@@ -102,4 +102,4 @@ The library handles:
 ## License
 
 MIT License
-EOF < /dev/null
+
