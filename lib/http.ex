@@ -19,8 +19,8 @@ defmodule HTTP do
               Supported options:
                 - `:method`: The HTTP method (e.g., "GET", "POST"). Defaults to "GET".
                              Can be a string or an atom (e.g., "GET" or :get).
-                - `:headers`: A map of request headers (e.g., %{"Content-Type" => "application/json"}).
-                              These will be converted to a list of `{key, value}` tuples.
+                - `:headers`: A list of request headers as `{name, value}` tuples (e.g., [{"Content-Type", "application/json"}])
+                              or a map that will be converted to the tuple format.
                 - `:body`: The request body (should be a binary or a string that can be coerced to binary).
                 - `:content_type`: The Content-Type header value. If not provided for methods with body,
                                    defaults to "application/octet-stream" in `Request.to_httpc_args`.
@@ -118,7 +118,7 @@ defmodule HTTP do
       # If you're using Elixir 1.18+, JSON.encode! is built-in. Otherwise, you'd need a library like Poison.
       # promise_post = HTTP.fetch("https://jsonplaceholder.typicode.com/posts",
       #        method: "POST",
-      #        headers: %{"Accept" => "application/json"},
+      #        headers: [{"Accept", "application/json"}],
       #        content_type: "application/json",
       #        body: JSON.encode!(%{title: "foo", body: "bar", userId: 1})
       #      )
@@ -168,9 +168,15 @@ defmodule HTTP do
     erlang_method =
       if is_atom(method), do: method, else: String.to_existing_atom(String.downcase(method))
 
-    headers = Keyword.get(init, :headers, %{})
-    # Convert headers map to list of tuples as expected by Request.headers
-    formatted_headers = Enum.into(headers, [])
+    headers = Keyword.get(init, :headers, [])
+    # Ensure headers are converted to HTTP.Headers struct
+    headers_struct =
+      case headers do
+        %HTTP.Headers{} = headers -> headers
+        headers when is_list(headers) -> HTTP.Headers.new(headers)
+        headers when is_map(headers) -> HTTP.Headers.from_map(headers)
+        _ -> HTTP.Headers.new()
+      end
 
     # Extract AbortController PID if provided
     abort_controller_pid = Keyword.get(init, :signal)
@@ -178,7 +184,7 @@ defmodule HTTP do
     request = %Request{
       url: url,
       method: erlang_method,
-      headers: formatted_headers,
+      headers: headers_struct,
       body: Keyword.get(init, :body),
       content_type: Keyword.get(init, :content_type),
       # Maps to Request.options (3rd arg for :httpc.request)
@@ -261,11 +267,11 @@ defmodule HTTP do
   # Success case: returns %Response{} directly
   @spec handle_httpc_response(httpc_response_tuple(), String.t() | nil) :: Response.t()
   defp handle_httpc_response({{_version, status, _reason_phrase}, httpc_headers, body}, url) do
-    # Convert :httpc's header list to a map for HTTP.Response
+    # Convert :httpc's header list to HTTP.Headers struct
     response_headers =
       httpc_headers
       |> Enum.map(fn {key, val} -> {to_string(key), to_string(val)} end)
-      |> Enum.into(%{})
+      |> HTTP.Headers.new()
 
     # Convert body from charlist (iodata) to binary if it's not already
     binary_body =

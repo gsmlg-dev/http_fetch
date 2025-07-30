@@ -7,8 +7,7 @@ defmodule HTTP.Request do
   # `opts` are for the 4th argument of :httpc.request (client-specific options like sync/body_format).
   defstruct method: :get,
             url: nil,
-            # Expected as a list of {key, value} tuples
-            headers: [],
+            headers: %HTTP.Headers{},
             # Separate field for Content-Type header
             content_type: nil,
             body: nil,
@@ -18,7 +17,6 @@ defmodule HTTP.Request do
 
   @type method :: :head | :get | :post | :put | :delete | :patch
   @type url :: String.t() | charlist()
-  @type headers :: [{String.t() | charlist(), String.t() | charlist()}]
   @type content_type :: String.t() | charlist() | nil
   @type body_content :: String.t() | charlist() | nil
   @type httpc_options :: Keyword.t()
@@ -27,7 +25,7 @@ defmodule HTTP.Request do
   @type t :: %__MODULE__{
           method: method,
           url: url,
-          headers: headers,
+          headers: HTTP.Headers.t(),
           content_type: content_type,
           body: body_content,
           options: httpc_options,
@@ -41,7 +39,7 @@ defmodule HTTP.Request do
   def to_httpc_args(%__MODULE__{} = req) do
     method = req.method
     url = to_charlist(req.url)
-    headers = Enum.map(req.headers, fn {k, v} -> {to_charlist(k), to_charlist(v)} end)
+    headers = Enum.map(req.headers.headers, fn {k, v} -> {to_charlist(k), to_charlist(v)} end)
 
     request_tuple =
       case method do

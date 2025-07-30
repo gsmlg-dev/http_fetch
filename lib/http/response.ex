@@ -4,13 +4,13 @@ defmodule HTTP.Response do
   """
 
   defstruct status: 0,
-            headers: %{},
+            headers: %HTTP.Headers{},
             body: nil,
             url: nil
 
   @type t :: %__MODULE__{
           status: integer(),
-          headers: %{String.t() => String.t()},
+          headers: HTTP.Headers.t(),
           body: String.t(),
           url: String.t()
         }
@@ -33,6 +33,43 @@ defmodule HTTP.Response do
     case JSON.decode(body) do
       {:ok, decoded} -> {:ok, decoded}
       {:error, error} -> {:error, error}
+    end
+  end
+
+  @doc """
+  Gets a response header value by name (case-insensitive).
+
+  ## Examples
+      iex> response = %HTTP.Response{headers: HTTP.Headers.new([{"Content-Type", "application/json"}])}
+      iex> HTTP.Response.get_header(response, "content-type")
+      "application/json"
+      
+      iex> response = %HTTP.Response{headers: HTTP.Headers.new([{"Content-Type", "application/json"}])}
+      iex> HTTP.Response.get_header(response, "missing")
+      nil
+  """
+  @spec get_header(t(), String.t()) :: String.t() | nil
+  def get_header(%__MODULE__{headers: headers}, name) do
+    HTTP.Headers.get(headers, name)
+  end
+
+  @doc """
+  Parses the Content-Type header to extract media type and parameters.
+
+  ## Examples
+      iex> response = %HTTP.Response{headers: HTTP.Headers.new([{"Content-Type", "application/json; charset=utf-8"}])}
+      iex> HTTP.Response.content_type(response)
+      {"application/json", %{"charset" => "utf-8"}}
+      
+      iex> response = %HTTP.Response{headers: HTTP.Headers.new([{"Content-Type", "text/plain"}])}
+      iex> HTTP.Response.content_type(response)
+      {"text/plain", %{}}
+  """
+  @spec content_type(t()) :: {String.t(), map()}
+  def content_type(%__MODULE__{headers: headers}) do
+    case HTTP.Headers.get(headers, "content-type") do
+      nil -> {"text/plain", %{}}
+      content_type -> HTTP.Headers.parse_content_type(content_type)
     end
   end
 end

@@ -6,7 +6,7 @@ defmodule HTTP.RequestTest do
     test "create request with defaults" do
       request = %HTTP.Request{}
       assert request.method == :get
-      assert request.headers == []
+      assert %HTTP.Headers{headers: []} = request.headers
       assert request.options == []
     end
 
@@ -14,14 +14,14 @@ defmodule HTTP.RequestTest do
       request = %HTTP.Request{
         method: :post,
         url: "http://example.com",
-        headers: [{"Content-Type", "application/json"}],
+        headers: HTTP.Headers.new([{"Content-Type", "application/json"}]),
         body: "test",
         content_type: "application/json"
       }
 
       assert request.method == :post
       assert request.url == "http://example.com"
-      assert request.headers == [{"Content-Type", "application/json"}]
+      assert %HTTP.Headers{headers: [{"Content-Type", "application/json"}]} = request.headers
       assert request.body == "test"
       assert request.content_type == "application/json"
     end
@@ -30,7 +30,7 @@ defmodule HTTP.RequestTest do
       request = %HTTP.Request{
         method: :get,
         url: "http://example.com",
-        headers: [{"Accept", "application/json"}]
+        headers: HTTP.Headers.new([{"Accept", "application/json"}])
       }
 
       [method, request_tuple, _options, _opts] = HTTP.Request.to_httpc_args(request)
