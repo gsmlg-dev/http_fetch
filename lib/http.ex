@@ -214,10 +214,6 @@ defmodule HTTP do
           pid() | nil
         ) :: {:ok, Response.t()} | {:error, term()}
   def handle_async_request(request, _calling_pid, abort_controller_pid) do
-    # Start the :inets application if it's not already running.
-    Application.ensure_all_started(:inets)
-    Application.ensure_all_started(:httpc)
-
     # Use a try/catch block to convert `throw` from handle_httpc_response into an {:error, reason} tuple
     try do
       case Request.to_httpc_args(request) do
