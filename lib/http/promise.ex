@@ -3,7 +3,7 @@ defmodule HTTP.Promise do
   Represents an asynchronous HTTP operation, similar to a JavaScript Promise.
   It wraps an underlying `Task` and provides an `await` function.
   """
-  
+
   defstruct task: nil
 
   @type t :: %__MODULE__{task: Task.t()}
