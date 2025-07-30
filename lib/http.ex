@@ -212,6 +212,20 @@ defmodule HTTP do
           | {{:http_version, integer(), String.t()}, [{atom() | String.t(), String.t()}],
              binary()}
 
+
+  defp handle_response(request_id, url) do
+    receive do
+      {:http, {^request_id, response_from_httpc}} ->
+        response = handle_httpc_response(response_from_httpc, url)
+        {:ok, response}
+      _ ->
+        throw(:request_interrupted_or_unexpected_message)
+    after
+      120_000 ->
+        throw(:request_timeout)
+    end
+  end
+
   # Internal function, not part of public API
   @doc false
   @spec handle_async_request(
@@ -224,35 +238,23 @@ defmodule HTTP do
     try do
       case Request.to_httpc_args(request) do
         [method, request_tuple, options, client_options] ->
-          # Send the request and get the RequestId (PID of the httpc client process)
-          case :httpc.request(method, request_tuple, options, client_options) do
-            {:ok, request_id} ->
-              # If an AbortController was provided, link it to this request_id
-              if abort_controller_pid && is_pid(abort_controller_pid) do
-                HTTP.AbortController.set_request_id(abort_controller_pid, request_id)
-              end
+          # Configure httpc options
+    httpc_options = Keyword.put(options, :body_format, :binary)
+    
+    # Send the request and get the RequestId (PID of the httpc client process)
+    case :httpc.request(method, request_tuple, httpc_options, client_options) do
+      {:ok, request_id} ->
+        # If an AbortController was provided, link it to this request_id
+        if abort_controller_pid && is_pid(abort_controller_pid) do
+          HTTP.AbortController.set_request_id(abort_controller_pid, request_id)
+        end
 
-              # Now, receive the response message from :httpc
-              # The message format is {:httpc, {RequestId, ResponseTuple}}
-              # Default 2 minute timeout if no response received
-              receive do
-                {:http, {^request_id, response_from_httpc}} ->
-                  # This will return %Response{} or throw
-                  response = handle_httpc_response(response_from_httpc, request.url)
-                  # Wrap in :ok for the Task result
-                  {:ok, response}
+        # Handle response (simplified - streaming handled in handle_httpc_response)
+        handle_response(request_id, request.url)
 
-                _ ->
-                  # This catch-all can happen if the process is killed or another message arrives
-                  throw(:request_interrupted_or_unexpected_message)
-              after
-                120_000 ->
-                  throw(:request_timeout)
-              end
-
-            {:error, reason} ->
-              throw(reason)
-          end
+      {:error, reason} ->
+        throw(reason)
+    end
 
         # Fallback for unexpected return from Request.to_httpc_args
         other_args ->
@@ -266,33 +268,111 @@ defmodule HTTP do
 
   # Success case: returns %Response{} directly
   @spec handle_httpc_response(httpc_response_tuple(), String.t() | nil) :: Response.t()
-  defp handle_httpc_response({{_version, status, _reason_phrase}, httpc_headers, body}, url) do
-    # Convert :httpc's header list to HTTP.Headers struct
-    response_headers =
-      httpc_headers
-      |> Enum.map(fn {key, val} -> {to_string(key), to_string(val)} end)
-      |> HTTP.Headers.new()
+  defp handle_httpc_response(response_tuple, url) do
+    case response_tuple do
+      {{_version, status, _reason_phrase}, httpc_headers, body} ->
+        # Convert :httpc's header list to HTTP.Headers struct
+        response_headers =
+          httpc_headers
+          |> Enum.map(fn {key, val} -> {to_string(key), to_string(val)} end)
+          |> HTTP.Headers.new()
 
-    # Convert body from charlist (iodata) to binary if it's not already
-    binary_body =
-      if is_list(body) do
-        IO.iodata_to_binary(body)
-      else
-        body
-      end
+        # Check if we should use streaming
+        content_length = HTTP.Headers.get(response_headers, "content-length")
+        should_stream = should_use_streaming?(content_length)
 
-    %Response{status: status, headers: response_headers, body: binary_body, url: url}
+        if should_stream do
+          # Create a streaming process
+          {:ok, stream_pid} = start_httpc_stream_process(url, response_headers)
+          %Response{status: status, headers: response_headers, body: nil, url: url, stream: stream_pid}
+        else
+          # Non-streaming response - handle as before
+          binary_body =
+            if is_list(body) do
+              IO.iodata_to_binary(body)
+            else
+              body
+            end
+          %Response{status: status, headers: response_headers, body: binary_body, url: url, stream: nil}
+        end
+
+      {:error, reason} ->
+        throw(reason)
+
+      other ->
+        throw({:unexpected_response, other})
+    end
   end
 
-  # Error case: throws the reason
-  @spec handle_httpc_response({:error, term()}, String.t() | nil) :: no_return()
-  defp handle_httpc_response({:error, reason}, _original_url) do
-    throw(reason)
+  defp should_use_streaming?(content_length) do
+    # Stream responses larger than 100KB or when content-length is unknown
+    case Integer.parse(content_length || "") do
+      {size, _} when size > 100_000 -> true
+      _ -> content_length == nil  # Stream when size is unknown
+    end
   end
 
-  # Unexpected response case: throws an explicit error
-  @spec handle_httpc_response(term(), String.t() | nil) :: no_return()
-  defp handle_httpc_response(other, _original_url) do
-    throw({:unexpected_response, other})
+  defp start_httpc_stream_process(url, headers) do
+    {:ok, pid} = Task.start_link(fn ->
+      stream_httpc_response(url, headers)
+    end)
+    {:ok, pid}
   end
+
+  defp stream_httpc_response(url, headers) do
+    # Create a streaming request using :httpc
+    uri = URI.parse(url)
+    _host = uri.host
+    _port = uri.port || 80
+    _path = uri.path || "/"
+    
+    # Build headers for the request
+    request_headers = 
+      headers.headers
+      |> Enum.map(fn {name, value} -> {String.to_charlist(name), String.to_charlist(value)} end)
+    
+    # Start the HTTP request with streaming
+    case :httpc.request(
+      :get, 
+      {String.to_charlist(url), request_headers}, 
+      [], 
+      [sync: false, body_format: :binary]
+    ) do
+      {:ok, request_id} ->
+        stream_loop(request_id, self())
+      {:error, reason} ->
+        send(self(), {:stream_error, self(), reason})
+    end
+  end
+
+  defp stream_loop(request_id, caller) do
+    receive do
+      {:http, {^request_id, {:http_response, _http_version, _status, _reason}}} ->
+        stream_loop(request_id, caller)
+      
+      {:http, {^request_id, {:http_header, _, _header_name, _, _header_value}}} ->
+        stream_loop(request_id, caller)
+      
+      {:http, {^request_id, :http_eoh}} ->
+        stream_loop(request_id, caller)
+      
+      {:http, {^request_id, {:http_error, reason}}} ->
+        send(caller, {:stream_error, self(), reason})
+      
+      {:http, {^request_id, :stream_end}} ->
+        send(caller, {:stream_end, self()})
+      
+      {:http, {^request_id, {:http_chunk, chunk}}} ->
+        send(caller, {:stream_chunk, self(), to_string(chunk)})
+        stream_loop(request_id, caller)
+      
+      {:http, {^request_id, {:http_body, body}}} ->
+        send(caller, {:stream_chunk, self(), to_string(body)})
+        send(caller, {:stream_end, self()})
+      
+      after 60_000 ->
+        send(caller, {:stream_error, self(), :timeout})
+    end
+  end
+
 end
