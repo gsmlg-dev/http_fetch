@@ -7,7 +7,13 @@ defmodule HttpFetch.MixProject do
       version: "0.1.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      description:
+        "A browser-like HTTP fetch API for Elixir using Erlang's built-in :httpc module",
+      licenses: ["MIT"],
+      links: %{
+        "GitHub" => "https://github.com/gsmlg-dev/http_fetch"
+      }
     ]
   end
 
