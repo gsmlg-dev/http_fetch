@@ -18,7 +18,7 @@ defmodule HTTP.Request do
   @type method :: :head | :get | :post | :put | :delete | :patch
   @type url :: String.t() | charlist()
   @type content_type :: String.t() | charlist() | nil
-  @type body_content :: String.t() | charlist() | nil
+  @type body_content :: String.t() | charlist() | HTTP.FormData.t() | nil
   @type httpc_options :: Keyword.t()
   @type httpc_client_opts :: Keyword.t()
 
@@ -52,10 +52,25 @@ defmodule HTTP.Request do
         :delete ->
           {url, headers}
 
-        # For methods typically with a body, include content_type and body
+        # For methods with HTTP.FormData body
+        _ when is_struct(req.body, HTTP.FormData) ->
+          case HTTP.FormData.to_body(req.body) do
+            {:url_encoded, body} ->
+              content_type = to_charlist("application/x-www-form-urlencoded")
+              {url, headers, content_type, to_charlist(body)}
+
+            {:multipart, body, boundary} ->
+              content_type = to_charlist("multipart/form-data; boundary=#{boundary}")
+              # Add boundary header
+              updated_headers = headers ++ [{~c"Content-Type", to_charlist(content_type)}]
+              {url, updated_headers, to_charlist(body)}
+          end
+
+        # For regular string/charlist bodies
         _ ->
           content_type = to_charlist(req.content_type || "application/octet-stream")
-          {url, headers, content_type, to_body(req.body)}
+          body_content = to_body(req.body)
+          {url, headers, content_type, body_content}
       end
 
     [method, request_tuple, req.options, req.opts]
@@ -64,8 +79,6 @@ defmodule HTTP.Request do
   @spec to_body(body_content()) :: charlist()
   defp to_body(nil), do: ~c[]
   defp to_body(body) when is_binary(body), do: String.to_charlist(body)
-  # Assume already charlist/iodata
   defp to_body(body) when is_list(body), do: body
-  # Convert other types to string then charlist
   defp to_body(other), do: String.to_charlist(to_string(other))
 end

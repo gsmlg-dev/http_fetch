@@ -6,6 +6,8 @@ A modern HTTP client library for Elixir that provides a fetch API similar to web
 
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
 - **Full HTTP support**: GET, POST, PUT, DELETE, PATCH, HEAD methods
+- **Form data support**: HTTP.FormData for multipart/form-data and file uploads
+- **Streaming file uploads**: Efficient large file uploads using streams
 - **Promise-based**: Async operations with chaining support
 - **Request cancellation**: AbortController support for cancelling requests
 - **Automatic JSON parsing**: Built-in JSON response handling
@@ -33,6 +35,19 @@ text = HTTP.Response.text(response)
   ])
   |> HTTP.Promise.await()
 ```
+
+# Form data with file upload
+{:ok, file_stream} = File.stream!("document.pdf")
+form = HTTP.FormData.new()
+       |> HTTP.FormData.append_field("name", "John Doe")
+       |> HTTP.FormData.append_file("document", "document.pdf", file_stream)
+
+{:ok, response} = 
+  HTTP.fetch("https://api.example.com/upload", [
+    method: "POST",
+    body: form
+  ])
+  |> HTTP.Promise.await()
 
 ## API Reference
 
@@ -80,6 +95,25 @@ request = %HTTP.Request{
   headers: [{"Authorization", "Bearer token"}],
   body: "data"
 }
+```
+
+### HTTP.FormData
+Handle form data and file uploads.
+
+```elixir
+# Regular form data
+form = HTTP.FormData.new()
+       |> HTTP.FormData.append_field("name", "John")
+       |> HTTP.FormData.append_field("email", "john@example.com")
+
+# File upload
+{:ok, file_stream} = File.stream!("document.pdf")
+form = HTTP.FormData.new()
+       |> HTTP.FormData.append_field("name", "John")
+       |> HTTP.FormData.append_file("document", "document.pdf", file_stream, "application/pdf")
+
+# Use in request
+HTTP.fetch("https://api.example.com/upload", method: "POST", body: form)
 ```
 
 ### HTTP.AbortController

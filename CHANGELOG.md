@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2025-07-30
+
+### Added
+- **HTTP.FormData module** - New dedicated module for handling form data and multipart/form-data encoding
+- **File upload support** - Support for file uploads with streaming via `File.Stream.t()`
+- **Automatic content type detection** - Automatically chooses between `application/x-www-form-urlencoded` and `multipart/form-data`
+- **Streaming file uploads** - Efficient large file uploads using Elixir streams
+- **Form data builder API** - Fluent interface with `new/0`, `append_field/3`, `append_file/4-5`
+- **Multipart boundary generation** - Automatic random boundary generation for multipart requests
+- **Comprehensive test coverage** - Full test suite for form data functionality
+
+### Changed
+- **HTTP.Request body parameter** - Now accepts `HTTP.FormData.t()` for form submissions
+- **Enhanced content type handling** - Automatic content-type detection and header setting
+- **Improved multipart encoding** - Proper multipart/form-data format with boundaries
+
+### Technical Details
+- **FormData struct** with parts array for form fields and file uploads
+- **Streaming support** via `File.Stream.t()` for memory-efficient file uploads
+- **URL encoding fallback** for simple form data without file uploads
+- **Backward compatibility** maintained for existing string/charlist body usage
+
 ## [0.3.0] - 2025-07-30
 
 ### Fixed
