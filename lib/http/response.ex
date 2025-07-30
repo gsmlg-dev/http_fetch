@@ -46,6 +46,7 @@ defmodule HTTP.Response do
   """
   @spec read_all(t()) :: String.t()
   def read_all(%__MODULE__{body: body, stream: nil}), do: body || ""
+
   def read_all(%__MODULE__{body: _body, stream: stream}) do
     if is_pid(stream) do
       # Request data from the stream
@@ -102,7 +103,7 @@ defmodule HTTP.Response do
   Returns:
     - `{:ok, map | list}` if the body is valid JSON.
     - `{:error, reason}` if the body cannot be parsed as JSON.
-  
+
   Note: This method is deprecated in favor of `read_as_json/1` for streaming responses.
   """
   @spec json(t()) :: {:ok, map() | list()} | {:error, term()}
@@ -112,6 +113,7 @@ defmodule HTTP.Response do
       {:error, error} -> {:error, error}
     end
   end
+
   def json(%__MODULE__{} = response), do: read_as_json(response)
 
   @doc """

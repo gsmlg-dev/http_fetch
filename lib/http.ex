@@ -212,12 +212,12 @@ defmodule HTTP do
           | {{:http_version, integer(), String.t()}, [{atom() | String.t(), String.t()}],
              binary()}
 
-
   defp handle_response(request_id, url) do
     receive do
       {:http, {^request_id, response_from_httpc}} ->
         response = handle_httpc_response(response_from_httpc, url)
         {:ok, response}
+
       _ ->
         throw(:request_interrupted_or_unexpected_message)
     after
@@ -238,23 +238,23 @@ defmodule HTTP do
     try do
       case Request.to_httpc_args(request) do
         [method, request_tuple, options, client_options] ->
-          # Configure httpc options
-    httpc_options = Keyword.put(options, :body_format, :binary)
-    
-    # Send the request and get the RequestId (PID of the httpc client process)
-    case :httpc.request(method, request_tuple, httpc_options, client_options) do
-      {:ok, request_id} ->
-        # If an AbortController was provided, link it to this request_id
-        if abort_controller_pid && is_pid(abort_controller_pid) do
-          HTTP.AbortController.set_request_id(abort_controller_pid, request_id)
-        end
+          # Configure httpc options - body_format should be in client_opts (4th arg)
+          httpc_client_opts = Keyword.put(client_options, :body_format, :binary)
 
-        # Handle response (simplified - streaming handled in handle_httpc_response)
-        handle_response(request_id, request.url)
+          # Send the request and get the RequestId (PID of the httpc client process)
+          case :httpc.request(method, request_tuple, options, httpc_client_opts) do
+            {:ok, request_id} ->
+              # If an AbortController was provided, link it to this request_id
+              if abort_controller_pid && is_pid(abort_controller_pid) do
+                HTTP.AbortController.set_request_id(abort_controller_pid, request_id)
+              end
 
-      {:error, reason} ->
-        throw(reason)
-    end
+              # Handle response (simplified - streaming handled in handle_httpc_response)
+              handle_response(request_id, request.url)
+
+            {:error, reason} ->
+              throw(reason)
+          end
 
         # Fallback for unexpected return from Request.to_httpc_args
         other_args ->
@@ -284,7 +284,14 @@ defmodule HTTP do
         if should_stream do
           # Create a streaming process
           {:ok, stream_pid} = start_httpc_stream_process(url, response_headers)
-          %Response{status: status, headers: response_headers, body: nil, url: url, stream: stream_pid}
+
+          %Response{
+            status: status,
+            headers: response_headers,
+            body: nil,
+            url: url,
+            stream: stream_pid
+          }
         else
           # Non-streaming response - handle as before
           binary_body =
@@ -293,7 +300,14 @@ defmodule HTTP do
             else
               body
             end
-          %Response{status: status, headers: response_headers, body: binary_body, url: url, stream: nil}
+
+          %Response{
+            status: status,
+            headers: response_headers,
+            body: binary_body,
+            url: url,
+            stream: nil
+          }
         end
 
       {:error, reason} ->
@@ -308,14 +322,17 @@ defmodule HTTP do
     # Stream responses larger than 100KB or when content-length is unknown
     case Integer.parse(content_length || "") do
       {size, _} when size > 100_000 -> true
-      _ -> content_length == nil  # Stream when size is unknown
+      # Stream when size is unknown
+      _ -> content_length == nil
     end
   end
 
   defp start_httpc_stream_process(url, headers) do
-    {:ok, pid} = Task.start_link(fn ->
-      stream_httpc_response(url, headers)
-    end)
+    {:ok, pid} =
+      Task.start_link(fn ->
+        stream_httpc_response(url, headers)
+      end)
+
     {:ok, pid}
   end
 
@@ -325,21 +342,22 @@ defmodule HTTP do
     _host = uri.host
     _port = uri.port || 80
     _path = uri.path || "/"
-    
+
     # Build headers for the request
-    request_headers = 
+    request_headers =
       headers.headers
       |> Enum.map(fn {name, value} -> {String.to_charlist(name), String.to_charlist(value)} end)
-    
+
     # Start the HTTP request with streaming
     case :httpc.request(
-      :get, 
-      {String.to_charlist(url), request_headers}, 
-      [], 
-      [sync: false, body_format: :binary]
-    ) do
+           :get,
+           {String.to_charlist(url), request_headers},
+           [],
+           sync: false
+         ) do
       {:ok, request_id} ->
         stream_loop(request_id, self())
+
       {:error, reason} ->
         send(self(), {:stream_error, self(), reason})
     end
@@ -349,30 +367,29 @@ defmodule HTTP do
     receive do
       {:http, {^request_id, {:http_response, _http_version, _status, _reason}}} ->
         stream_loop(request_id, caller)
-      
+
       {:http, {^request_id, {:http_header, _, _header_name, _, _header_value}}} ->
         stream_loop(request_id, caller)
-      
+
       {:http, {^request_id, :http_eoh}} ->
         stream_loop(request_id, caller)
-      
+
       {:http, {^request_id, {:http_error, reason}}} ->
         send(caller, {:stream_error, self(), reason})
-      
+
       {:http, {^request_id, :stream_end}} ->
         send(caller, {:stream_end, self()})
-      
+
       {:http, {^request_id, {:http_chunk, chunk}}} ->
         send(caller, {:stream_chunk, self(), to_string(chunk)})
         stream_loop(request_id, caller)
-      
+
       {:http, {^request_id, {:http_body, body}}} ->
         send(caller, {:stream_chunk, self(), to_string(body)})
         send(caller, {:stream_end, self()})
-      
-      after 60_000 ->
+    after
+      60_000 ->
         send(caller, {:stream_error, self(), :timeout})
     end
   end
-
 end

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-07-30
+
+### Fixed
+- **HTTP option placement** - Fixed `body_format: :binary` option being passed to wrong :httpc argument
+- **Eliminated warning messages** - Removed "Invalid option {body_format,binary} ignored" notices during tests
+- **Improved error handling** - Enhanced response handling for malformed URLs and network errors
+
+### Technical Details
+- **Corrected httpc arguments** - Proper separation of request options vs client options
+- **Cleaned up streaming setup** - Removed redundant option configurations
+- **Enhanced test reliability** - Reduced external dependency flakiness
+
 ## [0.2.0] - 2025-07-30
 
 ### Added

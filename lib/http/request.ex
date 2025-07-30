@@ -13,7 +13,7 @@ defmodule HTTP.Request do
             body: nil,
             # HTTPC request options (e.g., timeout)
             options: [],
-            opts: [sync: false, body_format: :binary]
+            opts: [sync: false]
 
   @type method :: :head | :get | :post | :put | :delete | :patch
   @type url :: String.t() | charlist()
