@@ -34,14 +34,12 @@ IO.puts("Status: #{response.status}")
 text = HTTP.Response.text(response)
 {:ok, json} = HTTP.Response.json(response)
 
-# Read response as stream (raw binary)
-{:ok, response} = 
-  HTTP.fetch("https://jsonplaceholder.typicode.com/posts/1", [
-    options: [body_format: :binary]
-  ])
+# Read response body as raw binary
+response = 
+  HTTP.fetch("https://jsonplaceholder.typicode.com/posts/1")
   |> HTTP.Promise.await()
 
-# response.body is now a binary stream you can process chunk by chunk
+# response.body contains the raw binary data
 binary_data = response.body
 
 # POST request with JSON
@@ -116,14 +114,12 @@ Represents an HTTP response.
 text = HTTP.Response.text(response)
 {:ok, json} = HTTP.Response.json(response)
 
-# Read response as stream (raw binary)
-{:ok, response} = 
-  HTTP.fetch("https://api.example.com/large-file", [
-    options: [body_format: :binary]
-  ])
+# Access raw response body as binary
+response = 
+  HTTP.fetch("https://api.example.com/large-file")
   |> HTTP.Promise.await()
 
-# Process binary response in chunks
+# response.body contains the raw binary response data
 binary_data = response.body
 ```
 
