@@ -106,9 +106,15 @@ request = %HTTP.Request{
   method: :post,
   url: URI.parse("https://api.example.com/data"),
   headers: [{"Authorization", "Bearer token"}],
-  body: "data"
+  body: "data",
+  http_options: [timeout: 10_000, connect_timeout: 5_000],
+  options: [sync: false, body_format: :binary]
 }
 ```
+
+**Field Mapping to :httpc.request/4:**
+- `http_options`: 3rd argument (request-specific HTTP options)
+- `options`: 4th argument (client-specific options)
 
 ### HTTP.FormData
 Handle form data and file uploads.

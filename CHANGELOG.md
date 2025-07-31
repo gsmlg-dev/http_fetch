@@ -11,12 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **URI struct support** - HTTP.fetch/2 now accepts both string URLs and %URI{} structs
 - **Enhanced URL handling** - Automatic conversion from string to %URI{} for internal processing
 - **Type safety improvements** - HTTP.Request and HTTP.Response now use %URI{} internally
+- **Improved Request field naming** - More intuitive field names for :httpc.request mapping
 
 ### Changed
 - **Refactored URL handling** - All internal representations now use %URI{} instead of string
 - **Updated type specifications** - HTTP.Request.url type changed from String.t() | charlist() to URI.t()
 - **Updated Response.url type** - Changed from String.t() to URI.t()
 - **Updated function signatures** - handle_httpc_response and related functions now accept URI.t()
+- **HTTP.Request field renaming** for better clarity:
+  - `options` → `http_options` (3rd argument to :httpc.request)
+  - `opts` → `options` (4th argument to :httpc.request)
 
 ### Technical Details
 - **Backward compatibility** - String URLs are automatically parsed to URI structs
@@ -24,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Eliminated redundant parsing** - Removed duplicate URI.parse calls in streaming functions
 - **Enhanced type safety** - Stronger typing throughout the codebase
 - **Updated test suite** - Request tests updated to use URI.parse/1 for consistency
+- **Improved field documentation** - Clear mapping to :httpc.request arguments
 
 ## [0.4.0] - 2025-07-30
 
