@@ -33,7 +33,7 @@ defmodule HTTP do
 
   Returns:
     - `%HTTP.Promise{}`: A Promise struct. The caller should `HTTP.Promise.await(promise_struct)` to get the final
-                 `{:ok, %HTTP.Response{}}` or `{:error, reason}`. If the request cannot be initiated
+                 `%HTTP.Response{}` or `{:error, reason}`. If the request cannot be initiated
                  (e.g., invalid URL, bad arguments), the Promise will contain an error result
                  when awaited.
 
@@ -42,7 +42,7 @@ defmodule HTTP do
       # GET request and awaiting JSON
       promise_json = HTTP.fetch("https://jsonplaceholder.typicode.com/todos/1")
       case HTTP.Promise.await(promise_json) do
-        {:ok, %HTTP.Response{} = response} ->
+        %HTTP.Response{} = response ->
           case HTTP.Response.json(response) do
             {:ok, json_body} ->
               IO.puts "GET JSON successful! Title: \#{json_body["title"]}"
@@ -56,7 +56,7 @@ defmodule HTTP do
       # GET request and awaiting text
       promise_text = HTTP.fetch("https://jsonplaceholder.typicode.com/posts/1")
       case HTTP.Promise.await(promise_text) do
-        {:ok, %HTTP.Response{} = response} ->
+        %HTTP.Response{} = response ->
           text_body = HTTP.Response.text(response)
           IO.puts "GET Text successful! First 50 chars: \#{String.slice(text_body, 0, 50)}..."
         {:error, reason} ->
@@ -132,7 +132,7 @@ defmodule HTTP do
       # Request with custom :httpc options (e.g., longer timeout for request options)
       delayed_promise = HTTP.fetch("https://httpbin.org/delay/5", options: [timeout: 10_000])
       case HTTP.Promise.await(delayed_promise) do
-        {:ok, %HTTP.Response{status: status}} ->
+        %HTTP.Response{status: status} ->
           IO.puts "Delayed request successful! Status: \#{status}"
         {:error, reason} ->
           IO.inspect reason, label: "Delayed Request Result"
@@ -152,7 +152,7 @@ defmodule HTTP do
 
       # Await the result of the abortable promise
       case HTTP.Promise.await(abortable_promise) do
-        {:ok, %HTTP.Response{status: status}} ->
+        %HTTP.Response{status: status} ->
           IO.puts "Abortable request completed successfully! Status: \#{status}"
         {:error, reason} ->
           IO.inspect reason, label: "Abortable Request Result"
@@ -215,8 +215,7 @@ defmodule HTTP do
   defp handle_response(request_id, url) do
     receive do
       {:http, {^request_id, response_from_httpc}} ->
-        response = handle_httpc_response(response_from_httpc, url)
-        {:ok, response}
+        handle_httpc_response(response_from_httpc, url)
 
       _ ->
         throw(:request_interrupted_or_unexpected_message)
@@ -232,7 +231,7 @@ defmodule HTTP do
           Request.t(),
           pid(),
           pid() | nil
-        ) :: {:ok, Response.t()} | {:error, term()}
+        ) :: Response.t() | {:error, term()}
   def handle_async_request(request, _calling_pid, abort_controller_pid) do
     # Use a try/catch block to convert `throw` from handle_httpc_response into an {:error, reason} tuple
     try do

@@ -6,8 +6,10 @@ A modern HTTP client library for Elixir that provides a fetch API similar to web
 
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
 - **Full HTTP support**: GET, POST, PUT, DELETE, PATCH, HEAD methods
+- **Complete httpc integration**: Support for all :httpc.request options
 - **Form data support**: HTTP.FormData for multipart/form-data and file uploads
 - **Streaming file uploads**: Efficient large file uploads using streams
+- **Type-safe configuration**: HTTP.FetchOptions for structured request configuration
 - **Promise-based**: Async operations with chaining support
 - **Request cancellation**: AbortController support for cancelling requests
 - **Automatic JSON parsing**: Built-in JSON response handling

@@ -7,23 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.1] - 2025-07-30
+## [0.4.0] - 2025-07-30
 
 ### Added
+- **HTTP.FetchOptions module** - New dedicated module for processing fetch options with full httpc support
+- **Enhanced option handling** - Support for all :httpc.request options including timeout, SSL, streaming, etc.
+- **Multiple input formats** - Accept keyword lists, maps, or HTTP.FetchOptions struct
+- **Complete httpc integration** - Proper separation of HttpOptions and Options for :httpc.request
+- **Type-safe configuration** - Structured approach to HTTP request configuration
+- **Comprehensive option coverage** - All documented :httpc.request options supported
 - **HTTP.FormData module** - New dedicated module for handling form data and multipart/form-data encoding
 - **File upload support** - Support for file uploads with streaming via `File.Stream.t()`
 - **Automatic content type detection** - Automatically chooses between `application/x-www-form-urlencoded` and `multipart/form-data`
 - **Streaming file uploads** - Efficient large file uploads using Elixir streams
 - **Form data builder API** - Fluent interface with `new/0`, `append_field/3`, `append_file/4-5`
 - **Multipart boundary generation** - Automatic random boundary generation for multipart requests
-- **Comprehensive test coverage** - Full test suite for form data functionality
+- **Comprehensive test coverage** - Full test suite for form data and fetch options functionality
 
 ### Changed
+- **HTTP.fetch refactored** - Now uses HTTP.FetchOptions for consistent option processing
 - **HTTP.Request body parameter** - Now accepts `HTTP.FormData.t()` for form submissions
 - **Enhanced content type handling** - Automatic content-type detection and header setting
 - **Improved multipart encoding** - Proper multipart/form-data format with boundaries
+- **Unified configuration API** - All configuration goes through HTTP.FetchOptions
 
 ### Technical Details
+- **HTTP.FetchOptions struct** with comprehensive field support for all httpc options
 - **FormData struct** with parts array for form fields and file uploads
 - **Streaming support** via `File.Stream.t()` for memory-efficient file uploads
 - **URL encoding fallback** for simple form data without file uploads

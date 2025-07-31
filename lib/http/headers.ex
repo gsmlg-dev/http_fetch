@@ -122,6 +122,33 @@ defmodule HTTP.Headers do
   end
 
   @doc """
+  Gets all header values for a given header name (case-insensitive).
+
+  ## Examples
+      iex> headers = HTTP.Headers.new([{"Accept", "text/html"}, {"Accept", "application/json"}])
+      iex> HTTP.Headers.get_all(headers, "accept")
+      ["text/html", "application/json"]
+      
+      iex> headers = HTTP.Headers.new([{"Content-Type", "application/json"}, {"Authorization", "Bearer token"}])
+      iex> HTTP.Headers.get_all(headers, "content-type")
+      ["application/json"]
+      
+      iex> headers = HTTP.Headers.new([{"Content-Type", "application/json"}])
+      iex> HTTP.Headers.get_all(headers, "missing")
+      []
+  """
+  @spec get_all(t(), String.t()) :: list(String.t())
+  def get_all(%__MODULE__{headers: headers}, name) when is_binary(name) do
+    normalized_name = String.downcase(name)
+
+    headers
+    |> Enum.filter(fn {header_name, _value} ->
+      String.downcase(header_name) == normalized_name
+    end)
+    |> Enum.map(fn {_header_name, value} -> value end)
+  end
+
+  @doc """
   Sets a header value, replacing any existing header with the same name.
 
   ## Examples
@@ -148,6 +175,34 @@ defmodule HTTP.Headers do
       |> Kernel.++([{normalized_name, value}])
 
     %{headers_struct | headers: updated_headers}
+  end
+
+  @doc """
+  Adds a new header value without removing existing headers with the same name.
+
+  ## Examples
+      iex> headers = HTTP.Headers.new([{"Accept", "text/html"}])
+      iex> updated = HTTP.Headers.add(headers, "Accept", "application/json")
+      iex> HTTP.Headers.get_all(updated, "Accept")
+      ["text/html", "application/json"]
+      
+      iex> headers = HTTP.Headers.new()
+      iex> updated = HTTP.Headers.add(headers, "Authorization", "Bearer token")
+      iex> HTTP.Headers.get(updated, "Authorization")
+      "Bearer token"
+      
+      iex> headers = HTTP.Headers.new([{"Content-Type", "text/plain"}])
+      iex> updated = HTTP.Headers.add(headers, "Authorization", "Bearer token")
+      iex> HTTP.Headers.get(updated, "Authorization")
+      "Bearer token"
+      iex> HTTP.Headers.get(updated, "Content-Type")
+      "text/plain"
+  """
+  @spec add(t(), String.t(), String.t()) :: t()
+  def add(%__MODULE__{headers: headers} = headers_struct, name, value)
+      when is_binary(name) and is_binary(value) do
+    normalized_name = normalize_name(name)
+    %{headers_struct | headers: headers ++ [{normalized_name, value}]}
   end
 
   @doc """
