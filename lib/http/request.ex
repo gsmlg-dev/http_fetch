@@ -3,8 +3,8 @@ defmodule HTTP.Request do
   Represents an HTTP request that can be serialized into :httpc.request arguments.
   """
 
-  # Note: `options` are for the 3rd argument of :httpc.request (request-specific options like timeout).
-  # `opts` are for the 4th argument of :httpc.request (client-specific options like sync/body_format).
+  # Note: `http_options` are for the 3rd argument of :httpc.request (request-specific options like timeout).
+  # `options` are for the 4th argument of :httpc.request (client-specific options like sync/body_format).
   defstruct method: :get,
             url: nil,
             headers: %HTTP.Headers{},
@@ -12,8 +12,8 @@ defmodule HTTP.Request do
             content_type: nil,
             body: nil,
             # HTTPC request options (e.g., timeout)
-            options: [],
-            opts: [sync: false]
+            http_options: [],
+            options: [sync: false]
 
   @type method :: :head | :get | :post | :put | :delete | :patch
   @type url :: URI.t()
@@ -28,8 +28,8 @@ defmodule HTTP.Request do
           headers: HTTP.Headers.t(),
           content_type: content_type,
           body: body_content,
-          options: httpc_options,
-          opts: httpc_client_opts
+          http_options: httpc_options,
+          options: httpc_client_opts
         }
 
   @doc """
@@ -73,7 +73,7 @@ defmodule HTTP.Request do
           {url, headers, content_type, body_content}
       end
 
-    [method, request_tuple, req.options, req.opts]
+    [method, request_tuple, req.http_options, req.options]
   end
 
   @spec to_body(body_content()) :: charlist()

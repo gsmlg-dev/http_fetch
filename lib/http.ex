@@ -172,10 +172,10 @@ defmodule HTTP do
       headers: HTTP.FetchOptions.get_headers(options),
       body: HTTP.FetchOptions.get_body(options),
       content_type: HTTP.FetchOptions.get_content_type(options),
-      # Maps to Request.options (3rd arg for :httpc.request)
-      options: options.options,
-      # Maps to Request.opts (4th arg for :httpc.request)
-      opts: Keyword.merge(Request.__struct__().opts, options.opts)
+      # Maps to Request.http_options (3rd arg for :httpc.request)
+      http_options: options.options,
+      # Maps to Request.options (4th arg for :httpc.request)
+      options: Keyword.merge(Request.__struct__().options, options.opts)
     }
 
     # Extract AbortController PID from FetchOptions

@@ -7,7 +7,8 @@ defmodule HTTP.RequestTest do
       request = %HTTP.Request{}
       assert request.method == :get
       assert %HTTP.Headers{headers: []} = request.headers
-      assert request.options == []
+      assert request.http_options == []
+      assert request.options == [sync: false]
     end
 
     test "create request with custom values" do
@@ -34,7 +35,7 @@ defmodule HTTP.RequestTest do
         headers: HTTP.Headers.new([{"Accept", "application/json"}])
       }
 
-      [method, request_tuple, _options, _opts] = HTTP.Request.to_httpc_args(request)
+      [method, request_tuple, _http_options, _options] = HTTP.Request.to_httpc_args(request)
       assert method == :get
       assert request_tuple == {~c"http://example.com", [{~c"Accept", ~c"application/json"}]}
     end
