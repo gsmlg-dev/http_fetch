@@ -13,13 +13,18 @@ defmodule HTTP.Promise do
   @doc """
   Awaits the completion of the HTTP promise.
 
+  Arguments:
+    - `promise`: The `HTTP.Promise` instance to await.
+    - `timeout`: Optional timeout in milliseconds or `:infinity`. Defaults to `:infinity`.
+
   Returns:
     - `%HTTP.Response{}` on successful completion.
     - `{:error, reason}` if the request fails or is aborted.
+    - `{:error, :timeout}` if the timeout is reached.
   """
-  @spec await(t()) :: HTTP.Response.t() | {:error, term()}
-  def await(%__MODULE__{task: task}) do
-    Task.await(task)
+  @spec await(t(), timeout :: non_neg_integer() | :infinity) :: HTTP.Response.t() | {:error, term()}
+  def await(%__MODULE__{task: task}, timeout \\ :infinity) do
+    Task.await(task, timeout)
   end
 
   @doc """
