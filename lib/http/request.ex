@@ -16,7 +16,7 @@ defmodule HTTP.Request do
             opts: [sync: false]
 
   @type method :: :head | :get | :post | :put | :delete | :patch
-  @type url :: String.t() | charlist()
+  @type url :: URI.t()
   @type content_type :: String.t() | charlist() | nil
   @type body_content :: String.t() | charlist() | HTTP.FormData.t() | nil
   @type httpc_options :: Keyword.t()
@@ -38,7 +38,7 @@ defmodule HTTP.Request do
   @spec to_httpc_args(t()) :: {atom, tuple, Keyword.t(), Keyword.t()}
   def to_httpc_args(%__MODULE__{} = req) do
     method = req.method
-    url = to_charlist(req.url)
+    url = req.url |> URI.to_string() |> to_charlist()
     headers = Enum.map(req.headers.headers, fn {k, v} -> {to_charlist(k), to_charlist(v)} end)
 
     request_tuple =

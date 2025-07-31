@@ -13,14 +13,15 @@ defmodule HTTP.RequestTest do
     test "create request with custom values" do
       request = %HTTP.Request{
         method: :post,
-        url: "http://example.com",
+        url: URI.parse("http://example.com"),
         headers: HTTP.Headers.new([{"Content-Type", "application/json"}]),
         body: "test",
         content_type: "application/json"
       }
 
       assert request.method == :post
-      assert request.url == "http://example.com"
+      assert %URI{} = request.url
+      assert request.url.host == "example.com"
       assert %HTTP.Headers{headers: [{"Content-Type", "application/json"}]} = request.headers
       assert request.body == "test"
       assert request.content_type == "application/json"
@@ -29,7 +30,7 @@ defmodule HTTP.RequestTest do
     test "convert to httpc args" do
       request = %HTTP.Request{
         method: :get,
-        url: "http://example.com",
+        url: URI.parse("http://example.com"),
         headers: HTTP.Headers.new([{"Accept", "application/json"}])
       }
 

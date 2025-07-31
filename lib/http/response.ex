@@ -13,7 +13,7 @@ defmodule HTTP.Response do
           status: integer(),
           headers: HTTP.Headers.t(),
           body: String.t() | nil,
-          url: String.t(),
+          url: URI.t(),
           stream: pid() | nil
         }
 

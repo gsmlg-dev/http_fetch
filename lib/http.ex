@@ -14,7 +14,7 @@ defmodule HTTP do
   Uses Erlang's built-in `:httpc` module asynchronously (`sync: false`).
 
   Arguments:
-    - `url`: The URL to fetch (string).
+    - `url`: The URL to fetch (string or URI struct).
     - `init`: An optional keyword list or map of options for the request.
               Supported options:
                 - `:method`: The HTTP method (e.g., "GET", "POST"). Defaults to "GET".
@@ -161,37 +161,25 @@ defmodule HTTP do
           end
       end
   """
-  @spec fetch(String.t(), Keyword.t() | map()) :: %HTTP.Promise{}
+  @spec fetch(String.t() | URI.t(), Keyword.t() | map()) :: %HTTP.Promise{}
   def fetch(url, init \\ []) do
-    method = Keyword.get(init, :method, "GET")
-    # Ensure method is an atom for Request struct
-    erlang_method =
-      if is_atom(method), do: method, else: String.to_existing_atom(String.downcase(method))
-
-    headers = Keyword.get(init, :headers, [])
-    # Ensure headers are converted to HTTP.Headers struct
-    headers_struct =
-      case headers do
-        %HTTP.Headers{} = headers -> headers
-        headers when is_list(headers) -> HTTP.Headers.new(headers)
-        headers when is_map(headers) -> HTTP.Headers.from_map(headers)
-        _ -> HTTP.Headers.new()
-      end
-
-    # Extract AbortController PID if provided
-    abort_controller_pid = Keyword.get(init, :signal)
+    uri = if is_binary(url), do: URI.parse(url), else: url
+    options = HTTP.FetchOptions.new(init)
 
     request = %Request{
-      url: url,
-      method: erlang_method,
-      headers: headers_struct,
-      body: Keyword.get(init, :body),
-      content_type: Keyword.get(init, :content_type),
+      url: uri,
+      method: HTTP.FetchOptions.get_method(options),
+      headers: HTTP.FetchOptions.get_headers(options),
+      body: HTTP.FetchOptions.get_body(options),
+      content_type: HTTP.FetchOptions.get_content_type(options),
       # Maps to Request.options (3rd arg for :httpc.request)
-      options: Keyword.get(init, :options, []),
+      options: options.options,
       # Maps to Request.opts (4th arg for :httpc.request)
-      opts: Keyword.get(init, :client_opts, Request.__struct__().opts)
+      opts: Keyword.merge(Request.__struct__().opts, options.opts)
     }
+
+    # Extract AbortController PID from FetchOptions
+    abort_controller_pid = options.signal
 
     # Spawn a task to handle the asynchronous HTTP request
     task =
@@ -266,7 +254,7 @@ defmodule HTTP do
   end
 
   # Success case: returns %Response{} directly
-  @spec handle_httpc_response(httpc_response_tuple(), String.t() | nil) :: Response.t()
+  @spec handle_httpc_response(httpc_response_tuple(), URI.t() | nil) :: Response.t()
   defp handle_httpc_response(response_tuple, url) do
     case response_tuple do
       {{_version, status, _reason_phrase}, httpc_headers, body} ->
@@ -326,18 +314,17 @@ defmodule HTTP do
     end
   end
 
-  defp start_httpc_stream_process(url, headers) do
+  defp start_httpc_stream_process(uri, headers) do
     {:ok, pid} =
       Task.start_link(fn ->
-        stream_httpc_response(url, headers)
+        stream_httpc_response(uri, headers)
       end)
 
     {:ok, pid}
   end
 
-  defp stream_httpc_response(url, headers) do
-    # Create a streaming request using :httpc
-    uri = URI.parse(url)
+  defp stream_httpc_response(uri, headers) do
+    # Use the URI directly (it's already parsed)
     _host = uri.host
     _port = uri.port || 80
     _path = uri.path || "/"
@@ -350,7 +337,7 @@ defmodule HTTP do
     # Start the HTTP request with streaming
     case :httpc.request(
            :get,
-           {String.to_charlist(url), request_headers},
+           {String.to_charlist(URI.to_string(uri)), request_headers},
            [],
            sync: false
          ) do

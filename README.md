@@ -67,6 +67,17 @@ promise = HTTP.fetch(url, [
 ])
 ```
 
+Supports both string URLs and URI structs:
+
+```elixir
+# String URL
+promise = HTTP.fetch("https://api.example.com/data")
+
+# URI struct
+uri = URI.parse("https://api.example.com/data")
+promise = HTTP.fetch(uri)
+```
+
 ### HTTP.Promise
 Asynchronous promise wrapper for HTTP requests.
 
@@ -93,7 +104,7 @@ Request configuration struct.
 ```elixir
 request = %HTTP.Request{
   method: :post,
-  url: "https://api.example.com/data",
+  url: URI.parse("https://api.example.com/data"),
   headers: [{"Authorization", "Bearer token"}],
   body: "data"
 }
