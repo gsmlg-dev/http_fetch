@@ -22,7 +22,8 @@ defmodule HTTP.Promise do
     - `{:error, reason}` if the request fails or is aborted.
     - `{:error, :timeout}` if the timeout is reached.
   """
-  @spec await(t(), timeout :: non_neg_integer() | :infinity) :: HTTP.Response.t() | {:error, term()}
+  @spec await(t(), timeout :: non_neg_integer() | :infinity) ::
+          HTTP.Response.t() | {:error, term()}
   def await(%__MODULE__{task: task}, timeout \\ :infinity) do
     Task.await(task, timeout)
   end
