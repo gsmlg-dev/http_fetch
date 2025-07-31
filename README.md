@@ -34,6 +34,16 @@ IO.puts("Status: #{response.status}")
 text = HTTP.Response.text(response)
 {:ok, json} = HTTP.Response.json(response)
 
+# Read response as stream (raw binary)
+{:ok, response} = 
+  HTTP.fetch("https://jsonplaceholder.typicode.com/posts/1", [
+    options: [body_format: :binary]
+  ])
+  |> HTTP.Promise.await()
+
+# response.body is now a binary stream you can process chunk by chunk
+binary_data = response.body
+
 # POST request with JSON
 {:ok, response} = 
   HTTP.fetch("https://jsonplaceholder.typicode.com/posts", [
@@ -105,6 +115,16 @@ Represents an HTTP response.
 ```elixir
 text = HTTP.Response.text(response)
 {:ok, json} = HTTP.Response.json(response)
+
+# Read response as stream (raw binary)
+{:ok, response} = 
+  HTTP.fetch("https://api.example.com/large-file", [
+    options: [body_format: :binary]
+  ])
+  |> HTTP.Promise.await()
+
+# Process binary response in chunks
+binary_data = response.body
 ```
 
 ### HTTP.Request
