@@ -1,5 +1,11 @@
 # HTTP Fetch
 
+ [![Elixir CI](https://github.com/gsmlg-dev/http_fetch/actions/workflows/elixir.yml/badge.svg)](https://github.com/gsmlg-dev/http_fetch/actions/workflows/elixir.yml)
+ [![Hex.pm](https://img.shields.io/hexpm/v/http_fetch.svg)](https://hex.pm/packages/phoenix_react_server)
+ [![Hexdocs.pm](https://img.shields.io/badge/hex-docs-lightgreen.svg)](https://hexdocs.pm/http_fetch/)
+ [![Hex.pm](https://img.shields.io/hexpm/dt/http_fetch.svg)](https://hex.pm/packages/http_fetch)
+ [![Hex.pm](https://img.shields.io/hexpm/dw/http_fetch.svg)](https://hex.pm/packages/http_fetch)
+
 A modern HTTP client library for Elixir that provides a fetch API similar to web browsers, built on Erlang's built-in `:httpc` module.
 
 ## Features
@@ -39,7 +45,9 @@ text = HTTP.Response.text(response)
 ```
 
 # Form data with file upload
-{:ok, file_stream} = File.stream!("document.pdf")
+
+```elixir
+file_stream = File.stream!("document.pdf")
 form = HTTP.FormData.new()
        |> HTTP.FormData.append_field("name", "John Doe")
        |> HTTP.FormData.append_file("document", "document.pdf", file_stream)
@@ -50,6 +58,7 @@ form = HTTP.FormData.new()
     body: form
   ])
   |> HTTP.Promise.await()
+```
 
 ## API Reference
 
@@ -126,7 +135,7 @@ form = HTTP.FormData.new()
        |> HTTP.FormData.append_field("email", "john@example.com")
 
 # File upload
-{:ok, file_stream} = File.stream!("document.pdf")
+file_stream = File.stream!("document.pdf")
 form = HTTP.FormData.new()
        |> HTTP.FormData.append_field("name", "John")
        |> HTTP.FormData.append_file("document", "document.pdf", file_stream, "application/pdf")
