@@ -10,9 +10,9 @@ defmodule HTTP.PromiseTest do
     end
 
     test "await promise" do
-      task = Task.async(fn -> {:ok, %HTTP.Response{status: 200}} end)
+      task = Task.async(fn -> %HTTP.Response{status: 200} end)
       promise = %HTTP.Promise{task: task}
-      assert {:ok, %HTTP.Response{status: 200}} = HTTP.Promise.await(promise)
+      assert %HTTP.Response{status: 200} = HTTP.Promise.await(promise)
     end
   end
 end

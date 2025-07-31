@@ -208,4 +208,108 @@ defmodule HTTP.HeadersTest do
       assert HTTP.Headers.to_list(headers) == [{"Content-Type", "application/json"}]
     end
   end
+
+  describe "get_all/2" do
+    test "returns all values for a header name case-insensitive" do
+      headers =
+        HTTP.Headers.new([
+          {"Accept", "text/html"},
+          {"Accept", "application/json"},
+          {"Accept", "*/*"}
+        ])
+
+      assert HTTP.Headers.get_all(headers, "accept") == ["text/html", "application/json", "*/*"]
+      assert HTTP.Headers.get_all(headers, "ACCEPT") == ["text/html", "application/json", "*/*"]
+    end
+
+    test "returns single value when only one exists" do
+      headers =
+        HTTP.Headers.new([
+          {"Content-Type", "application/json"},
+          {"Authorization", "Bearer token"}
+        ])
+
+      assert HTTP.Headers.get_all(headers, "content-type") == ["application/json"]
+    end
+
+    test "returns empty list for missing header" do
+      headers =
+        HTTP.Headers.new([
+          {"Content-Type", "application/json"}
+        ])
+
+      assert HTTP.Headers.get_all(headers, "missing") == []
+    end
+
+    test "handles empty headers" do
+      assert HTTP.Headers.get_all(HTTP.Headers.new(), "content-type") == []
+    end
+
+    test "returns empty list when no headers match" do
+      headers =
+        HTTP.Headers.new([
+          {"Content-Type", "application/json"},
+          {"Authorization", "Bearer token"}
+        ])
+
+      assert HTTP.Headers.get_all(headers, "x-custom-header") == []
+    end
+  end
+
+  describe "add/3" do
+    test "adds new header without replacing existing ones" do
+      headers =
+        HTTP.Headers.new([
+          {"Accept", "text/html"}
+        ])
+
+      updated = HTTP.Headers.add(headers, "Accept", "application/json")
+      assert HTTP.Headers.get_all(updated, "Accept") == ["text/html", "application/json"]
+    end
+
+    test "adds new header to existing structure" do
+      headers =
+        HTTP.Headers.new([
+          {"Content-Type", "text/plain"}
+        ])
+
+      updated = HTTP.Headers.add(headers, "Authorization", "Bearer token")
+      assert HTTP.Headers.get(updated, "Authorization") == "Bearer token"
+      assert HTTP.Headers.get(updated, "Content-Type") == "text/plain"
+    end
+
+    test "adds header to empty structure" do
+      headers = HTTP.Headers.new()
+      updated = HTTP.Headers.add(headers, "Authorization", "Bearer token")
+      assert HTTP.Headers.get(updated, "Authorization") == "Bearer token"
+    end
+
+    test "normalizes header name when adding" do
+      headers = HTTP.Headers.new()
+      updated = HTTP.Headers.add(headers, "content-type", "application/json")
+      assert HTTP.Headers.get(updated, "Content-Type") == "application/json"
+    end
+
+    test "adds multiple headers with same name" do
+      headers = HTTP.Headers.new()
+
+      headers = HTTP.Headers.add(headers, "Accept", "text/html")
+      headers = HTTP.Headers.add(headers, "Accept", "application/json")
+      headers = HTTP.Headers.add(headers, "Accept", "*/*")
+
+      assert HTTP.Headers.get_all(headers, "Accept") == ["text/html", "application/json", "*/*"]
+    end
+
+    test "adds headers case-insensitive" do
+      headers =
+        HTTP.Headers.new([
+          {"Accept", "text/html"}
+        ])
+
+      updated = HTTP.Headers.add(headers, "accept", "application/json")
+      updated = HTTP.Headers.add(updated, "ACCEPT", "*/*")
+
+      assert HTTP.Headers.get_all(updated, "Accept") == ["text/html", "application/json", "*/*"]
+    end
+  end
 end

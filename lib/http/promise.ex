@@ -14,10 +14,10 @@ defmodule HTTP.Promise do
   Awaits the completion of the HTTP promise.
 
   Returns:
-    - `{:ok, %HTTP.Response{}}` on successful completion.
+    - `%HTTP.Response{}` on successful completion.
     - `{:error, reason}` if the request fails or is aborted.
   """
-  @spec await(t()) :: {:ok, HTTP.Response.t()} | {:error, term()}
+  @spec await(t()) :: HTTP.Response.t() | {:error, term()}
   def await(%__MODULE__{task: task}) do
     Task.await(task)
   end
@@ -43,7 +43,7 @@ defmodule HTTP.Promise do
     new_task =
       Task.Supervisor.async_nolink(:http_fetch_task_supervisor, fn ->
         case Task.await(current_task) do
-          {:ok, response} ->
+          %HTTP.Response{} = response ->
             # Call the success function and handle its result
             apply_callback(success_fun, [response]) |> handle_chained_result()
 

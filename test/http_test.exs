@@ -10,7 +10,7 @@ defmodule HTTPTest do
         HTTP.fetch("#{@base_url}/status/200")
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{}} = resp
+      assert %HTTP.Response{} = resp
     end
 
     test "fetch handles HTTP error status" do
@@ -18,7 +18,7 @@ defmodule HTTPTest do
         HTTP.fetch("#{@base_url}/status/404")
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 404}} = resp
+      assert %HTTP.Response{status: 404} = resp
     end
 
     test "fetch handles different status codes" do
@@ -29,7 +29,7 @@ defmodule HTTPTest do
           HTTP.fetch("#{@base_url}/status/#{status}")
           |> HTTP.Promise.await()
 
-        assert {:ok, %HTTP.Response{status: ^status}} = resp
+        assert %HTTP.Response{status: ^status} = resp
       end
     end
   end
@@ -40,7 +40,7 @@ defmodule HTTPTest do
         HTTP.fetch("#{@base_url}/get", method: "GET")
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 200}} = resp
+      assert %HTTP.Response{status: 200} = resp
     end
 
     test "POST request" do
@@ -51,7 +51,7 @@ defmodule HTTPTest do
         )
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 200}} = resp
+      assert %HTTP.Response{status: 200} = resp
     end
 
     test "PUT request" do
@@ -62,7 +62,7 @@ defmodule HTTPTest do
         )
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 200}} = resp
+      assert %HTTP.Response{status: 200} = resp
     end
 
     test "DELETE request" do
@@ -71,7 +71,7 @@ defmodule HTTPTest do
         |> HTTP.Promise.await()
 
       # Allow 200 or 502 status codes (httpbin.org can be flaky)
-      assert {:ok, %HTTP.Response{status: status}} = resp
+      assert %HTTP.Response{status: status} = resp
       assert status in [200, 502]
     end
 
@@ -84,7 +84,7 @@ defmodule HTTPTest do
         |> HTTP.Promise.await()
 
       # Allow 200 or 502 status codes (httpbin.org can be flaky)
-      assert {:ok, %HTTP.Response{status: status}} = resp
+      assert %HTTP.Response{status: status} = resp
       assert status in [200, 502]
     end
   end
@@ -97,7 +97,7 @@ defmodule HTTPTest do
         HTTP.fetch("#{@base_url}/headers", headers: headers)
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 200}} = resp
+      assert %HTTP.Response{status: 200} = resp
     end
 
     test "content-type header" do
@@ -109,7 +109,7 @@ defmodule HTTPTest do
         )
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 200}} = resp
+      assert %HTTP.Response{status: 200} = resp
     end
   end
 
@@ -124,7 +124,7 @@ defmodule HTTPTest do
         )
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 200}} = resp
+      assert %HTTP.Response{status: 200} = resp
     end
 
     test "empty body" do
@@ -134,7 +134,7 @@ defmodule HTTPTest do
         )
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 200}} = resp
+      assert %HTTP.Response{status: 200} = resp
     end
   end
 
@@ -144,14 +144,11 @@ defmodule HTTPTest do
         HTTP.fetch("#{@base_url}/json")
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 200}} = resp
+      assert %HTTP.Response{status: 200} = resp
 
-      case resp do
-        {:ok, response} ->
-          case HTTP.Response.json(response) do
-            {:ok, json} -> assert is_map(json)
-            {:error, reason} -> flunk("JSON parsing failed: #{inspect(reason)}")
-          end
+      case HTTP.Response.json(resp) do
+        {:ok, json} -> assert is_map(json)
+        {:error, reason} -> flunk("JSON parsing failed: #{inspect(reason)}")
       end
     end
 
@@ -160,13 +157,10 @@ defmodule HTTPTest do
         HTTP.fetch("#{@base_url}/robots.txt")
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 200}} = resp
+      assert %HTTP.Response{status: 200} = resp
 
-      case resp do
-        {:ok, response} ->
-          text = HTTP.Response.text(response)
-          assert is_binary(text)
-      end
+      text = HTTP.Response.text(resp)
+      assert is_binary(text)
     end
   end
 
@@ -202,7 +196,7 @@ defmodule HTTPTest do
         HTTP.fetch("#{@base_url}/delay/1", options: [timeout: 5000])
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 200}} = resp
+      assert %HTTP.Response{status: 200} = resp
     end
 
     test "connect timeout" do
@@ -210,7 +204,7 @@ defmodule HTTPTest do
         HTTP.fetch("#{@base_url}/get", options: [connect_timeout: 5000])
         |> HTTP.Promise.await()
 
-      assert {:ok, %HTTP.Response{status: 200}} = resp
+      assert %HTTP.Response{status: 200} = resp
     end
   end
 end
