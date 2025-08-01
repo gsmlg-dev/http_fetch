@@ -121,6 +121,16 @@ response =
 
 # response.body contains the raw binary response data
 binary_data = response.body
+
+# Write response to file (supports both streaming and non-streaming)
+:ok = HTTP.Response.write_to(response, "/tmp/downloaded-file.txt")
+
+# Write large file downloads directly to disk
+{:ok, response} = 
+  HTTP.fetch("https://example.com/large-file.zip")
+  |> HTTP.Promise.await()
+
+:ok = HTTP.Response.write_to(response, "/tmp/large-file.zip")
 ```
 
 ### HTTP.Request

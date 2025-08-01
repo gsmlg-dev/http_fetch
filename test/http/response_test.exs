@@ -87,7 +87,7 @@ defmodule HTTP.ResponseTest do
   describe "write_to/2" do
     test "write non-streaming response to file" do
       temp_path = Path.join(System.tmp_dir!(), "http_response_test.txt")
-      
+
       response = %HTTP.Response{
         status: 200,
         headers: %HTTP.Headers{},
@@ -98,14 +98,14 @@ defmodule HTTP.ResponseTest do
 
       assert :ok = HTTP.Response.write_to(response, temp_path)
       assert File.read!(temp_path) == "test content"
-      
+
       # Cleanup
       File.rm!(temp_path)
     end
 
     test "write empty response to file" do
       temp_path = Path.join(System.tmp_dir!(), "empty_response_test.txt")
-      
+
       response = %HTTP.Response{
         status: 200,
         headers: %HTTP.Headers{},
@@ -116,14 +116,14 @@ defmodule HTTP.ResponseTest do
 
       assert :ok = HTTP.Response.write_to(response, temp_path)
       assert File.read!(temp_path) == ""
-      
+
       # Cleanup
       File.rm!(temp_path)
     end
 
     test "write iodata response to file" do
       temp_path = Path.join(System.tmp_dir!(), "iodata_response_test.txt")
-      
+
       response = %HTTP.Response{
         status: 200,
         headers: %HTTP.Headers{},
@@ -134,7 +134,7 @@ defmodule HTTP.ResponseTest do
 
       assert :ok = HTTP.Response.write_to(response, temp_path)
       assert File.read!(temp_path) == "hello world"
-      
+
       # Cleanup
       File.rm!(temp_path)
     end
@@ -142,7 +142,7 @@ defmodule HTTP.ResponseTest do
     test "write creates directory if needed" do
       temp_dir = Path.join(System.tmp_dir!(), "nested_test_dir")
       temp_path = Path.join(temp_dir, "test_file.txt")
-      
+
       response = %HTTP.Response{
         status: 200,
         headers: %HTTP.Headers{},
@@ -153,14 +153,14 @@ defmodule HTTP.ResponseTest do
 
       assert :ok = HTTP.Response.write_to(response, temp_path)
       assert File.read!(temp_path) == "nested directory content"
-      
+
       # Cleanup
       File.rm_rf!(temp_dir)
     end
 
     test "write_to with actual HTTP response" do
       temp_path = Path.join(System.tmp_dir!(), "actual_response_test.txt")
-      
+
       resp =
         HTTP.fetch("https://httpbin.org/json",
           headers: [{"user-agent", "Elixir http_fetch 0.4.1"}],
@@ -170,13 +170,13 @@ defmodule HTTP.ResponseTest do
 
       assert resp.status == 200
       assert :ok = HTTP.Response.write_to(resp, temp_path)
-      
+
       # Verify file was written
       assert File.exists?(temp_path)
       content = File.read!(temp_path)
       assert byte_size(content) > 0
       assert content =~ "slideshow"
-      
+
       # Cleanup
       File.rm!(temp_path)
     end

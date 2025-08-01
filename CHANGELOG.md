@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.2] - 2025-08-01
+
+### Added
+- Added `HTTP.Response.write_to/2` method to write response bodies to files
+  - Supports both streaming and non-streaming responses
+  - Automatically creates directories if they don't exist
+  - Returns `:ok` or `{:error, reason}` for proper error handling
+
+### Fixed
+- Fixed streaming implementation message format for complete responses
+- Increased streaming threshold from 100KB to 5MB to prevent issues with large files
+- Fixed test assertion for content-length comparison using `byte_size/1` instead of `length/1`
+
+### Changed
+- Updated streaming threshold to prevent streaming for files under 5MB
+- Improved streaming process error handling
+
+## [0.4.1] - 2025-07-31
 
 ### Added
 - **URI struct support** - HTTP.fetch/2 now accepts both string URLs and %URI{} structs

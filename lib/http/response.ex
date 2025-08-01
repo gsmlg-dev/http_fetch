@@ -183,8 +183,9 @@ defmodule HTTP.Response do
       case response do
         %{body: body, stream: nil} when is_binary(body) or is_list(body) ->
           # Non-streaming response
-          binary_body = 
+          binary_body =
             if is_list(body), do: IO.iodata_to_binary(body), else: body
+
           File.write!(file_path, binary_body)
           :ok
 
@@ -209,6 +210,7 @@ defmodule HTTP.Response do
           # For streaming responses, use collect_stream to get all data
           body = read_all(response)
           IO.binwrite(file, body)
+
         _ ->
           :ok
       end
