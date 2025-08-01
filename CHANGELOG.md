@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-08-01
+
+### Added
+- **HTTP.Telemetry module** - Complete telemetry integration for HTTP request monitoring
+  - Request lifecycle events with rich metadata
+  - Response body reading events for tracking download progress
+  - Streaming events for real-time data transfer monitoring
+  - Zero configuration integration with Elixir's :telemetry library
+
+### Changed
+- Updated default User-Agent string format to include library version 0.5.0
+- Enhanced telemetry event metadata with improved error reporting
+
 ## [0.4.3] - 2025-08-01
 
 ### Added
@@ -17,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Uses dynamic version detection via `Application.spec(:http_fetch, :vsn)`
   - Preserves custom `User-Agent` headers when provided
 - Added `HTTP.Headers.user_agent/0` method to access the default User-Agent string
+- Added comprehensive `HTTP.Telemetry` module for HTTP request metrics and monitoring
+  - **Request lifecycle events**: `[:http_fetch, :request, :start]`, `[:http_fetch, :request, :stop]`, `[:http_fetch, :request, :exception]`
+  - **Response body reading events**: `[:http_fetch, :response, :body_read_start]`, `[:http_fetch, :response, :body_read_stop]`
+  - **Streaming events**: `[:http_fetch, :streaming, :start]`, `[:http_fetch, :streaming, :chunk]`, `[:http_fetch, :streaming, :stop]`
+  - **Rich metadata**: Includes URLs, HTTP status codes, response sizes, durations, and error reasons
+  - **Automatic integration**: All HTTP.fetch operations automatically emit telemetry events
+  - **Zero configuration**: Works out of the box with Elixir's :telemetry library
 
 ### Changed
 - Enhanced User-Agent string to include system architecture information
