@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2025-08-01
+
+### Added
+- Added `HTTP.Headers.set_default/3` method to set headers only if they don't already exist
+  - Uses case-insensitive header name matching
+  - Preserves existing headers when they already contain the specified name
+- Added automatic default `User-Agent` header to all HTTP requests
+  - Format: `Mozilla/5.0 (macOS; aarch64-apple-darwin24.3.0) OTP/27 BEAM/15.2.3 Elixir/1.18.3 http_fetch/0.4.3`
+  - Includes OS information, system architecture, OTP version, BEAM version, Elixir version, and library version
+  - Uses dynamic version detection via `Application.spec(:http_fetch, :vsn)`
+  - Preserves custom `User-Agent` headers when provided
+- Added `HTTP.Headers.user_agent/0` method to access the default User-Agent string
+
+### Changed
+- Enhanced User-Agent string to include system architecture information
+- Refactored User-Agent generation for consistency across the codebase
+- Updated default headers handling to use `set_default/3` for better extensibility
+
 ## [0.4.2] - 2025-08-01
 
 ### Added

@@ -133,6 +133,29 @@ binary_data = response.body
 :ok = HTTP.Response.write_to(response, "/tmp/large-file.zip")
 ```
 
+### HTTP.Headers
+Handle HTTP headers with utilities for parsing, normalizing, and manipulating headers.
+
+```elixir
+# Create headers
+headers = HTTP.Headers.new([{"Content-Type", "application/json"}])
+
+# Get header value
+type = HTTP.Headers.get(headers, "content-type")
+
+# Set header
+headers = HTTP.Headers.set(headers, "Authorization", "Bearer token")
+
+# Set header only if not already present
+headers = HTTP.Headers.set_default(headers, "User-Agent", "CustomAgent/1.0")
+
+# Access default user agent string
+default_ua = HTTP.Headers.user_agent()
+
+# Parse Content-Type
+{media_type, params} = HTTP.Headers.parse_content_type("application/json; charset=utf-8")
+```
+
 ### HTTP.Request
 Request configuration struct.
 
