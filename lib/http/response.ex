@@ -152,4 +152,66 @@ defmodule HTTP.Response do
       content_type -> HTTP.Headers.parse_content_type(content_type)
     end
   end
+
+  @doc """
+  Writes the response body to a file.
+
+  For streaming responses, this will read the entire stream and write it to the file.
+  For non-streaming responses, it will write the existing body directly.
+
+  ## Parameters
+    - `response`: The HTTP response to write
+    - `file_path`: The path to write the file to
+
+  ## Returns
+    - `:ok` on success
+    - `{:error, reason}` on failure
+
+  ## Examples
+      iex> response = %HTTP.Response{body: "file content", stream: nil}
+      iex> HTTP.Response.write_to(response, "/tmp/test.txt")
+      :ok
+  """
+  @spec write_to(t(), String.t()) :: :ok | {:error, term()}
+  def write_to(%__MODULE__{} = response, file_path) do
+    try do
+      # Ensure the directory exists
+      file_path
+      |> Path.dirname()
+      |> File.mkdir_p!()
+
+      case response do
+        %{body: body, stream: nil} when is_binary(body) or is_list(body) ->
+          # Non-streaming response
+          binary_body = 
+            if is_list(body), do: IO.iodata_to_binary(body), else: body
+          File.write!(file_path, binary_body)
+          :ok
+
+        %{body: _body, stream: stream} when is_pid(stream) ->
+          # Streaming response - collect and write
+          write_stream_to_file(response, file_path)
+
+        _ ->
+          # Empty or nil body
+          File.write!(file_path, "")
+          :ok
+      end
+    rescue
+      error -> {:error, error}
+    end
+  end
+
+  defp write_stream_to_file(response, file_path) do
+    File.open!(file_path, [:write, :binary], fn file ->
+      case response do
+        %{body: _body, stream: stream} when is_pid(stream) ->
+          # For streaming responses, use collect_stream to get all data
+          body = read_all(response)
+          IO.binwrite(file, body)
+        _ ->
+          :ok
+      end
+    end)
+  end
 end

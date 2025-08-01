@@ -306,9 +306,9 @@ defmodule HTTP do
   end
 
   defp should_use_streaming?(content_length) do
-    # Stream responses larger than 100KB or when content-length is unknown
+    # Stream responses larger than 5MB to avoid issues with large files
     case Integer.parse(content_length || "") do
-      {size, _} when size > 100_000 -> true
+      {size, _} when size > 5_000_000 -> true
       # Stream when size is unknown
       _ -> content_length == nil
     end
@@ -372,6 +372,12 @@ defmodule HTTP do
 
       {:http, {^request_id, {:http_body, body}}} ->
         send(caller, {:stream_chunk, self(), to_string(body)})
+        send(caller, {:stream_end, self()})
+
+      {:http, {^request_id, {_status_line, _headers, body}}} ->
+        # Handle complete response (non-streaming case)
+        binary_body = if is_list(body), do: IO.iodata_to_binary(body), else: body
+        send(caller, {:stream_chunk, self(), binary_body})
         send(caller, {:stream_end, self()})
     after
       60_000 ->
