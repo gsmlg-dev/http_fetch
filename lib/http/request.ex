@@ -39,7 +39,10 @@ defmodule HTTP.Request do
   def to_httpc_args(%__MODULE__{} = req) do
     method = req.method
     url = req.url |> URI.to_string() |> to_charlist()
-    headers = Enum.map(req.headers.headers, fn {k, v} -> {to_charlist(k), to_charlist(v)} end)
+
+    # Add default user agent if not provided
+    headers = add_default_user_agent(req.headers.headers)
+    headers = Enum.map(headers, fn {k, v} -> {to_charlist(k), to_charlist(v)} end)
 
     request_tuple =
       case method do
@@ -81,4 +84,19 @@ defmodule HTTP.Request do
   defp to_body(body) when is_binary(body), do: String.to_charlist(body)
   defp to_body(body) when is_list(body), do: body
   defp to_body(other), do: String.to_charlist(to_string(other))
+
+  @spec add_default_user_agent([{String.t(), String.t()}]) :: [{String.t(), String.t()}]
+  defp add_default_user_agent(headers) do
+    # Check if user agent is already provided (case-insensitive)
+    has_user_agent =
+      Enum.any?(headers, fn {name, _value} ->
+        String.downcase(name) == "user-agent"
+      end)
+
+    if has_user_agent do
+      headers
+    else
+      [{"User-Agent", HTTP.Headers.user_agent()} | headers]
+    end
+  end
 end

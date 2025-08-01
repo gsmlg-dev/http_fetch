@@ -330,4 +330,87 @@ defmodule HTTP.Headers do
   def to_list(%__MODULE__{headers: headers}) do
     headers
   end
+
+  @doc """
+  Sets a header only if it doesn't already exist (case-insensitive).
+
+  ## Examples
+      iex> headers = HTTP.Headers.new([{"Content-Type", "text/plain"}])
+      iex> updated = HTTP.Headers.set_default(headers, "Content-Type", "application/json")
+      iex> HTTP.Headers.get(updated, "Content-Type")
+      "text/plain"
+      
+      iex> headers = HTTP.Headers.new([{"Accept", "text/html"}])
+      iex> updated = HTTP.Headers.set_default(headers, "User-Agent", "CustomAgent/1.0")
+      iex> HTTP.Headers.get(updated, "User-Agent")
+      "CustomAgent/1.0"
+      
+      iex> headers = HTTP.Headers.new()
+      iex> updated = HTTP.Headers.set_default(headers, "Authorization", "Bearer token")
+      iex> HTTP.Headers.get(updated, "Authorization")
+      "Bearer token"
+  """
+  @spec set_default(t(), String.t(), String.t()) :: t()
+  def set_default(%__MODULE__{headers: headers} = headers_struct, name, value)
+      when is_binary(name) and is_binary(value) do
+    normalized_name = String.downcase(name)
+
+    # Check if header already exists
+    header_exists =
+      Enum.any?(headers, fn {header_name, _} ->
+        String.downcase(header_name) == normalized_name
+      end)
+
+    if header_exists do
+      headers_struct
+    else
+      normalized_header_name = normalize_name(name)
+      %{headers_struct | headers: [{normalized_header_name, value} | headers]}
+    end
+  end
+
+  @doc """
+  Returns the default User-Agent string used by the library.
+
+  ## Examples
+      iex> user_agent = HTTP.Headers.user_agent()
+      iex> user_agent =~ "Mozilla/5.0"
+      true
+      iex> user_agent =~ "http_fetch/"
+      true
+  """
+  @spec user_agent() :: String.t()
+  def user_agent() do
+    os_info = get_os_info()
+    arch_info = get_arch_info()
+    otp_version = System.otp_release()
+    elixir_version = System.version()
+
+    beam_version = :erlang.system_info(:version)
+    http_fetch_version = Application.spec(:http_fetch, :vsn) |> to_string()
+
+    "Mozilla/5.0 (#{os_info}; #{arch_info}) OTP/#{otp_version} BEAM/#{beam_version} Elixir/#{elixir_version} http_fetch/#{http_fetch_version}"
+  end
+
+  @spec get_os_info() :: String.t()
+  defp get_os_info() do
+    case :os.type() do
+      {:unix, :darwin} ->
+        "macOS"
+
+      {:unix, :linux} ->
+        "Linux"
+
+      {:win32, _} ->
+        "Windows"
+
+      {_, os} ->
+        Atom.to_string(os)
+    end
+  end
+
+  @spec get_arch_info() :: String.t()
+  defp get_arch_info() do
+    to_string(:erlang.system_info(:system_architecture))
+  end
 end
