@@ -156,6 +156,39 @@ default_ua = HTTP.Headers.user_agent()
 {media_type, params} = HTTP.Headers.parse_content_type("application/json; charset=utf-8")
 ```
 
+### HTTP.Telemetry
+Comprehensive telemetry and metrics for HTTP requests and responses.
+
+```elixir
+# All HTTP.fetch operations automatically emit telemetry events
+# No configuration required - just attach handlers
+
+:telemetry.attach_many(
+  "my_handler",
+  [
+    [:http_fetch, :request, :start],
+    [:http_fetch, :request, :stop],
+    [:http_fetch, :request, :exception]
+  ],
+  fn event_name, measurements, metadata, _config ->
+    case event_name do
+      [:http_fetch, :request, :start] ->
+        IO.puts("Starting request to #{metadata.url}")
+      [:http_fetch, :request, :stop] ->
+        IO.puts("Request completed: #{measurements.status} in #{measurements.duration}μs")
+      [:http_fetch, :request, :exception] ->
+        IO.puts("Request failed: #{inspect(metadata.error)}")
+    end
+  end,
+  nil
+)
+
+# Manual telemetry events (for custom implementations)
+HTTP.Telemetry.request_start("GET", URI.parse("https://example.com"), %HTTP.Headers{})
+HTTP.Telemetry.request_stop(200, URI.parse("https://example.com"), 1024, 1500)
+HTTP.Telemetry.request_exception(URI.parse("https://example.com"), :timeout, 5000)
+```
+
 ### HTTP.Request
 Request configuration struct.
 

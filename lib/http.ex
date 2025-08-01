@@ -181,6 +181,9 @@ defmodule HTTP do
     # Extract AbortController PID from FetchOptions
     abort_controller_pid = options.signal
 
+    # Emit telemetry event for request start
+    HTTP.Telemetry.request_start(request.method, request.url, request.headers)
+
     # Spawn a task to handle the asynchronous HTTP request
     task =
       Task.Supervisor.async_nolink(
@@ -221,6 +224,8 @@ defmodule HTTP do
           pid() | nil
         ) :: Response.t() | {:error, term()}
   def handle_async_request(request, _calling_pid, abort_controller_pid) do
+    start_time = System.monotonic_time(:microsecond)
+
     # Use a try/catch block to convert `throw` from handle_httpc_response into an {:error, reason} tuple
     try do
       case Request.to_httpc_args(request) do
@@ -237,18 +242,46 @@ defmodule HTTP do
               end
 
               # Handle response (simplified - streaming handled in handle_httpc_response)
-              handle_response(request_id, request.url)
+              result = handle_response(request_id, request.url)
+
+              # Emit telemetry event for request completion
+              duration = System.monotonic_time(:microsecond) - start_time
+
+              case result do
+                %Response{status: status, body: body} when is_binary(body) ->
+                  HTTP.Telemetry.request_stop(status, request.url, byte_size(body), duration)
+
+                %Response{status: status, stream: nil} ->
+                  # Non-streaming response with nil body (unlikely, but handle)
+                  HTTP.Telemetry.request_stop(status, request.url, 0, duration)
+
+                %Response{status: status} ->
+                  # Streaming response - we'll emit telemetry when streaming completes
+                  HTTP.Telemetry.request_stop(status, request.url, 0, duration)
+
+                {:error, _} ->
+                  # Error will be handled in catch block
+                  :ok
+              end
+
+              result
 
             {:error, reason} ->
+              duration = System.monotonic_time(:microsecond) - start_time
+              HTTP.Telemetry.request_exception(request.url, reason, duration)
               throw(reason)
           end
 
         # Fallback for unexpected return from Request.to_httpc_args
         other_args ->
+          duration = System.monotonic_time(:microsecond) - start_time
+          HTTP.Telemetry.request_exception(request.url, {:bad_request_args, other_args}, duration)
           throw({:bad_request_args, other_args})
       end
     catch
       reason ->
+        duration = System.monotonic_time(:microsecond) - start_time
+        HTTP.Telemetry.request_exception(request.url, reason, duration)
         {:error, reason}
     end
   end
@@ -308,22 +341,33 @@ defmodule HTTP do
   defp should_use_streaming?(content_length) do
     # Stream responses larger than 5MB to avoid issues with large files
     case Integer.parse(content_length || "") do
-      {size, _} when size > 5_000_000 -> true
+      {size, _} when size > 5_000_000 ->
+        # Emit telemetry for streaming start
+        HTTP.Telemetry.streaming_start(size)
+        true
+
       # Stream when size is unknown
-      _ -> content_length == nil
+      _ ->
+        if content_length == nil do
+          HTTP.Telemetry.streaming_start(0)
+        end
+
+        content_length == nil
     end
   end
 
   defp start_httpc_stream_process(uri, headers) do
+    start_time = System.monotonic_time(:microsecond)
+
     {:ok, pid} =
       Task.start_link(fn ->
-        stream_httpc_response(uri, headers)
+        stream_httpc_response(uri, headers, start_time)
       end)
 
     {:ok, pid}
   end
 
-  defp stream_httpc_response(uri, headers) do
+  defp stream_httpc_response(uri, headers, start_time) do
     # Use the URI directly (it's already parsed)
     _host = uri.host
     _port = uri.port || 80
@@ -342,45 +386,62 @@ defmodule HTTP do
            sync: false
          ) do
       {:ok, request_id} ->
-        stream_loop(request_id, self())
+        stream_loop(request_id, self(), 0, start_time)
 
       {:error, reason} ->
         send(self(), {:stream_error, self(), reason})
     end
   end
 
-  defp stream_loop(request_id, caller) do
+  defp stream_loop(request_id, caller, total_bytes, start_time) do
     receive do
       {:http, {^request_id, {:http_response, _http_version, _status, _reason}}} ->
-        stream_loop(request_id, caller)
+        stream_loop(request_id, caller, total_bytes, start_time)
 
       {:http, {^request_id, {:http_header, _, _header_name, _, _header_value}}} ->
-        stream_loop(request_id, caller)
+        stream_loop(request_id, caller, total_bytes, start_time)
 
       {:http, {^request_id, :http_eoh}} ->
-        stream_loop(request_id, caller)
+        stream_loop(request_id, caller, total_bytes, start_time)
 
       {:http, {^request_id, {:http_error, reason}}} ->
         send(caller, {:stream_error, self(), reason})
 
       {:http, {^request_id, :stream_end}} ->
+        duration = System.monotonic_time(:microsecond) - start_time
+        HTTP.Telemetry.streaming_stop(total_bytes, duration)
         send(caller, {:stream_end, self()})
 
       {:http, {^request_id, {:http_chunk, chunk}}} ->
+        chunk_size = byte_size(chunk)
+        new_total = total_bytes + chunk_size
+        HTTP.Telemetry.streaming_chunk(chunk_size, new_total)
         send(caller, {:stream_chunk, self(), to_string(chunk)})
-        stream_loop(request_id, caller)
+        stream_loop(request_id, caller, new_total, start_time)
 
       {:http, {^request_id, {:http_body, body}}} ->
+        chunk_size = byte_size(body)
+        new_total = total_bytes + chunk_size
+        HTTP.Telemetry.streaming_chunk(chunk_size, new_total)
         send(caller, {:stream_chunk, self(), to_string(body)})
+        duration = System.monotonic_time(:microsecond) - start_time
+        HTTP.Telemetry.streaming_stop(new_total, duration)
         send(caller, {:stream_end, self()})
 
       {:http, {^request_id, {_status_line, _headers, body}}} ->
         # Handle complete response (non-streaming case)
         binary_body = if is_list(body), do: IO.iodata_to_binary(body), else: body
+        chunk_size = byte_size(binary_body)
+        new_total = total_bytes + chunk_size
+        HTTP.Telemetry.streaming_chunk(chunk_size, new_total)
         send(caller, {:stream_chunk, self(), binary_body})
+        duration = System.monotonic_time(:microsecond) - start_time
+        HTTP.Telemetry.streaming_stop(new_total, duration)
         send(caller, {:stream_end, self()})
     after
       60_000 ->
+        duration = System.monotonic_time(:microsecond) - start_time
+        HTTP.Telemetry.streaming_stop(total_bytes, duration)
         send(caller, {:stream_error, self(), :timeout})
     end
   end
