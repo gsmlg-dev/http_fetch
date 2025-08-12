@@ -189,6 +189,22 @@ HTTP.Telemetry.request_stop(200, URI.parse("https://example.com"), 1024, 1500)
 HTTP.Telemetry.request_exception(URI.parse("https://example.com"), :timeout, 5000)
 ```
 
+### HTTP.Logger
+The library includes a logger that can be attached to telemetry events to provide detailed logging of HTTP requests. To enable the logger, simply call `HTTP.Logger.attach()` in your application's startup code, for example in `application.ex`:
+
+```elixir
+defmodule MyApp.Application do
+  use Application
+
+  def start(_type, _args) do
+    # Enable HTTP fetch logging
+    HTTP.Logger.attach()
+
+    # ... rest of your application startup
+  end
+end
+```
+
 ### HTTP.Request
 Request configuration struct.
 

@@ -3,9 +3,6 @@ defmodule HTTP.TelemetryTest do
   doctest HTTP.Telemetry
 
   setup do
-    # Capture telemetry events
-    events = []
-
     # Start telemetry event capture
     :telemetry.attach_many(
       "test_handler",
