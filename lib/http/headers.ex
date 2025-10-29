@@ -99,8 +99,7 @@ defmodule HTTP.Headers do
     name
     |> String.downcase()
     |> String.split("-")
-    |> Enum.map(&String.capitalize/1)
-    |> Enum.join("-")
+    |> Enum.map_join("-", &String.capitalize/1)
   end
 
   @doc """
@@ -374,8 +373,7 @@ defmodule HTTP.Headers do
   @spec format(t()) :: String.t()
   def format(%__MODULE__{headers: headers}) do
     headers
-    |> Enum.map(fn {name, value} -> "#{name}: #{value}" end)
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", fn {name, value} -> "#{name}: #{value}" end)
   end
 
   @doc """
@@ -440,7 +438,7 @@ defmodule HTTP.Headers do
       true
   """
   @spec user_agent() :: String.t()
-  def user_agent() do
+  def user_agent do
     os_info = get_os_info()
     arch_info = get_arch_info()
     otp_version = System.otp_release()
@@ -453,7 +451,7 @@ defmodule HTTP.Headers do
   end
 
   @spec get_os_info() :: String.t()
-  defp get_os_info() do
+  defp get_os_info do
     case :os.type() do
       {:unix, :darwin} ->
         "macOS"
@@ -470,7 +468,7 @@ defmodule HTTP.Headers do
   end
 
   @spec get_arch_info() :: String.t()
-  defp get_arch_info() do
+  defp get_arch_info do
     to_string(:erlang.system_info(:system_architecture))
   end
 end

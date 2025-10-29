@@ -126,4 +126,4 @@ jobs:
           restore-keys: ${{ runner.os }}-dialyzer-
 
       - name: Run Dialyzer
-        run: mix dialyzer --halt-exit-status
+        run: mix dialyzer --format github

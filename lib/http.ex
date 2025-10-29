@@ -72,9 +72,9 @@ defmodule HTTP do
   See `HTTP.Telemetry` for detailed event documentation.
   """
 
+  alias HTTP.Promise
   alias HTTP.Request
   alias HTTP.Response
-  alias HTTP.Promise
 
   @doc """
   Performs an HTTP request, similar to `global.fetch` in web browsers.

@@ -172,10 +172,9 @@ defmodule HTTP.FormData do
         {:field, _, _} -> true
         _ -> false
       end)
-      |> Enum.map(fn {:field, name, value} ->
+      |> Enum.map_join("&", fn {:field, name, value} ->
         URI.encode_www_form(name) <> "=" <> URI.encode_www_form(value)
       end)
-      |> Enum.join("&")
 
     {:url_encoded, encoded}
   end

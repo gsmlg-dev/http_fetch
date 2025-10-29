@@ -105,21 +105,21 @@ defmodule HTTP.TelemetryTest do
     end
 
     test "streaming_chunk emits telemetry event" do
-      HTTP.Telemetry.streaming_chunk(8192, 16384)
+      HTTP.Telemetry.streaming_chunk(8192, 16_384)
 
       assert_receive {:telemetry_event, [:http_fetch, :streaming, :chunk], measurements,
                       _metadata}
 
       assert measurements.bytes_received == 8192
-      assert measurements.total_bytes == 16384
+      assert measurements.total_bytes == 16_384
     end
 
     test "streaming_stop emits telemetry event" do
-      HTTP.Telemetry.streaming_stop(5_242_880, 10000)
+      HTTP.Telemetry.streaming_stop(5_242_880, 10_000)
 
       assert_receive {:telemetry_event, [:http_fetch, :streaming, :stop], measurements, _metadata}
       assert measurements.total_bytes == 5_242_880
-      assert measurements.duration == 10000
+      assert measurements.duration == 10_000
     end
   end
 end

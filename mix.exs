@@ -45,7 +45,9 @@ defmodule HttpFetch.MixProject do
   defp dialyzer do
     [
       plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
-      plt_add_apps: [:ex_unit, :mix]
+      plt_add_apps: [:ex_unit, :mix],
+      flags: [:unmatched_returns, :error_handling, :underspecs],
+      ignore_warnings: ".dialyzer_ignore.exs"
     ]
   end
 end
