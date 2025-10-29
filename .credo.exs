@@ -151,7 +151,8 @@
           {Credo.Check.Warning.OperationOnSameValues, []},
           {Credo.Check.Warning.OperationWithConstantResult, []},
           {Credo.Check.Warning.RaiseInsideRescue, []},
-          {Credo.Check.Warning.SpecWithStruct, []},
+          # Allow structs in specs - needed for Promise return types
+          {Credo.Check.Warning.SpecWithStruct, false},
           {Credo.Check.Warning.UnsafeExec, []},
           {Credo.Check.Warning.UnusedEnumOperation, []},
           {Credo.Check.Warning.UnusedFileOperation, []},
