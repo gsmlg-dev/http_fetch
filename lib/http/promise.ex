@@ -1,7 +1,56 @@
 defmodule HTTP.Promise do
   @moduledoc """
-  Represents an asynchronous HTTP operation, similar to a JavaScript Promise.
-  It wraps an underlying `Task` and provides an `await` function.
+  JavaScript-like Promise implementation for asynchronous HTTP operations.
+
+  This module provides a Promise-based interface for handling asynchronous HTTP
+  requests, wrapping Elixir's `Task` with familiar Promise semantics including
+  chaining via `then/3` and error handling.
+
+  ## Features
+
+  - **Async/await pattern**: Similar to JavaScript's Promise.await()
+  - **Promise chaining**: Chain operations with `then/3` for sequential async operations
+  - **Error handling**: Separate success and error callbacks
+  - **Task-based**: Built on Elixir's Task.Supervisor for reliability
+
+  ## Basic Usage
+
+      # Simple await
+      {:ok, response} =
+        HTTP.fetch("https://api.example.com/data")
+        |> HTTP.Promise.await()
+
+      # Promise chaining
+      HTTP.fetch("https://api.example.com/users/1")
+      |> HTTP.Promise.then(&HTTP.Response.json/1)
+      |> HTTP.Promise.then(fn {:ok, user} ->
+        IO.puts("User: " <> user["name"])
+      end)
+      |> HTTP.Promise.await()
+
+  ## Chaining with Error Handling
+
+      HTTP.fetch("https://api.example.com/data")
+      |> HTTP.Promise.then(
+        fn response -> HTTP.Response.json(response) end,
+        fn error -> {:error, :request_failed} end
+      )
+      |> HTTP.Promise.await()
+
+  ## Returning Promises from Callbacks
+
+  Callbacks in `then/3` can return another Promise, enabling sequential async operations:
+
+      HTTP.fetch("https://api.example.com/posts/1")
+      |> HTTP.Promise.then(fn response ->
+        {:ok, post} = HTTP.Response.json(response)
+        # Fetch comments for this post
+        HTTP.fetch("https://api.example.com/posts/1/comments")
+      end)
+      |> HTTP.Promise.then(fn comments_response ->
+        HTTP.Response.json(comments_response)
+      end)
+      |> HTTP.Promise.await()
   """
 
   defstruct task: nil

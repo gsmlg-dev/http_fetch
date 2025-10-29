@@ -1,8 +1,75 @@
 defmodule HTTP do
   @moduledoc """
-  A module simulating the web browser's Fetch API in Elixir, using :httpc as the foundation.
-  Provides HTTP.Request, HTTP.Response, HTTP.Promise and a global-like fetch function with asynchronous
-  capabilities and an AbortController for request cancellation.
+  A browser-like HTTP fetch API for Elixir, built on Erlang's `:httpc` module.
+
+  This module provides a modern, Promise-based HTTP client interface similar to the
+  browser's `fetch()` API. It supports asynchronous requests, streaming, request
+  cancellation, and comprehensive telemetry integration.
+
+  ## Features
+
+  - **Async by default**: All requests use Task.Supervisor with `async_nolink/4`
+  - **Automatic streaming**: Responses >5MB or with unknown Content-Length automatically stream
+  - **Request cancellation**: Via `HTTP.AbortController` for aborting in-flight requests
+  - **Promise chaining**: JavaScript-like promise interface with `then/3` support
+  - **Telemetry integration**: Comprehensive event emission for monitoring and observability
+  - **Zero external dependencies**: Uses only Erlang/OTP built-in modules (except telemetry)
+
+  ## Quick Start
+
+      # Simple GET request
+      {:ok, response} =
+        HTTP.fetch("https://jsonplaceholder.typicode.com/posts/1")
+        |> HTTP.Promise.await()
+
+      # Parse JSON response
+      {:ok, json} = HTTP.Response.json(response)
+
+      # POST with JSON body
+      {:ok, response} =
+        HTTP.fetch("https://api.example.com/posts", [
+          method: "POST",
+          headers: %{"Content-Type" => "application/json"},
+          body: JSON.encode!(%{title: "Hello", body: "World"})
+        ])
+        |> HTTP.Promise.await()
+
+  ## Architecture
+
+  The library is structured around these core modules:
+
+  - `HTTP` - Main entry point with the `fetch/2` function
+  - `HTTP.Promise` - Promise wrapper around Tasks for async operations
+  - `HTTP.Request` - Request configuration struct
+  - `HTTP.Response` - Response struct with JSON/text parsing helpers
+  - `HTTP.Headers` - Header manipulation utilities
+  - `HTTP.FormData` - Multipart/form-data encoding with file upload support
+  - `HTTP.AbortController` - Request cancellation mechanism
+  - `HTTP.FetchOptions` - Options processing and validation
+  - `HTTP.Telemetry` - Telemetry event emission for monitoring
+
+  ## Streaming Behavior
+
+  Responses are automatically streamed when:
+
+  - Content-Length > 5MB
+  - Content-Length header is missing/unknown
+
+  Streaming responses have `body: nil` and `stream: pid` in the Response struct.
+  Use `HTTP.Response.read_all/1` or `HTTP.Response.write_to/2` to consume streams.
+
+  ## Telemetry Events
+
+  All events use the `[:http_fetch, ...]` prefix:
+
+  - `[:http_fetch, :request, :start]` - Request initiated
+  - `[:http_fetch, :request, :stop]` - Request completed
+  - `[:http_fetch, :request, :exception]` - Request failed
+  - `[:http_fetch, :streaming, :start]` - Streaming started
+  - `[:http_fetch, :streaming, :chunk]` - Stream chunk received
+  - `[:http_fetch, :streaming, :stop]` - Streaming completed
+
+  See `HTTP.Telemetry` for detailed event documentation.
   """
 
   alias HTTP.Request

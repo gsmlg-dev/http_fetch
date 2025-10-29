@@ -1,6 +1,66 @@
 defmodule HTTP.Headers do
   @moduledoc """
-  Module for processing HTTP headers with utilities for parsing, normalizing, and manipulating headers.
+  HTTP headers processing and manipulation utilities.
+
+  This module provides a comprehensive API for working with HTTP headers, including
+  case-insensitive lookups, header normalization, Content-Type parsing, and a
+  default User-Agent generator.
+
+  ## Features
+
+  - **Case-insensitive operations**: All header name comparisons are case-insensitive
+  - **Header normalization**: Converts header names to Title-Case format
+  - **Multiple headers**: Support for multiple values for the same header name
+  - **Content-Type parsing**: Extract media type and parameters
+  - **Default User-Agent**: Automatically generated based on runtime environment
+
+  ## Basic Usage
+
+      # Create headers
+      headers = HTTP.Headers.new([
+        {"Content-Type", "application/json"},
+        {"Authorization", "Bearer token"}
+      ])
+
+      # Get header value (case-insensitive)
+      content_type = HTTP.Headers.get(headers, "content-type")
+      # => "application/json"
+
+      # Set/update header
+      headers = HTTP.Headers.set(headers, "Accept", "application/json")
+
+      # Set only if not present
+      headers = HTTP.Headers.set_default(headers, "User-Agent", "CustomAgent/1.0")
+
+      # Add multiple values for same header
+      headers = HTTP.Headers.add(headers, "Accept", "text/html")
+      values = HTTP.Headers.get_all(headers, "Accept")
+      # => ["application/json", "text/html"]
+
+  ## Content-Type Parsing
+
+      {media_type, params} =
+        HTTP.Headers.parse_content_type("application/json; charset=utf-8")
+      # => {"application/json", %{"charset" => "utf-8"}}
+
+  ## User-Agent
+
+  The library provides a default User-Agent string that includes:
+
+  - Operating system information
+  - System architecture
+  - OTP version
+  - BEAM version
+  - Elixir version
+  - Library version
+
+  Example User-Agent:
+
+      "Mozilla/5.0 (macOS; x86_64-apple-darwin24.6.0) OTP/27 BEAM/15.1 Elixir/1.18.3 http_fetch/0.5.0"
+
+  Access the default User-Agent:
+
+      user_agent = HTTP.Headers.user_agent()
   """
 
   defstruct headers: []

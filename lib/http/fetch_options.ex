@@ -1,7 +1,85 @@
 defmodule HTTP.FetchOptions do
   @moduledoc """
-  Processes fetch options for HTTP requests, supporting flat map, keyword list,
-  and HTTP.FetchOptions struct formats. Handles conversion to :httpc.request arguments.
+  Options processing and validation for `HTTP.fetch/2` requests.
+
+  This module handles the conversion of various option formats (maps, keyword lists,
+  structs) into structured options for `:httpc.request/4`. It provides a flexible
+  API that supports both simple and advanced HTTP client configurations.
+
+  ## Options Categories
+
+  Options are divided into two main categories:
+
+  1. **HTTP Options** (3rd argument to `:httpc.request/4`) - Request-specific settings:
+     - `timeout` - Request timeout in milliseconds
+     - `connect_timeout` - Connection timeout in milliseconds
+     - `ssl` - SSL/TLS options
+     - `autoredirect` - Follow redirects automatically
+     - `proxy_auth` - Proxy authentication
+     - `version` - HTTP version
+     - `relaxed` - Relaxed parsing mode
+
+  2. **Client Options** (4th argument to `:httpc.request/4`) - Client behavior settings:
+     - `sync` - Synchronous/asynchronous mode (default: false)
+     - `stream` - Response streaming configuration
+     - `body_format` - Response body format (:string or :binary)
+     - `full_result` - Return full HTTP response
+     - `headers_as_is` - Preserve header case
+     - `socket_opts` - Socket-level options
+     - `receiver` - Custom receiver process
+     - `ipv6_host_with_brackets` - IPv6 host formatting
+
+  ## Basic Usage
+
+      # Simple options as keyword list
+      HTTP.fetch("https://api.example.com", [
+        method: "POST",
+        headers: %{"Content-Type" => "application/json"},
+        timeout: 10_000
+      ])
+
+      # Complex options with HTTP and client settings
+      HTTP.fetch("https://api.example.com", [
+        method: "GET",
+        timeout: 5_000,
+        connect_timeout: 2_000,
+        ssl: [verify: :verify_peer],
+        body_format: :binary
+      ])
+
+  ## Advanced Configuration
+
+      # Using options and opts keywords for fine control
+      HTTP.fetch("https://api.example.com", [
+        method: "POST",
+        body: "data",
+        # Request-specific options (3rd arg to :httpc.request)
+        options: [
+          timeout: 10_000,
+          connect_timeout: 5_000
+        ],
+        # Client-specific options (4th arg to :httpc.request)
+        opts: [
+          sync: false,
+          body_format: :binary
+        ]
+      ])
+
+  ## Flat vs Structured Options
+
+  The module supports both flat and structured option formats:
+
+      # Flat format (recommended for simplicity)
+      [method: "POST", timeout: 5_000, body_format: :binary]
+
+      # Structured format (for explicit control)
+      [
+        method: "POST",
+        options: [timeout: 5_000],
+        opts: [body_format: :binary]
+      ]
+
+  Both formats are equivalent; the module automatically categorizes options.
   """
 
   defstruct method: :get,

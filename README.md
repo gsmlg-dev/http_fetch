@@ -243,6 +243,73 @@ The library handles:
 - Invalid URLs
 - Cancelled requests
 
+## Development
+
+This project uses several code quality tools to maintain high standards:
+
+### Code Quality Tools
+
+**Credo** - Static code analysis to enforce Elixir style guidelines and identify code smells:
+
+```bash
+# Run standard checks
+mix credo
+
+# Run with strict mode (includes readability checks)
+mix credo --strict
+
+# Explain a specific issue
+mix credo explain <issue_category>
+```
+
+**Dialyzer** - Static type analysis to catch type errors and inconsistencies:
+
+```bash
+# Run type checking
+mix dialyzer
+
+# Generate/rebuild PLT (first time setup, takes 2-3 minutes)
+mix dialyzer --plt
+```
+
+**ExDoc** - Generate comprehensive documentation:
+
+```bash
+# Generate HTML documentation
+mix docs
+
+# View generated docs
+open doc/index.html
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+mix test
+
+# Run specific test file
+mix test test/http_test.exs
+
+# Run with coverage
+mix test --cover
+```
+
+### Code Formatting
+
+```bash
+# Format all code
+mix format
+
+# Check formatting without changes
+mix format --check-formatted
+```
+
+## Requirements
+
+- Elixir 1.18+ (for built-in `JSON` module support)
+- Erlang OTP with `:inets`, `:ssl`, `:public_key` applications
+
 ## License
 
 MIT License

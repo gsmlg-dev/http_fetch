@@ -1,7 +1,62 @@
 defmodule HTTP.FormData do
   @moduledoc """
-  Handles HTTP form data and multipart/form-data encoding for file uploads.
-  Supports both regular form data and multipart uploads with streaming file support.
+  HTTP form data and multipart/form-data encoding for file uploads.
+
+  This module provides a convenient API for building form submissions with support
+  for both URL-encoded forms and multipart file uploads. It automatically chooses
+  the appropriate encoding based on the presence of file fields.
+
+  ## Encoding Selection
+
+  - **URL-encoded** (`application/x-www-form-urlencoded`): Used when form contains only text fields
+  - **Multipart** (`multipart/form-data`): Used when form contains file fields
+
+  ## Features
+
+  - **Streaming file uploads**: Efficiently upload large files using `File.Stream`
+  - **Automatic encoding**: Selects appropriate encoding based on content
+  - **Boundary generation**: Automatically generates unique multipart boundaries
+  - **Mixed content**: Support for both text fields and files in the same form
+
+  ## Basic Usage
+
+      # Simple form with text fields
+      form = HTTP.FormData.new()
+             |> HTTP.FormData.append_field("username", "john_doe")
+             |> HTTP.FormData.append_field("email", "john@example.com")
+
+      HTTP.fetch("https://api.example.com/signup", method: "POST", body: form)
+
+  ## File Upload
+
+      # Single file upload
+      file_stream = File.stream!("document.pdf")
+      form = HTTP.FormData.new()
+             |> HTTP.FormData.append_field("title", "My Document")
+             |> HTTP.FormData.append_file("document", "document.pdf", file_stream, "application/pdf")
+
+      HTTP.fetch("https://api.example.com/upload", method: "POST", body: form)
+
+  ## Multiple Files
+
+      # Upload multiple files
+      form = HTTP.FormData.new()
+             |> HTTP.FormData.append_field("description", "Photos from vacation")
+             |> HTTP.FormData.append_file("photo1", "beach.jpg", File.stream!("beach.jpg"), "image/jpeg")
+             |> HTTP.FormData.append_file("photo2", "sunset.jpg", File.stream!("sunset.jpg"), "image/jpeg")
+
+      HTTP.fetch("https://api.example.com/gallery", method: "POST", body: form)
+
+  ## Content Types
+
+  When uploading files, you can specify the MIME type. If not provided, it defaults
+  to `"application/octet-stream"`:
+
+      # With explicit content type
+      form |> HTTP.FormData.append_file("image", "photo.jpg", stream, "image/jpeg")
+
+      # With default content type
+      form |> HTTP.FormData.append_file("data", "data.bin", stream)
   """
 
   defstruct parts: [],

@@ -1,6 +1,64 @@
 defmodule HTTP.Request do
   @moduledoc """
-  Represents an HTTP request that can be serialized into :httpc.request arguments.
+  HTTP request configuration struct that converts to `:httpc.request/4` arguments.
+
+  This module provides a structured way to build HTTP requests with proper
+  conversion to Erlang's `:httpc` module format. It handles method normalization,
+  header processing, body encoding, and FormData support.
+
+  ## Field Mapping to :httpc.request/4
+
+  The struct fields map to `:httpc.request/4` arguments as follows:
+
+  - `method` - 1st argument (HTTP method atom)
+  - `url`, `headers`, `body`, `content_type` - 2nd argument (request tuple)
+  - `http_options` - 3rd argument (request-specific options like `timeout`)
+  - `options` - 4th argument (client-specific options like `sync`, `body_format`)
+
+  ## Supported Methods
+
+  - `:get` - GET requests (no body)
+  - `:head` - HEAD requests (no body)
+  - `:post` - POST requests (with body)
+  - `:put` - PUT requests (with body)
+  - `:delete` - DELETE requests (no body)
+  - `:patch` - PATCH requests (with body)
+
+  ## Usage
+
+      # Basic request
+      request = %HTTP.Request{
+        method: :get,
+        url: URI.parse("https://api.example.com/data"),
+        headers: HTTP.Headers.new([{"Accept", "application/json"}])
+      }
+
+      # POST with JSON body
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("https://api.example.com/posts"),
+        headers: HTTP.Headers.new([{"Authorization", "Bearer token"}]),
+        content_type: "application/json",
+        body: JSON.encode!(%{title: "Hello"}),
+        http_options: [timeout: 10_000]
+      }
+
+      # FormData upload
+      form = HTTP.FormData.new()
+             |> HTTP.FormData.append_field("name", "John")
+             |> HTTP.FormData.append_file("photo", "photo.jpg", file_stream)
+
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("https://api.example.com/upload"),
+        body: form
+      }
+
+  ## Default Headers
+
+  The library automatically adds a `User-Agent` header if not provided,
+  containing information about the runtime environment (OS, architecture,
+  OTP version, Elixir version, and library version).
   """
 
   # Note: `http_options` are for the 3rd argument of :httpc.request (request-specific options like timeout).

@@ -1,6 +1,71 @@
 defmodule HTTP.Response do
   @moduledoc """
-  Represents an HTTP response with status, headers, body, and URL information.
+  HTTP response struct with utilities for parsing and consuming response data.
+
+  This module represents an HTTP response with support for both buffered and
+  streaming responses. It provides convenient methods for parsing JSON, reading
+  text, and writing responses to files.
+
+  ## Struct Fields
+
+  - `status` - HTTP status code (e.g., 200, 404, 500)
+  - `headers` - Response headers as `HTTP.Headers` struct
+  - `body` - Response body as binary (nil for streaming responses)
+  - `url` - The requested URL as `URI` struct
+  - `stream` - Stream process PID for streaming responses (nil for buffered)
+
+  ## Streaming vs Buffered Responses
+
+  Responses are automatically streamed when:
+
+  - Content-Length > 5MB
+  - Content-Length header is missing/unknown
+
+  **Buffered responses** have the complete body in the `body` field:
+
+      %HTTP.Response{
+        status: 200,
+        body: "response data",
+        stream: nil
+      }
+
+  **Streaming responses** have `body: nil` and a stream PID:
+
+      %HTTP.Response{
+        status: 200,
+        body: nil,
+        stream: #PID<0.123.0>
+      }
+
+  ## Usage
+
+      # Simple text response
+      {:ok, response} = HTTP.fetch("https://example.com") |> HTTP.Promise.await()
+      text = HTTP.Response.text(response)
+
+      # JSON parsing
+      {:ok, response} = HTTP.fetch("https://api.example.com/data") |> HTTP.Promise.await()
+      {:ok, json} = HTTP.Response.json(response)
+
+      # Write to file (works with both streaming and buffered)
+      {:ok, response} = HTTP.fetch("https://example.com/file.zip") |> HTTP.Promise.await()
+      :ok = HTTP.Response.write_to(response, "/tmp/file.zip")
+
+      # Get specific header
+      content_type = HTTP.Response.get_header(response, "content-type")
+
+      # Parse Content-Type
+      {media_type, params} = HTTP.Response.content_type(response)
+
+  ## Streaming Responses
+
+  For streaming responses, use `read_all/1` or `write_to/2` to consume the stream:
+
+      # Read entire stream into memory
+      body = HTTP.Response.read_all(response)
+
+      # Write stream directly to file (more memory efficient)
+      :ok = HTTP.Response.write_to(response, "/path/to/file")
   """
 
   defstruct status: 0,

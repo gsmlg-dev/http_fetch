@@ -1,8 +1,137 @@
 defmodule HTTP.Telemetry do
   @moduledoc """
-  Telemetry integration for HTTP fetch operations.
+  Telemetry integration for comprehensive HTTP request and response monitoring.
 
-  Provides event tracking and metrics collection for HTTP requests and responses.
+  This module provides automatic telemetry event emission for all HTTP operations,
+  enabling observability, metrics collection, and performance monitoring. All
+  events use the `[:http_fetch, ...]` prefix.
+
+  ## Automatic Events
+
+  All `HTTP.fetch/2` operations automatically emit telemetry events. No
+  configuration is required - simply attach handlers to receive events.
+
+  ## Event Types
+
+  ### Request Events
+
+  **`[:http_fetch, :request, :start]`** - Emitted when a request begins
+
+  - Measurements: `%{start_time: integer}` (milliseconds)
+  - Metadata: `%{method: atom, url: URI.t(), headers: HTTP.Headers.t()}`
+
+  **`[:http_fetch, :request, :stop]`** - Emitted when a request completes successfully
+
+  - Measurements: `%{duration: integer, status: integer, response_size: integer}`
+    - `duration` - Request duration in microseconds
+    - `status` - HTTP status code
+    - `response_size` - Response body size in bytes
+  - Metadata: `%{url: URI.t(), status: integer}`
+
+  **`[:http_fetch, :request, :exception]`** - Emitted when a request fails
+
+  - Measurements: `%{duration: integer}` (microseconds)
+  - Metadata: `%{url: URI.t(), error: term()}`
+
+  ### Streaming Events
+
+  **`[:http_fetch, :streaming, :start]`** - Emitted when response streaming begins
+
+  - Measurements: `%{content_length: integer}` (0 if unknown)
+  - Metadata: `%{}`
+
+  **`[:http_fetch, :streaming, :chunk]`** - Emitted for each stream chunk received
+
+  - Measurements: `%{bytes_received: integer, total_bytes: integer}`
+  - Metadata: `%{}`
+
+  **`[:http_fetch, :streaming, :stop]`** - Emitted when streaming completes
+
+  - Measurements: `%{total_bytes: integer, duration: integer}` (duration in microseconds)
+  - Metadata: `%{}`
+
+  ### Response Body Events
+
+  **`[:http_fetch, :response, :body_read_start]`** - Emitted when reading response body
+
+  - Measurements: `%{content_length: integer}`
+  - Metadata: `%{}`
+
+  **`[:http_fetch, :response, :body_read_stop]`** - Emitted when body read completes
+
+  - Measurements: `%{bytes_read: integer, duration: integer}`
+  - Metadata: `%{}`
+
+  ## Usage Example
+
+      # Attach a simple logger handler
+      :telemetry.attach_many(
+        "http-logger",
+        [
+          [:http_fetch, :request, :start],
+          [:http_fetch, :request, :stop],
+          [:http_fetch, :request, :exception]
+        ],
+        fn event_name, measurements, metadata, _config ->
+          case event_name do
+            [:http_fetch, :request, :start] ->
+              IO.puts("Request started: " <> to_string(metadata.url))
+
+            [:http_fetch, :request, :stop] ->
+              duration_ms = measurements.duration / 1000
+              IO.puts("Request completed in " <> Float.to_string(duration_ms) <> "ms")
+
+            [:http_fetch, :request, :exception] ->
+              IO.puts("Request failed: " <> inspect(metadata.error))
+          end
+        end,
+        nil
+      )
+
+  ## Metrics Collection
+
+      # Collect request duration metrics
+      :telemetry.attach(
+        "http-metrics",
+        [:http_fetch, :request, :stop],
+        fn _event, measurements, metadata, _config ->
+          # Send to your metrics system
+          MyMetrics.record_http_request(
+            url: to_string(metadata.url),
+            status: metadata.status,
+            duration_us: measurements.duration
+          )
+        end,
+        nil
+      )
+
+  ## Integration with Telemetry.Metrics
+
+      # Define metrics for visualization
+      import Telemetry.Metrics
+
+      [
+        # Request duration histogram
+        distribution("http_fetch.request.duration",
+          unit: {:native, :millisecond},
+          tags: [:status]
+        ),
+
+        # Request count by status
+        counter("http_fetch.request.count",
+          tags: [:status]
+        ),
+
+        # Response size summary
+        summary("http_fetch.request.response_size",
+          unit: :byte
+        ),
+
+        # Streaming throughput
+        distribution("http_fetch.streaming.chunk.bytes_received",
+          unit: :byte
+        )
+      ]
   """
 
   @doc """
