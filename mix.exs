@@ -11,6 +11,7 @@ defmodule HttpFetch.MixProject do
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      dialyzer: dialyzer(),
       description:
         "A browser-like HTTP fetch API for Elixir using Erlang's built-in :httpc module",
       package: [
@@ -35,7 +36,16 @@ defmodule HttpFetch.MixProject do
     [
       {:telemetry, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
-      {:briefly, "~> 0.4", only: :test}
+      {:briefly, "~> 0.4", only: :test},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
+    ]
+  end
+
+  defp dialyzer do
+    [
+      plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
+      plt_add_apps: [:ex_unit, :mix]
     ]
   end
 end
