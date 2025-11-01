@@ -272,13 +272,108 @@ defmodule HTTP do
 
   defp handle_response(request_id, url) do
     receive do
+      {:http, {^request_id, :stream_start, headers}} ->
+        # Streaming has started with headers included
+        # Wait for status line
+        handle_streaming_with_headers(request_id, url, headers)
+
+      {:http, {^request_id, {:http_response, {_, major, minor}, status, reason_phrase}}} ->
+        # Received status line in streaming mode
+        http_version = {major, minor}
+        handle_streaming_response(request_id, url, http_version, status, reason_phrase, [])
+
       {:http, {^request_id, response_from_httpc}} ->
+        # Non-streaming response (complete response tuple)
         handle_httpc_response(response_from_httpc, url)
 
-      _ ->
+      _other ->
         throw(:request_interrupted_or_unexpected_message)
     after
-      120_000 ->
+      HTTP.Config.default_request_timeout() ->
+        throw(:request_timeout)
+    end
+  end
+
+  # Handle streaming when :stream_start includes headers
+  defp handle_streaming_with_headers(request_id, url, headers) do
+    receive do
+      {:http, {^request_id, {:http_response, {_, _major, _minor}, status, _reason_phrase}}} ->
+        # Convert headers to our format
+        response_headers =
+          headers
+          |> Enum.map(fn {key, val} -> {to_string(key), to_string(val)} end)
+          |> HTTP.Headers.new()
+
+        # Check if we should stream based on Content-Length
+        content_length = HTTP.Headers.get(response_headers, "content-length")
+        should_stream = should_use_streaming?(content_length)
+
+        if should_stream do
+          # Start streaming handler
+          start_time = System.monotonic_time(:microsecond)
+          {:ok, stream_pid} = start_streaming_handler(request_id, start_time)
+
+          %Response{
+            status: status,
+            headers: response_headers,
+            body: nil,
+            url: url,
+            stream: stream_pid
+          }
+        else
+          # Collect body chunks for non-streaming
+          collect_body_for_stream_start(request_id, url, status, response_headers, <<>>)
+        end
+
+      {:http, {^request_id, :stream, body}} ->
+        # In some cases, we get :stream directly without status line
+        # This means headers were already sent and this is the body
+        # Create a response with these headers
+        response_headers =
+          headers
+          |> Enum.map(fn {key, val} -> {to_string(key), to_string(val)} end)
+          |> HTTP.Headers.new()
+
+        # Check if this should be streaming based on Content-Length
+        content_length = HTTP.Headers.get(response_headers, "content-length")
+        should_stream = should_use_streaming?(content_length)
+
+        if should_stream and byte_size(body) == 0 do
+          # Empty first chunk - set up streaming
+          start_time = System.monotonic_time(:microsecond)
+          {:ok, stream_pid} = start_streaming_handler(request_id, start_time)
+
+          %Response{
+            status: 200,
+            headers: response_headers,
+            body: nil,
+            url: url,
+            stream: stream_pid
+          }
+        else
+          # Small response or complete body - collect remaining
+          collect_stream_body(request_id, url, 200, response_headers, body)
+        end
+
+      {:http, {^request_id, :stream_end}} ->
+        # Stream ended without any body
+        response_headers =
+          headers
+          |> Enum.map(fn {key, val} -> {to_string(key), to_string(val)} end)
+          |> HTTP.Headers.new()
+
+        %Response{
+          status: 200,
+          headers: response_headers,
+          body: <<>>,
+          url: url,
+          stream: nil
+        }
+
+      _other ->
+        throw(:unexpected_streaming_message)
+    after
+      HTTP.Config.default_request_timeout() ->
         throw(:request_timeout)
     end
   end
@@ -298,7 +393,11 @@ defmodule HTTP do
       case Request.to_httpc_args(request) do
         [method, request_tuple, options, client_options] ->
           # Configure httpc options - body_format should be in client_opts (4th arg)
-          httpc_client_opts = Keyword.put(client_options, :body_format, :binary)
+          # Enable streaming mode so we can handle large responses efficiently
+          httpc_client_opts =
+            client_options
+            |> Keyword.put(:body_format, :binary)
+            |> Keyword.put(:stream, :self)
 
           # Send the request and get the RequestId (PID of the httpc client process)
           case :httpc.request(method, request_tuple, options, httpc_client_opts) do
@@ -353,7 +452,217 @@ defmodule HTTP do
     end
   end
 
-  # Success case: returns %Response{} directly
+  # Handle streaming response when we receive headers piece by piece
+  defp handle_streaming_response(
+         request_id,
+         url,
+         _http_version,
+         status,
+         _reason_phrase,
+         headers_acc
+       ) do
+    receive do
+      {:http, {^request_id, {:http_header, _, header_name, _, header_value}}} ->
+        # Collect header
+        header = {to_string(header_name), to_string(header_value)}
+        handle_streaming_response(request_id, url, nil, status, nil, [header | headers_acc])
+
+      {:http, {^request_id, :http_eoh}} ->
+        # End of headers - now decide if we should stream or buffer
+        response_headers = HTTP.Headers.new(Enum.reverse(headers_acc))
+        content_length = HTTP.Headers.get(response_headers, "content-length")
+        should_stream = should_use_streaming?(content_length)
+
+        if should_stream do
+          # Start a process to handle the streaming body
+          start_time = System.monotonic_time(:microsecond)
+          {:ok, stream_pid} = start_streaming_handler(request_id, start_time)
+
+          %Response{
+            status: status,
+            headers: response_headers,
+            body: nil,
+            url: url,
+            stream: stream_pid
+          }
+        else
+          # Buffer the response
+          collect_body_chunks(request_id, url, status, response_headers, <<>>)
+        end
+
+      {:http, {^request_id, {:http_error, reason}}} ->
+        throw(reason)
+
+      _other ->
+        throw(:unexpected_streaming_message)
+    after
+      HTTP.Config.default_request_timeout() ->
+        throw(:request_timeout)
+    end
+  end
+
+  # Collect remaining stream body when we get :stream messages
+  defp collect_stream_body(request_id, url, status, headers, body_acc) do
+    receive do
+      {:http, {^request_id, :stream, chunk}} ->
+        collect_stream_body(request_id, url, status, headers, body_acc <> chunk)
+
+      {:http, {^request_id, :stream_end}} ->
+        %Response{
+          status: status,
+          headers: headers,
+          body: body_acc,
+          url: url,
+          stream: nil
+        }
+
+      {:http, {^request_id, :stream_end, _headers}} ->
+        # stream_end can include headers, but we already have them
+        %Response{
+          status: status,
+          headers: headers,
+          body: body_acc,
+          url: url,
+          stream: nil
+        }
+
+      {:http, {^request_id, {:http_error, reason}}} ->
+        throw(reason)
+
+      _other ->
+        throw(:unexpected_body_message)
+    after
+      HTTP.Config.default_request_timeout() ->
+        throw(:request_timeout)
+    end
+  end
+
+  # Collect body chunks for stream_start mode (without status line yet)
+  defp collect_body_for_stream_start(request_id, url, status, headers, body_acc) do
+    receive do
+      {:http, {^request_id, :stream, chunk}} ->
+        collect_body_for_stream_start(request_id, url, status, headers, body_acc <> chunk)
+
+      {:http, {^request_id, :stream_end}} ->
+        # End of stream
+        %Response{
+          status: status,
+          headers: headers,
+          body: body_acc,
+          url: url,
+          stream: nil
+        }
+
+      {:http, {^request_id, {:http_error, reason}}} ->
+        throw(reason)
+
+      _other ->
+        throw(:unexpected_body_message)
+    after
+      HTTP.Config.default_request_timeout() ->
+        throw(:request_timeout)
+    end
+  end
+
+  # Collect body chunks for non-streaming responses
+  defp collect_body_chunks(request_id, url, status, headers, body_acc) do
+    receive do
+      {:http, {^request_id, {:http_chunk, chunk}}} ->
+        collect_body_chunks(request_id, url, status, headers, body_acc <> chunk)
+
+      {:http, {^request_id, {:http_body, body}}} ->
+        # Complete body received
+        final_body = body_acc <> body
+
+        %Response{
+          status: status,
+          headers: headers,
+          body: final_body,
+          url: url,
+          stream: nil
+        }
+
+      {:http, {^request_id, :stream_end}} ->
+        # End of chunked transfer
+        %Response{
+          status: status,
+          headers: headers,
+          body: body_acc,
+          url: url,
+          stream: nil
+        }
+
+      {:http, {^request_id, {:http_error, reason}}} ->
+        throw(reason)
+
+      _other ->
+        throw(:unexpected_body_message)
+    after
+      HTTP.Config.default_request_timeout() ->
+        throw(:request_timeout)
+    end
+  end
+
+  # Start a process to handle streaming body data
+  defp start_streaming_handler(request_id, start_time) do
+    parent = self()
+
+    {:ok, pid} =
+      Task.start_link(fn ->
+        stream_handler_loop(request_id, parent, 0, start_time)
+      end)
+
+    {:ok, pid}
+  end
+
+  # Stream handler loop that forwards chunks to consumers
+  defp stream_handler_loop(request_id, parent, total_bytes, start_time) do
+    receive do
+      {:http, {^request_id, :stream, chunk}} ->
+        # Handle :stream messages (used with stream: :self option)
+        chunk_size = byte_size(chunk)
+        new_total = total_bytes + chunk_size
+        HTTP.Telemetry.streaming_chunk(chunk_size, new_total)
+        send(parent, {:stream_chunk, self(), to_string(chunk)})
+        stream_handler_loop(request_id, parent, new_total, start_time)
+
+      {:http, {^request_id, {:http_chunk, chunk}}} ->
+        chunk_size = byte_size(chunk)
+        new_total = total_bytes + chunk_size
+        HTTP.Telemetry.streaming_chunk(chunk_size, new_total)
+        send(parent, {:stream_chunk, self(), to_string(chunk)})
+        stream_handler_loop(request_id, parent, new_total, start_time)
+
+      {:http, {^request_id, {:http_body, body}}} ->
+        # Complete body received (for non-chunked streams)
+        chunk_size = byte_size(body)
+        new_total = total_bytes + chunk_size
+        HTTP.Telemetry.streaming_chunk(chunk_size, new_total)
+        send(parent, {:stream_chunk, self(), to_string(body)})
+        duration = System.monotonic_time(:microsecond) - start_time
+        HTTP.Telemetry.streaming_stop(new_total, duration)
+        send(parent, {:stream_end, self()})
+
+      {:http, {^request_id, :stream_end}} ->
+        duration = System.monotonic_time(:microsecond) - start_time
+        HTTP.Telemetry.streaming_stop(total_bytes, duration)
+        send(parent, {:stream_end, self()})
+
+      {:http, {^request_id, {:http_error, reason}}} ->
+        send(parent, {:stream_error, self(), reason})
+
+      _other ->
+        send(parent, {:stream_error, self(), :unexpected_stream_message})
+    after
+      HTTP.Config.streaming_timeout() ->
+        duration = System.monotonic_time(:microsecond) - start_time
+        HTTP.Telemetry.streaming_stop(total_bytes, duration)
+        send(parent, {:stream_error, self(), :timeout})
+    end
+  end
+
+  # Success case: returns %Response{} directly (for non-streaming mode)
+  # This is used when :httpc returns the complete response tuple
   @spec handle_httpc_response(httpc_response_tuple(), URI.t() | nil) :: Response.t()
   defp handle_httpc_response(response_tuple, url) do
     case response_tuple do
@@ -364,38 +673,21 @@ defmodule HTTP do
           |> Enum.map(fn {key, val} -> {to_string(key), to_string(val)} end)
           |> HTTP.Headers.new()
 
-        # Check if we should use streaming
-        content_length = HTTP.Headers.get(response_headers, "content-length")
-        should_stream = should_use_streaming?(content_length)
+        # Non-streaming response - body is already complete
+        binary_body =
+          if is_list(body) do
+            IO.iodata_to_binary(body)
+          else
+            body
+          end
 
-        if should_stream do
-          # Create a streaming process
-          {:ok, stream_pid} = start_httpc_stream_process(url, response_headers)
-
-          %Response{
-            status: status,
-            headers: response_headers,
-            body: nil,
-            url: url,
-            stream: stream_pid
-          }
-        else
-          # Non-streaming response - handle as before
-          binary_body =
-            if is_list(body) do
-              IO.iodata_to_binary(body)
-            else
-              body
-            end
-
-          %Response{
-            status: status,
-            headers: response_headers,
-            body: binary_body,
-            url: url,
-            stream: nil
-          }
-        end
+        %Response{
+          status: status,
+          headers: response_headers,
+          body: binary_body,
+          url: url,
+          stream: nil
+        }
 
       {:error, reason} ->
         throw(reason)
@@ -406,12 +698,18 @@ defmodule HTTP do
   end
 
   defp should_use_streaming?(content_length) do
-    # Stream responses larger than 5MB to avoid issues with large files
+    # Stream responses larger than the configured threshold to avoid issues with large files
+    threshold = HTTP.Config.streaming_threshold()
+
     case Integer.parse(content_length || "") do
-      {size, _} when size > 5_000_000 ->
-        # Emit telemetry for streaming start
-        HTTP.Telemetry.streaming_start(size)
-        true
+      {size, _} ->
+        if size > threshold do
+          # Emit telemetry for streaming start
+          HTTP.Telemetry.streaming_start(size)
+          true
+        else
+          false
+        end
 
       # Stream when size is unknown
       _ ->
@@ -420,96 +718,6 @@ defmodule HTTP do
         end
 
         content_length == nil
-    end
-  end
-
-  defp start_httpc_stream_process(uri, headers) do
-    start_time = System.monotonic_time(:microsecond)
-
-    {:ok, pid} =
-      Task.start_link(fn ->
-        stream_httpc_response(uri, headers, start_time)
-      end)
-
-    {:ok, pid}
-  end
-
-  defp stream_httpc_response(uri, headers, start_time) do
-    # Use the URI directly (it's already parsed)
-    _host = uri.host
-    _port = uri.port || 80
-    _path = uri.path || "/"
-
-    # Build headers for the request
-    request_headers =
-      headers.headers
-      |> Enum.map(fn {name, value} -> {String.to_charlist(name), String.to_charlist(value)} end)
-
-    # Start the HTTP request with streaming
-    case :httpc.request(
-           :get,
-           {String.to_charlist(URI.to_string(uri)), request_headers},
-           [],
-           sync: false
-         ) do
-      {:ok, request_id} ->
-        stream_loop(request_id, self(), 0, start_time)
-
-      {:error, reason} ->
-        send(self(), {:stream_error, self(), reason})
-    end
-  end
-
-  defp stream_loop(request_id, caller, total_bytes, start_time) do
-    receive do
-      {:http, {^request_id, {:http_response, _http_version, _status, _reason}}} ->
-        stream_loop(request_id, caller, total_bytes, start_time)
-
-      {:http, {^request_id, {:http_header, _, _header_name, _, _header_value}}} ->
-        stream_loop(request_id, caller, total_bytes, start_time)
-
-      {:http, {^request_id, :http_eoh}} ->
-        stream_loop(request_id, caller, total_bytes, start_time)
-
-      {:http, {^request_id, {:http_error, reason}}} ->
-        send(caller, {:stream_error, self(), reason})
-
-      {:http, {^request_id, :stream_end}} ->
-        duration = System.monotonic_time(:microsecond) - start_time
-        HTTP.Telemetry.streaming_stop(total_bytes, duration)
-        send(caller, {:stream_end, self()})
-
-      {:http, {^request_id, {:http_chunk, chunk}}} ->
-        chunk_size = byte_size(chunk)
-        new_total = total_bytes + chunk_size
-        HTTP.Telemetry.streaming_chunk(chunk_size, new_total)
-        send(caller, {:stream_chunk, self(), to_string(chunk)})
-        stream_loop(request_id, caller, new_total, start_time)
-
-      {:http, {^request_id, {:http_body, body}}} ->
-        chunk_size = byte_size(body)
-        new_total = total_bytes + chunk_size
-        HTTP.Telemetry.streaming_chunk(chunk_size, new_total)
-        send(caller, {:stream_chunk, self(), to_string(body)})
-        duration = System.monotonic_time(:microsecond) - start_time
-        HTTP.Telemetry.streaming_stop(new_total, duration)
-        send(caller, {:stream_end, self()})
-
-      {:http, {^request_id, {_status_line, _headers, body}}} ->
-        # Handle complete response (non-streaming case)
-        binary_body = if is_list(body), do: IO.iodata_to_binary(body), else: body
-        chunk_size = byte_size(binary_body)
-        new_total = total_bytes + chunk_size
-        HTTP.Telemetry.streaming_chunk(chunk_size, new_total)
-        send(caller, {:stream_chunk, self(), binary_body})
-        duration = System.monotonic_time(:microsecond) - start_time
-        HTTP.Telemetry.streaming_stop(new_total, duration)
-        send(caller, {:stream_end, self()})
-    after
-      60_000 ->
-        duration = System.monotonic_time(:microsecond) - start_time
-        HTTP.Telemetry.streaming_stop(total_bytes, duration)
-        send(caller, {:stream_error, self(), :timeout})
     end
   end
 end

@@ -124,7 +124,8 @@ defmodule HTTP.Request do
               content_type = to_charlist("multipart/form-data; boundary=#{boundary}")
               # Add boundary header
               updated_headers = headers ++ [{~c"Content-Type", to_charlist(content_type)}]
-              {url, updated_headers, to_charlist(body)}
+              # Convert iodata to charlist efficiently
+              {url, updated_headers, iodata_to_charlist(body)}
           end
 
         # For regular string/charlist bodies
@@ -142,6 +143,16 @@ defmodule HTTP.Request do
   defp to_body(body) when is_binary(body), do: String.to_charlist(body)
   defp to_body(body) when is_list(body), do: body
   defp to_body(other), do: String.to_charlist(to_string(other))
+
+  # Efficiently converts iodata (nested list of binaries) to charlist
+  # This is used for multipart form data to minimize intermediate copies
+  # The iodata structure is flattened once instead of concatenating strings multiple times
+  @spec iodata_to_charlist(iodata()) :: charlist()
+  defp iodata_to_charlist(iodata) do
+    iodata
+    |> IO.iodata_to_binary()
+    |> String.to_charlist()
+  end
 
   @spec add_default_user_agent([{String.t(), String.t()}]) :: [{String.t(), String.t()}]
   defp add_default_user_agent(headers) do

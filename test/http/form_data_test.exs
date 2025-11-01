@@ -81,10 +81,15 @@ defmodule HTTP.FormDataTest do
         |> Map.put(:boundary, "test-boundary")
 
       assert {:multipart, body, "test-boundary"} = HTTP.FormData.to_body(form)
-      assert body =~ "Content-Disposition: form-data; name=\"name\""
-      assert body =~ "John"
-      assert body =~ "Content-Disposition: form-data; name=\"upload\"; filename=\"test.txt\""
-      assert body =~ "file content"
+      # Convert iodata to binary for testing
+      body_string = IO.iodata_to_binary(body)
+      assert body_string =~ "Content-Disposition: form-data; name=\"name\""
+      assert body_string =~ "John"
+
+      assert body_string =~
+               "Content-Disposition: form-data; name=\"upload\"; filename=\"test.txt\""
+
+      assert body_string =~ "file content"
     end
 
     test "encodes multipart with files" do
@@ -95,10 +100,15 @@ defmodule HTTP.FormDataTest do
 
       assert {:multipart, body, boundary} = HTTP.FormData.to_body(form)
       assert is_binary(boundary)
-      assert body =~ "Content-Disposition: form-data; name=\"description\""
-      assert body =~ "test file"
-      assert body =~ "Content-Disposition: form-data; name=\"upload\"; filename=\"test.txt\""
-      assert body =~ "file content"
+      # Convert iodata to binary for testing
+      body_string = IO.iodata_to_binary(body)
+      assert body_string =~ "Content-Disposition: form-data; name=\"description\""
+      assert body_string =~ "test file"
+
+      assert body_string =~
+               "Content-Disposition: form-data; name=\"upload\"; filename=\"test.txt\""
+
+      assert body_string =~ "file content"
     end
 
     test "encodes multipart with file stream" do
@@ -113,8 +123,13 @@ defmodule HTTP.FormDataTest do
         |> Map.put(:boundary, "test-boundary")
 
       assert {:multipart, body, "test-boundary"} = HTTP.FormData.to_body(form)
-      assert body =~ "Content-Disposition: form-data; name=\"upload\"; filename=\"test.txt\""
-      assert body =~ test_content
+      # Convert iodata to binary for testing
+      body_string = IO.iodata_to_binary(body)
+
+      assert body_string =~
+               "Content-Disposition: form-data; name=\"upload\"; filename=\"test.txt\""
+
+      assert body_string =~ test_content
 
       File.rm(path)
     end

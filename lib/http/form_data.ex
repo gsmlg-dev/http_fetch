@@ -128,8 +128,9 @@ defmodule HTTP.FormData do
   Converts FormData to HTTP body content with appropriate encoding.
 
   Returns {:url_encoded, body} for regular forms or {:multipart, body, boundary} for multipart.
+  The multipart body is returned as iodata for memory efficiency with large file uploads.
   """
-  @spec to_body(t()) :: {:url_encoded, String.t()} | {:multipart, String.t(), String.t()}
+  @spec to_body(t()) :: {:url_encoded, String.t()} | {:multipart, iodata(), String.t()}
   def to_body(%__MODULE__{parts: parts} = form) do
     has_file? =
       Enum.any?(parts, fn
@@ -184,33 +185,38 @@ defmodule HTTP.FormData do
 
     body_parts =
       parts
-      |> Enum.map(fn
+      |> Enum.flat_map(fn
         {:field, name, value} ->
-          encode_multipart_field(boundary, name, value)
+          [encode_multipart_field(boundary, name, value), "\r\n"]
 
         {:file, name, filename, content_type, %File.Stream{} = stream} ->
-          encode_multipart_file_stream(boundary, name, filename, content_type, stream)
+          [encode_multipart_file_stream(boundary, name, filename, content_type, stream), "\r\n"]
 
         {:file, name, filename, content_type, content} ->
-          encode_multipart_file_content(boundary, name, filename, content_type, content)
+          [encode_multipart_file_content(boundary, name, filename, content_type, content), "\r\n"]
       end)
 
-    body = Enum.join(body_parts, "\r\n") <> "\r\n--" <> boundary <> "--\r\n"
+    # Build as iodata list for memory efficiency
+    body = [body_parts, "--", boundary, "--\r\n"]
 
     {:multipart, body, boundary}
   end
 
   defp encode_multipart_field(boundary, name, value) do
-    "--#{boundary}\r\n" <>
-      "Content-Disposition: form-data; name=\"#{name}\"\r\n\r\n" <>
-      "#{value}"
+    [
+      "--#{boundary}\r\n",
+      "Content-Disposition: form-data; name=\"#{name}\"\r\n\r\n",
+      value
+    ]
   end
 
   defp encode_multipart_file_content(boundary, name, filename, content_type, content) do
-    "--#{boundary}\r\n" <>
-      "Content-Disposition: form-data; name=\"#{name}\"; filename=\"#{filename}\"\r\n" <>
-      "Content-Type: #{content_type}\r\n\r\n" <>
+    [
+      "--#{boundary}\r\n",
+      "Content-Disposition: form-data; name=\"#{name}\"; filename=\"#{filename}\"\r\n",
+      "Content-Type: #{content_type}\r\n\r\n",
       content
+    ]
   end
 
   defp encode_multipart_file_stream(
@@ -220,7 +226,9 @@ defmodule HTTP.FormData do
          content_type,
          %File.Stream{} = stream
        ) do
-    content = stream |> Enum.into("")
-    encode_multipart_file_content(boundary, name, filename, content_type, content)
+    # Convert stream to list of binaries (iodata) instead of concatenating into single binary
+    # This avoids loading the entire file into memory as one large binary
+    content_chunks = Enum.to_list(stream)
+    encode_multipart_file_content(boundary, name, filename, content_type, content_chunks)
   end
 end

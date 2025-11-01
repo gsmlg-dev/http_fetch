@@ -17,7 +17,7 @@ defmodule HTTP.Telemetry do
 
   **`[:http_fetch, :request, :start]`** - Emitted when a request begins
 
-  - Measurements: `%{start_time: integer}` (milliseconds)
+  - Measurements: `%{start_time: integer}` (microseconds)
   - Metadata: `%{method: atom, url: URI.t(), headers: HTTP.Headers.t()}`
 
   **`[:http_fetch, :request, :stop]`** - Emitted when a request completes successfully
@@ -143,7 +143,7 @@ defmodule HTTP.Telemetry do
   """
   @spec request_start(String.t(), URI.t(), HTTP.Headers.t()) :: :ok
   def request_start(method, url, headers) do
-    measurements = %{start_time: System.system_time(:millisecond)}
+    measurements = %{start_time: System.system_time(:microsecond)}
 
     metadata = %{
       method: method,
