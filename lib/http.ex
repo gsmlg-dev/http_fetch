@@ -426,10 +426,6 @@ defmodule HTTP do
                 %Response{status: status} ->
                   # Streaming response - we'll emit telemetry when streaming completes
                   HTTP.Telemetry.request_stop(status, request.url, 0, duration)
-
-                {:error, _} ->
-                  # Error will be handled in catch block
-                  :ok
               end
 
               result
