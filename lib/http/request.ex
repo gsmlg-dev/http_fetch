@@ -147,7 +147,7 @@ defmodule HTTP.Request do
   # Efficiently converts iodata (nested list of binaries) to charlist
   # This is used for multipart form data to minimize intermediate copies
   # The iodata structure is flattened once instead of concatenating strings multiple times
-  @spec iodata_to_charlist(iodata()) :: charlist()
+  @spec iodata_to_charlist(binary() | iodata()) :: charlist()
   defp iodata_to_charlist(iodata) do
     iodata
     |> IO.iodata_to_binary()

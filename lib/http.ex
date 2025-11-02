@@ -311,7 +311,8 @@ defmodule HTTP do
         if should_stream do
           # Start streaming handler
           start_time = System.monotonic_time(:microsecond)
-          {:ok, stream_pid} = start_streaming_handler(request_id, start_time)
+          content_length_int = parse_content_length(content_length)
+          {:ok, stream_pid} = start_streaming_handler(request_id, start_time, content_length_int)
 
           %Response{
             status: status,
@@ -341,7 +342,8 @@ defmodule HTTP do
         if should_stream and byte_size(body) == 0 do
           # Empty first chunk - set up streaming
           start_time = System.monotonic_time(:microsecond)
-          {:ok, stream_pid} = start_streaming_handler(request_id, start_time)
+          content_length_int = parse_content_length(content_length)
+          {:ok, stream_pid} = start_streaming_handler(request_id, start_time, content_length_int)
 
           %Response{
             status: 200,
@@ -476,7 +478,8 @@ defmodule HTTP do
         if should_stream do
           # Start a process to handle the streaming body
           start_time = System.monotonic_time(:microsecond)
-          {:ok, stream_pid} = start_streaming_handler(request_id, start_time)
+          content_length_int = parse_content_length(content_length)
+          {:ok, stream_pid} = start_streaming_handler(request_id, start_time, content_length_int)
 
           %Response{
             status: status,
@@ -604,8 +607,11 @@ defmodule HTTP do
   end
 
   # Start a process to handle streaming body data
-  defp start_streaming_handler(request_id, start_time) do
+  defp start_streaming_handler(request_id, start_time, content_length) do
     parent = self()
+
+    # Emit streaming start telemetry event
+    HTTP.Telemetry.streaming_start(content_length)
 
     {:ok, pid} =
       Task.start_link(fn ->
@@ -703,21 +709,19 @@ defmodule HTTP do
 
     case Integer.parse(content_length || "") do
       {size, _} ->
-        if size > threshold do
-          # Emit telemetry for streaming start
-          HTTP.Telemetry.streaming_start(size)
-          true
-        else
-          false
-        end
+        size > threshold
 
       # Stream when size is unknown
       _ ->
-        if content_length == nil do
-          HTTP.Telemetry.streaming_start(0)
-        end
-
         content_length == nil
+    end
+  end
+
+  # Parse content length header to integer, returning 0 if nil or invalid
+  defp parse_content_length(content_length) do
+    case Integer.parse(content_length || "") do
+      {size, _} -> size
+      _ -> 0
     end
   end
 end

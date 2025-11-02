@@ -55,7 +55,7 @@ defmodule HTTP.Config do
       iex> HTTP.Config.streaming_threshold()
       5_000_000
   """
-  @spec streaming_threshold() :: pos_integer()
+  @spec streaming_threshold() :: 5_000_000
   def streaming_threshold, do: @streaming_threshold
 
   @doc """
@@ -71,7 +71,7 @@ defmodule HTTP.Config do
       iex> HTTP.Config.default_request_timeout()
       120_000
   """
-  @spec default_request_timeout() :: pos_integer()
+  @spec default_request_timeout() :: 120_000
   def default_request_timeout, do: @default_request_timeout
 
   @doc """
@@ -88,6 +88,6 @@ defmodule HTTP.Config do
       iex> HTTP.Config.streaming_timeout()
       60_000
   """
-  @spec streaming_timeout() :: pos_integer()
+  @spec streaming_timeout() :: 60_000
   def streaming_timeout, do: @streaming_timeout
 end
