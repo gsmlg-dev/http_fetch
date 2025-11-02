@@ -133,8 +133,7 @@ defmodule HTTP.Response do
       {:stream_error, ^stream, _reason} ->
         acc
     after
-      # 60 second timeout
-      60_000 -> acc
+      HTTP.Config.streaming_timeout() -> acc
     end
   end
 
@@ -239,33 +238,31 @@ defmodule HTTP.Response do
   """
   @spec write_to(t(), String.t()) :: :ok | {:error, term()}
   def write_to(%__MODULE__{} = response, file_path) do
-    try do
-      # Ensure the directory exists
-      file_path
-      |> Path.dirname()
-      |> File.mkdir_p!()
+    # Ensure the directory exists
+    file_path
+    |> Path.dirname()
+    |> File.mkdir_p!()
 
-      case response do
-        %{body: body, stream: nil} when is_binary(body) or is_list(body) ->
-          # Non-streaming response
-          binary_body =
-            if is_list(body), do: IO.iodata_to_binary(body), else: body
+    case response do
+      %{body: body, stream: nil} when is_binary(body) or is_list(body) ->
+        # Non-streaming response
+        binary_body =
+          if is_list(body), do: IO.iodata_to_binary(body), else: body
 
-          File.write!(file_path, binary_body)
-          :ok
+        File.write!(file_path, binary_body)
+        :ok
 
-        %{body: _body, stream: stream} when is_pid(stream) ->
-          # Streaming response - collect and write
-          write_stream_to_file(response, file_path)
+      %{body: _body, stream: stream} when is_pid(stream) ->
+        # Streaming response - collect and write
+        write_stream_to_file(response, file_path)
 
-        _ ->
-          # Empty or nil body
-          File.write!(file_path, "")
-          :ok
-      end
-    rescue
-      error -> {:error, error}
+      _ ->
+        # Empty or nil body
+        File.write!(file_path, "")
+        :ok
     end
+  rescue
+    error -> {:error, error}
   end
 
   defp write_stream_to_file(response, file_path) do
