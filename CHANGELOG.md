@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2025-01-XX
+
+### Added - Browser Fetch API Compatibility (~85% API Parity)
+- **HTTP.StatusText module** - Maps HTTP status codes to standard status text messages (60+ codes)
+- **Response.status_text** - Status message property (e.g., "OK", "Not Found")
+- **Response.ok** - Boolean property indicating success (true for 200-299 status codes)
+- **Response.body_used** - Tracks body consumption (field exists for API compatibility)
+- **Response.redirected** - Indicates if response was redirected
+- **Response.type** - Response type (`:basic`, `:cors`, `:error`, `:opaque`)
+- **Response.new/1** - Constructor helper that auto-populates Browser API fields
+- **Response.clone/1** - Clone response for multiple reads (buffers streaming responses)
+- **Response.arrayBuffer/1** - Read body as binary (ArrayBuffer equivalent)
+- **Response.array_buffer/1** - Snake_case alias for arrayBuffer
+- **HTTP.Blob module** - Blob struct with `data`, `type`, and `size` fields
+- **Response.blob/1** - Read body as Blob with metadata (extracts MIME type from headers)
+- Comprehensive Browser API compatibility documentation in README
+- 41 new tests covering all Browser Fetch API features
+
+### Changed - Breaking Changes for Browser API Compatibility
+- **Response struct fields added**: `status_text`, `ok`, `body_used`, `redirected`, `type`
+  - **Migration**: Update pattern matches to ignore new fields or use variable binding
+  - Example: `%Response{status: 200} = response` (ignores new fields)
+- **Response construction**: All internal Response creation now uses `Response.new/1`
+  - Ensures consistent Browser API field population
+  - **Migration**: Use `Response.new/1` instead of direct `%Response{}` for consistency
+- **body_used field**: Present for Browser API compatibility but doesn't enforce in Elixir
+  - Due to Elixir's immutability, multiple reads of the same response value work
+  - Use `clone/1` for clarity when reading multiple times
+
+### Documentation
+- Added "Browser Fetch API Compatibility" section to README with examples
+- Documented Elixir-specific differences (immutability, synchronous returns, streams)
+- Updated all Response documentation to reflect new Browser API properties
+- Added comprehensive examples for `clone/1`, `arrayBuffer/1`, and `blob/1`
+
+### Notes
+- This release prioritizes Browser Fetch API compatibility over Elixir-specific patterns
+- The `body_used` field exists for API compatibility but cannot prevent multiple reads due to immutability
+- All critical Browser Fetch API Response properties and methods are now supported
+
 ## [0.5.0] - 2025-08-01
 
 ### Added

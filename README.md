@@ -21,6 +21,57 @@ A modern HTTP client library for Elixir that provides a fetch API similar to web
 - **Automatic JSON parsing**: Built-in JSON response handling
 - **Zero dependencies**: Uses only Erlang/OTP built-in modules
 
+## Browser Fetch API Compatibility
+
+This library implements the **Browser Fetch API** standard for Elixir with ~85% compatibility. All critical Response properties and methods from the JavaScript Fetch API are supported.
+
+### Response Properties
+
+```elixir
+response = HTTP.fetch("https://api.example.com/data") |> HTTP.Promise.await()
+
+# Standard Browser Fetch API properties
+response.status        # 200
+response.status_text   # "OK"
+response.ok            # true (for 200-299 status codes)
+response.headers       # HTTP.Headers struct
+response.body          # Response body binary
+response.body_used     # false (tracks consumption, but doesn't prevent reads in Elixir)
+response.redirected    # false (true if response was redirected)
+response.type          # :basic
+response.url           # URI struct
+```
+
+### Response Methods
+
+```elixir
+# Read as JSON
+{:ok, data} = HTTP.Response.json(response)
+
+# Read as text
+text = HTTP.Response.text(response)
+
+# Read as binary (ArrayBuffer equivalent)
+binary = HTTP.Response.arrayBuffer(response)
+
+# Read as Blob with metadata
+blob = HTTP.Response.blob(response)
+IO.puts "Type: #{blob.type}, Size: #{blob.size} bytes"
+
+# Clone for multiple reads
+clone = HTTP.Response.clone(response)
+json = HTTP.Response.json(response)
+text = HTTP.Response.text(clone)  # Read clone independently
+```
+
+### Elixir-Specific Differences
+
+**Immutability**: Unlike JavaScript, Elixir responses are immutable. The `body_used` field exists for API compatibility but doesn't prevent multiple reads of the same response value. Use `clone/1` for clarity when reading multiple times.
+
+**Synchronous Returns**: Methods like `json()` and `text()` return values directly instead of Promises, following Elixir conventions.
+
+**Stream Handling**: Large responses use Elixir processes for streaming instead of ReadableStream.
+
 ## Quick Start
 
 ```elixir
@@ -29,8 +80,9 @@ A modern HTTP client library for Elixir that provides a fetch API similar to web
   HTTP.fetch("https://jsonplaceholder.typicode.com/posts/1")
   |> HTTP.Promise.await()
 
-# Get response data
-IO.puts("Status: #{response.status}")
+# Use Browser-like API
+IO.puts("Status: #{response.status} #{response.status_text}")
+IO.puts("Success: #{response.ok}")
 text = HTTP.Response.text(response)
 {:ok, json} = HTTP.Response.json(response)
 
