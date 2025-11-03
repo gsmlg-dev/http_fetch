@@ -1,6 +1,7 @@
 # HTTP Fetch
 
- [![Elixir CI](https://github.com/gsmlg-dev/http_fetch/actions/workflows/elixir.yml/badge.svg)](https://github.com/gsmlg-dev/http_fetch/actions/workflows/elixir.yml)
+ [![Elixir CI](https://github.com/gsmlg-dev/http_fetch/actions/workflows/ci.yml/badge.svg)](https://github.com/gsmlg-dev/http_fetch/actions/workflows/ci.yml)
+ [![Elixir CI](https://github.com/gsmlg-dev/http_fetch/actions/workflows/test.yml/badge.svg)](https://github.com/gsmlg-dev/http_fetch/actions/workflows/test.yml)
  [![Hex.pm](https://img.shields.io/hexpm/v/http_fetch.svg)](https://hex.pm/packages/phoenix_react_server)
  [![Hexdocs.pm](https://img.shields.io/badge/hex-docs-lightgreen.svg)](https://hexdocs.pm/http_fetch/)
  [![Hex.pm](https://img.shields.io/hexpm/dt/http_fetch.svg)](https://hex.pm/packages/http_fetch)
@@ -76,7 +77,7 @@ text = HTTP.Response.text(clone)  # Read clone independently
 
 ```elixir
 # Simple GET request
-{:ok, response} = 
+{:ok, response} =
   HTTP.fetch("https://jsonplaceholder.typicode.com/posts/1")
   |> HTTP.Promise.await()
 
@@ -87,7 +88,7 @@ text = HTTP.Response.text(response)
 {:ok, json} = HTTP.Response.json(response)
 
 # Read response body as raw binary
-response = 
+response =
   HTTP.fetch("https://jsonplaceholder.typicode.com/posts/1")
   |> HTTP.Promise.await()
 
@@ -95,7 +96,7 @@ response =
 binary_data = response.body
 
 # POST request with JSON
-{:ok, response} = 
+{:ok, response} =
   HTTP.fetch("https://jsonplaceholder.typicode.com/posts", [
     method: "POST",
     headers: %{"Content-Type" => "application/json"},
@@ -112,7 +113,7 @@ form = HTTP.FormData.new()
        |> HTTP.FormData.append_field("name", "John Doe")
        |> HTTP.FormData.append_file("document", "document.pdf", file_stream)
 
-{:ok, response} = 
+{:ok, response} =
   HTTP.fetch("https://api.example.com/upload", [
     method: "POST",
     body: form
@@ -167,7 +168,7 @@ text = HTTP.Response.text(response)
 {:ok, json} = HTTP.Response.json(response)
 
 # Access raw response body as binary
-response = 
+response =
   HTTP.fetch("https://api.example.com/large-file")
   |> HTTP.Promise.await()
 
@@ -178,7 +179,7 @@ binary_data = response.body
 :ok = HTTP.Response.write_to(response, "/tmp/downloaded-file.txt")
 
 # Write large file downloads directly to disk
-{:ok, response} = 
+{:ok, response} =
   HTTP.fetch("https://example.com/large-file.zip")
   |> HTTP.Promise.await()
 
@@ -365,4 +366,3 @@ mix format --check-formatted
 ## License
 
 MIT License
-
