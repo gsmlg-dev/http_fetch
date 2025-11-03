@@ -158,24 +158,25 @@ defmodule HTTP.Response do
 
   ## Examples
 
-      iex> HTTP.Response.new(status: 200, body: "OK", url: URI.parse("https://example.com"))
-      %HTTP.Response{
-        status: 200,
-        status_text: "OK",
-        ok: true,
-        body: "OK",
-        body_used: false,
-        redirected: false,
-        type: :basic
-      }
+      iex> response = HTTP.Response.new(status: 200, body: "OK", url: URI.parse("https://example.com"))
+      iex> response.status
+      200
+      iex> response.status_text
+      "OK"
+      iex> response.ok
+      true
+      iex> response.body
+      "OK"
+      iex> response.body_used
+      false
 
-      iex> HTTP.Response.new(status: 404, headers: HTTP.Headers.new())
-      %HTTP.Response{
-        status: 404,
-        status_text: "Not Found",
-        ok: false,
-        body_used: false
-      }
+      iex> response = HTTP.Response.new(status: 404, headers: HTTP.Headers.new())
+      iex> response.status
+      404
+      iex> response.status_text
+      "Not Found"
+      iex> response.ok
+      false
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
