@@ -314,13 +314,13 @@ defmodule HTTP do
           content_length_int = parse_content_length(content_length)
           {:ok, stream_pid} = start_streaming_handler(request_id, start_time, content_length_int)
 
-          %Response{
+          Response.new(
             status: status,
             headers: response_headers,
             body: nil,
             url: url,
             stream: stream_pid
-          }
+          )
         else
           # Collect body chunks for non-streaming
           collect_body_for_stream_start(request_id, url, status, response_headers, <<>>)
@@ -345,13 +345,13 @@ defmodule HTTP do
           content_length_int = parse_content_length(content_length)
           {:ok, stream_pid} = start_streaming_handler(request_id, start_time, content_length_int)
 
-          %Response{
+          Response.new(
             status: 200,
             headers: response_headers,
             body: nil,
             url: url,
             stream: stream_pid
-          }
+          )
         else
           # Small response or complete body - collect remaining
           collect_stream_body(request_id, url, 200, response_headers, body)
@@ -364,13 +364,13 @@ defmodule HTTP do
           |> Enum.map(fn {key, val} -> {to_string(key), to_string(val)} end)
           |> HTTP.Headers.new()
 
-        %Response{
+        Response.new(
           status: 200,
           headers: response_headers,
           body: <<>>,
           url: url,
           stream: nil
-        }
+        )
 
       _other ->
         throw(:unexpected_streaming_message)
@@ -477,13 +477,13 @@ defmodule HTTP do
           content_length_int = parse_content_length(content_length)
           {:ok, stream_pid} = start_streaming_handler(request_id, start_time, content_length_int)
 
-          %Response{
+          Response.new(
             status: status,
             headers: response_headers,
             body: nil,
             url: url,
             stream: stream_pid
-          }
+          )
         else
           # Buffer the response
           collect_body_chunks(request_id, url, status, response_headers, <<>>)
@@ -507,23 +507,23 @@ defmodule HTTP do
         collect_stream_body(request_id, url, status, headers, body_acc <> chunk)
 
       {:http, {^request_id, :stream_end}} ->
-        %Response{
+        Response.new(
           status: status,
           headers: headers,
           body: body_acc,
           url: url,
           stream: nil
-        }
+        )
 
       {:http, {^request_id, :stream_end, _headers}} ->
         # stream_end can include headers, but we already have them
-        %Response{
+        Response.new(
           status: status,
           headers: headers,
           body: body_acc,
           url: url,
           stream: nil
-        }
+        )
 
       {:http, {^request_id, {:http_error, reason}}} ->
         throw(reason)
@@ -544,13 +544,13 @@ defmodule HTTP do
 
       {:http, {^request_id, :stream_end}} ->
         # End of stream
-        %Response{
+        Response.new(
           status: status,
           headers: headers,
           body: body_acc,
           url: url,
           stream: nil
-        }
+        )
 
       {:http, {^request_id, {:http_error, reason}}} ->
         throw(reason)
@@ -573,23 +573,23 @@ defmodule HTTP do
         # Complete body received
         final_body = body_acc <> body
 
-        %Response{
+        Response.new(
           status: status,
           headers: headers,
           body: final_body,
           url: url,
           stream: nil
-        }
+        )
 
       {:http, {^request_id, :stream_end}} ->
         # End of chunked transfer
-        %Response{
+        Response.new(
           status: status,
           headers: headers,
           body: body_acc,
           url: url,
           stream: nil
-        }
+        )
 
       {:http, {^request_id, {:http_error, reason}}} ->
         throw(reason)
@@ -683,13 +683,13 @@ defmodule HTTP do
             body
           end
 
-        %Response{
+        Response.new(
           status: status,
           headers: response_headers,
           body: binary_body,
           url: url,
           stream: nil
-        }
+        )
 
       {:error, reason} ->
         throw(reason)
