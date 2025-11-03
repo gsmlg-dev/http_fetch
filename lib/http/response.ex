@@ -126,9 +126,9 @@ defmodule HTTP.Response do
           status_text: String.t(),
           ok: boolean(),
           headers: HTTP.Headers.t(),
-          body: String.t() | nil,
+          body: binary() | nil,
           body_used: boolean(),
-          url: URI.t(),
+          url: URI.t() | nil,
           redirected: boolean(),
           type: response_type(),
           stream: pid() | nil
@@ -215,7 +215,7 @@ defmodule HTTP.Response do
       iex> HTTP.Response.text(response)
       "Hello"
   """
-  @spec text(t()) :: String.t()
+  @spec text(t()) :: binary()
   def text(%__MODULE__{body: body, stream: nil}), do: body
 
   def text(%__MODULE__{body: body, stream: stream} = response) do
