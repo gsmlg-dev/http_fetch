@@ -1,9 +1,9 @@
 defmodule HTTP.ResponseBrowserAPITest do
   use ExUnit.Case, async: true
 
-  alias HTTP.Response
-  alias HTTP.Headers
   alias HTTP.Blob
+  alias HTTP.Headers
+  alias HTTP.Response
 
   describe "Browser Fetch API properties" do
     test "ok is true for 200-299 status codes" do
@@ -41,6 +41,7 @@ defmodule HTTP.ResponseBrowserAPITest do
 
       for {status, expected_text} <- test_cases do
         response = Response.new(status: status)
+
         assert response.status_text == expected_text,
                "Status #{status} should have status_text='#{expected_text}', got '#{response.status_text}'"
       end
@@ -92,7 +93,8 @@ defmodule HTTP.ResponseBrowserAPITest do
 
       # Multiple reads work because response is immutable
       assert Response.text(response) == "Hello"
-      assert Response.text(response) == "Hello"  # Works in Elixir
+      # Works in Elixir
+      assert Response.text(response) == "Hello"
     end
 
     test "body_used flag can be manually checked" do
@@ -253,7 +255,8 @@ defmodule HTTP.ResponseBrowserAPITest do
   describe "Response.blob/1" do
     test "returns blob with correct data and type" do
       headers = Headers.new([{"content-type", "image/png"}])
-      data = <<137, 80, 78, 71>>  # PNG magic bytes
+      # PNG magic bytes
+      data = <<137, 80, 78, 71>>
       response = Response.new(status: 200, body: data, headers: headers)
 
       blob = Response.blob(response)

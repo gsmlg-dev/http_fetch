@@ -217,9 +217,9 @@ defmodule HTTP.Response do
   @spec text(t()) :: String.t()
   def text(%__MODULE__{body: body, stream: nil}), do: body
 
-  def text(%__MODULE__{body: body, stream: stream}) do
+  def text(%__MODULE__{body: body, stream: stream} = response) do
     if is_nil(body) and is_pid(stream) do
-      read_all(%__MODULE__{body: body, stream: stream})
+      read_all(response)
     else
       body || ""
     end
@@ -236,7 +236,7 @@ defmodule HTTP.Response do
       iex> HTTP.Response.read_all(response)
       "Hello World"
   """
-  @spec read_all(t()) :: String.t()
+  @spec read_all(t()) :: binary()
   def read_all(%__MODULE__{body: body, stream: nil}), do: body || ""
 
   def read_all(%__MODULE__{body: _body, stream: stream}) do
@@ -410,6 +410,7 @@ defmodule HTTP.Response do
       <<1, 2, 3, 4>>
   """
   @spec arrayBuffer(t()) :: binary()
+  # credo:disable-for-next-line Credo.Check.Readability.FunctionNames
   def arrayBuffer(%__MODULE__{} = response) do
     # arrayBuffer is essentially the same as read_all for binary data
     read_all(response)
