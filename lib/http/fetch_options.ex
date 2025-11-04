@@ -89,6 +89,7 @@ defmodule HTTP.FetchOptions do
             options: [],
             opts: [sync: false],
             signal: nil,
+            unix_socket: nil,
             timeout: nil,
             connect_timeout: nil,
             ssl: nil,
@@ -112,6 +113,7 @@ defmodule HTTP.FetchOptions do
           options: keyword(),
           opts: keyword(),
           signal: any() | nil,
+          unix_socket: String.t() | nil,
           timeout: integer() | nil,
           connect_timeout: integer() | nil,
           ssl: list() | nil,
@@ -229,6 +231,9 @@ defmodule HTTP.FetchOptions do
 
       {:signal, signal}, acc ->
         %{acc | signal: signal}
+
+      {:unix_socket, unix_socket}, acc ->
+        %{acc | unix_socket: unix_socket}
 
       {:timeout, timeout}, acc ->
         %{acc | timeout: timeout}

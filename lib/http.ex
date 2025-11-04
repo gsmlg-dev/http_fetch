@@ -12,6 +12,7 @@ defmodule HTTP do
   - **Automatic streaming**: Responses >5MB or with unknown Content-Length automatically stream
   - **Request cancellation**: Via `HTTP.AbortController` for aborting in-flight requests
   - **Promise chaining**: JavaScript-like promise interface with `then/3` support
+  - **Unix Domain Sockets**: Support for HTTP over Unix sockets (Docker daemon, systemd, etc.)
   - **Telemetry integration**: Comprehensive event emission for monitoring and observability
   - **Zero external dependencies**: Uses only Erlang/OTP built-in modules (except telemetry)
 
@@ -32,6 +33,12 @@ defmodule HTTP do
           headers: %{"Content-Type" => "application/json"},
           body: JSON.encode!(%{title: "Hello", body: "World"})
         ])
+        |> HTTP.Promise.await()
+
+      # Unix Domain Socket request (e.g., Docker daemon)
+      {:ok, response} =
+        HTTP.fetch("http://localhost/version",
+          unix_socket: "/var/run/docker.sock")
         |> HTTP.Promise.await()
 
   ## Architecture
@@ -97,6 +104,8 @@ defmodule HTTP do
                                   (e.g., `sync: false`, `body_format: :binary`). Overrides `Request` defaults.
                 - `:signal`: An `HTTP.AbortController` PID. If provided, the request can be aborted
                              via this controller.
+                - `:unix_socket`: Path to a Unix Domain Socket file (e.g., "/var/run/docker.sock").
+                                  When provided, the request is sent over the Unix socket instead of TCP/IP.
 
   Returns:
     - `%HTTP.Promise{}`: A Promise struct. The caller should `HTTP.Promise.await(promise_struct)` to get the final
@@ -227,6 +236,21 @@ defmodule HTTP do
             IO.puts "Request was likely aborted. Reason: \#{inspect(reason)}"
           end
       end
+
+      # Unix Domain Socket request to Docker daemon
+      docker_promise = HTTP.fetch("http://localhost/version", unix_socket: "/var/run/docker.sock")
+      case HTTP.Promise.await(docker_promise) do
+        %HTTP.Response{status: 200} = response ->
+          case HTTP.Response.json(response) do
+            {:ok, json} ->
+              IO.puts "Docker Version: \#{json["Version"]}"
+              IO.puts "API Version: \#{json["ApiVersion"]}"
+            {:error, reason} ->
+              IO.inspect reason, label: "JSON Parse Error"
+          end
+        {:error, reason} ->
+          IO.inspect reason, label: "Docker Request Error"
+      end
   """
   @spec fetch(String.t() | URI.t(), Keyword.t() | map()) :: %HTTP.Promise{}
   def fetch(url, init \\ []) do
@@ -245,8 +269,9 @@ defmodule HTTP do
       options: Keyword.merge(Request.__struct__().options, options.opts)
     }
 
-    # Extract AbortController PID from FetchOptions
+    # Extract AbortController PID and unix_socket from FetchOptions
     abort_controller_pid = options.signal
+    unix_socket_path = options.unix_socket
 
     # Emit telemetry event for request start
     HTTP.Telemetry.request_start(request.method, request.url, request.headers)
@@ -257,7 +282,7 @@ defmodule HTTP do
         :http_fetch_task_supervisor,
         HTTP,
         :handle_async_request,
-        [request, self(), abort_controller_pid]
+        [request, self(), abort_controller_pid, unix_socket_path]
       )
 
     # Wrap the task in our new Promise struct
@@ -385,10 +410,49 @@ defmodule HTTP do
   @spec handle_async_request(
           Request.t(),
           pid(),
-          pid() | nil
+          pid() | nil,
+          String.t() | nil
         ) :: Response.t() | {:error, term()}
-  def handle_async_request(request, _calling_pid, abort_controller_pid) do
+  def handle_async_request(request, _calling_pid, abort_controller_pid, unix_socket_path \\ nil) do
     start_time = System.monotonic_time(:microsecond)
+
+    # If unix_socket_path is provided, use Unix socket transport
+    if unix_socket_path do
+      handle_unix_socket_request(request, unix_socket_path, start_time)
+    else
+      handle_httpc_request(request, abort_controller_pid, start_time)
+    end
+  end
+
+  # Handle Unix Domain Socket requests
+  defp handle_unix_socket_request(request, socket_path, start_time) do
+    try do
+      # Get timeout from request options
+      timeout = Keyword.get(request.http_options, :timeout, 30_000)
+
+      case HTTP.UnixSocket.request(socket_path, request, timeout) do
+        {:ok, response} ->
+          # Emit telemetry event for request completion
+          duration = System.monotonic_time(:microsecond) - start_time
+          body_size = if is_binary(response.body), do: byte_size(response.body), else: 0
+          HTTP.Telemetry.request_stop(response.status, request.url, body_size, duration)
+          response
+
+        {:error, reason} ->
+          duration = System.monotonic_time(:microsecond) - start_time
+          HTTP.Telemetry.request_exception(request.url, reason, duration)
+          throw(reason)
+      end
+    catch
+      reason ->
+        duration = System.monotonic_time(:microsecond) - start_time
+        HTTP.Telemetry.request_exception(request.url, reason, duration)
+        {:error, reason}
+    end
+  end
+
+  # Handle regular HTTP/HTTPS requests via :httpc
+  defp handle_httpc_request(request, abort_controller_pid, start_time) do
 
     # Use a try/catch block to convert `throw` from handle_httpc_response into an {:error, reason} tuple
     try do

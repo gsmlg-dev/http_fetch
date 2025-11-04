@@ -13,6 +13,7 @@ A modern HTTP client library for Elixir that provides a fetch API similar to web
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
 - **Full HTTP support**: GET, POST, PUT, DELETE, PATCH, HEAD methods
 - **Complete httpc integration**: Support for all :httpc.request options
+- **Unix Domain Sockets**: HTTP over Unix sockets for Docker daemon, systemd, and other local services
 - **Form data support**: HTTP.FormData for multipart/form-data and file uploads
 - **Streaming file uploads**: Efficient large file uploads using streams
 - **Type-safe configuration**: HTTP.FetchOptions for structured request configuration
@@ -43,13 +44,23 @@ response =
 binary_data = response.body
 
 # POST request with JSON
-{:ok, response} = 
+{:ok, response} =
   HTTP.fetch("https://jsonplaceholder.typicode.com/posts", [
     method: "POST",
     headers: %{"Content-Type" => "application/json"},
     body: JSON.encode\!(%{title: "Hello", body: "World"})
   ])
   |> HTTP.Promise.await()
+
+# Unix Domain Socket request (Docker daemon example)
+{:ok, response} =
+  HTTP.fetch("http://localhost/version",
+    unix_socket: "/var/run/docker.sock")
+  |> HTTP.Promise.await()
+
+# Parse Docker version info
+{:ok, docker_info} = HTTP.Response.json(response)
+IO.puts("Docker Version: #{docker_info["Version"]}")
 ```
 
 # Form data with file upload
@@ -80,7 +91,8 @@ promise = HTTP.fetch(url, [
   body: "request body",
   content_type: "application/json",
   options: [timeout: 10_000],
-  signal: abort_controller
+  signal: abort_controller,
+  unix_socket: "/var/run/docker.sock"  # Optional: use Unix Domain Socket
 ])
 ```
 
