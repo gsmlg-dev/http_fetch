@@ -1,9 +1,9 @@
 defmodule HTTPUnixSocketTest do
   use ExUnit.Case, async: true
 
-  alias HTTP.Test.UnixSocketServer
   alias HTTP.Promise
   alias HTTP.Response
+  alias HTTP.Test.UnixSocketServer
 
   doctest HTTP.UnixSocket
 
@@ -84,13 +84,13 @@ defmodule HTTPUnixSocketTest do
         end)
 
       promise =
-        HTTP.fetch("http://localhost/protected", [
+        HTTP.fetch("http://localhost/protected",
           unix_socket: socket_path,
           headers: [
             {"Authorization", "Bearer test-token"},
             {"X-Custom-Header", "custom-value"}
           ]
-        ])
+        )
 
       response = Promise.await(promise)
       assert response.status == 200
@@ -123,12 +123,12 @@ defmodule HTTPUnixSocketTest do
       body = JSON.encode!(%{title: "Test Post", content: "This is a test"})
 
       promise =
-        HTTP.fetch("http://localhost/posts", [
+        HTTP.fetch("http://localhost/posts",
           method: "POST",
           unix_socket: socket_path,
           headers: [{"Content-Type", "application/json"}],
           body: body
-        ])
+        )
 
       response = Promise.await(promise)
       assert response.status == 201
@@ -153,11 +153,11 @@ defmodule HTTPUnixSocketTest do
         end)
 
       promise =
-        HTTP.fetch("http://localhost/data", [
+        HTTP.fetch("http://localhost/data",
           method: "POST",
           unix_socket: socket_path,
           body: "plain text data"
-        ])
+        )
 
       response = Promise.await(promise)
       assert response.status == 200
@@ -186,12 +186,12 @@ defmodule HTTPUnixSocketTest do
       body = JSON.encode!(%{name: "Updated Name"})
 
       promise =
-        HTTP.fetch("http://localhost/users/123", [
+        HTTP.fetch("http://localhost/users/123",
           method: "PUT",
           unix_socket: socket_path,
           headers: [{"Content-Type", "application/json"}],
           body: body
-        ])
+        )
 
       response = Promise.await(promise)
       assert response.status == 200
@@ -247,12 +247,12 @@ defmodule HTTPUnixSocketTest do
       body = JSON.encode!(%{email: "newemail@example.com"})
 
       promise =
-        HTTP.fetch("http://localhost/users/123", [
+        HTTP.fetch("http://localhost/users/123",
           method: "PATCH",
           unix_socket: socket_path,
           headers: [{"Content-Type", "application/json"}],
           body: body
-        ])
+        )
 
       response = Promise.await(promise)
       assert response.status == 200

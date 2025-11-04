@@ -453,7 +453,6 @@ defmodule HTTP do
 
   # Handle regular HTTP/HTTPS requests via :httpc
   defp handle_httpc_request(request, abort_controller_pid, start_time) do
-
     # Use a try/catch block to convert `throw` from handle_httpc_response into an {:error, reason} tuple
     try do
       case Request.to_httpc_args(request) do

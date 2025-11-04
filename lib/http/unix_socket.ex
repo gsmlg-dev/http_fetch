@@ -30,9 +30,9 @@ defmodule HTTP.UnixSocket do
   - Request/response timeout is fixed at 30 seconds
   """
 
+  alias HTTP.Headers
   alias HTTP.Request
   alias HTTP.Response
-  alias HTTP.Headers
 
   @default_timeout 30_000
   @recv_timeout 30_000
@@ -74,11 +74,16 @@ defmodule HTTP.UnixSocket do
     # :binary - receive data as binary
     # packet: :raw - no packet framing
     # active: false - use passive mode for blocking receives
-    :gen_tcp.connect({:local, socket_charlist}, 0, [
-      :binary,
-      packet: :raw,
-      active: false
-    ], timeout)
+    :gen_tcp.connect(
+      {:local, socket_charlist},
+      0,
+      [
+        :binary,
+        packet: :raw,
+        active: false
+      ],
+      timeout
+    )
   end
 
   # Send HTTP request over socket
@@ -89,7 +94,6 @@ defmodule HTTP.UnixSocket do
   end
 
   # Build HTTP/1.1 request string
-  @spec build_http_request(Request.t()) :: iodata()
   defp build_http_request(%Request{} = request) do
     method = request.method |> to_string() |> String.upcase()
     path = request.url.path || "/"
@@ -130,9 +134,7 @@ defmodule HTTP.UnixSocket do
 
     # Build headers string
     headers_string =
-      headers.headers
-      |> Enum.map(fn {name, value} -> "#{name}: #{value}\r\n" end)
-      |> Enum.join()
+      Enum.map_join(headers.headers, "", fn {name, value} -> "#{name}: #{value}\r\n" end)
 
     # Combine all parts
     [request_line, headers_string, "\r\n", body]
@@ -142,12 +144,14 @@ defmodule HTTP.UnixSocket do
   @spec to_binary(term()) :: binary()
   defp to_binary(body) when is_binary(body), do: body
   defp to_binary(body) when is_list(body), do: IO.iodata_to_binary(body)
+
   defp to_binary(%HTTP.FormData{} = form_data) do
     case HTTP.FormData.to_body(form_data) do
       {:url_encoded, body} -> to_string(body)
       {:multipart, body, _boundary} -> IO.iodata_to_binary(body)
     end
   end
+
   defp to_binary(body), do: to_string(body)
 
   # Add Content-Type header if not already present
@@ -194,8 +198,6 @@ defmodule HTTP.UnixSocket do
   end
 
   # Receive data until we get the end of headers (\r\n\r\n)
-  @spec recv_until_headers_end(:gen_tcp.socket(), binary()) ::
-          {:ok, binary()} | {:error, term()}
   defp recv_until_headers_end(socket, acc) do
     case :gen_tcp.recv(socket, 0, @recv_timeout) do
       {:ok, data} ->
@@ -296,8 +298,37 @@ defmodule HTTP.UnixSocket do
     Headers.new(headers)
   end
 
+  # Receive body with Content-Length header
+  defp receive_body_with_content_length(socket, content_length, body_so_far) do
+    case Integer.parse(content_length) do
+      {length, ""} when length > 0 ->
+        bytes_received = byte_size(body_so_far)
+
+        if bytes_received >= length do
+          # We already have the complete body
+          {:ok, binary_part(body_so_far, 0, length)}
+        else
+          # Need to receive more bytes
+          remaining = length - bytes_received
+
+          case :gen_tcp.recv(socket, remaining, @recv_timeout) do
+            {:ok, more_data} ->
+              {:ok, body_so_far <> more_data}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
+        end
+
+      {0, ""} ->
+        {:ok, ""}
+
+      _ ->
+        {:error, :invalid_content_length}
+    end
+  end
+
   # Receive response body based on headers
-  @spec receive_body(:gen_tcp.socket(), Headers.t(), binary()) :: {:ok, binary()} | {:error, term()}
   defp receive_body(socket, headers, body_so_far) do
     transfer_encoding = Headers.get(headers, "transfer-encoding")
     content_length = Headers.get(headers, "content-length")
@@ -309,32 +340,7 @@ defmodule HTTP.UnixSocket do
 
       # Content-Length specified
       content_length ->
-        case Integer.parse(content_length) do
-          {length, ""} when length > 0 ->
-            bytes_received = byte_size(body_so_far)
-
-            if bytes_received >= length do
-              # We already have the complete body
-              {:ok, binary_part(body_so_far, 0, length)}
-            else
-              # Need to receive more bytes
-              remaining = length - bytes_received
-
-              case :gen_tcp.recv(socket, remaining, @recv_timeout) do
-                {:ok, more_data} ->
-                  {:ok, body_so_far <> more_data}
-
-                {:error, reason} ->
-                  {:error, reason}
-              end
-            end
-
-          {0, ""} ->
-            {:ok, ""}
-
-          _ ->
-            {:error, :invalid_content_length}
-        end
+        receive_body_with_content_length(socket, content_length, body_so_far)
 
       # No body or no Content-Length (read until connection closes)
       true ->

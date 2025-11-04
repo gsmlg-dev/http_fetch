@@ -254,9 +254,7 @@ defmodule HTTP.Test.UnixSocketServer do
       |> Map.put_new("Connection", "close")
 
     headers_string =
-      headers
-      |> Enum.map(fn {name, value} -> "#{name}: #{value}\r\n" end)
-      |> Enum.join()
+      Enum.map_join(headers, "", fn {name, value} -> "#{name}: #{value}\r\n" end)
 
     response_data = [status_line, headers_string, "\r\n", body]
 
