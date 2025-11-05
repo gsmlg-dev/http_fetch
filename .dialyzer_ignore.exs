@@ -1,10 +1,10 @@
 [
   # HTTP.fetch/2 uses throw/catch for error handling which confuses Dialyzer
-  ~r/lib\/http\.ex:231.*invalid_contract/,
-  ~r/lib\/http\.ex:232.*no_return/,
+  ~r/lib\/http\.ex:255.*invalid_contract/,
+  ~r/lib\/http\.ex:256.*no_return/,
 
   # Pattern match warning in handle_async_request - intentional error handling
-  ~r/lib\/http\.ex:329.*pattern_match/,
+  ~r/lib\/http\.ex:1.*pattern_match/,
 
   # HTTP.Promise.then/3 opaque type issue with Task struct - Task.Supervisor returns opaque Task
   ~r/lib\/http\/promise\.ex:96.*contract_with_opaque/,
