@@ -13,6 +13,7 @@ defmodule HttpFetch.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       dialyzer: dialyzer(),
+      aliases: aliases(),
       description:
         "A browser-like HTTP fetch API for Elixir using Erlang's built-in :httpc module",
       package: [
@@ -53,6 +54,12 @@ defmodule HttpFetch.MixProject do
       plt_add_apps: [:ex_unit, :mix],
       flags: [:unmatched_returns, :error_handling, :underspecs],
       ignore_warnings: ".dialyzer_ignore.exs"
+    ]
+  end
+
+  defp aliases do
+    [
+      "test.e2e": ["test e2e/"]
     ]
   end
 end
