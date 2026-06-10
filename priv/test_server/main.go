@@ -90,7 +90,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, map[string]any{
 		"server": "http_test_server",
 		"routes": []string{
 			"/get", "/post", "/put", "/patch", "/delete", "/options", "/head",
@@ -168,7 +168,7 @@ func handleHead(w http.ResponseWriter, r *http.Request) {
 
 func handleJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, map[string]any{
 		"ok":      true,
 		"n":       42,
 		"message": "hello from test server",
@@ -190,7 +190,7 @@ func handleURLEncoded(w http.ResponseWriter, r *http.Request) {
 		"query": r.URL.Query(),
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }
 
 func handleMultipart(w http.ResponseWriter, r *http.Request) {
@@ -224,7 +224,7 @@ func handleMultipart(w http.ResponseWriter, r *http.Request) {
 		files[fieldName] = out
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, map[string]any{
 		"fields": fields,
 		"files":  files,
 	})
@@ -423,7 +423,7 @@ func handleRedirect(w http.ResponseWriter, r *http.Request) {
 	if n == 0 {
 		// Final destination.
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "redirects": 0})
+		writeJSON(w, map[string]any{"ok": true, "redirects": 0})
 		return
 	}
 	// Hop one step toward /redirect/0.
@@ -439,10 +439,20 @@ func handleDelay(w http.ResponseWriter, r *http.Request) {
 	}
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"slept_ms": ms})
+	writeJSON(w, map[string]any{"slept_ms": ms})
 }
 
 // --- helpers --------------------------------------------------------------
+
+// writeJSON serializes v as JSON and writes it to w without a trailing newline.
+func writeJSON(w http.ResponseWriter, v any) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_, _ = w.Write(data)
+}
 
 // echoRequest serializes the request (method, url, query, headers, body) as JSON.
 func echoRequest(w http.ResponseWriter, r *http.Request, body string) {
@@ -463,7 +473,7 @@ func echoRequest(w http.ResponseWriter, r *http.Request, body string) {
 		out["body"] = body
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }
 
 // --- end of file ---

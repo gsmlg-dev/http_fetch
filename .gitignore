@@ -24,3 +24,9 @@ http_fetch-*.tar
 
 # Dialyzer PLT files
 /priv/plts/
+
+# e2e test server port file (written when running locally)
+/.e2e_port
+
+# The compiled e2e test server binary (built locally with `go build`)
+/priv/test_server/server
