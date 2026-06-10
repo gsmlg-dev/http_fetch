@@ -350,7 +350,7 @@ open doc/index.html
 ### Running Tests
 
 ```bash
-# Run all tests
+# Run all unit tests
 mix test
 
 # Run specific test file
@@ -359,6 +359,26 @@ mix test test/http_test.exs
 # Run with coverage
 mix test --cover
 ```
+
+### Running E2E Tests
+
+The e2e suite exercises real HTTP behavior against a vendored Go test
+server. It requires Go 1.22+ to build the server.
+
+```bash
+# 1. Build the test server
+(cd priv/test_server && go build -o ../test_server/server .)
+
+# 2. Start it in the background; capture the printed port
+./priv/test_server/server > .e2e_port &
+PORT=$(grep -oE '[0-9]+' .e2e_port | head -n1)
+export E2E_BASE_URL="http://127.0.0.1:$PORT"
+
+# 3. Run the e2e suite
+mix test.e2e
+```
+
+In CI, the `e2e.yml` workflow handles all of this automatically.
 
 ### Code Formatting
 

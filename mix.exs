@@ -25,8 +25,10 @@ defmodule HttpFetch.MixProject do
     ]
   end
 
-  # Specifies which paths to compile per environment
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  # Specifies which paths to compile per environment.
+  # `e2e/support` is added so the helpers (Server, ResponseView, SSE) are
+  # available to e2e tests under `e2e/`.
+  defp elixirc_paths(:test), do: ["lib", "test/support", "e2e/support"]
   defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help compile.app" to learn about applications.
@@ -59,7 +61,19 @@ defmodule HttpFetch.MixProject do
 
   defp aliases do
     [
-      "test.e2e": ["test e2e/"]
+      # `mix test.e2e [path]` runs the e2e test files (optionally filtered
+      # to a single file or line range).
+      "test.e2e": [&run_e2e_tests/1]
     ]
+  end
+
+  defp run_e2e_tests(args) do
+    # If the user passed file paths or line refs, run only those.
+    # Otherwise, run everything under `e2e/`.
+    if Enum.any?(args) do
+      Mix.Task.run("test", args)
+    else
+      Mix.Task.run("test", ["e2e/"])
+    end
   end
 end

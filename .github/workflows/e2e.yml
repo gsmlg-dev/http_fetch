@@ -35,7 +35,12 @@ jobs:
           elixir-version: "1.18"
           otp-version: "28"
 
-      - name: Restore dependencies cache
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Restore Elixir dependencies cache
         uses: actions/cache@v4
         with:
           path: |
@@ -45,13 +50,52 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mix-
 
-      - name: Install dependencies
+      - name: Restore Go module cache
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('priv/test_server/go.sum', 'priv/test_server/go.mod') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install Elixir dependencies
         run: mix deps.get
 
+      - name: Build the e2e test server
+        working-directory: priv/test_server
+        run: go build -o ../test_server/server .
+
+      - name: Start the e2e test server
+        id: server
+        run: |
+          set -euo pipefail
+          ./priv/test_server/server > .e2e_port &
+          SERVER_PID=$!
+          echo "SERVER_PID=${SERVER_PID}" >> "$GITHUB_OUTPUT"
+          for i in {1..50}; do
+            if [ -s .e2e_port ]; then
+              PORT=$(grep -oE '[0-9]+' .e2e_port | head -n1)
+              if curl -fs "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
+                echo "E2E_BASE_URL=http://127.0.0.1:${PORT}" >> "$GITHUB_ENV"
+                echo "Test server ready on port ${PORT}"
+                exit 0
+              fi
+            fi
+            sleep 0.2
+          done
+          echo "::error::E2E test server failed to start within 10s"
+          kill "${SERVER_PID}" 2>/dev/null || true
+          exit 1
+
       - name: Run E2E test suite
-        # Runs the e2e suite via the `test.e2e` Mix alias, which expands to
-        # `mix test e2e/`. Tag new e2e tests with `@moduletag :e2e` and place
-        # them under `e2e/`.
-        run: mix test.e2e
         env:
-          MIX_ENV: test
+          E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
+        run: mix test.e2e
+
+      - name: Stop the e2e test server
+        if: always()
+        run: |
+          if [ -n "${{ steps.server.outputs.SERVER_PID }}" ]; then
+            kill "${{ steps.server.outputs.SERVER_PID }}" 2>/dev/null || true
+          fi
+          rm -f .e2e_port
