@@ -70,7 +70,7 @@ defmodule E2E.StreamingTest do
     assert resp.stream == nil
   end
 
-  @tag :skip
+  # TODO(upstream): gsmlg-dev/http_fetch#10
   test "streamed response has body=nil and a stream pid" do
     resp = E2E.Server.url("/stream-large") |> HTTP.fetch() |> HTTP.Promise.await()
     assert %HTTP.Response{body: nil, stream: stream} = resp
@@ -78,14 +78,12 @@ defmodule E2E.StreamingTest do
     assert resp.status == 200
   end
 
-  @tag :skip
   test "read_all/1 returns the full body" do
     resp = E2E.Server.url("/stream-large") |> HTTP.fetch() |> HTTP.Promise.await()
     body = HTTP.Response.read_all(resp)
     assert byte_size(body) == @expected_size
   end
 
-  @tag :skip
   test "write_to/2 streams the body to a file" do
     tmp = Briefly.create!(directory: true, prefix: "stream_")
     out = Path.join(tmp, "out.bin")
@@ -96,7 +94,7 @@ defmodule E2E.StreamingTest do
     assert File.stat!(out).size == @expected_size
   end
 
-  @tag :skip
+  # TODO(upstream): gsmlg-dev/http_fetch#10
   test "emits :streaming, :start, :chunk (>=1), and :stop telemetry events" do
     _ = E2E.Server.url("/stream-large") |> HTTP.fetch() |> HTTP.Promise.await()
     # Wait briefly for the stream to flush any tail events.

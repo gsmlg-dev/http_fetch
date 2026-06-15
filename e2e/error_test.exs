@@ -47,9 +47,7 @@ defmodule E2E.ErrorTest do
   end
 
   describe "aborts" do
-    @tag :skip
-    # AbortController does not currently interrupt an in-flight :httpc request
-    # promptly — the request still runs to completion. Tracked in issue #N.
+    # TODO(upstream): gsmlg-dev/http_fetch#6
     test "aborting an in-flight request returns an error tuple" do
       controller = HTTP.AbortController.new()
 

@@ -67,8 +67,7 @@ defmodule E2E.MethodsTest do
   end
 
   describe "OPTIONS" do
-    @tag :skip
-    # :httpc returns :invalid_request for OPTIONS. Tracked in issue #N.
+    # TODO(upstream): gsmlg-dev/http_fetch#9
     test "returns the Allow header listing supported methods" do
       resp =
         E2E.Server.url("/options")
@@ -89,9 +88,7 @@ defmodule E2E.MethodsTest do
   end
 
   describe "HEAD" do
-    @tag :skip
-    # The streaming response handler raises :unexpected_streaming_message for
-    # HEAD with an empty body. Tracked in issue #N.
+    # TODO(upstream): gsmlg-dev/http_fetch#8
     test "returns 200 with headers and no body" do
       resp =
         E2E.Server.url("/head")

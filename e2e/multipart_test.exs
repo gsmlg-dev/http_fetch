@@ -43,7 +43,7 @@ defmodule E2E.MultipartTest do
   end
 
   describe "single file upload" do
-    @tag :skip
+    # TODO(upstream): gsmlg-dev/http_fetch#7
     test "uploads a small text file with one extra field", ctx do
       form =
         HTTP.FormData.new()
@@ -75,7 +75,7 @@ defmodule E2E.MultipartTest do
   end
 
   describe "binary file upload" do
-    @tag :skip
+    # TODO(upstream): gsmlg-dev/http_fetch#7
     test "preserves non-UTF-8 bytes", ctx do
       form =
         HTTP.FormData.new()
@@ -100,7 +100,7 @@ defmodule E2E.MultipartTest do
   end
 
   describe "multiple files in one form" do
-    @tag :skip
+    # TODO(upstream): gsmlg-dev/http_fetch#7
     test "sends two file fields with a text field", ctx do
       form =
         HTTP.FormData.new()
@@ -138,7 +138,7 @@ defmodule E2E.MultipartTest do
   end
 
   describe "large file upload" do
-    @tag :skip
+    # TODO(upstream): gsmlg-dev/http_fetch#7
     test "uploads 1.5MB binary file intact", ctx do
       form =
         HTTP.FormData.new()
