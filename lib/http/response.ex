@@ -242,27 +242,43 @@ defmodule HTTP.Response do
 
   def read_all(%__MODULE__{body: _body, stream: stream}) do
     if is_pid(stream) do
-      # Request data from the stream
-      send(stream, {:read_chunk, self()})
-      collect_stream(stream, "")
+      case read_stream(stream) do
+        {:ok, body} -> body
+        {:error, reason} -> raise RuntimeError, "stream read failed: #{inspect(reason)}"
+      end
     else
       ""
     end
   end
 
+  defp read_stream(stream) do
+    send(stream, {:read_chunk, self(), :ack})
+    collect_stream(stream, [])
+  end
+
   defp collect_stream(stream, acc) do
     receive do
+      {:stream_chunk, ^stream, chunk, ack_ref} ->
+        send(stream, {:stream_chunk_ack, ack_ref})
+        collect_stream(stream, [chunk | acc])
+
       {:stream_chunk, ^stream, chunk} ->
-        collect_stream(stream, acc <> chunk)
+        collect_stream(stream, [chunk | acc])
 
       {:stream_end, ^stream} ->
-        acc
+        {:ok, collected_body(acc)}
 
-      {:stream_error, ^stream, _reason} ->
-        acc
+      {:stream_error, ^stream, reason} ->
+        {:error, reason}
     after
-      HTTP.Config.streaming_timeout() -> acc
+      HTTP.Config.streaming_timeout() -> {:error, :timeout}
     end
+  end
+
+  defp collected_body(acc) do
+    acc
+    |> Enum.reverse()
+    |> IO.iodata_to_binary()
   end
 
   @doc """
@@ -456,7 +472,7 @@ defmodule HTTP.Response do
   @doc """
   Writes the response body to a file.
 
-  For streaming responses, this will read the entire stream and write it to the file.
+  For streaming responses, this writes chunks directly to the file.
   For non-streaming responses, it will write the existing body directly.
 
   ## Parameters
@@ -489,7 +505,6 @@ defmodule HTTP.Response do
         :ok
 
       %{body: _body, stream: stream} when is_pid(stream) ->
-        # Streaming response - collect and write
         write_stream_to_file(response, file_path)
 
       _ ->
@@ -502,16 +517,39 @@ defmodule HTTP.Response do
   end
 
   defp write_stream_to_file(response, file_path) do
-    File.open!(file_path, [:write, :binary], fn file ->
-      case response do
-        %{body: _body, stream: stream} when is_pid(stream) ->
-          # For streaming responses, use collect_stream to get all data
-          body = read_all(response)
-          IO.binwrite(file, body)
+    with %{body: _body, stream: stream} when is_pid(stream) <- response,
+         {:ok, result} <-
+           File.open(file_path, [:write, :binary], &write_stream_chunks(stream, &1)) do
+      result
+    else
+      {:error, reason} -> {:error, reason}
+      _ -> :ok
+    end
+  end
 
-        _ ->
-          :ok
-      end
-    end)
+  defp write_stream_chunks(stream, file) do
+    send(stream, {:read_chunk, self(), :ack})
+    do_write_stream_chunks(stream, file)
+  end
+
+  defp do_write_stream_chunks(stream, file) do
+    receive do
+      {:stream_chunk, ^stream, chunk, ack_ref} ->
+        :ok = IO.binwrite(file, chunk)
+        send(stream, {:stream_chunk_ack, ack_ref})
+        do_write_stream_chunks(stream, file)
+
+      {:stream_chunk, ^stream, chunk} ->
+        :ok = IO.binwrite(file, chunk)
+        do_write_stream_chunks(stream, file)
+
+      {:stream_end, ^stream} ->
+        :ok
+
+      {:stream_error, ^stream, reason} ->
+        {:error, reason}
+    after
+      HTTP.Config.streaming_timeout() -> {:error, :timeout}
+    end
   end
 end

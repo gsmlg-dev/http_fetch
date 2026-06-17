@@ -7,13 +7,13 @@
  [![Hex.pm](https://img.shields.io/hexpm/dt/http_fetch.svg)](https://hex.pm/packages/http_fetch)
  [![Hex.pm](https://img.shields.io/hexpm/dw/http_fetch.svg)](https://hex.pm/packages/http_fetch)
 
-A modern HTTP client library for Elixir that provides a fetch API similar to web browsers, built on Erlang's built-in `:httpc` module.
+A modern HTTP client library for Elixir that provides a fetch API similar to web browsers, built on Erlang's built-in socket modules.
 
 ## Features
 
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
 - **Full HTTP support**: GET, POST, PUT, DELETE, PATCH, HEAD methods
-- **Complete httpc integration**: Support for all :httpc.request options
+- **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, `:ssl` for HTTPS, and Unix domain sockets
 - **Unix Domain Sockets**: HTTP over Unix sockets for Docker daemon, systemd, and other local services
 - **Form data support**: HTTP.FormData for multipart/form-data and file uploads
 - **Streaming file uploads**: Efficient large file uploads using streams
@@ -268,9 +268,15 @@ request = %HTTP.Request{
 }
 ```
 
-**Field Mapping to :httpc.request/4:**
-- `http_options`: 3rd argument (request-specific HTTP options)
-- `options`: 4th argument (client-specific options)
+**Transport Options:**
+- `http_options`: Request options such as `timeout`, `connect_timeout`, `ssl`, and `autoredirect`
+- `options`: Compatibility options such as `socket_opts`
+
+`autoredirect` defaults to `true` with the socket transport. Pass
+`http_options: [autoredirect: false]` or `options: [autoredirect: false]` to return redirect responses.
+Legacy `:httpc` options such as `proxy_auth`, `version`, `relaxed`, `body_format`,
+`full_result`, `headers_as_is`, `receiver`, and `ipv6_host_with_brackets` are parsed for
+source compatibility but are not implemented by the socket transport.
 
 ### HTTP.FormData
 Handle form data and file uploads.
@@ -393,7 +399,7 @@ mix format --check-formatted
 ## Requirements
 
 - Elixir 1.18+ (for built-in `JSON` module support)
-- Erlang OTP with `:inets`, `:ssl`, `:public_key` applications
+- Erlang OTP with `:ssl` and `:public_key` applications
 
 ## License
 

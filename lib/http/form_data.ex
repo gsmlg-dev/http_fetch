@@ -226,9 +226,22 @@ defmodule HTTP.FormData do
          content_type,
          %File.Stream{} = stream
        ) do
-    # Convert stream to list of binaries (iodata) instead of concatenating into single binary
-    # This avoids loading the entire file into memory as one large binary
-    content_chunks = Enum.to_list(stream)
+    # Reopen default line-mode File.Streams in byte chunks so arbitrary binary
+    # uploads are not interpreted as lines.
+    content_chunks =
+      stream
+      |> binary_file_stream()
+      |> Enum.to_list()
+
     encode_multipart_file_content(boundary, name, filename, content_type, content_chunks)
+  end
+
+  defp binary_file_stream(%File.Stream{line_or_bytes: line_or_bytes} = stream)
+       when is_integer(line_or_bytes) do
+    stream
+  end
+
+  defp binary_file_stream(%File.Stream{} = stream) do
+    File.stream!(stream.path, 2048, stream.modes)
   end
 end

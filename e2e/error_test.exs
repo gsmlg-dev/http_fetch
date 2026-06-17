@@ -12,27 +12,38 @@ defmodule E2E.ErrorTest do
   describe "status codes" do
     test "404 returns a 404 Response (not an error tuple)" do
       resp = E2E.Server.url("/status/404") |> HTTP.fetch() |> HTTP.Promise.await()
-      view = E2E.ResponseView.from(resp)
+      view = ResponseView.from(resp)
       assert view.status == 404
     end
 
     test "500 returns a 500 Response" do
       resp = E2E.Server.url("/status/500") |> HTTP.fetch() |> HTTP.Promise.await()
-      view = E2E.ResponseView.from(resp)
+      view = ResponseView.from(resp)
       assert view.status == 500
     end
   end
 
   describe "redirects" do
+    test "follows a 302 chain by default" do
+      resp =
+        E2E.Server.url("/redirect/2")
+        |> HTTP.fetch()
+        |> HTTP.Promise.await()
+
+      view = ResponseView.from(resp)
+      assert view.status == 200
+      assert ResponseView.json!(view) == %{"ok" => true, "redirects" => 0}
+    end
+
     test "autoredirect: true follows a 302 chain" do
       resp =
         E2E.Server.url("/redirect/2")
         |> HTTP.fetch(options: [autoredirect: true])
         |> HTTP.Promise.await()
 
-      view = E2E.ResponseView.from(resp)
+      view = ResponseView.from(resp)
       assert view.status == 200
-      assert E2E.ResponseView.json!(view) == %{"ok" => true, "redirects" => 0}
+      assert ResponseView.json!(view) == %{"ok" => true, "redirects" => 0}
     end
 
     test "autoredirect: false returns the 302" do
@@ -41,13 +52,12 @@ defmodule E2E.ErrorTest do
         |> HTTP.fetch(options: [autoredirect: false])
         |> HTTP.Promise.await()
 
-      view = E2E.ResponseView.from(resp)
+      view = ResponseView.from(resp)
       assert view.status == 302
     end
   end
 
   describe "aborts" do
-    # TODO(upstream): gsmlg-dev/http_fetch#6
     test "aborting an in-flight request returns an error tuple" do
       controller = HTTP.AbortController.new()
 

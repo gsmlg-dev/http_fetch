@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+- Replaced `:httpc` with the internal socket transport while preserving the default
+  redirect-following behavior; pass `autoredirect: false` to return redirect responses.
+- Legacy `:httpc` options that are not implemented by the socket transport are documented
+  as compatibility-only options.
+
 ## [0.7.0] - 2025-01-XX
 
 ### Added - Browser Fetch API Compatibility (~85% API Parity)

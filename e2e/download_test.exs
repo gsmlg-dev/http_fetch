@@ -33,9 +33,8 @@ defmodule E2E.DownloadTest do
   end
 
   describe "byte range" do
-    # NOTE: :httpc does not currently surface the 206 status code for range
-    # requests; the response shape still has the correct Content-Range and
-    # body length. Tracked in issue #N.
+    # The important client contract for range responses is that the
+    # Content-Range header and response body slice are preserved.
     test "explicit range returns the correct Content-Range and body slice" do
       resp =
         E2E.Server.url("/range")

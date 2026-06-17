@@ -60,7 +60,7 @@ defmodule HTTP.AbortController do
 
   - Uses Elixir's `Agent` for state management
   - Registers with a `Registry` for process tracking
-  - Calls `:httpc.cancel_request/1` internally to abort the request
+  - Sends an abort message to the socket owner process
   - Thread-safe and can be called from any process
   - Idempotent - calling `abort/1` multiple times is safe
 
@@ -68,7 +68,7 @@ defmodule HTTP.AbortController do
 
   The controller maintains the following state:
 
-  - `request_id` - PID of the active `:httpc` request (set automatically)
+  - `request_id` - PID of the active socket owner process (set automatically)
   - `signal_ref` - Unique reference for registry lookup
   - `aborted` - Boolean flag indicating abort status
   """
@@ -98,12 +98,18 @@ defmodule HTTP.AbortController do
   end
 
   @doc """
-  Sets the `:httpc` request_id for the given controller.
+  Sets the active request process for the given controller.
   This links the controller to an active request.
   """
   @spec set_request_id(pid(), pid()) :: :ok
   def set_request_id(controller_pid, request_id) when is_pid(controller_pid) do
-    Agent.update(controller_pid, fn state -> %{state | request_id: request_id} end)
+    Agent.update(controller_pid, fn state ->
+      if state.aborted do
+        send(request_id, :abort)
+      end
+
+      %{state | request_id: request_id}
+    end)
   end
 
   @doc """
@@ -116,17 +122,16 @@ defmodule HTTP.AbortController do
 
   @doc """
   Aborts the associated HTTP request.
-  Sends a stop signal to :httpc if a request is active and not already aborted.
+  Sends a stop signal if a request is active and not already aborted.
   """
   @spec abort(pid()) :: :ok
   def abort(controller_pid) when is_pid(controller_pid) do
     Agent.update(controller_pid, fn state ->
       if state.request_id && !state.aborted do
-        # CORRECTED: Use :httpc.cancel_request/1
-        :httpc.cancel_request(state.request_id)
+        send(state.request_id, :abort)
         %{state | aborted: true}
       else
-        state
+        %{state | aborted: true}
       end
     end)
 

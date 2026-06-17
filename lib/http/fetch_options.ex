@@ -3,31 +3,27 @@ defmodule HTTP.FetchOptions do
   Options processing and validation for `HTTP.fetch/2` requests.
 
   This module handles the conversion of various option formats (maps, keyword lists,
-  structs) into structured options for `:httpc.request/4`. It provides a flexible
+  structs) into structured options for the internal socket transport. It provides a flexible
   API that supports both simple and advanced HTTP client configurations.
 
   ## Options Categories
 
   Options are divided into two main categories:
 
-  1. **HTTP Options** (3rd argument to `:httpc.request/4`) - Request-specific settings:
+  1. **Request Options** - Request-specific settings consumed by the socket transport:
      - `timeout` - Request timeout in milliseconds
      - `connect_timeout` - Connection timeout in milliseconds
      - `ssl` - SSL/TLS options
      - `autoredirect` - Follow redirects automatically
-     - `proxy_auth` - Proxy authentication
-     - `version` - HTTP version
-     - `relaxed` - Relaxed parsing mode
 
-  2. **Client Options** (4th argument to `:httpc.request/4`) - Client behavior settings:
-     - `sync` - Synchronous/asynchronous mode (default: false)
-     - `stream` - Response streaming configuration
-     - `body_format` - Response body format (:string or :binary)
-     - `full_result` - Return full HTTP response
-     - `headers_as_is` - Preserve header case
+  2. **Compatibility Options** - Parsed for source compatibility, but broad legacy-client
+     option parity is intentionally not implemented:
      - `socket_opts` - Socket-level options
-     - `receiver` - Custom receiver process
-     - `ipv6_host_with_brackets` - IPv6 host formatting
+
+     The socket transport does not implement legacy `:httpc` options such as `proxy_auth`,
+     `version`, `relaxed`, `body_format`, `full_result`, `headers_as_is`, `receiver`, or
+     `ipv6_host_with_brackets`; they are retained only when converting option structs back
+     to keyword lists.
 
   ## Basic Usage
 
@@ -53,12 +49,12 @@ defmodule HTTP.FetchOptions do
       HTTP.fetch("https://api.example.com", [
         method: "POST",
         body: "data",
-        # Request-specific options (3rd arg to :httpc.request)
+        # Request-specific options
         options: [
           timeout: 10_000,
           connect_timeout: 5_000
         ],
-        # Client-specific options (4th arg to :httpc.request)
+        # Compatibility options
         opts: [
           sync: false,
           body_format: :binary
@@ -153,8 +149,7 @@ defmodule HTTP.FetchOptions do
   end
 
   @doc """
-  Converts FetchOptions to HTTP options for :httpc.request 3rd argument.
-  Returns keyword list of HttpOptions.
+  Converts FetchOptions to request options.
   """
   @spec to_http_options(t()) :: keyword()
   def to_http_options(%__MODULE__{} = options) do
@@ -169,8 +164,7 @@ defmodule HTTP.FetchOptions do
   end
 
   @doc """
-  Converts FetchOptions to options for :httpc.request 4th argument.
-  Returns keyword list of Options.
+  Converts FetchOptions to compatibility client options.
   """
   @spec to_options(t()) :: keyword()
   def to_options(%__MODULE__{} = options) do

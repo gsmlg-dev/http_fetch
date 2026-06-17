@@ -1,6 +1,8 @@
 name: E2E
 
 on:
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       version:
@@ -26,7 +28,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.version }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}
           fetch-depth: 0
 
       - name: Set up Elixir
@@ -89,6 +91,7 @@ jobs:
 
       - name: Run E2E test suite
         env:
+          MIX_ENV: test
           E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
         run: mix test.e2e
 
