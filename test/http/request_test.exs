@@ -28,24 +28,20 @@ defmodule HTTP.RequestTest do
       assert request.content_type == "application/json"
     end
 
-    test "convert to httpc args" do
+    test "convert to HTTP/1.1 wire request" do
       request = %HTTP.Request{
         method: :get,
         url: URI.parse("http://example.com"),
         headers: HTTP.Headers.new([{"Accept", "application/json"}])
       }
 
-      [method, request_tuple, _http_options, _options] = HTTP.Request.to_httpc_args(request)
-      assert method == :get
-      assert {~c"http://example.com", headers} = request_tuple
+      wire = request |> HTTP.Request.to_iodata() |> IO.iodata_to_binary()
 
-      assert Enum.any?(headers, fn {name, value} ->
-               to_string(name) == "User-Agent" and to_string(value) =~ "Mozilla/5.0"
-             end)
-
-      assert Enum.any?(headers, fn {name, value} ->
-               to_string(name) == "Accept" and to_string(value) == "application/json"
-             end)
+      assert wire =~ "GET / HTTP/1.1\r\n"
+      assert wire =~ "Host: example.com\r\n"
+      assert wire =~ "Connection: close\r\n"
+      assert wire =~ "User-Agent: Mozilla/5.0"
+      assert wire =~ "Accept: application/json\r\n"
     end
 
     test "does not override provided user agent" do
@@ -55,18 +51,11 @@ defmodule HTTP.RequestTest do
         headers: HTTP.Headers.new([{"User-Agent", "CustomAgent/1.0"}])
       }
 
-      [method, request_tuple, _http_options, _options] = HTTP.Request.to_httpc_args(request)
-      assert method == :get
-      assert {~c"http://example.com", headers} = request_tuple
+      wire = request |> HTTP.Request.to_iodata() |> IO.iodata_to_binary()
 
-      assert Enum.any?(headers, fn {name, value} ->
-               to_string(name) == "User-Agent" and to_string(value) == "CustomAgent/1.0"
-             end)
-
-      # Should not have the default user agent
-      refute Enum.any?(headers, fn {name, value} ->
-               to_string(name) == "User-Agent" and to_string(value) =~ "http_fetch"
-             end)
+      assert wire =~ "GET / HTTP/1.1\r\n"
+      assert wire =~ "User-Agent: CustomAgent/1.0\r\n"
+      refute wire =~ "http_fetch/"
     end
   end
 end

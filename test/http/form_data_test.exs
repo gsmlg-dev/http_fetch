@@ -133,6 +133,27 @@ defmodule HTTP.FormDataTest do
 
       File.rm(path)
     end
+
+    test "encodes binary file streams without line-mode truncation" do
+      test_content = :crypto.strong_rand_bytes(100_000)
+      {:ok, path} = Briefly.create()
+      File.write!(path, test_content)
+      file_stream = File.stream!(path)
+
+      form =
+        HTTP.FormData.new()
+        |> HTTP.FormData.append_file("upload", "test.bin", file_stream)
+        |> Map.put(:boundary, "test-boundary")
+
+      assert {:multipart, body, "test-boundary"} = HTTP.FormData.to_body(form)
+      body_binary = IO.iodata_to_binary(body)
+      [_headers, rest] = String.split(body_binary, "\r\n\r\n", parts: 2)
+      [file_content, _closing] = :binary.split(rest, "\r\n--test-boundary--\r\n")
+
+      assert file_content == test_content
+
+      File.rm(path)
+    end
   end
 
   describe "get_content_type/1" do

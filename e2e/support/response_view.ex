@@ -45,12 +45,17 @@ defmodule E2E.ResponseView do
 
   @doc "Returns the raw response body as a binary."
   @spec text(t()) :: binary()
-  def text(%__MODULE__{body: body}), do: body || ""
+  def text(%__MODULE__{body: body}) when is_binary(body), do: body
+
+  def text(%__MODULE__{stream: pid}) when is_pid(pid) do
+    HTTP.Response.read_all(%HTTP.Response{stream: pid})
+  end
+
+  def text(%__MODULE__{}), do: ""
 
   @doc "Decodes the body as JSON. Returns `{:ok, term}` or `{:error, reason}`."
   @spec json(t()) :: {:ok, term()} | {:error, term()}
-  def json(%__MODULE__{body: body}) when is_binary(body), do: JSON.decode(body)
-  def json(%__MODULE__{body: nil}), do: {:error, :no_body}
+  def json(%__MODULE__{} = view), do: view |> text() |> JSON.decode()
 
   @doc "Decodes the body as JSON, raising on failure."
   @spec json!(t()) :: term()
@@ -74,13 +79,9 @@ defmodule E2E.ResponseView do
   pid. Blocks until the stream completes.
   """
   @spec read_json(t()) :: {:ok, term()} | {:error, term()}
-  def read_json(%__MODULE__{body: body, stream: nil}) when is_binary(body), do: JSON.decode(body)
-
-  def read_json(%__MODULE__{body: _body, stream: pid}) when is_pid(pid) do
-    pid |> HTTP.Response.read_all() |> JSON.decode()
-  end
+  def read_json(%__MODULE__{} = view), do: json(view)
 
   @doc "Returns the parsed SSE event list. Convenience wrapper around `E2E.SSE`."
   @spec sse_events(t()) :: [E2E.SSE.event()]
-  def sse_events(%__MODULE__{body: body}) when is_binary(body), do: E2E.SSE.parse(body)
+  def sse_events(%__MODULE__{} = view), do: view |> text() |> E2E.SSE.parse()
 end

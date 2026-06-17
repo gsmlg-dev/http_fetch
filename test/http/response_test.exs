@@ -67,13 +67,9 @@ defmodule HTTP.ResponseTest do
     end
 
     test "fetch and read data by `read_all/1`" do
-      resp =
-        HTTP.fetch("https://www.internic.net/domain/root.zone",
-          headers: [{"user-agent", "Elixir http_fetch 0.4.1"}],
-          timeout: 30_000,
-          connect_timeout: 15_000
-        )
-        |> HTTP.Promise.await()
+      body = String.duplicate("root-zone-line\n", 100)
+      url = start_local_http_server!(body)
+      resp = url |> HTTP.fetch(timeout: 5_000, connect_timeout: 1_000) |> HTTP.Promise.await()
 
       assert resp.status == 200
 
@@ -160,13 +156,10 @@ defmodule HTTP.ResponseTest do
 
     test "write_to with actual HTTP response" do
       temp_path = Path.join(System.tmp_dir!(), "actual_response_test.txt")
+      body = ~s({"slideshow":{"title":"Sample Slide Show"}})
+      url = start_local_http_server!(body, [{"Content-Type", "application/json"}])
 
-      resp =
-        HTTP.fetch("https://httpbin.org/json",
-          headers: [{"user-agent", "Elixir http_fetch 0.4.1"}],
-          timeout: 30_000
-        )
-        |> HTTP.Promise.await()
+      resp = url |> HTTP.fetch(timeout: 5_000, connect_timeout: 1_000) |> HTTP.Promise.await()
 
       assert resp.status == 200
       assert :ok = HTTP.Response.write_to(resp, temp_path)
@@ -179,6 +172,55 @@ defmodule HTTP.ResponseTest do
 
       # Cleanup
       File.rm!(temp_path)
+    end
+  end
+
+  defp start_local_http_server!(body, headers \\ [{"Content-Type", "text/plain"}]) do
+    {:ok, listen_socket} =
+      :gen_tcp.listen(0, [
+        :binary,
+        packet: :raw,
+        active: false,
+        ip: {127, 0, 0, 1},
+        reuseaddr: true
+      ])
+
+    {:ok, port} = :inet.port(listen_socket)
+
+    pid =
+      spawn_link(fn ->
+        {:ok, socket} = :gen_tcp.accept(listen_socket)
+        _ = recv_headers(socket, <<>>)
+
+        response_headers =
+          headers
+          |> Enum.concat([
+            {"Content-Length", to_string(byte_size(body))},
+            {"Connection", "close"}
+          ])
+          |> Enum.map(fn {name, value} -> [name, ": ", value, "\r\n"] end)
+
+        :ok = :gen_tcp.send(socket, ["HTTP/1.1 200 OK\r\n", response_headers, "\r\n", body])
+        :gen_tcp.close(socket)
+        :gen_tcp.close(listen_socket)
+      end)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+      :gen_tcp.close(listen_socket)
+    end)
+
+    "http://127.0.0.1:#{port}/test"
+  end
+
+  defp recv_headers(socket, acc) do
+    if String.contains?(acc, "\r\n\r\n") do
+      :ok
+    else
+      case :gen_tcp.recv(socket, 0, 5_000) do
+        {:ok, data} -> recv_headers(socket, acc <> data)
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 end

@@ -15,7 +15,7 @@ defmodule HttpFetch.MixProject do
       dialyzer: dialyzer(),
       aliases: aliases(),
       description:
-        "A browser-like HTTP fetch API for Elixir using Erlang's built-in :httpc module",
+        "A browser-like HTTP fetch API for Elixir using Erlang's built-in socket modules",
       package: [
         files: ["lib", "mix.exs", "README*", "LICENSE*", "CHANGELOG*"],
         maintainers: ["Jonathan Gao"],
@@ -34,7 +34,7 @@ defmodule HttpFetch.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :inets, :public_key, :ssl],
+      extra_applications: [:logger, :public_key, :ssl],
       mod: {HTTPFetch.Application, []}
     ]
   end

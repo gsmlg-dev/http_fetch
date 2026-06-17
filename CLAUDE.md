@@ -4,14 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Elixir library providing a browser-like HTTP fetch API built on Erlang's `:httpc` module. It implements Promise-based async operations with request cancellation, streaming support, and comprehensive telemetry integration.
+This is an Elixir library providing a browser-like HTTP fetch API built on Erlang's `:gen_tcp` and `:ssl` modules. It implements Promise-based async operations with request cancellation, streaming support, and comprehensive telemetry integration.
 
 ## Core Architecture
 
 ### Main Modules
 - **HTTP** (`lib/http.ex`): Entry point providing `fetch/2` function. Handles async request execution via Task.Supervisor, response processing (including streaming detection), and telemetry event emission
 - **HTTP.Promise** (`lib/http/promise.ex`): JavaScript-like Promise implementation wrapping Task with chaining via `then/3` and `await/2`
-- **HTTP.Request** (`lib/http/request.ex`): Request configuration struct that converts to `:httpc.request/4` arguments. Maps `http_options` to 3rd arg and `options` to 4th arg
+- **HTTP.Request** (`lib/http/request.ex`): Request configuration struct that serializes to HTTP/1.1 wire iodata
+- **HTTP.HTTP1** (`lib/http/http1.ex`): Pure HTTP/1.1 serializer and response parser for status, headers, Content-Length, chunked bodies, and read-to-close bodies
+- **HTTP.SocketClient** (`lib/http/socket_client.ex`): Socket owner process for one request lifecycle, including TCP/TLS/Unix transport selection, redirects, streaming, deadlines, and aborts
 - **HTTP.Response** (`lib/http/response.ex`): Response struct with `json/1`, `text/1`, and `write_to/2` methods. Handles both buffered and streamed responses
 - **HTTP.Headers** (`lib/http/headers.ex`): Headers manipulation with case-insensitive operations, Content-Type parsing, and default User-Agent support
 - **HTTP.FormData** (`lib/http/form_data.ex`): Multipart/form-data encoding with streaming file upload support
@@ -23,8 +25,8 @@ This is an Elixir library providing a browser-like HTTP fetch API built on Erlan
 - **HTTPFetch.Application** (`lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
 
 ### Key Design Patterns
-1. **Async by default**: All requests use Task.Supervisor with `async_nolink/4` and `:httpc` with `sync: false`
-2. **Streaming threshold**: Responses >5MB or with unknown Content-Length automatically stream via separate process (`lib/http.ex:341-356`)
+1. **Async by default**: All requests use Task.Supervisor with `async_nolink/4`
+2. **Streaming threshold**: Responses >5MB or with unknown Content-Length automatically stream via `HTTP.Stream`
 3. **Telemetry instrumentation**: All operations emit `:telemetry` events (`:http_fetch` prefix) for monitoring and observability
 4. **Error propagation**: Uses `throw/catch` internally to convert errors to `{:error, reason}` tuples for consistent API
 
@@ -80,12 +82,12 @@ MIX_ENV=prod mix compile
 ## Important Implementation Details
 
 ### Request Options Mapping
-- `options:` keyword in `fetch/2` maps to `http_options` (3rd arg to `:httpc.request/4`) - controls timeout, connect_timeout, etc.
-- `opts:` keyword in `fetch/2` maps to `options` (4th arg to `:httpc.request/4`) - controls sync, body_format, etc.
+- `options:` keyword in `fetch/2` maps to request options - controls timeout, connect_timeout, ssl, autoredirect, etc.
+- `opts:` keyword in `fetch/2` maps to compatibility options - currently used for socket options.
 
 ### Streaming Behavior
-- Automatic streaming for responses >5MB or unknown Content-Length (`lib/http.ex:341`)
-- Stream process spawned via `Task.start_link` receiving `:http` messages from `:httpc`
+- Automatic streaming for responses >5MB or unknown Content-Length
+- Stream process receives decoded body chunks from the socket owner
 - Stream messages: `{:stream_chunk, pid, data}`, `{:stream_end, pid}`, `{:stream_error, pid, reason}`
 
 ### Response Body Handling
@@ -122,9 +124,8 @@ Dialyzer performs static type analysis to catch type errors and inconsistencies.
 Current known issues to address:
 - `HTTP.fetch/2`: Spec doesn't match success typing (may be due to throw/catch usage)
 - `HTTP.Promise.then/3`: Opaque type violations with Task struct
-- `HTTP.Request.to_httpc_args/1`: Spec returns tuple but actual implementation returns list
 - Various pattern match and contract issues
 
 ## Requirements
 - Elixir 1.18+ (for built-in `JSON` module support)
-- Erlang OTP with `:inets`, `:ssl`, `:public_key` applications
+- Erlang OTP with `:ssl` and `:public_key` applications

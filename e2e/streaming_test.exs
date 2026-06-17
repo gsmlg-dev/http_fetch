@@ -57,17 +57,12 @@ defmodule E2E.StreamingTest do
     assert @expected_size > @streaming_threshold
   end
 
-  test "currently the >5MB response is buffered in `body` (streaming path is not triggered; tracked in issue #N)" do
-    # NOTE: The current implementation buffers the full body even when the
-    # content length exceeds the streaming threshold. This is a real finding
-    # the e2e suite is surfacing. Once the streaming path is fixed, flip
-    # this assertion and re-enable the tests below.
+  test "the >5MB response is streamed instead of buffered" do
     resp = E2E.Server.url("/stream-large") |> HTTP.fetch() |> HTTP.Promise.await()
     assert %HTTP.Response{} = resp
     assert resp.status == 200
-    assert is_binary(resp.body)
-    assert byte_size(resp.body) == @expected_size
-    assert resp.stream == nil
+    assert resp.body == nil
+    assert is_pid(resp.stream)
   end
 
   # TODO(upstream): gsmlg-dev/http_fetch#10
