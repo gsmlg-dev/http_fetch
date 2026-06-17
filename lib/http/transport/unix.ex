@@ -16,6 +16,9 @@ defmodule HTTP.Transport.Unix do
   end
 
   @impl true
+  def controlling_process(socket, pid), do: :gen_tcp.controlling_process(socket, pid)
+
+  @impl true
   def send(socket, iodata), do: :gen_tcp.send(socket, iodata)
 
   @impl true

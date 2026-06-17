@@ -6,6 +6,7 @@ defmodule HTTP.Transport do
 
   @callback connect(String.t(), non_neg_integer(), keyword(), timeout()) ::
               {:ok, socket()} | {:error, term()}
+  @callback controlling_process(socket(), pid()) :: :ok | {:error, term()}
   @callback send(socket(), iodata()) :: :ok | {:error, term()}
   @callback setopts(socket(), keyword()) :: :ok | {:error, term()}
   @callback close(socket()) :: :ok

@@ -20,6 +20,11 @@ defmodule HTTP.FetchOptions do
      option parity is intentionally not implemented:
      - `socket_opts` - Socket-level options
 
+     The socket transport does not implement legacy `:httpc` options such as `proxy_auth`,
+     `version`, `relaxed`, `body_format`, `full_result`, `headers_as_is`, `receiver`, or
+     `ipv6_host_with_brackets`; they are retained only when converting option structs back
+     to keyword lists.
+
   ## Basic Usage
 
       # Simple options as keyword list

@@ -113,6 +113,10 @@ defmodule HTTP do
                  (e.g., invalid URL, bad arguments), the Promise will contain an error result
                  when awaited.
 
+  The socket transport defaults `autoredirect` to `true`; pass `options: [autoredirect: false]`
+  to return redirect responses. Request timeout handling gives the internal socket owner up to one
+  additional second to report its timeout before the awaiting caller aborts it.
+
   Example Usage:
 
       # GET request and awaiting JSON

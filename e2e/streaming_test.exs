@@ -63,6 +63,7 @@ defmodule E2E.StreamingTest do
     assert resp.status == 200
     assert resp.body == nil
     assert is_pid(resp.stream)
+    assert resp |> HTTP.Response.read_all() |> byte_size() == @expected_size
   end
 
   test "streamed response has body=nil and a stream pid" do
@@ -70,6 +71,7 @@ defmodule E2E.StreamingTest do
     assert %HTTP.Response{body: nil, stream: stream} = resp
     assert is_pid(stream)
     assert resp.status == 200
+    assert resp |> HTTP.Response.read_all() |> byte_size() == @expected_size
   end
 
   test "read_all/1 returns the full body" do
@@ -89,8 +91,9 @@ defmodule E2E.StreamingTest do
   end
 
   test "emits :streaming, :start, :chunk (>=1), and :stop telemetry events" do
-    _ = E2E.Server.url("/stream-large") |> HTTP.fetch() |> HTTP.Promise.await()
-    # Wait briefly for the stream to flush any tail events.
+    resp = E2E.Server.url("/stream-large") |> HTTP.fetch() |> HTTP.Promise.await()
+    assert resp |> HTTP.Response.read_all() |> byte_size() == @expected_size
+
     Process.sleep(100)
     events = drain_telemetry() |> Enum.map(fn {:telemetry, name, _} -> name end)
 

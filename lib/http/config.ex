@@ -7,8 +7,12 @@ defmodule HTTP.Config do
 
   ## Configuration Values
 
-  All configuration values are compile-time constants defined as module attributes.
-  To customize these values, modify this module and recompile the library.
+  Configuration values can be overridden at runtime with application environment:
+
+      config :http_fetch,
+        streaming_threshold: 5_000_000,
+        default_request_timeout: 120_000,
+        streaming_timeout: 60_000
 
   ### Streaming Configuration
 
@@ -55,8 +59,10 @@ defmodule HTTP.Config do
       iex> HTTP.Config.streaming_threshold()
       5_000_000
   """
-  @spec streaming_threshold() :: 5_000_000
-  def streaming_threshold, do: @streaming_threshold
+  @spec streaming_threshold() :: non_neg_integer()
+  def streaming_threshold do
+    Application.get_env(:http_fetch, :streaming_threshold, @streaming_threshold)
+  end
 
   @doc """
   Returns the default request timeout in milliseconds.
@@ -71,8 +77,10 @@ defmodule HTTP.Config do
       iex> HTTP.Config.default_request_timeout()
       120_000
   """
-  @spec default_request_timeout() :: 120_000
-  def default_request_timeout, do: @default_request_timeout
+  @spec default_request_timeout() :: non_neg_integer()
+  def default_request_timeout do
+    Application.get_env(:http_fetch, :default_request_timeout, @default_request_timeout)
+  end
 
   @doc """
   Returns the streaming timeout in milliseconds.
@@ -88,6 +96,8 @@ defmodule HTTP.Config do
       iex> HTTP.Config.streaming_timeout()
       60_000
   """
-  @spec streaming_timeout() :: 60_000
-  def streaming_timeout, do: @streaming_timeout
+  @spec streaming_timeout() :: non_neg_integer()
+  def streaming_timeout do
+    Application.get_env(:http_fetch, :streaming_timeout, @streaming_timeout)
+  end
 end

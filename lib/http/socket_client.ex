@@ -11,14 +11,15 @@ defmodule HTTP.SocketClient do
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
     ref = make_ref()
     parent = self()
-    deadline_at = System.monotonic_time(:millisecond) + request_timeout(request)
+    timeout = request_timeout(request)
+    deadline_at = System.monotonic_time(:millisecond) + timeout
 
     case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
            owner(parent, ref, request, unix_socket_path, 0, false, deadline_at)
          end) do
       {:ok, owner_pid} ->
         set_abort_owner(abort_controller_pid, owner_pid)
-        await_owner(ref, owner_pid, request_timeout(request))
+        await_owner(ref, owner_pid, timeout)
 
       {:error, reason} ->
         {:error, reason}
@@ -34,9 +35,10 @@ defmodule HTTP.SocketClient do
         timer_ref = Process.send_after(self(), :deadline, timeout)
 
         with {:ok, transport, host, port} <- select_transport(request, unix_socket_path),
+             {:ok, wire_request} <- serialize_request(request),
              {:ok, socket} <- connect(transport, host, port, request, timeout),
-             :ok <- transport.send(socket, HTTP.HTTP1.serialize_request(request)),
-             :ok <- transport.setopts(socket, active: :once) do
+             :ok <- send_request(transport, socket, wire_request, timeout),
+             :ok <- activate_socket(transport, socket) do
           state = %{
             parent: parent,
             ref: ref,
@@ -60,6 +62,12 @@ defmodule HTTP.SocketClient do
             send_error(parent, ref, reason)
         end
     end
+  end
+
+  defp serialize_request(%Request{} = request) do
+    {:ok, HTTP.HTTP1.serialize_request(request)}
+  rescue
+    error -> {:error, error}
   end
 
   defp owner_loop(state) do
@@ -125,21 +133,28 @@ defmodule HTTP.SocketClient do
         redirected: state.redirected?
       )
 
-    if stream_response?(state.request, status, headers) do
-      content_length = headers |> Headers.get("content-length") |> parse_content_length()
-      {:ok, stream_pid} = HTTP.Stream.start_link(content_length)
-      response = %{response | stream: stream_pid}
-      send_response(state.parent, state.ref, response)
+    cond do
+      follow_redirect?(state, response) ->
+        redirect(state, response)
 
-      {:continue, %{state | mode: {:stream, stream_pid}, response_sent?: true}}
-    else
-      {:continue, %{state | mode: {:buffer, response, []}}}
+      stream_response?(state.request, status, headers) ->
+        content_length = stream_content_length(headers)
+        {:ok, stream_pid} = HTTP.Stream.start_link(content_length)
+        response = %{response | stream: stream_pid}
+        send_response(state.parent, state.ref, response)
+
+        {:continue, %{state | mode: {:stream, stream_pid}, response_sent?: true}}
+
+      true ->
+        {:continue, %{state | mode: {:buffer, response, []}}}
     end
   end
 
   defp handle_event(%{mode: {:stream, stream_pid}} = state, {:body, chunk}) do
-    HTTP.Stream.chunk(stream_pid, chunk)
-    {:continue, state}
+    case HTTP.Stream.chunk(stream_pid, chunk, stream_chunk_timeout(state.deadline_at)) do
+      :ok -> {:continue, state}
+      {:error, reason} -> fail(state, reason)
+    end
   end
 
   defp handle_event(%{mode: {:buffer, response, chunks}} = state, {:body, chunk}) do
@@ -261,7 +276,114 @@ defmodule HTTP.SocketClient do
 
   defp connect(transport, host, port, request, timeout) do
     connect_timeout = min(connect_timeout(request), timeout)
-    transport.connect(host, port, transport_opts(request), connect_timeout)
+
+    interruptible_connect(
+      transport,
+      host,
+      port,
+      transport_opts(request, timeout),
+      connect_timeout
+    )
+  end
+
+  defp interruptible_connect(transport, host, port, opts, timeout) do
+    parent = self()
+    ref = make_ref()
+
+    case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
+           result = connect_in_worker(transport, host, port, opts, timeout, parent)
+           send(parent, {:connect_result, ref, result})
+         end) do
+      {:ok, pid} ->
+        receive do
+          {:connect_result, ^ref, result} ->
+            result
+
+          :abort ->
+            Process.exit(pid, :kill)
+            {:error, :aborted}
+
+          :deadline ->
+            Process.exit(pid, :kill)
+            {:error, :request_timeout}
+        after
+          timeout ->
+            Process.exit(pid, :kill)
+            {:error, :connect_timeout}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp connect_in_worker(transport, host, port, opts, timeout, owner) do
+    case transport.connect(host, port, opts, timeout) do
+      {:ok, socket} ->
+        case transport.controlling_process(socket, owner) do
+          :ok ->
+            {:ok, socket}
+
+          {:error, reason} ->
+            transport.close(socket)
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp send_request(transport, socket, iodata, timeout) do
+    parent = self()
+    ref = make_ref()
+
+    case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
+           send(parent, {:send_result, ref, transport.send(socket, iodata)})
+         end) do
+      {:ok, pid} ->
+        receive do
+          {:send_result, ^ref, result} ->
+            close_on_error(transport, socket, result)
+
+          :abort ->
+            transport.close(socket)
+            Process.exit(pid, :kill)
+            {:error, :aborted}
+
+          :deadline ->
+            transport.close(socket)
+            Process.exit(pid, :kill)
+            {:error, :request_timeout}
+        after
+          timeout ->
+            transport.close(socket)
+            Process.exit(pid, :kill)
+            {:error, :request_timeout}
+        end
+
+      {:error, reason} ->
+        transport.close(socket)
+        {:error, reason}
+    end
+  end
+
+  defp close_on_error(_transport, _socket, :ok), do: :ok
+
+  defp close_on_error(transport, socket, {:error, reason}) do
+    transport.close(socket)
+    {:error, reason}
+  end
+
+  defp activate_socket(transport, socket) do
+    case transport.setopts(socket, active: :once) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        transport.close(socket)
+        {:error, reason}
+    end
   end
 
   defp select_transport(_request, socket_path) when is_binary(socket_path) do
@@ -290,10 +412,16 @@ defmodule HTTP.SocketClient do
     Keyword.get(request.http_options, :connect_timeout, min(request_timeout(request), 30_000))
   end
 
-  defp transport_opts(%Request{} = request) do
+  defp transport_opts(%Request{} = request, timeout) do
+    socket_opts =
+      request.options
+      |> Keyword.get(:socket_opts, [])
+      |> Keyword.put_new(:send_timeout, max(timeout, 1))
+      |> Keyword.put_new(:send_timeout_close, true)
+
     [
       ssl: Keyword.get(request.http_options, :ssl, []),
-      socket_opts: Keyword.get(request.options, :socket_opts, [])
+      socket_opts: socket_opts
     ]
   end
 
@@ -301,35 +429,55 @@ defmodule HTTP.SocketClient do
     max(deadline_at - System.monotonic_time(:millisecond), 0)
   end
 
-  defp stream_response?(request, status, headers) do
-    !redirect_candidate?(request, status, headers) &&
-      !body_forbidden?(request.method, status) &&
-      should_use_streaming?(Headers.get(headers, "content-length"))
+  defp stream_chunk_timeout(deadline_at) do
+    min(remaining_timeout(deadline_at), HTTP.Config.streaming_timeout())
   end
 
-  defp should_use_streaming?(content_length) do
-    threshold = HTTP.Config.streaming_threshold()
+  defp stream_response?(request, status, headers) do
+    !HTTP.HTTP1.body_forbidden?(request.method, status) &&
+      should_use_streaming?(headers)
+  end
 
-    case Integer.parse(content_length || "") do
-      {size, _} -> size > threshold
-      _ -> is_nil(content_length)
+  defp should_use_streaming?(headers) do
+    threshold = HTTP.Config.streaming_threshold()
+    content_length = Headers.get(headers, "content-length")
+
+    if chunked_transfer?(Headers.get(headers, "transfer-encoding")) do
+      true
+    else
+      case Integer.parse(content_length || "") do
+        {size, ""} -> size > threshold
+        _ -> is_nil(content_length)
+      end
+    end
+  end
+
+  defp stream_content_length(headers) do
+    if chunked_transfer?(Headers.get(headers, "transfer-encoding")) do
+      0
+    else
+      headers |> Headers.get("content-length") |> parse_content_length()
     end
   end
 
   defp parse_content_length(content_length) do
     case Integer.parse(content_length || "") do
-      {size, _} -> size
+      {size, ""} -> size
       _ -> 0
     end
   end
 
-  defp body_forbidden?(:head, _status), do: true
-  defp body_forbidden?(_method, status) when status in 100..199, do: true
-  defp body_forbidden?(_method, status) when status in [204, 304], do: true
-  defp body_forbidden?(_, _), do: false
+  defp chunked_transfer?(nil), do: false
+
+  defp chunked_transfer?(transfer_encoding) do
+    transfer_encoding
+    |> String.downcase()
+    |> String.split(",")
+    |> Enum.any?(&(String.trim(&1) == "chunked"))
+  end
 
   defp follow_redirect?(state, response) do
-    Keyword.get(state.request.http_options, :autoredirect, false) &&
+    Keyword.get(state.request.http_options, :autoredirect, true) &&
       state.redirects < @max_redirects &&
       redirect_candidate?(state.request, response.status, response.headers)
   end
@@ -354,15 +502,34 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp rewrite_redirect_method(request, status) when status in [301, 302, 303] do
-    if request.method in [:get, :head] do
-      request
-    else
-      %{request | method: :get, body: nil, content_type: nil}
-    end
-  end
+  defp rewrite_redirect_method(%{method: :post} = request, status) when status in [301, 302],
+    do: drop_redirect_body(request)
+
+  defp rewrite_redirect_method(request, 303) when request.method not in [:get, :head],
+    do: drop_redirect_body(request)
 
   defp rewrite_redirect_method(request, _status), do: request
+
+  defp drop_redirect_body(request) do
+    %{
+      request
+      | method: :get,
+        body: nil,
+        content_type: nil,
+        headers: delete_entity_headers(request.headers)
+    }
+  end
+
+  defp delete_entity_headers(headers) do
+    headers
+    |> Headers.delete("Content-Encoding")
+    |> Headers.delete("Content-Language")
+    |> Headers.delete("Content-Location")
+    |> Headers.delete("Content-Length")
+    |> Headers.delete("Content-Type")
+    |> Headers.delete("Transfer-Encoding")
+    |> Headers.delete("Trailer")
+  end
 
   defp strip_redirect_headers(request, cross_origin?) do
     headers = Headers.delete(request.headers, "Host")
@@ -381,10 +548,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp cross_origin?(%URI{} = left, %URI{} = right) do
-    {left.scheme, left.host, left.port || default_port(left.scheme)} !=
-      {right.scheme, right.host, right.port || default_port(right.scheme)}
+    {left.scheme, left.host, left.port || HTTP.HTTP1.default_port(left.scheme)} !=
+      {right.scheme, right.host, right.port || HTTP.HTTP1.default_port(right.scheme)}
   end
-
-  defp default_port("https"), do: 443
-  defp default_port(_), do: 80
 end

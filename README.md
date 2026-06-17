@@ -272,6 +272,12 @@ request = %HTTP.Request{
 - `http_options`: Request options such as `timeout`, `connect_timeout`, `ssl`, and `autoredirect`
 - `options`: Compatibility options such as `socket_opts`
 
+`autoredirect` defaults to `true` with the socket transport. Pass
+`http_options: [autoredirect: false]` or `options: [autoredirect: false]` to return redirect responses.
+Legacy `:httpc` options such as `proxy_auth`, `version`, `relaxed`, `body_format`,
+`full_result`, `headers_as_is`, `receiver`, and `ipv6_host_with_brackets` are parsed for
+source compatibility but are not implemented by the socket transport.
+
 ### HTTP.FormData
 Handle form data and file uploads.
 

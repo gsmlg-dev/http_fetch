@@ -4,6 +4,12 @@ defmodule HTTP.HTTP1 do
   alias HTTP.Headers
   alias HTTP.Request
 
+  @allowed_methods ~w(DELETE GET HEAD OPTIONS PATCH POST PUT)
+  @max_head_bytes 64 * 1024
+  @max_trailer_bytes 64 * 1024
+  @max_line_bytes 8 * 1024
+  @max_chunk_emit_bytes 64 * 1024
+
   defstruct method: :get,
             state: :head,
             buffer: <<>>,
@@ -20,11 +26,11 @@ defmodule HTTP.HTTP1 do
 
   @spec serialize_request(Request.t()) :: iolist()
   def serialize_request(%Request{} = request) do
-    method = request.method |> to_string() |> String.upcase()
+    method = method_token(request.method)
     target = request_target(request.url)
 
     {headers, body} = request |> request_headers() |> add_body_headers(request)
-    header_lines = Enum.map(headers.headers, fn {name, value} -> [name, ": ", value, "\r\n"] end)
+    header_lines = Enum.map(headers.headers, fn {name, value} -> header_line(name, value) end)
 
     [method, " ", target, " HTTP/1.1\r\n", header_lines, "\r\n", body]
   end
@@ -66,21 +72,23 @@ defmodule HTTP.HTTP1 do
   defp parse(%__MODULE__{state: :head, buffer: buffer} = conn, events) do
     case :binary.match(buffer, "\r\n\r\n") do
       {index, 4} ->
-        head = binary_part(buffer, 0, index)
-        body = binary_part(buffer, index + 4, byte_size(buffer) - index - 4)
+        if index > @max_head_bytes do
+          {:error, :headers_too_large}
+        else
+          head = binary_part(buffer, 0, index)
+          body = binary_part(buffer, index + 4, byte_size(buffer) - index - 4)
 
-        with {:ok, status, headers} <- parse_head(head) do
-          conn =
-            conn
-            |> Map.merge(%{status: status, headers: headers, buffer: body})
-            |> set_body_framing()
-
-          events = [{:headers, status, headers} | events]
-          parse(conn, maybe_done_event(conn, events))
+          with {:ok, status, headers} <- parse_head(head) do
+            parse_head_response(conn, status, headers, body, events)
+          end
         end
 
       :nomatch ->
-        {:ok, conn, Enum.reverse(events)}
+        if byte_size(buffer) > @max_head_bytes do
+          {:error, :headers_too_large}
+        else
+          {:ok, conn, Enum.reverse(events)}
+        end
     end
   end
 
@@ -130,39 +138,78 @@ defmodule HTTP.HTTP1 do
 
       :more ->
         {:ok, conn, Enum.reverse(events)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
+  defp parse(%__MODULE__{state: :chunk_data, buffer: <<>>} = conn, events) do
+    {:ok, conn, Enum.reverse(events)}
+  end
+
   defp parse(%__MODULE__{state: :chunk_data, buffer: buffer, chunk_size: size} = conn, events) do
-    needed = size + 2
+    take_size = min(min(byte_size(buffer), size), @max_chunk_emit_bytes)
+    <<chunk::binary-size(take_size), rest::binary>> = buffer
 
-    if byte_size(buffer) < needed do
-      {:ok, conn, Enum.reverse(events)}
-    else
-      case buffer do
-        <<chunk::binary-size(size), "\r\n", rest::binary>> ->
-          conn = %{conn | state: :chunk_size, buffer: rest, chunk_size: nil}
-          parse(conn, [{:body, chunk} | events])
+    conn = %{conn | buffer: rest, chunk_size: size - take_size}
+    events = if take_size > 0, do: [{:body, chunk} | events], else: events
 
-        _ ->
-          {:error, :invalid_chunk}
-      end
+    cond do
+      conn.chunk_size == 0 ->
+        parse(%{conn | state: :chunk_crlf, chunk_size: nil}, events)
+
+      byte_size(conn.buffer) > 0 ->
+        parse(conn, events)
+
+      true ->
+        {:ok, conn, Enum.reverse(events)}
+    end
+  end
+
+  defp parse(%__MODULE__{state: :chunk_crlf, buffer: buffer} = conn, events) do
+    case buffer do
+      <<"\r\n", rest::binary>> ->
+        parse(%{conn | state: :chunk_size, buffer: rest}, events)
+
+      <<>> ->
+        {:ok, conn, Enum.reverse(events)}
+
+      <<"\r">> ->
+        {:ok, conn, Enum.reverse(events)}
+
+      _ ->
+        {:error, :invalid_chunk}
     end
   end
 
   defp parse(%__MODULE__{state: :chunk_trailers, buffer: buffer} = conn, events) do
-    cond do
-      String.starts_with?(buffer, "\r\n") ->
-        rest = binary_part(buffer, 2, byte_size(buffer) - 2)
+    case trailer_end(buffer) do
+      {:ok, rest} ->
         parse(%{conn | state: :done, buffer: rest}, [:done | events])
 
-      match = :binary.match(buffer, "\r\n\r\n") ->
-        {index, 4} = match
-        rest = binary_part(buffer, index + 4, byte_size(buffer) - index - 4)
-        parse(%{conn | state: :done, buffer: rest}, [:done | events])
-
-      true ->
+      :more ->
         {:ok, conn, Enum.reverse(events)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp parse_head_response(_conn, 101, _headers, _body, _events) do
+    {:error, :unsupported_protocol_switch}
+  end
+
+  defp parse_head_response(conn, status, _headers, body, events) when status in 100..199 do
+    parse(%{conn | state: :head, buffer: body, status: nil, headers: %Headers{}}, events)
+  end
+
+  defp parse_head_response(conn, status, headers, body, events) do
+    conn = Map.merge(conn, %{status: status, headers: headers, buffer: body})
+
+    with {:ok, conn} <- set_body_framing(conn) do
+      events = [{:headers, status, headers} | events]
+      parse(conn, maybe_done_event(conn, events))
     end
   end
 
@@ -204,38 +251,75 @@ defmodule HTTP.HTTP1 do
 
   defp set_body_framing(%__MODULE__{} = conn) do
     transfer_encoding = Headers.get(conn.headers, "transfer-encoding")
-    content_length = Headers.get(conn.headers, "content-length")
+    content_lengths = Headers.get_all(conn.headers, "content-length")
 
     cond do
-      body_forbidden?(conn.method, conn.status) ->
-        %{conn | state: :done, remaining: 0}
+      HTTP.HTTP1.body_forbidden?(conn.method, conn.status) ->
+        {:ok, %{conn | state: :done, remaining: 0}}
 
       chunked?(transfer_encoding) ->
-        %{conn | state: :chunk_size}
+        {:ok, %{conn | state: :chunk_size}}
 
-      is_binary(content_length) ->
-        set_content_length_framing(conn, content_length)
+      content_lengths != [] ->
+        with {:ok, length} <- parse_content_lengths(content_lengths) do
+          {:ok, set_content_length_framing(conn, length)}
+        end
 
       true ->
-        %{conn | state: :body_eof}
+        {:ok, %{conn | state: :body_eof}}
     end
   end
 
-  defp set_content_length_framing(conn, content_length) do
-    case Integer.parse(content_length) do
-      {0, ""} -> %{conn | state: :done, remaining: 0}
-      {length, ""} when length > 0 -> %{conn | state: :content_length, remaining: length}
-      _ -> %{conn | state: :done, remaining: 0}
+  defp parse_content_lengths(values) do
+    lengths = Enum.map(values, &String.trim/1)
+
+    if lengths == [] or Enum.any?(lengths, &invalid_content_length_value?/1) do
+      {:error, :invalid_content_length}
+    else
+      lengths
+      |> Enum.reduce_while({:ok, []}, fn value, {:ok, acc} ->
+        case parse_content_length(value) do
+          {:ok, length} -> {:cont, {:ok, [length | acc]}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+      |> case do
+        {:ok, parsed_lengths} ->
+          case Enum.uniq(parsed_lengths) do
+            [length] -> {:ok, length}
+            _ -> {:error, :invalid_content_length}
+          end
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
+
+  defp invalid_content_length_value?(value), do: value == "" or String.contains?(value, ",")
+
+  defp parse_content_length(value) do
+    if digits_only?(value) do
+      {:ok, String.to_integer(value)}
+    else
+      {:error, :invalid_content_length}
+    end
+  end
+
+  defp set_content_length_framing(conn, 0), do: %{conn | state: :done, remaining: 0}
+
+  defp set_content_length_framing(conn, length) when length > 0,
+    do: %{conn | state: :content_length, remaining: length}
 
   defp maybe_done_event(%__MODULE__{state: :done}, events), do: [:done | events]
   defp maybe_done_event(_conn, events), do: events
 
-  defp body_forbidden?(:head, _status), do: true
-  defp body_forbidden?(_method, status) when status in 100..199, do: true
-  defp body_forbidden?(_method, status) when status in [204, 304], do: true
-  defp body_forbidden?(_, _), do: false
+  @doc false
+  @spec body_forbidden?(atom(), non_neg_integer()) :: boolean()
+  def body_forbidden?(:head, _status), do: true
+  def body_forbidden?(_method, status) when status in 100..199, do: true
+  def body_forbidden?(_method, status) when status in [204, 304], do: true
+  def body_forbidden?(_, _), do: false
 
   defp chunked?(nil), do: false
 
@@ -254,7 +338,30 @@ defmodule HTTP.HTTP1 do
         {:ok, line, rest}
 
       :nomatch ->
-        :more
+        if byte_size(buffer) > @max_line_bytes do
+          {:error, :line_too_long}
+        else
+          :more
+        end
+    end
+  end
+
+  defp trailer_end(buffer) do
+    cond do
+      String.starts_with?(buffer, "\r\n") ->
+        {:ok, binary_part(buffer, 2, byte_size(buffer) - 2)}
+
+      byte_size(buffer) > @max_trailer_bytes ->
+        {:error, :trailers_too_large}
+
+      true ->
+        case :binary.match(buffer, "\r\n\r\n") do
+          {index, 4} ->
+            {:ok, binary_part(buffer, index + 4, byte_size(buffer) - index - 4)}
+
+          :nomatch ->
+            :more
+        end
     end
   end
 
@@ -273,6 +380,7 @@ defmodule HTTP.HTTP1 do
 
   defp request_headers(%Request{} = request) do
     request.headers
+    |> reject_unsupported_request_framing!()
     |> ensure_user_agent()
     |> Headers.set_default("Host", host_header(request.url))
     |> Headers.set("Connection", "close")
@@ -281,7 +389,7 @@ defmodule HTTP.HTTP1 do
   defp add_body_headers(headers, %Request{} = request) do
     case request_body(request) do
       nil ->
-        {headers, ""}
+        {Headers.delete(headers, "Content-Length"), ""}
 
       {body, content_type} ->
         headers =
@@ -320,8 +428,12 @@ defmodule HTTP.HTTP1 do
 
   defp maybe_set_content_type(headers, nil), do: headers
 
+  defp maybe_set_content_type(headers, content_type) when is_list(content_type) do
+    maybe_set_content_type(headers, to_string(content_type))
+  end
+
   defp maybe_set_content_type(headers, content_type) do
-    Headers.set_default(headers, "Content-Type", content_type)
+    Headers.set_default(headers, "Content-Type", to_string(content_type))
   end
 
   defp ensure_user_agent(headers) do
@@ -337,9 +449,89 @@ defmodule HTTP.HTTP1 do
       end
 
     if uri.query && uri.query != "" do
-      path <> "?" <> uri.query
+      valid_request_target!(path <> "?" <> uri.query)
     else
-      path
+      valid_request_target!(path)
+    end
+  end
+
+  defp method_token(method) do
+    method = method |> to_string() |> String.upcase()
+
+    if method in @allowed_methods and valid_token?(method) do
+      method
+    else
+      raise ArgumentError, "unsupported HTTP method: #{inspect(method)}"
+    end
+  end
+
+  defp header_line(name, value) do
+    name = valid_header_name!(to_string(name))
+    value = valid_header_value!(to_string(value))
+
+    [name, ": ", value, "\r\n"]
+  end
+
+  defp valid_request_target!(target) do
+    if safe_request_target?(target) do
+      target
+    else
+      raise ArgumentError, "request target contains invalid whitespace or control characters"
+    end
+  end
+
+  defp valid_header_name!(name) do
+    if valid_token?(name) do
+      name
+    else
+      raise ArgumentError, "invalid HTTP header name: #{inspect(name)}"
+    end
+  end
+
+  defp valid_header_value!(value) do
+    if safe_header_value?(value) do
+      value
+    else
+      raise ArgumentError, "invalid HTTP header value for wire serialization"
+    end
+  end
+
+  defp valid_token?(value) when is_binary(value) do
+    value != "" and Enum.all?(:binary.bin_to_list(value), &token_char?/1)
+  end
+
+  defp token_char?(char) when char in ?0..?9, do: true
+  defp token_char?(char) when char in ?A..?Z, do: true
+  defp token_char?(char) when char in ?a..?z, do: true
+  defp token_char?(char) when char in ~c"!#$%&'*+-.^_`|~", do: true
+  defp token_char?(_char), do: false
+
+  defp safe_header_value?(value) do
+    value
+    |> :binary.bin_to_list()
+    |> Enum.all?(fn char -> char == ?\t or (char >= 32 and char != 127) end)
+  end
+
+  defp safe_request_target?(target) do
+    target
+    |> :binary.bin_to_list()
+    |> Enum.all?(fn char -> char > 32 and char != 127 end)
+  end
+
+  defp digits_only?(value) do
+    value != "" and Enum.all?(:binary.bin_to_list(value), &(&1 in ?0..?9))
+  end
+
+  defp reject_unsupported_request_framing!(headers) do
+    cond do
+      Headers.has?(headers, "Transfer-Encoding") ->
+        raise ArgumentError, "Transfer-Encoding request headers are not supported"
+
+      Headers.has?(headers, "Trailer") ->
+        raise ArgumentError, "Trailer request headers are not supported"
+
+      true ->
+        headers
     end
   end
 
@@ -351,13 +543,15 @@ defmodule HTTP.HTTP1 do
         do: "[#{host}]",
         else: host
 
-    if uri.port && uri.port != default_port(uri.scheme) do
+    if uri.port && uri.port != HTTP.HTTP1.default_port(uri.scheme) do
       host <> ":" <> to_string(uri.port)
     else
       host
     end
   end
 
-  defp default_port("https"), do: 443
-  defp default_port(_), do: 80
+  @doc false
+  @spec default_port(String.t() | nil) :: 80 | 443
+  def default_port("https"), do: 443
+  def default_port(_), do: 80
 end

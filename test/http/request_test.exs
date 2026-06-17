@@ -57,5 +57,47 @@ defmodule HTTP.RequestTest do
       assert wire =~ "User-Agent: CustomAgent/1.0\r\n"
       refute wire =~ "http_fetch/"
     end
+
+    test "convert to legacy httpc args" do
+      request = %HTTP.Request{
+        method: :get,
+        url: URI.parse("http://example.com"),
+        headers: HTTP.Headers.new([{"Accept", "application/json"}])
+      }
+
+      [method, request_tuple, _http_options, _options] = HTTP.Request.to_httpc_args(request)
+
+      assert method == :get
+      assert {~c"http://example.com", headers} = request_tuple
+
+      assert Enum.any?(headers, fn {name, value} ->
+               to_string(name) == "User-Agent" and to_string(value) =~ "Mozilla/5.0"
+             end)
+
+      assert Enum.any?(headers, fn {name, value} ->
+               to_string(name) == "Accept" and to_string(value) == "application/json"
+             end)
+    end
+
+    test "convert body requests to legacy httpc args" do
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("http://example.com/widgets"),
+        headers: HTTP.Headers.new([{"Authorization", "Bearer token"}]),
+        body: "payload",
+        content_type: "text/plain",
+        http_options: [timeout: 1_000],
+        options: [sync: false]
+      }
+
+      assert [
+               :post,
+               {~c"http://example.com/widgets", headers, ~c"text/plain", ~c"payload"},
+               [timeout: 1_000],
+               [sync: false]
+             ] = HTTP.Request.to_httpc_args(request)
+
+      assert {~c"Authorization", ~c"Bearer token"} in headers
+    end
   end
 end

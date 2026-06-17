@@ -5,10 +5,7 @@ defmodule HTTP.Transport.SSL do
 
   @impl true
   def connect(host, port, opts, timeout) do
-    ssl_opts =
-      host
-      |> default_ssl_options()
-      |> Keyword.merge(Keyword.get(opts, :ssl, []))
+    ssl_opts = ssl_options(host, Keyword.get(opts, :ssl, []))
 
     socket_opts =
       [
@@ -19,6 +16,9 @@ defmodule HTTP.Transport.SSL do
 
     :ssl.connect(String.to_charlist(host), port, socket_opts, timeout)
   end
+
+  @impl true
+  def controlling_process(socket, pid), do: :ssl.controlling_process(socket, pid)
 
   @impl true
   def send(socket, iodata), do: :ssl.send(socket, iodata)
@@ -46,5 +46,32 @@ defmodule HTTP.Transport.SSL do
       versions: [:"tlsv1.3", :"tlsv1.2"],
       depth: 4
     ]
+  end
+
+  defp ssl_options(host, user_ssl_opts) do
+    user_ssl_opts = normalize_user_ssl_options(user_ssl_opts)
+
+    host
+    |> default_ssl_options()
+    |> maybe_drop_default_cacerts(user_ssl_opts)
+    |> Keyword.merge(user_ssl_opts)
+  end
+
+  defp normalize_user_ssl_options(user_ssl_opts) do
+    Enum.map(user_ssl_opts, fn
+      {key, value} when key in [:cacertfile, :certfile, :keyfile] and is_binary(value) ->
+        {key, String.to_charlist(value)}
+
+      option ->
+        option
+    end)
+  end
+
+  defp maybe_drop_default_cacerts(defaults, user_ssl_opts) do
+    if Keyword.has_key?(user_ssl_opts, :cacertfile) or Keyword.has_key?(user_ssl_opts, :cacerts) do
+      Keyword.delete(defaults, :cacerts)
+    else
+      defaults
+    end
   end
 end

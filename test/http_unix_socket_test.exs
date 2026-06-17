@@ -360,19 +360,4 @@ defmodule HTTPUnixSocketTest do
       UnixSocketServer.stop(server_pid)
     end
   end
-
-  describe "Real-world use case: Docker socket" do
-    test "connects to Docker daemon (requires Docker)" do
-      socket_path = "/var/run/docker.sock"
-
-      assert File.exists?(socket_path), "Docker socket not found at #{socket_path}"
-
-      promise = HTTP.fetch("http://localhost/version", unix_socket: socket_path)
-      response = Promise.await(promise)
-
-      assert response.status == 200
-      assert {:ok, json} = Response.json(response)
-      assert Map.has_key?(json, "Version")
-    end
-  end
 end
