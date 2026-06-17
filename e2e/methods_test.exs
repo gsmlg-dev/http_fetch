@@ -67,7 +67,6 @@ defmodule E2E.MethodsTest do
   end
 
   describe "OPTIONS" do
-    # TODO(upstream): gsmlg-dev/http_fetch#9
     test "returns the Allow header listing supported methods" do
       resp =
         E2E.Server.url("/options")
@@ -88,7 +87,6 @@ defmodule E2E.MethodsTest do
   end
 
   describe "HEAD" do
-    # TODO(upstream): gsmlg-dev/http_fetch#8
     test "returns 200 with headers and no body" do
       resp =
         E2E.Server.url("/head")

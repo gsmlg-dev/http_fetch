@@ -65,7 +65,6 @@ defmodule E2E.StreamingTest do
     assert is_pid(resp.stream)
   end
 
-  # TODO(upstream): gsmlg-dev/http_fetch#10
   test "streamed response has body=nil and a stream pid" do
     resp = E2E.Server.url("/stream-large") |> HTTP.fetch() |> HTTP.Promise.await()
     assert %HTTP.Response{body: nil, stream: stream} = resp
@@ -89,7 +88,6 @@ defmodule E2E.StreamingTest do
     assert File.stat!(out).size == @expected_size
   end
 
-  # TODO(upstream): gsmlg-dev/http_fetch#10
   test "emits :streaming, :start, :chunk (>=1), and :stop telemetry events" do
     _ = E2E.Server.url("/stream-large") |> HTTP.fetch() |> HTTP.Promise.await()
     # Wait briefly for the stream to flush any tail events.

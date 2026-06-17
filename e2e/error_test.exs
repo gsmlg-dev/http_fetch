@@ -47,7 +47,6 @@ defmodule E2E.ErrorTest do
   end
 
   describe "aborts" do
-    # TODO(upstream): gsmlg-dev/http_fetch#6
     test "aborting an in-flight request returns an error tuple" do
       controller = HTTP.AbortController.new()
 
