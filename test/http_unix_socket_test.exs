@@ -362,24 +362,17 @@ defmodule HTTPUnixSocketTest do
   end
 
   describe "Real-world use case: Docker socket" do
-    @tag :skip
     test "connects to Docker daemon (requires Docker)" do
-      # This test is skipped by default as it requires Docker to be installed
-      # and running. To run it, remove the @tag :skip and ensure Docker is running.
-
       socket_path = "/var/run/docker.sock"
 
-      # Check if socket exists
-      if File.exists?(socket_path) do
-        promise = HTTP.fetch("http://localhost/version", unix_socket: socket_path)
-        response = Promise.await(promise)
+      assert File.exists?(socket_path), "Docker socket not found at #{socket_path}"
 
-        assert response.status == 200
-        assert {:ok, json} = Response.json(response)
-        assert Map.has_key?(json, "Version")
-      else
-        IO.puts("Docker socket not found at #{socket_path}, skipping test")
-      end
+      promise = HTTP.fetch("http://localhost/version", unix_socket: socket_path)
+      response = Promise.await(promise)
+
+      assert response.status == 200
+      assert {:ok, json} = Response.json(response)
+      assert Map.has_key?(json, "Version")
     end
   end
 end
