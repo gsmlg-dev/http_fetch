@@ -289,37 +289,66 @@ defmodule HTTP.SocketClient do
   defp interruptible_connect(transport, host, port, opts, timeout) do
     parent = self()
     ref = make_ref()
+    deadline_at = System.monotonic_time(:millisecond) + timeout
 
     case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
-           result = connect_in_worker(transport, host, port, opts, timeout, parent)
+           result = connect_in_worker(transport, host, port, opts, timeout, parent, ref)
            send(parent, {:connect_result, ref, result})
          end) do
       {:ok, pid} ->
-        receive do
-          {:connect_result, ^ref, result} ->
-            result
-
-          :abort ->
-            Process.exit(pid, :kill)
-            {:error, :aborted}
-
-          :deadline ->
-            Process.exit(pid, :kill)
-            {:error, :request_timeout}
-        after
-          timeout ->
-            Process.exit(pid, :kill)
-            {:error, :connect_timeout}
-        end
+        await_connect_result(transport, pid, ref, nil, deadline_at)
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  defp connect_in_worker(transport, host, port, opts, timeout, owner) do
+  defp await_connect_result(transport, pid, ref, socket, deadline_at) do
+    receive do
+      {:connect_socket, ^ref, connected_socket} ->
+        send(pid, {:transfer_socket, ref})
+        await_connect_result(transport, pid, ref, connected_socket, deadline_at)
+
+      {:connect_result, ^ref, result} ->
+        result
+
+      :abort ->
+        send(pid, {:close_socket, ref})
+        close_connect_socket(transport, socket)
+        Process.exit(pid, :kill)
+        {:error, :aborted}
+
+      :deadline ->
+        send(pid, {:close_socket, ref})
+        close_connect_socket(transport, socket)
+        Process.exit(pid, :kill)
+        {:error, :request_timeout}
+    after
+      remaining_timeout(deadline_at) ->
+        send(pid, {:close_socket, ref})
+        close_connect_socket(transport, socket)
+        Process.exit(pid, :kill)
+        {:error, :connect_timeout}
+    end
+  end
+
+  defp close_connect_socket(_transport, nil), do: :ok
+  defp close_connect_socket(transport, socket), do: transport.close(socket)
+
+  defp connect_in_worker(transport, host, port, opts, timeout, owner, ref) do
     case transport.connect(host, port, opts, timeout) do
       {:ok, socket} ->
+        send(owner, {:connect_socket, ref, socket})
+        transfer_connected_socket(transport, socket, owner, ref, timeout)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp transfer_connected_socket(transport, socket, owner, ref, timeout) do
+    receive do
+      {:transfer_socket, ^ref} ->
         case transport.controlling_process(socket, owner) do
           :ok ->
             {:ok, socket}
@@ -329,8 +358,13 @@ defmodule HTTP.SocketClient do
             {:error, reason}
         end
 
-      {:error, reason} ->
-        {:error, reason}
+      {:close_socket, ^ref} ->
+        transport.close(socket)
+        {:error, :aborted}
+    after
+      timeout ->
+        transport.close(socket)
+        {:error, :connect_timeout}
     end
   end
 
@@ -442,21 +476,25 @@ defmodule HTTP.SocketClient do
     threshold = HTTP.Config.streaming_threshold()
     content_length = Headers.get(headers, "content-length")
 
-    if chunked_transfer?(Headers.get(headers, "transfer-encoding")) do
-      true
-    else
-      case Integer.parse(content_length || "") do
-        {size, ""} -> size > threshold
-        _ -> is_nil(content_length)
-      end
+    case HTTP.HTTP1.response_body_framing(headers) do
+      :chunked ->
+        true
+
+      :identity ->
+        case Integer.parse(content_length || "") do
+          {size, ""} -> size > threshold
+          _ -> is_nil(content_length)
+        end
+
+      {:error, _reason} ->
+        false
     end
   end
 
   defp stream_content_length(headers) do
-    if chunked_transfer?(Headers.get(headers, "transfer-encoding")) do
-      0
-    else
-      headers |> Headers.get("content-length") |> parse_content_length()
+    case HTTP.HTTP1.response_body_framing(headers) do
+      :chunked -> 0
+      _ -> headers |> Headers.get("content-length") |> parse_content_length()
     end
   end
 
@@ -465,15 +503,6 @@ defmodule HTTP.SocketClient do
       {size, ""} -> size
       _ -> 0
     end
-  end
-
-  defp chunked_transfer?(nil), do: false
-
-  defp chunked_transfer?(transfer_encoding) do
-    transfer_encoding
-    |> String.downcase()
-    |> String.split(",")
-    |> Enum.any?(&(String.trim(&1) == "chunked"))
   end
 
   defp follow_redirect?(state, response) do

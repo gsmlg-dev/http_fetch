@@ -80,15 +80,15 @@ defmodule HTTP.Response do
   ## Usage
 
       # Simple text response
-      {:ok, response} = HTTP.fetch("https://example.com") |> HTTP.Promise.await()
+      response = HTTP.fetch("https://example.com") |> HTTP.Promise.await()
       text = HTTP.Response.text(response)
 
       # JSON parsing
-      {:ok, response} = HTTP.fetch("https://api.example.com/data") |> HTTP.Promise.await()
+      response = HTTP.fetch("https://api.example.com/data") |> HTTP.Promise.await()
       {:ok, json} = HTTP.Response.json(response)
 
       # Write to file (works with both streaming and buffered)
-      {:ok, response} = HTTP.fetch("https://example.com/file.zip") |> HTTP.Promise.await()
+      response = HTTP.fetch("https://example.com/file.zip") |> HTTP.Promise.await()
       :ok = HTTP.Response.write_to(response, "/tmp/file.zip")
 
       # Get specific header

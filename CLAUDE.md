@@ -28,7 +28,7 @@ This is an Elixir library providing a browser-like HTTP fetch API built on Erlan
 1. **Async by default**: All requests use Task.Supervisor with `async_nolink/4`
 2. **Streaming threshold**: Responses >5MB or with unknown Content-Length automatically stream via `HTTP.Stream`
 3. **Telemetry instrumentation**: All operations emit `:telemetry` events (`:http_fetch` prefix) for monitoring and observability
-4. **Error propagation**: Uses `throw/catch` internally to convert errors to `{:error, reason}` tuples for consistent API
+4. **Error propagation**: Expected transport and parser failures return `{:error, reason}` tuples for consistent API behavior
 
 ## Development Commands
 
@@ -83,7 +83,7 @@ MIX_ENV=prod mix compile
 
 ### Request Options Mapping
 - `options:` keyword in `fetch/2` maps to request options - controls timeout, connect_timeout, ssl, autoredirect, etc.
-- `opts:` keyword in `fetch/2` maps to compatibility options - currently used for socket options.
+- `opts:` and `client_opts:` keywords in `fetch/2` map to compatibility options - currently used for socket options.
 
 ### Streaming Behavior
 - Automatic streaming for responses >5MB or unknown Content-Length
@@ -122,9 +122,8 @@ Current known issues to address:
 Dialyzer performs static type analysis to catch type errors and inconsistencies. PLT (Persistent Lookup Table) stored in `priv/plts/dialyzer.plt`.
 
 Current known issues to address:
-- `HTTP.fetch/2`: Spec doesn't match success typing (may be due to throw/catch usage)
+- `HTTP.fetch/2`: Spec doesn't match success typing due to Task.Supervisor return inference
 - `HTTP.Promise.then/3`: Opaque type violations with Task struct
-- Various pattern match and contract issues
 
 ## Requirements
 - Elixir 1.18+ (for built-in `JSON` module support)

@@ -2,7 +2,7 @@
 
  [![Elixir CI](https://github.com/gsmlg-dev/http_fetch/actions/workflows/ci.yml/badge.svg)](https://github.com/gsmlg-dev/http_fetch/actions/workflows/ci.yml)
  [![Elixir CI](https://github.com/gsmlg-dev/http_fetch/actions/workflows/test.yml/badge.svg)](https://github.com/gsmlg-dev/http_fetch/actions/workflows/test.yml)
- [![Hex.pm](https://img.shields.io/hexpm/v/http_fetch.svg)](https://hex.pm/packages/phoenix_react_server)
+ [![Hex.pm](https://img.shields.io/hexpm/v/http_fetch.svg)](https://hex.pm/packages/http_fetch)
  [![Hexdocs.pm](https://img.shields.io/badge/hex-docs-lightgreen.svg)](https://hexdocs.pm/http_fetch/)
  [![Hex.pm](https://img.shields.io/hexpm/dt/http_fetch.svg)](https://hex.pm/packages/http_fetch)
  [![Hex.pm](https://img.shields.io/hexpm/dw/http_fetch.svg)](https://hex.pm/packages/http_fetch)
@@ -78,7 +78,7 @@ text = HTTP.Response.text(clone)  # Read clone independently
 
 ```elixir
 # Simple GET request
-{:ok, response} =
+response =
   HTTP.fetch("https://jsonplaceholder.typicode.com/posts/1")
   |> HTTP.Promise.await()
 
@@ -97,7 +97,7 @@ response =
 binary_data = response.body
 
 # POST request with JSON
-{:ok, response} =
+response =
   HTTP.fetch("https://jsonplaceholder.typicode.com/posts", [
     method: "POST",
     headers: %{"Content-Type" => "application/json"},
@@ -106,7 +106,7 @@ binary_data = response.body
   |> HTTP.Promise.await()
 
 # Unix Domain Socket request (Docker daemon example)
-{:ok, response} =
+response =
   HTTP.fetch("http://localhost/version",
     unix_socket: "/var/run/docker.sock")
   |> HTTP.Promise.await()
@@ -124,7 +124,7 @@ form = HTTP.FormData.new()
        |> HTTP.FormData.append_field("name", "John Doe")
        |> HTTP.FormData.append_file("document", "document.pdf", file_stream)
 
-{:ok, response} =
+response =
   HTTP.fetch("https://api.example.com/upload", [
     method: "POST",
     body: form
@@ -164,7 +164,7 @@ promise = HTTP.fetch(uri)
 Asynchronous promise wrapper for HTTP requests.
 
 ```elixir
-{:ok, response} = HTTP.Promise.await(promise)
+response = HTTP.Promise.await(promise)
 
 # Promise chaining
 HTTP.fetch("https://api.example.com/data")
@@ -191,7 +191,7 @@ binary_data = response.body
 :ok = HTTP.Response.write_to(response, "/tmp/downloaded-file.txt")
 
 # Write large file downloads directly to disk
-{:ok, response} =
+response =
   HTTP.fetch("https://example.com/large-file.zip")
   |> HTTP.Promise.await()
 
@@ -261,7 +261,7 @@ Request configuration struct.
 request = %HTTP.Request{
   method: :post,
   url: URI.parse("https://api.example.com/data"),
-  headers: [{"Authorization", "Bearer token"}],
+  headers: HTTP.Headers.new([{"Authorization", "Bearer token"}]),
   body: "data",
   http_options: [timeout: 10_000, connect_timeout: 5_000],
   options: [sync: false, body_format: :binary]
@@ -273,7 +273,8 @@ request = %HTTP.Request{
 - `options`: Compatibility options such as `socket_opts`
 
 `autoredirect` defaults to `true` with the socket transport. Pass
-`http_options: [autoredirect: false]` or `options: [autoredirect: false]` to return redirect responses.
+`options: [autoredirect: false]` to `HTTP.fetch/2` or
+`http_options: [autoredirect: false]` on `%HTTP.Request{}` to return redirect responses.
 Legacy `:httpc` options such as `proxy_auth`, `version`, `relaxed`, `body_format`,
 `full_result`, `headers_as_is`, `receiver`, and `ipv6_host_with_brackets` are parsed for
 source compatibility but are not implemented by the socket transport.
@@ -381,7 +382,7 @@ PORT=$(grep -oE '[0-9]+' .e2e_port | head -n1)
 export E2E_BASE_URL="http://127.0.0.1:$PORT"
 
 # 3. Run the e2e suite
-mix test.e2e
+MIX_ENV=test mix test.e2e
 ```
 
 In CI, the `e2e.yml` workflow handles all of this automatically.

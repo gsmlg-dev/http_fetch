@@ -127,8 +127,8 @@ defmodule HTTP.Stream do
 
   defp maybe_continue(%__MODULE__{} = state), do: loop(state)
 
-  defp timeout(%__MODULE__{done?: true}), do: :ok
-  defp timeout(%__MODULE__{error: error}) when not is_nil(error), do: :ok
+  defp timeout(%__MODULE__{done?: true} = state), do: loop(state)
+  defp timeout(%__MODULE__{error: error} = state) when not is_nil(error), do: loop(state)
 
   defp timeout(%__MODULE__{} = state) do
     duration = System.monotonic_time(:microsecond) - state.start_time

@@ -1,5 +1,5 @@
 defmodule HTTP.StreamTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   test "exits after flushing a completed stream to its reader" do
     {:ok, stream} = HTTP.Stream.start_link(0)
@@ -29,5 +29,29 @@ defmodule HTTP.StreamTest do
 
     HTTP.Stream.finish(stream)
     assert_receive {:stream_end, ^stream}
+  end
+
+  test "completed empty streams wait for a late reader" do
+    previous_timeout = Application.get_env(:http_fetch, :streaming_timeout)
+    Application.put_env(:http_fetch, :streaming_timeout, 10)
+
+    on_exit(fn ->
+      if is_nil(previous_timeout) do
+        Application.delete_env(:http_fetch, :streaming_timeout)
+      else
+        Application.put_env(:http_fetch, :streaming_timeout, previous_timeout)
+      end
+    end)
+
+    {:ok, stream} = HTTP.Stream.start_link(0)
+    monitor_ref = Process.monitor(stream)
+
+    HTTP.Stream.finish(stream)
+    refute_receive {:DOWN, ^monitor_ref, :process, ^stream, :normal}, 30
+
+    send(stream, {:read_chunk, self()})
+
+    assert_receive {:stream_end, ^stream}
+    assert_receive {:DOWN, ^monitor_ref, :process, ^stream, :normal}
   end
 end

@@ -70,6 +70,15 @@ defmodule HTTP.FetchOptionsTest do
       assert opts[:full_result] == false
     end
 
+    test "accepts documented client_opts alias" do
+      options =
+        HTTP.FetchOptions.new(client_opts: [sync: false, socket_opts: [:inet6]])
+
+      opts = HTTP.FetchOptions.to_options(options)
+      assert opts[:sync] == false
+      assert opts[:socket_opts] == [:inet6]
+    end
+
     test "handles streaming options" do
       options = HTTP.FetchOptions.new(stream: :self)
       opts = HTTP.FetchOptions.to_options(options)

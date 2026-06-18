@@ -121,7 +121,7 @@ defmodule HTTP.Request do
 
       {:multipart, body, boundary} ->
         content_type = ~c"multipart/form-data; boundary=#{boundary}"
-        {url, headers ++ [{~c"Content-Type", content_type}], iodata_to_charlist(body)}
+        {url, headers, content_type, iodata_to_charlist(body)}
     end
   end
 

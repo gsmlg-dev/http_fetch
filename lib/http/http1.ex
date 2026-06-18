@@ -216,8 +216,9 @@ defmodule HTTP.HTTP1 do
   defp parse_head(head) do
     case String.split(head, "\r\n") do
       [status_line | header_lines] ->
-        with {:ok, status} <- parse_status_line(status_line) do
-          {:ok, status, parse_headers(header_lines)}
+        with {:ok, status} <- parse_status_line(status_line),
+             {:ok, headers} <- parse_headers(header_lines) do
+          {:ok, status, headers}
         end
 
       _ ->
@@ -240,33 +241,49 @@ defmodule HTTP.HTTP1 do
 
   defp parse_headers(lines) do
     lines
-    |> Enum.flat_map(fn line ->
+    |> Enum.reduce_while({:ok, []}, fn line, {:ok, acc} ->
       case String.split(line, ":", parts: 2) do
-        [name, value] -> [{String.trim(name), String.trim(value)}]
-        _ -> []
+        [name, value] ->
+          name = String.trim(name)
+
+          if name == "" do
+            {:halt, {:error, :invalid_header}}
+          else
+            {:cont, {:ok, [{name, String.trim(value)} | acc]}}
+          end
+
+        _ ->
+          {:halt, {:error, :invalid_header}}
       end
     end)
-    |> Headers.new()
+    |> case do
+      {:ok, headers} -> {:ok, headers |> Enum.reverse() |> Headers.new()}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp set_body_framing(%__MODULE__{} = conn) do
-    transfer_encoding = Headers.get(conn.headers, "transfer-encoding")
     content_lengths = Headers.get_all(conn.headers, "content-length")
 
-    cond do
-      HTTP.HTTP1.body_forbidden?(conn.method, conn.status) ->
-        {:ok, %{conn | state: :done, remaining: 0}}
+    if HTTP.HTTP1.body_forbidden?(conn.method, conn.status) do
+      {:ok, %{conn | state: :done, remaining: 0}}
+    else
+      case response_body_framing(conn.headers) do
+        :chunked ->
+          {:ok, %{conn | state: :chunk_size}}
 
-      chunked?(transfer_encoding) ->
-        {:ok, %{conn | state: :chunk_size}}
+        :identity ->
+          if content_lengths != [] do
+            with {:ok, length} <- parse_content_lengths(content_lengths) do
+              {:ok, set_content_length_framing(conn, length)}
+            end
+          else
+            {:ok, %{conn | state: :body_eof}}
+          end
 
-      content_lengths != [] ->
-        with {:ok, length} <- parse_content_lengths(content_lengths) do
-          {:ok, set_content_length_framing(conn, length)}
-        end
-
-      true ->
-        {:ok, %{conn | state: :body_eof}}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -321,13 +338,38 @@ defmodule HTTP.HTTP1 do
   def body_forbidden?(_method, status) when status in [204, 304], do: true
   def body_forbidden?(_, _), do: false
 
-  defp chunked?(nil), do: false
+  @doc false
+  @spec response_body_framing(Headers.t()) ::
+          :identity
+          | :chunked
+          | {:error, :invalid_transfer_encoding}
+          | {:error, {:unsupported_transfer_encoding, [String.t()]}}
+  def response_body_framing(%Headers{} = headers) do
+    case transfer_codings(headers) do
+      [] -> :identity
+      ["chunked"] -> :chunked
+      {:error, reason} -> {:error, reason}
+      codings -> {:error, {:unsupported_transfer_encoding, codings}}
+    end
+  end
 
-  defp chunked?(transfer_encoding) do
-    transfer_encoding
-    |> String.downcase()
-    |> String.split(",")
-    |> Enum.any?(&(String.trim(&1) == "chunked"))
+  defp transfer_codings(headers) do
+    case Headers.get_all(headers, "transfer-encoding") do
+      [] ->
+        []
+
+      values ->
+        codings =
+          values
+          |> Enum.flat_map(&String.split(&1, ","))
+          |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
+
+        if Enum.any?(codings, &(&1 == "")) do
+          {:error, :invalid_transfer_encoding}
+        else
+          codings
+        end
+    end
   end
 
   defp read_line(buffer) do

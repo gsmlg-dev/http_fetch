@@ -19,7 +19,7 @@ defmodule HTTP do
   ## Quick Start
 
       # Simple GET request
-      {:ok, response} =
+      response =
         HTTP.fetch("https://jsonplaceholder.typicode.com/posts/1")
         |> HTTP.Promise.await()
 
@@ -27,7 +27,7 @@ defmodule HTTP do
       {:ok, json} = HTTP.Response.json(response)
 
       # POST with JSON body
-      {:ok, response} =
+      response =
         HTTP.fetch("https://api.example.com/posts", [
           method: "POST",
           headers: %{"Content-Type" => "application/json"},
@@ -36,7 +36,7 @@ defmodule HTTP do
         |> HTTP.Promise.await()
 
       # Unix Domain Socket request (e.g., Docker daemon)
-      {:ok, response} =
+      response =
         HTTP.fetch("http://localhost/version",
           unix_socket: "/var/run/docker.sock")
         |> HTTP.Promise.await()
@@ -100,8 +100,9 @@ defmodule HTTP do
                                    defaults to "application/octet-stream" when a body is present.
                 - `:options`: A keyword list of request options such as `timeout`, `connect_timeout`, `ssl`, and
                               `autoredirect`.
-                - `:client_opts`: A keyword list of compatibility client options. Broad legacy-client option parity is
-                                  intentionally not implemented by the socket transport.
+                - `:client_opts` or `:opts`: A keyword list of compatibility client options.
+                                             Broad legacy-client option parity is intentionally not
+                                             implemented by the socket transport.
                 - `:signal`: An `HTTP.AbortController` PID. If provided, the request can be aborted
                              via this controller.
                 - `:unix_socket`: Path to a Unix Domain Socket file (e.g., "/var/run/docker.sock").
@@ -203,7 +204,7 @@ defmodule HTTP do
       #        body: JSON.encode!(%{title: "foo", body: "bar", userId: 1})
       #      )
       # case HTTP.Promise.await(promise_post) do
-      #   {:ok, %HTTP.Response{status: 201, body: body}} ->
+      #   %HTTP.Response{status: 201, body: body} ->
       #     IO.puts "POST successful! Body: \#{body}"
       #   {:error, reason} ->
       #     IO.inspect reason, label: "POST Error"

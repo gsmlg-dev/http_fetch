@@ -99,5 +99,31 @@ defmodule HTTP.RequestTest do
 
       assert {~c"Authorization", ~c"Bearer token"} in headers
     end
+
+    test "convert multipart form data to legacy httpc body request tuple" do
+      form =
+        HTTP.FormData.new()
+        |> HTTP.FormData.append_field("name", "value")
+        |> HTTP.FormData.append_file("upload", "test.txt", "content")
+
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("http://example.com/upload"),
+        headers: HTTP.Headers.new([{"Authorization", "Bearer token"}]),
+        body: form
+      }
+
+      assert [
+               :post,
+               {~c"http://example.com/upload", headers, content_type, body},
+               [],
+               [sync: false]
+             ] = HTTP.Request.to_httpc_args(request)
+
+      assert {~c"Authorization", ~c"Bearer token"} in headers
+      refute Enum.any?(headers, fn {name, _value} -> name == ~c"Content-Type" end)
+      assert to_string(content_type) =~ "multipart/form-data; boundary="
+      assert to_string(body) =~ "name=\"upload\"; filename=\"test.txt\""
+    end
   end
 end

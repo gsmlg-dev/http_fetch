@@ -152,6 +152,33 @@ defmodule HTTP.HTTP1Test do
                HTTP.HTTP1.stream(conn, "3\r\ning\r\n0\r\n\r\n")
     end
 
+    test "rejects unsupported transfer encodings instead of using content-length" do
+      conn = HTTP.HTTP1.new(:get)
+
+      assert {:error, {:unsupported_transfer_encoding, ["gzip"]}} =
+               HTTP.HTTP1.stream(
+                 conn,
+                 "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nContent-Length: 2\r\n\r\nok"
+               )
+    end
+
+    test "rejects transfer encodings where chunked is not the only coding" do
+      conn = HTTP.HTTP1.new(:get)
+
+      assert {:error, {:unsupported_transfer_encoding, ["chunked", "gzip"]}} =
+               HTTP.HTTP1.stream(
+                 conn,
+                 "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, gzip\r\n\r\n"
+               )
+    end
+
+    test "rejects empty transfer encoding values" do
+      conn = HTTP.HTTP1.new(:get)
+
+      assert {:error, :invalid_transfer_encoding} =
+               HTTP.HTTP1.stream(conn, "HTTP/1.1 200 OK\r\nTransfer-Encoding: \r\n\r\n")
+    end
+
     test "waits for split chunk trailers" do
       conn = HTTP.HTTP1.new(:get)
 
@@ -227,6 +254,13 @@ defmodule HTTP.HTTP1Test do
                  conn,
                  "HTTP/1.1 200 OK\r\nContent-Length: 2, 2\r\n\r\nok"
                )
+    end
+
+    test "rejects malformed response headers" do
+      conn = HTTP.HTTP1.new(:get)
+
+      assert {:error, :invalid_header} =
+               HTTP.HTTP1.stream(conn, "HTTP/1.1 200 OK\r\nMalformed-Header\r\n\r\n")
     end
 
     test "accepts matching duplicate content-length responses" do

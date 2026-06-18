@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- Validate response `Transfer-Encoding` framing instead of falling back to
+  `Content-Length` for unsupported transfer codings.
+- Keep completed empty streams readable for late consumers.
+- Accept the documented `client_opts:` alias for compatibility client options.
+- Return the correct legacy `:httpc` multipart body request tuple from
+  `HTTP.Request.to_httpc_args/1`.
+- Make the Unix socket e2e coverage independent of a host Docker daemon.
+- Align release metadata, README examples, and project guidance with the socket
+  transport.
+
+## [0.9.0] - 2026-06-17
+
 ### Changed
 - Replaced `:httpc` with the internal socket transport while preserving the default
   redirect-following behavior; pass `autoredirect: false` to return redirect responses.

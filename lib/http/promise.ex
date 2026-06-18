@@ -16,7 +16,7 @@ defmodule HTTP.Promise do
   ## Basic Usage
 
       # Simple await
-      {:ok, response} =
+      response =
         HTTP.fetch("https://api.example.com/data")
         |> HTTP.Promise.await()
 

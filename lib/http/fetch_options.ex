@@ -45,7 +45,7 @@ defmodule HTTP.FetchOptions do
 
   ## Advanced Configuration
 
-      # Using options and opts keywords for fine control
+      # Using options and client_opts keywords for fine control
       HTTP.fetch("https://api.example.com", [
         method: "POST",
         body: "data",
@@ -55,7 +55,7 @@ defmodule HTTP.FetchOptions do
           connect_timeout: 5_000
         ],
         # Compatibility options
-        opts: [
+        client_opts: [
           sync: false,
           body_format: :binary
         ]
@@ -72,7 +72,7 @@ defmodule HTTP.FetchOptions do
       [
         method: "POST",
         options: [timeout: 5_000],
-        opts: [body_format: :binary]
+        client_opts: [body_format: :binary]
       ]
 
   Both formats are equivalent; the module automatically categorizes options.
@@ -221,6 +221,9 @@ defmodule HTTP.FetchOptions do
         %{acc | options: Keyword.merge(acc.options, List.wrap(options))}
 
       {:opts, opts}, acc ->
+        %{acc | opts: Keyword.merge(acc.opts, List.wrap(opts))}
+
+      {:client_opts, opts}, acc ->
         %{acc | opts: Keyword.merge(acc.opts, List.wrap(opts))}
 
       {:signal, signal}, acc ->
