@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.9.1] - 2026-06-23
+
 ### Changed
 - Removed legacy `:httpc` compatibility option buckets from `HTTP.fetch/2`.
   Fetch init options are now flat, and redirects use `redirect: :follow | :manual | :error`.
