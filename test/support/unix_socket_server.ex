@@ -72,7 +72,7 @@ defmodule HTTP.Test.UnixSocketServer do
   @impl true
   def init({socket_path, handler_fun}) do
     # Ensure socket file doesn't exist
-    File.rm(socket_path)
+    _ = File.rm(socket_path)
 
     # Create Unix socket listener
     socket_charlist = String.to_charlist(socket_path)
@@ -103,11 +103,11 @@ defmodule HTTP.Test.UnixSocketServer do
   @impl true
   def terminate(_reason, state) do
     if state.listen_socket do
-      :gen_tcp.close(state.listen_socket)
+      _ = :gen_tcp.close(state.listen_socket)
     end
 
     # Clean up socket file
-    File.rm(state.socket_path)
+    _ = File.rm(state.socket_path)
     :ok
   end
 
@@ -144,13 +144,25 @@ defmodule HTTP.Test.UnixSocketServer do
     case recv_request(socket) do
       {:ok, request} ->
         response = handler_fun.(request)
-        send_response(socket, response)
+        handle_send_response(socket, response)
 
       {:error, reason} ->
         Logger.error("Error receiving request: #{inspect(reason)}")
     end
 
-    :gen_tcp.close(socket)
+    _ = :gen_tcp.close(socket)
+    :ok
+  end
+
+  defp handle_send_response(socket, response) do
+    case send_response(socket, response) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Error sending response: #{inspect(reason)}")
+        :ok
+    end
   end
 
   defp recv_request(socket) do
