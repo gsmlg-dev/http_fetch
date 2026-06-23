@@ -144,7 +144,7 @@ jobs:
 
       - name: Validate release source
         run: |
-          SOURCE_VERSION=$(mix run --no-start -e 'IO.puts(Mix.Project.config()[:version])')
+          SOURCE_VERSION=$(mix run --no-compile --no-start -e 'IO.puts(Mix.Project.config()[:version])')
           if [ "${SOURCE_VERSION}" != "${{ github.event.inputs.release-version }}" ]; then
             echo "::error::mix.exs version ${SOURCE_VERSION} does not match requested release ${{ github.event.inputs.release-version }}"
             exit 1
