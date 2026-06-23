@@ -7,8 +7,7 @@ defmodule HTTP.RequestTest do
       request = %HTTP.Request{}
       assert request.method == :get
       assert %HTTP.Headers{headers: []} = request.headers
-      assert request.http_options == []
-      assert request.options == [sync: false]
+      assert request.transport_options == []
     end
 
     test "create request with custom values" do
@@ -58,49 +57,7 @@ defmodule HTTP.RequestTest do
       refute wire =~ "http_fetch/"
     end
 
-    test "convert to legacy httpc args" do
-      request = %HTTP.Request{
-        method: :get,
-        url: URI.parse("http://example.com"),
-        headers: HTTP.Headers.new([{"Accept", "application/json"}])
-      }
-
-      [method, request_tuple, _http_options, _options] = HTTP.Request.to_httpc_args(request)
-
-      assert method == :get
-      assert {~c"http://example.com", headers} = request_tuple
-
-      assert Enum.any?(headers, fn {name, value} ->
-               to_string(name) == "User-Agent" and to_string(value) =~ "Mozilla/5.0"
-             end)
-
-      assert Enum.any?(headers, fn {name, value} ->
-               to_string(name) == "Accept" and to_string(value) == "application/json"
-             end)
-    end
-
-    test "convert body requests to legacy httpc args" do
-      request = %HTTP.Request{
-        method: :post,
-        url: URI.parse("http://example.com/widgets"),
-        headers: HTTP.Headers.new([{"Authorization", "Bearer token"}]),
-        body: "payload",
-        content_type: "text/plain",
-        http_options: [timeout: 1_000],
-        options: [sync: false]
-      }
-
-      assert [
-               :post,
-               {~c"http://example.com/widgets", headers, ~c"text/plain", ~c"payload"},
-               [timeout: 1_000],
-               [sync: false]
-             ] = HTTP.Request.to_httpc_args(request)
-
-      assert {~c"Authorization", ~c"Bearer token"} in headers
-    end
-
-    test "convert multipart form data to legacy httpc body request tuple" do
+    test "serializes multipart form data to HTTP/1.1 wire request" do
       form =
         HTTP.FormData.new()
         |> HTTP.FormData.append_field("name", "value")
@@ -113,17 +70,12 @@ defmodule HTTP.RequestTest do
         body: form
       }
 
-      assert [
-               :post,
-               {~c"http://example.com/upload", headers, content_type, body},
-               [],
-               [sync: false]
-             ] = HTTP.Request.to_httpc_args(request)
+      wire = request |> HTTP.Request.to_iodata() |> IO.iodata_to_binary()
 
-      assert {~c"Authorization", ~c"Bearer token"} in headers
-      refute Enum.any?(headers, fn {name, _value} -> name == ~c"Content-Type" end)
-      assert to_string(content_type) =~ "multipart/form-data; boundary="
-      assert to_string(body) =~ "name=\"upload\"; filename=\"test.txt\""
+      assert wire =~ "POST /upload HTTP/1.1\r\n"
+      assert wire =~ "Authorization: Bearer token\r\n"
+      assert wire =~ "Content-Type: multipart/form-data; boundary="
+      assert wire =~ "name=\"upload\"; filename=\"test.txt\""
     end
   end
 end

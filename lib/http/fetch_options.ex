@@ -1,139 +1,82 @@
 defmodule HTTP.FetchOptions do
   @moduledoc """
-  Options processing and validation for `HTTP.fetch/2` requests.
+  Options processing for `HTTP.fetch/2` requests.
 
-  This module handles the conversion of various option formats (maps, keyword lists,
-  structs) into structured options for the internal socket transport. It provides a flexible
-  API that supports both simple and advanced HTTP client configurations.
+  `HTTP.fetch/2` accepts a flat init keyword list or map, mirroring the browser
+  `fetch(input, init)` shape. Supported fetch-style options are:
 
-  ## Options Categories
+  - `method` - HTTP method, defaulting to `GET`
+  - `headers` - request headers as a list, map, or `HTTP.Headers`
+  - `body` - request body
+  - `signal` - `HTTP.AbortController` PID
+  - `redirect` - `:follow`, `:manual`, or `:error`; defaults to `:follow`
 
-  Options are divided into two main categories:
+  The socket transport also accepts Elixir-specific extensions:
 
-  1. **Request Options** - Request-specific settings consumed by the socket transport:
-     - `timeout` - Request timeout in milliseconds
-     - `connect_timeout` - Connection timeout in milliseconds
-     - `ssl` - SSL/TLS options
-     - `autoredirect` - Follow redirects automatically
-
-  2. **Compatibility Options** - Parsed for source compatibility, but broad legacy-client
-     option parity is intentionally not implemented:
-     - `socket_opts` - Socket-level options
-
-     The socket transport does not implement legacy `:httpc` options such as `proxy_auth`,
-     `version`, `relaxed`, `body_format`, `full_result`, `headers_as_is`, `receiver`, or
-     `ipv6_host_with_brackets`; they are retained only when converting option structs back
-     to keyword lists.
-
-  ## Basic Usage
-
-      # Simple options as keyword list
-      HTTP.fetch("https://api.example.com", [
-        method: "POST",
-        headers: %{"Content-Type" => "application/json"},
-        timeout: 10_000
-      ])
-
-      # Complex options with HTTP and client settings
-      HTTP.fetch("https://api.example.com", [
-        method: "GET",
-        timeout: 5_000,
-        connect_timeout: 2_000,
-        ssl: [verify: :verify_peer],
-        body_format: :binary
-      ])
-
-  ## Advanced Configuration
-
-      # Using options and client_opts keywords for fine control
-      HTTP.fetch("https://api.example.com", [
-        method: "POST",
-        body: "data",
-        # Request-specific options
-        options: [
-          timeout: 10_000,
-          connect_timeout: 5_000
-        ],
-        # Compatibility options
-        client_opts: [
-          sync: false,
-          body_format: :binary
-        ]
-      ])
-
-  ## Flat vs Structured Options
-
-  The module supports both flat and structured option formats:
-
-      # Flat format (recommended for simplicity)
-      [method: "POST", timeout: 5_000, body_format: :binary]
-
-      # Structured format (for explicit control)
-      [
-        method: "POST",
-        options: [timeout: 5_000],
-        client_opts: [body_format: :binary]
-      ]
-
-  Both formats are equivalent; the module automatically categorizes options.
+  - `content_type` - convenience Content-Type value for request bodies
+  - `timeout` - request timeout in milliseconds
+  - `connect_timeout` - connection timeout in milliseconds
+  - `ssl` - TLS options passed to `:ssl`
+  - `socket_opts` - socket options passed to the underlying transport
+  - `unix_socket` - Unix Domain Socket path
   """
+
+  @string_keys %{
+    "body" => :body,
+    "connect_timeout" => :connect_timeout,
+    "connectTimeout" => :connect_timeout,
+    "content_type" => :content_type,
+    "contentType" => :content_type,
+    "headers" => :headers,
+    "method" => :method,
+    "redirect" => :redirect,
+    "signal" => :signal,
+    "socket_opts" => :socket_opts,
+    "socketOpts" => :socket_opts,
+    "ssl" => :ssl,
+    "timeout" => :timeout,
+    "unix_socket" => :unix_socket,
+    "unixSocket" => :unix_socket
+  }
 
   defstruct method: :get,
             headers: %HTTP.Headers{},
             content_type: nil,
             body: nil,
-            options: [],
-            opts: [sync: false],
             signal: nil,
             unix_socket: nil,
+            redirect: :follow,
             timeout: nil,
             connect_timeout: nil,
             ssl: nil,
-            autoredirect: nil,
-            proxy_auth: nil,
-            version: nil,
-            relaxed: nil,
-            stream: nil,
-            body_format: nil,
-            full_result: nil,
-            headers_as_is: nil,
-            socket_opts: nil,
-            receiver: nil,
-            ipv6_host_with_brackets: nil
+            socket_opts: nil
+
+  @type redirect :: :follow | :manual | :error
 
   @type t :: %__MODULE__{
           method: atom(),
           headers: HTTP.Headers.t(),
           content_type: String.t() | nil,
           body: any(),
-          options: keyword(),
-          opts: keyword(),
           signal: any() | nil,
           unix_socket: String.t() | nil,
+          redirect: redirect(),
           timeout: integer() | nil,
           connect_timeout: integer() | nil,
           ssl: list() | nil,
-          autoredirect: boolean() | nil,
-          proxy_auth: tuple() | nil,
-          version: String.t() | nil,
-          relaxed: boolean() | nil,
-          stream: atom() | tuple() | nil,
-          body_format: atom() | nil,
-          full_result: boolean() | nil,
-          headers_as_is: boolean() | nil,
-          socket_opts: list() | nil,
-          receiver: pid() | function() | tuple() | nil,
-          ipv6_host_with_brackets: boolean() | nil
+          socket_opts: list() | nil
         }
 
   @doc """
-  Creates a new FetchOptions struct from various input formats.
-  Supports flat map, keyword list, or existing FetchOptions struct.
+  Creates a new FetchOptions struct from a flat map, keyword list, or existing
+  FetchOptions struct.
   """
   @spec new(map() | keyword() | t()) :: t()
+  def new(%__MODULE__{} = options), do: normalize_options(options)
+
   def new(options) when is_map(options) do
     options
-    |> Map.to_list()
+    |> Enum.map(fn {key, value} -> {normalize_key(key), value} end)
     |> new()
   end
 
@@ -143,40 +86,17 @@ defmodule HTTP.FetchOptions do
     |> normalize_options()
   end
 
-  def new(%__MODULE__{} = options) do
-    options
-    |> normalize_options()
-  end
-
   @doc """
-  Converts FetchOptions to request options.
+  Converts fetch init options to the internal socket transport option list.
   """
-  @spec to_http_options(t()) :: keyword()
-  def to_http_options(%__MODULE__{} = options) do
+  @spec to_transport_options(t()) :: keyword()
+  def to_transport_options(%__MODULE__{} = options) do
     []
     |> maybe_add(:timeout, options.timeout)
     |> maybe_add(:connect_timeout, options.connect_timeout)
     |> maybe_add(:ssl, options.ssl)
-    |> maybe_add(:autoredirect, options.autoredirect)
-    |> maybe_add(:proxy_auth, options.proxy_auth)
-    |> maybe_add(:version, options.version)
-    |> maybe_add(:relaxed, options.relaxed)
-  end
-
-  @doc """
-  Converts FetchOptions to compatibility client options.
-  """
-  @spec to_options(t()) :: keyword()
-  def to_options(%__MODULE__{} = options) do
-    options.opts
-    |> Keyword.put_new(:sync, false)
-    |> maybe_add(:stream, options.stream)
-    |> maybe_add(:body_format, options.body_format)
-    |> maybe_add(:full_result, options.full_result)
-    |> maybe_add(:headers_as_is, options.headers_as_is)
     |> maybe_add(:socket_opts, options.socket_opts)
-    |> maybe_add(:receiver, options.receiver)
-    |> maybe_add(:ipv6_host_with_brackets, options.ipv6_host_with_brackets)
+    |> maybe_add(:redirect, options.redirect)
   end
 
   @doc """
@@ -217,20 +137,14 @@ defmodule HTTP.FetchOptions do
       {:body, body}, acc ->
         %{acc | body: body}
 
-      {:options, options}, acc ->
-        %{acc | options: Keyword.merge(acc.options, List.wrap(options))}
-
-      {:opts, opts}, acc ->
-        %{acc | opts: Keyword.merge(acc.opts, List.wrap(opts))}
-
-      {:client_opts, opts}, acc ->
-        %{acc | opts: Keyword.merge(acc.opts, List.wrap(opts))}
-
       {:signal, signal}, acc ->
         %{acc | signal: signal}
 
       {:unix_socket, unix_socket}, acc ->
         %{acc | unix_socket: unix_socket}
+
+      {:redirect, redirect}, acc ->
+        %{acc | redirect: redirect}
 
       {:timeout, timeout}, acc ->
         %{acc | timeout: timeout}
@@ -241,43 +155,16 @@ defmodule HTTP.FetchOptions do
       {:ssl, ssl}, acc ->
         %{acc | ssl: ssl}
 
-      {:autoredirect, autoredirect}, acc ->
-        %{acc | autoredirect: autoredirect}
-
-      {:proxy_auth, proxy_auth}, acc ->
-        %{acc | proxy_auth: proxy_auth}
-
-      {:version, version}, acc ->
-        %{acc | version: version}
-
-      {:relaxed, relaxed}, acc ->
-        %{acc | relaxed: relaxed}
-
-      {:stream, stream}, acc ->
-        %{acc | stream: stream}
-
-      {:body_format, body_format}, acc ->
-        %{acc | body_format: body_format}
-
-      {:full_result, full_result}, acc ->
-        %{acc | full_result: full_result}
-
-      {:headers_as_is, headers_as_is}, acc ->
-        %{acc | headers_as_is: headers_as_is}
-
       {:socket_opts, socket_opts}, acc ->
         %{acc | socket_opts: socket_opts}
 
-      {:receiver, receiver}, acc ->
-        %{acc | receiver: receiver}
-
-      {:ipv6_host_with_brackets, ipv6_host_with_brackets}, acc ->
-        %{acc | ipv6_host_with_brackets: ipv6_host_with_brackets}
-
-      {key, value}, acc ->
-        handle_unknown_option(key, value, acc)
+      {_key, _value}, acc ->
+        acc
     end)
   end
+
+  defp normalize_key(key) when is_binary(key), do: Map.get(@string_keys, key, key)
+  defp normalize_key(key), do: key
 
   defp normalize_headers(%HTTP.Headers{} = headers), do: headers
   defp normalize_headers(headers) when is_list(headers), do: HTTP.Headers.new(headers)
@@ -285,24 +172,37 @@ defmodule HTTP.FetchOptions do
   defp normalize_headers(_), do: HTTP.Headers.new()
 
   defp normalize_options(%__MODULE__{} = options) do
-    %{options | method: normalize_method(options.method)}
+    %{
+      options
+      | method: normalize_method(options.method),
+        redirect: normalize_redirect(options.redirect)
+    }
   end
 
   defp normalize_method(method) when is_binary(method) do
     method |> String.downcase() |> String.to_atom()
   end
 
-  defp normalize_method(method) when is_atom(method) do
-    method
-  end
+  defp normalize_method(method) when is_atom(method), do: method
 
-  defp handle_unknown_option(key, value, acc) do
-    if Keyword.keyword?(acc.options) do
-      %{acc | options: Keyword.put(acc.options, key, value)}
-    else
-      acc
+  defp normalize_redirect(nil), do: :follow
+  defp normalize_redirect(:follow), do: :follow
+  defp normalize_redirect(:manual), do: :manual
+  defp normalize_redirect(:error), do: :error
+
+  defp normalize_redirect(redirect) when is_binary(redirect) do
+    case String.downcase(redirect) do
+      "follow" -> :follow
+      "manual" -> :manual
+      "error" -> :error
+      _ -> raise ArgumentError, redirect_error_message(redirect)
     end
   end
+
+  defp normalize_redirect(redirect), do: raise(ArgumentError, redirect_error_message(redirect))
+
+  defp redirect_error_message(redirect),
+    do: "unsupported redirect mode: #{inspect(redirect)}; expected :follow, :manual, or :error"
 
   defp maybe_add(list, _key, nil), do: list
   defp maybe_add(list, key, value), do: Keyword.put(list, key, value)

@@ -3,16 +3,28 @@ defmodule HTTP.FetchOptionsTest do
 
   describe "new/1" do
     test "creates from keyword list" do
-      options = HTTP.FetchOptions.new(method: "GET", timeout: 5000)
-      assert %HTTP.FetchOptions{method: :get, timeout: 5000} = options
+      options = HTTP.FetchOptions.new(method: "GET", timeout: 5_000)
+      assert %HTTP.FetchOptions{method: :get, timeout: 5_000} = options
     end
 
-    test "creates from map" do
+    test "creates from atom-keyed map" do
       options =
         HTTP.FetchOptions.new(%{method: "POST", headers: %{"Content-Type" => "application/json"}})
 
       assert %HTTP.FetchOptions{method: :post} = options
       assert %HTTP.Headers{headers: [{"Content-Type", "application/json"}]} = options.headers
+    end
+
+    test "creates from browser-style string-keyed map" do
+      options =
+        HTTP.FetchOptions.new(%{
+          "method" => "POST",
+          "redirect" => "manual",
+          "connectTimeout" => 2_000
+        })
+
+      assert %HTTP.FetchOptions{method: :post, redirect: :manual, connect_timeout: 2_000} =
+               options
     end
 
     test "creates from existing FetchOptions" do
@@ -26,63 +38,52 @@ defmodule HTTP.FetchOptionsTest do
       assert %HTTP.FetchOptions{method: :post} = HTTP.FetchOptions.new(method: "POST")
       assert %HTTP.FetchOptions{method: :get} = HTTP.FetchOptions.new(method: :get)
     end
-  end
 
-  describe "to_http_options/1" do
-    test "converts HTTP-specific options" do
-      options =
-        HTTP.FetchOptions.new(
-          timeout: 5000,
-          connect_timeout: 2000,
-          autoredirect: true,
-          ssl: [verify: :verify_none]
-        )
-
-      http_options = HTTP.FetchOptions.to_http_options(options)
-      assert http_options[:timeout] == 5000
-      assert http_options[:connect_timeout] == 2000
-      assert http_options[:autoredirect] == true
-      assert http_options[:ssl] == [verify: :verify_none]
+    test "normalizes redirect mode" do
+      assert %HTTP.FetchOptions{redirect: :follow} = HTTP.FetchOptions.new([])
+      assert %HTTP.FetchOptions{redirect: :follow} = HTTP.FetchOptions.new(redirect: "follow")
+      assert %HTTP.FetchOptions{redirect: :manual} = HTTP.FetchOptions.new(redirect: "manual")
+      assert %HTTP.FetchOptions{redirect: :error} = HTTP.FetchOptions.new(redirect: :error)
     end
 
-    test "filters out non-HTTP options" do
+    test "rejects invalid redirect mode" do
+      assert_raise ArgumentError, ~r/unsupported redirect mode/, fn ->
+        HTTP.FetchOptions.new(redirect: :invalid)
+      end
+    end
+  end
+
+  describe "to_transport_options/1" do
+    test "converts socket transport options" do
+      options =
+        HTTP.FetchOptions.new(
+          timeout: 5_000,
+          connect_timeout: 2_000,
+          redirect: :manual,
+          ssl: [verify: :verify_none],
+          socket_opts: [:inet6]
+        )
+
+      transport_options = HTTP.FetchOptions.to_transport_options(options)
+      assert transport_options[:timeout] == 5_000
+      assert transport_options[:connect_timeout] == 2_000
+      assert transport_options[:redirect] == :manual
+      assert transport_options[:ssl] == [verify: :verify_none]
+      assert transport_options[:socket_opts] == [:inet6]
+    end
+
+    test "filters out fetch request options" do
       options =
         HTTP.FetchOptions.new(
           method: "GET",
           headers: %{"Accept" => "application/json"},
-          sync: false
+          body: "payload"
         )
 
-      http_options = HTTP.FetchOptions.to_http_options(options)
-      refute Keyword.has_key?(http_options, :sync)
-      refute Keyword.has_key?(http_options, :headers)
-    end
-  end
-
-  describe "to_options/1" do
-    test "converts client options" do
-      options =
-        HTTP.FetchOptions.new(opts: [sync: false, body_format: :binary, full_result: false])
-
-      opts = HTTP.FetchOptions.to_options(options)
-      assert opts[:sync] == false
-      assert opts[:body_format] == :binary
-      assert opts[:full_result] == false
-    end
-
-    test "accepts documented client_opts alias" do
-      options =
-        HTTP.FetchOptions.new(client_opts: [sync: false, socket_opts: [:inet6]])
-
-      opts = HTTP.FetchOptions.to_options(options)
-      assert opts[:sync] == false
-      assert opts[:socket_opts] == [:inet6]
-    end
-
-    test "handles streaming options" do
-      options = HTTP.FetchOptions.new(stream: :self)
-      opts = HTTP.FetchOptions.to_options(options)
-      assert opts[:stream] == :self
+      transport_options = HTTP.FetchOptions.to_transport_options(options)
+      refute Keyword.has_key?(transport_options, :method)
+      refute Keyword.has_key?(transport_options, :headers)
+      refute Keyword.has_key?(transport_options, :body)
     end
   end
 
@@ -115,23 +116,10 @@ defmodule HTTP.FetchOptionsTest do
       assert %HTTP.FetchOptions{} = options
     end
 
-    test "handles unknown options gracefully" do
+    test "ignores unknown options" do
       options = HTTP.FetchOptions.new(custom_option: "value")
       assert %HTTP.FetchOptions{} = options
-    end
-
-    test "merges nested options" do
-      options =
-        HTTP.FetchOptions.new(
-          timeout: 5000,
-          opts: [sync: true]
-        )
-
-      http_options = HTTP.FetchOptions.to_http_options(options)
-      assert http_options[:timeout] == 5000
-
-      opts = HTTP.FetchOptions.to_options(options)
-      assert opts[:sync] == true
+      refute Map.has_key?(options, :custom_option)
     end
   end
 end

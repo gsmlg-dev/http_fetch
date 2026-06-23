@@ -134,6 +134,9 @@ defmodule HTTP.SocketClient do
       )
 
     cond do
+      redirect_error?(state, response) ->
+        fail(state, :redirect)
+
       follow_redirect?(state, response) ->
         redirect(state, response)
 
@@ -438,23 +441,26 @@ defmodule HTTP.SocketClient do
     {:error, {:unsupported_scheme, scheme}}
   end
 
-  defp request_timeout(%Request{} = request) do
-    Keyword.get(request.http_options, :timeout, HTTP.Config.default_request_timeout())
-  end
+  defp request_timeout(%Request{} = request),
+    do: Keyword.get(request.transport_options, :timeout, HTTP.Config.default_request_timeout())
 
-  defp connect_timeout(%Request{} = request) do
-    Keyword.get(request.http_options, :connect_timeout, min(request_timeout(request), 30_000))
-  end
+  defp connect_timeout(%Request{} = request),
+    do:
+      Keyword.get(
+        request.transport_options,
+        :connect_timeout,
+        min(request_timeout(request), 30_000)
+      )
 
   defp transport_opts(%Request{} = request, timeout) do
     socket_opts =
-      request.options
+      request.transport_options
       |> Keyword.get(:socket_opts, [])
       |> Keyword.put_new(:send_timeout, max(timeout, 1))
       |> Keyword.put_new(:send_timeout_close, true)
 
     [
-      ssl: Keyword.get(request.http_options, :ssl, []),
+      ssl: Keyword.get(request.transport_options, :ssl, []),
       socket_opts: socket_opts
     ]
   end
@@ -505,11 +511,19 @@ defmodule HTTP.SocketClient do
     end
   end
 
+  defp redirect_error?(state, response) do
+    redirect_mode(state.request) == :error &&
+      redirect_candidate?(state.request, response.status, response.headers)
+  end
+
   defp follow_redirect?(state, response) do
-    Keyword.get(state.request.http_options, :autoredirect, true) &&
+    redirect_mode(state.request) == :follow &&
       state.redirects < @max_redirects &&
       redirect_candidate?(state.request, response.status, response.headers)
   end
+
+  defp redirect_mode(%Request{} = request),
+    do: Keyword.get(request.transport_options, :redirect, :follow)
 
   defp redirect_candidate?(_request, status, headers) when status in [301, 302, 303, 307, 308] do
     is_binary(Headers.get(headers, "location"))

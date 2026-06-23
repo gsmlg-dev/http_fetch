@@ -23,7 +23,7 @@ defmodule HTTP.AbortController do
       # Start a long-running request with the controller
       promise = HTTP.fetch("https://httpbin.org/delay/10",
         signal: controller,
-        options: [timeout: 20_000]
+        timeout: 20_000
       )
 
       # Abort the request (e.g., after 2 seconds)

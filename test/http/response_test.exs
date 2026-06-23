@@ -231,7 +231,7 @@ defmodule HTTP.ResponseTest do
       File.rm!(temp_path)
     end
 
-    test "streams large redirect bodies when autoredirect is false" do
+    test "streams large redirect bodies when redirect is manual" do
       body = String.duplicate("x", HTTP.Config.streaming_threshold() + 1)
 
       url =
@@ -252,7 +252,7 @@ defmodule HTTP.ResponseTest do
 
       response =
         url
-        |> HTTP.fetch(options: [autoredirect: false])
+        |> HTTP.fetch(redirect: :manual)
         |> HTTP.Promise.await()
 
       assert response.status == 302
@@ -289,7 +289,7 @@ defmodule HTTP.ResponseTest do
 
       response =
         url
-        |> HTTP.fetch(options: [autoredirect: true])
+        |> HTTP.fetch(redirect: :follow)
         |> HTTP.Promise.await()
 
       assert response.status == 200
@@ -428,7 +428,7 @@ defmodule HTTP.ResponseTest do
             "Content-Type" => "text/plain",
             "Content-Length" => "999"
           },
-          options: [autoredirect: true]
+          redirect: :follow
         )
         |> HTTP.Promise.await()
 
@@ -475,7 +475,7 @@ defmodule HTTP.ResponseTest do
           method: :put,
           body: "payload",
           content_type: "text/plain",
-          options: [autoredirect: true]
+          redirect: :follow
         )
         |> HTTP.Promise.await()
 
@@ -528,7 +528,7 @@ defmodule HTTP.ResponseTest do
             "Content-Type" => "text/plain",
             "Content-Length" => "999"
           },
-          options: [autoredirect: true]
+          redirect: :follow
         )
         |> HTTP.Promise.await()
 

@@ -35,10 +35,10 @@ defmodule E2E.ErrorTest do
       assert ResponseView.json!(view) == %{"ok" => true, "redirects" => 0}
     end
 
-    test "autoredirect: true follows a 302 chain" do
+    test "redirect: :follow follows a 302 chain" do
       resp =
         E2E.Server.url("/redirect/2")
-        |> HTTP.fetch(options: [autoredirect: true])
+        |> HTTP.fetch(redirect: :follow)
         |> HTTP.Promise.await()
 
       view = ResponseView.from(resp)
@@ -46,14 +46,23 @@ defmodule E2E.ErrorTest do
       assert ResponseView.json!(view) == %{"ok" => true, "redirects" => 0}
     end
 
-    test "autoredirect: false returns the 302" do
+    test "redirect: :manual returns the 302" do
       resp =
         E2E.Server.url("/redirect/2")
-        |> HTTP.fetch(options: [autoredirect: false])
+        |> HTTP.fetch(redirect: :manual)
         |> HTTP.Promise.await()
 
       view = ResponseView.from(resp)
       assert view.status == 302
+    end
+
+    test "redirect: :error rejects a 302" do
+      result =
+        E2E.Server.url("/redirect/2")
+        |> HTTP.fetch(redirect: :error)
+        |> HTTP.Promise.await()
+
+      assert {:error, :redirect} = result
     end
   end
 
@@ -65,7 +74,7 @@ defmodule E2E.ErrorTest do
         E2E.Server.url("/delay/2000")
         |> HTTP.fetch(
           signal: controller,
-          options: [timeout: 10_000]
+          timeout: 10_000
         )
 
       Process.sleep(100)

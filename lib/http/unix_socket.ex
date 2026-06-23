@@ -19,7 +19,10 @@ defmodule HTTP.UnixSocket do
   """
   @spec request(String.t(), Request.t(), integer()) :: {:ok, Response.t()} | {:error, term()}
   def request(socket_path, %Request{} = request, timeout \\ 30_000) do
-    request = %{request | http_options: Keyword.put(request.http_options, :timeout, timeout)}
+    request = %{
+      request
+      | transport_options: Keyword.put(request.transport_options, :timeout, timeout)
+    }
 
     case HTTP.SocketClient.request(request, nil, socket_path) do
       %Response{} = response -> {:ok, response}

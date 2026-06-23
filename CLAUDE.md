@@ -82,8 +82,8 @@ MIX_ENV=prod mix compile
 ## Important Implementation Details
 
 ### Request Options Mapping
-- `options:` keyword in `fetch/2` maps to request options - controls timeout, connect_timeout, ssl, autoredirect, etc.
-- `opts:` and `client_opts:` keywords in `fetch/2` map to compatibility options - currently used for socket options.
+- `fetch/2` accepts flat fetch init options. Use `method`, `headers`, `body`, `signal`, and `redirect` for browser-style options.
+- Socket transport extensions are also flat: `timeout`, `connect_timeout`, `ssl`, `socket_opts`, and `unix_socket`.
 
 ### Streaming Behavior
 - Automatic streaming for responses >5MB or unknown Content-Length

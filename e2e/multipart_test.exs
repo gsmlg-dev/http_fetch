@@ -147,7 +147,7 @@ defmodule E2E.MultipartTest do
 
       resp =
         E2E.Server.url("/multipart")
-        |> HTTP.fetch(method: "POST", body: form, options: [timeout: 30_000])
+        |> HTTP.fetch(method: "POST", body: form, timeout: 30_000)
         |> HTTP.Promise.await()
 
       view = E2E.ResponseView.from(resp)

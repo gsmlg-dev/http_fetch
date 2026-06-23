@@ -32,12 +32,10 @@ For module-by-module details, see the table in `CLAUDE.md` and read
 
 ## Gotchas — read before editing
 
-- **`options:` vs `opts:`/`client_opts:` in `fetch/2`.** The keyword
-  `options:` maps to request options consumed by the socket transport
-  (`timeout`, `connect_timeout`, `ssl`, `autoredirect`). The `opts:` and
-  `client_opts:` keywords map to compatibility client options; broad legacy
-  client parity is intentionally not implemented, but `socket_opts` is consumed
-  by the transports.
+- **Flat fetch init options in `fetch/2`.** Pass request and transport settings
+  directly (`method`, `headers`, `body`, `signal`, `redirect`, `timeout`,
+  `connect_timeout`, `ssl`, `socket_opts`). Do not use legacy `options:`,
+  `opts:`, or `client_opts:` buckets.
 - **5MB streaming threshold.** Responses >5MB, chunked responses, or responses
   with unknown `Content-Length` stream via a separate process. Streamed
   responses have `body: nil` and `stream: pid`; consume them with

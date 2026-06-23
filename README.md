@@ -143,7 +143,8 @@ promise = HTTP.fetch(url, [
   headers: %{"Accept" => "application/json"},
   body: "request body",
   content_type: "application/json",
-  options: [timeout: 10_000],
+  redirect: :manual,
+  timeout: 10_000,
   signal: abort_controller,
   unix_socket: "/var/run/docker.sock"  # Optional: use Unix Domain Socket
 ])
@@ -263,21 +264,18 @@ request = %HTTP.Request{
   url: URI.parse("https://api.example.com/data"),
   headers: HTTP.Headers.new([{"Authorization", "Bearer token"}]),
   body: "data",
-  http_options: [timeout: 10_000, connect_timeout: 5_000],
-  options: [sync: false, body_format: :binary]
+  transport_options: [timeout: 10_000, connect_timeout: 5_000, redirect: :manual]
 }
 ```
 
 **Transport Options:**
-- `http_options`: Request options such as `timeout`, `connect_timeout`, `ssl`, and `autoredirect`
-- `options`: Compatibility options such as `socket_opts`
+- `transport_options`: Socket transport options such as `timeout`, `connect_timeout`, `ssl`,
+  `socket_opts`, and `redirect`
 
-`autoredirect` defaults to `true` with the socket transport. Pass
-`options: [autoredirect: false]` to `HTTP.fetch/2` or
-`http_options: [autoredirect: false]` on `%HTTP.Request{}` to return redirect responses.
-Legacy `:httpc` options such as `proxy_auth`, `version`, `relaxed`, `body_format`,
-`full_result`, `headers_as_is`, `receiver`, and `ipv6_host_with_brackets` are parsed for
-source compatibility but are not implemented by the socket transport.
+`redirect` defaults to `:follow` with the socket transport. Pass `redirect: :manual`
+to `HTTP.fetch/2` or `transport_options: [redirect: :manual]` on `%HTTP.Request{}`
+to return redirect responses. Pass `redirect: :error` to fail when a redirect response
+is received.
 
 ### HTTP.FormData
 Handle form data and file uploads.

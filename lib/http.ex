@@ -98,13 +98,11 @@ defmodule HTTP do
                 - `:body`: The request body (should be a binary or a string that can be coerced to binary).
                 - `:content_type`: The Content-Type header value. If not provided for methods with body,
                                    defaults to "application/octet-stream" when a body is present.
-                - `:options`: A keyword list of request options such as `timeout`, `connect_timeout`, `ssl`, and
-                              `autoredirect`.
-                - `:client_opts` or `:opts`: A keyword list of compatibility client options.
-                                             Broad legacy-client option parity is intentionally not
-                                             implemented by the socket transport.
+                - `:redirect`: Redirect mode, one of `:follow`, `:manual`, or `:error`. Defaults to `:follow`.
                 - `:signal`: An `HTTP.AbortController` PID. If provided, the request can be aborted
                              via this controller.
+                - `:timeout`, `:connect_timeout`, `:ssl`, and `:socket_opts`: Elixir-specific transport
+                  extensions used by the socket transport.
                 - `:unix_socket`: Path to a Unix Domain Socket file (e.g., "/var/run/docker.sock").
                                   When provided, the request is sent over the Unix socket instead of TCP/IP.
 
@@ -114,9 +112,10 @@ defmodule HTTP do
                  (e.g., invalid URL, bad arguments), the Promise will contain an error result
                  when awaited.
 
-  The socket transport defaults `autoredirect` to `true`; pass `options: [autoredirect: false]`
-  to return redirect responses. Request timeout handling gives the internal socket owner up to one
-  additional second to report its timeout before the awaiting caller aborts it.
+  The socket transport defaults `redirect` to `:follow`; pass `redirect: :manual`
+  to return redirect responses, or `redirect: :error` to fail on redirect. Request timeout handling
+  gives the internal socket owner up to one additional second to report its timeout before the
+  awaiting caller aborts it.
 
   Example Usage:
 
@@ -210,8 +209,8 @@ defmodule HTTP do
       #     IO.inspect reason, label: "POST Error"
       # end
 
-      # Request with custom transport options (e.g., longer timeout for request options)
-      delayed_promise = HTTP.fetch("https://httpbin.org/delay/5", options: [timeout: 10_000])
+      # Request with a longer timeout
+      delayed_promise = HTTP.fetch("https://httpbin.org/delay/5", timeout: 10_000)
       case HTTP.Promise.await(delayed_promise) do
         %HTTP.Response{status: status} ->
           IO.puts "Delayed request successful! Status: \#{status}"
@@ -222,7 +221,7 @@ defmodule HTTP do
       # Abortable request example
       controller = HTTP.AbortController.new() # Create a new controller
       IO.puts "Fetching a long request that will be aborted..."
-      abortable_promise = HTTP.fetch("https://httpbin.org/delay/10", signal: controller, options: [timeout: 20_000])
+      abortable_promise = HTTP.fetch("https://httpbin.org/delay/10", signal: controller, timeout: 20_000)
 
       # Simulate some work, then abort after a short delay
       Task.start_link(fn ->
@@ -268,8 +267,7 @@ defmodule HTTP do
       headers: HTTP.FetchOptions.get_headers(options),
       body: HTTP.FetchOptions.get_body(options),
       content_type: HTTP.FetchOptions.get_content_type(options),
-      http_options: Keyword.merge(options.options, HTTP.FetchOptions.to_http_options(options)),
-      options: HTTP.FetchOptions.to_options(options)
+      transport_options: HTTP.FetchOptions.to_transport_options(options)
     }
 
     # Extract AbortController PID and unix_socket from FetchOptions

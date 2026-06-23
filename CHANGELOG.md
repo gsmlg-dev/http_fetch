@@ -7,13 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+- Removed legacy `:httpc` compatibility option buckets from `HTTP.fetch/2`.
+  Fetch init options are now flat, and redirects use `redirect: :follow | :manual | :error`.
+
 ### Fixed
 - Validate response `Transfer-Encoding` framing instead of falling back to
   `Content-Length` for unsupported transfer codings.
 - Keep completed empty streams readable for late consumers.
-- Accept the documented `client_opts:` alias for compatibility client options.
-- Return the correct legacy `:httpc` multipart body request tuple from
-  `HTTP.Request.to_httpc_args/1`.
 - Make the Unix socket e2e coverage independent of a host Docker daemon.
 - Align release metadata, README examples, and project guidance with the socket
   transport.

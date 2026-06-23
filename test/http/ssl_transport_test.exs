@@ -23,7 +23,7 @@ defmodule HTTP.SSLTransportTest do
 
       response =
         url
-        |> HTTP.fetch(options: [ssl: [verify: :verify_none]])
+        |> HTTP.fetch(ssl: [verify: :verify_none])
         |> HTTP.Promise.await()
 
       assert response.status == 200
@@ -41,7 +41,7 @@ defmodule HTTP.SSLTransportTest do
 
       response =
         url
-        |> HTTP.fetch(options: [ssl: [cacertfile: @cacertfile]])
+        |> HTTP.fetch(ssl: [cacertfile: @cacertfile])
         |> HTTP.Promise.await()
 
       assert response.status == 200
@@ -59,7 +59,7 @@ defmodule HTTP.SSLTransportTest do
 
       response =
         url
-        |> HTTP.fetch(options: [ssl: [verify: :verify_none]])
+        |> HTTP.fetch(ssl: [verify: :verify_none])
         |> HTTP.Promise.await()
 
       assert response.status == 200
