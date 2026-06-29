@@ -9,20 +9,21 @@ This is an Elixir library providing a browser-like HTTP fetch API built on Erlan
 ## Core Architecture
 
 ### Main Modules
-- **HTTP** (`lib/http.ex`): Entry point providing `fetch/2` function. Handles async request execution via Task.Supervisor, response processing (including streaming detection), and telemetry event emission
-- **HTTP.Promise** (`lib/http/promise.ex`): JavaScript-like Promise implementation wrapping Task with chaining via `then/3` and `await/2`
-- **HTTP.Request** (`lib/http/request.ex`): Request configuration struct that serializes to HTTP/1.1 wire iodata
-- **HTTP.HTTP1** (`lib/http/http1.ex`): Pure HTTP/1.1 serializer and response parser for status, headers, Content-Length, chunked bodies, and read-to-close bodies
-- **HTTP.SocketClient** (`lib/http/socket_client.ex`): Socket owner process for one request lifecycle, including TCP/TLS/Unix transport selection, redirects, streaming, deadlines, and aborts
-- **HTTP.Response** (`lib/http/response.ex`): Response struct with `json/1`, `text/1`, and `write_to/2` methods. Handles both buffered and streamed responses
-- **HTTP.Headers** (`lib/http/headers.ex`): Headers manipulation with case-insensitive operations, Content-Type parsing, and default User-Agent support
-- **HTTP.FormData** (`lib/http/form_data.ex`): Multipart/form-data encoding with streaming file upload support
-- **HTTP.AbortController** (`lib/http/abort_controller.ex`): Request cancellation via Agent-based controller
-- **HTTP.FetchOptions** (`lib/http/fetch_options.ex`): Options processing and validation for `fetch/2`
-- **HTTP.Telemetry** (`lib/http/telemetry.ex`): Comprehensive telemetry events for requests, responses, streaming, and errors
+- **HTTP** (`apps/http_fetch/lib/http.ex`): Entry point providing `fetch/2` function. Handles async request execution via Task.Supervisor, response processing (including streaming detection), and telemetry event emission
+- **HTTP.Promise** (`apps/http_fetch/lib/http/promise.ex`): JavaScript-like Promise implementation wrapping Task with chaining via `then/3` and `await/2`
+- **HTTP.Request** (`apps/http_fetch/lib/http/request.ex`): Request configuration struct that serializes to HTTP/1.1 wire iodata
+- **HTTP.HTTP1** (`apps/http_fetch/lib/http/http1.ex`): Pure HTTP/1.1 serializer and response parser for status, headers, Content-Length, chunked bodies, and read-to-close bodies
+- **HTTP.SocketClient** (`apps/http_fetch/lib/http/socket_client.ex`): Socket owner process for one request lifecycle, including TCP/TLS/Unix transport selection, redirects, streaming, deadlines, and aborts
+- **HTTP.Response** (`apps/http_fetch/lib/http/response.ex`): Response struct with `json/1`, `text/1`, and `write_to/2` methods. Handles both buffered and streamed responses
+- **HTTP.Headers** (`apps/http_fetch/lib/http/headers.ex`): Headers manipulation with case-insensitive operations, Content-Type parsing, and default User-Agent support
+- **HTTP.FormData** (`apps/http_fetch/lib/http/form_data.ex`): Multipart/form-data encoding with streaming file upload support
+- **HTTP.AbortController** (`apps/http_fetch/lib/http/abort_controller.ex`): Request cancellation via Agent-based controller
+- **HTTP.FetchOptions** (`apps/http_fetch/lib/http/fetch_options.ex`): Options processing and validation for `fetch/2`
+- **HTTP.Telemetry** (`apps/http_fetch/lib/http/telemetry.ex`): Comprehensive telemetry events for requests, responses, streaming, and errors
 
 ### Application Structure
-- **HTTPFetch.Application** (`lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
+- This is a Mix umbrella with one child app: `apps/http_fetch`
+- **HTTPFetch.Application** (`apps/http_fetch/lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
 
 ### Key Design Patterns
 1. **Async by default**: All requests use Task.Supervisor with `async_nolink/4`
@@ -40,10 +41,10 @@ mix deps.get
 mix test
 
 # Run specific test file
-mix test test/http_test.exs
+mix test apps/http_fetch/test/http/response_test.exs
 
 # Run specific test by line number
-mix test test/http_test.exs:42
+mix test apps/http_fetch/test/http/response_test.exs:42
 
 # Interactive development with application started
 iex -S mix
@@ -119,7 +120,7 @@ Current known issues to address:
 - Warnings: Struct specifications in `@spec` declarations
 
 ### Dialyzer
-Dialyzer performs static type analysis to catch type errors and inconsistencies. PLT (Persistent Lookup Table) stored in `priv/plts/dialyzer.plt`.
+Dialyzer performs static type analysis to catch type errors and inconsistencies. PLT (Persistent Lookup Table) stored in `apps/http_fetch/priv/plts/dialyzer.plt`.
 
 Current known issues to address:
 - `HTTP.fetch/2`: Spec doesn't match success typing due to Task.Supervisor return inference

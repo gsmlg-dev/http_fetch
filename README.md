@@ -359,7 +359,7 @@ open doc/index.html
 mix test
 
 # Run specific test file
-mix test test/http_test.exs
+mix test apps/http_fetch/test/http/response_test.exs
 
 # Run with coverage
 mix test --cover
@@ -372,10 +372,10 @@ server. It requires Go 1.22+ to build the server.
 
 ```bash
 # 1. Build the test server
-(cd priv/test_server && go build -o ../test_server/server .)
+(cd apps/http_fetch/priv/test_server && go build -o ../test_server/server .)
 
 # 2. Start it in the background; capture the printed port
-./priv/test_server/server > .e2e_port &
+./apps/http_fetch/priv/test_server/server > .e2e_port &
 PORT=$(grep -oE '[0-9]+' .e2e_port | head -n1)
 export E2E_BASE_URL="http://127.0.0.1:$PORT"
 

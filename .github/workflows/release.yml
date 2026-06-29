@@ -71,14 +71,14 @@ jobs:
       run: mix dialyzer --format github
 
     - name: Build the e2e test server
-      working-directory: priv/test_server
+      working-directory: apps/http_fetch/priv/test_server
       run: go build -o ../test_server/server .
 
     - name: Start the e2e test server
       id: server
       run: |
         set -euo pipefail
-        ./priv/test_server/server > .e2e_port &
+        ./apps/http_fetch/priv/test_server/server > .e2e_port &
         SERVER_PID=$!
         echo "SERVER_PID=${SERVER_PID}" >> "$GITHUB_OUTPUT"
         for i in {1..50}; do
@@ -142,24 +142,27 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
-      - name: Validate release source
-        run: |
-          SOURCE_VERSION=$(mix run --no-compile --no-start -e 'IO.puts(Mix.Project.config()[:version])')
-          if [ "${SOURCE_VERSION}" != "${{ github.event.inputs.release-version }}" ]; then
-            echo "::error::mix.exs version ${SOURCE_VERSION} does not match requested release ${{ github.event.inputs.release-version }}"
-            exit 1
-          fi
-          if ! grep -q "^## \\[${{ github.event.inputs.release-version }}\\]" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md is missing section ${{ github.event.inputs.release-version }}"
-            exit 1
-          fi
+    - name: Validate release source
+      working-directory: apps/http_fetch
+      run: |
+        SOURCE_VERSION=$(mix run --no-compile --no-start -e 'IO.puts(Mix.Project.config()[:version])')
+        if [ "${SOURCE_VERSION}" != "${{ github.event.inputs.release-version }}" ]; then
+          echo "::error::mix.exs version ${SOURCE_VERSION} does not match requested release ${{ github.event.inputs.release-version }}"
+          exit 1
+        fi
+        if ! grep -q "^## \\[${{ github.event.inputs.release-version }}\\]" ../../CHANGELOG.md; then
+          echo "::error::CHANGELOG.md is missing section ${{ github.event.inputs.release-version }}"
+          exit 1
+        fi
 
-      - name: Build Hex package
-        run: mix hex.build
+    - name: Build Hex package
+      working-directory: apps/http_fetch
+      run: mix hex.build
 
-      - name: Publish to hex.pm
-        run: |
-          mix hex.publish --yes
+    - name: Publish to hex.pm
+      working-directory: apps/http_fetch
+      run: |
+        mix hex.publish --yes
 
       - name: Create Git Tag
         run: |

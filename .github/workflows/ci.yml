@@ -126,7 +126,7 @@ jobs:
       - name: Restore Dialyzer PLT cache
         uses: actions/cache@v4
         with:
-          path: priv/plts
+          path: apps/http_fetch/priv/plts
           key: ${{ runner.os }}-dialyzer-${{ hashFiles('**/mix.lock') }}
           restore-keys: ${{ runner.os }}-dialyzer-
 

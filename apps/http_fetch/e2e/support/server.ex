@@ -3,7 +3,7 @@ defmodule E2E.Server do
   Resolves the base URL of the running e2e test server.
 
   The server is started outside of the ExUnit process by the CI workflow (or
-  by a developer running `priv/test_server/server` locally) and its URL is
+  by a developer running `apps/http_fetch/priv/test_server/server` locally) and its URL is
   exported as the `E2E_BASE_URL` environment variable.
 
   ## Usage
@@ -29,8 +29,8 @@ defmodule E2E.Server do
 
           1. Run the CI workflow which exports E2E_BASE_URL for you, OR
           2. Locally:
-               go build -o priv/test_server/server ./priv/test_server
-               priv/test_server/server &
+               go build -o apps/http_fetch/priv/test_server/server ./apps/http_fetch/priv/test_server
+               apps/http_fetch/priv/test_server/server &
                export E2E_BASE_URL=http://127.0.0.1:$(grep ^PORT= <log>)
         """
 

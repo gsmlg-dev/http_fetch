@@ -14,21 +14,23 @@ mix compile --warnings-as-errors   # CI compiles with warnings-as-errors
 mix test
 mix format --check-formatted       # CI runs this; use `mix format` to fix
 mix credo                          # CI runs this
-mix dialyzer                       # CI runs this; PLT at priv/plts/dialyzer.plt
+mix dialyzer                       # CI runs this; PLT at apps/http_fetch/priv/plts/dialyzer.plt
 mix docs                           # ExDoc HTML
 ```
 
-Run a single test file or line: `mix test test/http_test.exs:42`.
-First-time Dialyzer setup: `mix dialyzer --plt` (2-3 min, cached in `priv/plts/`).
+Run a single test file or line: `mix test apps/http_fetch/test/http/response_test.exs:42`.
+First-time Dialyzer setup: `mix dialyzer --plt` (2-3 min, cached in `apps/http_fetch/priv/plts/`).
 
 ## Project layout
 
-Entry point is `HTTP.fetch/2` in `lib/http.ex`. It is async by default
+This is a Mix umbrella with a single child app at `apps/http_fetch`.
+
+Entry point is `HTTP.fetch/2` in `apps/http_fetch/lib/http.ex`. It is async by default
 (`Task.Supervisor` + the internal socket transport) and returns an `HTTP.Promise`.
 Response handling, streaming, and telemetry emission live in the socket client and
 response modules.
 For module-by-module details, see the table in `CLAUDE.md` and read
-`lib/http/*.ex` directly.
+`apps/http_fetch/lib/http/*.ex` directly.
 
 ## Gotchas — read before editing
 
@@ -47,7 +49,7 @@ For module-by-module details, see the table in `CLAUDE.md` and read
   up" the output.
 - **Telemetry prefix is `[:http_fetch, ...]`.** Event names: `[:request,
   :start | :stop | :exception]`, `[:streaming, :start | :chunk | :stop]`.
-  See `lib/http/telemetry.ex` and `HTTP.Telemetry` for the full list and
+  See `apps/http_fetch/lib/http/telemetry.ex` and `HTTP.Telemetry` for the full list and
   metadata keys. Don't invent new event names without updating the module.
 - **Unix Domain Sockets.** `fetch/2` accepts `unix_socket: "/path/to.sock"`.
   This routes through `HTTP.Transport.Unix`; do not assume standard TCP host
@@ -56,8 +58,8 @@ For module-by-module details, see the table in `CLAUDE.md` and read
 ## Style
 
 - `mix format` is authoritative; do not hand-format Elixir.
-- The formatter scope is `{mix,.formatter}.exs` and
-  `{config,lib,test}/**/*.{ex,exs}` (see `.formatter.exs`).
+- The formatter scope is the umbrella root plus `apps/http_fetch` (see
+  `.formatter.exs` and `apps/http_fetch/.formatter.exs`).
 - Credo is run in CI; run `mix credo` locally before pushing.
 
 ## Repo etiquette
