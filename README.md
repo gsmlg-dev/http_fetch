@@ -132,6 +132,52 @@ response =
   |> HTTP.Promise.await()
 ```
 
+## WebSocket Client
+
+The umbrella also includes `HTTP.WebSocket`, a browser-like WebSocket client.
+It returns a socket immediately, then delivers `open`, `message`, `error`, and
+`close` events to the owner process.
+
+```elixir
+socket = HTTP.WebSocket.new("wss://example.com/socket", ["chat.v1"])
+
+receive do
+  {HTTP.WebSocket, ^socket, %HTTP.WebSocket.Event.Open{}} ->
+    :ok = HTTP.WebSocket.send(socket, "hello")
+
+  {HTTP.WebSocket, ^socket, %HTTP.WebSocket.Event.Message{data: data}} ->
+    IO.inspect(data, label: "message")
+
+  {HTTP.WebSocket, ^socket, %HTTP.WebSocket.Event.Close{code: code, reason: reason}} ->
+    IO.inspect({code, reason}, label: "closed")
+end
+```
+
+Browser-compatible accessors are exposed with Elixir naming:
+
+```elixir
+HTTP.WebSocket.ready_state(socket)
+HTTP.WebSocket.buffered_amount(socket)
+HTTP.WebSocket.protocol(socket)
+HTTP.WebSocket.extensions(socket)
+HTTP.WebSocket.binary_type(socket)
+HTTP.WebSocket.url(socket)
+```
+
+Plain Elixir binaries are sent as text frames. Use `HTTP.WebSocket.array_buffer/1`
+or `HTTP.Blob` for binary frames:
+
+```elixir
+:ok = HTTP.WebSocket.send(socket, "text")
+:ok = HTTP.WebSocket.send(socket, HTTP.WebSocket.array_buffer(<<0, 1, 2>>))
+:ok = HTTP.WebSocket.send(socket, HTTP.Blob.new(<<0, 1, 2>>))
+:ok = HTTP.WebSocket.close(socket, 1000, "done")
+```
+
+Elixir differences from the browser API: invalid constructor input returns
+`{:error, reason}` instead of raising a DOM exception, and events are process
+messages instead of `EventTarget` callbacks.
+
 ## API Reference
 
 ### HTTP.fetch/2
