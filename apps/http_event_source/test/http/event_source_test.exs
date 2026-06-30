@@ -82,6 +82,28 @@ defmodule HTTP.EventSourceTest do
     assert EventSource.ready_state(source) == EventSource.closed()
   end
 
+  test "stops on invalid content type" do
+    {:ok, _server, port} =
+      HTTPEventSource.TestServer.start_link(content_type: "application/json", body: "{}")
+
+    source = EventSource.new("http://127.0.0.1:#{port}/events", reconnect_time: 10)
+
+    assert_receive {EventSource, ^source, %Error{reason: :invalid_content_type}}, 1_000
+    assert EventSource.ready_state(source) == EventSource.closed()
+  end
+
+  test "honors retry fields from the stream" do
+    {:ok, _server, port} =
+      HTTPEventSource.TestServer.start_link(body: "retry: 25\ndata: ready\n\n", close: false)
+
+    source = EventSource.new("http://127.0.0.1:#{port}/events", reconnect_time: 10)
+
+    assert_receive {EventSource, ^source, %Open{}}, 1_000
+    assert_receive {EventSource, ^source, %Message{data: "ready"}}, 1_000
+    assert EventSource.reconnect_time(source) == 25
+    assert :ok = EventSource.close(source)
+  end
+
   test "rejects invalid constructor input synchronously" do
     assert {:error, {:unsupported_scheme, "ftp"}} = EventSource.new("ftp://example.com/events")
   end

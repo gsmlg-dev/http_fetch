@@ -33,6 +33,13 @@ defmodule HTTP.EventSource.ParserTest do
            ] = events
   end
 
+  test "empty id resets the last event id" do
+    parser = Parser.new(last_event_id: "old")
+
+    assert {:ok, _parser, [{:event, "message", "reset", ""}]} =
+             Parser.parse(parser, "id:\ndata: reset\n\n")
+  end
+
   test "handles chunk boundaries and CRLF line endings" do
     parser = Parser.new()
 
