@@ -1,7 +1,7 @@
 defmodule HttpFetch.MixProject do
   use Mix.Project
 
-  @version "0.9.1"
+  @version "0.10.0"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
 
   def project do
@@ -57,7 +57,7 @@ defmodule HttpFetch.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:http_core, "~> 0.9.1", in_umbrella: true, hex: :http_core},
+      {:http_core, "~> 0.10.0", in_umbrella: true, hex: :http_core},
       {:telemetry, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
       {:briefly, "~> 0.4", only: :test},
