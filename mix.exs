@@ -3,6 +3,7 @@ defmodule HttpFetch.Umbrella.MixProject do
 
   @version "0.9.1"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
+  @e2e_apps ~w(http_fetch http_event_source http_web_transport http_web_socket)
 
   def project do
     [
@@ -53,21 +54,12 @@ defmodule HttpFetch.Umbrella.MixProject do
   end
 
   defp run_e2e_tests([]) do
-    run_child_e2e(:http_fetch, "apps/http_fetch", [])
-    run_child_e2e(:http_event_source, "apps/http_event_source", [])
-    run_child_e2e(:http_web_transport, "apps/http_web_transport", [])
-    run_child_e2e(:http_web_socket, "apps/http_web_socket", [])
+    args = Enum.flat_map(@e2e_apps, &["--app", &1]) ++ ["cmd", "mix", "test.e2e"]
+
+    Mix.Task.run("do", args)
   end
 
   defp run_e2e_tests(args) do
     Mix.Task.run("test", args)
-  end
-
-  defp run_child_e2e(app, path, args) do
-    Mix.Project.in_project(app, path, fn _module ->
-      Mix.Task.run("test.e2e", args)
-      Mix.Task.reenable("test.e2e")
-      Mix.Task.reenable("test")
-    end)
   end
 end
