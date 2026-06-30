@@ -1,172 +1,233 @@
-name: release
+name: Release
 
 on:
   workflow_dispatch:
     inputs:
       release-version:
         required: true
-        description: 'The version of the release'
-        default: '0.1.0'
+        description: "Release version, e.g. 1.2.3"
+        default: "0.1.0"
+        type: string
       git-ref:
         required: true
-        description: 'The git revison of repo, branch, tag or commit'
-        default: 'main'
+        description: "Branch to release from"
+        default: "main"
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs['release-version'] }}
+  cancel-in-progress: false
 
 permissions:
-  actions: write
   contents: write
 
+env:
+  ELIXIR_VERSION: "1.18"
+  OTP_VERSION: "28"
+  RELEASE_APPS: "http_core http_fetch http_web_socket http_event_source http_web_transport"
+  HEX_DEP_APPS: "http_fetch http_web_socket http_event_source http_web_transport"
+
 jobs:
-  tests:
-    name: Run tests (Elixir ${{matrix.elixir}}, OTP ${{matrix.otp}})
-
-    strategy:
-      matrix:
-        include:
-          - elixir: 1.18
-            otp: 27
-            lint: lint
-
-    runs-on: ubuntu-latest
-
-    env:
-      MIX_ENV: test
-
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.git-ref }}
-
-    - name: Set up Elixir
-      uses: erlef/setup-beam@v1
-      with:
-        otp-version: ${{ matrix.otp }}
-        elixir-version: ${{ matrix.elixir }}
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: "1.22"
-
-    - name: Install dependencies
-      run: mix deps.get
-
-    - name: Check source code format
-      run: mix format --check-formatted
-
-    - name: Remove compiled application files
-      run: mix clean
-
-    - name: Compile & lint dependencies
-      run: mix compile --warnings-as-errors
-
-    - name: Run tests
-      run: mix test
-
-    - name: Run Credo
-      run: mix credo
-
-    - name: Run Dialyzer
-      run: mix dialyzer --format github
-
-    - name: Build the e2e test server
-      working-directory: apps/http_fetch/priv/test_server
-      run: go build -o ../test_server/server .
-
-    - name: Start the e2e test server
-      id: server
-      run: |
-        set -euo pipefail
-        ./apps/http_fetch/priv/test_server/server > .e2e_port &
-        SERVER_PID=$!
-        echo "SERVER_PID=${SERVER_PID}" >> "$GITHUB_OUTPUT"
-        for i in {1..50}; do
-          if [ -s .e2e_port ]; then
-            PORT=$(grep -oE '[0-9]+' .e2e_port | head -n1)
-            if curl -fs "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
-              echo "E2E_BASE_URL=http://127.0.0.1:${PORT}" >> "$GITHUB_ENV"
-              echo "Test server ready on port ${PORT}"
-              exit 0
-            fi
-          fi
-          sleep 0.2
-        done
-        echo "::error::E2E test server failed to start within 10s"
-        kill "${SERVER_PID}" 2>/dev/null || true
-        exit 1
-
-    - name: Run E2E test suite
-      env:
-        E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
-      run: mix test.e2e
-
-    - name: Stop the e2e test server
-      if: always()
-      run: |
-        if [ -n "${{ steps.server.outputs.SERVER_PID }}" ]; then
-          kill "${{ steps.server.outputs.SERVER_PID }}" 2>/dev/null || true
-        fi
-        rm -f .e2e_port
-
-    - name: Build docs
-      run: |
-        MIX_ENV=dev mix deps.get
-        MIX_ENV=dev mix docs
-
   release:
-    name: Publish release to hex.pm
+    name: Publish all packages to hex.pm
     runs-on: ubuntu-latest
-    needs: [ tests ]
+    timeout-minutes: 45
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
-    steps:
-      - name: 🛑 Cancel Previous Runs
-        uses: styfle/cancel-workflow-action@0.12.1
-        with:
-          access_token: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_VERSION: ${{ inputs['release-version'] }}
+      RELEASE_BRANCH: ${{ inputs['git-ref'] }}
 
+    steps:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.git-ref }}
+          ref: ${{ inputs['git-ref'] }}
           fetch-depth: 0
+
+      - name: Validate release branch
+        run: |
+          set -euo pipefail
+          if ! git ls-remote --heads origin "${RELEASE_BRANCH}" | grep -q "refs/heads/${RELEASE_BRANCH}$"; then
+            echo "::error::release git-ref must be a branch so the version bump can be pushed"
+            exit 1
+          fi
 
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          otp-version: 27
-          elixir-version: 1.18
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Restore Elixir dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-
+
+      - name: Restore Go module cache
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('apps/http_fetch/priv/test_server/go.sum', 'apps/http_fetch/priv/test_server/go.mod') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Set release version
+        run: |
+          set -euo pipefail
+          for mix_file in mix.exs apps/*/mix.exs; do
+            perl -0pi -e 's/@version "[^"]+"/@version "'"${RELEASE_VERSION}"'"/g' "${mix_file}"
+          done
+          for app in ${HEX_DEP_APPS}; do
+            perl -0pi -e 's/\{:http_core, "~> [^"]+", in_umbrella: true, hex: :http_core\}/{:http_core, "~> "'"${RELEASE_VERSION}"'", in_umbrella: true, hex: :http_core}/g' "apps/${app}/mix.exs"
+          done
+
+      - name: Validate shared release version
+        run: |
+          set -euo pipefail
+          for mix_file in mix.exs apps/*/mix.exs; do
+            app_version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' "${mix_file}")
+            if [ "${app_version}" != "${RELEASE_VERSION}" ]; then
+              echo "::error::${mix_file} version ${app_version} does not match requested release ${RELEASE_VERSION}"
+              exit 1
+            fi
+          done
+
+          for app in ${HEX_DEP_APPS}; do
+            expected='{:http_core, "~> '"${RELEASE_VERSION}"'", in_umbrella: true, hex: :http_core}'
+            if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
+              echo "::error::apps/${app}/mix.exs does not use local http_core ${RELEASE_VERSION} before testing"
+              exit 1
+            fi
+          done
+
+          if ! grep -q "^## \\[${RELEASE_VERSION}\\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md is missing section ${RELEASE_VERSION}"
+            exit 1
+          fi
 
       - name: Install dependencies
         run: mix deps.get
 
-    - name: Validate release source
-      working-directory: apps/http_fetch
-      run: |
-        SOURCE_VERSION=$(mix run --no-compile --no-start -e 'IO.puts(Mix.Project.config()[:version])')
-        if [ "${SOURCE_VERSION}" != "${{ github.event.inputs.release-version }}" ]; then
-          echo "::error::mix.exs version ${SOURCE_VERSION} does not match requested release ${{ github.event.inputs.release-version }}"
-          exit 1
-        fi
-        if ! grep -q "^## \\[${{ github.event.inputs.release-version }}\\]" ../../CHANGELOG.md; then
-          echo "::error::CHANGELOG.md is missing section ${{ github.event.inputs.release-version }}"
-          exit 1
-        fi
+      - name: Check source code format
+        run: mix format --check-formatted
 
-    - name: Build Hex package
-      working-directory: apps/http_fetch
-      run: mix hex.build
+      - name: Compile with warnings as errors
+        run: mix compile --warnings-as-errors
 
-    - name: Publish to hex.pm
-      working-directory: apps/http_fetch
-      run: |
-        mix hex.publish --yes
+      - name: Run unit tests
+        run: mix test
 
-      - name: Create Git Tag
+      - name: Run Credo
+        run: mix credo
+
+      - name: Run Dialyzer
+        run: mix dialyzer --format github
+
+      - name: Build the e2e test server
+        working-directory: apps/http_fetch/priv/test_server
+        run: go build -o ../test_server/server .
+
+      - name: Start the e2e test server
+        id: server
         run: |
+          set -euo pipefail
+          ./apps/http_fetch/priv/test_server/server > .e2e_port &
+          SERVER_PID=$!
+          echo "SERVER_PID=${SERVER_PID}" >> "$GITHUB_OUTPUT"
+          for i in {1..50}; do
+            if [ -s .e2e_port ]; then
+              PORT=$(grep -oE '[0-9]+' .e2e_port | head -n1)
+              if curl -fs "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
+                echo "E2E_BASE_URL=http://127.0.0.1:${PORT}" >> "$GITHUB_ENV"
+                echo "Test server ready on port ${PORT}"
+                exit 0
+              fi
+            fi
+            sleep 0.2
+          done
+          echo "::error::E2E test server failed to start within 10s"
+          kill "${SERVER_PID}" 2>/dev/null || true
+          exit 1
+
+      - name: Run E2E test suite
+        env:
+          E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
+        run: mix test.e2e
+
+      - name: Stop the e2e test server
+        if: always()
+        run: |
+          if [ -n "${{ steps.server.outputs.SERVER_PID }}" ]; then
+            kill "${{ steps.server.outputs.SERVER_PID }}" 2>/dev/null || true
+          fi
+          rm -f .e2e_port
+
+      - name: Build docs
+        run: mix docs
+
+      - name: Build package smoke tests
+        run: |
+          set -euo pipefail
+          for app in ${RELEASE_APPS}; do
+            (cd "apps/${app}" && mix hex.build --unpack -o "/tmp/${app}_pkg")
+          done
+
+      - name: Commit version bump
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "${{ github.event.inputs.release-version }}"
-          git push origin "refs/tags/${{ github.event.inputs.release-version }}"
+          git add mix.exs apps/*/mix.exs
+          if git diff --cached --quiet; then
+            echo "Release version already committed"
+          else
+            git commit -m "chore(release): v${RELEASE_VERSION}"
+          fi
+
+      - name: Replace umbrella deps with Hex deps for publishing
+        run: |
+          set -euo pipefail
+          for app in ${HEX_DEP_APPS}; do
+            perl -0pi -e 's/\{:http_core, "~> [^"]+", in_umbrella: true, hex: :http_core\}/{:http_core, "~> "'"${RELEASE_VERSION}"'"}/g' "apps/${app}/mix.exs"
+          done
+          if grep -R "in_umbrella: true" apps/*/mix.exs; then
+            echo "::error::Found in_umbrella deps after preparing Hex publish metadata"
+            exit 1
+          fi
+
+      - name: Publish packages to hex.pm
+        run: |
+          set -euo pipefail
+          for app in ${RELEASE_APPS}; do
+            (cd "apps/${app}" && mix hex.publish --yes)
+          done
+
+      - name: Push version bump and tag
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          if git rev-parse "${tag}" >/dev/null 2>&1; then
+            echo "::error::Tag ${tag} already exists locally"
+            exit 1
+          fi
+          git tag "${tag}"
+          git push origin "HEAD:${RELEASE_BRANCH}"
+          git push origin "refs/tags/${tag}"
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "v${RELEASE_VERSION}" \
+            --title "v${RELEASE_VERSION}" \
+            --generate-notes

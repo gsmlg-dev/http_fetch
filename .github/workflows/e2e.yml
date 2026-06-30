@@ -2,11 +2,11 @@ name: E2E
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
-        description: "Git ref (tag, branch, or SHA) to test — e.g. 0.8.0 or main"
+        description: "Git ref (tag, branch, or SHA) to test, e.g. v0.9.1 or main"
         required: true
         default: "main"
         type: string
@@ -18,11 +18,25 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  ELIXIR_VERSION: "1.18"
+  OTP_VERSION: "28"
+
 jobs:
   e2e:
-    name: End-to-end tests
+    name: E2E ${{ matrix.app }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - http_core
+          - http_fetch
+          - http_web_socket
+          - http_event_source
+          - http_web_transport
 
     steps:
       - name: Checkout
@@ -34,13 +48,8 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.18"
-          otp-version: "28"
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
 
       - name: Restore Elixir dependencies cache
         uses: actions/cache@v4
@@ -52,7 +61,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mix-
 
+      - name: Install Elixir dependencies
+        run: mix deps.get
+
+      - name: Set up Go
+        if: matrix.app == 'http_fetch'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
       - name: Restore Go module cache
+        if: matrix.app == 'http_fetch'
         uses: actions/cache@v4
         with:
           path: ~/go/pkg/mod
@@ -60,14 +79,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Install Elixir dependencies
-        run: mix deps.get
-
-      - name: Build the e2e test server
+      - name: Build the http_fetch e2e test server
+        if: matrix.app == 'http_fetch'
         working-directory: apps/http_fetch/priv/test_server
         run: go build -o ../test_server/server .
 
-      - name: Start the e2e test server
+      - name: Start the http_fetch e2e test server
+        if: matrix.app == 'http_fetch'
         id: server
         run: |
           set -euo pipefail
@@ -89,14 +107,26 @@ jobs:
           kill "${SERVER_PID}" 2>/dev/null || true
           exit 1
 
-      - name: Run E2E test suite
+      - name: Run http_fetch E2E test suite
+        if: matrix.app == 'http_fetch'
         env:
           MIX_ENV: test
           E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
         run: mix test.e2e
 
-      - name: Stop the e2e test server
-        if: always()
+      - name: Run app E2E test suite if present
+        if: matrix.app != 'http_fetch'
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          set -euo pipefail
+          if [ -d e2e ]; then
+            MIX_ENV=test mix test e2e/
+          else
+            echo "No e2e suite for ${{ matrix.app }}"
+          fi
+
+      - name: Stop the http_fetch e2e test server
+        if: always() && matrix.app == 'http_fetch'
         run: |
           if [ -n "${{ steps.server.outputs.SERVER_PID }}" ]; then
             kill "${{ steps.server.outputs.SERVER_PID }}" 2>/dev/null || true

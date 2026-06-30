@@ -2,35 +2,45 @@ name: Test
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ELIXIR_VERSION: "1.18"
+  OTP_VERSION: "28"
 
 jobs:
   test:
-    name: Test
+    name: Test ${{ matrix.app }}
     runs-on: ubuntu-latest
 
-    services:
-      mailhog:
-        image: mailhog/mailhog:latest
-        ports:
-          - 1025:1025
-          - 8025:8025
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - http_core
+          - http_fetch
+          - http_web_socket
+          - http_event_source
+          - http_web_transport
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: '1.18'
-          otp-version: '28'
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
 
       - name: Restore dependencies cache
         uses: actions/cache@v4
@@ -46,4 +56,5 @@ jobs:
         run: mix deps.get
 
       - name: Run tests
+        working-directory: apps/${{ matrix.app }}
         run: mix test

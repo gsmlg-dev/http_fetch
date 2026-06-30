@@ -2,14 +2,56 @@ name: CI
 
 on:
   push:
-    branches: [ '**' ]
+    branches: ["**"]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
+env:
+  ELIXIR_VERSION: "1.18"
+  OTP_VERSION: "28"
+
 jobs:
+  version:
+    name: Version Metadata
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate shared version metadata
+        run: |
+          set -euo pipefail
+
+          VERSION=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' mix.exs)
+          if [ -z "${VERSION}" ]; then
+            echo "::error::Root mix.exs is missing @version"
+            exit 1
+          fi
+
+          for mix_file in mix.exs apps/*/mix.exs; do
+            app_version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' "${mix_file}")
+            if [ "${app_version}" != "${VERSION}" ]; then
+              echo "::error::${mix_file} version ${app_version} does not match root version ${VERSION}"
+              exit 1
+            fi
+          done
+
+          for app in http_fetch http_web_socket http_event_source http_web_transport; do
+            expected='{:http_core, "~> '"${VERSION}"'", in_umbrella: true, hex: :http_core}'
+            if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
+              echo "::error::apps/${app}/mix.exs does not depend on http_core ${VERSION} with umbrella + Hex metadata"
+              exit 1
+            fi
+          done
+
   compile:
     name: Compile
     runs-on: ubuntu-latest
@@ -21,8 +63,8 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: '1.18'
-          otp-version: '28'
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
 
       - name: Restore dependencies cache
         uses: actions/cache@v4
@@ -50,8 +92,8 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: '1.18'
-          otp-version: '28'
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
 
       - name: Restore dependencies cache
         uses: actions/cache@v4
@@ -79,8 +121,8 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: '1.18'
-          otp-version: '28'
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
 
       - name: Restore dependencies cache
         uses: actions/cache@v4
@@ -108,8 +150,8 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: '1.18'
-          otp-version: '28'
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
 
       - name: Restore dependencies cache
         uses: actions/cache@v4
@@ -132,3 +174,43 @@ jobs:
 
       - name: Run Dialyzer
         run: mix dialyzer --format github
+
+  package:
+    name: Package ${{ matrix.app }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - http_core
+          - http_fetch
+          - http_web_socket
+          - http_event_source
+          - http_web_transport
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Restore dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Build package
+        working-directory: apps/${{ matrix.app }}
+        run: mix hex.build --unpack -o /tmp/${{ matrix.app }}_pkg
