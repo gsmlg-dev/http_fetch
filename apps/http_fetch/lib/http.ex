@@ -264,7 +264,10 @@ defmodule HTTP do
     request = %Request{
       url: uri,
       method: HTTP.FetchOptions.get_method(options),
-      headers: HTTP.FetchOptions.get_headers(options),
+      headers:
+        options
+        |> HTTP.FetchOptions.get_headers()
+        |> HTTP.Headers.set_default("User-Agent", HTTP.Headers.user_agent(:http_fetch)),
       body: HTTP.FetchOptions.get_body(options),
       content_type: HTTP.FetchOptions.get_content_type(options),
       transport_options: HTTP.FetchOptions.to_transport_options(options)

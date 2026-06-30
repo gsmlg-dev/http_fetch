@@ -23,14 +23,18 @@ First-time Dialyzer setup: `mix dialyzer --plt` (2-3 min, cached in `apps/http_f
 
 ## Project layout
 
-This is a Mix umbrella with a single child app at `apps/http_fetch`.
+This is a Mix umbrella with independent child apps under `apps/`. Shared HTTP
+primitives live in `apps/http_core`; concrete protocol clients such as
+`apps/http_fetch`, `apps/http_web_socket`, `apps/http_event_source`, and
+`apps/http_web_transport` depend on `:http_core` instead of each other.
 
 Entry point is `HTTP.fetch/2` in `apps/http_fetch/lib/http.ex`. It is async by default
 (`Task.Supervisor` + the internal socket transport) and returns an `HTTP.Promise`.
 Response handling, streaming, and telemetry emission live in the socket client and
 response modules.
 For module-by-module details, see the table in `CLAUDE.md` and read
-`apps/http_fetch/lib/http/*.ex` directly.
+`apps/http_fetch/lib/http/*.ex` plus shared primitives in
+`apps/http_core/lib/http/*.ex` directly.
 
 ## Gotchas — read before editing
 

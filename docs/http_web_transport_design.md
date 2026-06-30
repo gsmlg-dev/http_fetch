@@ -117,7 +117,7 @@ apps/http_web_transport/
   test/http/web_transport/telemetry_test.exs
 ```
 
-`http_web_transport` should depend on `http_fetch` in the umbrella so it can
+`http_web_transport` should depend on `http_core` in the umbrella so it can
 reuse:
 
 - `HTTP.Headers`

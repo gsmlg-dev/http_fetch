@@ -58,7 +58,7 @@ HTTPWebSocket.Application      # DynamicSupervisor + Registry
 
 - [x] SP-001 Create `apps/http_web_socket/mix.exs` with umbrella paths matching
   `apps/http_fetch/mix.exs`.
-- [x] SP-002 Add `{:http_fetch, in_umbrella: true}` and `{:telemetry, "~> 1.0"}`
+- [x] SP-002 Add `{:http_core, "~> 0.9.1", in_umbrella: true, hex: :http_core}` and `{:telemetry, "~> 1.0"}`
   to the child app dependencies.
 - [x] SP-003 Add `extra_applications: [:logger, :crypto, :public_key, :ssl]`.
 - [x] SP-004 Create `apps/http_web_socket/.formatter.exs` with the same local

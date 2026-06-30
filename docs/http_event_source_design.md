@@ -68,7 +68,7 @@ apps/http_event_source/
   test/support/event_source_server.ex
 ```
 
-`http_event_source` should depend on `http_fetch` in the umbrella so it can
+`http_event_source` should depend on `http_core` in the umbrella so it can
 reuse:
 
 - `HTTP.Headers`

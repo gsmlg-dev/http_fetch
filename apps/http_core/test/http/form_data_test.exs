@@ -44,10 +44,10 @@ defmodule HTTP.FormDataTest do
       assert {:file, "upload", "test.json", "application/json", ~s({"test": true})} in form.parts
     end
 
-    test "adds file with stream" do
-      # Create a temporary file for testing
+    @tag :tmp_dir
+    test "adds file with stream", %{tmp_dir: tmp_dir} do
       test_content = "test file content"
-      {:ok, path} = Briefly.create()
+      path = Path.join(tmp_dir, "test.txt")
       File.write!(path, test_content)
       file_stream = File.stream!(path)
 
@@ -57,8 +57,6 @@ defmodule HTTP.FormDataTest do
                {:file, "upload", "test.txt", "application/octet-stream", %File.Stream{}},
                hd(form.parts)
              )
-
-      File.rm(path)
     end
   end
 
@@ -111,9 +109,10 @@ defmodule HTTP.FormDataTest do
       assert body_string =~ "file content"
     end
 
-    test "encodes multipart with file stream" do
+    @tag :tmp_dir
+    test "encodes multipart with file stream", %{tmp_dir: tmp_dir} do
       test_content = "test file content"
-      {:ok, path} = Briefly.create()
+      path = Path.join(tmp_dir, "test.txt")
       File.write!(path, test_content)
       file_stream = File.stream!(path)
 
@@ -130,13 +129,12 @@ defmodule HTTP.FormDataTest do
                "Content-Disposition: form-data; name=\"upload\"; filename=\"test.txt\""
 
       assert body_string =~ test_content
-
-      File.rm(path)
     end
 
-    test "encodes binary file streams without line-mode truncation" do
+    @tag :tmp_dir
+    test "encodes binary file streams without line-mode truncation", %{tmp_dir: tmp_dir} do
       test_content = :crypto.strong_rand_bytes(100_000)
-      {:ok, path} = Briefly.create()
+      path = Path.join(tmp_dir, "test.bin")
       File.write!(path, test_content)
       file_stream = File.stream!(path)
 
@@ -151,8 +149,6 @@ defmodule HTTP.FormDataTest do
       [file_content, _closing] = :binary.split(rest, "\r\n--test-boundary--\r\n")
 
       assert file_content == test_content
-
-      File.rm(path)
     end
   end
 

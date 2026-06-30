@@ -61,7 +61,7 @@ apps/http_web_socket/
   test/http/web_socket/handshake_test.exs
 ```
 
-`http_web_socket` should depend on `http_fetch` in the umbrella so it can reuse:
+`http_web_socket` should depend on `http_core` in the umbrella so it can reuse:
 
 - `HTTP.Headers`
 - `HTTP.Blob`

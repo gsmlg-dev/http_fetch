@@ -56,7 +56,7 @@ defmodule HTTP.Headers do
 
   Example User-Agent:
 
-      "Mozilla/5.0 (macOS; x86_64-apple-darwin24.6.0) OTP/27 BEAM/15.1 Elixir/1.18.3 http_fetch/0.5.0"
+      "Mozilla/5.0 (macOS; x86_64-apple-darwin24.6.0) OTP/27 BEAM/15.1 Elixir/1.18.3 http_core/0.5.0"
 
   Access the default User-Agent:
 
@@ -434,20 +434,29 @@ defmodule HTTP.Headers do
       iex> user_agent = HTTP.Headers.user_agent()
       iex> user_agent =~ "Mozilla/5.0"
       true
-      iex> user_agent =~ "http_fetch/"
+      iex> user_agent =~ "http_core/"
       true
   """
-  @spec user_agent() :: String.t()
-  def user_agent do
+  @spec user_agent(atom()) :: String.t()
+  def user_agent(app \\ :http_core) when is_atom(app) do
     os_info = get_os_info()
     arch_info = get_arch_info()
     otp_version = System.otp_release()
     elixir_version = System.version()
 
     beam_version = :erlang.system_info(:version)
-    http_fetch_version = Application.spec(:http_fetch, :vsn) |> to_string()
+    app_version = app_version(app)
 
-    "Mozilla/5.0 (#{os_info}; #{arch_info}) OTP/#{otp_version} BEAM/#{beam_version} Elixir/#{elixir_version} http_fetch/#{http_fetch_version}"
+    "Mozilla/5.0 (#{os_info}; #{arch_info}) OTP/#{otp_version} BEAM/#{beam_version} Elixir/#{elixir_version} #{app}/#{app_version}"
+  end
+
+  defp app_version(app) do
+    app
+    |> Application.spec(:vsn)
+    |> case do
+      nil -> "unknown"
+      version -> to_string(version)
+    end
   end
 
   @spec get_os_info() :: String.t()

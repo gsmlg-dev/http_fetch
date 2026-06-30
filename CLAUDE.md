@@ -11,18 +11,22 @@ This is an Elixir library providing a browser-like HTTP fetch API built on Erlan
 ### Main Modules
 - **HTTP** (`apps/http_fetch/lib/http.ex`): Entry point providing `fetch/2` function. Handles async request execution via Task.Supervisor, response processing (including streaming detection), and telemetry event emission
 - **HTTP.Promise** (`apps/http_fetch/lib/http/promise.ex`): JavaScript-like Promise implementation wrapping Task with chaining via `then/3` and `await/2`
-- **HTTP.Request** (`apps/http_fetch/lib/http/request.ex`): Request configuration struct that serializes to HTTP/1.1 wire iodata
-- **HTTP.HTTP1** (`apps/http_fetch/lib/http/http1.ex`): Pure HTTP/1.1 serializer and response parser for status, headers, Content-Length, chunked bodies, and read-to-close bodies
+- **HTTP.Request** (`apps/http_core/lib/http/request.ex`): Request configuration struct that serializes to HTTP/1.1 wire iodata
+- **HTTP.HTTP1** (`apps/http_core/lib/http/http1.ex`): Pure HTTP/1.1 serializer and response parser for status, headers, Content-Length, chunked bodies, and read-to-close bodies
 - **HTTP.SocketClient** (`apps/http_fetch/lib/http/socket_client.ex`): Socket owner process for one request lifecycle, including TCP/TLS/Unix transport selection, redirects, streaming, deadlines, and aborts
 - **HTTP.Response** (`apps/http_fetch/lib/http/response.ex`): Response struct with `json/1`, `text/1`, and `write_to/2` methods. Handles both buffered and streamed responses
-- **HTTP.Headers** (`apps/http_fetch/lib/http/headers.ex`): Headers manipulation with case-insensitive operations, Content-Type parsing, and default User-Agent support
-- **HTTP.FormData** (`apps/http_fetch/lib/http/form_data.ex`): Multipart/form-data encoding with streaming file upload support
+- **HTTP.Headers** (`apps/http_core/lib/http/headers.ex`): Headers manipulation with case-insensitive operations, Content-Type parsing, and default User-Agent support
+- **HTTP.FormData** (`apps/http_core/lib/http/form_data.ex`): Multipart/form-data encoding with streaming file upload support
+- **HTTP.Blob** (`apps/http_core/lib/http/blob.ex`): Browser-like binary blob data type shared by Fetch and WebSocket APIs
+- **HTTP.Transport** (`apps/http_core/lib/http/transport.ex`): Shared TCP, TLS, and Unix socket transport behaviour and implementations
 - **HTTP.AbortController** (`apps/http_fetch/lib/http/abort_controller.ex`): Request cancellation via Agent-based controller
 - **HTTP.FetchOptions** (`apps/http_fetch/lib/http/fetch_options.ex`): Options processing and validation for `fetch/2`
 - **HTTP.Telemetry** (`apps/http_fetch/lib/http/telemetry.ex`): Comprehensive telemetry events for requests, responses, streaming, and errors
 
 ### Application Structure
-- This is a Mix umbrella with one child app: `apps/http_fetch`
+- This is a Mix umbrella with independent protocol apps under `apps/`.
+- Shared HTTP primitives live in `apps/http_core`; concrete protocol clients
+  depend on `:http_core` instead of each other.
 - **HTTPFetch.Application** (`apps/http_fetch/lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
 
 ### Key Design Patterns

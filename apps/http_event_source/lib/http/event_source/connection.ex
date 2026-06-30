@@ -191,6 +191,7 @@ defmodule HTTP.EventSource.Connection do
     headers =
       state.headers
       |> HTTP.Headers.new()
+      |> HTTP.Headers.set_default("User-Agent", HTTP.Headers.user_agent(:http_event_source))
       |> HTTP.Headers.set_default("Accept", "text/event-stream")
       |> HTTP.Headers.set_default("Cache-Control", "no-cache")
       |> maybe_set_last_event_id(state.last_event_id)

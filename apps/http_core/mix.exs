@@ -1,4 +1,4 @@
-defmodule HttpWebTransport.MixProject do
+defmodule HttpCore.MixProject do
   use Mix.Project
 
   @version "0.9.1"
@@ -6,16 +6,15 @@ defmodule HttpWebTransport.MixProject do
 
   def project do
     [
-      app: :http_web_transport,
+      app: :http_core,
       version: @version,
       build_path: "../../_build",
       deps_path: "../../deps",
       elixir: "~> 1.18",
       lockfile: "../../mix.lock",
       start_permanent: Mix.env() == :prod,
-      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
-      description: "A browser-like WebTransport client API for Elixir",
+      description: "Shared HTTP primitives for browser-like protocol clients",
       package: [
         files: ["lib", "mix.exs"],
         maintainers: ["Jonathan Gao"],
@@ -23,27 +22,18 @@ defmodule HttpWebTransport.MixProject do
         links: %{"GitHub" => @source_url}
       ],
       docs: [
-        main: "HTTP.WebTransport",
+        main: "HTTP.Headers",
         source_ref: "v#{@version}",
         source_url: @source_url
       ]
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
-  defp elixirc_paths(_), do: ["lib"]
-
   def application do
     [
-      extra_applications: [:logger, :public_key, :ssl],
-      mod: {HTTPWebTransport.Application, []}
+      extra_applications: [:public_key, :ssl]
     ]
   end
 
-  defp deps do
-    [
-      {:http_core, "~> 0.9.1", in_umbrella: true, hex: :http_core},
-      {:telemetry, "~> 1.0"}
-    ]
-  end
+  defp deps, do: []
 end
