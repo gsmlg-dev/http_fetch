@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.10.0] - 2026-07-01
+
+### Added
+- Added independent `http_web_socket`, `http_event_source`, and
+  `http_web_transport` umbrella apps with browser-like protocol APIs.
+- Added e2e coverage for EventSource, WebSocket, and WebTransport workflows.
+
+### Changed
+- Extracted shared HTTP primitives into the `http_core` app so protocol apps
+  share common code without depending on `http_fetch`.
+- Updated CI, test, e2e, and release workflows to cover every umbrella app and
+  publish all packages with one shared version.
+
 ## [0.9.1] - 2026-06-23
 
 ### Changed
