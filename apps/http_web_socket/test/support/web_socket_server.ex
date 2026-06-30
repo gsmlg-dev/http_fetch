@@ -36,12 +36,12 @@ defmodule HTTPWebSocket.TestServer do
       :ok = :gen_tcp.send(socket, handshake_response(key, protocol))
       send(parent, {:websocket_server_handshake, request})
 
-      case Keyword.get(opts, :open_message) do
-        nil -> :ok
-        message -> send_server_frame(socket, 0x1, message)
-      end
+      maybe_send_open_message(socket, Keyword.get(opts, :open_message))
 
-      loop(socket, parent, <<>>)
+      case maybe_send_close(socket, Keyword.get(opts, :close_after_open)) do
+        :closed -> :ok
+        :open -> loop(socket, parent, <<>>)
+      end
     else
       {:error, reason} ->
         send(parent, {:websocket_server_error, reason})
@@ -86,6 +86,24 @@ defmodule HTTPWebSocket.TestServer do
 
   defp handle_frame(_socket, parent, opcode, payload) do
     send(parent, {:websocket_server_received, opcode, payload})
+  end
+
+  defp maybe_send_open_message(_socket, nil), do: :ok
+
+  defp maybe_send_open_message(socket, {:binary, payload}) do
+    send_server_frame(socket, 0x2, payload)
+  end
+
+  defp maybe_send_open_message(socket, message) when is_binary(message) do
+    send_server_frame(socket, 0x1, message)
+  end
+
+  defp maybe_send_close(_socket, nil), do: :open
+
+  defp maybe_send_close(socket, {code, reason}) do
+    :ok = send_server_frame(socket, 0x8, <<code::16, reason::binary>>)
+    :gen_tcp.close(socket)
+    :closed
   end
 
   defp recv_until(socket, marker, buffer) do

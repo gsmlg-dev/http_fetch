@@ -54,13 +54,31 @@ defmodule HTTP.WebSocketTest do
   end
 
   test "supports selected subprotocols and array buffer receive mode" do
-    {:ok, _server, port} = HTTPWebSocket.TestServer.start_link(protocol: "chat")
+    {:ok, _server, port} =
+      HTTPWebSocket.TestServer.start_link(protocol: "chat", open_message: {:binary, <<1, 2, 3>>})
 
     socket = WebSocket.new("ws://127.0.0.1:#{port}/socket", ["chat"], binary_type: :array_buffer)
 
     assert_receive {WebSocket, ^socket, %Open{}}, 1_000
     assert WebSocket.protocol(socket) == "chat"
     assert WebSocket.binary_type(socket) == :array_buffer
+
+    assert_receive {WebSocket, ^socket,
+                    %Message{data: %ArrayBuffer{data: <<1, 2, 3>>, byte_length: 3}}},
+                   1_000
+  end
+
+  test "sends array buffer and blob payloads as binary frames" do
+    {:ok, _server, port} = HTTPWebSocket.TestServer.start_link()
+    socket = WebSocket.new("ws://127.0.0.1:#{port}/socket")
+
+    assert_receive {WebSocket, ^socket, %Open{}}, 1_000
+
+    assert :ok = WebSocket.send(socket, WebSocket.array_buffer(<<1, 2, 3>>))
+    assert_receive {:websocket_server_received, :binary, <<1, 2, 3>>}, 1_000
+
+    assert :ok = WebSocket.send(socket, HTTP.Blob.new(<<4, 5, 6>>))
+    assert_receive {:websocket_server_received, :binary, <<4, 5, 6>>}, 1_000
   end
 
   test "rejects invalid constructor input synchronously" do

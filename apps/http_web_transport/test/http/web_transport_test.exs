@@ -53,6 +53,24 @@ defmodule HTTP.WebTransportTest do
     assert {:error, :timeout} = DatagramDuplexStream.read(datagrams, timeout: 10)
   end
 
+  test "bounds the incoming datagram queue" do
+    transport =
+      WebTransport.new("https://example.com/transport",
+        backend: FakeBackend,
+        max_incoming_datagrams: 1
+      )
+
+    assert %WebTransport{} = transport
+    assert :ok = WebTransport.await_ready(transport, 1_000)
+    datagrams = WebTransport.datagrams(transport)
+
+    send(transport.pid, {:webtransport_datagram, transport.ref, "first"})
+    send(transport.pid, {:webtransport_datagram, transport.ref, "second"})
+
+    assert {:ok, "second"} = DatagramDuplexStream.read(datagrams, timeout: 1_000)
+    assert {:error, :timeout} = DatagramDuplexStream.read(datagrams, timeout: 10)
+  end
+
   test "configures datagram max age settings" do
     transport = connected_transport()
     datagrams = WebTransport.datagrams(transport)
@@ -82,6 +100,15 @@ defmodule HTTP.WebTransportTest do
     assert :fin = ReceiveStream.read(stream.readable, timeout: 1_000)
 
     assert :ok = SendStream.close(stream.writable)
+  end
+
+  test "receive stream read times out while no data is available" do
+    transport = connected_transport()
+
+    assert {:ok, %BidirectionalStream{} = stream} =
+             WebTransport.create_bidirectional_stream(transport)
+
+    assert {:error, :timeout} = ReceiveStream.read(stream.readable, timeout: 10)
   end
 
   test "opens unidirectional send streams" do
@@ -122,6 +149,26 @@ defmodule HTTP.WebTransportTest do
     datagrams = WebTransport.datagrams(transport)
     writable = DatagramDuplexStream.create_writable(datagrams)
     assert {:error, :invalid_state} = DatagramsWritable.write(writable, "late")
+  end
+
+  test "backend draining and close messages resolve lifecycle promises" do
+    transport = connected_transport()
+
+    send(transport.pid, {:webtransport_draining, transport.ref})
+
+    assert :ok = WebTransport.await_draining(transport, 1_000)
+    assert WebTransport.state(transport) == :draining
+    assert_receive {WebTransport, ^transport, {:state, :draining}}, 1_000
+
+    send(
+      transport.pid,
+      {:webtransport_closed, transport.ref, %{close_code: 19, reason: "remote"}}
+    )
+
+    assert {:ok, %CloseInfo{close_code: 19, reason: "remote"}} =
+             WebTransport.await_closed(transport, 1_000)
+
+    assert WebTransport.state(transport) == :closed
   end
 
   test "validates close input" do

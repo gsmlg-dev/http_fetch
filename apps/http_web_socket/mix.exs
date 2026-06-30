@@ -15,6 +15,7 @@ defmodule HttpWebSocket.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
+      aliases: aliases(),
       description: "A browser-like WebSocket client API for Elixir",
       package: [
         files: ["lib", "mix.exs"],
@@ -30,8 +31,14 @@ defmodule HttpWebSocket.MixProject do
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(:test), do: ["lib", "test/support", "e2e/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  def cli do
+    [
+      preferred_envs: ["test.e2e": :test]
+    ]
+  end
 
   def application do
     [
@@ -45,5 +52,19 @@ defmodule HttpWebSocket.MixProject do
       {:http_core, "~> 0.9.1", in_umbrella: true, hex: :http_core},
       {:telemetry, "~> 1.0"}
     ]
+  end
+
+  defp aliases do
+    [
+      "test.e2e": [&run_e2e_tests/1]
+    ]
+  end
+
+  defp run_e2e_tests(args) do
+    if Enum.any?(args) do
+      Mix.Task.run("test", args)
+    else
+      Mix.Task.run("test", ["e2e/"])
+    end
   end
 end

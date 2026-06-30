@@ -48,7 +48,26 @@ defmodule HttpFetch.Umbrella.MixProject do
 
   defp aliases do
     [
-      "test.e2e": "do --app http_fetch test.e2e"
+      "test.e2e": [&run_e2e_tests/1]
     ]
+  end
+
+  defp run_e2e_tests([]) do
+    run_child_e2e(:http_fetch, "apps/http_fetch", [])
+    run_child_e2e(:http_event_source, "apps/http_event_source", [])
+    run_child_e2e(:http_web_transport, "apps/http_web_transport", [])
+    run_child_e2e(:http_web_socket, "apps/http_web_socket", [])
+  end
+
+  defp run_e2e_tests(args) do
+    Mix.Task.run("test", args)
+  end
+
+  defp run_child_e2e(app, path, args) do
+    Mix.Project.in_project(app, path, fn _module ->
+      Mix.Task.run("test.e2e", args)
+      Mix.Task.reenable("test.e2e")
+      Mix.Task.reenable("test")
+    end)
   end
 end
