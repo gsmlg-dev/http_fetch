@@ -86,12 +86,32 @@ jobs:
       - name: Set release version
         run: |
           set -euo pipefail
-          for mix_file in mix.exs apps/*/mix.exs; do
-            perl -0pi -e 's/@version "[^"]+"/@version "'"${RELEASE_VERSION}"'"/g' "${mix_file}"
-          done
-          for app in ${HEX_DEP_APPS}; do
-            perl -0pi -e "s/\\{:http_core, \"~> [^\"]+\", in_umbrella: true, hex: :http_core\\}/{:http_core, \"~> ${RELEASE_VERSION}\", in_umbrella: true, hex: :http_core}/g" "apps/${app}/mix.exs"
-          done
+          elixir -e '
+          version = System.fetch_env!("RELEASE_VERSION")
+          hex_dep_apps = System.fetch_env!("HEX_DEP_APPS") |> String.split()
+
+          for mix_file <- ["mix.exs" | Path.wildcard("apps/*/mix.exs")] do
+            body = File.read!(mix_file)
+            body = Regex.replace(~r/@version "[^"]+"/, body, ~s(@version "#{version}"))
+
+            File.write!(mix_file, body)
+          end
+
+          for app <- hex_dep_apps do
+            path = "apps/#{app}/mix.exs"
+
+            body = File.read!(path)
+
+            body =
+              Regex.replace(
+                ~r/\{:http_core, "~> [^"]+", in_umbrella: true, hex: :http_core\}/,
+                body,
+                ~s({:http_core, "~> #{version}", in_umbrella: true, hex: :http_core})
+              )
+
+            File.write!(path, body)
+          end
+          '
 
       - name: Validate shared release version
         run: |
@@ -105,7 +125,7 @@ jobs:
           done
 
           for app in ${HEX_DEP_APPS}; do
-            expected='{:http_core, "~> '"${RELEASE_VERSION}"'", in_umbrella: true, hex: :http_core}'
+            expected="{:http_core, \"~> ${RELEASE_VERSION}\", in_umbrella: true, hex: :http_core}"
             if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
               echo "::error::apps/${app}/mix.exs does not use local http_core ${RELEASE_VERSION} before testing"
               exit 1
@@ -199,9 +219,25 @@ jobs:
       - name: Replace umbrella deps with Hex deps for publishing
         run: |
           set -euo pipefail
-          for app in ${HEX_DEP_APPS}; do
-            perl -0pi -e "s/\\{:http_core, \"~> [^\"]+\", in_umbrella: true, hex: :http_core\\}/{:http_core, \"~> ${RELEASE_VERSION}\"}/g" "apps/${app}/mix.exs"
-          done
+          elixir -e '
+          version = System.fetch_env!("RELEASE_VERSION")
+          hex_dep_apps = System.fetch_env!("HEX_DEP_APPS") |> String.split()
+
+          for app <- hex_dep_apps do
+            path = "apps/#{app}/mix.exs"
+
+            body = File.read!(path)
+
+            body =
+              Regex.replace(
+                ~r/\{:http_core, "~> [^"]+", in_umbrella: true, hex: :http_core\}/,
+                body,
+                ~s({:http_core, "~> #{version}"})
+              )
+
+            File.write!(path, body)
+          end
+          '
           if grep -R "in_umbrella: true" apps/*/mix.exs; then
             echo "::error::Found in_umbrella deps after preparing Hex publish metadata"
             exit 1
