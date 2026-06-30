@@ -247,7 +247,11 @@ jobs:
         run: |
           set -euo pipefail
           for app in ${RELEASE_APPS}; do
-            (cd "apps/${app}" && mix hex.publish --yes)
+            if mix hex.info "${app}" "${RELEASE_VERSION}" >/dev/null 2>&1; then
+              echo "${app} ${RELEASE_VERSION} already exists on hex.pm; skipping"
+            else
+              (cd "apps/${app}" && mix deps.get && mix hex.publish --yes)
+            fi
           done
 
       - name: Push version bump and tag
