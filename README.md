@@ -178,6 +178,41 @@ Elixir differences from the browser API: invalid constructor input returns
 `{:error, reason}` instead of raising a DOM exception, and events are process
 messages instead of `EventTarget` callbacks.
 
+## EventSource Client
+
+The umbrella includes `HTTP.EventSource`, a browser-like Server-Sent Events
+client. It returns an event source immediately, then delivers `open`, `message`,
+custom message-type, and `error` events to the owner process.
+
+```elixir
+source = HTTP.EventSource.new("https://example.com/events")
+
+receive do
+  {HTTP.EventSource, ^source, %HTTP.EventSource.Event.Open{}} ->
+    IO.puts("connected")
+
+  {HTTP.EventSource, ^source, %HTTP.EventSource.Event.Message{data: data}} ->
+    IO.inspect(data, label: "event")
+
+  {HTTP.EventSource, ^source, %HTTP.EventSource.Event.Error{reason: reason}} ->
+    IO.inspect(reason, label: "stream error")
+end
+```
+
+Browser-compatible accessors are exposed with Elixir naming:
+
+```elixir
+HTTP.EventSource.ready_state(source)
+HTTP.EventSource.with_credentials(source)
+HTTP.EventSource.url(source)
+HTTP.EventSource.close(source)
+```
+
+The client reconnects after dropped streams, honors `retry:` fields, and sends
+`Last-Event-ID` after receiving event IDs. Elixir differences from the browser
+API: invalid constructor input returns `{:error, reason}`, and events are
+process messages instead of `EventTarget` callbacks.
+
 ## API Reference
 
 ### HTTP.fetch/2
