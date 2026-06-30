@@ -90,7 +90,7 @@ jobs:
             perl -0pi -e 's/@version "[^"]+"/@version "'"${RELEASE_VERSION}"'"/g' "${mix_file}"
           done
           for app in ${HEX_DEP_APPS}; do
-            perl -0pi -e 's/\{:http_core, "~> [^"]+", in_umbrella: true, hex: :http_core\}/{:http_core, "~> "'"${RELEASE_VERSION}"'", in_umbrella: true, hex: :http_core}/g' "apps/${app}/mix.exs"
+            perl -0pi -e "s/\\{:http_core, \"~> [^\"]+\", in_umbrella: true, hex: :http_core\\}/{:http_core, \"~> ${RELEASE_VERSION}\", in_umbrella: true, hex: :http_core}/g" "apps/${app}/mix.exs"
           done
 
       - name: Validate shared release version
@@ -200,7 +200,7 @@ jobs:
         run: |
           set -euo pipefail
           for app in ${HEX_DEP_APPS}; do
-            perl -0pi -e 's/\{:http_core, "~> [^"]+", in_umbrella: true, hex: :http_core\}/{:http_core, "~> "'"${RELEASE_VERSION}"'"}/g' "apps/${app}/mix.exs"
+            perl -0pi -e "s/\\{:http_core, \"~> [^\"]+\", in_umbrella: true, hex: :http_core\\}/{:http_core, \"~> ${RELEASE_VERSION}\"}/g" "apps/${app}/mix.exs"
           done
           if grep -R "in_umbrella: true" apps/*/mix.exs; then
             echo "::error::Found in_umbrella deps after preparing Hex publish metadata"
