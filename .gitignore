@@ -37,3 +37,7 @@ http_fetch-*.tar
 # The compiled e2e test server binary (built locally with `go build`)
 /priv/test_server/server
 /apps/http_fetch/priv/test_server/server
+
+# devenv
+.devenv/
+.devenv.*
