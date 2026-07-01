@@ -34,31 +34,31 @@ defmodule HTTP.H3.Settings do
   @type setting :: {setting_id(), non_neg_integer()}
   @type settings :: %{optional(atom() | setting_id()) => non_neg_integer()} | [setting()]
 
-  @spec qpack_max_table_capacity() :: setting_id()
+  @spec qpack_max_table_capacity() :: 1
   def qpack_max_table_capacity, do: @qpack_max_table_capacity
 
-  @spec max_field_section_size() :: setting_id()
+  @spec max_field_section_size() :: 6
   def max_field_section_size, do: @max_field_section_size
 
-  @spec qpack_blocked_streams() :: setting_id()
+  @spec qpack_blocked_streams() :: 7
   def qpack_blocked_streams, do: @qpack_blocked_streams
 
-  @spec enable_connect_protocol() :: setting_id()
+  @spec enable_connect_protocol() :: 8
   def enable_connect_protocol, do: @enable_connect_protocol
 
-  @spec h3_datagram() :: setting_id()
+  @spec h3_datagram() :: 51
   def h3_datagram, do: @h3_datagram
 
-  @spec wt_enabled() :: setting_id()
+  @spec wt_enabled() :: 746_385_408
   def wt_enabled, do: @wt_enabled
 
-  @spec wt_initial_max_streams_uni() :: setting_id()
+  @spec wt_initial_max_streams_uni() :: 11_108
   def wt_initial_max_streams_uni, do: @wt_initial_max_streams_uni
 
-  @spec wt_initial_max_streams_bidi() :: setting_id()
+  @spec wt_initial_max_streams_bidi() :: 11_109
   def wt_initial_max_streams_bidi, do: @wt_initial_max_streams_bidi
 
-  @spec wt_initial_max_data() :: setting_id()
+  @spec wt_initial_max_data() :: 11_105
   def wt_initial_max_data, do: @wt_initial_max_data
 
   @spec name(setting_id()) :: atom() | nil

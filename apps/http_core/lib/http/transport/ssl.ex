@@ -29,7 +29,7 @@ defmodule HTTP.Transport.SSL do
   @impl true
   def close(socket), do: :ssl.close(socket)
 
-  @spec negotiated_protocol(:ssl.sslsocket()) :: {:ok, binary() | nil} | {:error, term()}
+  @spec negotiated_protocol(:ssl.sslsocket()) :: {:ok, binary() | nil} | {:error, :closed}
   def negotiated_protocol(socket) do
     case :ssl.negotiated_protocol(socket) do
       {:ok, protocol} -> {:ok, protocol}

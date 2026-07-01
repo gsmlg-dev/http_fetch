@@ -32,10 +32,8 @@ defmodule HTTP.HTTP2 do
   @spec new(atom()) :: t()
   def new(method), do: %__MODULE__{method: method}
 
-  @spec connection_preface() :: binary()
   def connection_preface, do: @connection_preface
 
-  @spec serialize_request(Request.t()) :: iodata()
   def serialize_request(%Request{} = request) do
     {headers, body} = request |> request_headers() |> Request.put_body_headers(request)
     body = IO.iodata_to_binary(body)

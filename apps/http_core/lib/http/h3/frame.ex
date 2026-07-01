@@ -16,30 +16,30 @@ defmodule HTTP.H3.Frame do
 
   @type frame_type :: non_neg_integer()
   @type t :: %__MODULE__{type: frame_type(), payload: binary()}
-  @type decode_result :: {:ok, t(), binary()} | :more | {:error, term()}
+  @type decode_result :: {:ok, t(), binary()} | :more
 
-  @spec data() :: frame_type()
+  @spec data() :: 0
   def data, do: @data
 
-  @spec headers() :: frame_type()
+  @spec headers() :: 1
   def headers, do: @headers
 
-  @spec cancel_push() :: frame_type()
+  @spec cancel_push() :: 3
   def cancel_push, do: @cancel_push
 
-  @spec settings() :: frame_type()
+  @spec settings() :: 4
   def settings, do: @settings
 
-  @spec push_promise() :: frame_type()
+  @spec push_promise() :: 5
   def push_promise, do: @push_promise
 
-  @spec goaway() :: frame_type()
+  @spec goaway() :: 7
   def goaway, do: @goaway
 
-  @spec max_push_id() :: frame_type()
+  @spec max_push_id() :: 13
   def max_push_id, do: @max_push_id
 
-  @spec wt_stream() :: frame_type()
+  @spec wt_stream() :: 65
   def wt_stream, do: @wt_stream
 
   @spec name(frame_type()) :: atom() | nil

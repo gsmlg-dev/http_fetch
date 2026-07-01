@@ -131,7 +131,7 @@ defmodule HTTP.Request do
   end
 
   @doc false
-  @spec body_payload(t()) :: nil | {iodata(), String.t() | nil}
+  @spec body_payload(t()) :: nil | {iodata(), content_type()}
   def body_payload(%__MODULE__{body: nil}), do: nil
   def body_payload(%__MODULE__{method: method}) when method in [:get, :head, :delete], do: nil
 

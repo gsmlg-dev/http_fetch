@@ -6,9 +6,9 @@ defmodule HTTP.H3.Varint do
   @max (1 <<< 62) - 1
 
   @type encoded_size :: 1 | 2 | 4 | 8
-  @type decode_result :: {:ok, non_neg_integer(), binary()} | :more | {:error, term()}
+  @type decode_result :: {:ok, non_neg_integer(), binary()} | :more
 
-  @spec max() :: non_neg_integer()
+  @spec max() :: 4_611_686_018_427_387_903
   def max, do: @max
 
   @spec encoded_size(non_neg_integer()) :: {:ok, encoded_size()} | {:error, :invalid_varint}
@@ -44,7 +44,7 @@ defmodule HTTP.H3.Varint do
 
   def encode(_value, _bytes), do: {:error, :invalid_varint_length}
 
-  @spec encode!(non_neg_integer(), :shortest | encoded_size()) :: binary()
+  @spec encode!(non_neg_integer(), :shortest | encoded_size()) :: nonempty_binary()
   def encode!(value, bytes \\ :shortest) do
     case encode(value, bytes) do
       {:ok, encoded} -> encoded

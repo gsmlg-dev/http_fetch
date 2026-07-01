@@ -27,7 +27,7 @@ defmodule HTTP.HTTP2.Frame do
 
   @max_frame_length 16_777_215
 
-  @spec encode(type(), non_neg_integer(), non_neg_integer(), iodata()) :: iodata()
+  @spec encode(type(), non_neg_integer(), non_neg_integer(), iodata()) :: binary()
   def encode(type, flags, stream_id, payload) do
     payload = IO.iodata_to_binary(payload)
     length = byte_size(payload)
@@ -58,7 +58,6 @@ defmodule HTTP.HTTP2.Frame do
     end
   end
 
-  @spec type_id(type()) :: non_neg_integer()
   def type_id(:data), do: 0x0
   def type_id(:headers), do: 0x1
   def type_id(:priority), do: 0x2

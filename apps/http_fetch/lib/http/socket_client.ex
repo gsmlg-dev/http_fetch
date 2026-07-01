@@ -331,7 +331,6 @@ defmodule HTTP.SocketClient do
 
   defp normalize_alpn_protocol(nil), do: nil
   defp normalize_alpn_protocol(protocol) when is_binary(protocol), do: protocol
-  defp normalize_alpn_protocol(protocol) when is_list(protocol), do: List.to_string(protocol)
 
   defp connect(transport, host, port, request, selection, timeout) do
     connect_timeout = min(connect_timeout(request), timeout)

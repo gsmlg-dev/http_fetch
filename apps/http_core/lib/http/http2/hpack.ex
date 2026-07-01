@@ -338,10 +338,9 @@ defmodule HTTP.HTTP2.HPACK do
     {256, 0x3FFFFFFF, 30}
   ]
 
-  @spec new_decoder() :: t()
   def new_decoder, do: %__MODULE__{}
 
-  @spec encode_headers([header()]) :: iodata()
+  @spec encode_headers([header()]) :: [iodata()]
   def encode_headers(headers) when is_list(headers) do
     Enum.map(headers, fn {name, value} ->
       [encode_integer(0, 4, 0x00), encode_string(name), encode_string(value)]
