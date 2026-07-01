@@ -9,6 +9,14 @@ defmodule HTTP.SocketClient do
 
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
+    if http_version(request) == :http3 do
+      request_http3(request, abort_controller_pid, unix_socket_path)
+    else
+      request_socket(request, abort_controller_pid, unix_socket_path)
+    end
+  end
+
+  defp request_socket(%Request{} = request, abort_controller_pid, unix_socket_path) do
     ref = make_ref()
     parent = self()
     timeout = request_timeout(request)
@@ -23,6 +31,103 @@ defmodule HTTP.SocketClient do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp request_http3(_request, _abort_controller_pid, unix_socket_path)
+       when is_binary(unix_socket_path) do
+    {:error, {:unsupported_http_version_for_unix_socket, :http3}}
+  end
+
+  defp request_http3(%Request{} = request, abort_controller_pid, _unix_socket_path) do
+    ref = make_ref()
+    parent = self()
+    timeout = request_timeout(request)
+    deadline_at = System.monotonic_time(:millisecond) + timeout
+
+    case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
+           http3_owner(parent, ref, request, 0, false, deadline_at)
+         end) do
+      {:ok, owner_pid} ->
+        set_abort_owner(abort_controller_pid, owner_pid)
+        await_owner(ref, owner_pid, timeout)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp http3_owner(parent, ref, request, redirects, redirected?, deadline_at) do
+    case remaining_timeout(deadline_at) do
+      0 ->
+        send_error(parent, ref, :request_timeout)
+
+      timeout ->
+        request = put_request_timeout(request, timeout)
+        result = HTTP.HTTP3.request(request)
+        handle_http3_result(result, parent, ref, request, redirects, redirected?, deadline_at)
+    end
+  end
+
+  defp handle_http3_result(
+         {:ok, %{status: status, headers: headers, body: body}},
+         parent,
+         ref,
+         request,
+         redirects,
+         redirected?,
+         deadline_at
+       ) do
+    response =
+      Response.new(
+        status: status,
+        headers: headers,
+        body: body,
+        url: request.url,
+        redirected: redirected?
+      )
+
+    handle_http3_response(response, parent, ref, request, redirects, deadline_at)
+  end
+
+  defp handle_http3_result(
+         {:error, reason},
+         parent,
+         ref,
+         _request,
+         _redirects,
+         _redirected?,
+         _deadline_at
+       ) do
+    send_error(parent, ref, reason)
+  end
+
+  defp handle_http3_response(response, parent, ref, request, redirects, deadline_at) do
+    state = %{request: request, redirects: redirects}
+
+    cond do
+      redirect_error?(state, response) ->
+        send_error(parent, ref, :redirect)
+
+      redirect_mode(request) == :follow and redirects >= @max_redirects and
+          redirect_candidate?(request, response.status, response.headers) ->
+        send_error(parent, ref, :too_many_redirects)
+
+      follow_redirect?(state, response) ->
+        follow_http3_redirect(response, parent, ref, request, redirects, deadline_at)
+
+      true ->
+        send_response(parent, ref, response)
+    end
+  end
+
+  defp follow_http3_redirect(response, parent, ref, request, redirects, deadline_at) do
+    case redirect_request(request, response) do
+      {:ok, redirected_request} ->
+        http3_owner(parent, ref, redirected_request, redirects + 1, true, deadline_at)
+
+      {:error, _reason} ->
+        send_response(parent, ref, response)
     end
   end
 
@@ -562,6 +667,10 @@ defmodule HTTP.SocketClient do
 
   defp request_timeout(%Request{} = request),
     do: Keyword.get(request.transport_options, :timeout, HTTP.Config.default_request_timeout())
+
+  defp put_request_timeout(%Request{} = request, timeout) do
+    %{request | transport_options: Keyword.put(request.transport_options, :timeout, timeout)}
+  end
 
   defp connect_timeout(%Request{} = request),
     do:

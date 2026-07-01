@@ -40,6 +40,61 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert {":path", "/test"} in headers
   end
 
+  test "sends WINDOW_UPDATE frames while receiving a large h2c response" do
+    body = :binary.copy("x", 70_000)
+
+    url =
+      start_h2c_server!(fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+
+        send_h2_response_headers(socket, transport, body)
+        buffer = assert_settings_ack(socket, transport, buffer)
+
+        chunks = chunk_binary(body, 16_384)
+        last_index = length(chunks) - 1
+
+        Enum.reduce(Enum.with_index(chunks), buffer, fn {chunk, index}, buffer ->
+          flags = if index == last_index, do: @end_stream, else: 0
+          send_all(socket, transport, Frame.encode(:data, flags, 1, chunk))
+
+          buffer = assert_window_update(socket, transport, buffer, 0, byte_size(chunk))
+          assert_window_update(socket, transport, buffer, 1, byte_size(chunk))
+        end)
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(http_version: :h2c)
+      |> HTTP.Promise.await()
+
+    assert response.status == 200
+    assert HTTP.Response.read_all(response) == body
+  end
+
+  test "continues an in-flight h2c response after graceful GOAWAY" do
+    url =
+      start_h2c_server!(fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+
+        send_h2_response_headers(socket, transport, "ok")
+
+        send_all(socket, transport, [
+          Frame.encode(:goaway, 0, 0, <<0::1, 1::31, 0x0::32, "drain">>),
+          Frame.encode(:data, @end_stream, 1, "ok")
+        ])
+
+        assert_settings_ack(socket, transport, buffer)
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(http_version: :h2c)
+      |> HTTP.Promise.await()
+
+    assert response.status == 200
+    assert HTTP.Response.read_all(response) == "ok"
+  end
+
   test "auto over https negotiates h2 with ALPN" do
     test_pid = self()
 
@@ -170,12 +225,7 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   defp send_h2_response(socket, transport, body) do
-    headers =
-      HPACK.encode_headers([
-        {":status", "200"},
-        {"content-length", Integer.to_string(byte_size(body))},
-        {"x-protocol", "h2"}
-      ])
+    headers = response_headers(body)
 
     send_all(socket, transport, [
       Frame.encode(:settings, 0, 0, ""),
@@ -184,11 +234,39 @@ defmodule HTTP.SocketClientHTTP2Test do
     ])
   end
 
+  defp send_h2_response_headers(socket, transport, body) do
+    send_all(socket, transport, [
+      Frame.encode(:settings, 0, 0, ""),
+      Frame.encode(:headers, @end_headers, 1, response_headers(body))
+    ])
+  end
+
+  defp response_headers(body) do
+    HPACK.encode_headers([
+      {":status", "200"},
+      {"content-length", Integer.to_string(byte_size(body))},
+      {"x-protocol", "h2"}
+    ])
+  end
+
   defp assert_settings_ack(socket, transport, buffer) do
-    assert {:ok, %Frame{type: :settings, flags: flags, stream_id: 0, payload: ""}, _buffer} =
+    assert {:ok, %Frame{type: :settings, flags: flags, stream_id: 0, payload: ""}, buffer} =
              recv_frame(socket, transport, buffer)
 
     assert (flags &&& @ack) == @ack
+    buffer
+  end
+
+  defp assert_window_update(socket, transport, buffer, stream_id, increment) do
+    assert {:ok,
+            %Frame{
+              type: :window_update,
+              stream_id: ^stream_id,
+              payload: <<0::1, received_increment::31>>
+            }, buffer} = recv_frame(socket, transport, buffer)
+
+    assert received_increment == increment
+    buffer
   end
 
   defp recv_frame(socket, transport, buffer) do
@@ -214,6 +292,13 @@ defmodule HTTP.SocketClientHTTP2Test do
 
   defp send_all(socket, transport, iodata) do
     :ok = apply(transport, :send, [socket, iodata])
+  end
+
+  defp chunk_binary(binary, size) when byte_size(binary) <= size, do: [binary]
+
+  defp chunk_binary(binary, size) do
+    <<chunk::binary-size(size), rest::binary>> = binary
+    [chunk | chunk_binary(rest, size)]
   end
 
   defp negotiated_protocol(socket) do

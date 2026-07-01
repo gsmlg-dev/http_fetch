@@ -15,6 +15,7 @@ defmodule HTTP.H3.WebTransport do
   def client_settings(opts \\ []) do
     [
       {Settings.wt_enabled(), 1},
+      {Settings.enable_connect_protocol(), 1},
       {Settings.h3_datagram(), 1}
     ]
     |> maybe_setting(
@@ -38,6 +39,13 @@ defmodule HTTP.H3.WebTransport do
              Settings.wt_enabled(),
              &(&1 == 1),
              :webtransport_not_enabled
+           ),
+         :ok <-
+           require_setting(
+             normalized,
+             Settings.enable_connect_protocol(),
+             &(&1 == 1),
+             :extended_connect_disabled
            ) do
       require_setting(normalized, Settings.h3_datagram(), &(&1 == 1), :h3_datagram_disabled)
     end

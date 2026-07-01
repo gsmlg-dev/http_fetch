@@ -50,6 +50,7 @@ defmodule HttpWebTransport.MixProject do
   defp deps do
     [
       {:http_core, "~> 0.10.0", in_umbrella: true, hex: :http_core},
+      {:quic, "~> 1.6"},
       {:telemetry, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]

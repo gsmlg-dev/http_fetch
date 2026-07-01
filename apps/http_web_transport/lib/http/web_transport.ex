@@ -3,9 +3,8 @@ defmodule HTTP.WebTransport do
   Browser-like WebTransport client API for Elixir.
 
   This module implements the public API shape and lifecycle management for
-  WebTransport sessions. Browser-compatible network interoperability requires a
-  backend that speaks WebTransport over HTTP/3; the default backend is currently
-  a placeholder that reports `:quic_backend_unavailable`.
+  WebTransport sessions. The default backend speaks WebTransport extended
+  CONNECT over HTTP/3 using the shared QUIC transport in `:http_core`.
   """
 
   alias HTTP.WebTransport.CloseInfo

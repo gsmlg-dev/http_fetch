@@ -10,6 +10,7 @@ defmodule HTTP.HTTP2 do
 
   @connection_preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
   @client_stream_id 1
+  @initial_window_size 65_535
   @initial_max_frame_size 16_384
 
   @flag_end_stream 0x1
@@ -23,6 +24,8 @@ defmodule HTTP.HTTP2 do
             hpack: HPACK.new_decoder(),
             continuation: nil,
             status: nil,
+            connection_receive_window: @initial_window_size,
+            stream_receive_window: @initial_window_size,
             outbound: [],
             done?: false
 
@@ -151,7 +154,8 @@ defmodule HTTP.HTTP2 do
   defp handle_frame(_conn, %Frame{type: :continuation}), do: {:error, :unexpected_continuation}
 
   defp handle_frame(conn, %Frame{type: :data, stream_id: @client_stream_id} = frame) do
-    with {:ok, data} <- data_payload(frame) do
+    with {:ok, data, flow_controlled_size} <- data_payload(frame),
+         {:ok, conn} <- consume_receive_window(conn, flow_controlled_size) do
       end_stream? = Frame.flag?(frame.flags, @flag_end_stream)
       forbidden? = response_body_forbidden?(conn)
       conn = if end_stream?, do: %{conn | done?: true}, else: conn
@@ -192,12 +196,12 @@ defmodule HTTP.HTTP2 do
     {:error, {:goaway, error_code(code), debug}}
   end
 
-  defp handle_frame(_conn, %Frame{
+  defp handle_frame(conn, %Frame{
          type: :goaway,
          stream_id: 0,
-         payload: <<_reserved::1, _last_stream_id::31, code::32, debug::binary>>
+         payload: <<_reserved::1, _last_stream_id::31, _code::32, _debug::binary>>
        }) do
-    {:error, {:goaway, error_code(code), debug}}
+    {:ok, conn, []}
   end
 
   defp handle_frame(_conn, %Frame{type: :goaway}), do: {:error, :invalid_goaway}
@@ -212,6 +216,10 @@ defmodule HTTP.HTTP2 do
   end
 
   defp handle_frame(_conn, %Frame{type: :ping}), do: {:error, :invalid_ping}
+
+  defp handle_frame(_conn, %Frame{type: :window_update, payload: <<_reserved::1, 0::31>>}) do
+    {:error, :invalid_window_update_increment}
+  end
 
   defp handle_frame(conn, %Frame{type: :window_update, payload: <<_reserved::1, _increment::31>>}) do
     {:ok, conn, []}
@@ -262,8 +270,44 @@ defmodule HTTP.HTTP2 do
 
   defp data_payload(%Frame{flags: flags, payload: payload}) do
     with {:ok, payload, pad_length} <- unpad_payload(payload, Frame.flag?(flags, @flag_padded)) do
-      take_padding(payload, pad_length)
+      with {:ok, data} <- take_padding(payload, pad_length) do
+        {:ok, data, byte_size(payload) + if(Frame.flag?(flags, @flag_padded), do: 1, else: 0)}
+      end
     end
+  end
+
+  defp consume_receive_window(conn, 0), do: {:ok, conn}
+
+  defp consume_receive_window(
+         %__MODULE__{
+           connection_receive_window: connection_window,
+           stream_receive_window: stream_window
+         } = conn,
+         size
+       ) do
+    if size > connection_window or size > stream_window do
+      {:error, :flow_control_error}
+    else
+      conn =
+        conn
+        |> Map.update!(:connection_receive_window, &(&1 - size))
+        |> Map.update!(:stream_receive_window, &(&1 - size))
+        |> restore_receive_window(size)
+
+      {:ok, conn}
+    end
+  end
+
+  defp restore_receive_window(%__MODULE__{} = conn, size) do
+    conn
+    |> Map.update!(:connection_receive_window, &(&1 + size))
+    |> Map.update!(:stream_receive_window, &(&1 + size))
+    |> enqueue(window_update_frame(0, size))
+    |> enqueue(window_update_frame(@client_stream_id, size))
+  end
+
+  defp window_update_frame(stream_id, increment) do
+    Frame.encode(:window_update, 0, stream_id, <<0::1, increment::31>>)
   end
 
   defp unpad_payload(<<pad_length, rest::binary>>, true), do: {:ok, rest, pad_length}

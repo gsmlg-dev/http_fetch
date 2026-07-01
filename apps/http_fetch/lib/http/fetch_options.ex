@@ -16,8 +16,8 @@ defmodule HTTP.FetchOptions do
   - `content_type` - convenience Content-Type value for request bodies
   - `timeout` - request timeout in milliseconds
   - `connect_timeout` - connection timeout in milliseconds
-  - `http_version` - protocol selection, one of `:http1`, `:http2`, `:h2c`,
-    or `:auto`; defaults to `:http1`
+  - `http_version` - protocol selection, one of `:http1`, `:http2`, `:http3`,
+    `:h2c`, or `:auto`; defaults to `:http1`
   - `ssl` - TLS options passed to `:ssl`
   - `socket_opts` - socket options passed to the underlying transport
   - `unix_socket` - Unix Domain Socket path
@@ -57,7 +57,7 @@ defmodule HTTP.FetchOptions do
             socket_opts: nil
 
   @type redirect :: :follow | :manual | :error
-  @type http_version :: :http1 | :http2 | :h2c | :auto
+  @type http_version :: :http1 | :http2 | :http3 | :h2c | :auto
 
   @type t :: %__MODULE__{
           method: atom(),
@@ -219,6 +219,7 @@ defmodule HTTP.FetchOptions do
   defp normalize_http_version(nil), do: :http1
   defp normalize_http_version(:http1), do: :http1
   defp normalize_http_version(:http2), do: :http2
+  defp normalize_http_version(:http3), do: :http3
   defp normalize_http_version(:h2c), do: :h2c
   defp normalize_http_version(:auto), do: :auto
 
@@ -228,6 +229,8 @@ defmodule HTTP.FetchOptions do
       "http/1.1" -> :http1
       "http2" -> :http2
       "h2" -> :http2
+      "http3" -> :http3
+      "h3" -> :http3
       "h2c" -> :h2c
       "auto" -> :auto
       _ -> raise ArgumentError, http_version_error_message(http_version)
@@ -238,7 +241,7 @@ defmodule HTTP.FetchOptions do
     do: raise(ArgumentError, http_version_error_message(http_version))
 
   defp http_version_error_message(http_version) do
-    "unsupported http_version: #{inspect(http_version)}; expected :http1, :http2, :h2c, or :auto"
+    "unsupported http_version: #{inspect(http_version)}; expected :http1, :http2, :http3, :h2c, or :auto"
   end
 
   defp maybe_add(list, _key, nil), do: list

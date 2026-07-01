@@ -7,6 +7,7 @@ defmodule HTTP.WebTransportTest do
   alias HTTP.WebTransport.DatagramDuplexStream
   alias HTTP.WebTransport.DatagramsWritable
   alias HTTP.WebTransport.FakeBackend
+  alias HTTP.WebTransport.Options
   alias HTTP.WebTransport.ReceiveStream
   alias HTTP.WebTransport.SendStream
   alias HTTP.WebTransport.StreamQueue
@@ -30,12 +31,9 @@ defmodule HTTP.WebTransportTest do
     assert_receive {WebTransport, ^transport, {:state, :connected}}, 1_000
   end
 
-  test "default backend reports unavailable QUIC support through ready promise" do
-    transport = WebTransport.new("https://example.com/transport")
-
-    assert %WebTransport{} = transport
-    assert {:error, :quic_backend_unavailable} = WebTransport.await_ready(transport, 1_000)
-    assert WebTransport.state(transport) == :failed
+  test "default backend is the QUIC transport" do
+    assert {:ok, %Options{backend: HTTP.WebTransport.Transport.QUIC}} =
+             Options.new("https://example.com/transport")
   end
 
   test "sends and receives datagrams" do

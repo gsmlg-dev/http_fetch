@@ -4,9 +4,11 @@ defmodule HTTP.WebTransport.Transport.QUICTest do
   alias HTTP.WebTransport.Options
   alias HTTP.WebTransport.Transport.QUIC
 
-  test "validates H3 WebTransport metadata before reporting unavailable backend" do
+  test "default backend module exposes the QUIC transport contract" do
     assert {:ok, options} = Options.new("https://example.com/transport")
-    assert {:error, :quic_backend_unavailable} = QUIC.connect(options.uri, options)
+    assert options.backend == QUIC
+    assert Code.ensure_loaded?(QUIC)
+    assert function_exported?(QUIC, :connect, 2)
   end
 
   test "rejects invalid H3 WebTransport CONNECT targets before backend setup" do

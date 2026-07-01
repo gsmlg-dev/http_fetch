@@ -1,6 +1,7 @@
 defmodule HTTP do
   @moduledoc """
-  A browser-like HTTP fetch API for Elixir, built on Erlang's `:gen_tcp` and `:ssl`.
+  A browser-like HTTP fetch API for Elixir, built on Erlang's `:gen_tcp`, `:ssl`,
+  and the shared QUIC HTTP/3 transport.
 
   This module provides a modern, Promise-based HTTP client interface similar to the
   browser's `fetch()` API. It supports asynchronous requests, streaming, request
@@ -14,7 +15,7 @@ defmodule HTTP do
   - **Promise chaining**: JavaScript-like promise interface with `then/3` support
   - **Unix Domain Sockets**: Support for HTTP over Unix sockets (Docker daemon, systemd, etc.)
   - **Telemetry integration**: Comprehensive event emission for monitoring and observability
-  - **Zero external dependencies**: Uses only Erlang/OTP built-in modules (except telemetry)
+  - **HTTP/3 opt-in**: Pass `http_version: :http3` for QUIC-backed HTTP/3 requests
 
   ## Quick Start
 
@@ -85,7 +86,7 @@ defmodule HTTP do
 
   @doc """
   Performs an HTTP request, similar to `global.fetch` in web browsers.
-  Uses an internal HTTP/1.1 socket transport asynchronously.
+  Uses an internal HTTP/1.1 socket transport asynchronously by default.
 
   Arguments:
     - `url`: The URL to fetch (string or URI struct).
@@ -101,8 +102,9 @@ defmodule HTTP do
                 - `:redirect`: Redirect mode, one of `:follow`, `:manual`, or `:error`. Defaults to `:follow`.
                 - `:signal`: An `HTTP.AbortController` PID. If provided, the request can be aborted
                              via this controller.
+                - `:http_version`: `:http1`, `:http2`, `:http3`, `:h2c`, or `:auto`.
                 - `:timeout`, `:connect_timeout`, `:ssl`, and `:socket_opts`: Elixir-specific transport
-                  extensions used by the socket transport.
+                  extensions used by the socket or QUIC transport.
                 - `:unix_socket`: Path to a Unix Domain Socket file (e.g., "/var/run/docker.sock").
                                   When provided, the request is sent over the Unix socket instead of TCP/IP.
 

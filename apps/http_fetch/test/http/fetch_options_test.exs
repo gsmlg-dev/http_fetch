@@ -65,13 +65,18 @@ defmodule HTTP.FetchOptionsTest do
                HTTP.FetchOptions.new(http_version: "http/1.1")
 
       assert %HTTP.FetchOptions{http_version: :http2} = HTTP.FetchOptions.new(http_version: "h2")
+      assert %HTTP.FetchOptions{http_version: :http3} = HTTP.FetchOptions.new(http_version: "h3")
+
+      assert %HTTP.FetchOptions{http_version: :http3} =
+               HTTP.FetchOptions.new(http_version: :http3)
+
       assert %HTTP.FetchOptions{http_version: :h2c} = HTTP.FetchOptions.new(http_version: :h2c)
       assert %HTTP.FetchOptions{http_version: :auto} = HTTP.FetchOptions.new(http_version: "auto")
     end
 
     test "rejects invalid http version selection" do
       assert_raise ArgumentError, ~r/unsupported http_version/, fn ->
-        HTTP.FetchOptions.new(http_version: :http3)
+        HTTP.FetchOptions.new(http_version: :spdy)
       end
     end
   end

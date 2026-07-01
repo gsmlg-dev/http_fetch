@@ -79,6 +79,7 @@ defmodule HTTP.H3.WebTransportTest do
 
     assert [
              {wt_enabled, 1},
+             {enable_connect_protocol, 1},
              {h3_datagram, 1},
              {wt_initial_max_streams_uni, 3},
              {wt_initial_max_streams_bidi, 4},
@@ -86,11 +87,19 @@ defmodule HTTP.H3.WebTransportTest do
            ] = settings
 
     assert wt_enabled == Settings.wt_enabled()
+    assert enable_connect_protocol == Settings.enable_connect_protocol()
     assert h3_datagram == Settings.h3_datagram()
     assert wt_initial_max_streams_uni == Settings.wt_initial_max_streams_uni()
     assert wt_initial_max_streams_bidi == Settings.wt_initial_max_streams_bidi()
     assert wt_initial_max_data == Settings.wt_initial_max_data()
     assert :ok = WebTransport.validate_client_settings(settings)
+
+    assert {:error, :extended_connect_disabled} =
+             settings
+             |> Enum.reject(fn {setting, _value} ->
+               setting == Settings.enable_connect_protocol()
+             end)
+             |> WebTransport.validate_client_settings()
   end
 
   test "validates server WebTransport settings" do

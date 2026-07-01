@@ -93,7 +93,14 @@ defmodule HTTP.HTTP2Test do
       assert HTTP.Headers.get(headers, "content-length") == "2"
 
       {conn, outbound} = HTTP.HTTP2.take_outbound(conn)
-      assert IO.iodata_to_binary(outbound) == Frame.encode(:settings, @ack, 0, "")
+      outbound = IO.iodata_to_binary(outbound)
+
+      assert {:ok, %Frame{type: :settings, flags: flags, stream_id: 0, payload: ""}, outbound} =
+               Frame.decode(outbound)
+
+      assert (flags &&& @ack) == @ack
+      outbound = assert_window_update(outbound, 0, 2)
+      assert "" = assert_window_update(outbound, 1, 2)
       assert {^conn, []} = HTTP.HTTP2.take_outbound(conn)
     end
 
@@ -149,9 +156,42 @@ defmodule HTTP.HTTP2Test do
                  Frame.encode(:goaway, 0, 0, <<0::1, 0::31, 0x1::32, "debug">>)
                )
     end
+
+    test "allows graceful goaway to drain stream 1" do
+      frames = [
+        response_headers_frame([{":status", "200"}, {"content-length", "2"}]),
+        Frame.encode(:goaway, 0, 0, <<0::1, 1::31, 0x0::32, "drain">>),
+        Frame.encode(:data, @end_stream, 1, "ok")
+      ]
+
+      assert {:ok, _conn, [{:headers, 200, _headers}, {:body, "ok"}, :done]} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), IO.iodata_to_binary(frames))
+    end
+
+    test "rejects zero window update increments" do
+      for stream_id <- [0, 1] do
+        assert {:error, :invalid_window_update_increment} =
+                 HTTP.HTTP2.stream(
+                   HTTP.HTTP2.new(:get),
+                   Frame.encode(:window_update, 0, stream_id, <<0::1, 0::31>>)
+                 )
+      end
+    end
   end
 
   defp response_headers_frame(headers) do
     Frame.encode(:headers, @end_headers, 1, HPACK.encode_headers(headers))
+  end
+
+  defp assert_window_update(buffer, stream_id, increment) do
+    assert {:ok,
+            %Frame{
+              type: :window_update,
+              stream_id: ^stream_id,
+              payload: <<0::1, received_increment::31>>
+            }, rest} = Frame.decode(buffer)
+
+    assert received_increment == increment
+    rest
   end
 end
