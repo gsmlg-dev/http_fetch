@@ -20,10 +20,16 @@ defmodule HTTP.FetchOptionsTest do
         HTTP.FetchOptions.new(%{
           "method" => "POST",
           "redirect" => "manual",
+          "httpVersion" => "h2",
           "connectTimeout" => 2_000
         })
 
-      assert %HTTP.FetchOptions{method: :post, redirect: :manual, connect_timeout: 2_000} =
+      assert %HTTP.FetchOptions{
+               method: :post,
+               redirect: :manual,
+               http_version: :http2,
+               connect_timeout: 2_000
+             } =
                options
     end
 
@@ -51,6 +57,23 @@ defmodule HTTP.FetchOptionsTest do
         HTTP.FetchOptions.new(redirect: :invalid)
       end
     end
+
+    test "normalizes http version selection" do
+      assert %HTTP.FetchOptions{http_version: :http1} = HTTP.FetchOptions.new([])
+
+      assert %HTTP.FetchOptions{http_version: :http1} =
+               HTTP.FetchOptions.new(http_version: "http/1.1")
+
+      assert %HTTP.FetchOptions{http_version: :http2} = HTTP.FetchOptions.new(http_version: "h2")
+      assert %HTTP.FetchOptions{http_version: :h2c} = HTTP.FetchOptions.new(http_version: :h2c)
+      assert %HTTP.FetchOptions{http_version: :auto} = HTTP.FetchOptions.new(http_version: "auto")
+    end
+
+    test "rejects invalid http version selection" do
+      assert_raise ArgumentError, ~r/unsupported http_version/, fn ->
+        HTTP.FetchOptions.new(http_version: :http3)
+      end
+    end
   end
 
   describe "to_transport_options/1" do
@@ -60,6 +83,7 @@ defmodule HTTP.FetchOptionsTest do
           timeout: 5_000,
           connect_timeout: 2_000,
           redirect: :manual,
+          http_version: :http2,
           ssl: [verify: :verify_none],
           socket_opts: [:inet6]
         )
@@ -68,6 +92,7 @@ defmodule HTTP.FetchOptionsTest do
       assert transport_options[:timeout] == 5_000
       assert transport_options[:connect_timeout] == 2_000
       assert transport_options[:redirect] == :manual
+      assert transport_options[:http_version] == :http2
       assert transport_options[:ssl] == [verify: :verify_none]
       assert transport_options[:socket_opts] == [:inet6]
     end

@@ -16,6 +16,8 @@ defmodule HTTP.FetchOptions do
   - `content_type` - convenience Content-Type value for request bodies
   - `timeout` - request timeout in milliseconds
   - `connect_timeout` - connection timeout in milliseconds
+  - `http_version` - protocol selection, one of `:http1`, `:http2`, `:h2c`,
+    or `:auto`; defaults to `:http1`
   - `ssl` - TLS options passed to `:ssl`
   - `socket_opts` - socket options passed to the underlying transport
   - `unix_socket` - Unix Domain Socket path
@@ -28,6 +30,8 @@ defmodule HTTP.FetchOptions do
     "content_type" => :content_type,
     "contentType" => :content_type,
     "headers" => :headers,
+    "http_version" => :http_version,
+    "httpVersion" => :http_version,
     "method" => :method,
     "redirect" => :redirect,
     "signal" => :signal,
@@ -46,12 +50,14 @@ defmodule HTTP.FetchOptions do
             signal: nil,
             unix_socket: nil,
             redirect: :follow,
+            http_version: :http1,
             timeout: nil,
             connect_timeout: nil,
             ssl: nil,
             socket_opts: nil
 
   @type redirect :: :follow | :manual | :error
+  @type http_version :: :http1 | :http2 | :h2c | :auto
 
   @type t :: %__MODULE__{
           method: atom(),
@@ -61,6 +67,7 @@ defmodule HTTP.FetchOptions do
           signal: any() | nil,
           unix_socket: String.t() | nil,
           redirect: redirect(),
+          http_version: http_version(),
           timeout: integer() | nil,
           connect_timeout: integer() | nil,
           ssl: list() | nil,
@@ -97,6 +104,7 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:ssl, options.ssl)
     |> maybe_add(:socket_opts, options.socket_opts)
     |> maybe_add(:redirect, options.redirect)
+    |> maybe_add(:http_version, options.http_version)
   end
 
   @doc """
@@ -146,6 +154,9 @@ defmodule HTTP.FetchOptions do
       {:redirect, redirect}, acc ->
         %{acc | redirect: redirect}
 
+      {:http_version, http_version}, acc ->
+        %{acc | http_version: http_version}
+
       {:timeout, timeout}, acc ->
         %{acc | timeout: timeout}
 
@@ -175,7 +186,8 @@ defmodule HTTP.FetchOptions do
     %{
       options
       | method: normalize_method(options.method),
-        redirect: normalize_redirect(options.redirect)
+        redirect: normalize_redirect(options.redirect),
+        http_version: normalize_http_version(options.http_version)
     }
   end
 
@@ -203,6 +215,31 @@ defmodule HTTP.FetchOptions do
 
   defp redirect_error_message(redirect),
     do: "unsupported redirect mode: #{inspect(redirect)}; expected :follow, :manual, or :error"
+
+  defp normalize_http_version(nil), do: :http1
+  defp normalize_http_version(:http1), do: :http1
+  defp normalize_http_version(:http2), do: :http2
+  defp normalize_http_version(:h2c), do: :h2c
+  defp normalize_http_version(:auto), do: :auto
+
+  defp normalize_http_version(http_version) when is_binary(http_version) do
+    case String.downcase(http_version) do
+      "http1" -> :http1
+      "http/1.1" -> :http1
+      "http2" -> :http2
+      "h2" -> :http2
+      "h2c" -> :h2c
+      "auto" -> :auto
+      _ -> raise ArgumentError, http_version_error_message(http_version)
+    end
+  end
+
+  defp normalize_http_version(http_version),
+    do: raise(ArgumentError, http_version_error_message(http_version))
+
+  defp http_version_error_message(http_version) do
+    "unsupported http_version: #{inspect(http_version)}; expected :http1, :http2, :h2c, or :auto"
+  end
 
   defp maybe_add(list, _key, nil), do: list
   defp maybe_add(list, key, value), do: Keyword.put(list, key, value)

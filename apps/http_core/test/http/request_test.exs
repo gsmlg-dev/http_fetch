@@ -77,5 +77,36 @@ defmodule HTTP.RequestTest do
       assert wire =~ "Content-Type: multipart/form-data; boundary="
       assert wire =~ "name=\"upload\"; filename=\"test.txt\""
     end
+
+    test "exposes origin-form path and authority helpers for protocol serializers" do
+      uri = URI.parse("https://example.com:8443/api/items?limit=10")
+
+      assert HTTP.Request.origin_form(uri) == "/api/items?limit=10"
+      assert HTTP.Request.authority(uri) == "example.com:8443"
+      assert HTTP.Request.authority(URI.parse("https://example.com/path")) == "example.com"
+      assert HTTP.Request.authority(URI.parse("http://[::1]:8080/path")) == "[::1]:8080"
+    end
+
+    test "exposes prepared request body with inferred content type" do
+      request = %HTTP.Request{method: :post, body: "payload"}
+
+      assert {"payload", "application/octet-stream"} = HTTP.Request.body_payload(request)
+    end
+
+    test "omits body for no-body methods" do
+      request = %HTTP.Request{method: :get, body: "payload"}
+
+      assert HTTP.Request.body_payload(request) == nil
+    end
+
+    test "adds body headers for shared protocol preparation" do
+      request = %HTTP.Request{method: :post, body: "payload", content_type: "text/plain"}
+
+      assert {%HTTP.Headers{} = headers, "payload"} =
+               HTTP.Request.put_body_headers(HTTP.Headers.new(), request)
+
+      assert HTTP.Headers.get(headers, "content-length") == "7"
+      assert HTTP.Headers.get(headers, "content-type") == "text/plain"
+    end
   end
 end

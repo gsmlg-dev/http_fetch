@@ -4,7 +4,6 @@ defmodule HTTP.HTTP1 do
   alias HTTP.Headers
   alias HTTP.Request
 
-  @allowed_methods ~w(DELETE GET HEAD OPTIONS PATCH POST PUT)
   @max_head_bytes 64 * 1024
   @max_trailer_bytes 64 * 1024
   @max_line_bytes 8 * 1024
@@ -26,10 +25,10 @@ defmodule HTTP.HTTP1 do
 
   @spec serialize_request(Request.t()) :: iolist()
   def serialize_request(%Request{} = request) do
-    method = method_token(request.method)
-    target = request_target(request.url)
+    method = Request.method_token(request.method)
+    target = Request.origin_form(request.url)
 
-    {headers, body} = request |> request_headers() |> add_body_headers(request)
+    {headers, body} = request |> request_headers() |> Request.put_body_headers(request)
     header_lines = Enum.map(headers.headers, fn {name, value} -> header_line(name, value) end)
 
     [method, " ", target, " HTTP/1.1\r\n", header_lines, "\r\n", body]
@@ -422,89 +421,14 @@ defmodule HTTP.HTTP1 do
 
   defp request_headers(%Request{} = request) do
     request.headers
-    |> reject_unsupported_request_framing!()
+    |> Request.reject_unsupported_request_framing!()
     |> ensure_user_agent()
-    |> Headers.set_default("Host", host_header(request.url))
+    |> Headers.set_default("Host", Request.authority(request.url))
     |> Headers.set("Connection", "close")
-  end
-
-  defp add_body_headers(headers, %Request{} = request) do
-    case request_body(request) do
-      nil ->
-        {Headers.delete(headers, "Content-Length"), ""}
-
-      {body, content_type} ->
-        headers =
-          headers
-          |> Headers.set(
-            "Content-Length",
-            body |> IO.iodata_to_binary() |> byte_size() |> to_string()
-          )
-          |> maybe_set_content_type(content_type)
-
-        {headers, body}
-    end
-  end
-
-  defp request_body(%Request{body: nil}), do: nil
-  defp request_body(%Request{method: method}) when method in [:get, :head, :delete], do: nil
-
-  defp request_body(%Request{body: %HTTP.FormData{} = form_data}) do
-    case HTTP.FormData.to_body(form_data) do
-      {:url_encoded, body} ->
-        {body, "application/x-www-form-urlencoded"}
-
-      {:multipart, body, boundary} ->
-        body = IO.iodata_to_binary(body)
-        {body, "multipart/form-data; boundary=#{boundary}"}
-    end
-  end
-
-  defp request_body(%Request{body: body, content_type: content_type}) do
-    {to_body(body), content_type || "application/octet-stream"}
-  end
-
-  defp to_body(body) when is_binary(body), do: body
-  defp to_body(body) when is_list(body), do: IO.iodata_to_binary(body)
-  defp to_body(body), do: to_string(body)
-
-  defp maybe_set_content_type(headers, nil), do: headers
-
-  defp maybe_set_content_type(headers, content_type) when is_list(content_type) do
-    maybe_set_content_type(headers, to_string(content_type))
-  end
-
-  defp maybe_set_content_type(headers, content_type) do
-    Headers.set_default(headers, "Content-Type", to_string(content_type))
   end
 
   defp ensure_user_agent(headers) do
     Headers.set_default(headers, "User-Agent", Headers.user_agent())
-  end
-
-  defp request_target(%URI{} = uri) do
-    path =
-      case uri.path do
-        nil -> "/"
-        "" -> "/"
-        path -> path
-      end
-
-    if uri.query && uri.query != "" do
-      valid_request_target!(path <> "?" <> uri.query)
-    else
-      valid_request_target!(path)
-    end
-  end
-
-  defp method_token(method) do
-    method = method |> to_string() |> String.upcase()
-
-    if method in @allowed_methods and valid_token?(method) do
-      method
-    else
-      raise ArgumentError, "unsupported HTTP method: #{inspect(method)}"
-    end
   end
 
   defp header_line(name, value) do
@@ -512,14 +436,6 @@ defmodule HTTP.HTTP1 do
     value = valid_header_value!(to_string(value))
 
     [name, ": ", value, "\r\n"]
-  end
-
-  defp valid_request_target!(target) do
-    if safe_request_target?(target) do
-      target
-    else
-      raise ArgumentError, "request target contains invalid whitespace or control characters"
-    end
   end
 
   defp valid_header_name!(name) do
@@ -554,46 +470,11 @@ defmodule HTTP.HTTP1 do
     |> Enum.all?(fn char -> char == ?\t or (char >= 32 and char != 127) end)
   end
 
-  defp safe_request_target?(target) do
-    target
-    |> :binary.bin_to_list()
-    |> Enum.all?(fn char -> char > 32 and char != 127 end)
-  end
-
   defp digits_only?(value) do
     value != "" and Enum.all?(:binary.bin_to_list(value), &(&1 in ?0..?9))
   end
 
-  defp reject_unsupported_request_framing!(headers) do
-    cond do
-      Headers.has?(headers, "Transfer-Encoding") ->
-        raise ArgumentError, "Transfer-Encoding request headers are not supported"
-
-      Headers.has?(headers, "Trailer") ->
-        raise ArgumentError, "Trailer request headers are not supported"
-
-      true ->
-        headers
-    end
-  end
-
-  defp host_header(%URI{} = uri) do
-    host = uri.host || "localhost"
-
-    host =
-      if String.contains?(host, ":") and !String.starts_with?(host, "["),
-        do: "[#{host}]",
-        else: host
-
-    if uri.port && uri.port != HTTP.HTTP1.default_port(uri.scheme) do
-      host <> ":" <> to_string(uri.port)
-    else
-      host
-    end
-  end
-
   @doc false
   @spec default_port(String.t() | nil) :: 80 | 443
-  def default_port("https"), do: 443
-  def default_port(_), do: 80
+  defdelegate default_port(scheme), to: Request
 end
