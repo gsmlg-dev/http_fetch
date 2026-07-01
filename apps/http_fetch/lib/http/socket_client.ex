@@ -35,39 +35,48 @@ defmodule HTTP.SocketClient do
         timer_ref = Process.send_after(self(), :deadline, timeout)
 
         with {:ok, transport, host, port} <- select_transport(request, unix_socket_path),
-             {:ok, wire_request} <- serialize_request(request),
-             {:ok, socket} <- connect(transport, host, port, request, timeout),
-             :ok <- send_request(transport, socket, wire_request, timeout),
-             :ok <- activate_socket(transport, socket) do
-          state = %{
-            parent: parent,
-            ref: ref,
-            request: request,
-            unix_socket_path: unix_socket_path,
-            redirects: redirects,
-            redirected?: redirected?,
-            deadline_at: deadline_at,
-            timer_ref: timer_ref,
-            transport: transport,
-            socket: socket,
-            protocol: HTTP.HTTP1.new(request.method),
-            mode: nil,
-            response_sent?: false
-          }
+             {:ok, selection} <- protocol_selection(request, transport),
+             {:ok, socket} <- connect(transport, host, port, request, selection, timeout) do
+          case initialize_protocol(transport, socket, request, selection) do
+            {:ok, protocol_module, protocol, wire_request} ->
+              with :ok <- send_request(transport, socket, wire_request, timeout),
+                   :ok <- activate_socket(transport, socket) do
+                state = %{
+                  parent: parent,
+                  ref: ref,
+                  request: request,
+                  unix_socket_path: unix_socket_path,
+                  redirects: redirects,
+                  redirected?: redirected?,
+                  deadline_at: deadline_at,
+                  timer_ref: timer_ref,
+                  transport: transport,
+                  socket: socket,
+                  protocol_module: protocol_module,
+                  protocol: protocol,
+                  mode: nil,
+                  response_sent?: false
+                }
 
-          owner_loop(state)
+                owner_loop(state)
+              else
+                {:error, reason} ->
+                  transport.close(socket)
+                  _ = Process.cancel_timer(timer_ref)
+                  send_error(parent, ref, reason)
+              end
+
+            {:error, reason} ->
+              transport.close(socket)
+              _ = Process.cancel_timer(timer_ref)
+              send_error(parent, ref, reason)
+          end
         else
           {:error, reason} ->
             _ = Process.cancel_timer(timer_ref)
             send_error(parent, ref, reason)
         end
     end
-  end
-
-  defp serialize_request(%Request{} = request) do
-    {:ok, HTTP.HTTP1.serialize_request(request)}
-  rescue
-    error -> {:error, error}
   end
 
   defp owner_loop(state) do
@@ -89,10 +98,14 @@ defmodule HTTP.SocketClient do
   end
 
   defp handle_data(state, data) do
-    case HTTP.HTTP1.stream(state.protocol, data) do
+    case state.protocol_module.stream(state.protocol, data) do
       {:ok, protocol, events} ->
-        %{state | protocol: protocol}
-        |> handle_events(events)
+        state = %{state | protocol: protocol}
+
+        case flush_protocol_writes(state) do
+          {:ok, state} -> handle_events(state, events)
+          {:error, reason} -> fail(state, reason)
+        end
 
       {:error, reason} ->
         fail(state, reason)
@@ -100,7 +113,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp handle_closed(state) do
-    case HTTP.HTTP1.close(state.protocol) do
+    case state.protocol_module.close(state.protocol) do
       {:ok, protocol, events} ->
         %{state | protocol: protocol}
         |> handle_events(events)
@@ -277,14 +290,57 @@ defmodule HTTP.SocketClient do
 
   defp set_abort_owner(_other, _owner_pid), do: :ok
 
-  defp connect(transport, host, port, request, timeout) do
+  defp initialize_protocol(transport, socket, %Request{} = request, selection) do
+    with {:ok, protocol} <- connected_protocol(transport, socket, selection) do
+      serialize_request(protocol, request)
+    end
+  end
+
+  defp serialize_request(:http1, %Request{} = request) do
+    {:ok, HTTP.HTTP1, HTTP.HTTP1.new(request.method), HTTP.HTTP1.serialize_request(request)}
+  rescue
+    error -> {:error, error}
+  end
+
+  defp serialize_request(:http2, %Request{} = request) do
+    {:ok, HTTP.HTTP2, HTTP.HTTP2.new(request.method), HTTP.HTTP2.serialize_request(request)}
+  rescue
+    error -> {:error, error}
+  end
+
+  defp connected_protocol(_transport, _socket, %{mode: :http1}), do: {:ok, :http1}
+  defp connected_protocol(_transport, _socket, %{mode: :h2c}), do: {:ok, :http2}
+
+  defp connected_protocol(HTTP.Transport.SSL, socket, %{mode: :force_h2}) do
+    with {:ok, protocol} <- HTTP.Transport.SSL.negotiated_protocol(socket) do
+      case normalize_alpn_protocol(protocol) do
+        "h2" -> {:ok, :http2}
+        other -> {:error, {:http2_not_negotiated, other}}
+      end
+    end
+  end
+
+  defp connected_protocol(HTTP.Transport.SSL, socket, %{mode: :auto_https}) do
+    with {:ok, protocol} <- HTTP.Transport.SSL.negotiated_protocol(socket) do
+      case normalize_alpn_protocol(protocol) do
+        "h2" -> {:ok, :http2}
+        _other -> {:ok, :http1}
+      end
+    end
+  end
+
+  defp normalize_alpn_protocol(nil), do: nil
+  defp normalize_alpn_protocol(protocol) when is_binary(protocol), do: protocol
+  defp normalize_alpn_protocol(protocol) when is_list(protocol), do: List.to_string(protocol)
+
+  defp connect(transport, host, port, request, selection, timeout) do
     connect_timeout = min(connect_timeout(request), timeout)
 
     interruptible_connect(
       transport,
       host,
       port,
-      transport_opts(request, timeout),
+      transport_opts(request, selection, timeout),
       connect_timeout
     )
   end
@@ -412,6 +468,27 @@ defmodule HTTP.SocketClient do
     {:error, reason}
   end
 
+  defp flush_protocol_writes(%{protocol_module: HTTP.HTTP2, protocol: protocol} = state) do
+    {protocol, iodata} = HTTP.HTTP2.take_outbound(protocol)
+    state = %{state | protocol: protocol}
+
+    case IO.iodata_to_binary(iodata) do
+      "" -> {:ok, state}
+      data -> flush_protocol_write(state, data)
+    end
+  end
+
+  defp flush_protocol_writes(state), do: {:ok, state}
+
+  defp flush_protocol_write(state, data) do
+    timeout = remaining_timeout(state.deadline_at)
+
+    case send_request(state.transport, state.socket, data, timeout) do
+      :ok -> {:ok, state}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp activate_socket(transport, socket) do
     case transport.setopts(socket, active: :once) do
       :ok ->
@@ -441,6 +518,49 @@ defmodule HTTP.SocketClient do
     {:error, {:unsupported_scheme, scheme}}
   end
 
+  defp protocol_selection(%Request{} = request, HTTP.Transport.Unix) do
+    case http_version(request) do
+      version when version in [:http1, :auto] ->
+        {:ok, %{mode: :http1, alpn_protocols: []}}
+
+      version ->
+        {:error, {:unsupported_http_version_for_unix_socket, version}}
+    end
+  end
+
+  defp protocol_selection(%Request{url: %URI{scheme: "http"}} = request, HTTP.Transport.TCP) do
+    case http_version(request) do
+      version when version in [:http1, :auto] ->
+        {:ok, %{mode: :http1, alpn_protocols: []}}
+
+      :h2c ->
+        {:ok, %{mode: :h2c, alpn_protocols: []}}
+
+      :http2 ->
+        {:error, :http2_requires_tls}
+    end
+  end
+
+  defp protocol_selection(%Request{url: %URI{scheme: "https"}} = request, HTTP.Transport.SSL) do
+    case http_version(request) do
+      :http1 ->
+        {:ok, %{mode: :http1, alpn_protocols: []}}
+
+      :http2 ->
+        {:ok, %{mode: :force_h2, alpn_protocols: [<<"h2">>]}}
+
+      :auto ->
+        {:ok, %{mode: :auto_https, alpn_protocols: [<<"h2">>, <<"http/1.1">>]}}
+
+      :h2c ->
+        {:error, :h2c_requires_cleartext}
+    end
+  end
+
+  defp http_version(%Request{} = request) do
+    Keyword.get(request.transport_options, :http_version, :http1)
+  end
+
   defp request_timeout(%Request{} = request),
     do: Keyword.get(request.transport_options, :timeout, HTTP.Config.default_request_timeout())
 
@@ -452,7 +572,7 @@ defmodule HTTP.SocketClient do
         min(request_timeout(request), 30_000)
       )
 
-  defp transport_opts(%Request{} = request, timeout) do
+  defp transport_opts(%Request{} = request, selection, timeout) do
     socket_opts =
       request.transport_options
       |> Keyword.get(:socket_opts, [])
@@ -460,10 +580,18 @@ defmodule HTTP.SocketClient do
       |> Keyword.put_new(:send_timeout_close, true)
 
     [
-      ssl: Keyword.get(request.transport_options, :ssl, []),
+      ssl:
+        request.transport_options
+        |> Keyword.get(:ssl, [])
+        |> put_alpn(selection.alpn_protocols),
       socket_opts: socket_opts
     ]
   end
+
+  defp put_alpn(ssl_opts, []), do: ssl_opts
+
+  defp put_alpn(ssl_opts, protocols),
+    do: Keyword.put_new(ssl_opts, :alpn_advertised_protocols, protocols)
 
   defp remaining_timeout(deadline_at) do
     max(deadline_at - System.monotonic_time(:millisecond), 0)
