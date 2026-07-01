@@ -29,6 +29,15 @@ defmodule HTTP.Transport.SSL do
   @impl true
   def close(socket), do: :ssl.close(socket)
 
+  @spec negotiated_protocol(:ssl.sslsocket()) :: {:ok, binary() | nil} | {:error, term()}
+  def negotiated_protocol(socket) do
+    case :ssl.negotiated_protocol(socket) do
+      {:ok, protocol} -> {:ok, protocol}
+      {:error, :protocol_not_negotiated} -> {:ok, nil}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @impl true
   def normalize_message({:ssl, socket, data}, socket), do: {:data, data}
   def normalize_message({:ssl_closed, socket}, socket), do: :closed
