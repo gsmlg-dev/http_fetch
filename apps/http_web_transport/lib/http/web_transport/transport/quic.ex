@@ -19,17 +19,8 @@ defmodule HTTP.WebTransport.Transport.QUIC do
            H3WebTransport.validate_connect_pseudo_headers(pseudo_headers),
          :ok <- validate_client_settings(options),
          :ok <- ensure_started(),
-         {:ok, conn} <- connect_h3(uri, options),
-         {:ok, stream_id} <-
-           :quic_h3.request(conn, encode_headers(pseudo_headers ++ options.headers), %{
-             end_stream: false
-           }),
-         {:ok, status, response_headers} <-
-           await_connect_response(conn, stream_id, options.connect_timeout),
-         :ok <- validate_connect_response(status),
-         :ok <- validate_peer_settings(conn),
-         {:ok, info} <- transport_info(conn, stream_id, response_headers, options) do
-      {:ok, session_ref(conn, stream_id), info}
+         {:ok, conn} <- connect_h3(uri, options) do
+      connect_session(conn, pseudo_headers, options)
     else
       {:error, _reason} = error ->
         error
@@ -115,15 +106,37 @@ defmodule HTTP.WebTransport.Transport.QUIC do
     end
   end
 
+  defp connect_session(conn, pseudo_headers, %Options{} = options) do
+    ops = quic_ops(options)
+
+    with {:ok, stream_id} <-
+           ops.request(conn, encode_headers(pseudo_headers ++ options.headers), %{
+             end_stream: false
+           }),
+         {:ok, status, response_headers} <-
+           await_connect_response(conn, stream_id, options.connect_timeout),
+         :ok <- validate_connect_response(status),
+         :ok <- validate_peer_settings(conn, ops),
+         {:ok, info} <- transport_info(conn, stream_id, response_headers, options, ops) do
+      {:ok, session_ref(conn, stream_id), info}
+    else
+      {:error, _reason} = error ->
+        :ok = close_connection(conn, ops)
+        error
+    end
+  end
+
   defp connect_h3(%URI{} = uri, %Options{} = options) do
-    case quic_h3_connect(uri.host, port(uri), connect_options(options)) do
+    ops = quic_ops(options)
+
+    case ops.connect(uri.host, port(uri), connect_options(options)) do
       {:ok, conn} ->
-        case :quic_h3.wait_connected(conn, options.connect_timeout) do
+        case ops.wait_connected(conn, options.connect_timeout) do
           :ok ->
             {:ok, conn}
 
           {:error, :timeout} ->
-            :ok = close(%{conn: conn}, nil)
+            :ok = close_connection(conn, ops)
             {:error, :connect_timeout}
         end
 
@@ -135,10 +148,6 @@ defmodule HTTP.WebTransport.Transport.QUIC do
   defp port(%URI{port: port}) when is_integer(port) and port in 1..65_535, do: port
   defp port(%URI{}), do: 443
 
-  defp quic_h3_connect(host, port, options) do
-    apply(:quic_h3, :connect, [host, port, options])
-  end
-
   defp connect_options(%Options{} = options) do
     %{
       settings:
@@ -147,7 +156,10 @@ defmodule HTTP.WebTransport.Transport.QUIC do
         |> quic_h3_settings(),
       h3_datagram_enabled: true,
       stream_type_handler: &claim_webtransport_stream/3,
-      quic_opts: Map.new(options.quic)
+      quic_opts:
+        options.quic
+        |> Keyword.delete(:quic_ops)
+        |> Map.new()
     }
     |> Map.merge(ssl_options(options.ssl))
   end
@@ -188,15 +200,15 @@ defmodule HTTP.WebTransport.Transport.QUIC do
   defp validate_connect_response(status) when status in 200..299, do: :ok
   defp validate_connect_response(status), do: {:error, {:webtransport_connect_failed, status}}
 
-  defp validate_peer_settings(conn) do
-    case :quic_h3.get_peer_settings(conn) do
+  defp validate_peer_settings(conn, ops) do
+    case ops.get_peer_settings(conn) do
       :undefined -> :ok
       settings -> H3WebTransport.validate_server_settings(settings)
     end
   end
 
-  defp transport_info(conn, stream_id, response_headers, %Options{} = options) do
-    unreliable? = :quic_h3.h3_datagrams_enabled(conn)
+  defp transport_info(conn, stream_id, response_headers, %Options{} = options, ops) do
+    unreliable? = ops.h3_datagrams_enabled(conn)
 
     if options.require_unreliable and not unreliable? do
       {:error, :h3_datagram_disabled}
@@ -206,7 +218,7 @@ defmodule HTTP.WebTransport.Transport.QUIC do
          protocol: negotiated_protocol(options, response_headers),
          reliability: if(unreliable?, do: "supports-unreliable", else: "reliable-only"),
          response_headers: response_headers,
-         max_datagram_size: max_datagram_size(conn, stream_id, options)
+         max_datagram_size: max_datagram_size(conn, stream_id, options, ops)
        }}
     end
   end
@@ -216,8 +228,8 @@ defmodule HTTP.WebTransport.Transport.QUIC do
   defp negotiated_protocol(_options, headers),
     do: header_value(headers, "sec-webtransport-protocol") || ""
 
-  defp max_datagram_size(conn, stream_id, options) do
-    case :quic_h3.max_datagram_size(conn, stream_id) do
+  defp max_datagram_size(conn, stream_id, options, ops) do
+    case ops.max_datagram_size(conn, stream_id) do
       size when is_integer(size) and size > 0 -> min(size, options.max_datagram_size)
       _size -> options.max_datagram_size
     end
@@ -230,6 +242,37 @@ defmodule HTTP.WebTransport.Transport.QUIC do
   defp stream_ref(conn, quic_conn, stream_id) do
     %{conn: conn, quic_conn: quic_conn, stream_id: stream_id}
   end
+
+  defp quic_ops(%Options{quic: quic}) do
+    Keyword.get(quic, :quic_ops, __MODULE__)
+  end
+
+  defp close_connection(conn, ops) do
+    ops.close(conn)
+  catch
+    _kind, _reason -> :ok
+  end
+
+  @doc false
+  def connect(host, port, options), do: apply(:quic_h3, :connect, [host, port, options])
+
+  @doc false
+  def wait_connected(conn, timeout), do: :quic_h3.wait_connected(conn, timeout)
+
+  @doc false
+  def request(conn, headers, options), do: :quic_h3.request(conn, headers, options)
+
+  @doc false
+  def close(conn), do: :quic_h3.close(conn)
+
+  @doc false
+  def get_peer_settings(conn), do: :quic_h3.get_peer_settings(conn)
+
+  @doc false
+  def h3_datagrams_enabled(conn), do: :quic_h3.h3_datagrams_enabled(conn)
+
+  @doc false
+  def max_datagram_size(conn, stream_id), do: :quic_h3.max_datagram_size(conn, stream_id)
 
   defp encode_headers(headers) do
     Enum.map(headers, fn {name, value} -> {to_string(name), to_string(value)} end)

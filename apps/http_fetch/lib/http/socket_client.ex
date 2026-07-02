@@ -64,62 +64,95 @@ defmodule HTTP.SocketClient do
 
       timeout ->
         request = put_request_timeout(request, timeout)
-        result = HTTP.HTTP3.request(request)
-        handle_http3_result(result, parent, ref, request, redirects, redirected?, deadline_at)
+
+        state = %{
+          parent: parent,
+          ref: ref,
+          request: request,
+          redirects: redirects,
+          redirected?: redirected?,
+          deadline_at: deadline_at,
+          mode: nil,
+          response_sent?: false,
+          action: nil
+        }
+
+        case HTTP.HTTP3.request(request, state, &handle_http3_event/2) do
+          {:ok, %{action: {:redirect, response}}} ->
+            follow_http3_redirect(response, parent, ref, request, redirects, deadline_at)
+
+          {:ok, _state} ->
+            :ok
+
+          {:error, reason, state} ->
+            fail_http3(state, reason)
+        end
     end
   end
 
-  defp handle_http3_result(
-         {:ok, %{status: status, headers: headers, body: body}},
-         parent,
-         ref,
-         request,
-         redirects,
-         redirected?,
-         deadline_at
-       ) do
+  defp handle_http3_event(state, {:headers, status, headers}) do
     response =
       Response.new(
         status: status,
         headers: headers,
-        body: body,
-        url: request.url,
-        redirected: redirected?
+        body: nil,
+        url: state.request.url,
+        redirected: state.redirected?
       )
-
-    handle_http3_response(response, parent, ref, request, redirects, deadline_at)
-  end
-
-  defp handle_http3_result(
-         {:error, reason},
-         parent,
-         ref,
-         _request,
-         _redirects,
-         _redirected?,
-         _deadline_at
-       ) do
-    send_error(parent, ref, reason)
-  end
-
-  defp handle_http3_response(response, parent, ref, request, redirects, deadline_at) do
-    state = %{request: request, redirects: redirects}
 
     cond do
       redirect_error?(state, response) ->
-        send_error(parent, ref, :redirect)
+        {:error, :redirect, state}
 
-      redirect_mode(request) == :follow and redirects >= @max_redirects and
-          redirect_candidate?(request, response.status, response.headers) ->
-        send_error(parent, ref, :too_many_redirects)
+      redirect_mode(state.request) == :follow and state.redirects >= @max_redirects and
+          redirect_candidate?(state.request, response.status, response.headers) ->
+        {:error, :too_many_redirects, state}
 
       follow_redirect?(state, response) ->
-        follow_http3_redirect(response, parent, ref, request, redirects, deadline_at)
+        {:halt, %{state | action: {:redirect, response}}}
+
+      stream_response?(state.request, status, headers) ->
+        content_length = stream_content_length(headers)
+        {:ok, stream_pid} = HTTP.Stream.start_link(content_length)
+        response = %{response | stream: stream_pid}
+        send_response(state.parent, state.ref, response)
+
+        {:cont, %{state | mode: {:stream, stream_pid}, response_sent?: true}}
 
       true ->
-        send_response(parent, ref, response)
+        {:cont, %{state | mode: {:buffer, response, []}}}
     end
   end
+
+  defp handle_http3_event(%{mode: {:stream, stream_pid}} = state, {:body, chunk}) do
+    case HTTP.Stream.chunk(stream_pid, chunk, stream_chunk_timeout(state.deadline_at)) do
+      :ok -> {:cont, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp handle_http3_event(%{mode: {:buffer, response, chunks}} = state, {:body, chunk}) do
+    {:cont, %{state | mode: {:buffer, response, [chunk | chunks]}}}
+  end
+
+  defp handle_http3_event(%{mode: {:stream, stream_pid}} = state, :done) do
+    HTTP.Stream.finish(stream_pid)
+    {:halt, state}
+  end
+
+  defp handle_http3_event(%{mode: {:buffer, response, chunks}} = state, :done) do
+    body =
+      chunks
+      |> Enum.reverse()
+      |> IO.iodata_to_binary()
+
+    response = %{response | body: body, stream: nil}
+    send_response(state.parent, state.ref, response)
+
+    {:halt, state}
+  end
+
+  defp handle_http3_event(state, :done), do: {:error, :invalid_http_response, state}
 
   defp follow_http3_redirect(response, parent, ref, request, redirects, deadline_at) do
     case redirect_request(request, response) do
@@ -128,6 +161,17 @@ defmodule HTTP.SocketClient do
 
       {:error, _reason} ->
         send_response(parent, ref, response)
+    end
+  end
+
+  defp fail_http3(state, reason) do
+    if state.response_sent? do
+      case state.mode do
+        {:stream, stream_pid} -> HTTP.Stream.error(stream_pid, reason)
+        _mode -> :ok
+      end
+    else
+      send_error(state.parent, state.ref, reason)
     end
   end
 
@@ -408,7 +452,8 @@ defmodule HTTP.SocketClient do
   end
 
   defp serialize_request(:http2, %Request{} = request) do
-    {:ok, HTTP.HTTP2, HTTP.HTTP2.new(request.method), HTTP.HTTP2.serialize_request(request)}
+    {protocol, wire_request} = HTTP.HTTP2.prepare_request(HTTP.HTTP2.new(request.method), request)
+    {:ok, HTTP.HTTP2, protocol, wire_request}
   rescue
     error -> {:error, error}
   end

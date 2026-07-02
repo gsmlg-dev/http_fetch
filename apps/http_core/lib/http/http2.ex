@@ -12,6 +12,8 @@ defmodule HTTP.HTTP2 do
   @client_stream_id 1
   @initial_window_size 65_535
   @initial_max_frame_size 16_384
+  @max_window_size 2_147_483_647
+  @max_max_frame_size 16_777_215
 
   @flag_end_stream 0x1
   @flag_ack 0x1
@@ -26,6 +28,11 @@ defmodule HTTP.HTTP2 do
             status: nil,
             connection_receive_window: @initial_window_size,
             stream_receive_window: @initial_window_size,
+            connection_send_window: @initial_window_size,
+            stream_send_window: @initial_window_size,
+            peer_initial_window_size: @initial_window_size,
+            max_frame_size: @initial_max_frame_size,
+            pending_body: "",
             outbound: [],
             done?: false
 
@@ -38,6 +45,18 @@ defmodule HTTP.HTTP2 do
   def connection_preface, do: @connection_preface
 
   def serialize_request(%Request{} = request) do
+    {conn, wire_request} = prepare_request(new(request.method), request)
+
+    if conn.pending_body != "" do
+      raise ArgumentError,
+            "HTTP/2 request body exceeds the initial flow-control window; use prepare_request/2"
+    end
+
+    wire_request
+  end
+
+  @spec prepare_request(t(), Request.t()) :: {t(), iodata()}
+  def prepare_request(%__MODULE__{} = conn, %Request{} = request) do
     {headers, body} = request |> request_headers() |> Request.put_body_headers(request)
     body = IO.iodata_to_binary(body)
     header_block = request |> pseudo_headers() |> Kernel.++(regular_headers(headers))
@@ -47,12 +66,16 @@ defmodule HTTP.HTTP2 do
       @flag_end_headers |||
         if(body == "", do: @flag_end_stream, else: 0)
 
-    [
-      @connection_preface,
-      Frame.encode(:settings, 0, 0, ""),
-      Frame.encode(:headers, header_flags, @client_stream_id, encoded_headers),
-      data_frames(body)
-    ]
+    conn = %{conn | pending_body: body}
+    {conn, outbound} = conn |> flush_pending_body() |> take_outbound()
+
+    {conn,
+     [
+       @connection_preface,
+       Frame.encode(:settings, 0, 0, ""),
+       Frame.encode(:headers, header_flags, @client_stream_id, encoded_headers),
+       outbound
+     ]}
   end
 
   @spec stream(t(), binary()) :: {:ok, t(), [event()]} | {:error, term()}
@@ -108,7 +131,14 @@ defmodule HTTP.HTTP2 do
         {:error, :invalid_settings_frame}
 
       true ->
-        {:ok, enqueue(conn, Frame.encode(:settings, @flag_ack, 0, "")), []}
+        with {:ok, conn} <- apply_settings(conn, payload) do
+          conn =
+            conn
+            |> enqueue(Frame.encode(:settings, @flag_ack, 0, ""))
+            |> flush_pending_body()
+
+          {:ok, conn, []}
+        end
     end
   end
 
@@ -221,8 +251,14 @@ defmodule HTTP.HTTP2 do
     {:error, :invalid_window_update_increment}
   end
 
-  defp handle_frame(conn, %Frame{type: :window_update, payload: <<_reserved::1, _increment::31>>}) do
-    {:ok, conn, []}
+  defp handle_frame(conn, %Frame{
+         type: :window_update,
+         stream_id: stream_id,
+         payload: <<_reserved::1, increment::31>>
+       }) do
+    with {:ok, conn} <- update_send_window(conn, stream_id, increment) do
+      {:ok, flush_pending_body(conn), []}
+    end
   end
 
   defp handle_frame(_conn, %Frame{type: :window_update}), do: {:error, :invalid_window_update}
@@ -310,6 +346,66 @@ defmodule HTTP.HTTP2 do
     Frame.encode(:window_update, 0, stream_id, <<0::1, increment::31>>)
   end
 
+  defp update_send_window(%__MODULE__{} = conn, 0, increment) do
+    add_window(conn, :connection_send_window, increment)
+  end
+
+  defp update_send_window(%__MODULE__{} = conn, @client_stream_id, increment) do
+    add_window(conn, :stream_send_window, increment)
+  end
+
+  defp update_send_window(%__MODULE__{} = conn, _stream_id, _increment), do: {:ok, conn}
+
+  defp add_window(%__MODULE__{} = conn, key, increment) do
+    window = Map.fetch!(conn, key)
+
+    if window + increment > @max_window_size do
+      {:error, :flow_control_error}
+    else
+      {:ok, Map.put(conn, key, window + increment)}
+    end
+  end
+
+  defp apply_settings(%__MODULE__{} = conn, payload) do
+    payload
+    |> parse_settings([])
+    |> case do
+      {:ok, settings} -> Enum.reduce_while(settings, {:ok, conn}, &apply_setting/2)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp parse_settings(<<>>, settings), do: {:ok, Enum.reverse(settings)}
+
+  defp parse_settings(<<id::16, value::32, rest::binary>>, settings) do
+    parse_settings(rest, [{id, value} | settings])
+  end
+
+  defp parse_settings(_payload, _settings), do: {:error, :invalid_settings_frame}
+
+  defp apply_setting({0x4, value}, {:ok, conn}) when value <= @max_window_size do
+    delta = value - conn.peer_initial_window_size
+
+    {:cont,
+     {:ok,
+      %{
+        conn
+        | peer_initial_window_size: value,
+          stream_send_window: conn.stream_send_window + delta
+      }}}
+  end
+
+  defp apply_setting({0x4, _value}, {:ok, _conn}), do: {:halt, {:error, :flow_control_error}}
+
+  defp apply_setting({0x5, value}, {:ok, conn})
+       when value in @initial_max_frame_size..@max_max_frame_size do
+    {:cont, {:ok, %{conn | max_frame_size: value}}}
+  end
+
+  defp apply_setting({0x5, _value}, {:ok, _conn}), do: {:halt, {:error, :protocol_error}}
+
+  defp apply_setting({_id, _value}, {:ok, conn}), do: {:cont, {:ok, conn}}
+
   defp unpad_payload(<<pad_length, rest::binary>>, true), do: {:ok, rest, pad_length}
   defp unpad_payload(<<>>, true), do: {:error, :invalid_padding}
   defp unpad_payload(payload, false), do: {:ok, payload, 0}
@@ -348,27 +444,25 @@ defmodule HTTP.HTTP2 do
     %{conn | outbound: [iodata | outbound]}
   end
 
-  defp data_frames(""), do: []
+  defp flush_pending_body(%__MODULE__{pending_body: ""} = conn), do: conn
 
-  defp data_frames(body) do
-    body
-    |> chunk_binary(@initial_max_frame_size)
-    |> Enum.with_index()
-    |> Enum.map(fn {chunk, index} ->
-      flags =
-        if index == div(byte_size(body) - 1, @initial_max_frame_size),
-          do: @flag_end_stream,
-          else: 0
+  defp flush_pending_body(%__MODULE__{} = conn) do
+    writable = min(conn.connection_send_window, conn.stream_send_window)
 
-      Frame.encode(:data, flags, @client_stream_id, chunk)
-    end)
-  end
+    if writable <= 0 do
+      conn
+    else
+      chunk_size = min(min(writable, conn.max_frame_size), byte_size(conn.pending_body))
+      <<chunk::binary-size(chunk_size), rest::binary>> = conn.pending_body
+      flags = if rest == "", do: @flag_end_stream, else: 0
 
-  defp chunk_binary(binary, size) when byte_size(binary) <= size, do: [binary]
-
-  defp chunk_binary(binary, size) do
-    <<chunk::binary-size(size), rest::binary>> = binary
-    [chunk | chunk_binary(rest, size)]
+      conn
+      |> Map.update!(:connection_send_window, &(&1 - chunk_size))
+      |> Map.update!(:stream_send_window, &(&1 - chunk_size))
+      |> Map.put(:pending_body, rest)
+      |> enqueue(Frame.encode(:data, flags, @client_stream_id, chunk))
+      |> flush_pending_body()
+    end
   end
 
   defp pseudo_headers(%Request{} = request) do

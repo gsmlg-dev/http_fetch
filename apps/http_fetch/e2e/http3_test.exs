@@ -81,6 +81,146 @@ defmodule E2E.HTTP3Test do
     assert_receive {:h3_post_body, "h3-payload"}
   end
 
+  test "sends a large request body over HTTP/3 in chunks" do
+    test_pid = self()
+    body = :binary.copy("h3-large-payload", 5_000)
+
+    url =
+      start_http3_server!(fn conn, stream_id, method, path, headers ->
+        send(test_pid, {:h3_large_post_request, method, path, headers})
+        :ok = :quic_h3.set_stream_handler(conn, stream_id, self(), %{drain_buffer: false})
+
+        received_body = receive_h3_body(conn, stream_id, test_pid, [])
+        send(test_pid, {:h3_large_post_body_size, byte_size(received_body)})
+
+        :ok = :quic_h3.send_response(conn, stream_id, 200, [{"content-type", "text/plain"}])
+        :ok = :quic_h3.send_data(conn, stream_id, "received:#{byte_size(received_body)}", true)
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(
+        method: :post,
+        body: body,
+        content_type: "application/octet-stream",
+        http_version: :http3,
+        ssl: [verify: :verify_none],
+        timeout: 10_000
+      )
+      |> HTTP.Promise.await()
+
+    assert response.status == 200
+    assert HTTP.Response.read_all(response) == "received:#{byte_size(body)}"
+
+    assert_receive {:h3_large_post_request, <<"POST">>, <<"/hello?transport=h3">>, headers}
+    assert {<<"content-length">>, content_length} = List.keyfind(headers, <<"content-length">>, 0)
+    assert to_string(content_length) == Integer.to_string(byte_size(body))
+    assert_receive {:h3_large_post_body_size, size}
+    assert size == byte_size(body)
+  end
+
+  test "aborts an in-flight HTTP/3 request" do
+    test_pid = self()
+    controller = HTTP.AbortController.new()
+
+    url =
+      start_http3_server!(fn _conn, _stream_id, method, path, _headers ->
+        send(test_pid, {:h3_abort_request, method, path})
+        Process.sleep(5_000)
+      end)
+
+    promise =
+      HTTP.fetch(url,
+        http_version: :http3,
+        ssl: [verify: :verify_none],
+        signal: controller,
+        timeout: 10_000
+      )
+
+    assert_receive {:h3_abort_request, <<"GET">>, <<"/hello?transport=h3">>}, 5_000
+    :ok = HTTP.AbortController.abort(controller)
+
+    assert {:error, :aborted} = HTTP.Promise.await(promise, 10_000)
+  end
+
+  test "aborts while waiting for HTTP/3 connect" do
+    {:ok, socket} = :gen_udp.open(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(socket)
+    on_exit(fn -> :gen_udp.close(socket) end)
+
+    controller = HTTP.AbortController.new()
+
+    promise =
+      "https://127.0.0.1:#{port}/never-connect"
+      |> HTTP.fetch(
+        http_version: :http3,
+        ssl: [verify: :verify_none],
+        signal: controller,
+        connect_timeout: 10_000,
+        timeout: 10_000
+      )
+
+    Process.sleep(100)
+    started_at = System.monotonic_time(:millisecond)
+    :ok = HTTP.AbortController.abort(controller)
+
+    assert {:error, :aborted} = HTTP.Promise.await(promise, 10_000)
+    assert System.monotonic_time(:millisecond) - started_at < 2_000
+  end
+
+  test "ignores informational HTTP/3 responses before the final response" do
+    url =
+      start_http3_server!(fn conn, stream_id, _method, _path, _headers ->
+        :ok = :quic_h3.send_response(conn, stream_id, 103, [{"link", "</style.css>"}])
+        :ok = :quic_h3.send_response(conn, stream_id, 200, [{"content-type", "text/plain"}])
+        :ok = :quic_h3.send_data(conn, stream_id, "final", true)
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(http_version: :http3, ssl: [verify: :verify_none], timeout: 5_000)
+      |> HTTP.Promise.await()
+
+    assert response.status == 200
+    assert HTTP.Response.read_all(response) == "final"
+  end
+
+  test "streams large HTTP/3 responses" do
+    previous_threshold = Application.get_env(:http_fetch, :streaming_threshold)
+    Application.put_env(:http_fetch, :streaming_threshold, 1_024)
+
+    on_exit(fn ->
+      if is_nil(previous_threshold) do
+        Application.delete_env(:http_fetch, :streaming_threshold)
+      else
+        Application.put_env(:http_fetch, :streaming_threshold, previous_threshold)
+      end
+    end)
+
+    body = :binary.copy("s", HTTP.Config.streaming_threshold() + 1)
+
+    url =
+      start_http3_server!(fn conn, stream_id, _method, _path, _headers ->
+        :ok =
+          :quic_h3.send_response(conn, stream_id, 200, [
+            {"content-type", "application/octet-stream"},
+            {"content-length", Integer.to_string(byte_size(body))}
+          ])
+
+        :ok = :quic_h3.send_data(conn, stream_id, body, true)
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(http_version: :http3, ssl: [verify: :verify_none], timeout: 10_000)
+      |> HTTP.Promise.await()
+
+    assert response.status == 200
+    assert response.body == nil
+    assert is_pid(response.stream)
+    assert HTTP.Response.read_all(response) == body
+  end
+
   defp start_http3_server!(handler) do
     :ok = ensure_quic_started!()
 

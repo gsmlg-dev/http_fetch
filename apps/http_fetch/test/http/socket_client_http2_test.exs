@@ -12,6 +12,7 @@ defmodule HTTP.SocketClientHTTP2Test do
   @ack 0x1
   @end_stream 0x1
   @end_headers 0x4
+  @initial_window_size 65_535
 
   test "fetches an explicit h2c prior-knowledge response" do
     test_pid = self()
@@ -69,6 +70,44 @@ defmodule HTTP.SocketClientHTTP2Test do
 
     assert response.status == 200
     assert HTTP.Response.read_all(response) == body
+  end
+
+  test "waits for WINDOW_UPDATE before sending request body beyond the send window" do
+    body = :binary.copy("p", @initial_window_size + 5)
+
+    url =
+      start_h2c_server!(fn socket, transport ->
+        {request_headers, buffer} = recv_client_h2_request(socket, transport)
+
+        assert {":method", "POST"} in request_headers
+        assert {"content-length", Integer.to_string(byte_size(body))} in request_headers
+
+        {initial_body, buffer} =
+          recv_request_body_until(socket, transport, buffer, @initial_window_size)
+
+        assert initial_body == binary_part(body, 0, @initial_window_size)
+        assert buffer == ""
+        assert {:error, :timeout} = apply(transport, :recv, [socket, 0, 50])
+
+        send_all(socket, transport, [
+          Frame.encode(:window_update, 0, 0, <<0::1, 5::31>>),
+          Frame.encode(:window_update, 0, 1, <<0::1, 5::31>>)
+        ])
+
+        {rest, _buffer} = recv_request_body_until_end(socket, transport, buffer)
+        assert rest == "ppppp"
+
+        send_h2_response(socket, transport, "upload-ok")
+        assert_settings_ack(socket, transport, "")
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(method: :post, body: body, http_version: :h2c)
+      |> HTTP.Promise.await()
+
+    assert response.status == 200
+    assert HTTP.Response.read_all(response) == "upload-ok"
   end
 
   test "continues an in-flight h2c response after graceful GOAWAY" do
@@ -288,6 +327,38 @@ defmodule HTTP.SocketClientHTTP2Test do
   defp recv_exact(socket, transport, size, acc) do
     {:ok, data} = apply(transport, :recv, [socket, 0, 5_000])
     recv_exact(socket, transport, size, acc <> data)
+  end
+
+  defp recv_request_body_until(socket, transport, buffer, size),
+    do: recv_request_body_until(socket, transport, buffer, size, "")
+
+  defp recv_request_body_until(_socket, _transport, buffer, size, body)
+       when byte_size(body) >= size do
+    {body, buffer}
+  end
+
+  defp recv_request_body_until(socket, transport, buffer, size, body) do
+    {:ok, %Frame{type: :data, stream_id: 1, flags: flags, payload: chunk}, buffer} =
+      recv_frame(socket, transport, buffer)
+
+    refute (flags &&& @end_stream) == @end_stream
+    recv_request_body_until(socket, transport, buffer, size, body <> chunk)
+  end
+
+  defp recv_request_body_until_end(socket, transport, buffer),
+    do: recv_request_body_until_end(socket, transport, buffer, "")
+
+  defp recv_request_body_until_end(socket, transport, buffer, body) do
+    {:ok, %Frame{type: :data, stream_id: 1, flags: flags, payload: chunk}, buffer} =
+      recv_frame(socket, transport, buffer)
+
+    body = body <> chunk
+
+    if (flags &&& @end_stream) == @end_stream do
+      {body, buffer}
+    else
+      recv_request_body_until_end(socket, transport, buffer, body)
+    end
   end
 
   defp send_all(socket, transport, iodata) do

@@ -55,6 +55,29 @@ defmodule E2E.WebTransportQUICE2ETest do
     assert :ok = WebTransport.close(transport, close_code: 0, reason: "done")
   end
 
+  test "fails when extended CONNECT is rejected" do
+    test_pid = self()
+
+    url =
+      start_webtransport_server!(fn conn, stream_id, method, path, _headers ->
+        send(test_pid, {:webtransport_reject, method, path})
+        :ok = :quic_h3.send_response(conn, stream_id, 404, [{"x-webtransport", "no"}])
+      end)
+
+    transport =
+      WebTransport.new(url,
+        ssl: [verify: :verify_none],
+        connect_timeout: 5_000,
+        require_unreliable: true
+      )
+
+    assert {:error, {:webtransport_connect_failed, 404}} =
+             WebTransport.await_ready(transport, 5_000)
+
+    assert WebTransport.state(transport) == :failed
+    assert_receive {:webtransport_reject, <<"CONNECT">>, <<"/transport">>}
+  end
+
   defp start_webtransport_server!(handler) do
     :ok = ensure_quic_started!()
 

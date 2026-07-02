@@ -9,6 +9,7 @@ defmodule HTTP.HTTP2Test do
   @end_stream 0x1
   @ack 0x1
   @end_headers 0x4
+  @initial_window_size 65_535
 
   describe "serialize_request/1" do
     test "serializes the connection preface, settings, and request headers" do
@@ -74,6 +75,67 @@ defmodule HTTP.HTTP2Test do
 
       assert {:ok, %Frame{type: :data, flags: @end_stream, stream_id: 1, payload: "hello"}, ""} =
                Frame.decode(frames)
+    end
+
+    test "buffers request body bytes beyond the send window until WINDOW_UPDATE" do
+      body = :binary.copy("x", @initial_window_size + 5)
+
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("https://example.com/widgets"),
+        content_type: "text/plain",
+        body: body
+      }
+
+      {conn, wire} = HTTP.HTTP2.prepare_request(HTTP.HTTP2.new(:post), request)
+      wire = IO.iodata_to_binary(wire)
+      preface = HTTP.HTTP2.connection_preface()
+      preface_size = byte_size(preface)
+      <<^preface::binary-size(preface_size), frames::binary>> = wire
+
+      {:ok, %Frame{type: :settings}, frames} = Frame.decode(frames)
+      {:ok, %Frame{type: :headers, flags: flags}, frames} = Frame.decode(frames)
+
+      assert (flags &&& @end_stream) == 0
+
+      data_frames = collect_data_frames(frames)
+      assert data_payload(data_frames) == binary_part(body, 0, @initial_window_size)
+      refute Enum.any?(data_frames, &Frame.flag?(&1.flags, @end_stream))
+
+      {_conn, outbound} = HTTP.HTTP2.take_outbound(conn)
+      assert [] = outbound
+
+      assert {:ok, conn, []} =
+               HTTP.HTTP2.stream(
+                 conn,
+                 Frame.encode(:window_update, 0, 0, <<0::1, 5::31>>)
+               )
+
+      {_conn, outbound} = HTTP.HTTP2.take_outbound(conn)
+      assert [] = outbound
+
+      assert {:ok, conn, []} =
+               HTTP.HTTP2.stream(
+                 conn,
+                 Frame.encode(:window_update, 0, 1, <<0::1, 5::31>>)
+               )
+
+      {_conn, outbound} = HTTP.HTTP2.take_outbound(conn)
+
+      assert {:ok, %Frame{type: :data, flags: @end_stream, payload: "xxxxx"}, ""} =
+               outbound |> IO.iodata_to_binary() |> Frame.decode()
+    end
+
+    test "raises for direct serialization when a request body needs flow-control state" do
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("https://example.com/widgets"),
+        body: :binary.copy("x", @initial_window_size + 1)
+      }
+
+      assert_raise ArgumentError, ~r/use prepare_request\/2/, fn ->
+        HTTP.HTTP2.serialize_request(request)
+      end
     end
   end
 
@@ -177,6 +239,52 @@ defmodule HTTP.HTTP2Test do
                  )
       end
     end
+
+    test "uses SETTINGS_INITIAL_WINDOW_SIZE changes when draining queued request body" do
+      body = :binary.copy("x", @initial_window_size + 5)
+
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("https://example.com/widgets"),
+        body: body
+      }
+
+      {conn, _wire} = HTTP.HTTP2.prepare_request(HTTP.HTTP2.new(:post), request)
+
+      assert {:ok, conn, []} =
+               HTTP.HTTP2.stream(
+                 conn,
+                 Frame.encode(:window_update, 0, 0, <<0::1, 5::31>>)
+               )
+
+      settings = <<0x4::16, @initial_window_size + 5::32>>
+
+      assert {:ok, conn, []} =
+               HTTP.HTTP2.stream(conn, Frame.encode(:settings, 0, 0, settings))
+
+      {_conn, outbound} = HTTP.HTTP2.take_outbound(conn)
+      outbound = IO.iodata_to_binary(outbound)
+
+      assert {:ok, %Frame{type: :settings, flags: flags}, outbound} = Frame.decode(outbound)
+      assert (flags &&& @ack) == @ack
+
+      assert {:ok, %Frame{type: :data, flags: @end_stream, payload: "xxxxx"}, ""} =
+               Frame.decode(outbound)
+    end
+
+    test "rejects invalid peer flow-control settings" do
+      assert {:error, :flow_control_error} =
+               HTTP.HTTP2.stream(
+                 HTTP.HTTP2.new(:get),
+                 Frame.encode(:settings, 0, 0, <<0x4::16, 2_147_483_648::32>>)
+               )
+
+      assert {:error, :protocol_error} =
+               HTTP.HTTP2.stream(
+                 HTTP.HTTP2.new(:get),
+                 Frame.encode(:settings, 0, 0, <<0x5::16, 16_383::32>>)
+               )
+    end
   end
 
   defp response_headers_frame(headers) do
@@ -193,5 +301,20 @@ defmodule HTTP.HTTP2Test do
 
     assert received_increment == increment
     rest
+  end
+
+  defp collect_data_frames(buffer), do: collect_data_frames(buffer, [])
+
+  defp collect_data_frames("", frames), do: Enum.reverse(frames)
+
+  defp collect_data_frames(buffer, frames) do
+    assert {:ok, %Frame{type: :data, stream_id: 1} = frame, rest} = Frame.decode(buffer)
+    collect_data_frames(rest, [frame | frames])
+  end
+
+  defp data_payload(frames) do
+    frames
+    |> Enum.map(& &1.payload)
+    |> IO.iodata_to_binary()
   end
 end
