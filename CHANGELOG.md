@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.11.0] - 2026-07-04
+
+### Added
+- Added Fetch-style streaming response bodies by exposing the stream PID in
+  `response.body`, while keeping `response.stream` as a compatibility alias.
+- Added HTTP/1.1 streaming request uploads with `HTTP.Stream` bodies and
+  `duplex: "half"` chunked request framing.
+
+### Changed
+- Updated response helpers, docs, and e2e coverage for the new streamed body
+  shape.
+- Return explicit unsupported errors for streaming request bodies on HTTP/2 and
+  HTTP/3 instead of buffering or misframing them.
+
 ## [0.10.0] - 2026-07-01
 
 ### Added
