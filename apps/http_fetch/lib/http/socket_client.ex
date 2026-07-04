@@ -9,10 +9,15 @@ defmodule HTTP.SocketClient do
 
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
-    if http_version(request) == :http3 do
-      request_http3(request, abort_controller_pid, unix_socket_path)
-    else
-      request_socket(request, abort_controller_pid, unix_socket_path)
+    cond do
+      http_version(request) == :http3 and Request.streaming_body?(request) ->
+        {:error, :streaming_request_body_unsupported_for_http3}
+
+      http_version(request) == :http3 ->
+        request_http3(request, abort_controller_pid, unix_socket_path)
+
+      true ->
+        request_socket(request, abort_controller_pid, unix_socket_path)
     end
   end
 
@@ -114,7 +119,7 @@ defmodule HTTP.SocketClient do
       stream_response?(state.request, status, headers) ->
         content_length = stream_content_length(headers)
         {:ok, stream_pid} = HTTP.Stream.start_link(content_length)
-        response = %{response | stream: stream_pid}
+        response = Response.with_stream_body(response, stream_pid)
         send_response(state.parent, state.ref, response)
 
         {:cont, %{state | mode: {:stream, stream_pid}, response_sent?: true}}
@@ -146,7 +151,7 @@ defmodule HTTP.SocketClient do
       |> Enum.reverse()
       |> IO.iodata_to_binary()
 
-    response = %{response | body: body, stream: nil}
+    response = Response.with_buffered_body(response, body)
     send_response(state.parent, state.ref, response)
 
     {:halt, state}
@@ -187,8 +192,14 @@ defmodule HTTP.SocketClient do
              {:ok, selection} <- protocol_selection(request, transport),
              {:ok, socket} <- connect(transport, host, port, request, selection, timeout) do
           case initialize_protocol(transport, socket, request, selection) do
-            {:ok, protocol_module, protocol, wire_request} ->
-              with :ok <- send_request(transport, socket, wire_request, timeout),
+            {:ok, protocol_module, protocol, prepared_request} ->
+              with :ok <-
+                     send_prepared_request(
+                       transport,
+                       socket,
+                       prepared_request,
+                       deadline_at
+                     ),
                    :ok <- activate_socket(transport, socket) do
                 state = %{
                   parent: parent,
@@ -305,7 +316,7 @@ defmodule HTTP.SocketClient do
       stream_response?(state.request, status, headers) ->
         content_length = stream_content_length(headers)
         {:ok, stream_pid} = HTTP.Stream.start_link(content_length)
-        response = %{response | stream: stream_pid}
+        response = Response.with_stream_body(response, stream_pid)
         send_response(state.parent, state.ref, response)
 
         {:continue, %{state | mode: {:stream, stream_pid}, response_sent?: true}}
@@ -337,7 +348,7 @@ defmodule HTTP.SocketClient do
       |> Enum.reverse()
       |> IO.iodata_to_binary()
 
-    response = %{response | body: body, stream: nil}
+    response = Response.with_buffered_body(response, body)
 
     if follow_redirect?(state, response) do
       redirect(state, response)
@@ -446,14 +457,28 @@ defmodule HTTP.SocketClient do
   end
 
   defp serialize_request(:http1, %Request{} = request) do
-    {:ok, HTTP.HTTP1, HTTP.HTTP1.new(request.method), HTTP.HTTP1.serialize_request(request)}
+    {head, body} = HTTP.HTTP1.prepare_request(request)
+
+    prepared_request =
+      case body do
+        {:stream, stream} -> {:http1_stream, head, stream}
+        body -> {:buffer, [head, body]}
+      end
+
+    {:ok, HTTP.HTTP1, HTTP.HTTP1.new(request.method), prepared_request}
   rescue
     error -> {:error, error}
   end
 
   defp serialize_request(:http2, %Request{} = request) do
-    {protocol, wire_request} = HTTP.HTTP2.prepare_request(HTTP.HTTP2.new(request.method), request)
-    {:ok, HTTP.HTTP2, protocol, wire_request}
+    if Request.streaming_body?(request) do
+      {:error, :streaming_request_body_unsupported_for_http2}
+    else
+      {protocol, wire_request} =
+        HTTP.HTTP2.prepare_request(HTTP.HTTP2.new(request.method), request)
+
+      {:ok, HTTP.HTTP2, protocol, {:buffer, wire_request}}
+    end
   rescue
     error -> {:error, error}
   end
@@ -616,6 +641,73 @@ defmodule HTTP.SocketClient do
     transport.close(socket)
     {:error, reason}
   end
+
+  defp send_prepared_request(transport, socket, {:buffer, iodata}, deadline_at) do
+    send_request(transport, socket, iodata, remaining_timeout(deadline_at))
+  end
+
+  defp send_prepared_request(transport, socket, {:http1_stream, head, stream}, deadline_at) do
+    with :ok <- send_request(transport, socket, head, remaining_timeout(deadline_at)) do
+      send_http1_stream_body(transport, socket, stream, deadline_at)
+    end
+  end
+
+  defp send_http1_stream_body(transport, socket, stream, deadline_at) do
+    send(stream, {:read_chunk, self(), :ack})
+    read_http1_stream_body(transport, socket, stream, deadline_at)
+  end
+
+  defp read_http1_stream_body(transport, socket, stream, deadline_at) do
+    receive do
+      {:stream_chunk, ^stream, chunk, ack_ref} ->
+        send_http1_stream_chunk(transport, socket, stream, chunk, ack_ref, deadline_at)
+
+      {:stream_chunk, ^stream, chunk} ->
+        send_http1_stream_chunk(transport, socket, stream, chunk, nil, deadline_at)
+
+      {:stream_end, ^stream} ->
+        send_request(transport, socket, "0\r\n\r\n", remaining_timeout(deadline_at))
+
+      {:stream_error, ^stream, reason} ->
+        transport.close(socket)
+        {:error, reason}
+
+      :abort ->
+        transport.close(socket)
+        {:error, :aborted}
+
+      :deadline ->
+        transport.close(socket)
+        {:error, :request_timeout}
+    after
+      remaining_timeout(deadline_at) ->
+        transport.close(socket)
+        {:error, :request_timeout}
+    end
+  end
+
+  defp send_http1_stream_chunk(transport, socket, stream, chunk, ack_ref, deadline_at) do
+    request_chunk = [
+      Integer.to_string(byte_size(chunk), 16),
+      "\r\n",
+      chunk,
+      "\r\n"
+    ]
+
+    case send_request(transport, socket, request_chunk, remaining_timeout(deadline_at)) do
+      :ok ->
+        ack_stream_chunk(stream, ack_ref)
+        read_http1_stream_body(transport, socket, stream, deadline_at)
+
+      {:error, reason} ->
+        ack_stream_chunk(stream, ack_ref)
+        HTTP.Stream.error(stream, reason)
+        {:error, reason}
+    end
+  end
+
+  defp ack_stream_chunk(_stream, nil), do: :ok
+  defp ack_stream_chunk(stream, ack_ref), do: send(stream, {:stream_chunk_ack, ack_ref})
 
   defp flush_protocol_writes(%{protocol_module: HTTP.HTTP2, protocol: protocol} = state) do
     {protocol, iodata} = HTTP.HTTP2.take_outbound(protocol)

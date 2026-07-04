@@ -57,6 +57,10 @@ defmodule HTTP.HTTP2 do
 
   @spec prepare_request(t(), Request.t()) :: {t(), iodata()}
   def prepare_request(%__MODULE__{} = conn, %Request{} = request) do
+    if Request.streaming_body?(request) do
+      raise ArgumentError, "HTTP/2 streaming request bodies are not supported"
+    end
+
     {headers, body} = request |> request_headers() |> Request.put_body_headers(request)
     body = IO.iodata_to_binary(body)
     header_block = request |> pseudo_headers() |> Kernel.++(regular_headers(headers))

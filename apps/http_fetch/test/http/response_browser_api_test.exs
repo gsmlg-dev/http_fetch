@@ -352,6 +352,14 @@ defmodule HTTP.ResponseBrowserAPITest do
       assert response.body_used == false
     end
 
+    test "uses stream as body when constructing streaming responses" do
+      stream = self()
+      response = Response.new(status: 200, stream: stream)
+
+      assert response.body == stream
+      assert response.stream == stream
+    end
+
     test "accepts all Browser API fields" do
       headers = Headers.new([{"content-type", "text/html"}])
       url = URI.parse("https://example.com/page")

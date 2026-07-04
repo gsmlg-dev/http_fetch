@@ -16,7 +16,7 @@ A modern HTTP client library for Elixir that provides a fetch API similar to web
 - **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, `:ssl` for HTTPS, and Unix domain sockets
 - **Unix Domain Sockets**: HTTP over Unix sockets for Docker daemon, systemd, and other local services
 - **Form data support**: HTTP.FormData for multipart/form-data and file uploads
-- **Streaming file uploads**: Efficient large file uploads using streams
+- **Streaming request bodies**: Fetch-style `duplex: "half"` uploads over HTTP/1.1
 - **Type-safe configuration**: HTTP.FetchOptions for structured request configuration
 - **Promise-based**: Async operations with chaining support
 - **Request cancellation**: AbortController support for cancelling requests
@@ -37,7 +37,7 @@ response.status        # 200
 response.status_text   # "OK"
 response.ok            # true (for 200-299 status codes)
 response.headers       # HTTP.Headers struct
-response.body          # Response body binary
+response.body          # Response body binary, or stream PID for streamed responses
 response.body_used     # false (tracks consumption, but doesn't prevent reads in Elixir)
 response.redirected    # false (true if response was redirected)
 response.type          # :basic
@@ -72,7 +72,9 @@ text = HTTP.Response.text(clone)  # Read clone independently
 
 **Synchronous Returns**: Methods like `json()` and `text()` return values directly instead of Promises, following Elixir conventions.
 
-**Stream Handling**: Large responses use Elixir processes for streaming instead of ReadableStream.
+**Stream Handling**: Large responses expose an Elixir stream process in `response.body`
+instead of a JavaScript `ReadableStream`. The legacy `response.stream` field is kept
+as an alias for streamed responses.
 
 ## Quick Start
 
@@ -93,8 +95,9 @@ response =
   HTTP.fetch("https://jsonplaceholder.typicode.com/posts/1")
   |> HTTP.Promise.await()
 
-# response.body contains the raw binary data
-binary_data = response.body
+# For buffered responses, response.body contains the raw binary data.
+# For streamed responses, use HTTP.Response.read_all/1 or write_to/2.
+binary_data = HTTP.Response.read_all(response)
 
 # POST request with JSON
 response =
@@ -116,7 +119,7 @@ response =
 IO.puts("Docker Version: #{docker_info["Version"]}")
 ```
 
-# Form data with file upload
+## Form Data With File Upload
 
 ```elixir
 file_stream = File.stream!("document.pdf")
@@ -128,6 +131,21 @@ response =
   HTTP.fetch("https://api.example.com/upload", [
     method: "POST",
     body: form
+  ])
+  |> HTTP.Promise.await()
+```
+
+## Streaming Request Body
+
+```elixir
+{:ok, stream} = HTTP.Stream.from_enumerable(["chunk one", "chunk two"])
+
+response =
+  HTTP.fetch("https://api.example.com/upload", [
+    method: "POST",
+    body: stream,
+    duplex: "half",
+    content_type: "text/plain"
   ])
   |> HTTP.Promise.await()
 ```
@@ -231,6 +249,8 @@ promise = HTTP.fetch(url, [
 ])
 ```
 
+Set `duplex: "half"` only when `body` is an `HTTP.Stream` PID.
+
 Supports both string URLs and URI structs:
 
 ```elixir
@@ -266,8 +286,9 @@ response =
   HTTP.fetch("https://api.example.com/large-file")
   |> HTTP.Promise.await()
 
-# response.body contains the raw binary response data
-binary_data = response.body
+# For buffered responses, response.body contains raw bytes; streamed responses
+# expose a stream PID and can still be read through the helper.
+binary_data = HTTP.Response.read_all(response)
 
 # Write response to file (supports both streaming and non-streaming)
 :ok = HTTP.Response.write_to(response, "/tmp/downloaded-file.txt")

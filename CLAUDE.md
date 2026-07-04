@@ -16,7 +16,7 @@ This is an Elixir library providing a browser-like HTTP fetch API built on Erlan
 - **HTTP.SocketClient** (`apps/http_fetch/lib/http/socket_client.ex`): Socket owner process for one request lifecycle, including TCP/TLS/Unix transport selection, redirects, streaming, deadlines, and aborts
 - **HTTP.Response** (`apps/http_fetch/lib/http/response.ex`): Response struct with `json/1`, `text/1`, and `write_to/2` methods. Handles both buffered and streamed responses
 - **HTTP.Headers** (`apps/http_core/lib/http/headers.ex`): Headers manipulation with case-insensitive operations, Content-Type parsing, and default User-Agent support
-- **HTTP.FormData** (`apps/http_core/lib/http/form_data.ex`): Multipart/form-data encoding with streaming file upload support
+- **HTTP.FormData** (`apps/http_core/lib/http/form_data.ex`): Multipart/form-data encoding with file upload support
 - **HTTP.Blob** (`apps/http_core/lib/http/blob.ex`): Browser-like binary blob data type shared by Fetch and WebSocket APIs
 - **HTTP.Transport** (`apps/http_core/lib/http/transport.ex`): Shared TCP, TLS, and Unix socket transport behaviour and implementations
 - **HTTP.AbortController** (`apps/http_fetch/lib/http/abort_controller.ex`): Request cancellation via Agent-based controller
@@ -94,10 +94,11 @@ MIX_ENV=prod mix compile
 - Automatic streaming for responses >5MB or unknown Content-Length
 - Stream process receives decoded body chunks from the socket owner
 - Stream messages: `{:stream_chunk, pid, data}`, `{:stream_end, pid}`, `{:stream_error, pid, reason}`
+- Streaming uploads pass an `HTTP.Stream` PID as `body` with `duplex: "half"`; this currently uses HTTP/1.1 chunked request framing
 
 ### Response Body Handling
 - `HTTP.Response.write_to/2` handles both buffered (direct binary write) and streamed responses (receive loop)
-- Streamed responses have `body: nil` and `stream: pid`
+- Streamed responses expose the stream PID in `body`; `stream: pid` remains as a compatibility alias
 
 ### Telemetry Events
 All events use `[:http_fetch, ...]` prefix:

@@ -25,13 +25,26 @@ defmodule HTTP.HTTP1 do
 
   @spec serialize_request(Request.t()) :: iolist()
   def serialize_request(%Request{} = request) do
+    {head, body} = prepare_request(request)
+
+    case body do
+      {:stream, _stream} ->
+        raise ArgumentError, "streaming request bodies require HTTP.SocketClient"
+
+      body ->
+        [head, body]
+    end
+  end
+
+  @spec prepare_request(Request.t()) :: {iolist(), iodata() | {:stream, pid()}}
+  def prepare_request(%Request{} = request) do
     method = Request.method_token(request.method)
     target = Request.origin_form(request.url)
 
     {headers, body} = request |> request_headers() |> Request.put_body_headers(request)
     header_lines = Enum.map(headers.headers, fn {name, value} -> header_line(name, value) end)
 
-    [method, " ", target, " HTTP/1.1\r\n", header_lines, "\r\n", body]
+    {[method, " ", target, " HTTP/1.1\r\n", header_lines, "\r\n"], body}
   end
 
   @spec stream(t(), binary()) :: {:ok, t(), [event()]} | {:error, term()}

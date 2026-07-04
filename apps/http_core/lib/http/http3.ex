@@ -128,20 +128,25 @@ defmodule HTTP.HTTP3 do
 
   defp do_request(conn, request, state, handler, timeout) do
     deadline_at = System.monotonic_time(:millisecond) + timeout
-    {headers, body} = request |> request_headers() |> Request.put_body_headers(request)
 
-    with {:ok, stream_id} <-
-           :quic_h3.request(
-             conn,
-             pseudo_headers(request) ++ regular_headers(headers),
-             request_options(body)
-           ),
-         :ok <- send_body(conn, stream_id, body, deadline_at),
-         {:ok, state} <- await_response(conn, stream_id, state, handler, deadline_at) do
-      {:ok, state}
+    if Request.streaming_body?(request) do
+      {:error, :streaming_request_body_unsupported_for_http3, state}
     else
-      {:error, reason, state} -> {:error, reason, state}
-      {:error, reason} -> {:error, reason, state}
+      {headers, body} = request |> request_headers() |> Request.put_body_headers(request)
+
+      with {:ok, stream_id} <-
+             :quic_h3.request(
+               conn,
+               pseudo_headers(request) ++ regular_headers(headers),
+               request_options(body)
+             ),
+           :ok <- send_body(conn, stream_id, body, deadline_at),
+           {:ok, state} <- await_response(conn, stream_id, state, handler, deadline_at) do
+        {:ok, state}
+      else
+        {:error, reason, state} -> {:error, reason, state}
+        {:error, reason} -> {:error, reason, state}
+      end
     end
   rescue
     error -> {:error, error, state}

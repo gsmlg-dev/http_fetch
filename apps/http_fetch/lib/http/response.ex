@@ -14,7 +14,7 @@ defmodule HTTP.Response do
   - `status_text` - Status message ("OK", "Not Found", etc.)
   - `ok` - Boolean for success status (200-299)
   - `headers` - Response headers as `HTTP.Headers` struct
-  - `body` - Response body as binary (nil for streaming responses)
+  - `body` - Response body as binary, or stream PID for streaming responses
   - `body_used` - Track if body has been consumed
   - `url` - The requested URL as `URI` struct
   - `redirected` - Whether response was redirected
@@ -38,8 +38,8 @@ defmodule HTTP.Response do
   **Synchronous Returns**: Methods like `json()` and `text()` return values directly
   instead of Promises, following Elixir conventions.
 
-  **Stream Handling**: Large responses use Elixir processes for streaming instead
-  of ReadableStream.
+  **Stream Handling**: Large responses expose a stream process in `body`, with
+  `stream` retained as a compatibility alias.
 
   ## Struct Fields
 
@@ -47,7 +47,7 @@ defmodule HTTP.Response do
   - `status_text` - Status message (e.g., "OK", "Not Found")
   - `ok` - Boolean indicating success (true for 200-299)
   - `headers` - Response headers as `HTTP.Headers` struct
-  - `body` - Response body as binary (nil for streaming responses)
+  - `body` - Response body as binary, or stream PID for streaming responses
   - `body_used` - Whether body has been consumed (Browser API behavior)
   - `url` - The requested URL as `URI` struct
   - `redirected` - Whether response was redirected
@@ -69,13 +69,14 @@ defmodule HTTP.Response do
         stream: nil
       }
 
-  **Streaming responses** have `body: nil` and a stream PID:
+  **Streaming responses** expose the stream PID on `body`, with the same PID
+  retained on `stream` for compatibility:
 
-      %HTTP.Response{
-        status: 200,
-        body: nil,
-        stream: #PID<0.123.0>
-      }
+        %HTTP.Response{
+          status: 200,
+          body: #PID<0.123.0>,
+          stream: #PID<0.123.0>
+        }
 
   ## Usage
 
@@ -126,7 +127,7 @@ defmodule HTTP.Response do
           status_text: String.t(),
           ok: boolean(),
           headers: HTTP.Headers.t(),
-          body: binary() | nil,
+          body: binary() | pid() | nil,
           body_used: boolean(),
           url: URI.t() | nil,
           redirected: boolean(),
@@ -145,7 +146,7 @@ defmodule HTTP.Response do
     - `opts` - Keyword list with fields:
       - `:status` - HTTP status code (default: 0)
       - `:headers` - HTTP.Headers struct (default: empty headers)
-      - `:body` - Response body binary (default: nil)
+      - `:body` - Response body binary or stream PID (default: stream PID or nil)
       - `:url` - Request URL (default: nil)
       - `:stream` - Stream PID for streaming responses (default: nil)
       - `:redirected` - Whether response was redirected (default: false)
@@ -181,18 +182,26 @@ defmodule HTTP.Response do
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     status = Keyword.get(opts, :status, 0)
+    stream = Keyword.get(opts, :stream, nil)
+
+    body =
+      if Keyword.has_key?(opts, :body) do
+        Keyword.get(opts, :body)
+      else
+        stream
+      end
 
     %__MODULE__{
       status: status,
       status_text: HTTP.StatusText.get(status),
       ok: status in 200..299,
       headers: Keyword.get(opts, :headers, %HTTP.Headers{}),
-      body: Keyword.get(opts, :body, nil),
+      body: body,
       body_used: false,
       url: Keyword.get(opts, :url, nil),
       redirected: Keyword.get(opts, :redirected, false),
       type: Keyword.get(opts, :type, :basic),
-      stream: Keyword.get(opts, :stream, nil)
+      stream: stream
     }
   end
 
@@ -216,10 +225,11 @@ defmodule HTTP.Response do
       "Hello"
   """
   @spec text(t()) :: binary()
+  def text(%__MODULE__{body: body} = response) when is_pid(body), do: read_all(response)
   def text(%__MODULE__{body: body, stream: nil}), do: body
 
-  def text(%__MODULE__{body: body, stream: stream} = response) do
-    if is_nil(body) and is_pid(stream) do
+  def text(%__MODULE__{body: body} = response) do
+    if is_pid(response_stream(response)) do
       read_all(response)
     else
       body || ""
@@ -238,16 +248,55 @@ defmodule HTTP.Response do
       "Hello World"
   """
   @spec read_all(t()) :: binary()
-  def read_all(%__MODULE__{body: body, stream: nil}), do: body || ""
+  def read_all(%__MODULE__{} = response) do
+    case response_stream(response) do
+      stream when is_pid(stream) ->
+        case read_stream(stream) do
+          {:ok, body} -> body
+          {:error, reason} -> raise RuntimeError, "stream read failed: #{inspect(reason)}"
+        end
 
-  def read_all(%__MODULE__{body: _body, stream: stream}) do
-    if is_pid(stream) do
-      case read_stream(stream) do
-        {:ok, body} -> body
-        {:error, reason} -> raise RuntimeError, "stream read failed: #{inspect(reason)}"
-      end
-    else
-      ""
+      nil ->
+        response.body || ""
+    end
+  end
+
+  defp response_stream(%__MODULE__{body: body}) when is_pid(body), do: body
+  defp response_stream(%__MODULE__{stream: stream}) when is_pid(stream), do: stream
+  defp response_stream(%__MODULE__{}), do: nil
+
+  @doc false
+  @spec stream_body?(t()) :: boolean()
+  def stream_body?(%__MODULE__{} = response), do: is_pid(response_stream(response))
+
+  @doc false
+  @spec stream_pid(t()) :: pid() | nil
+  def stream_pid(%__MODULE__{} = response), do: response_stream(response)
+
+  @doc false
+  @spec with_stream_body(t(), pid()) :: t()
+  def with_stream_body(%__MODULE__{} = response, stream) when is_pid(stream) do
+    %{response | body: stream, stream: stream}
+  end
+
+  @doc false
+  @spec with_buffered_body(t(), binary()) :: t()
+  def with_buffered_body(%__MODULE__{} = response, body) when is_binary(body) do
+    %{response | body: body, stream: nil}
+  end
+
+  @doc false
+  @spec buffered_body(t()) :: binary() | nil
+  def buffered_body(%__MODULE__{} = response) do
+    if stream_body?(response), do: nil, else: response.body
+  end
+
+  @doc false
+  @spec body_size(t()) :: non_neg_integer()
+  def body_size(%__MODULE__{} = response) do
+    case buffered_body(response) do
+      body when is_binary(body) -> byte_size(body)
+      _other -> 0
     end
   end
 
@@ -315,14 +364,14 @@ defmodule HTTP.Response do
   Note: This method is deprecated in favor of `read_as_json/1` for streaming responses.
   """
   @spec json(t()) :: {:ok, map() | list()} | {:error, term()}
-  def json(%__MODULE__{body: body, stream: nil}) do
+  def json(%__MODULE__{} = response) do
+    body = read_all(response)
+
     case JSON.decode(body) do
       {:ok, decoded} -> {:ok, decoded}
       {:error, error} -> {:error, error}
     end
   end
-
-  def json(%__MODULE__{} = response), do: read_as_json(response)
 
   @doc """
   Gets a response header value by name (case-insensitive).
@@ -394,24 +443,19 @@ defmodule HTTP.Response do
       data2 = HTTP.Response.read_all(clone)
   """
   @spec clone(t()) :: t()
-  def clone(%__MODULE__{body: body, stream: nil} = response) when not is_nil(body) do
-    # Buffered response - simple copy with body_used reset
-    %{response | body_used: false}
-  end
-
-  def clone(%__MODULE__{stream: stream_pid} = response) when is_pid(stream_pid) do
-    # Streaming response - create a tee
-    # Note: This implementation reads the entire stream and creates two buffered copies
-    # This is simpler than implementing a true stream tee at the process level
-    body = read_all(%{response | body_used: false})
-
-    # Return clone as buffered response
-    %{response | body: body, stream: nil, body_used: false}
-  end
-
   def clone(%__MODULE__{} = response) do
-    # Empty body case
-    %{response | body_used: false}
+    cond do
+      stream_body?(response) ->
+        # This reads the stream and returns a buffered copy.
+        body = read_all(%{response | body_used: false})
+        with_buffered_body(%{response | body_used: false}, body)
+
+      not is_nil(response.body) ->
+        %{response | body_used: false}
+
+      true ->
+        %{response | body_used: false}
+    end
   end
 
   @doc """
@@ -495,19 +539,19 @@ defmodule HTTP.Response do
     |> Path.dirname()
     |> File.mkdir_p!()
 
-    case response do
-      %{body: body, stream: nil} when is_binary(body) or is_list(body) ->
+    cond do
+      stream_body?(response) ->
+        write_stream_to_file(response, file_path)
+
+      is_binary(response.body) or is_list(response.body) ->
         # Non-streaming response
         binary_body =
-          if is_list(body), do: IO.iodata_to_binary(body), else: body
+          if is_list(response.body), do: IO.iodata_to_binary(response.body), else: response.body
 
         File.write!(file_path, binary_body)
         :ok
 
-      %{body: _body, stream: stream} when is_pid(stream) ->
-        write_stream_to_file(response, file_path)
-
-      _ ->
+      true ->
         # Empty or nil body
         File.write!(file_path, "")
         :ok
@@ -517,7 +561,7 @@ defmodule HTTP.Response do
   end
 
   defp write_stream_to_file(response, file_path) do
-    with %{body: _body, stream: stream} when is_pid(stream) <- response,
+    with stream when is_pid(stream) <- response_stream(response),
          {:ok, result} <-
            File.open(file_path, [:write, :binary], &write_stream_chunks(stream, &1)) do
       result

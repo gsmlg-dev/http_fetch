@@ -52,6 +52,18 @@ defmodule HTTP.FetchOptionsTest do
       assert %HTTP.FetchOptions{redirect: :error} = HTTP.FetchOptions.new(redirect: :error)
     end
 
+    test "normalizes duplex mode" do
+      assert %HTTP.FetchOptions{duplex: nil} = HTTP.FetchOptions.new([])
+      assert %HTTP.FetchOptions{duplex: :half} = HTTP.FetchOptions.new(duplex: "half")
+      assert %HTTP.FetchOptions{duplex: :half} = HTTP.FetchOptions.new(%{"duplex" => "half"})
+    end
+
+    test "rejects invalid duplex mode" do
+      assert_raise ArgumentError, ~r/unsupported duplex mode/, fn ->
+        HTTP.FetchOptions.new(duplex: :full)
+      end
+    end
+
     test "rejects invalid redirect mode" do
       assert_raise ArgumentError, ~r/unsupported redirect mode/, fn ->
         HTTP.FetchOptions.new(redirect: :invalid)
@@ -132,6 +144,11 @@ defmodule HTTP.FetchOptionsTest do
     test "get_body/1" do
       options = HTTP.FetchOptions.new(body: "test data")
       assert HTTP.FetchOptions.get_body(options) == "test data"
+    end
+
+    test "get_duplex/1" do
+      options = HTTP.FetchOptions.new(duplex: "half")
+      assert HTTP.FetchOptions.get_duplex(options) == :half
     end
 
     test "get_content_type/1" do

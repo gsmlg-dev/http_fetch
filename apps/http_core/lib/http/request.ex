@@ -61,19 +61,23 @@ defmodule HTTP.Request do
             headers: %HTTP.Headers{},
             # Separate field for Content-Type header
             content_type: nil,
+            # Fetch-compatible request streaming mode.
+            duplex: nil,
             body: nil,
             # Socket transport options (e.g., timeout, connect_timeout, ssl, redirect)
             transport_options: []
 
-  @type method :: :head | :get | :post | :put | :delete | :patch
+  @type method :: atom()
   @type url :: URI.t()
   @type content_type :: String.t() | charlist() | nil
-  @type body_content :: String.t() | charlist() | HTTP.FormData.t() | nil
+  @type duplex :: :half | nil
+  @type body_content :: any()
   @type t :: %__MODULE__{
           method: method,
           url: url,
           headers: HTTP.Headers.t(),
           content_type: content_type,
+          duplex: duplex(),
           body: body_content,
           transport_options: Keyword.t()
         }
@@ -131,9 +135,18 @@ defmodule HTTP.Request do
   end
 
   @doc false
-  @spec body_payload(t()) :: nil | {iodata(), content_type()}
+  @spec body_payload(t()) :: nil | {iodata() | {:stream, pid()}, content_type()}
   def body_payload(%__MODULE__{body: nil}), do: nil
   def body_payload(%__MODULE__{method: method}) when method in [:get, :head, :delete], do: nil
+
+  def body_payload(%__MODULE__{body: body, duplex: :half, content_type: content_type})
+      when is_pid(body) do
+    {{:stream, body}, content_type || "application/octet-stream"}
+  end
+
+  def body_payload(%__MODULE__{body: body}) when is_pid(body) do
+    raise ArgumentError, "streaming request body requires duplex: :half"
+  end
 
   def body_payload(%__MODULE__{body: %HTTP.FormData{} = form_data}) do
     case HTTP.FormData.to_body(form_data) do
@@ -151,11 +164,20 @@ defmodule HTTP.Request do
   end
 
   @doc false
-  @spec put_body_headers(Headers.t(), t()) :: {Headers.t(), iodata()}
+  @spec put_body_headers(Headers.t(), t()) :: {Headers.t(), iodata() | {:stream, pid()}}
   def put_body_headers(%Headers{} = headers, %__MODULE__{} = request) do
     case body_payload(request) do
       nil ->
         {Headers.delete(headers, "Content-Length"), ""}
+
+      {{:stream, stream}, content_type} ->
+        headers =
+          headers
+          |> Headers.delete("Content-Length")
+          |> Headers.set("Transfer-Encoding", "chunked")
+          |> maybe_set_content_type(content_type)
+
+        {headers, {:stream, stream}}
 
       {body, content_type} ->
         headers =
@@ -169,6 +191,14 @@ defmodule HTTP.Request do
         {headers, body}
     end
   end
+
+  @doc false
+  @spec streaming_body?(t()) :: boolean()
+  def streaming_body?(%__MODULE__{body: body, duplex: :half, method: method})
+      when is_pid(body) and method not in [:get, :head, :delete],
+      do: true
+
+  def streaming_body?(%__MODULE__{}), do: false
 
   @doc false
   @spec reject_unsupported_request_framing!(Headers.t()) :: Headers.t()

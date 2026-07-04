@@ -137,6 +137,19 @@ defmodule HTTP.HTTP2Test do
         HTTP.HTTP2.serialize_request(request)
       end
     end
+
+    test "raises clearly for streaming request bodies" do
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("https://example.com/widgets"),
+        body: self(),
+        duplex: :half
+      }
+
+      assert_raise ArgumentError, ~r/HTTP\/2 streaming request bodies are not supported/, fn ->
+        HTTP.HTTP2.prepare_request(HTTP.HTTP2.new(:post), request)
+      end
+    end
   end
 
   describe "stream/2" do

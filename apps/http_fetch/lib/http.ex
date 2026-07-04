@@ -11,6 +11,7 @@ defmodule HTTP do
 
   - **Async by default**: All requests use Task.Supervisor with `async_nolink/4`
   - **Automatic streaming**: Responses >5MB or with unknown Content-Length automatically stream
+  - **Request streaming**: Pass an `HTTP.Stream` PID as `body` with `duplex: "half"` for HTTP/1.1 uploads
   - **Request cancellation**: Via `HTTP.AbortController` for aborting in-flight requests
   - **Promise chaining**: JavaScript-like promise interface with `then/3` support
   - **Unix Domain Sockets**: Support for HTTP over Unix sockets (Docker daemon, systemd, etc.)
@@ -50,6 +51,7 @@ defmodule HTTP do
   - `HTTP.Promise` - Promise wrapper around Tasks for async operations
   - `HTTP.Request` - Request configuration struct
   - `HTTP.Response` - Response struct with JSON/text parsing helpers
+  - `HTTP.Stream` - Process-backed stream for response bodies and streaming uploads
   - `HTTP.Headers` - Header manipulation utilities
   - `HTTP.FormData` - Multipart/form-data encoding with file upload support
   - `HTTP.AbortController` - Request cancellation mechanism
@@ -63,7 +65,8 @@ defmodule HTTP do
   - Content-Length > 5MB
   - Content-Length header is missing/unknown
 
-  Streaming responses have `body: nil` and `stream: pid` in the Response struct.
+  Streaming responses expose the stream PID in `body`; `stream` is retained as a
+  compatibility alias.
   Use `HTTP.Response.read_all/1` or `HTTP.Response.write_to/2` to consume streams.
 
   ## Telemetry Events
@@ -96,7 +99,10 @@ defmodule HTTP do
                              Can be a string or an atom (e.g., "GET" or :get).
                 - `:headers`: A list of request headers as `{name, value}` tuples (e.g., [{"Content-Type", "application/json"}])
                               or a map that will be converted to the tuple format.
-                - `:body`: The request body (should be a binary or a string that can be coerced to binary).
+                - `:body`: The request body. Buffered bodies may be binary or iodata; streaming
+                           bodies may be an `HTTP.Stream` PID when `duplex: "half"` is set.
+                - `:duplex`: Set to `:half` or `"half"` to enable Fetch-style request body streaming.
+                             Streaming uploads currently use HTTP/1.1 chunked request framing.
                 - `:content_type`: The Content-Type header value. If not provided for methods with body,
                                    defaults to "application/octet-stream" when a body is present.
                 - `:redirect`: Redirect mode, one of `:follow`, `:manual`, or `:error`. Defaults to `:follow`.
@@ -271,6 +277,7 @@ defmodule HTTP do
         |> HTTP.FetchOptions.get_headers()
         |> HTTP.Headers.set_default("User-Agent", HTTP.Headers.user_agent(:http_fetch)),
       body: HTTP.FetchOptions.get_body(options),
+      duplex: HTTP.FetchOptions.get_duplex(options),
       content_type: HTTP.FetchOptions.get_content_type(options),
       transport_options: HTTP.FetchOptions.to_transport_options(options)
     }
@@ -326,6 +333,5 @@ defmodule HTTP do
     end
   end
 
-  defp response_body_size(%Response{body: body}) when is_binary(body), do: byte_size(body)
-  defp response_body_size(%Response{}), do: 0
+  defp response_body_size(%Response{} = response), do: Response.body_size(response)
 end

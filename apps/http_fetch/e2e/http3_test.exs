@@ -216,8 +216,8 @@ defmodule E2E.HTTP3Test do
       |> HTTP.Promise.await()
 
     assert response.status == 200
-    assert response.body == nil
     assert is_pid(response.stream)
+    assert response.body == response.stream
     assert HTTP.Response.read_all(response) == body
   end
 

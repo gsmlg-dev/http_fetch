@@ -8,6 +8,7 @@ defmodule HTTP.FetchOptions do
   - `method` - HTTP method, defaulting to `GET`
   - `headers` - request headers as a list, map, or `HTTP.Headers`
   - `body` - request body
+  - `duplex` - request streaming mode; `:half` or `"half"` for streaming bodies
   - `signal` - `HTTP.AbortController` PID
   - `redirect` - `:follow`, `:manual`, or `:error`; defaults to `:follow`
 
@@ -29,6 +30,7 @@ defmodule HTTP.FetchOptions do
     "connectTimeout" => :connect_timeout,
     "content_type" => :content_type,
     "contentType" => :content_type,
+    "duplex" => :duplex,
     "headers" => :headers,
     "http_version" => :http_version,
     "httpVersion" => :http_version,
@@ -47,6 +49,7 @@ defmodule HTTP.FetchOptions do
             headers: %HTTP.Headers{},
             content_type: nil,
             body: nil,
+            duplex: nil,
             signal: nil,
             unix_socket: nil,
             redirect: :follow,
@@ -64,6 +67,7 @@ defmodule HTTP.FetchOptions do
           headers: HTTP.Headers.t(),
           content_type: String.t() | nil,
           body: any(),
+          duplex: :half | nil,
           signal: any() | nil,
           unix_socket: String.t() | nil,
           redirect: redirect(),
@@ -126,6 +130,12 @@ defmodule HTTP.FetchOptions do
   def get_body(%__MODULE__{body: body}), do: body
 
   @doc """
+  Extracts the request body streaming mode from options.
+  """
+  @spec get_duplex(t()) :: :half | nil
+  def get_duplex(%__MODULE__{duplex: duplex}), do: duplex
+
+  @doc """
   Extracts content type from options.
   """
   @spec get_content_type(t()) :: String.t() | nil
@@ -144,6 +154,9 @@ defmodule HTTP.FetchOptions do
 
       {:body, body}, acc ->
         %{acc | body: body}
+
+      {:duplex, duplex}, acc ->
+        %{acc | duplex: normalize_duplex(duplex)}
 
       {:signal, signal}, acc ->
         %{acc | signal: signal}
@@ -187,6 +200,7 @@ defmodule HTTP.FetchOptions do
       options
       | method: normalize_method(options.method),
         redirect: normalize_redirect(options.redirect),
+        duplex: normalize_duplex(options.duplex),
         http_version: normalize_http_version(options.http_version)
     }
   end
@@ -215,6 +229,21 @@ defmodule HTTP.FetchOptions do
 
   defp redirect_error_message(redirect),
     do: "unsupported redirect mode: #{inspect(redirect)}; expected :follow, :manual, or :error"
+
+  defp normalize_duplex(nil), do: nil
+  defp normalize_duplex(:half), do: :half
+
+  defp normalize_duplex(duplex) when is_binary(duplex) do
+    case String.downcase(duplex) do
+      "half" -> :half
+      _ -> raise ArgumentError, duplex_error_message(duplex)
+    end
+  end
+
+  defp normalize_duplex(duplex), do: raise(ArgumentError, duplex_error_message(duplex))
+
+  defp duplex_error_message(duplex),
+    do: "unsupported duplex mode: #{inspect(duplex)}; expected :half or \"half\""
 
   defp normalize_http_version(nil), do: :http1
   defp normalize_http_version(:http1), do: :http1

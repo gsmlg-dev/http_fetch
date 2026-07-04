@@ -13,7 +13,7 @@ defmodule HTTP.FormData do
 
   ## Features
 
-  - **Streaming file uploads**: Efficiently upload large files using `File.Stream`
+  - **File stream inputs**: Accepts `File.Stream` values when building multipart bodies
   - **Automatic encoding**: Selects appropriate encoding based on content
   - **Boundary generation**: Automatically generates unique multipart boundaries
   - **Mixed content**: Support for both text fields and files in the same form
@@ -97,7 +97,7 @@ defmodule HTTP.FormData do
   end
 
   @doc """
-  Adds a file field for upload with streaming support.
+  Adds a file field for upload.
 
   ## Examples
 

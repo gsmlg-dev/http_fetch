@@ -1,5 +1,12 @@
 defmodule HTTP.Stream do
-  @moduledoc false
+  @moduledoc """
+  Process-backed readable stream used for Fetch-style response and request bodies.
+
+  Streamed responses expose this PID in `HTTP.Response.body`. Streaming uploads can
+  pass a stream PID as `body` when `HTTP.fetch/2` is called with `duplex: "half"`.
+  Producers write chunks with `chunk/3` and finish with `finish/1`; consumers read
+  by sending `{:read_chunk, pid}` or `{:read_chunk, pid, :ack}`.
+  """
 
   defstruct reader: nil,
             reader_ack?: false,
@@ -18,6 +25,28 @@ defmodule HTTP.Stream do
     Task.start_link(fn ->
       loop(%__MODULE__{start_time: start_time})
     end)
+  end
+
+  @doc """
+  Creates a stream from an enumerable.
+
+  Each enumerable item is converted to binary and emitted with backpressure. The
+  returned PID can be passed as a streaming request body:
+
+      {:ok, stream} = HTTP.Stream.from_enumerable(["hello", " ", "world"])
+      HTTP.fetch(url, method: :post, body: stream, duplex: "half")
+  """
+  @spec from_enumerable(Enumerable.t()) :: {:ok, pid()} | {:error, term()}
+  def from_enumerable(enumerable) do
+    with {:ok, stream} <- start_link(0),
+         {:ok, _producer} <-
+           Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
+             produce_enumerable(stream, enumerable)
+           end) do
+      {:ok, stream}
+    else
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @spec chunk(pid(), binary(), timeout()) :: :ok | {:error, term()}
@@ -63,6 +92,22 @@ defmodule HTTP.Stream do
   def error(pid, reason) when is_pid(pid) do
     send(pid, {:error, reason})
     :ok
+  end
+
+  defp produce_enumerable(stream, enumerable) do
+    enumerable
+    |> Enum.reduce_while(:ok, fn chunk, :ok ->
+      case __MODULE__.chunk(stream, IO.iodata_to_binary(chunk)) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      :ok -> finish(stream)
+      {:error, reason} -> error(stream, reason)
+    end
+  rescue
+    error -> __MODULE__.error(stream, error)
   end
 
   defp loop(%__MODULE__{} = state) do

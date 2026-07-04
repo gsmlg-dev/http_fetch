@@ -256,8 +256,8 @@ defmodule HTTP.ResponseTest do
         |> HTTP.Promise.await()
 
       assert response.status == 302
-      assert response.body == nil
       assert is_pid(response.stream)
+      assert response.body == response.stream
       assert HTTP.Response.read_all(response) == body
     end
 
@@ -386,8 +386,8 @@ defmodule HTTP.ResponseTest do
       response = url |> HTTP.fetch() |> HTTP.Promise.await()
 
       assert response.status == 200
-      assert response.body == nil
       assert is_pid(response.stream)
+      assert response.body == response.stream
       assert HTTP.Response.read_all(response) == "hello"
     end
 

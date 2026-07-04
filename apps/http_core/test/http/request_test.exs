@@ -108,5 +108,54 @@ defmodule HTTP.RequestTest do
       assert HTTP.Headers.get(headers, "content-length") == "7"
       assert HTTP.Headers.get(headers, "content-type") == "text/plain"
     end
+
+    test "adds chunked framing for duplex stream bodies" do
+      stream = self()
+
+      request = %HTTP.Request{
+        method: :post,
+        body: stream,
+        duplex: :half,
+        content_type: "text/plain"
+      }
+
+      assert {%HTTP.Headers{} = headers, {:stream, ^stream}} =
+               HTTP.Request.put_body_headers(HTTP.Headers.new(), request)
+
+      assert HTTP.Headers.get(headers, "transfer-encoding") == "chunked"
+      assert HTTP.Headers.get(headers, "content-type") == "text/plain"
+      assert HTTP.Headers.get(headers, "content-length") == nil
+      assert HTTP.Request.streaming_body?(request)
+    end
+
+    test "requires duplex half for stream bodies" do
+      request = %HTTP.Request{method: :post, body: self()}
+
+      assert_raise ArgumentError, ~r/streaming request body requires duplex/, fn ->
+        HTTP.Request.put_body_headers(HTTP.Headers.new(), request)
+      end
+    end
+
+    test "prepares HTTP/1 stream body headers separately from body stream" do
+      stream = self()
+
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("http://example.com/upload"),
+        body: stream,
+        duplex: :half
+      }
+
+      {head, {:stream, ^stream}} = HTTP.HTTP1.prepare_request(request)
+      head = IO.iodata_to_binary(head)
+
+      assert head =~ "POST /upload HTTP/1.1\r\n"
+      assert head =~ "Transfer-Encoding: chunked\r\n"
+      refute head =~ "Content-Length:"
+
+      assert_raise ArgumentError, ~r/streaming request bodies require HTTP.SocketClient/, fn ->
+        HTTP.HTTP1.serialize_request(request)
+      end
+    end
   end
 end
