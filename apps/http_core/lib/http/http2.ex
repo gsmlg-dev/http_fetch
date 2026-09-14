@@ -187,6 +187,10 @@ defmodule HTTP.HTTP2 do
 
   defp handle_frame(_conn, %Frame{type: :continuation}), do: {:error, :unexpected_continuation}
 
+  defp handle_frame(%__MODULE__{status: nil}, %Frame{type: :data, stream_id: @client_stream_id}) do
+    {:error, :data_before_response_headers}
+  end
+
   defp handle_frame(conn, %Frame{type: :data, stream_id: @client_stream_id} = frame) do
     with {:ok, data, flow_controlled_size} <- data_payload(frame),
          {:ok, conn} <- consume_receive_window(conn, flow_controlled_size) do
@@ -269,6 +273,15 @@ defmodule HTTP.HTTP2 do
 
   defp handle_frame(conn, %Frame{}), do: {:ok, conn, []}
 
+  defp decode_response_headers(%__MODULE__{status: status} = conn, header_block, end_stream?)
+       when is_integer(status) do
+    with true <- end_stream? || {:error, :invalid_response_trailers},
+         {:ok, hpack, headers} <- HPACK.decode(conn.hpack, header_block),
+         :ok <- validate_response_trailers(headers) do
+      {:ok, %{conn | hpack: hpack, done?: true}, [:done]}
+    end
+  end
+
   defp decode_response_headers(%__MODULE__{} = conn, header_block, end_stream?) do
     with {:ok, hpack, headers} <- HPACK.decode(conn.hpack, header_block),
          {:ok, status, regular_headers} <- response_headers(headers) do
@@ -298,6 +311,14 @@ defmodule HTTP.HTTP2 do
       {:ok, status, regular_headers}
     else
       _ -> {:error, :invalid_response_headers}
+    end
+  end
+
+  defp validate_response_trailers(headers) do
+    if Enum.any?(headers, fn {name, _value} -> String.starts_with?(name, ":") end) do
+      {:error, :invalid_response_trailers}
+    else
+      :ok
     end
   end
 
@@ -389,14 +410,19 @@ defmodule HTTP.HTTP2 do
 
   defp apply_setting({0x4, value}, {:ok, conn}) when value <= @max_window_size do
     delta = value - conn.peer_initial_window_size
+    stream_send_window = conn.stream_send_window + delta
 
-    {:cont,
-     {:ok,
-      %{
-        conn
-        | peer_initial_window_size: value,
-          stream_send_window: conn.stream_send_window + delta
-      }}}
+    if stream_send_window > @max_window_size do
+      {:halt, {:error, :flow_control_error}}
+    else
+      {:cont,
+       {:ok,
+        %{
+          conn
+          | peer_initial_window_size: value,
+            stream_send_window: stream_send_window
+        }}}
+    end
   end
 
   defp apply_setting({0x4, _value}, {:ok, _conn}), do: {:halt, {:error, :flow_control_error}}

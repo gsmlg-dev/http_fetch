@@ -10,6 +10,7 @@ defmodule HTTP.HTTP2Test do
   @ack 0x1
   @end_headers 0x4
   @initial_window_size 65_535
+  @max_window_size 2_147_483_647
 
   describe "serialize_request/1" do
     test "serializes the connection preface, settings, and request headers" do
@@ -243,6 +244,30 @@ defmodule HTTP.HTTP2Test do
                HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), IO.iodata_to_binary(frames))
     end
 
+    test "rejects data before final response headers" do
+      assert {:error, :data_before_response_headers} =
+               HTTP.HTTP2.stream(
+                 HTTP.HTTP2.new(:get),
+                 Frame.encode(:data, 0, 1, "body")
+               )
+    end
+
+    test "ignores response trailers and completes the stream" do
+      frames = [
+        response_headers_frame([{":status", "200"}]),
+        Frame.encode(:data, 0, 1, "ok"),
+        Frame.encode(
+          :headers,
+          @end_headers ||| @end_stream,
+          1,
+          HPACK.encode_headers([{"x-checksum", "ok"}])
+        )
+      ]
+
+      assert {:ok, _conn, [{:headers, 200, _headers}, {:body, "ok"}, :done]} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), IO.iodata_to_binary(frames))
+    end
+
     test "rejects zero window update increments" do
       for stream_id <- [0, 1] do
         assert {:error, :invalid_window_update_increment} =
@@ -296,6 +321,22 @@ defmodule HTTP.HTTP2Test do
                HTTP.HTTP2.stream(
                  HTTP.HTTP2.new(:get),
                  Frame.encode(:settings, 0, 0, <<0x5::16, 16_383::32>>)
+               )
+    end
+
+    test "rejects settings that overflow the stream send window" do
+      increment = @max_window_size - @initial_window_size
+
+      assert {:ok, conn, []} =
+               HTTP.HTTP2.stream(
+                 HTTP.HTTP2.new(:post),
+                 Frame.encode(:window_update, 0, 1, <<0::1, increment::31>>)
+               )
+
+      assert {:error, :flow_control_error} =
+               HTTP.HTTP2.stream(
+                 conn,
+                 Frame.encode(:settings, 0, 0, <<0x4::16, @max_window_size::32>>)
                )
     end
   end
