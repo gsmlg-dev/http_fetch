@@ -167,9 +167,12 @@ backend automatically.
 
 A complete HTTP/2 response remains deliverable if the peer closes before the
 client can write its remaining WINDOW_UPDATE or acknowledgement frames. This
-only applies to `:closed` after the parser reports completion and the pending
-writes contain no request DATA. Truncated responses and other write failures
-remain errors; flow-control and streaming delivery order are unchanged.
+also covers responses buffered across multiple TLS records by `ex_ssl` after a
+normal peer shutdown: the client drains the receive side before deciding whether
+the response completed. Only `:closed` on optional control writes qualifies,
+and the request body must already be fully sent. END_STREAM is still required;
+truncation, required request writes, abnormal closure, cancellation and timeout
+remain errors. The original deadline and streaming backpressure are preserved.
 
 For `:ex_ssl`, `socket_opts` accepts `send_timeout` and
 `send_timeout_close: true`. These override matching entries in `ssl`. Custom

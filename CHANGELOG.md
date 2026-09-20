@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   END_STREAM DATA frame and a non-essential WINDOW_UPDATE or acknowledgement
   returns `:closed`. Incomplete responses, required request writes, and other
   errors still fail normally.
+- Preserve unread ex_ssl TLS records when an HTTP/2 control write fails after
+  normal peer closure. Drain them through the existing active-once receiver and
+  require a complete HTTP/2 response, without extending deadlines or accepting
+  failed uploads, truncated responses, resets, or protocol errors.
 
 ## [0.11.0] - 2026-07-04
 

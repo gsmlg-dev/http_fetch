@@ -266,18 +266,14 @@ defmodule HTTP.SocketClient do
     case state.protocol_module.stream(state.protocol, data) do
       {:ok, protocol, events} ->
         state = %{state | protocol: protocol}
-        response_complete? = completed_response_control_writes?(state)
+        discard_closed_controls? = discard_closed_control_writes?(state, events)
 
-        case flush_protocol_writes(state) do
+        case flush_protocol_writes(state, discard_closed_controls?) do
           {:ok, state} ->
             handle_events(state, events)
 
           {:error, reason} ->
-            if reason == :closed and response_complete? and :done in events do
-              handle_events(state, events)
-            else
-              fail(state, reason)
-            end
+            fail(state, reason)
         end
 
       {:error, reason} ->
@@ -627,7 +623,9 @@ defmodule HTTP.SocketClient do
       {:ok, pid} ->
         receive do
           {:send_result, ^ref, result} ->
-            close_on_error(transport, socket, result)
+            # The caller owns cleanup. A failed control write can leave readable
+            # TLS data behind, so sending must not destroy the receive side.
+            result
 
           :abort ->
             transport.close(socket)
@@ -649,13 +647,6 @@ defmodule HTTP.SocketClient do
         transport.close(socket)
         {:error, reason}
     end
-  end
-
-  defp close_on_error(_transport, _socket, :ok), do: :ok
-
-  defp close_on_error(transport, socket, {:error, reason}) do
-    transport.close(socket)
-    {:error, reason}
   end
 
   defp send_prepared_request(transport, socket, {:buffer, iodata}, deadline_at) do
@@ -725,32 +716,44 @@ defmodule HTTP.SocketClient do
   defp ack_stream_chunk(_stream, nil), do: :ok
   defp ack_stream_chunk(stream, ack_ref), do: send(stream, {:stream_chunk_ack, ack_ref})
 
-  defp flush_protocol_writes(%{protocol_module: HTTP.HTTP2, protocol: protocol} = state) do
+  defp flush_protocol_writes(
+         %{protocol_module: HTTP.HTTP2, protocol: protocol} = state,
+         discard_closed_controls?
+       ) do
     {protocol, iodata} = HTTP.HTTP2.take_outbound(protocol)
     state = %{state | protocol: protocol}
 
     case IO.iodata_to_binary(iodata) do
       "" -> {:ok, state}
-      data -> flush_protocol_write(state, data)
+      data -> flush_protocol_write(state, data, discard_closed_controls?)
     end
   end
 
-  defp flush_protocol_writes(state), do: {:ok, state}
+  defp flush_protocol_writes(state, _discard_closed_controls?), do: {:ok, state}
 
-  defp completed_response_control_writes?(%{
-         protocol_module: HTTP.HTTP2,
-         protocol: protocol
-       }) do
-    HTTP.HTTP2.complete_response?(protocol) and HTTP.HTTP2.outbound_control_only?(protocol)
+  defp discard_closed_control_writes?(
+         %{protocol_module: HTTP.HTTP2, protocol: protocol, transport: transport},
+         events
+       ) do
+    # Classify before take_outbound/1 clears the queue, including any request
+    # body still waiting for flow-control credit. In ex_ssl 0.3.0 an established
+    # socket's peer close_notify rejects writes with :closed while retaining
+    # unread plaintext; abnormal TCP closure returns :econnreset instead.
+    # This owner has not closed the socket locally. Rearming it drains that
+    # plaintext (or reports EOF); only the HTTP parser can complete a response.
+    HTTP.HTTP2.outbound_control_only?(protocol) and
+      (transport == HTTP.Transport.ExSSL or
+         (HTTP.HTTP2.complete_response?(protocol) and :done in events))
   end
 
-  defp completed_response_control_writes?(_state), do: false
+  defp discard_closed_control_writes?(_state, _events), do: false
 
-  defp flush_protocol_write(state, data) do
+  defp flush_protocol_write(state, data, discard_closed_controls?) do
     timeout = remaining_timeout(state.deadline_at)
 
     case send_request(state.transport, state.socket, data, timeout) do
       :ok -> {:ok, state}
+      {:error, :closed} when discard_closed_controls? -> {:ok, state}
       {:error, reason} -> {:error, reason}
     end
   end

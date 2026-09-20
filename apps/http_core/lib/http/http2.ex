@@ -102,9 +102,11 @@ defmodule HTTP.HTTP2 do
   def complete_response?(%__MODULE__{done?: done?}), do: done?
 
   @spec outbound_control_only?(t()) :: boolean()
-  def outbound_control_only?(%__MODULE__{outbound: outbound}) do
+  def outbound_control_only?(%__MODULE__{outbound: outbound, pending_body: ""}) do
     Enum.all?(outbound, &control_frame?/1)
   end
+
+  def outbound_control_only?(%__MODULE__{}), do: false
 
   defp append_buffer(%__MODULE__{buffer: buffer} = conn, data) do
     %{conn | buffer: buffer <> data}

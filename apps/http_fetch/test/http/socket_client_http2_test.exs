@@ -242,8 +242,7 @@ defmodule HTTP.SocketClientHTTP2Test do
     await_owner_loop(owner)
 
     on_exit(fn ->
-      if Process.info(owner, :status) == {:status, :suspended}, do: :erlang.resume_process(owner)
-      if Process.alive?(controller), do: HTTP.AbortController.abort(controller)
+      cleanup_owner(owner, controller)
     end)
 
     true = :erlang.suspend_process(owner)
@@ -259,6 +258,539 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert response.status == 200
     assert HTTP.Response.read_all(response) == "queued-before-close"
     assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  @tag :cross_record
+  test "drains a second ex_ssl TLS record after control writes fail following peer close" do
+    test_pid = self()
+    body = "second-record-body"
+
+    first_record = [
+      Frame.encode(:settings, 0, 0, ""),
+      Frame.encode(:headers, @end_headers, 1, response_headers(body))
+    ]
+
+    first_record_binary = IO.iodata_to_binary(first_record)
+    second_record = Frame.encode(:data, @end_stream, 1, body)
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, _buffer} = recv_client_h2_request(socket, transport)
+        send(test_pid, {:server_received_request, self()})
+
+        await_test_gate(:send_first_record)
+        send_all(socket, transport, first_record)
+        send(test_pid, :first_record_sent)
+
+        await_test_gate(:send_second_record_and_close)
+        send_all(socket, transport, second_record)
+        :ok = :ssl.close(socket)
+        send(test_pid, :second_record_closed)
+      end)
+
+    controller = HTTP.AbortController.new()
+
+    promise =
+      HTTP.fetch(url,
+        http_version: :http2,
+        signal: controller,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+
+    assert_receive {:server_received_request, server_pid}, 5_000
+    owner = await_owner(controller)
+    await_owner_loop(owner)
+
+    on_exit(fn ->
+      cleanup_owner(owner, controller)
+    end)
+
+    true = :erlang.suspend_process(owner)
+    send(server_pid, :send_first_record)
+    assert_receive :first_record_sent, 5_000
+
+    {tls_pid, ^first_record_binary} = await_owner_tls_data(owner, first_record_binary)
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    send(server_pid, :send_second_record_and_close)
+    assert_receive :second_record_closed, 5_000
+    assert_tls_buffered_after_peer_close(tls_pid, byte_size(second_record))
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    tls_monitor = Process.monitor(tls_pid)
+    owner_monitor = Process.monitor(owner)
+    true = :erlang.resume_process(owner)
+
+    response = HTTP.Promise.await(promise)
+    assert response.status == 200
+    assert HTTP.Response.read_all(response) == body
+    assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  @tag :cross_record
+  test "drains a split HTTP/2 frame from the ex_ssl receive buffer after peer close" do
+    test_pid = self()
+    body = "split-frame-body"
+    headers = Frame.encode(:headers, @end_headers, 1, response_headers(body))
+    split_at = 5
+    <<headers_start::binary-size(split_at), headers_rest::binary>> = headers
+
+    first_record = [Frame.encode(:settings, 0, 0, ""), headers_start]
+    first_record_binary = IO.iodata_to_binary(first_record)
+    second_record = [headers_rest, Frame.encode(:data, @end_stream, 1, body)]
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, _buffer} = recv_client_h2_request(socket, transport)
+        send(test_pid, {:server_received_request, self()})
+
+        await_test_gate(:send_first_record)
+        send_all(socket, transport, first_record)
+        send(test_pid, :first_record_sent)
+
+        await_test_gate(:send_second_record_and_close)
+        send_all(socket, transport, second_record)
+        :ok = :ssl.close(socket)
+        send(test_pid, :second_record_closed)
+      end)
+
+    controller = HTTP.AbortController.new()
+
+    promise =
+      HTTP.fetch(url,
+        http_version: :http2,
+        signal: controller,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+
+    assert_receive {:server_received_request, server_pid}, 5_000
+    owner = await_owner(controller)
+    await_owner_loop(owner)
+
+    on_exit(fn ->
+      cleanup_owner(owner, controller)
+    end)
+
+    true = :erlang.suspend_process(owner)
+    send(server_pid, :send_first_record)
+    assert_receive :first_record_sent, 5_000
+
+    {tls_pid, ^first_record_binary} = await_owner_tls_data(owner, first_record_binary)
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    send(server_pid, :send_second_record_and_close)
+    assert_receive :second_record_closed, 5_000
+    assert_tls_buffered_after_peer_close(tls_pid, :erlang.iolist_size(second_record))
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    tls_monitor = Process.monitor(tls_pid)
+    owner_monitor = Process.monitor(owner)
+    true = :erlang.resume_process(owner)
+
+    response = HTTP.Promise.await(promise)
+    assert response.status == 200
+    assert HTTP.Response.read_all(response) == body
+    assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  @tag :cross_record
+  test "rejects a truncated second ex_ssl TLS record after a control write fails" do
+    test_pid = self()
+    body = "truncated-second-record"
+
+    first_record = [
+      Frame.encode(:settings, 0, 0, ""),
+      Frame.encode(:headers, @end_headers, 1, response_headers(body))
+    ]
+
+    first_record_binary = IO.iodata_to_binary(first_record)
+    second_record = Frame.encode(:data, 0, 1, body)
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, _buffer} = recv_client_h2_request(socket, transport)
+        send(test_pid, {:server_received_request, self()})
+
+        await_test_gate(:send_first_record)
+        send_all(socket, transport, first_record)
+        send(test_pid, :first_record_sent)
+
+        await_test_gate(:send_second_record_and_close)
+        send_all(socket, transport, second_record)
+        :ok = :ssl.close(socket)
+        send(test_pid, :second_record_closed)
+      end)
+
+    controller = HTTP.AbortController.new()
+
+    promise =
+      HTTP.fetch(url,
+        http_version: :http2,
+        signal: controller,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+
+    assert_receive {:server_received_request, server_pid}, 5_000
+    owner = await_owner(controller)
+    await_owner_loop(owner)
+
+    on_exit(fn ->
+      cleanup_owner(owner, controller)
+    end)
+
+    true = :erlang.suspend_process(owner)
+    send(server_pid, :send_first_record)
+    assert_receive :first_record_sent, 5_000
+
+    {tls_pid, ^first_record_binary} = await_owner_tls_data(owner, first_record_binary)
+    send(server_pid, :send_second_record_and_close)
+    assert_receive :second_record_closed, 5_000
+    assert_tls_buffered_after_peer_close(tls_pid, byte_size(second_record))
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    tls_monitor = Process.monitor(tls_pid)
+    owner_monitor = Process.monitor(owner)
+    true = :erlang.resume_process(owner)
+
+    assert {:error, :closed} = HTTP.Promise.await(promise)
+    assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  @tag :cross_record
+  test "does not turn a reset buffered after peer close into a successful response" do
+    test_pid = self()
+    body = "reset-after-drain"
+
+    first_record = [
+      Frame.encode(:settings, 0, 0, ""),
+      Frame.encode(:headers, @end_headers, 1, response_headers(body))
+    ]
+
+    first_record_binary = IO.iodata_to_binary(first_record)
+
+    second_record = [
+      Frame.encode(:data, @end_stream, 1, body),
+      Frame.encode(:rst_stream, 0, 1, <<0x8::32>>)
+    ]
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, _buffer} = recv_client_h2_request(socket, transport)
+        send(test_pid, {:server_received_request, self()})
+
+        await_test_gate(:send_first_record)
+        send_all(socket, transport, first_record)
+        send(test_pid, :first_record_sent)
+
+        await_test_gate(:send_second_record_and_close)
+        send_all(socket, transport, second_record)
+        :ok = :ssl.close(socket)
+        send(test_pid, :second_record_closed)
+      end)
+
+    controller = HTTP.AbortController.new()
+
+    promise =
+      HTTP.fetch(url,
+        http_version: :http2,
+        signal: controller,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+
+    assert_receive {:server_received_request, server_pid}, 5_000
+    owner = await_owner(controller)
+    await_owner_loop(owner)
+
+    on_exit(fn ->
+      cleanup_owner(owner, controller)
+    end)
+
+    true = :erlang.suspend_process(owner)
+    send(server_pid, :send_first_record)
+    assert_receive :first_record_sent, 5_000
+
+    {tls_pid, ^first_record_binary} = await_owner_tls_data(owner, first_record_binary)
+    send(server_pid, :send_second_record_and_close)
+    assert_receive :second_record_closed, 5_000
+    assert_tls_buffered_after_peer_close(tls_pid, :erlang.iolist_size(second_record))
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    tls_monitor = Process.monitor(tls_pid)
+    owner_monitor = Process.monitor(owner)
+    true = :erlang.resume_process(owner)
+
+    assert {:error, {:stream_reset, :cancel}} = HTTP.Promise.await(promise)
+    assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  @tag :cross_record
+  test "fails when SETTINGS acknowledgement cannot flush a pending HTTP/2 request body" do
+    test_pid = self()
+    body = :binary.copy("p", @initial_window_size + 5)
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+
+        {initial_body, _buffer} =
+          recv_request_body_until(socket, transport, buffer, @initial_window_size)
+
+        assert initial_body == binary_part(body, 0, @initial_window_size)
+        send(test_pid, {:server_received_request, self()})
+
+        await_test_gate(:send_response_and_close)
+
+        send_all(socket, transport, [
+          Frame.encode(:settings, 0, 0, ""),
+          Frame.encode(:headers, @end_headers, 1, response_headers("complete")),
+          Frame.encode(:data, @end_stream, 1, "complete")
+        ])
+
+        :ok = :ssl.close(socket)
+        send(test_pid, :server_closed)
+      end)
+
+    controller = HTTP.AbortController.new()
+
+    promise =
+      HTTP.fetch(url,
+        method: :post,
+        body: body,
+        http_version: :http2,
+        signal: controller,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+
+    assert_receive {:server_received_request, server_pid}, 5_000
+    owner = await_owner(controller)
+    await_owner_loop(owner)
+
+    on_exit(fn ->
+      cleanup_owner(owner, controller)
+    end)
+
+    true = :erlang.suspend_process(owner)
+    send(server_pid, :send_response_and_close)
+    assert_receive :server_closed, 5_000
+    tls_pid = await_owner_tls_data_and_close(owner)
+    tls_monitor = Process.monitor(tls_pid)
+    assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, _reason}, 5_000
+    owner_monitor = Process.monitor(owner)
+    true = :erlang.resume_process(owner)
+
+    assert {:error, :closed} =
+             HTTP.Promise.await(promise)
+
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  @tag :cross_record
+  test "drains a final streaming HTTP/2 frame buffered by ex_ssl after peer close" do
+    test_pid = self()
+    body = :binary.copy("q", HTTP.Config.streaming_threshold() + 1)
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+        send_h2_response_headers(socket, transport, body)
+        buffer = assert_settings_ack(socket, transport, buffer)
+        chunks = chunk_binary(body, 16_384)
+        preceding_chunks = Enum.drop(chunks, -3)
+        [first_final_chunk, second_final_chunk, third_final_chunk] = Enum.take(chunks, -3)
+
+        Enum.reduce(preceding_chunks, buffer, fn chunk, current_buffer ->
+          send_all(socket, transport, Frame.encode(:data, 0, 1, chunk))
+
+          current_buffer =
+            assert_window_update(socket, transport, current_buffer, 0, byte_size(chunk))
+
+          assert_window_update(socket, transport, current_buffer, 1, byte_size(chunk))
+        end)
+
+        first_final_frame = Frame.encode(:data, 0, 1, first_final_chunk)
+        split_at = 8_000
+        <<first_frame_start::binary-size(split_at), first_frame_rest::binary>> = first_final_frame
+
+        first_record = [Frame.encode(:ping, 0, 0, "final123"), first_frame_start]
+
+        second_record = [
+          first_frame_rest,
+          Frame.encode(:data, 0, 1, second_final_chunk),
+          Frame.encode(:data, @end_stream, 1, third_final_chunk)
+        ]
+
+        send(
+          test_pid,
+          {:server_ready_to_finish, self(), IO.iodata_to_binary(first_record), second_record}
+        )
+
+        await_test_gate(:send_final_first_record)
+        send_all(socket, transport, first_record)
+        send(test_pid, :final_first_record_sent)
+
+        await_test_gate(:send_final_second_record_and_close)
+        send_all(socket, transport, second_record)
+        :ok = :ssl.close(socket)
+        send(test_pid, :final_second_record_closed)
+      end)
+
+    controller = HTTP.AbortController.new()
+
+    promise =
+      HTTP.fetch(url,
+        http_version: :http2,
+        signal: controller,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+
+    response = HTTP.Promise.await(promise)
+    assert response.status == 200
+    stream_monitor = monitor_test_process(response.stream)
+    reader = Task.async(fn -> HTTP.Response.read_all(response) end)
+    monitor_test_process(reader.pid)
+
+    assert_receive {:server_ready_to_finish, server_pid, first_record, second_record}, 10_000
+    owner = await_owner(controller)
+    await_owner_loop(owner)
+
+    on_exit(fn ->
+      cleanup_owner(owner, controller)
+    end)
+
+    true = :erlang.suspend_process(owner)
+    send(server_pid, :send_final_first_record)
+    assert_receive :final_first_record_sent, 5_000
+
+    {tls_pid, ^first_record} = await_owner_tls_data(owner, first_record)
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    send(server_pid, :send_final_second_record_and_close)
+    assert_receive :final_second_record_closed, 5_000
+    assert_tls_buffered_after_peer_close(tls_pid, :erlang.iolist_size(second_record))
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    tls_monitor = Process.monitor(tls_pid)
+    owner_monitor = Process.monitor(owner)
+    true = :erlang.resume_process(owner)
+
+    assert Task.await(reader, 10_000) == body
+    assert_receive {:DOWN, ^stream_monitor, :process, _stream, :normal}, 5_000
+    assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  @tag :cross_record
+  test "aborts an ex_ssl cross-record drain while stream backpressure holds the final body" do
+    {server_pid, controller, promise, owner, first_record, second_record} =
+      cross_record_stream_drain_fixture(self(), 5_000)
+
+    on_exit(fn ->
+      cleanup_owner(owner, controller)
+    end)
+
+    {tls_pid, owner_monitor, tls_monitor} =
+      queue_cross_record_stream_drain(server_pid, owner, first_record, second_record)
+
+    response = HTTP.Promise.await(promise)
+    assert response.status == 200
+    assert is_pid(response.stream)
+    stream = response.stream
+    stream_monitor = monitor_test_process(stream)
+
+    holder = hold_cross_record_stream_chunk(stream, self())
+    monitor_test_process(holder)
+
+    assert_receive {:held_cross_record_stream_chunk, ^holder, ^stream, _chunk, _ack_ref},
+                   5_000
+
+    await_cross_record_stream_backpressure(owner)
+
+    :ok = HTTP.AbortController.abort(controller)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+
+    reader =
+      Task.Supervisor.async_nolink(:http_fetch_task_supervisor, fn ->
+        assert_raise RuntimeError, "stream read failed: :aborted", fn ->
+          HTTP.Response.read_all(response)
+        end
+      end)
+
+    monitor_test_process(reader.pid)
+    await_cross_record_read_all(reader.pid)
+    send(holder, :release_cross_record_stream_chunk)
+
+    assert %RuntimeError{message: "stream read failed: :aborted"} = Task.await(reader, 5_000)
+    assert_receive {:DOWN, ^stream_monitor, :process, _stream, :normal}, 5_000
+    assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
+  end
+
+  @tag :cross_record
+  test "keeps the original deadline while an ex_ssl cross-record drain is backpressured" do
+    timeout = 2_000
+    started_at = System.monotonic_time(:millisecond)
+
+    {server_pid, controller, promise, owner, first_record, second_record} =
+      cross_record_stream_drain_fixture(self(), timeout)
+
+    on_exit(fn ->
+      cleanup_owner(owner, controller)
+    end)
+
+    # This explicit timer gate consumes half the request budget before entering
+    # the drain. A drain that reset the request timeout would outlive the
+    # original absolute deadline asserted below.
+    Process.send_after(self(), :begin_cross_record_deadline_drain, div(timeout, 2))
+    assert_receive :begin_cross_record_deadline_drain, div(timeout, 2) + 250
+
+    {tls_pid, owner_monitor, tls_monitor} =
+      queue_cross_record_stream_drain(server_pid, owner, first_record, second_record)
+
+    response = HTTP.Promise.await(promise)
+    assert response.status == 200
+    assert is_pid(response.stream)
+    stream = response.stream
+    stream_monitor = monitor_test_process(stream)
+
+    holder = hold_cross_record_stream_chunk(stream, self())
+    monitor_test_process(holder)
+
+    assert_receive {:held_cross_record_stream_chunk, ^holder, ^stream, _chunk, _ack_ref},
+                   5_000
+
+    await_cross_record_stream_backpressure(owner)
+
+    deadline_at = started_at + timeout
+    remaining = deadline_at - System.monotonic_time(:millisecond)
+    assert remaining > 0
+
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, remaining + 400
+
+    reader =
+      Task.Supervisor.async_nolink(:http_fetch_task_supervisor, fn ->
+        assert_raise RuntimeError, ~r/^stream read failed: :(request_timeout|timeout)$/, fn ->
+          HTTP.Response.read_all(response)
+        end
+      end)
+
+    monitor_test_process(reader.pid)
+    await_cross_record_read_all(reader.pid)
+    send(holder, :release_cross_record_stream_chunk)
+
+    assert %RuntimeError{message: message} = Task.await(reader, 5_000)
+    assert message in ["stream read failed: :request_timeout", "stream read failed: :timeout"]
+
+    assert_receive {:DOWN, ^stream_monitor, :process, _stream, :normal}, 5_000
+    assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
   end
 
   for {completion, end_stream_flag} <- [complete: @end_stream, incomplete: 0] do
@@ -717,6 +1249,32 @@ defmodule HTTP.SocketClientHTTP2Test do
     :ok = apply(transport, :send, [socket, iodata])
   end
 
+  defp await_test_gate(gate) do
+    receive do
+      ^gate -> :ok
+    after
+      5_000 -> exit({:test_gate_timeout, gate})
+    end
+  end
+
+  defp monitor_test_process(pid) do
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+    end)
+
+    Process.monitor(pid)
+  end
+
+  defp cleanup_owner(owner, controller) do
+    if Process.info(owner, :status) == {:status, :suspended}, do: :erlang.resume_process(owner)
+
+    if Process.alive?(controller) do
+      HTTP.AbortController.abort(controller)
+    else
+      if Process.alive?(owner), do: send(owner, :abort)
+    end
+  end
+
   defp await_owner(controller) do
     case :sys.get_state(controller).request_id do
       owner when is_pid(owner) -> owner
@@ -726,6 +1284,75 @@ defmodule HTTP.SocketClientHTTP2Test do
 
   defp await_owner_tls_data_and_close(owner) do
     await_owner_tls_data_and_close(owner, nil, System.monotonic_time(:millisecond) + 5_000)
+  end
+
+  defp await_owner_tls_data(owner, expected_data) do
+    await_owner_tls_data(owner, expected_data, System.monotonic_time(:millisecond) + 5_000)
+  end
+
+  defp await_owner_tls_data(owner, expected_data, deadline_at) do
+    case Process.info(owner, :messages) do
+      {:messages, messages} ->
+        case Enum.find(messages, fn
+               {:ssl, %SSL.Socket{}, ^expected_data} -> true
+               _message -> false
+             end) do
+          {:ssl, %SSL.Socket{pid: tls_pid}, ^expected_data} -> {tls_pid, expected_data}
+          nil -> await_owner_tls_data_or_fail(owner, expected_data, deadline_at)
+        end
+
+      nil ->
+        flunk("socket owner exited before receiving the first TLS record")
+    end
+  end
+
+  defp await_owner_tls_data_or_fail(owner, expected_data, deadline_at) do
+    remaining = deadline_at - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      flunk("socket owner did not receive the first TLS record as one active-once delivery")
+    else
+      receive do
+      after
+        min(10, remaining) -> await_owner_tls_data(owner, expected_data, deadline_at)
+      end
+    end
+  end
+
+  defp assert_owner_has_only_tls_data(owner, tls_pid, expected_count) do
+    {:messages, messages} = Process.info(owner, :messages)
+
+    assert messages
+           |> Enum.count(&match?({:ssl, %SSL.Socket{pid: ^tls_pid}, _data}, &1)) == expected_count
+  end
+
+  defp assert_tls_buffered_after_peer_close(tls_pid, minimum_size) do
+    assert_tls_buffered_after_peer_close(
+      tls_pid,
+      minimum_size,
+      System.monotonic_time(:millisecond) + 5_000
+    )
+  end
+
+  defp assert_tls_buffered_after_peer_close(tls_pid, minimum_size, deadline_at) do
+    {_phase, state} = :sys.get_state(tls_pid)
+
+    if state.closed and state.size >= minimum_size do
+      assert state.active == false
+      :ok
+    else
+      remaining = deadline_at - System.monotonic_time(:millisecond)
+
+      if remaining <= 0 do
+        flunk("second TLS record was not retained in the TLS receive buffer after peer close")
+      else
+        receive do
+        after
+          min(10, remaining) ->
+            assert_tls_buffered_after_peer_close(tls_pid, minimum_size, deadline_at)
+        end
+      end
+    end
   end
 
   defp await_owner_loop(owner) do
@@ -779,6 +1406,146 @@ defmodule HTTP.SocketClientHTTP2Test do
 
       nil ->
         flunk("socket owner exited before receiving the queued TLS response and close")
+    end
+  end
+
+  defp cross_record_stream_drain_fixture(test_pid, timeout) do
+    body = "backpressured-final-record"
+
+    first_record = [
+      Frame.encode(:settings, 0, 0, ""),
+      Frame.encode(
+        :headers,
+        @end_headers,
+        1,
+        HPACK.encode_headers([{":status", "200"}, {"x-protocol", "h2"}])
+      )
+    ]
+
+    first_record_binary = IO.iodata_to_binary(first_record)
+    second_record = Frame.encode(:data, @end_stream, 1, body)
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, _buffer} = recv_client_h2_request(socket, transport)
+        send(test_pid, {:cross_record_stream_server_ready, self()})
+
+        await_test_gate(:send_cross_record_stream_first)
+        send_all(socket, transport, first_record)
+        send(test_pid, :cross_record_stream_first_sent)
+
+        await_test_gate(:send_cross_record_stream_second)
+        send_all(socket, transport, second_record)
+        :ok = :ssl.close(socket)
+        send(test_pid, :cross_record_stream_second_closed)
+      end)
+
+    controller = HTTP.AbortController.new()
+
+    promise =
+      HTTP.fetch(url,
+        http_version: :http2,
+        signal: controller,
+        timeout: timeout,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+
+    assert_receive {:cross_record_stream_server_ready, server_pid}, 5_000
+    owner = await_owner(controller)
+    await_owner_loop(owner)
+
+    {server_pid, controller, promise, owner, first_record_binary, second_record}
+  end
+
+  defp queue_cross_record_stream_drain(server_pid, owner, first_record, second_record) do
+    true = :erlang.suspend_process(owner)
+    send(server_pid, :send_cross_record_stream_first)
+    assert_receive :cross_record_stream_first_sent, 5_000
+
+    {tls_pid, ^first_record} = await_owner_tls_data(owner, first_record)
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    send(server_pid, :send_cross_record_stream_second)
+    assert_receive :cross_record_stream_second_closed, 5_000
+    assert_tls_buffered_after_peer_close(tls_pid, byte_size(second_record))
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    owner_monitor = Process.monitor(owner)
+    tls_monitor = Process.monitor(tls_pid)
+    true = :erlang.resume_process(owner)
+    {tls_pid, owner_monitor, tls_monitor}
+  end
+
+  defp hold_cross_record_stream_chunk(stream, test_pid) do
+    spawn(fn ->
+      send(stream, {:read_chunk, self(), :ack})
+
+      receive do
+        {:stream_chunk, ^stream, chunk, ack_ref} ->
+          send(test_pid, {:held_cross_record_stream_chunk, self(), stream, chunk, ack_ref})
+
+          receive do
+            :release_cross_record_stream_chunk ->
+              send(stream, {:stream_chunk_ack, ack_ref})
+          after
+            5_000 ->
+              send(test_pid, {:held_cross_record_stream_chunk_timeout, self()})
+          end
+      after
+        5_000 ->
+          send(test_pid, {:held_cross_record_stream_chunk_timeout, self()})
+      end
+    end)
+  end
+
+  defp await_cross_record_stream_backpressure(owner) do
+    await_cross_record_stream_backpressure(owner, System.monotonic_time(:millisecond) + 5_000)
+  end
+
+  defp await_cross_record_stream_backpressure(owner, deadline_at) do
+    if Process.info(owner, :current_function) == {:current_function, {HTTP.Stream, :chunk, 3}} and
+         Process.info(owner, :status) == {:status, :waiting} do
+      :ok
+    else
+      await_cross_record_condition(
+        owner,
+        deadline_at,
+        "socket owner did not block on stream backpressure",
+        fn -> await_cross_record_stream_backpressure(owner, deadline_at) end
+      )
+    end
+  end
+
+  defp await_cross_record_read_all(reader) do
+    await_cross_record_read_all(reader, System.monotonic_time(:millisecond) + 5_000)
+  end
+
+  defp await_cross_record_read_all(reader, deadline_at) do
+    if Process.info(reader, :current_function) ==
+         {:current_function, {HTTP.Response, :collect_stream, 2}} and
+         Process.info(reader, :status) == {:status, :waiting} do
+      :ok
+    else
+      await_cross_record_condition(
+        reader,
+        deadline_at,
+        "response reader did not wait for stream error",
+        fn -> await_cross_record_read_all(reader, deadline_at) end
+      )
+    end
+  end
+
+  defp await_cross_record_condition(_pid, deadline_at, message, fun) do
+    remaining = deadline_at - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      flunk(message)
+    else
+      receive do
+      after
+        min(10, remaining) -> fun.()
+      end
     end
   end
 
