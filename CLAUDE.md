@@ -84,6 +84,14 @@ mix docs
 MIX_ENV=prod mix compile
 ```
 
+For individual app tests, stay at the umbrella root: run `MIX_ENV=test mix
+deps.get`, `MIX_ENV=test mix compile --warnings-as-errors`, then `mix test
+apps/<app>/test`. Running Mix inside a child app does not traverse the runtime
+dependencies of its `in_umbrella` dependencies. E2E uses the same root preparation
+and `mix test apps/<app>/e2e`, or `mix test.e2e` for all E2E suites.
+Run `bash scripts/external_consumer_smoke.sh` to build all five packages and
+verify an isolated non-umbrella consumer, including transitive TLS dependencies.
+
 ## Important Implementation Details
 
 ### Request Options Mapping

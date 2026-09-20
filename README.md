@@ -9,6 +9,12 @@
 
 A modern HTTP client library for Elixir that provides a fetch API similar to web browsers, built on Erlang's built-in socket modules.
 
+For development, prepare the umbrella before running a scoped app test:
+`MIX_ENV=test mix deps.get && MIX_ENV=test mix compile --warnings-as-errors`
+followed by `MIX_ENV=test mix test apps/http_fetch/test`. Running the test from
+the root keeps runtime applications of `in_umbrella` dependencies, including
+`ex_ssl`, on the code path without adding duplicate child dependencies.
+
 ## Features
 
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
@@ -149,6 +155,8 @@ configuration. The backend is captured when the request/client is created and
 retained through redirects and EventSource reconnects; runtime configuration
 changes affect new operations. Invalid selections fail explicitly.
 
+`http_core` declares `ex_ssl ~> 0.3.0` as a transitive runtime dependency,
+allowing 0.3.x patch updates. Consumers do not need to add it separately.
 `ssl: [...]` supplies TLS settings to the selected backend. The `ex_ssl` 0.3.0
 backend uses the `SSL` module and requires peer verification and TLS 1.3. It uses
 system CA certificates unless `cacerts` or `cacertfile` is supplied. DNS names
@@ -156,6 +164,12 @@ and IP addresses are verified against the peer certificate. TLS 1.2,
 `verify: :verify_none`, client certificates, and arbitrary TCP socket options
 are unsupported and return errors; connections never fall back to another
 backend automatically.
+
+A complete HTTP/2 response remains deliverable if the peer closes before the
+client can write its remaining WINDOW_UPDATE or acknowledgement frames. This
+only applies to `:closed` after the parser reports completion and the pending
+writes contain no request DATA. Truncated responses and other write failures
+remain errors; flow-control and streaming delivery order are unchanged.
 
 For `:ex_ssl`, `socket_opts` accepts `send_timeout` and
 `send_timeout_close: true`. These override matching entries in `ssl`. Custom
@@ -505,9 +519,21 @@ open doc/index.html
 
 ### Running Tests
 
+Run these commands from the umbrella root, including when testing one app.
+The root dependency graph includes the runtime dependencies of every umbrella
+app; invoking Mix inside a child app does not traverse its `in_umbrella`
+dependencies in the same way.
+
 ```bash
+# Prepare dependencies, including on a cold checkout
+MIX_ENV=test mix deps.get
+MIX_ENV=test mix compile --warnings-as-errors
+
 # Run all unit tests
 mix test
+
+# Run one app (replace the app name as needed)
+mix test apps/http_fetch/test
 
 # Run specific test file
 mix test apps/http_fetch/test/http/response_test.exs
@@ -535,6 +561,22 @@ MIX_ENV=test mix test.e2e
 ```
 
 In CI, the `e2e.yml` workflow handles all of this automatically.
+`mix test.e2e` keeps execution at the umbrella root. To run one suite, use
+`MIX_ENV=test mix test apps/http_web_socket/e2e` (or another app's `e2e`
+directory) after the same preparation as the unit tests.
+
+### Testing Packaged Consumers
+
+```bash
+bash scripts/external_consumer_smoke.sh
+```
+
+This builds all five current Hex packages and installs their unpacked contents
+into a temporary project outside the umbrella, with independent dependencies
+and build output and no repository lockfile. Local paths resolve the unpublished
+internal packages; `ex_ssl` is resolved only through `http_core`. The smoke
+checks runtime application startup, verified local TLS 1.3 requests with both
+TCP TLS backends, and the separate WebTransport QUIC boundary.
 
 ### Code Formatting
 

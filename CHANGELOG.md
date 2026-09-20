@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+- Keep OTP `:ssl` as the default TCP TLS backend while allowing verified TLS
+  1.3 through the optional `:ex_ssl` backend (`~> 0.3.0`). HTTP/3 and
+  WebTransport continue to use QUIC's independent TLS implementation.
+- Run individual app tests and E2E suites from the umbrella root after explicit
+  test-environment preparation, so transitive runtime applications are compiled
+  and on the code path even on cold checkouts.
+- Validate all five built packages in an isolated external consumer, including
+  transitive dependencies and verified local TLS requests.
+
+### Fixed
+- Deliver complete HTTP/2 responses when the peer closes immediately after an
+  END_STREAM DATA frame and a non-essential WINDOW_UPDATE or acknowledgement
+  returns `:closed`. Incomplete responses, required request writes, and other
+  errors still fail normally.
+
 ## [0.11.0] - 2026-07-04
 
 ### Added

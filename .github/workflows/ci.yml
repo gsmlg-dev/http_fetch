@@ -81,6 +81,13 @@ jobs:
       - name: Compile with warnings as errors
         run: mix compile --warnings-as-errors
 
+      - name: Compile test environment with warnings as errors
+        env:
+          MIX_ENV: test
+        run: |
+          mix deps.get
+          mix compile --warnings-as-errors
+
   format:
     name: Format Check
     runs-on: ubuntu-latest
@@ -214,3 +221,25 @@ jobs:
       - name: Build package
         working-directory: apps/${{ matrix.app }}
         run: mix hex.build --unpack -o /tmp/${{ matrix.app }}_pkg
+
+  external-consumer:
+    name: External consumer smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Install dependencies
+        env:
+          MIX_ENV: prod
+        run: mix deps.get
+
+      - name: Run external consumer smoke test
+        run: bash scripts/external_consumer_smoke.sh

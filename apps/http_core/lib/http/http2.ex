@@ -98,6 +98,14 @@ defmodule HTTP.HTTP2 do
     {%{conn | outbound: []}, Enum.reverse(outbound)}
   end
 
+  @spec complete_response?(t()) :: boolean()
+  def complete_response?(%__MODULE__{done?: done?}), do: done?
+
+  @spec outbound_control_only?(t()) :: boolean()
+  def outbound_control_only?(%__MODULE__{outbound: outbound}) do
+    Enum.all?(outbound, &control_frame?/1)
+  end
+
   defp append_buffer(%__MODULE__{buffer: buffer} = conn, data) do
     %{conn | buffer: buffer <> data}
   end
@@ -472,6 +480,15 @@ defmodule HTTP.HTTP2 do
 
   defp enqueue(%__MODULE__{outbound: outbound} = conn, iodata) do
     %{conn | outbound: [iodata | outbound]}
+  end
+
+  defp control_frame?(iodata) do
+    case Frame.decode(IO.iodata_to_binary(iodata)) do
+      {:ok, %Frame{type: :window_update}, ""} -> true
+      {:ok, %Frame{type: :settings, flags: flags}, ""} -> Frame.flag?(flags, @flag_ack)
+      {:ok, %Frame{type: :ping, flags: flags}, ""} -> Frame.flag?(flags, @flag_ack)
+      _ -> false
+    end
   end
 
   defp flush_pending_body(%__MODULE__{pending_body: ""} = conn), do: conn

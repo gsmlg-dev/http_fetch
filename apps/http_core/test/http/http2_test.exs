@@ -244,6 +244,28 @@ defmodule HTTP.HTTP2Test do
                HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), IO.iodata_to_binary(frames))
     end
 
+    test "does not discard a reset following END_STREAM in the same batch" do
+      frames = [
+        response_headers_frame([{":status", "200"}, {"content-length", "2"}]),
+        Frame.encode(:data, @end_stream, 1, "ok"),
+        Frame.encode(:rst_stream, 0, 1, <<0x8::32>>)
+      ]
+
+      assert {:error, {:stream_reset, :cancel}} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), IO.iodata_to_binary(frames))
+    end
+
+    test "does not discard a protocol error following END_STREAM in the same batch" do
+      frames = [
+        response_headers_frame([{":status", "200"}, {"content-length", "2"}]),
+        Frame.encode(:data, @end_stream, 1, "ok"),
+        Frame.encode(:window_update, 0, 0, <<0::32>>)
+      ]
+
+      assert {:error, :invalid_window_update_increment} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), IO.iodata_to_binary(frames))
+    end
+
     test "rejects data before final response headers" do
       assert {:error, :data_before_response_headers} =
                HTTP.HTTP2.stream(

@@ -21,6 +21,22 @@ mix docs                           # ExDoc HTML
 Run a single test file or line: `mix test apps/http_fetch/test/http/response_test.exs:42`.
 First-time Dialyzer setup: `mix dialyzer --plt` (2-3 min, cached in `apps/http_fetch/priv/plts/`).
 
+### Testing an individual umbrella app
+
+The child applications share the umbrella's `_build`, `deps`, and lockfile, but
+a child Mix project does not put runtime applications of an `in_umbrella`
+dependency on its own code path. Run scoped tests through the root Mix project
+after the root preparation step:
+
+```bash
+MIX_ENV=test mix deps.get
+MIX_ENV=test mix compile --warnings-as-errors
+MIX_ENV=test mix test apps/http_fetch/test
+```
+
+Use the same root preparation and replace the path for any other app under
+`apps/`. The E2E workflow uses the same root-scoped form for `apps/*/e2e`.
+
 ## Project layout
 
 This is a Mix umbrella with independent child apps under `apps/`. Shared HTTP

@@ -266,10 +266,18 @@ defmodule HTTP.SocketClient do
     case state.protocol_module.stream(state.protocol, data) do
       {:ok, protocol, events} ->
         state = %{state | protocol: protocol}
+        response_complete? = completed_response_control_writes?(state)
 
         case flush_protocol_writes(state) do
-          {:ok, state} -> handle_events(state, events)
-          {:error, reason} -> fail(state, reason)
+          {:ok, state} ->
+            handle_events(state, events)
+
+          {:error, reason} ->
+            if reason == :closed and response_complete? and :done in events do
+              handle_events(state, events)
+            else
+              fail(state, reason)
+            end
         end
 
       {:error, reason} ->
@@ -728,6 +736,15 @@ defmodule HTTP.SocketClient do
   end
 
   defp flush_protocol_writes(state), do: {:ok, state}
+
+  defp completed_response_control_writes?(%{
+         protocol_module: HTTP.HTTP2,
+         protocol: protocol
+       }) do
+    HTTP.HTTP2.complete_response?(protocol) and HTTP.HTTP2.outbound_control_only?(protocol)
+  end
+
+  defp completed_response_control_writes?(_state), do: false
 
   defp flush_protocol_write(state, data) do
     timeout = remaining_timeout(state.deadline_at)
