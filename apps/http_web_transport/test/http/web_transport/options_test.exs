@@ -78,4 +78,19 @@ defmodule HTTP.WebTransport.OptionsTest do
                server_certificate_hashes: [%{algorithm: "sha-256", value: <<0>>}]
              )
   end
+
+  test "rejects explicit TLS backends because WebTransport uses QUIC TLS" do
+    for backend <- [:ssl, :ex_ssl, "ssl", "ex_ssl", false] do
+      for options <- [
+            [tls_backend: backend],
+            %{"tls_backend" => backend},
+            %{"tlsBackend" => backend}
+          ] do
+        assert {:error, :tls_backend_not_supported_for_quic} =
+                 Options.new("https://example.com/transport", options)
+      end
+    end
+
+    assert {:ok, _} = Options.new("https://example.com/transport", tls_backend: nil)
+  end
 end

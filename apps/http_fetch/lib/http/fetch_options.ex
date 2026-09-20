@@ -19,7 +19,9 @@ defmodule HTTP.FetchOptions do
   - `connect_timeout` - connection timeout in milliseconds
   - `http_version` - protocol selection, one of `:http1`, `:http2`, `:http3`,
     `:h2c`, or `:auto`; defaults to `:http1`
-  - `ssl` - TLS options passed to `:ssl`
+  - `tls_backend` - TLS implementation, `:ssl` or `:ex_ssl`; defaults to the
+    shared `:http_core, :tls_backend` configuration
+  - `ssl` - TLS options passed to the selected TLS backend
   - `socket_opts` - socket options passed to the underlying transport
   - `unix_socket` - Unix Domain Socket path
   """
@@ -40,6 +42,8 @@ defmodule HTTP.FetchOptions do
     "socket_opts" => :socket_opts,
     "socketOpts" => :socket_opts,
     "ssl" => :ssl,
+    "tls_backend" => :tls_backend,
+    "tlsBackend" => :tls_backend,
     "timeout" => :timeout,
     "unix_socket" => :unix_socket,
     "unixSocket" => :unix_socket
@@ -54,6 +58,7 @@ defmodule HTTP.FetchOptions do
             unix_socket: nil,
             redirect: :follow,
             http_version: :http1,
+            tls_backend: nil,
             timeout: nil,
             connect_timeout: nil,
             ssl: nil,
@@ -61,6 +66,7 @@ defmodule HTTP.FetchOptions do
 
   @type redirect :: :follow | :manual | :error
   @type http_version :: :http1 | :http2 | :http3 | :h2c | :auto
+  @type tls_backend :: term()
 
   @type t :: %__MODULE__{
           method: atom(),
@@ -72,6 +78,7 @@ defmodule HTTP.FetchOptions do
           unix_socket: String.t() | nil,
           redirect: redirect(),
           http_version: http_version(),
+          tls_backend: tls_backend(),
           timeout: integer() | nil,
           connect_timeout: integer() | nil,
           ssl: list() | nil,
@@ -109,6 +116,7 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:socket_opts, options.socket_opts)
     |> maybe_add(:redirect, options.redirect)
     |> maybe_add(:http_version, options.http_version)
+    |> maybe_add(:tls_backend, options.tls_backend)
   end
 
   @doc """
@@ -170,6 +178,9 @@ defmodule HTTP.FetchOptions do
       {:http_version, http_version}, acc ->
         %{acc | http_version: http_version}
 
+      {:tls_backend, tls_backend}, acc ->
+        %{acc | tls_backend: tls_backend}
+
       {:timeout, timeout}, acc ->
         %{acc | timeout: timeout}
 
@@ -196,12 +207,15 @@ defmodule HTTP.FetchOptions do
   defp normalize_headers(_), do: HTTP.Headers.new()
 
   defp normalize_options(%__MODULE__{} = options) do
+    http_version = normalize_http_version(options.http_version)
+
     %{
       options
       | method: normalize_method(options.method),
         redirect: normalize_redirect(options.redirect),
         duplex: normalize_duplex(options.duplex),
-        http_version: normalize_http_version(options.http_version)
+        http_version: http_version,
+        tls_backend: normalize_tls_backend(options.tls_backend, http_version)
     }
   end
 
@@ -271,6 +285,24 @@ defmodule HTTP.FetchOptions do
 
   defp http_version_error_message(http_version) do
     "unsupported http_version: #{inspect(http_version)}; expected :http1, :http2, :http3, :h2c, or :auto"
+  end
+
+  defp normalize_tls_backend(nil, :http3), do: nil
+  defp normalize_tls_backend(tls_backend, :http3), do: tls_backend
+  defp normalize_tls_backend(tls_backend, _http_version), do: resolve_tls_backend(tls_backend)
+
+  defp resolve_tls_backend(tls_backend) do
+    case HTTP.TLSBackend.resolve(tls_backend) do
+      {:ok, backend} ->
+        backend
+
+      {:error, :invalid_tls_backend} ->
+        raise ArgumentError, tls_backend_error_message(tls_backend)
+    end
+  end
+
+  defp tls_backend_error_message(tls_backend) do
+    "unsupported tls_backend: #{inspect(tls_backend)}; expected :ssl or :ex_ssl"
   end
 
   defp maybe_add(list, _key, nil), do: list

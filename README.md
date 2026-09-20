@@ -13,7 +13,7 @@ A modern HTTP client library for Elixir that provides a fetch API similar to web
 
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
 - **Full HTTP support**: GET, POST, PUT, DELETE, PATCH, HEAD methods
-- **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, `:ssl` for HTTPS, and Unix domain sockets
+- **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, selectable TLS for HTTPS, and Unix domain sockets
 - **Unix Domain Sockets**: HTTP over Unix sockets for Docker daemon, systemd, and other local services
 - **Form data support**: HTTP.FormData for multipart/form-data and file uploads
 - **Streaming request bodies**: Fetch-style `duplex: "half"` uploads over HTTP/1.1
@@ -21,7 +21,7 @@ A modern HTTP client library for Elixir that provides a fetch API similar to web
 - **Promise-based**: Async operations with chaining support
 - **Request cancellation**: AbortController support for cancelling requests
 - **Automatic JSON parsing**: Built-in JSON response handling
-- **Zero dependencies**: Uses only Erlang/OTP built-in modules
+- **Selectable TLS**: OTP `:ssl` by default, with opt-in `:ex_ssl` for verified TLS 1.3
 
 ## Browser Fetch API Compatibility
 
@@ -118,6 +118,55 @@ response =
 {:ok, docker_info} = HTTP.Response.json(response)
 IO.puts("Docker Version: #{docker_info["Version"]}")
 ```
+
+## TLS Backend Selection
+
+HTTPS fetch (HTTP/1.1 and HTTP/2), secure WebSocket, and HTTPS EventSource share
+one TLS default. OTP `:ssl` remains the default when no configuration is set:
+
+```elixir
+# config/config.exs or config/runtime.exs
+config :http_core, tls_backend: :ex_ssl
+```
+
+A flat per-call option overrides that default:
+
+```elixir
+HTTP.fetch("https://example.com", tls_backend: :ssl)
+
+HTTP.fetch("https://example.com",
+  tls_backend: :ex_ssl,
+  ssl: [cacertfile: "/path/to/ca.pem"]
+)
+
+HTTP.WebSocket.new("wss://example.com/socket", [], tls_backend: :ex_ssl)
+HTTP.EventSource.new("https://example.com/events", tls_backend: :ex_ssl)
+```
+
+`tls_backend` accepts `:ssl`, `:ex_ssl`, `"ssl"`, or `"ex_ssl"`. Maps also accept
+`"tls_backend"` and `"tlsBackend"` keys. Omitted or `nil` values inherit the shared
+configuration. The backend is captured when the request/client is created and
+retained through redirects and EventSource reconnects; runtime configuration
+changes affect new operations. Invalid selections fail explicitly.
+
+`ssl: [...]` supplies TLS settings to the selected backend. The `ex_ssl` 0.3.0
+backend uses the `SSL` module and requires peer verification and TLS 1.3. It uses
+system CA certificates unless `cacerts` or `cacertfile` is supplied. DNS names
+and IP addresses are verified against the peer certificate. TLS 1.2,
+`verify: :verify_none`, client certificates, and arbitrary TCP socket options
+are unsupported and return errors; connections never fall back to another
+backend automatically.
+
+For `:ex_ssl`, `socket_opts` accepts `send_timeout` and
+`send_timeout_close: true`. These override matching entries in `ssl`. Custom
+ClientHello profiles can be passed through `ssl: [ex_ssl: [profile: profile]]`;
+any ALPN list added by HTTP/2 selection must match the profile's ALPN list exactly.
+See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.3.0/docs/COMPATIBILITY.md).
+
+Plain HTTP, WS, and Unix sockets retain their existing transports. HTTP/3 and
+WebTransport use QUIC's separate TLS implementation and ignore the shared
+setting. An explicit non-`nil` `tls_backend` on either QUIC API returns
+`{:error, :tls_backend_not_supported_for_quic}` (through the promise for fetch).
 
 ## Form Data With File Upload
 
@@ -371,7 +420,7 @@ request = %HTTP.Request{
 ```
 
 **Transport Options:**
-- `transport_options`: Socket transport options such as `timeout`, `connect_timeout`, `ssl`,
+- `transport_options`: Socket transport options such as `timeout`, `connect_timeout`, `tls_backend`, `ssl`,
   `socket_opts`, and `redirect`
 
 `redirect` defaults to `:follow` with the socket transport. Pass `redirect: :manual`

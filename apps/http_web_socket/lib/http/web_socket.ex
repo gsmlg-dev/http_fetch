@@ -11,6 +11,10 @@ defmodule HTTP.WebSocket do
 
   Plain Elixir binaries are sent as text frames. Use `array_buffer/1` or
   `HTTP.Blob` for binary frames.
+
+  For `wss` connections, pass `tls_backend: :ssl | :ex_ssl` (or the equivalent
+  string in a map). When omitted, the shared `:http_core` TLS backend setting is
+  captured when the socket is created.
   """
 
   alias HTTP.WebSocket.ArrayBuffer

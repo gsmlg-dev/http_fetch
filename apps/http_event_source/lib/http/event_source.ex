@@ -10,6 +10,10 @@ defmodule HTTP.EventSource do
 
   Custom server-sent event names are delivered through the message event's
   `type` field.
+
+  For `https` connections, pass `tls_backend: :ssl | :ex_ssl` (or the equivalent
+  string in a map). When omitted, the shared `:http_core` TLS backend setting is
+  captured when the source is created and retained across reconnects.
   """
 
   alias HTTP.EventSource.Connection

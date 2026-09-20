@@ -24,6 +24,8 @@ defmodule HTTP.EventSource.Options do
     "socket_opts" => :socket_opts,
     "socketOpts" => :socket_opts,
     "ssl" => :ssl,
+    "tls_backend" => :tls_backend,
+    "tlsBackend" => :tls_backend,
     "unix_socket" => :unix_socket,
     "unixSocket" => :unix_socket,
     "with_credentials" => :with_credentials,
@@ -42,6 +44,7 @@ defmodule HTTP.EventSource.Options do
             idle_timeout: :infinity,
             ssl: [],
             socket_opts: [],
+            tls_backend: :ssl,
             unix_socket: nil,
             max_line_size: @default_max_line_size,
             ref: nil
@@ -59,6 +62,7 @@ defmodule HTTP.EventSource.Options do
           idle_timeout: timeout(),
           ssl: keyword(),
           socket_opts: keyword(),
+          tls_backend: HTTP.TLSBackend.t(),
           unix_socket: String.t() | nil,
           max_line_size: pos_integer(),
           ref: reference()
@@ -82,6 +86,7 @@ defmodule HTTP.EventSource.Options do
          idle_timeout: Keyword.get(init, :idle_timeout, :infinity),
          ssl: Keyword.get(init, :ssl, []),
          socket_opts: Keyword.get(init, :socket_opts, []),
+         tls_backend: Keyword.fetch!(init, :tls_backend),
          unix_socket: Keyword.get(init, :unix_socket),
          max_line_size: Keyword.get(init, :max_line_size, @default_max_line_size),
          ref: Keyword.get(init, :ref, make_ref())
@@ -144,6 +149,7 @@ defmodule HTTP.EventSource.Options do
          {:ok, ssl} <- normalize_keyword(Keyword.get(init, :ssl, []), :invalid_ssl_options),
          {:ok, socket_opts} <-
            normalize_keyword(Keyword.get(init, :socket_opts, []), :invalid_socket_options),
+         {:ok, tls_backend} <- HTTP.TLSBackend.resolve(Keyword.get(init, :tls_backend)),
          {:ok, unix_socket} <- normalize_unix_socket(Keyword.get(init, :unix_socket)),
          {:ok, max_line_size} <-
            normalize_pos_integer(
@@ -162,6 +168,7 @@ defmodule HTTP.EventSource.Options do
        |> Keyword.put(:idle_timeout, idle_timeout)
        |> Keyword.put(:ssl, ssl)
        |> Keyword.put(:socket_opts, socket_opts)
+       |> Keyword.put(:tls_backend, tls_backend)
        |> Keyword.put(:unix_socket, unix_socket)
        |> Keyword.put(:max_line_size, max_line_size)}
     end

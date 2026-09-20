@@ -22,6 +22,12 @@ defmodule HTTP.Transport.Unix do
   def send(socket, iodata), do: :gen_tcp.send(socket, iodata)
 
   @impl true
+  def recv(socket, length, timeout), do: :gen_tcp.recv(socket, length, timeout)
+
+  @impl true
+  def negotiated_protocol(_socket), do: {:ok, nil}
+
+  @impl true
   def setopts(socket, opts), do: :inet.setopts(socket, opts)
 
   @impl true

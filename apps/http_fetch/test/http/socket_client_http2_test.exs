@@ -7,6 +7,7 @@ defmodule HTTP.SocketClientHTTP2Test do
   alias HTTP.HTTP2.HPACK
 
   @certfile Path.expand("../support/fixtures/localhost.pem", __DIR__)
+  @cacertfile Path.expand("../support/fixtures/localhost-ca.pem", __DIR__)
   @keyfile Path.expand("../support/fixtures/localhost.key", __DIR__)
 
   @ack 0x1
@@ -169,6 +170,123 @@ defmodule HTTP.SocketClientHTTP2Test do
              |> HTTP.Promise.await()
   end
 
+  test "auto over https negotiates h2 through ex_ssl" do
+    url =
+      start_https_h2_server!([<<"h2">>, <<"http/1.1">>], fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+        send_h2_response(socket, transport, "ex-ssl-h2")
+        assert_settings_ack(socket, transport, buffer)
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(
+        http_version: :auto,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+      |> HTTP.Promise.await()
+
+    assert response.status == 200
+    assert HTTP.Response.read_all(response) == "ex-ssl-h2"
+  end
+
+  test "forced HTTPS HTTP/2 succeeds through ex_ssl" do
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+        send_h2_response(socket, transport, "forced-ex-ssl-h2")
+        assert_settings_ack(socket, transport, buffer)
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(
+        http_version: :http2,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+      |> HTTP.Promise.await()
+
+    assert HTTP.Response.read_all(response) == "forced-ex-ssl-h2"
+  end
+
+  test "auto HTTPS falls back to HTTP/1.1 through ex_ssl without ALPN" do
+    url =
+      start_https_h2_server!([], fn socket, _transport ->
+        assert {:ok, request} = recv_http1_headers(socket, <<>>)
+        assert request =~ "GET /test HTTP/1.1\r\n"
+
+        :ok =
+          :ssl.send(
+            socket,
+            "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nfallback"
+          )
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(
+        http_version: :auto,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+      |> HTTP.Promise.await()
+
+    assert HTTP.Response.read_all(response) == "fallback"
+  end
+
+  test "streams large forced HTTPS HTTP/2 responses through ex_ssl" do
+    body = :binary.copy("h", HTTP.Config.streaming_threshold() + 1)
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+        send_h2_response_headers(socket, transport, body)
+        buffer = assert_settings_ack(socket, transport, buffer)
+
+        chunks = chunk_binary(body, 16_384)
+        last_index = length(chunks) - 1
+
+        Enum.reduce(Enum.with_index(chunks), buffer, fn {chunk, index}, buffer ->
+          flags = if index == last_index, do: @end_stream, else: 0
+          send_all(socket, transport, Frame.encode(:data, flags, 1, chunk))
+
+          buffer = assert_window_update(socket, transport, buffer, 0, byte_size(chunk))
+          assert_window_update(socket, transport, buffer, 1, byte_size(chunk))
+        end)
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(
+        http_version: :http2,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+      |> HTTP.Promise.await()
+
+    assert is_pid(response.stream)
+    assert HTTP.Response.read_all(response) == body
+  end
+
+  test "forced HTTPS HTTP/2 through ex_ssl fails without h2 ALPN" do
+    url =
+      start_https_h2_server!([], fn socket, _transport ->
+        :timer.sleep(100)
+        :ssl.close(socket)
+      end)
+
+    assert {:error, {:http2_not_negotiated, nil}} =
+             url
+             |> HTTP.fetch(
+               http_version: :http2,
+               tls_backend: :ex_ssl,
+               ssl: [cacertfile: @cacertfile]
+             )
+             |> HTTP.Promise.await()
+  end
+
   defp start_h2c_server!(handler) do
     {:ok, listen_socket} =
       :gen_tcp.listen(0, [
@@ -261,6 +379,17 @@ defmodule HTTP.SocketClientHTTP2Test do
 
     {:ok, _decoder, headers} = HPACK.decode(HPACK.new_decoder(), header_block)
     {headers, buffer}
+  end
+
+  defp recv_http1_headers(socket, acc) do
+    if String.contains?(acc, "\r\n\r\n") do
+      {:ok, acc}
+    else
+      case :ssl.recv(socket, 0, 5_000) do
+        {:ok, data} -> recv_http1_headers(socket, acc <> data)
+        {:error, reason} -> {:error, reason}
+      end
+    end
   end
 
   defp send_h2_response(socket, transport, body) do

@@ -10,6 +10,9 @@ defmodule HTTP.SocketClient do
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
     cond do
+      http_version(request) == :http3 and tls_backend(request) != nil ->
+        {:error, :tls_backend_not_supported_for_quic}
+
       http_version(request) == :http3 and Request.streaming_body?(request) ->
         {:error, :streaming_request_body_unsupported_for_http3}
 
@@ -17,7 +20,9 @@ defmodule HTTP.SocketClient do
         request_http3(request, abort_controller_pid, unix_socket_path)
 
       true ->
-        request_socket(request, abort_controller_pid, unix_socket_path)
+        with {:ok, request} <- pin_tls_backend(request) do
+          request_socket(request, abort_controller_pid, unix_socket_path)
+        end
     end
   end
 
@@ -366,6 +371,7 @@ defmodule HTTP.SocketClient do
   defp rearm(state) do
     case state.transport.setopts(state.socket, active: :once) do
       :ok -> owner_loop(state)
+      {:error, :closed} -> handle_closed(state)
       {:error, reason} -> fail(state, reason)
     end
   end
@@ -486,8 +492,9 @@ defmodule HTTP.SocketClient do
   defp connected_protocol(_transport, _socket, %{mode: :http1}), do: {:ok, :http1}
   defp connected_protocol(_transport, _socket, %{mode: :h2c}), do: {:ok, :http2}
 
-  defp connected_protocol(HTTP.Transport.SSL, socket, %{mode: :force_h2}) do
-    with {:ok, protocol} <- HTTP.Transport.SSL.negotiated_protocol(socket) do
+  defp connected_protocol(transport, socket, %{mode: :force_h2})
+       when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
+    with {:ok, protocol} <- transport.negotiated_protocol(socket) do
       case normalize_alpn_protocol(protocol) do
         "h2" -> {:ok, :http2}
         other -> {:error, {:http2_not_negotiated, other}}
@@ -495,8 +502,9 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp connected_protocol(HTTP.Transport.SSL, socket, %{mode: :auto_https}) do
-    with {:ok, protocol} <- HTTP.Transport.SSL.negotiated_protocol(socket) do
+  defp connected_protocol(transport, socket, %{mode: :auto_https})
+       when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
+    with {:ok, protocol} <- transport.negotiated_protocol(socket) do
       case normalize_alpn_protocol(protocol) do
         "h2" -> {:ok, :http2}
         _other -> {:ok, :http1}
@@ -750,9 +758,12 @@ defmodule HTTP.SocketClient do
     {:ok, HTTP.Transport.TCP, host, uri.port || 80}
   end
 
-  defp select_transport(%Request{url: %URI{scheme: "https", host: host} = uri}, _socket_path)
+  defp select_transport(
+         %Request{url: %URI{scheme: "https", host: host} = uri} = request,
+         _socket_path
+       )
        when is_binary(host) do
-    {:ok, HTTP.Transport.SSL, host, uri.port || 443}
+    {:ok, HTTP.TLSBackend.transport(tls_backend(request)), host, uri.port || 443}
   end
 
   defp select_transport(%Request{url: %URI{scheme: scheme}}, _socket_path) do
@@ -782,7 +793,8 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp protocol_selection(%Request{url: %URI{scheme: "https"}} = request, HTTP.Transport.SSL) do
+  defp protocol_selection(%Request{url: %URI{scheme: "https"}} = request, transport)
+       when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
     case http_version(request) do
       :http1 ->
         {:ok, %{mode: :http1, alpn_protocols: []}}
@@ -800,6 +812,18 @@ defmodule HTTP.SocketClient do
 
   defp http_version(%Request{} = request) do
     Keyword.get(request.transport_options, :http_version, :http1)
+  end
+
+  defp tls_backend(%Request{} = request), do: Keyword.get(request.transport_options, :tls_backend)
+
+  defp pin_tls_backend(%Request{} = request) do
+    with {:ok, backend} <- HTTP.TLSBackend.resolve(tls_backend(request)) do
+      {:ok,
+       %{
+         request
+         | transport_options: Keyword.put(request.transport_options, :tls_backend, backend)
+       }}
+    end
   end
 
   defp request_timeout(%Request{} = request),

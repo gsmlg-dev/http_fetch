@@ -37,7 +37,9 @@ defmodule HTTP.WebTransport.Options do
     "server_certificate_hashes" => :server_certificate_hashes,
     "socketOpts" => :socket_opts,
     "socket_opts" => :socket_opts,
-    "ssl" => :ssl
+    "ssl" => :ssl,
+    "tlsBackend" => :tls_backend,
+    "tls_backend" => :tls_backend
   }
 
   defstruct uri: nil,
@@ -149,7 +151,8 @@ defmodule HTTP.WebTransport.Options do
   end
 
   defp normalize_init(init) when is_list(init) do
-    with {:ok, headers} <- normalize_headers(Keyword.get(init, :headers, [])),
+    with :ok <- validate_tls_backend(Keyword.get(init, :tls_backend)),
+         {:ok, headers} <- normalize_headers(Keyword.get(init, :headers, [])),
          {:ok, owner} <- normalize_owner(Keyword.get(init, :owner, self())),
          {:ok, allow_pooling} <-
            normalize_boolean(Keyword.get(init, :allow_pooling, false), :invalid_allow_pooling),
@@ -229,6 +232,9 @@ defmodule HTTP.WebTransport.Options do
   end
 
   defp normalize_init(_init), do: {:error, :invalid_options}
+
+  defp validate_tls_backend(nil), do: :ok
+  defp validate_tls_backend(_backend), do: {:error, :tls_backend_not_supported_for_quic}
 
   defp default_backend, do: HTTP.WebTransport.Transport.QUIC
 

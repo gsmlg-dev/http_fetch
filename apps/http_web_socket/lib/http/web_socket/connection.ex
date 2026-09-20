@@ -30,6 +30,7 @@ defmodule HTTP.WebSocket.Connection do
             connect_timeout: 30_000,
             ssl: [],
             socket_opts: [],
+            tls_backend: :ssl,
             max_send_queue: 16 * 1024 * 1024,
             transport: nil,
             socket: nil,
@@ -75,6 +76,7 @@ defmodule HTTP.WebSocket.Connection do
       connect_timeout: options.connect_timeout,
       ssl: options.ssl,
       socket_opts: options.socket_opts,
+      tls_backend: options.tls_backend,
       max_send_queue: options.max_send_queue,
       binary_type: options.binary_type,
       parser: Frame.new_parser(max_message_size: options.max_message_size)
@@ -94,13 +96,15 @@ defmodule HTTP.WebSocket.Connection do
         Telemetry.connect_stop(state.uri, state.protocol, duration)
         emit(state, %Open{target: state.target})
 
-        if extra != <<>> do
-          send(self(), {:websocket_data, extra})
-        end
+        state = %{state | ready_state: @open, connect_started_at: started_at}
 
-        case rearm(state) do
-          :ok -> {:noreply, %{state | ready_state: @open, connect_started_at: started_at}}
-          {:error, reason} -> fail_connection(state, reason, started_at)
+        if extra == <<>> do
+          case rearm(state) do
+            :ok -> {:noreply, state}
+            {:error, reason} -> fail_connection(state, reason, started_at)
+          end
+        else
+          handle_socket_data(extra, state)
         end
 
       {:error, reason} ->
@@ -146,8 +150,6 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   @impl true
-  def handle_info({:websocket_data, data}, state), do: handle_socket_data(data, state)
-
   def handle_info(:close_timeout, state) do
     {:stop, :normal, finish_close(state, state.close_code || 1006, state.close_reason, false)}
   end
@@ -167,7 +169,7 @@ defmodule HTTP.WebSocket.Connection do
   defp connect_and_upgrade(state) do
     key = state |> Map.get(:uri) |> generate_key()
 
-    with {:ok, transport, host, port} <- select_transport(state.uri),
+    with {:ok, transport, host, port} <- select_transport(state),
          {:ok, request} <-
            Handshake.build_request(state.uri, state.protocols, state.headers, key),
          {:ok, socket} <- connect(transport, host, port, state),
@@ -190,15 +192,15 @@ defmodule HTTP.WebSocket.Connection do
 
   defp generate_key(_uri), do: :crypto.strong_rand_bytes(16) |> Base.encode64()
 
-  defp select_transport(%URI{scheme: "ws", host: host, port: port}) do
+  defp select_transport(%{uri: %URI{scheme: "ws", host: host, port: port}}) do
     {:ok, HTTP.Transport.TCP, host, port || 80}
   end
 
-  defp select_transport(%URI{scheme: "wss", host: host, port: port}) do
-    {:ok, HTTP.Transport.SSL, host, port || 443}
+  defp select_transport(%{uri: %URI{scheme: "wss", host: host, port: port}, tls_backend: backend}) do
+    {:ok, HTTP.TLSBackend.transport(backend), host, port || 443}
   end
 
-  defp select_transport(%URI{scheme: scheme}), do: {:error, {:unsupported_scheme, scheme}}
+  defp select_transport(%{uri: %URI{scheme: scheme}}), do: {:error, {:unsupported_scheme, scheme}}
 
   defp connect(transport, host, port, state) do
     transport.connect(
@@ -224,8 +226,7 @@ defmodule HTTP.WebSocket.Connection do
     end
   end
 
-  defp recv(HTTP.Transport.TCP, socket, timeout), do: :gen_tcp.recv(socket, 0, timeout)
-  defp recv(HTTP.Transport.SSL, socket, timeout), do: :ssl.recv(socket, 0, timeout)
+  defp recv(transport, socket, timeout), do: transport.recv(socket, 0, timeout)
 
   defp fail_connection(state, reason, started_at) do
     duration = System.monotonic_time(:microsecond) - started_at

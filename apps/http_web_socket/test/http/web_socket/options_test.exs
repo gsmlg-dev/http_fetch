@@ -1,5 +1,5 @@
 defmodule HTTP.WebSocket.OptionsTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias HTTP.WebSocket.Options
 
@@ -56,4 +56,39 @@ defmodule HTTP.WebSocket.OptionsTest do
     assert options.max_message_size == 32
     assert options.max_send_queue == 64
   end
+
+  test "selects TLS backends from atom and string map options" do
+    assert {:ok, %{tls_backend: :ssl}} =
+             Options.new("wss://example.com/socket", [], tls_backend: :ssl)
+
+    assert {:ok, %{tls_backend: :ex_ssl}} =
+             Options.new("wss://example.com/socket", [], %{"tlsBackend" => "ex_ssl"})
+
+    assert {:ok, %{tls_backend: :ssl}} =
+             Options.new("wss://example.com/socket", [], %{"tls_backend" => "ssl"})
+  end
+
+  test "pins the configured TLS backend when options are constructed" do
+    previous = Application.get_env(:http_core, :tls_backend)
+    on_exit(fn -> restore_tls_backend(previous) end)
+
+    Application.put_env(:http_core, :tls_backend, :ex_ssl)
+    assert {:ok, options} = Options.new("wss://example.com/socket")
+    assert options.tls_backend == :ex_ssl
+
+    assert {:ok, %{tls_backend: :ssl}} =
+             Options.new("wss://example.com/socket", [], tls_backend: :ssl)
+
+    Application.put_env(:http_core, :tls_backend, :ssl)
+    assert options.tls_backend == :ex_ssl
+    assert {:ok, %{tls_backend: :ssl}} = Options.new("wss://example.com/socket")
+  end
+
+  test "rejects invalid TLS backend selections" do
+    assert {:error, :invalid_tls_backend} =
+             Options.new("wss://example.com/socket", [], tls_backend: :unknown)
+  end
+
+  defp restore_tls_backend(nil), do: Application.delete_env(:http_core, :tls_backend)
+  defp restore_tls_backend(value), do: Application.put_env(:http_core, :tls_backend, value)
 end

@@ -24,11 +24,15 @@ defmodule HTTP.Transport.SSL do
   def send(socket, iodata), do: :ssl.send(socket, iodata)
 
   @impl true
+  def recv(socket, length, timeout), do: :ssl.recv(socket, length, timeout)
+
+  @impl true
   def setopts(socket, opts), do: :ssl.setopts(socket, opts)
 
   @impl true
   def close(socket), do: :ssl.close(socket)
 
+  @impl true
   @spec negotiated_protocol(:ssl.sslsocket()) :: {:ok, binary() | nil} | {:error, :closed}
   def negotiated_protocol(socket) do
     case :ssl.negotiated_protocol(socket) do
