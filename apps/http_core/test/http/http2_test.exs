@@ -13,7 +13,7 @@ defmodule HTTP.HTTP2Test do
   @max_window_size 2_147_483_647
 
   describe "outbound_control_only?/1" do
-    test "only permits acknowledgements and window updates after the upload is sent" do
+    test "classifies only acknowledgements and window updates" do
       controls = [
         Frame.encode(:settings, @ack, 0, ""),
         Frame.encode(:ping, @ack, 0, "12345678"),
@@ -22,7 +22,7 @@ defmodule HTTP.HTTP2Test do
 
       conn = %HTTP.HTTP2{outbound: controls}
       assert HTTP.HTTP2.outbound_control_only?(conn)
-      refute HTTP.HTTP2.outbound_control_only?(%{conn | pending_body: "unsent"})
+      assert HTTP.HTTP2.outbound_control_only?(%{conn | pending_body: "unsent"})
 
       for required <- [
             Frame.encode(:data, @end_stream, 1, "upload"),
@@ -203,21 +203,209 @@ defmodule HTTP.HTTP2Test do
     end
 
     test "combines HEADERS and CONTINUATION before decoding" do
-      conn = HTTP.HTTP2.new(:get)
+      body = :binary.copy("x", @initial_window_size + 5)
+
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("https://example.com/widgets"),
+        body: body
+      }
+
+      {conn, _wire} = HTTP.HTTP2.prepare_request(HTTP.HTTP2.new(:post), request)
       header_block = HPACK.encode_headers([{":status", "204"}, {"x-test", "split"}])
       size = div(IO.iodata_length(header_block), 2)
       header_block = IO.iodata_to_binary(header_block)
       <<first::binary-size(size), second::binary>> = header_block
 
-      frames = [
-        Frame.encode(:headers, @end_stream, 1, first),
-        Frame.encode(:continuation, @end_headers, 1, second)
-      ]
+      assert {:ok, conn, []} =
+               HTTP.HTTP2.stream(conn, Frame.encode(:headers, @end_stream, 1, first))
 
-      assert {:ok, _conn, [{:headers, 204, headers}, :done]} =
-               HTTP.HTTP2.stream(conn, IO.iodata_to_binary(frames))
+      refute HTTP.HTTP2.complete_response?(conn)
+      refute HTTP.HTTP2.request_stopped?(conn)
+      assert conn.pending_body == "xxxxx"
+
+      assert {:ok, conn, [{:headers, 204, headers}, :done]} =
+               HTTP.HTTP2.stream(conn, Frame.encode(:continuation, @end_headers, 1, second))
 
       assert HTTP.Headers.get(headers, "x-test") == "split"
+      assert HTTP.HTTP2.complete_response?(conn)
+      assert HTTP.HTTP2.request_stopped?(conn)
+    end
+
+    test "does not complete a bodyless response until END_STREAM arrives" do
+      assert {:ok, conn, [{:headers, 204, _headers}]} =
+               HTTP.HTTP2.stream(
+                 HTTP.HTTP2.new(:get),
+                 response_headers_frame([{":status", "204"}])
+               )
+
+      refute HTTP.HTTP2.complete_response?(conn)
+      assert {:error, :closed} = HTTP.HTTP2.close(conn)
+
+      assert {:ok, conn, [:done]} =
+               HTTP.HTTP2.stream(conn, Frame.encode(:data, @end_stream, 1, ""))
+
+      assert HTTP.HTTP2.complete_response?(conn)
+    end
+
+    test "stops an upload explicitly without discarding non-upload frames" do
+      conn = %HTTP.HTTP2{
+        pending_body: "unsent",
+        outbound: [
+          Frame.encode(:data, @end_stream, 1, "upload"),
+          Frame.encode(:settings, @ack, 0, ""),
+          Frame.encode(:settings, 0, 0, "")
+        ]
+      }
+
+      conn = HTTP.HTTP2.stop_request(conn)
+      {conn, outbound} = HTTP.HTTP2.take_outbound(conn)
+      assert [] = conn.outbound
+
+      assert {:ok, %Frame{type: :settings, flags: 0, payload: ""}, outbound} =
+               outbound |> IO.iodata_to_binary() |> Frame.decode()
+
+      assert {:ok, %Frame{type: :settings, flags: @ack, payload: ""}, ""} =
+               Frame.decode(outbound)
+
+      refute HTTP.HTTP2.outbound_control_only?(%{
+               conn
+               | outbound: [Frame.encode(:settings, 0, 0, "")]
+             })
+
+      refute HTTP.HTTP2.complete_response?(conn)
+      assert HTTP.HTTP2.request_stopped?(conn)
+
+      assert {:ok, conn, []} =
+               HTTP.HTTP2.stream(
+                 conn,
+                 Frame.encode(:window_update, 0, 1, <<0::1, 1::31>>)
+               )
+
+      assert {^conn, []} = HTTP.HTTP2.take_outbound(conn)
+    end
+
+    test "stops a pending upload after an early final response and preserves control frames" do
+      body = :binary.copy("x", @initial_window_size + 5)
+
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("https://example.com/widgets"),
+        body: body
+      }
+
+      {conn, _wire} = HTTP.HTTP2.prepare_request(HTTP.HTTP2.new(:post), request)
+
+      final_response =
+        Frame.encode(
+          :headers,
+          @end_headers ||| @end_stream,
+          1,
+          HPACK.encode_headers([{":status", "200"}])
+        )
+
+      frames = [
+        Frame.encode(:settings, 0, 0, ""),
+        Frame.encode(:window_update, 0, 0, <<0::1, 5::31>>),
+        Frame.encode(:window_update, 0, 1, <<0::1, 5::31>>),
+        final_response
+      ]
+
+      assert {:ok, conn, [{:headers, 200, _headers}, :done]} =
+               HTTP.HTTP2.stream(conn, IO.iodata_to_binary(frames))
+
+      assert HTTP.HTTP2.complete_response?(conn)
+
+      {conn, outbound} = HTTP.HTTP2.take_outbound(conn)
+
+      assert {:ok, %Frame{type: :settings, flags: flags, payload: ""}, ""} =
+               outbound |> IO.iodata_to_binary() |> Frame.decode()
+
+      assert (flags &&& @ack) == @ack
+      assert HTTP.HTTP2.outbound_control_only?(conn)
+      assert HTTP.HTTP2.request_stopped?(conn)
+
+      assert {:ok, conn, []} =
+               HTTP.HTTP2.stream(
+                 conn,
+                 IO.iodata_to_binary([
+                   Frame.encode(:window_update, 0, 0, <<0::1, 5::31>>),
+                   Frame.encode(:window_update, 0, 1, <<0::1, 5::31>>)
+                 ])
+               )
+
+      assert {^conn, []} = HTTP.HTTP2.take_outbound(conn)
+    end
+
+    test "does not restart an upload when WINDOW_UPDATE follows an early final response" do
+      body = :binary.copy("x", @initial_window_size + 5)
+
+      request = %HTTP.Request{
+        method: :post,
+        url: URI.parse("https://example.com/widgets"),
+        body: body
+      }
+
+      {conn, _wire} = HTTP.HTTP2.prepare_request(HTTP.HTTP2.new(:post), request)
+
+      final_response =
+        Frame.encode(
+          :headers,
+          @end_headers ||| @end_stream,
+          1,
+          HPACK.encode_headers([{":status", "200"}])
+        )
+
+      frames = [
+        final_response,
+        Frame.encode(:window_update, 0, 0, <<0::1, 5::31>>),
+        Frame.encode(:window_update, 0, 1, <<0::1, 5::31>>)
+      ]
+
+      assert {:ok, conn, [{:headers, 200, _headers}, :done]} =
+               HTTP.HTTP2.stream(conn, IO.iodata_to_binary(frames))
+
+      assert {_conn, []} = HTTP.HTTP2.take_outbound(conn)
+      assert HTTP.HTTP2.request_stopped?(conn)
+    end
+
+    test "accepts NO_ERROR reset after a complete response without duplicate events" do
+      final_headers =
+        Frame.encode(
+          :headers,
+          @end_headers ||| @end_stream,
+          1,
+          HPACK.encode_headers([{":status", "200"}])
+        )
+
+      reset = Frame.encode(:rst_stream, 0, 1, <<0::32>>)
+
+      assert {:ok, conn, [{:headers, 200, _headers}, :done]} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), final_headers)
+
+      assert HTTP.HTTP2.complete_response?(conn)
+      assert {:ok, ^conn, []} = HTTP.HTTP2.stream(conn, reset)
+      assert {:ok, ^conn, []} = HTTP.HTTP2.stream(conn, reset)
+
+      assert {:ok, _conn, [{:headers, 200, _headers}, :done]} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), final_headers <> reset)
+
+      assert {:error, {:stream_reset, :no_error}} =
+               HTTP.HTTP2.stream(
+                 HTTP.HTTP2.new(:get),
+                 Frame.encode(:rst_stream, 0, 1, <<0::32>>)
+               )
+    end
+
+    test "keeps an incomplete response reset as an error" do
+      headers = response_headers_frame([{":status", "200"}])
+      reset = Frame.encode(:rst_stream, 0, 1, <<0::32>>)
+
+      assert {:ok, conn, [{:headers, 200, _headers}]} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), headers)
+
+      refute HTTP.HTTP2.complete_response?(conn)
+      assert {:error, {:stream_reset, :no_error}} = HTTP.HTTP2.stream(conn, reset)
     end
 
     test "decodes hpack static, dynamic, and huffman response headers" do

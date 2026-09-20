@@ -34,6 +34,7 @@ defmodule HTTP.HTTP2 do
             max_frame_size: @initial_max_frame_size,
             pending_body: "",
             outbound: [],
+            request_stopped?: false,
             done?: false
 
   @type event :: {:headers, non_neg_integer(), Headers.t()} | {:body, binary()} | :done
@@ -101,12 +102,23 @@ defmodule HTTP.HTTP2 do
   @spec complete_response?(t()) :: boolean()
   def complete_response?(%__MODULE__{done?: done?}), do: done?
 
-  @spec outbound_control_only?(t()) :: boolean()
-  def outbound_control_only?(%__MODULE__{outbound: outbound, pending_body: ""}) do
-    Enum.all?(outbound, &control_frame?/1)
+  @spec request_stopped?(t()) :: boolean()
+  def request_stopped?(%__MODULE__{request_stopped?: stopped?}), do: stopped?
+
+  @spec stop_request(t()) :: t()
+  def stop_request(%__MODULE__{} = conn) do
+    %{
+      conn
+      | pending_body: "",
+        outbound: Enum.reject(conn.outbound, &request_data_frame?/1),
+        request_stopped?: true
+    }
   end
 
-  def outbound_control_only?(%__MODULE__{}), do: false
+  @spec outbound_control_only?(t()) :: boolean()
+  def outbound_control_only?(%__MODULE__{outbound: outbound}) do
+    Enum.all?(outbound, &control_frame?/1)
+  end
 
   defp append_buffer(%__MODULE__{buffer: buffer} = conn, data) do
     %{conn | buffer: buffer <> data}
@@ -206,7 +218,7 @@ defmodule HTTP.HTTP2 do
          {:ok, conn} <- consume_receive_window(conn, flow_controlled_size) do
       end_stream? = Frame.flag?(frame.flags, @flag_end_stream)
       forbidden? = response_body_forbidden?(conn)
-      conn = if end_stream?, do: %{conn | done?: true}, else: conn
+      conn = if end_stream?, do: complete_response(conn), else: conn
 
       events =
         []
@@ -218,6 +230,14 @@ defmodule HTTP.HTTP2 do
   end
 
   defp handle_frame(_conn, %Frame{type: :data}), do: {:error, :invalid_data_stream}
+
+  defp handle_frame(%__MODULE__{done?: true} = conn, %Frame{
+         type: :rst_stream,
+         stream_id: @client_stream_id,
+         payload: <<0::32>>
+       }) do
+    {:ok, conn, []}
+  end
 
   defp handle_frame(_conn, %Frame{
          type: :rst_stream,
@@ -288,7 +308,7 @@ defmodule HTTP.HTTP2 do
     with true <- end_stream? || {:error, :invalid_response_trailers},
          {:ok, hpack, headers} <- HPACK.decode(conn.hpack, header_block),
          :ok <- validate_response_trailers(headers) do
-      {:ok, %{conn | hpack: hpack, done?: true}, [:done]}
+      {:ok, conn |> Map.put(:hpack, hpack) |> complete_response(), [:done]}
     end
   end
 
@@ -301,9 +321,9 @@ defmodule HTTP.HTTP2 do
         {:ok, conn, []}
       else
         headers = Headers.new(regular_headers)
-        done? = end_stream? or HTTP.HTTP1.body_forbidden?(conn.method, status)
-        conn = %{conn | status: status, done?: done?}
-        events = [{:headers, status, headers}] |> maybe_done_event(done?)
+        conn = %{conn | status: status}
+        conn = if end_stream?, do: complete_response(conn), else: conn
+        events = [{:headers, status, headers}] |> maybe_done_event(end_stream?)
 
         {:ok, conn, events}
       end
@@ -493,7 +513,15 @@ defmodule HTTP.HTTP2 do
     end
   end
 
+  defp request_data_frame?(iodata) do
+    case Frame.decode(IO.iodata_to_binary(iodata)) do
+      {:ok, %Frame{type: :data, stream_id: @client_stream_id}, ""} -> true
+      _ -> false
+    end
+  end
+
   defp flush_pending_body(%__MODULE__{pending_body: ""} = conn), do: conn
+  defp flush_pending_body(%__MODULE__{request_stopped?: true} = conn), do: conn
 
   defp flush_pending_body(%__MODULE__{} = conn) do
     writable = min(conn.connection_send_window, conn.stream_send_window)
@@ -512,6 +540,12 @@ defmodule HTTP.HTTP2 do
       |> enqueue(Frame.encode(:data, flags, @client_stream_id, chunk))
       |> flush_pending_body()
     end
+  end
+
+  defp complete_response(conn) do
+    conn
+    |> Map.put(:done?, true)
+    |> stop_request()
   end
 
   defp pseudo_headers(%Request{} = request) do

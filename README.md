@@ -169,10 +169,16 @@ A complete HTTP/2 response remains deliverable if the peer closes before the
 client can write its remaining WINDOW_UPDATE or acknowledgement frames. This
 also covers responses buffered across multiple TLS records by `ex_ssl` after a
 normal peer shutdown: the client drains the receive side before deciding whether
-the response completed. Only `:closed` on optional control writes qualifies,
-and the request body must already be fully sent. END_STREAM is still required;
-truncation, required request writes, abnormal closure, cancellation and timeout
-remain errors. The original deadline and streaming backpressure are preserved.
+the response completed. Only `:closed` on optional control writes qualifies.
+A complete early response (such as 413) stops the remaining upload, including
+request DATA queued by WINDOW_UPDATE in the same batch. It also survives a
+subsequent RST_STREAM(NO_ERROR), as required by
+[RFC 9113 §8.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-8.1).
+Completion requires END_STREAM and the complete HEADERS/CONTINUATION field
+block; an unfinished upload neither proves nor prevents response completion.
+Truncation, required writes before completion, abnormal closure, cancellation
+and timeout remain errors. The original deadline and streaming backpressure
+are preserved.
 
 For `:ex_ssl`, `socket_opts` accepts `send_timeout` and
 `send_timeout_close: true`. These override matching entries in `ssl`. Custom

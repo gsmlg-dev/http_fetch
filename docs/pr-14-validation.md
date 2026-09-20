@@ -1,6 +1,192 @@
 # PR #14 validation
 
-## Follow-up: response data across TLS records
+## Early final responses (baseline a1312cc)
+
+The current round started at `a1312cc40c8d6aad2cb60e750bfba84f9b3ac1cf`,
+which was also the remote PR HEAD; the working tree was clean. The previous
+cross-record drain remains in place. This round corrects its overly broad
+assumption that an unfinished request upload invalidates a completed response.
+The earlier records below are historical; their blanket pending-upload and
+NO_ERROR-reset failure rules are superseded by this section.
+
+### Protocol basis and root cause
+
+[RFC 9113 §8.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-8.1) defines
+response completion independently of request transmission. A server may finish
+its response before receiving the entire request, then use RST_STREAM(NO_ERROR)
+to stop the upload without invalidating that response. Completion requires
+END_STREAM and completion of any associated HEADERS/CONTINUATION field block.
+A final status, Content-Length, or body-forbidden response alone is insufficient.
+
+Three decisions had been conflated:
+
+1. `outbound_control_only?/1` classified the queued frames **and** required an
+   empty `pending_body`. This prevented normal-close draining and discarded
+   complete early responses even when only an ACK needed writing.
+2. Parsing WINDOW_UPDATE could queue more request DATA before the final response
+   was recognized, and response completion did not remove that obsolete upload.
+3. Every target-stream RST_STREAM was returned as an error, including NO_ERROR
+   after a complete response. Body-forbidden responses were also incorrectly
+   considered complete without END_STREAM.
+
+The implementation separates frame classification, stopped request transmission
+and response completion. Valid completion stops the remaining upload and removes
+queued request DATA while preserving control frames. A normal ex_ssl close
+reported by an optional control write stops transmission without marking the
+response complete; the original active-once/deadline loop drains and validates
+what remains. Subsequent buffered WINDOW_UPDATE cannot restart that upload.
+Actual request DATA write failures before this transition remain failures.
+NO_ERROR reset is harmless only after verified response completion; CANCEL,
+protocol/TLS errors, truncation, cancellation and deadline retain their errors.
+
+### Initial baseline evidence
+
+A fresh detached worktree at `.trees/r3-baseline` was prepared with independent
+`deps` and `_build` using `MIX_ENV=test mix deps.get` and
+`MIX_ENV=test mix compile --warnings-as-errors`. Only the regression test file
+was copied in; production code remained at a1312cc.
+
+```bash
+MIX_ENV=test mix test apps/http_fetch/test/http/socket_client_http2_test.exs --only early_response --seed 0
+# Initial baseline: 25 discovered, 1 executed, 1 failure, 24 excluded.
+```
+
+The client POSTs 65,535 + 5 bytes. The server reads only the initial window,
+then waits for the test to suspend the HTTP owner before sending a valid 413
+response with exact body `payload-too-large` and END_STREAM. The test confirms
+normal TLS closure and the queued response before resuming the owner.
+`HTTP.Promise.await` actually returns `{:error, :closed}`, so the expected 413
+response assertion fails. Log: `/tmp/http_fetch-pr14-r3/a1312cc-first-red.log`.
+
+### Corrected expectations and additional baseline evidence
+
+The old test named `fails when SETTINGS acknowledgement cannot flush a pending
+HTTP/2 request body` is corrected to expect a 413 and exact response body after
+the same deterministic peer-close barrier. The completed branch of the existing
+WINDOW_UPDATE/upload test is likewise corrected to preserve the response and
+discard unsent DATA. Its incomplete branch retains the actual DATA-write failure
+expectation; NO_ERROR-reset rejection is separate, so a parser reset cannot hide
+loss of required-write coverage.
+
+The queue-classification test now permits an ACK-only queue even when
+`pending_body` is nonempty. Separate tests verify explicit upload stopping,
+retention of non-upload frames, continued ordinary upload flow control, and no
+false response completion. The old bodyless HEADERS/CONTINUATION fixture is made
+protocol-valid by carrying END_STREAM on HEADERS and waiting for END_HEADERS on
+CONTINUATION; the first fragment alone neither completes the response nor stops
+the pending upload.
+
+The final core test file was copied into the unchanged a1312cc worktree and run
+with these selections:
+
+```bash
+MIX_ENV=test mix test apps/http_core/test/http/http2_test.exs:235 apps/http_core/test/http/http2_test.exs:288 apps/http_core/test/http/http2_test.exs:372 --seed 0
+# 25 discovered, 3 executed, 3 failures, 22 excluded.
+```
+
+These are actual behavior failures, not missing-new-API errors: premature `:done`
+for 204 without END_STREAM; request DATA still queued after a complete response;
+and `{:stream_reset, :no_error}` after a complete response. Log:
+`/tmp/http_fetch-pr14-r3/a1312cc-core-final-red.log`. The fixed full core HTTP/2
+file passes all 25 tests. Same-batch and subsequent-call NO_ERROR resets are
+covered, including repeated reset with no duplicate events, and reset before a
+complete response remains an error.
+
+### Final integration regression evidence
+
+The final integration file was copied unchanged into the a1312cc worktree:
+
+```bash
+MIX_ENV=test mix test apps/http_fetch/test/http/socket_client_http2_test.exs --only early_response --seed 0
+# Baseline: 31 discovered, 9 executed, 6 failures, 22 excluded.
+```
+
+Five failures returned `{:error, :closed}` instead of the complete response:
+413 with body, bodyless 413, cross-record 413, a completed response followed by
+a buffered NO_ERROR reset, and WINDOW_UPDATE plus a completed response. The
+sixth returned `{:error, {:stream_reset, :no_error}}` for a complete response
+and reset parsed in the same batch. The three passing controls were OTP's early
+response, incomplete-response NO_ERROR reset, and the actual required DATA-write
+failure. Log: `/tmp/http_fetch-pr14-r3/a1312cc-final-integration-red.log`.
+
+All early-response fixtures use a 65,540-byte POST, with the peer reading the
+initial 65,535-byte window. The simple 413 and bodyless variants provide no
+additional upload credit. The cross-record variant adds WINDOW_UPDATE in its
+buffered second batch to verify that draining cannot restart a stopped upload.
+Message gates prove that the first plaintext batch is the paused owner's sole
+TLS message before releasing the second write. A bounded probe then verifies
+normal peer closure, inactive delivery, and the exact remaining plaintext buffer
+size. Only these flags and sizes are observed; no TLS keys or state dumps are
+printed. The owner resumes while the TLS receive buffer still exists.
+
+The separate-record NO_ERROR integration test permits the owner to finish after
+the complete first batch and release the buffered reset during cleanup. Protocol
+unit tests additionally parse the reset in a subsequent call and prove that it
+produces no duplicate events. Same-batch integration exercises actual reset
+parsing. NO_ERROR before completion, CANCEL, truncation, fragmented frames,
+required writes, streaming backpressure, cancellation and deadline keep their
+negative coverage. Owner and TLS process monitors verify release in the gated
+close tests. Existing cross-record/frame-fragment and streaming tests are kept.
+
+The complete final integration file passed seeds 1, 2, 3, 4 and 5: **31 tests,
+0 failures per run**, no skips or exclusions. The core HTTP/2 file passed seeds
+101, 202, 303, 404 and 505: **25 tests, 0 failures per run**. These repetitions
+check stability; the record/buffer barriers establish the timing itself.
+
+### Current local acceptance results
+
+Executed on Elixir **1.18.5**, Erlang/OTP **28** (ERTS 16.4.0.5), Go **1.26.6**.
+All commands below ran from the umbrella root, except the explicitly noted Go
+build and isolated baseline reproduction. Logs and exit codes are in
+`/tmp/http_fetch-pr14-r3/final-*.log` and `final-results.json`.
+
+| Actual command | Final result |
+| --- | --- |
+| `mix deps.get`; `MIX_ENV=test mix deps.get` | Both passed; lockfile unchanged |
+| `mix format --check-formatted` | Passed |
+| `mix compile --warnings-as-errors` | Passed |
+| `MIX_ENV=test mix compile --warnings-as-errors` | Passed |
+| `mix test` | **422 tests + 20 doctests, 0 failures, 0 skipped** |
+| `MIX_ENV=test mix test apps/http_core/test` | 168 tests, 0 failures |
+| `MIX_ENV=test mix test apps/http_fetch/test` | 171 tests + 20 doctests, 0 failures |
+| `MIX_ENV=test mix test apps/http_web_socket/test` | 33 tests, 0 failures |
+| `MIX_ENV=test mix test apps/http_event_source/test` | 26 tests, 0 failures |
+| `MIX_ENV=test mix test apps/http_web_transport/test` | 24 tests, 0 failures |
+| `mix test apps/http_fetch/test/http/socket_client_http2_test.exs --seed N` for N=1..5 | 31 tests/run, 0 failures |
+| `mix test apps/http_core/test/http/http2_test.exs --seed N` for N=101,202,303,404,505 | 25 tests/run, 0 failures |
+| `mix credo` | Passed, no issues |
+| `mix dialyzer --format github` | Passed; 4 existing ignored diagnostics, 0 new diagnostics |
+| `bash scripts/external_consumer_smoke.sh` | Passed: five packages built from current source, metadata checked, isolated dependency resolution/compilation/startup and eight local TLS exchanges |
+| `MIX_ENV=test mix test apps/http_fetch/e2e` | 50 tests, 0 failures |
+| `MIX_ENV=test mix test apps/http_web_socket/e2e` | 3 tests, 0 failures |
+| `MIX_ENV=test mix test apps/http_event_source/e2e` | 2 tests, 0 failures |
+| `MIX_ENV=test mix test apps/http_web_transport/e2e` | 3 tests, 0 failures |
+| `MIX_ENV=test mix test.e2e` | Same 58 E2E tests, 0 failures |
+
+The Go fixture was rebuilt with `go build -o ../test_server/server .` from
+`apps/http_fetch/priv/test_server`, started before E2E, and stopped afterward.
+`E2E_BASE_URL` pointed at its reported local port. `http_core` has no E2E suite;
+its root-scoped unit suite covers that workflow matrix entry. All final selected
+app and E2E runs had zero skipped/excluded tests. Baseline line/tag exclusions
+above are deliberate selection, not skipped failing tests.
+
+Cold compilation was exercised in the independent a1312cc worktree; the final
+source was also cold-compiled by the external consumer with its own `deps`,
+`_build`, and newly resolved lockfile. The consumer obtains ex_ssl transitively
+from the built http_core package, with no manually added ex_ssl dependency.
+WebTransport retains its existing QUIC boundary check; it is not a TCP TLS test.
+
+No requested local checks remain unexecuted. These results are local, not proof
+of remote CI on a future commit; new remote results belong to their exact SHA.
+Known limits remain: tests probe private ex_ssl 0.3.0 buffer flags only for
+synchronization; production uses public transport calls. OTP's previously
+recorded immediate-close `:einval` is still an error, not a new exception. The
+OTP early-response test keeps the peer open for control acknowledgements; the
+ex_ssl regressions prove close-before-control-write behavior. No backend
+fallback, POST retry, certificate-policy relaxation, new timeout, dependency
+patch, or dependency upgrade was introduced.
+
+## Historical: cross-record drain at a1312cc
 
 Reviewed baseline and remote PR HEAD: `010b0b850745b43faab73093849d3fb6a1dc6650`.
 The branch had no later commits when this follow-up started. The earlier fixes

@@ -20,12 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Deliver complete HTTP/2 responses when the peer closes immediately after an
   END_STREAM DATA frame and a non-essential WINDOW_UPDATE or acknowledgement
-  returns `:closed`. Incomplete responses, required request writes, and other
-  errors still fail normally.
+  returns `:closed`. Incomplete responses and required request writes before
+  response completion still fail normally.
 - Preserve unread ex_ssl TLS records when an HTTP/2 control write fails after
   normal peer closure. Drain them through the existing active-once receiver and
   require a complete HTTP/2 response, without extending deadlines or accepting
-  failed uploads, truncated responses, resets, or protocol errors.
+  truncated responses, error resets, or protocol errors.
+- Preserve valid HTTP/2 early final responses while cancelling remaining upload
+  DATA, including queued DATA released by WINDOW_UPDATE. Accept NO_ERROR resets
+  only after response completion; require END_STREAM and a complete field block
+  even for responses with no body.
 
 ## [0.11.0] - 2026-07-04
 

@@ -735,9 +735,10 @@ defmodule HTTP.SocketClient do
          %{protocol_module: HTTP.HTTP2, protocol: protocol, transport: transport},
          events
        ) do
-    # Classify before take_outbound/1 clears the queue, including any request
-    # body still waiting for flow-control credit. In ex_ssl 0.3.0 an established
-    # socket's peer close_notify rejects writes with :closed while retaining
+    # Classify queued frames independently from any upload waiting for credit.
+    # A complete early response stops that upload in the protocol layer.
+    # In ex_ssl 0.3.0 an established socket's peer close_notify rejects writes
+    # with :closed while retaining
     # unread plaintext; abnormal TCP closure returns :econnreset instead.
     # This owner has not closed the socket locally. Rearming it drains that
     # plaintext (or reports EOF); only the HTTP parser can complete a response.
@@ -752,9 +753,17 @@ defmodule HTTP.SocketClient do
     timeout = remaining_timeout(state.deadline_at)
 
     case send_request(state.transport, state.socket, data, timeout) do
-      :ok -> {:ok, state}
-      {:error, :closed} when discard_closed_controls? -> {:ok, state}
-      {:error, reason} -> {:error, reason}
+      :ok ->
+        {:ok, state}
+
+      {:error, :closed} when discard_closed_controls? ->
+        # Sending is over, but receiving is not necessarily over. In particular,
+        # buffered WINDOW_UPDATE frames must not restart the abandoned upload
+        # while we drain the response through the original receive/deadline loop.
+        {:ok, %{state | protocol: HTTP.HTTP2.stop_request(state.protocol)}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
