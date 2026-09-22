@@ -5,11 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.12.0] - Unreleased
+
+### Added
+- Add source-candidate coverage for verified ex_ssl TLS 1.2 across Fetch,
+  HTTP/2, WebSocket, and EventSource, and for TLS 1.3 ticket resumption over
+  fresh HTTP/1.1 connections.
+- Forward validated ex_ssl client identities, TCP socket options, and ordered
+  TLS 1.3 algorithm preferences. Pin client identities to the redirect origin.
 
 ### Changed
 - Keep OTP `:ssl` as the default TCP TLS backend while allowing verified TLS
-  1.3 through the optional `:ex_ssl` backend (`~> 0.3.0`). HTTP/3 and
+  1.3 through the optional `:ex_ssl` backend. HTTP/3 and
   WebTransport continue to use QUIC's independent TLS implementation.
 - Run individual app tests and E2E suites from the umbrella root after explicit
   test-environment preparation, so transitive runtime applications are compiled
@@ -30,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DATA, including queued DATA released by WINDOW_UPDATE. Accept NO_ERROR resets
   only after response completion; require END_STREAM and a complete field block
   even for responses with no body.
+- Enforce HTTP/2 response Content-Length and bounded frame/header parsing while
+  preserving valid cross-record and streaming completion after peer closure.
 
 ## [0.11.0] - 2026-07-04
 
