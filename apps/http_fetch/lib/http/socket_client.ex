@@ -537,12 +537,15 @@ defmodule HTTP.SocketClient do
   end
 
   defp validate_transport_option_lists(HTTP.Transport.ExSSL, request) do
-    if Enum.all?([:ssl, :socket_opts], fn key ->
-         opts = Keyword.get(request.transport_options, key, [])
+    valid? =
+      Enum.all?([:ssl, :socket_opts], fn key ->
+        opts = Keyword.get(request.transport_options, key, [])
 
-         Keyword.keyword?(opts) and
-           length(Keyword.keys(opts)) == length(Enum.uniq(Keyword.keys(opts)))
-       end) do
+        Keyword.keyword?(opts) and
+          length(Keyword.keys(opts)) == length(Enum.uniq(Keyword.keys(opts)))
+      end)
+
+    if valid? do
       :ok
     else
       {:error, {:options, :invalid_options}}
