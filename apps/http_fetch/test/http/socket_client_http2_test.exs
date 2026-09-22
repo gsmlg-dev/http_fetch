@@ -1763,7 +1763,7 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   defp assert_tls_buffered_after_peer_close(tls_pid, expected_size) do
-    assert Application.spec(:ex_ssl, :vsn) == ~c"0.3.0",
+    assert Application.spec(:ex_ssl, :vsn) == ~c"0.4.0",
            "revalidate this private buffer probe before testing another ex_ssl version"
 
     assert_tls_buffered_after_peer_close(

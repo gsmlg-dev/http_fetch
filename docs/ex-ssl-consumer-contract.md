@@ -1,9 +1,8 @@
 # TCP TLS consumer contract
 
-Audited against PR #14 head `690258ac38e50b0d1a968d9d5e510c560f45f5d4`
-on 2026-09-22. OTP `:ssl` stays the default; ex_ssl is explicitly selected.
-This inventory separates implemented consumer requirements from planned library
-features. It does not claim full OTP compatibility.
+Audited against PR #14 baseline `690258ac38e50b0d1a968d9d5e510c560f45f5d4`
+and released ex_ssl 0.4.0 on 2026-09-22. OTP `:ssl` stays the default; ex_ssl
+is explicitly selected. This inventory does not claim full OTP compatibility.
 
 | Requirement | Status | Production boundary | Executable coverage |
 | --- | --- | --- | --- |
@@ -19,7 +18,8 @@ features. It does not claim full OTP compatibility.
 | Wrong CA/reference hostname and profile/ALPN conflicts | implemented | adapter forwards to verified ex_ssl options | `tls_transport_test.exs` (adapter-level evidence) |
 | No automatic backend fallback | implemented | fixed adapter, explicit option/handshake errors | `tls_backend_test.exs`, TLS-1.2-only peer negative in `tls_transport_test.exs` |
 | `socket_opts: [send_timeout: ..., send_timeout_close: true]` | implemented | ExSSL translates these two options; socket values override matching `ssl` values | `tls_transport_test.exs` |
-| Arbitrary TCP options, verify-none, client certificates, TLS 1.2/mixed versions | deliberately unsupported in ex_ssl 0.3.0 | explicit redacted option errors | `tls_transport_test.exs` |
+| Safe TCP options, client certificates, TLS 1.2/mixed versions, ordered TLS policy | implemented in ex_ssl 0.4.0 | allowlisted adapter options and independent ex_ssl engine | packaged-source 47-test gate, published-dependency smoke, and scoped transport tests |
+| Arbitrary TCP options, verify-none, early data, TLS 1.2 resumption | unsupported | explicit option/protocol errors | negative option and authentication tests |
 | Introspection beyond negotiated ALPN, active-N, packet modes | not required by audited consumer | no production callsites | library roadmap; not a Phase 0 blocker |
 | HTTP/3 and WebTransport | separate QUIC implementation | explicit TCP backend rejected; shared default ignored | fetch SSL transport tests and WebTransport option/TLS config tests |
 
@@ -35,28 +35,30 @@ is dropped to make a connection succeed.
 The cross-record fixture suspends the HTTP owner after it enters its receive
 loop, proves its sole first plaintext delivery, releases later peer output, and
 checks authenticated closure with retained plaintext before resuming. Its private
-ex_ssl state probe is test-only, guarded to version 0.3.0, and checks exact byte
+ex_ssl state probe is test-only, guarded to version 0.4.0, and checks exact byte
 count plus passive mode. Larger streaming responses drain incrementally through
 flow control before the final gated records; they do not require an oversized
 passive TLS buffer.
 
-Current validation is tracked in the ex_ssl worktree's
+Current validation is tracked in the ex_ssl repository's
 `docs/EX_SSL_HTTP_FETCH_PROGRESS.md`. Historical PR validation remains in
 [pr-14-validation.md](pr-14-validation.md). Commands must run from the umbrella
 root. Adapter-level security tests do not establish per-client-family coverage
 of every invalid option, and local OTP peers do not prove every server or runtime.
 
-## Phase 1 source candidate
+## Phase 1: algorithms in ex_ssl 0.4.0
 
-The unreleased ex_ssl candidate adds P-384 ECDHE/ECDSA, Ed25519 and
-RSA-PSS-PSS SHA-256/384/512. Consumer package metadata still uses ex_ssl 0.3.0;
-these new algorithms require the candidate source until a separate release.
+ex_ssl 0.4.0 adds P-384 ECDHE/ECDSA, Ed25519 and RSA-PSS-PSS SHA-256/384/512.
+The source smoke below records the pre-release cross-repository validation;
+the current consumer dependency resolves the published 0.4.0 package.
 
 Run `EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl bash scripts/ex_ssl_source_smoke.sh`
 from the umbrella root. This builds all five fresh package artifacts into a
 temporary consumer and explicitly overrides ex_ssl there; repository manifests,
 lockfiles and installed sources are unchanged. It is separate from the existing
 five-package released-dependency smoke, which has no ex_ssl override.
+Set `EX_SSL_DEP_MODE=published` with the same fixture source directory to run
+the 47-test feature gate against the Hex release rather than the source override.
 
 Seed 36 on OTP 28 / Elixir 1.18.5: 12 tests, zero failures (ten positive exchanges
 cover each new signature over HTTP/1.1+P-384 HRR and HTTP/2+direct P-384; five
@@ -67,9 +69,9 @@ both HTTP mode and exact profile ALPN and waits for the SETTINGS acknowledgement
 No production workaround was added. Log: `/tmp/http-fetch-tls-plan-algorithms.log`.
 
 
-## Phase 2 source candidate
+## Phase 2: client identity in ex_ssl 0.4.0
 
-Candidate ex_ssl `fc1319d` supports one bounded initial-handshake client identity
+ex_ssl 0.4.0 supports one bounded initial-handshake client identity
 through `ssl: [certfile: ..., keyfile: ...]` or the documented in-memory forms.
 It remains separate from the server's `cacerts`/`cacertfile` trust. Encrypted keys,
 hardware signing and multiple identities remain unsupported. The library's
@@ -90,19 +92,18 @@ expired/wrong-purpose/incompatible credentials, pre-I/O key mismatch and bad
 server hostname. WSS verifies passive Upgrade, active-once frames and close;
 EventSource verifies the identity across same-origin reconnects. Redirect tests
 cover all three origin components, DNS casing, manual reuse and unchanged OTP.
-These are source-candidate tests; released ex_ssl 0.3.0 still rejects client
-identity options. No release manifest or installed dependency has been changed.
+These tests were first run against source and are now rerun against the published
+0.4.0 dependency without modifying installed dependency sources.
 
-## Phase 3 source candidate
+## Phase 3: options in ex_ssl 0.4.0
 
 The adapter forwards the safe TCP allowlist: `nodelay`, `keepalive`, `sndbuf`,
-`recbuf`, local `ip`/`port`, plus the existing send deadline options. The source
-candidate validates values and supports mutable driver options; released ex_ssl
-0.3.0 continues to reject newly unsupported keys. Keyword containers and duplicate
+`recbuf`, local `ip`/`port`, plus the existing send deadline options. ex_ssl 0.4.0
+validates values and supports mutable driver options. Keyword containers and duplicate
 keys reject before fetch adds deadlines or ALPN, including improper lists.
 Raw active/packet controls, linger and arbitrary socket backends remain rejected.
 
-The candidate accepts ordered TLS1.3 `ciphers`, `signature_algs`,
+ex_ssl 0.4.0 accepts ordered TLS 1.3 `ciphers`, `signature_algs`,
 `signature_algs_cert` and `supported_groups` through `ssl`. Generated profiles
 preserve order; explicit profile conflicts fail before I/O. The certificate
 signature policy is separate from handshake CertificateVerify. No supplied
@@ -114,19 +115,18 @@ selection, IPv6 local binding/DNS, raw option precedence/mutation, authenticatio
 failures and pre-I/O rejection of malformed/unsafe/conflicting options. The same
 shared adapter serves WSS and SSE. No TLS1.2 or default change is introduced here.
 
-## Phase 4 source candidate
+## Phase 4: TLS 1.2 in ex_ssl 0.4.0
 
-The source candidate adds verified TLS 1.2 ECDHE AES-GCM to the shared ex_ssl
-adapter. The independent OpenSSL packaged-source gate covers HTTP/1.1 and HTTP/2
+ex_ssl 0.4.0 adds verified TLS 1.2 ECDHE AES-GCM to the shared adapter. The
+independent OpenSSL packaged gate covers HTTP/1.1 and HTTP/2
 with both TLS 1.2-only and mixed offers, mixed-offer TLS 1.3 selection, WSS
 Upgrade/frame/close, and EventSource reconnect with pinned backend and
 Last-Event-ID. All seven scenarios pass in the final 47-test source gate.
 The expanded HTTP/2 fixture sends 262,144 bytes, honors connection/stream
 flow control, and requires observed WINDOW_UPDATE frames; its seven-test gate
-also passes. The released ex_ssl 0.3.0 remains TLS 1.3-only. TLS 1.2 session resumption and full
-OTP option parity are not claimed.
+also passes. TLS 1.2 session resumption and full OTP option parity are not claimed.
 
-## Phase 5 source candidate
+## Phase 5: opt-in TLS 1.3 resumption in ex_ssl 0.4.0
 
 `ssl: [versions: [:"tlsv1.3"], session_tickets: :auto]` enables bounded TLS 1.3
 ticket reuse for a fresh connection to the same authenticated context. The
@@ -137,7 +137,33 @@ handshake processing on the same socket.
 
 `scripts/ex_ssl_resumption_test.exs` uses two packaged HTTP/1.1 fetches against
 one Python/OpenSSL context and checks the peer's `session_reused` value is false
-then true. It is a source-candidate test and does not extend the released
-dependency contract. Cache policy isolation and measured performance are
+then true. Cache policy isolation and measured performance are
 recorded in the library readiness report. This consumer check proves only the
 HTTP/1.1 adapter path; HTTP/2/WSS/SSE resumption is not separately verified.
+
+## Published 0.4.0 validation (2026-09-22)
+
+The umbrella lock resolves Hex ex_ssl 0.4.0. The test-only cross-record buffer
+probe was revalidated against its `closed`, `size`, and `active` fields and its
+version guard advanced from 0.3.0 to 0.4.0. `MIX_ENV=test mix test
+apps/http_fetch/test/http/socket_client_http2_test.exs --only cross_record`
+passed 11 tests with 23 excluded. The full `MIX_ENV=test mix test` passed 185
+`http_core`, 176 `http_fetch` plus 20 doctests, 33 WebSocket, 24 WebTransport,
+and 26 EventSource tests, all with zero failures. `MIX_ENV=test mix compile
+--warnings-as-errors`, `mix format --check-formatted`, `mix credo` (116 files,
+no issues), and `mix dialyzer` (four existing ignored warnings, zero unnecessary
+skips) passed.
+
+The fresh five-package `bash scripts/external_consumer_smoke.sh` passed with a
+transitive Hex ex_ssl 0.4.0 dependency and no source override. The broader
+`EX_SSL_DEP_MODE=published EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl bash
+scripts/ex_ssl_source_smoke.sh` resolved ex_ssl from Hex and passed 47 tests;
+the source directory supplies only test fixture builders in that mode. Neither
+smoke modifies installed dependency sources. On the first published run, the
+unit suite had two failures from obsolete 0.3.0 negative expectations for
+TLS 1.2 and `nodelay: true`; the first external smoke failed its obsolete
+`~> 0.3.0` metadata assertion. Those assertions were updated to test supported
+and still-rejected values before the passing reruns. An earlier source-mode
+47-test run had one intermittent large HTTP/2 `:econnreset`; the independent
+test peer now holds its close until the client reads the complete response.
+The final source-mode and published-mode 47-test runs each had zero failures.

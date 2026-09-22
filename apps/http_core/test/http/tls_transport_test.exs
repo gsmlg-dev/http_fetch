@@ -98,15 +98,22 @@ defmodule HTTP.TLSTransportTest do
   test "ex_ssl rejects unsupported TLS and TCP options before connecting" do
     for ssl <- [
           [verify: :verify_none],
-          [versions: [:"tlsv1.2"]],
-          [versions: [:"tlsv1.3", :"tlsv1.2"]],
+          [versions: [:"tlsv1.1"]],
           [certfile: @cert]
         ] do
       assert {:error, {:options, _}} = ExSSL.connect("localhost", 0, [ssl: ssl], 100)
     end
 
     assert {:error, {:options, {:nodelay, :unsupported_or_invalid}}} =
-             ExSSL.connect("localhost", 0, [socket_opts: [nodelay: true]], 100)
+             ExSSL.connect("localhost", 0, [socket_opts: [nodelay: :invalid]], 100)
+
+    assert {:error, :econnrefused} =
+             ExSSL.connect("127.0.0.1", 0, [socket_opts: [nodelay: true]], 100)
+
+    for versions <- [[:"tlsv1.2"], [:"tlsv1.3", :"tlsv1.2"]] do
+      assert {:error, :econnrefused} =
+               ExSSL.connect("127.0.0.1", 0, [ssl: [versions: versions]], 100)
+    end
 
     assert {:error, {:options, {:send_timeout_close, :unsupported_or_invalid}}} =
              ExSSL.connect("localhost", 0, [socket_opts: [send_timeout_close: false]], 100)

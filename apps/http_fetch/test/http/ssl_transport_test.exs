@@ -25,7 +25,7 @@ defmodule HTTP.SSLTransportTest do
     end
 
     test "rejects unsupported ex_ssl socket options through HTTP.fetch" do
-      for socket_opts <- [[nodelay: true], [send_timeout_close: false]] do
+      for socket_opts <- [[nodelay: :invalid], [send_timeout_close: false]] do
         assert {:error, {:options, _reason}} =
                  "https://127.0.0.1:1/secure"
                  |> HTTP.fetch(tls_backend: :ex_ssl, socket_opts: socket_opts)

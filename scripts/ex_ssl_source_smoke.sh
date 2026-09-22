@@ -4,6 +4,12 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 : "${EX_SSL_SOURCE_DIR:?Set EX_SSL_SOURCE_DIR to the candidate ex_ssl checkout}"
 export EX_SSL_SOURCE_DIR=$(cd "$EX_SSL_SOURCE_DIR" && pwd)
+: "${EX_SSL_DEP_MODE:=source}"
+if [[ "$EX_SSL_DEP_MODE" != source && "$EX_SSL_DEP_MODE" != published ]]; then
+  echo "EX_SSL_DEP_MODE must be source or published" >&2
+  exit 2
+fi
+export EX_SSL_DEP_MODE
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 export HTTP_FETCH_PACKAGE_DIR="$work_dir/packages"
@@ -16,13 +22,20 @@ defmodule CandidateConsumer.MixProject do
   use Mix.Project
   def project do
     packages = System.fetch_env!("HTTP_FETCH_PACKAGE_DIR")
+    ex_ssl_dep =
+      if System.fetch_env!("EX_SSL_DEP_MODE") == "published" do
+        {:ex_ssl, "~> 0.4.0"}
+      else
+        {:ex_ssl, path: System.fetch_env!("EX_SSL_SOURCE_DIR"), override: true}
+      end
+
     [app: :candidate_consumer, version: "0.0.0", deps: [
       {:http_core, path: Path.join(packages, "http_core")},
       {:http_fetch, path: Path.join(packages, "http_fetch")},
       {:http_web_socket, path: Path.join(packages, "http_web_socket")},
       {:http_event_source, path: Path.join(packages, "http_event_source")},
       {:http_web_transport, path: Path.join(packages, "http_web_transport")},
-      {:ex_ssl, path: System.fetch_env!("EX_SSL_SOURCE_DIR"), override: true}
+      ex_ssl_dep
     ]]
   end
   def application, do: [extra_applications: [:logger, :ssl, :public_key]]
@@ -34,4 +47,12 @@ for test_file in "$repo_root"/scripts/ex_ssl_*_test.exs; do
 done
 cp "$repo_root/scripts/ex_ssl_tls12_peer.py" "$work_dir/consumer/test/ex_ssl_tls12_peer.py"
 printf 'ExUnit.start()\n' > "$work_dir/consumer/test/test_helper.exs"
-(cd "$work_dir/consumer" && mix deps.get && mix compile --warnings-as-errors && mix test "$@" --seed 36)
+(
+  cd "$work_dir/consumer"
+  mix deps.get
+  mix compile --warnings-as-errors
+  if [[ "$EX_SSL_DEP_MODE" == published ]]; then
+    mix run -e 'unless Application.spec(:ex_ssl, :vsn) == ~c"0.4.0", do: raise "expected published ex_ssl 0.4.0"'
+  fi
+  mix test "$@" --seed 36
+)

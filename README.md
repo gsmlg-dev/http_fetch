@@ -155,15 +155,14 @@ configuration. The backend is captured when the request/client is created and
 retained through redirects and EventSource reconnects; runtime configuration
 changes affect new operations. Invalid selections fail explicitly.
 
-`http_core` declares `ex_ssl ~> 0.3.0` as a transitive runtime dependency,
-allowing 0.3.x patch updates. Consumers do not need to add it separately.
-`ssl: [...]` supplies TLS settings to the selected backend. The `ex_ssl` 0.3.0
-backend uses the `SSL` module and requires peer verification and TLS 1.3. It uses
-system CA certificates unless `cacerts` or `cacertfile` is supplied. DNS names
-and IP addresses are verified against the peer certificate. TLS 1.2,
-`verify: :verify_none`, client certificates, and arbitrary TCP socket options
-are unsupported and return errors; connections never fall back to another
-backend automatically.
+`http_core` declares `ex_ssl ~> 0.4.0` as a transitive runtime dependency.
+Consumers do not need to add it separately. `ssl: [...]` supplies TLS settings
+to the selected backend. The `ex_ssl` backend uses its own `SSL` protocol engine
+and requires peer verification. TLS 1.3 is the default; verified TLS 1.2 is
+explicitly selectable. It uses system CA certificates unless `cacerts` or
+`cacertfile` is supplied. DNS names and IP addresses are verified against the
+peer certificate. `verify: :verify_none` and unsupported TLS or TCP options
+return errors; connections never fall back to another backend automatically.
 
 A complete HTTP/2 response remains deliverable if the peer closes before the
 client can write its remaining WINDOW_UPDATE or acknowledgement frames. This
@@ -189,39 +188,38 @@ Truncation, required writes before completion, abnormal closure, cancellation
 and timeout remain errors. The original deadline and streaming backpressure
 are preserved.
 
-For `:ex_ssl`, `socket_opts` accepts `send_timeout` and
-`send_timeout_close: true`. The unreleased source candidate also implements
-`nodelay`, `keepalive`, `sndbuf`, `recbuf`, and local `ip`/`port`; the adapter
-forwards only this allowlist and ex_ssl validates values. IPv6 literals infer the
-family; an IPv6 local `ip` tuple selects IPv6 DNS resolution. Both option
-containers must be keyword lists. These override matching entries in `ssl`. Custom
+For `:ex_ssl`, `socket_opts` accepts `send_timeout`,
+`send_timeout_close: true`, `nodelay`, `keepalive`, `sndbuf`, `recbuf`, and local
+`ip`/`port`. The adapter forwards only this allowlist and ex_ssl validates values.
+IPv6 literals infer the family; an IPv6 local `ip` tuple selects IPv6 DNS
+resolution. Both option containers must be keyword lists. Socket options
+override matching entries in `ssl`. Custom
 ClientHello profiles can be passed through `ssl: [ex_ssl: [profile: profile]]`;
 any ALPN list added by HTTP/2 selection must match the profile's ALPN list exactly.
-For a source candidate that implements client authentication, ex_ssl credentials
-stay within the initial request origin during automatic redirects. A scheme,
+Configured ex_ssl client credentials stay within the initial request origin
+during automatic redirects. A scheme,
 hostname or effective-port change returns
 `{:error, :client_identity_cross_origin_redirect}`. To authorize another origin,
 use `redirect: :manual` and explicitly make a new request with that identity.
-The OTP backend retains its existing redirect behavior. Published ex_ssl 0.3.0
-does not yet support client identity options.
+The OTP backend retains its existing redirect behavior.
 
-The unreleased ex_ssl source candidate also supports verified TLS 1.2 for
+ex_ssl 0.4.0 supports verified TLS 1.2 for
 HTTP/1.1, HTTP/2, WSS and EventSource. Select it with `ssl: [versions:
 [:"tlsv1.2"]]`; a mixed TLS 1.3/TLS 1.2 offer selects the peer's supported
-version. Its independent OpenSSL source gate includes 262,144-byte HTTP/2 responses
-with observed connection and stream WINDOW_UPDATE frames. This does not change
-the published 0.3.0 contract or the OTP default.
+version. The independent OpenSSL package gate includes 262,144-byte HTTP/2
+responses with observed connection and stream WINDOW_UPDATE frames. The OTP
+default is unchanged.
 
-TLS 1.3 session resumption in that candidate is explicit:
+TLS 1.3 session resumption is explicit:
 `ssl: [versions: [:"tlsv1.3"], session_tickets: :auto]`. Tickets are disabled
 by default. Auto mode currently rejects client identities and mixed/TLS 1.2
 version offers; early data and PSK-only exchange are unsupported. When a server
 declines a ticket, a full handshake continues on the same connection without
-replaying request bytes. The source-only package test checks two fresh HTTP/1.1 connections
+replaying request bytes. The package test checks two fresh HTTP/1.1 connections
 against an independent OpenSSL peer and requires server-observed session reuse.
 This is a bounded subset, not full OTP `:ssl` parity.
 
-See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.3.0/docs/COMPATIBILITY.md).
+See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.4.0/docs/COMPATIBILITY.md).
 The [consumer contract inventory](docs/ex-ssl-consumer-contract.md) maps the
 implemented subset and intentional restrictions to its tests.
 
@@ -645,8 +643,11 @@ mix format --check-formatted
 
 MIT License
 
-For unreleased ex_ssl algorithm and mTLS candidates, the source-only integration gate is
+For cross-repository source checks, the source integration gate is
 `EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl bash scripts/ex_ssl_source_smoke.sh`.
-It validates new algorithms and mTLS against all five fresh package artifacts with a temporary
-source override. Published ex_ssl 0.3.0 retains its documented algorithm subset;
-see [the consumer contract](docs/ex-ssl-consumer-contract.md).
+It validates algorithms, mTLS, TLS 1.2, and resumption against all five fresh
+package artifacts with a temporary source override. Add
+`EX_SSL_DEP_MODE=published` to resolve ex_ssl 0.4.0 from Hex while using the
+source checkout only for test certificate fixtures. The external consumer smoke
+also checks the published dependency; see
+[the consumer contract](docs/ex-ssl-consumer-contract.md).

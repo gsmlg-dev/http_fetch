@@ -15,6 +15,9 @@ defmodule ExternalConsumerSmoke do
     assert Enum.any?(Application.started_applications(), fn {app, _, _} -> app == :ex_ssl end),
            ":ex_ssl was not started through http_core's package dependency"
 
+    assert Application.spec(:ex_ssl, :vsn) == ~c"0.4.0",
+           "published ex_ssl 0.4.0 must be loaded through http_core"
+
     certfile = System.fetch_env!("HTTP_FETCH_CERTFILE")
     cacertfile = System.fetch_env!("HTTP_FETCH_CACERTFILE")
     keyfile = System.fetch_env!("HTTP_FETCH_KEYFILE")
@@ -70,8 +73,8 @@ defmodule ExternalConsumerSmoke do
     core = metadata!(package_dir, "http_core")
     core_version = Map.fetch!(core, <<"version">>)
 
-    assert requirement!(core, <<"ex_ssl">>) == <<"~> 0.3.0">>,
-           "http_core package must require ex_ssl ~> 0.3.0"
+    assert requirement!(core, <<"ex_ssl">>) == <<"~> 0.4.0">>,
+           "http_core package must require ex_ssl ~> 0.4.0"
 
     for app <- ["http_fetch", "http_web_socket", "http_event_source", "http_web_transport"] do
       assert requirement!(metadata!(package_dir, app), <<"http_core">>) == "~> " <> core_version,

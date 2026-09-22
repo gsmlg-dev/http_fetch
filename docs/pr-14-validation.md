@@ -1,5 +1,9 @@
 # PR #14 validation
 
+> Historical PR #14 validation at ex_ssl 0.3.0. For the released ex_ssl 0.4.0
+> dependency and current consumer limits, see
+> [the TCP TLS consumer contract](ex-ssl-consumer-contract.md).
+
 ## Phase 0 continuation (2026-09-22)
 
 Current PR head remains `690258ac38e50b0d1a968d9d5e510c560f45f5d4`.

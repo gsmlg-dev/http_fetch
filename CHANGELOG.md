@@ -5,18 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.12.0] - Unreleased
+## [0.12.0] - 2026-09-22
 
 ### Added
-- Add source-candidate coverage for verified ex_ssl TLS 1.2 across Fetch,
-  HTTP/2, WebSocket, and EventSource, and for TLS 1.3 ticket resumption over
-  fresh HTTP/1.1 connections.
+- Add verified ex_ssl 0.4.0 TLS 1.2 support across Fetch, HTTP/2, WebSocket,
+  and EventSource, and opt-in TLS 1.3 ticket resumption over fresh HTTP/1.1
+  connections. The default remains verified TLS 1.3 with tickets disabled.
 - Forward validated ex_ssl client identities, TCP socket options, and ordered
   TLS 1.3 algorithm preferences. Pin client identities to the redirect origin.
 
 ### Changed
 - Keep OTP `:ssl` as the default TCP TLS backend while allowing verified TLS
-  1.3 through the optional `:ex_ssl` backend. HTTP/3 and
+  1.3 or explicitly selected TLS 1.2 through the optional `:ex_ssl` backend.
+  HTTP/3 and
   WebTransport continue to use QUIC's independent TLS implementation.
 - Run individual app tests and E2E suites from the umbrella root after explicit
   test-environment preparation, so transitive runtime applications are compiled
