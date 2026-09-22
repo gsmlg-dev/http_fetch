@@ -92,3 +92,24 @@ EventSource verifies the identity across same-origin reconnects. Redirect tests
 cover all three origin components, DNS casing, manual reuse and unchanged OTP.
 These are source-candidate tests; released ex_ssl 0.3.0 still rejects client
 identity options. No release manifest or installed dependency has been changed.
+
+## Phase 3 source candidate
+
+The adapter forwards the safe TCP allowlist: `nodelay`, `keepalive`, `sndbuf`,
+`recbuf`, local `ip`/`port`, plus the existing send deadline options. The source
+candidate validates values and supports mutable driver options; released ex_ssl
+0.3.0 continues to reject newly unsupported keys. Keyword containers and duplicate
+keys reject before fetch adds deadlines or ALPN, including improper lists.
+Raw active/packet controls, linger and arbitrary socket backends remain rejected.
+
+The candidate accepts ordered TLS1.3 `ciphers`, `signature_algs`,
+`signature_algs_cert` and `supported_groups` through `ssl`. Generated profiles
+preserve order; explicit profile conflicts fail before I/O. The certificate
+signature policy is separate from handshake CertificateVerify. No supplied
+`signature_algs_cert` preserves the earlier chain policy. See the library matrix
+for supported names/maps and deliberate differences from OTP.
+
+`scripts/ex_ssl_options_test.exs` exercises real packaged HTTP policy and TCP
+selection, IPv6 local binding/DNS, raw option precedence/mutation, authentication
+failures and pre-I/O rejection of malformed/unsafe/conflicting options. The same
+shared adapter serves WSS and SSE. No TLS1.2 or default change is introduced here.

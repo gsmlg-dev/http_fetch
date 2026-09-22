@@ -190,7 +190,11 @@ and timeout remain errors. The original deadline and streaming backpressure
 are preserved.
 
 For `:ex_ssl`, `socket_opts` accepts `send_timeout` and
-`send_timeout_close: true`. These override matching entries in `ssl`. Custom
+`send_timeout_close: true`. The unreleased source candidate also implements
+`nodelay`, `keepalive`, `sndbuf`, `recbuf`, and local `ip`/`port`; the adapter
+forwards only this allowlist and ex_ssl validates values. IPv6 literals infer the
+family; an IPv6 local `ip` tuple selects IPv6 DNS resolution. Both option
+containers must be keyword lists. These override matching entries in `ssl`. Custom
 ClientHello profiles can be passed through `ssl: [ex_ssl: [profile: profile]]`;
 any ALPN list added by HTTP/2 selection must match the profile's ALPN list exactly.
 For a source candidate that implements client authentication, ex_ssl credentials

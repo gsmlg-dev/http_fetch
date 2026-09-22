@@ -525,14 +525,31 @@ defmodule HTTP.SocketClient do
   defp connect(transport, host, port, request, selection, timeout) do
     connect_timeout = min(connect_timeout(request), timeout)
 
-    interruptible_connect(
-      transport,
-      host,
-      port,
-      transport_opts(request, selection, timeout),
-      connect_timeout
-    )
+    with :ok <- validate_transport_option_lists(transport, request) do
+      interruptible_connect(
+        transport,
+        host,
+        port,
+        transport_opts(request, selection, timeout),
+        connect_timeout
+      )
+    end
   end
+
+  defp validate_transport_option_lists(HTTP.Transport.ExSSL, request) do
+    if Enum.all?([:ssl, :socket_opts], fn key ->
+         opts = Keyword.get(request.transport_options, key, [])
+
+         Keyword.keyword?(opts) and
+           length(Keyword.keys(opts)) == length(Enum.uniq(Keyword.keys(opts)))
+       end) do
+      :ok
+    else
+      {:error, {:options, :invalid_options}}
+    end
+  end
+
+  defp validate_transport_option_lists(_transport, _request), do: :ok
 
   defp interruptible_connect(transport, host, port, opts, timeout) do
     parent = self()
