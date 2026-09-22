@@ -72,7 +72,18 @@ defmodule HTTP.Transport.ExSSL do
   end
 
   defp validate_socket_options(opts) do
-    case Enum.find(opts, fn {key, _} -> key not in [:send_timeout, :send_timeout_close] end) do
+    allowed = [
+      :send_timeout,
+      :send_timeout_close,
+      :nodelay,
+      :keepalive,
+      :sndbuf,
+      :recbuf,
+      :ip,
+      :port
+    ]
+
+    case Enum.find(opts, fn {key, _} -> key not in allowed end) do
       nil -> :ok
       {key, _} -> {:error, {:options, {key, :unsupported_or_invalid}}}
     end

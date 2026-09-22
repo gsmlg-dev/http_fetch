@@ -9,6 +9,7 @@ defmodule HTTP.HTTP2Test do
   @end_stream 0x1
   @ack 0x1
   @end_headers 0x4
+  @padded 0x8
   @initial_window_size 65_535
   @max_window_size 2_147_483_647
 
@@ -200,6 +201,179 @@ defmodule HTTP.HTTP2Test do
       outbound = assert_window_update(outbound, 0, 2)
       assert "" = assert_window_update(outbound, 1, 2)
       assert {^conn, []} = HTTP.HTTP2.take_outbound(conn)
+    end
+
+    test "rejects a final DATA frame shorter or longer than Content-Length" do
+      for {declared_length, body} <- [{3, "ok"}, {2, "too"}] do
+        frames = [
+          response_headers_frame([
+            {":status", "200"},
+            {"content-length", Integer.to_string(declared_length)}
+          ]),
+          Frame.encode(:data, @end_stream, 1, body)
+        ]
+
+        assert {:error, :content_length_mismatch} =
+                 HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), IO.iodata_to_binary(frames))
+      end
+    end
+
+    test "rejects DATA exceeding Content-Length before END_STREAM" do
+      frames = [
+        response_headers_frame([{":status", "200"}, {"content-length", "2"}]),
+        Frame.encode(:data, 0, 1, "too")
+      ]
+
+      assert {:error, :content_length_mismatch} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), IO.iodata_to_binary(frames))
+    end
+
+    test "rejects malformed and conflicting Content-Length response headers" do
+      for headers <- [
+            [{":status", "200"}, {"content-length", "two"}],
+            [{":status", "200"}, {"content-length", "2"}, {"content-length", "3"}],
+            [{":status", "200"}, {"content-length", String.duplicate("9", 21)}],
+            [{":status", "200"}, {"content-length", "18446744073709551616"}]
+          ] do
+        assert {:error, :invalid_content_length} =
+                 HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), response_headers_frame(headers))
+      end
+    end
+
+    test "accepts the largest unsigned 64-bit Content-Length" do
+      assert {:ok, %{expected_content_length: 18_446_744_073_709_551_615},
+              [{:headers, 200, _headers}]} =
+               HTTP.HTTP2.stream(
+                 HTTP.HTTP2.new(:get),
+                 response_headers_frame([
+                   {":status", "200"},
+                   {"content-length", "18446744073709551615"}
+                 ])
+               )
+    end
+
+    test "rejects Content-Length on informational response headers" do
+      assert {:error, :invalid_content_length} =
+               HTTP.HTTP2.stream(
+                 HTTP.HTTP2.new(:get),
+                 response_headers_frame([{":status", "100"}, {"content-length", "0"}])
+               )
+    end
+
+    test "counts DATA payload without padding toward Content-Length" do
+      frames = [
+        response_headers_frame([{":status", "200"}, {"content-length", "2"}]),
+        Frame.encode(:data, @padded ||| @end_stream, 1, <<2, "ok", 0, 0>>)
+      ]
+
+      assert {:ok, _conn, [{:headers, 200, _headers}, {:body, "ok"}, :done]} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), IO.iodata_to_binary(frames))
+    end
+
+    test "validates Content-Length when trailers complete a streamed response" do
+      headers = response_headers_frame([{":status", "200"}, {"content-length", "4"}])
+
+      trailers =
+        Frame.encode(
+          :headers,
+          @end_headers ||| @end_stream,
+          1,
+          HPACK.encode_headers([{"x-checksum", "ok"}])
+        )
+
+      assert {:ok, conn, [{:headers, 200, _headers}, {:body, "he"}]} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), headers <> Frame.encode(:data, 0, 1, "he"))
+
+      assert {:error, :content_length_mismatch} =
+               HTTP.HTTP2.stream(conn, trailers)
+
+      assert {:ok, conn, [{:headers, 200, _headers}, {:body, "four"}]} =
+               HTTP.HTTP2.stream(
+                 HTTP.HTTP2.new(:get),
+                 headers <> Frame.encode(:data, 0, 1, "four")
+               )
+
+      assert {:ok, _conn, [:done]} = HTTP.HTTP2.stream(conn, trailers)
+    end
+
+    test "rejects Content-Length in response trailers" do
+      headers = response_headers_frame([{":status", "200"}, {"content-length", "2"}])
+
+      trailers =
+        Frame.encode(
+          :headers,
+          @end_headers ||| @end_stream,
+          1,
+          HPACK.encode_headers([{"content-length", "2"}])
+        )
+
+      assert {:ok, conn, [{:headers, 200, _headers}, {:body, "ok"}]} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), headers <> Frame.encode(:data, 0, 1, "ok"))
+
+      assert {:error, :invalid_response_trailers} = HTTP.HTTP2.stream(conn, trailers)
+    end
+
+    test "completes a Content-Length response streamed across calls" do
+      headers = response_headers_frame([{":status", "200"}, {"content-length", "4"}])
+
+      assert {:ok, conn, [{:headers, 200, _headers}, {:body, "he"}]} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), headers <> Frame.encode(:data, 0, 1, "he"))
+
+      assert {:ok, _conn, [{:body, "ll"}, :done]} =
+               HTTP.HTTP2.stream(conn, Frame.encode(:data, @end_stream, 1, "ll"))
+    end
+
+    test "allows HEAD and 304 representation lengths without response content" do
+      for {method, status} <- [{:head, "200"}, {:get, "304"}] do
+        frame =
+          Frame.encode(
+            :headers,
+            @end_headers ||| @end_stream,
+            1,
+            HPACK.encode_headers([{":status", status}, {"content-length", "10"}])
+          )
+
+        assert {:ok, _conn, [{:headers, _status, _headers}, :done]} =
+                 HTTP.HTTP2.stream(HTTP.HTTP2.new(method), frame)
+      end
+    end
+
+    test "rejects Content-Length on a 204 response" do
+      assert {:error, :invalid_content_length} =
+               HTTP.HTTP2.stream(
+                 HTTP.HTTP2.new(:get),
+                 response_headers_frame([{":status", "204"}, {"content-length", "0"}])
+               )
+    end
+
+    test "rejects nonempty DATA on a body-forbidden response" do
+      headers = response_headers_frame([{":status", "204"}])
+
+      assert {:ok, conn, [{:headers, 204, _headers}]} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), headers)
+
+      assert {:error, :invalid_response_body} =
+               HTTP.HTTP2.stream(conn, Frame.encode(:data, @end_stream, 1, "nope"))
+    end
+
+    test "rejects DATA and HEADERS after response completion" do
+      complete =
+        Frame.encode(
+          :headers,
+          @end_headers ||| @end_stream,
+          1,
+          HPACK.encode_headers([{":status", "200"}])
+        )
+
+      assert {:ok, conn, [{:headers, 200, _headers}, :done]} =
+               HTTP.HTTP2.stream(HTTP.HTTP2.new(:get), complete)
+
+      for frame <- [
+            Frame.encode(:data, @end_stream, 1, ""),
+            response_headers_frame([{":status", "200"}])
+          ] do
+        assert {:error, :stream_closed} = HTTP.HTTP2.stream(conn, frame)
+      end
     end
 
     test "combines HEADERS and CONTINUATION before decoding" do

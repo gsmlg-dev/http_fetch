@@ -176,15 +176,54 @@ subsequent RST_STREAM(NO_ERROR), as required by
 [RFC 9113 §8.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-8.1).
 Completion requires END_STREAM and the complete HEADERS/CONTINUATION field
 block; an unfinished upload neither proves nor prevents response completion.
+HTTP/2 also validates Content-Length against unpadded DATA bytes before
+completion, rejects body overruns immediately, and reports mismatches as
+`:content_length_mismatch`. Valid HEAD/304 representation lengths do not require
+a body. Malformed/conflicting lengths, values longer than 20 decimal digits,
+and values outside the unsigned 64-bit bound return `:invalid_content_length`.
+Inbound frames are limited to the advertised 16,384-byte payload size and
+compressed header blocks to 65,536 bytes, including CONTINUATION fragments.
+Content-Length is forbidden on informational/204 responses and in trailers;
+DATA or HEADERS after END_STREAM is rejected rather than completed again.
 Truncation, required writes before completion, abnormal closure, cancellation
 and timeout remain errors. The original deadline and streaming backpressure
 are preserved.
 
 For `:ex_ssl`, `socket_opts` accepts `send_timeout` and
-`send_timeout_close: true`. These override matching entries in `ssl`. Custom
+`send_timeout_close: true`. The unreleased source candidate also implements
+`nodelay`, `keepalive`, `sndbuf`, `recbuf`, and local `ip`/`port`; the adapter
+forwards only this allowlist and ex_ssl validates values. IPv6 literals infer the
+family; an IPv6 local `ip` tuple selects IPv6 DNS resolution. Both option
+containers must be keyword lists. These override matching entries in `ssl`. Custom
 ClientHello profiles can be passed through `ssl: [ex_ssl: [profile: profile]]`;
 any ALPN list added by HTTP/2 selection must match the profile's ALPN list exactly.
+For a source candidate that implements client authentication, ex_ssl credentials
+stay within the initial request origin during automatic redirects. A scheme,
+hostname or effective-port change returns
+`{:error, :client_identity_cross_origin_redirect}`. To authorize another origin,
+use `redirect: :manual` and explicitly make a new request with that identity.
+The OTP backend retains its existing redirect behavior. Published ex_ssl 0.3.0
+does not yet support client identity options.
+
+The unreleased ex_ssl source candidate also supports verified TLS 1.2 for
+HTTP/1.1, HTTP/2, WSS and EventSource. Select it with `ssl: [versions:
+[:"tlsv1.2"]]`; a mixed TLS 1.3/TLS 1.2 offer selects the peer's supported
+version. Its independent OpenSSL source gate includes 262,144-byte HTTP/2 responses
+with observed connection and stream WINDOW_UPDATE frames. This does not change
+the published 0.3.0 contract or the OTP default.
+
+TLS 1.3 session resumption in that candidate is explicit:
+`ssl: [versions: [:"tlsv1.3"], session_tickets: :auto]`. Tickets are disabled
+by default. Auto mode currently rejects client identities and mixed/TLS 1.2
+version offers; early data and PSK-only exchange are unsupported. When a server
+declines a ticket, a full handshake continues on the same connection without
+replaying request bytes. The source-only package test checks two fresh HTTP/1.1 connections
+against an independent OpenSSL peer and requires server-observed session reuse.
+This is a bounded subset, not full OTP `:ssl` parity.
+
 See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.3.0/docs/COMPATIBILITY.md).
+The [consumer contract inventory](docs/ex-ssl-consumer-contract.md) maps the
+implemented subset and intentional restrictions to its tests.
 
 Plain HTTP, WS, and Unix sockets retain their existing transports. HTTP/3 and
 WebTransport use QUIC's separate TLS implementation and ignore the shared
@@ -605,3 +644,9 @@ mix format --check-formatted
 ## License
 
 MIT License
+
+For unreleased ex_ssl algorithm and mTLS candidates, the source-only integration gate is
+`EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl bash scripts/ex_ssl_source_smoke.sh`.
+It validates new algorithms and mTLS against all five fresh package artifacts with a temporary
+source override. Published ex_ssl 0.3.0 retains its documented algorithm subset;
+see [the consumer contract](docs/ex-ssl-consumer-contract.md).

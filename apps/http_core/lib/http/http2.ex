@@ -12,8 +12,10 @@ defmodule HTTP.HTTP2 do
   @client_stream_id 1
   @initial_window_size 65_535
   @initial_max_frame_size 16_384
+  @max_header_block_size 65_536
   @max_window_size 2_147_483_647
   @max_max_frame_size 16_777_215
+  @max_content_length "18446744073709551615"
 
   @flag_end_stream 0x1
   @flag_ack 0x1
@@ -35,6 +37,8 @@ defmodule HTTP.HTTP2 do
             pending_body: "",
             outbound: [],
             request_stopped?: false,
+            expected_content_length: nil,
+            received_content_length: 0,
             done?: false
 
   @type event :: {:headers, non_neg_integer(), Headers.t()} | {:body, binary()} | :done
@@ -124,6 +128,12 @@ defmodule HTTP.HTTP2 do
     %{conn | buffer: buffer <> data}
   end
 
+  # We do not advertise a larger receive frame size. Peer SETTINGS only change
+  # the size of frames we send, not this inbound bound.
+  defp parse(%__MODULE__{buffer: <<length::24, _header::binary-size(6), _::binary>>}, _events)
+       when length > @initial_max_frame_size,
+       do: {:error, :frame_size_error}
+
   defp parse(%__MODULE__{} = conn, events) do
     case Frame.decode(conn.buffer) do
       :more ->
@@ -170,6 +180,9 @@ defmodule HTTP.HTTP2 do
 
   defp handle_frame(_conn, %Frame{type: :settings}), do: {:error, :invalid_settings_stream}
 
+  defp handle_frame(%__MODULE__{done?: true}, %Frame{type: :headers, stream_id: @client_stream_id}),
+       do: {:error, :stream_closed}
+
   defp handle_frame(conn, %Frame{type: :headers, stream_id: @client_stream_id} = frame) do
     with {:ok, fragment} <- headers_fragment(frame) do
       end_stream? = Frame.flag?(frame.flags, @flag_end_stream)
@@ -180,6 +193,7 @@ defmodule HTTP.HTTP2 do
         continuation = %{
           stream_id: frame.stream_id,
           fragments: [fragment],
+          size: byte_size(fragment),
           end_stream?: end_stream?
         }
 
@@ -194,20 +208,32 @@ defmodule HTTP.HTTP2 do
          %__MODULE__{continuation: %{stream_id: stream_id} = continuation} = conn,
          %Frame{type: :continuation, stream_id: stream_id} = frame
        ) do
-    fragments = [frame.payload | continuation.fragments]
+    size = continuation.size + byte_size(frame.payload)
 
-    if Frame.flag?(frame.flags, @flag_end_headers) do
-      header_block = fragments |> Enum.reverse() |> IO.iodata_to_binary()
-
-      conn
-      |> Map.put(:continuation, nil)
-      |> decode_response_headers(header_block, continuation.end_stream?)
+    if size > @max_header_block_size do
+      {:error, :header_block_too_large}
     else
-      {:ok, %{conn | continuation: %{continuation | fragments: fragments}}, []}
+      fragments =
+        if frame.payload == "",
+          do: continuation.fragments,
+          else: [frame.payload | continuation.fragments]
+
+      if Frame.flag?(frame.flags, @flag_end_headers) do
+        header_block = fragments |> Enum.reverse() |> IO.iodata_to_binary()
+
+        conn
+        |> Map.put(:continuation, nil)
+        |> decode_response_headers(header_block, continuation.end_stream?)
+      else
+        {:ok, %{conn | continuation: %{continuation | fragments: fragments, size: size}}, []}
+      end
     end
   end
 
   defp handle_frame(_conn, %Frame{type: :continuation}), do: {:error, :unexpected_continuation}
+
+  defp handle_frame(%__MODULE__{done?: true}, %Frame{type: :data, stream_id: @client_stream_id}),
+    do: {:error, :stream_closed}
 
   defp handle_frame(%__MODULE__{status: nil}, %Frame{type: :data, stream_id: @client_stream_id}) do
     {:error, :data_before_response_headers}
@@ -215,17 +241,20 @@ defmodule HTTP.HTTP2 do
 
   defp handle_frame(conn, %Frame{type: :data, stream_id: @client_stream_id} = frame) do
     with {:ok, data, flow_controlled_size} <- data_payload(frame),
-         {:ok, conn} <- consume_receive_window(conn, flow_controlled_size) do
+         {:ok, conn} <- consume_receive_window(conn, flow_controlled_size),
+         :ok <- validate_response_body(conn, data),
+         {:ok, conn} <- count_response_body(conn, data) do
       end_stream? = Frame.flag?(frame.flags, @flag_end_stream)
       forbidden? = response_body_forbidden?(conn)
-      conn = if end_stream?, do: complete_response(conn), else: conn
 
-      events =
-        []
-        |> maybe_body_event(data, forbidden?)
-        |> maybe_done_event(end_stream?)
+      with {:ok, conn} <- maybe_complete_response(conn, end_stream?) do
+        events =
+          []
+          |> maybe_body_event(data, forbidden?)
+          |> maybe_done_event(end_stream?)
 
-      {:ok, conn, events}
+        {:ok, conn, events}
+      end
     end
   end
 
@@ -307,8 +336,9 @@ defmodule HTTP.HTTP2 do
        when is_integer(status) do
     with true <- end_stream? || {:error, :invalid_response_trailers},
          {:ok, hpack, headers} <- HPACK.decode(conn.hpack, header_block),
-         :ok <- validate_response_trailers(headers) do
-      {:ok, conn |> Map.put(:hpack, hpack) |> complete_response(), [:done]}
+         :ok <- validate_response_trailers(headers),
+         {:ok, conn} <- complete_response(conn) do
+      {:ok, %{conn | hpack: hpack}, [:done]}
     end
   end
 
@@ -318,14 +348,19 @@ defmodule HTTP.HTTP2 do
       conn = %{conn | hpack: hpack}
 
       if status in 100..199 do
-        {:ok, conn, []}
+        with :ok <- validate_informational_response_headers(regular_headers) do
+          {:ok, conn, []}
+        end
       else
         headers = Headers.new(regular_headers)
         conn = %{conn | status: status}
-        conn = if end_stream?, do: complete_response(conn), else: conn
-        events = [{:headers, status, headers}] |> maybe_done_event(end_stream?)
 
-        {:ok, conn, events}
+        with {:ok, conn} <- set_expected_content_length(conn, regular_headers),
+             {:ok, conn} <- maybe_complete_response(conn, end_stream?) do
+          events = [{:headers, status, headers}] |> maybe_done_event(end_stream?)
+
+          {:ok, conn, events}
+        end
       end
     end
   end
@@ -345,7 +380,9 @@ defmodule HTTP.HTTP2 do
   end
 
   defp validate_response_trailers(headers) do
-    if Enum.any?(headers, fn {name, _value} -> String.starts_with?(name, ":") end) do
+    if Enum.any?(headers, fn {name, _value} ->
+         String.starts_with?(name, ":") or name == "content-length"
+       end) do
       {:error, :invalid_response_trailers}
     else
       :ok
@@ -494,6 +531,103 @@ defmodule HTTP.HTTP2 do
   defp maybe_done_event(events, false), do: events
   defp maybe_done_event(events, true), do: events ++ [:done]
 
+  defp set_expected_content_length(conn, headers) do
+    headers
+    |> response_content_lengths()
+    |> parse_content_lengths()
+    |> case do
+      {:ok, nil} ->
+        {:ok, conn}
+
+      {:ok, length} ->
+        cond do
+          conn.status in 100..199 or conn.status == 204 ->
+            {:error, :invalid_content_length}
+
+          response_body_forbidden?(conn) ->
+            {:ok, conn}
+
+          true ->
+            {:ok, %{conn | expected_content_length: length}}
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp validate_informational_response_headers(headers) do
+    case headers |> response_content_lengths() |> parse_content_lengths() do
+      {:ok, nil} -> :ok
+      _ -> {:error, :invalid_content_length}
+    end
+  end
+
+  defp response_content_lengths(headers) do
+    headers
+    |> Enum.filter(fn {name, _value} -> name == "content-length" end)
+    |> Enum.map(fn {_name, value} -> value end)
+  end
+
+  defp parse_content_lengths([]), do: {:ok, nil}
+
+  defp parse_content_lengths(values) do
+    if Enum.any?(values, &invalid_content_length_value?/1) do
+      {:error, :invalid_content_length}
+    else
+      lengths = Enum.map(values, &String.to_integer/1)
+
+      case Enum.uniq(lengths) do
+        [length] -> {:ok, length}
+        _ -> {:error, :invalid_content_length}
+      end
+    end
+  end
+
+  defp invalid_content_length_value?(value) do
+    byte_size(value) not in 1..20 or
+      (byte_size(value) == 20 and value > @max_content_length) or
+      not Enum.all?(:binary.bin_to_list(value), &(&1 in ?0..?9))
+  end
+
+  defp validate_response_body(conn, data) do
+    if response_body_forbidden?(conn) and data != "" do
+      {:error, :invalid_response_body}
+    else
+      :ok
+    end
+  end
+
+  defp count_response_body(conn, data) do
+    conn = Map.update!(conn, :received_content_length, &(&1 + byte_size(data)))
+
+    if response_content_length_valid_or_pending?(conn) do
+      {:ok, conn}
+    else
+      {:error, :content_length_mismatch}
+    end
+  end
+
+  defp maybe_complete_response(conn, false), do: {:ok, conn}
+  defp maybe_complete_response(conn, true), do: complete_response(conn)
+
+  defp response_content_length_valid?(%__MODULE__{expected_content_length: nil}), do: true
+
+  defp response_content_length_valid?(%__MODULE__{
+         expected_content_length: expected,
+         received_content_length: received
+       }),
+       do: expected == received
+
+  defp response_content_length_valid_or_pending?(%__MODULE__{expected_content_length: nil}),
+    do: true
+
+  defp response_content_length_valid_or_pending?(%__MODULE__{
+         expected_content_length: expected,
+         received_content_length: received
+       }),
+       do: received <= expected
+
   defp response_body_forbidden?(%__MODULE__{status: nil}), do: false
 
   defp response_body_forbidden?(%__MODULE__{method: method, status: status}) do
@@ -543,9 +677,14 @@ defmodule HTTP.HTTP2 do
   end
 
   defp complete_response(conn) do
-    conn
-    |> Map.put(:done?, true)
-    |> stop_request()
+    if response_content_length_valid?(conn) do
+      {:ok,
+       conn
+       |> Map.put(:done?, true)
+       |> stop_request()}
+    else
+      {:error, :content_length_mismatch}
+    end
   end
 
   defp pseudo_headers(%Request{} = request) do

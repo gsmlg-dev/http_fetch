@@ -397,6 +397,106 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
   end
 
+  for mode <- [:buffered_short, :buffered_long, :streamed_short] do
+    @tag :cross_record
+    @tag :content_length_gate
+    @tag length_mode: mode
+    test "rejects #{mode} Content-Length mismatch after cross-record peer close", %{
+      length_mode: mode
+    } do
+      test_pid = self()
+      body = "invalid-length-body"
+
+      declared_size =
+        case mode do
+          :buffered_short -> byte_size(body) + 1
+          :buffered_long -> byte_size(body) - 1
+          :streamed_short -> HTTP.Config.streaming_threshold() + 1
+        end
+
+      headers =
+        HPACK.encode_headers([
+          {":status", "200"},
+          {"content-length", Integer.to_string(declared_size)}
+        ])
+
+      first_record = [
+        Frame.encode(:settings, 0, 0, ""),
+        Frame.encode(:headers, @end_headers, 1, headers)
+      ]
+
+      first_record_binary = IO.iodata_to_binary(first_record)
+      second_record = Frame.encode(:data, @end_stream, 1, body)
+
+      url =
+        start_https_h2_server!([<<"h2">>], fn socket, transport ->
+          {_request_headers, _buffer} = recv_client_h2_request(socket, transport)
+          send(test_pid, {:server_received_request, self()})
+
+          await_test_gate(:send_first_record)
+          send_all(socket, transport, first_record)
+          send(test_pid, :first_record_sent)
+
+          await_test_gate(:send_second_record_and_close)
+          send_all(socket, transport, second_record)
+          :ok = :ssl.close(socket)
+          send(test_pid, :second_record_closed)
+        end)
+
+      controller = HTTP.AbortController.new()
+
+      promise =
+        HTTP.fetch(url,
+          http_version: :http2,
+          signal: controller,
+          tls_backend: :ex_ssl,
+          ssl: [cacertfile: @cacertfile]
+        )
+
+      assert_receive {:server_received_request, server_pid}, 5_000
+      owner = await_owner(controller)
+      await_owner_loop(owner)
+
+      on_exit(fn ->
+        cleanup_owner(owner, controller)
+      end)
+
+      true = :erlang.suspend_process(owner)
+      send(server_pid, :send_first_record)
+      assert_receive :first_record_sent, 5_000
+
+      {tls_pid, ^first_record_binary} = await_owner_tls_data(owner, first_record_binary)
+      send(server_pid, :send_second_record_and_close)
+      assert_receive :second_record_closed, 5_000
+      assert_tls_buffered_after_peer_close(tls_pid, byte_size(second_record))
+      assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+      tls_monitor = Process.monitor(tls_pid)
+      owner_monitor = Process.monitor(owner)
+      true = :erlang.resume_process(owner)
+
+      case mode do
+        :streamed_short ->
+          response = HTTP.Promise.await(promise)
+          assert response.status == 200
+          assert is_pid(response.stream)
+          stream_monitor = Process.monitor(response.stream)
+
+          assert_raise RuntimeError, "stream read failed: :content_length_mismatch", fn ->
+            HTTP.Response.read_all(response)
+          end
+
+          assert_receive {:DOWN, ^stream_monitor, :process, _stream, :normal}, 5_000
+
+        _ ->
+          assert {:error, :content_length_mismatch} = HTTP.Promise.await(promise)
+      end
+
+      assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+    end
+  end
+
   @tag :cross_record
   test "rejects a truncated second ex_ssl TLS record after a control write fails" do
     test_pid = self()
@@ -1662,18 +1762,22 @@ defmodule HTTP.SocketClientHTTP2Test do
            |> Enum.count(&match?({:ssl, %SSL.Socket{pid: ^tls_pid}, _data}, &1)) == expected_count
   end
 
-  defp assert_tls_buffered_after_peer_close(tls_pid, minimum_size) do
+  defp assert_tls_buffered_after_peer_close(tls_pid, expected_size) do
+    assert Application.spec(:ex_ssl, :vsn) == ~c"0.3.0",
+           "revalidate this private buffer probe before testing another ex_ssl version"
+
     assert_tls_buffered_after_peer_close(
       tls_pid,
-      minimum_size,
+      expected_size,
       System.monotonic_time(:millisecond) + 5_000
     )
   end
 
-  defp assert_tls_buffered_after_peer_close(tls_pid, minimum_size, deadline_at) do
+  defp assert_tls_buffered_after_peer_close(tls_pid, expected_size, deadline_at) do
     {_phase, state} = :sys.get_state(tls_pid)
 
-    if state.closed and state.size >= minimum_size do
+    if state.closed do
+      assert state.size == expected_size
       assert state.active == false
       :ok
     else
@@ -1685,7 +1789,7 @@ defmodule HTTP.SocketClientHTTP2Test do
         receive do
         after
           min(10, remaining) ->
-            assert_tls_buffered_after_peer_close(tls_pid, minimum_size, deadline_at)
+            assert_tls_buffered_after_peer_close(tls_pid, expected_size, deadline_at)
         end
       end
     end

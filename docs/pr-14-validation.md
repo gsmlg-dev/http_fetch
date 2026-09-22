@@ -1,5 +1,30 @@
 # PR #14 validation
 
+## Phase 0 continuation (2026-09-22)
+
+Current PR head remains `690258ac38e50b0d1a968d9d5e510c560f45f5d4`.
+The new work is isolated on `codex/tls-backend-plan`. Baseline rerun passed
+422 tests plus 20 doctests on Elixir 1.18.5 / OTP 28 with seed 22.
+The cross-record closure and early-response fixes are preserved.
+
+The Phase 0 audit found a separate response-completion gap: Content-Length was
+not checked against HTTP/2 DATA. Pure regressions initially failed in four
+cases. The change counts unpadded DATA, validates all completion paths and
+rejects malformed or conflicting lengths. Real TLS regressions use the existing
+owner/peer barriers to cover short buffered, oversized buffered, and short
+streamed bodies after authenticated close. The private ex_ssl state probe now
+checks exact retained bytes and explicitly guards the tested 0.3.0 version.
+
+Final root-scoped suites at seed 25 passed **442 tests plus 20 doctests**,
+zero failures, no exclusions. Core HTTP/2 plus bounds tests passed 42 tests,
+and the HTTP/2 consumer suite passed 34 tests (seed 24). These include the
+original deterministic closure/early-response tests. Formatting, dev/test
+warnings-as-errors compilation and Credo passed.
+
+Current execution commands, outcomes and remaining phases are tracked in the
+ex_ssl companion worktree at `docs/EX_SSL_HTTP_FETCH_PROGRESS.md`; historical
+results below are not results for this continuation.
+
 ## Early final responses (baseline a1312cc)
 
 The current round started at `a1312cc40c8d6aad2cb60e750bfba84f9b3ac1cf`,
