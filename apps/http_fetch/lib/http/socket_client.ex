@@ -397,6 +397,9 @@ defmodule HTTP.SocketClient do
 
         :done
 
+      {:error, :client_identity_cross_origin_redirect = reason} ->
+        fail(state, reason)
+
       {:error, _reason} ->
         send_response(state.parent, state.ref, response)
         finish(state)
@@ -959,7 +962,8 @@ defmodule HTTP.SocketClient do
 
   defp redirect_request(request, response) do
     with location when is_binary(location) <- Headers.get(response.headers, "location"),
-         %URI{} = uri <- URI.merge(request.url, location) do
+         %URI{} = uri <- URI.merge(request.url, location),
+         :ok <- validate_client_identity_redirect(request, uri) do
       request =
         request
         |> rewrite_redirect_method(response.status)
@@ -967,8 +971,27 @@ defmodule HTTP.SocketClient do
 
       {:ok, %{request | url: uri}}
     else
+      {:error, _} = error -> error
       _ -> {:error, :invalid_redirect}
     end
+  end
+
+  defp validate_client_identity_redirect(request, uri) do
+    ssl_options = Keyword.get(request.transport_options, :ssl, [])
+
+    if tls_backend(request) == :ex_ssl and
+         Enum.any?([:cert, :certfile, :key, :keyfile], &Keyword.has_key?(ssl_options, &1)) and
+         client_identity_origin(request.url) != client_identity_origin(uri) do
+      {:error, :client_identity_cross_origin_redirect}
+    else
+      :ok
+    end
+  end
+
+  defp client_identity_origin(uri) do
+    scheme = String.downcase(uri.scheme || "")
+
+    {scheme, String.downcase(uri.host || ""), uri.port || HTTP.HTTP1.default_port(scheme)}
   end
 
   defp rewrite_redirect_method(%{method: :post} = request, status) when status in [301, 302],

@@ -53,7 +53,7 @@ RSA-PSS-PSS SHA-256/384/512. Consumer package metadata still uses ex_ssl 0.3.0;
 these new algorithms require the candidate source until a separate release.
 
 Run `EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl bash scripts/ex_ssl_source_smoke.sh`
-from the umbrella root. This builds fresh http_core/http_fetch artifacts into a
+from the umbrella root. This builds all five fresh package artifacts into a
 temporary consumer and explicitly overrides ex_ssl there; repository manifests,
 lockfiles and installed sources are unchanged. It is separate from the existing
 five-package released-dependency smoke, which has no ex_ssl override.
@@ -65,3 +65,30 @@ transport modes retain peer verification. New fixture setup initially omitted
 `http_version: :http2`, so five HTTP/2 cases failed; the corrected fixture sets
 both HTTP mode and exact profile ALPN and waits for the SETTINGS acknowledgement.
 No production workaround was added. Log: `/tmp/http-fetch-tls-plan-algorithms.log`.
+
+
+## Phase 2 source candidate
+
+Candidate ex_ssl `fc1319d` supports one bounded initial-handshake client identity
+through `ssl: [certfile: ..., keyfile: ...]` or the documented in-memory forms.
+It remains separate from the server's `cacerts`/`cacertfile` trust. Encrypted keys,
+hardware signing and multiple identities remain unsupported. The library's
+compatibility matrix documents CertificateRequest selection limits.
+
+For `:ex_ssl` with any configured `cert`, `certfile`, `key` or `keyfile`, an
+automatic redirect that changes scheme, case-insensitive hostname or effective
+port returns `{:error, :client_identity_cross_origin_redirect}` before opening
+the next connection. Same-origin redirects retain the identity. Use
+`redirect: :manual` and issue a separate, deliberate request if another origin
+is authorized to receive those credentials. OTP backend behavior is unchanged.
+This policy also rejects a downgrade to plain HTTP. HTTP/3/WebTransport remain
+on QUIC and do not use these credentials.
+
+The source smoke includes required RSA/EC/large-chain HTTP/1.1 and HTTP/2
+requests, exact server-observed client DER, optional auth, missing/wrong-CA/
+expired/wrong-purpose/incompatible credentials, pre-I/O key mismatch and bad
+server hostname. WSS verifies passive Upgrade, active-once frames and close;
+EventSource verifies the identity across same-origin reconnects. Redirect tests
+cover all three origin components, DNS casing, manual reuse and unchanged OTP.
+These are source-candidate tests; released ex_ssl 0.3.0 still rejects client
+identity options. No release manifest or installed dependency has been changed.

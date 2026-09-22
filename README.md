@@ -193,6 +193,14 @@ For `:ex_ssl`, `socket_opts` accepts `send_timeout` and
 `send_timeout_close: true`. These override matching entries in `ssl`. Custom
 ClientHello profiles can be passed through `ssl: [ex_ssl: [profile: profile]]`;
 any ALPN list added by HTTP/2 selection must match the profile's ALPN list exactly.
+For a source candidate that implements client authentication, ex_ssl credentials
+stay within the initial request origin during automatic redirects. A scheme,
+hostname or effective-port change returns
+`{:error, :client_identity_cross_origin_redirect}`. To authorize another origin,
+use `redirect: :manual` and explicitly make a new request with that identity.
+The OTP backend retains its existing redirect behavior. Published ex_ssl 0.3.0
+does not yet support client identity options.
+
 See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.3.0/docs/COMPATIBILITY.md).
 The [consumer contract inventory](docs/ex-ssl-consumer-contract.md) maps the
 implemented subset and intentional restrictions to its tests.
@@ -617,8 +625,8 @@ mix format --check-formatted
 
 MIT License
 
-For unreleased ex_ssl algorithm candidates, the source-only integration gate is
+For unreleased ex_ssl algorithm and mTLS candidates, the source-only integration gate is
 `EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl bash scripts/ex_ssl_source_smoke.sh`.
-It validates new algorithms against fresh HTTP package artifacts with a temporary
+It validates new algorithms and mTLS against all five fresh package artifacts with a temporary
 source override. Published ex_ssl 0.3.0 retains its documented algorithm subset;
 see [the consumer contract](docs/ex-ssl-consumer-contract.md).
