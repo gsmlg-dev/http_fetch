@@ -532,7 +532,8 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   @tag :cross_record
-  test "fails when SETTINGS acknowledgement cannot flush a pending HTTP/2 request body" do
+  @tag :early_response
+  test "delivers a complete 413 response when the HTTP/2 request body is still pending" do
     test_pid = self()
     body = :binary.copy("p", @initial_window_size + 5)
 
@@ -548,10 +549,12 @@ defmodule HTTP.SocketClientHTTP2Test do
 
         await_test_gate(:send_response_and_close)
 
+        response_body = "payload-too-large"
+
         send_all(socket, transport, [
           Frame.encode(:settings, 0, 0, ""),
-          Frame.encode(:headers, @end_headers, 1, response_headers("complete")),
-          Frame.encode(:data, @end_stream, 1, "complete")
+          Frame.encode(:headers, @end_headers, 1, response_headers(413, response_body)),
+          Frame.encode(:data, @end_stream, 1, response_body)
         ])
 
         :ok = :ssl.close(socket)
@@ -587,10 +590,328 @@ defmodule HTTP.SocketClientHTTP2Test do
     owner_monitor = Process.monitor(owner)
     true = :erlang.resume_process(owner)
 
-    assert {:error, :closed} =
-             HTTP.Promise.await(promise)
+    response = HTTP.Promise.await(promise)
+    assert response.status == 413
+    assert HTTP.Response.read_all(response) == "payload-too-large"
 
     assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  @tag :early_response
+  test "drains a cross-record 413 response without resuming its pending HTTP/2 upload" do
+    test_pid = self()
+    request_body = :binary.copy("p", @initial_window_size + 5)
+    response_body = "cross-record-payload-too-large"
+
+    first_record = [
+      Frame.encode(:settings, 0, 0, ""),
+      Frame.encode(:headers, @end_headers, 1, response_headers(413, response_body))
+    ]
+
+    first_record_binary = IO.iodata_to_binary(first_record)
+
+    second_record = [
+      Frame.encode(:window_update, 0, 0, <<0::1, 5::31>>),
+      Frame.encode(:window_update, 0, 1, <<0::1, 5::31>>),
+      Frame.encode(:data, @end_stream, 1, response_body)
+    ]
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+
+        {initial_body, _buffer} =
+          recv_request_body_until(socket, transport, buffer, @initial_window_size)
+
+        assert initial_body == binary_part(request_body, 0, @initial_window_size)
+        send(test_pid, {:server_received_request, self()})
+
+        await_test_gate(:send_early_response_first_record)
+        send_all(socket, transport, first_record)
+        send(test_pid, :early_response_first_record_sent)
+
+        await_test_gate(:send_early_response_second_record_and_close)
+        send_all(socket, transport, second_record)
+        :ok = :ssl.close(socket)
+        send(test_pid, :early_response_second_record_closed)
+      end)
+
+    controller = HTTP.AbortController.new()
+
+    promise =
+      HTTP.fetch(url,
+        method: :post,
+        body: request_body,
+        http_version: :http2,
+        signal: controller,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+
+    assert_receive {:server_received_request, server_pid}, 5_000
+    owner = await_owner(controller)
+    await_owner_loop(owner)
+
+    on_exit(fn ->
+      cleanup_owner(owner, controller)
+    end)
+
+    true = :erlang.suspend_process(owner)
+    send(server_pid, :send_early_response_first_record)
+    assert_receive :early_response_first_record_sent, 5_000
+
+    {tls_pid, ^first_record_binary} = await_owner_tls_data(owner, first_record_binary)
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    send(server_pid, :send_early_response_second_record_and_close)
+    assert_receive :early_response_second_record_closed, 5_000
+    assert_tls_buffered_after_peer_close(tls_pid, :erlang.iolist_size(second_record))
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    tls_monitor = Process.monitor(tls_pid)
+    owner_monitor = Process.monitor(owner)
+    true = :erlang.resume_process(owner)
+
+    response = HTTP.Promise.await(promise)
+    assert response.status == 413
+    assert HTTP.Response.read_all(response) == response_body
+    assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  @tag :early_response
+  test "delivers a no-body 413 response through ex_ssl while the HTTP/2 upload is pending" do
+    test_pid = self()
+    request_body = :binary.copy("p", @initial_window_size + 5)
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+
+        {initial_body, _buffer} =
+          recv_request_body_until(socket, transport, buffer, @initial_window_size)
+
+        assert initial_body == binary_part(request_body, 0, @initial_window_size)
+        send(test_pid, {:server_received_request, self()})
+        await_test_gate(:send_no_body_early_response_and_close)
+
+        send_all(socket, transport, [
+          Frame.encode(:settings, 0, 0, ""),
+          Frame.encode(:headers, @end_headers ||| @end_stream, 1, response_headers(413, ""))
+        ])
+
+        :ok = :ssl.close(socket)
+        send(test_pid, :no_body_early_response_closed)
+      end)
+
+    controller = HTTP.AbortController.new()
+
+    promise =
+      HTTP.fetch(url,
+        method: :post,
+        body: request_body,
+        http_version: :http2,
+        signal: controller,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+
+    assert_receive {:server_received_request, server_pid}, 5_000
+    owner = await_owner(controller)
+    await_owner_loop(owner)
+
+    on_exit(fn ->
+      cleanup_owner(owner, controller)
+    end)
+
+    true = :erlang.suspend_process(owner)
+    send(server_pid, :send_no_body_early_response_and_close)
+    assert_receive :no_body_early_response_closed, 5_000
+    tls_pid = await_owner_tls_data_and_close(owner)
+    tls_monitor = Process.monitor(tls_pid)
+    assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, _reason}, 5_000
+    owner_monitor = Process.monitor(owner)
+    true = :erlang.resume_process(owner)
+
+    response = HTTP.Promise.await(promise)
+
+    assert response.status == 413
+    assert HTTP.Response.read_all(response) == ""
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  @tag :early_response
+  test "delivers an early 413 response through OTP TLS while the peer stays open for SETTINGS ACK" do
+    test_pid = self()
+    request_body = :binary.copy("p", @initial_window_size + 5)
+    response_body = "otp-payload-too-large"
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+
+        {initial_body, buffer} =
+          recv_request_body_until(socket, transport, buffer, @initial_window_size)
+
+        assert initial_body == binary_part(request_body, 0, @initial_window_size)
+
+        send_all(socket, transport, [
+          Frame.encode(:settings, 0, 0, ""),
+          Frame.encode(:headers, @end_headers, 1, response_headers(413, response_body)),
+          Frame.encode(:data, @end_stream, 1, response_body)
+        ])
+
+        buffer = assert_settings_ack(socket, transport, buffer)
+        buffer = assert_window_update(socket, transport, buffer, 0, byte_size(response_body))
+        buffer = assert_window_update(socket, transport, buffer, 1, byte_size(response_body))
+        assert buffer == ""
+        send(test_pid, {:otp_early_response_settings_acknowledged, self()})
+        await_test_gate(:close_otp_early_response)
+      end)
+
+    promise =
+      HTTP.fetch(url,
+        method: :post,
+        body: request_body,
+        http_version: :http2,
+        ssl: [verify: :verify_none]
+      )
+
+    response = HTTP.Promise.await(promise)
+    assert response.status == 413
+    assert HTTP.Response.read_all(response) == response_body
+    assert_receive {:otp_early_response_settings_acknowledged, server_pid}, 5_000
+    send(server_pid, :close_otp_early_response)
+  end
+
+  @tag :early_response
+  test "delivers one complete response when a later buffered NO_ERROR reset follows END_STREAM" do
+    test_pid = self()
+    request_body = :binary.copy("p", @initial_window_size + 5)
+    body = "no-error-reset-after-end-stream"
+
+    first_record = [
+      Frame.encode(:settings, 0, 0, ""),
+      Frame.encode(:headers, @end_headers, 1, response_headers(body)),
+      Frame.encode(:data, @end_stream, 1, body)
+    ]
+
+    first_record_binary = IO.iodata_to_binary(first_record)
+    second_record = Frame.encode(:rst_stream, 0, 1, <<0::32>>)
+
+    url =
+      start_https_h2_server!([<<"h2">>], fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+
+        {initial_body, _buffer} =
+          recv_request_body_until(socket, transport, buffer, @initial_window_size)
+
+        assert initial_body == binary_part(request_body, 0, @initial_window_size)
+        send(test_pid, {:server_received_request, self()})
+
+        await_test_gate(:send_complete_response_record)
+        send_all(socket, transport, first_record)
+        send(test_pid, :complete_response_record_sent)
+
+        await_test_gate(:send_no_error_reset_and_close)
+        send_all(socket, transport, second_record)
+        :ok = :ssl.close(socket)
+        send(test_pid, :no_error_reset_closed)
+      end)
+
+    controller = HTTP.AbortController.new()
+
+    promise =
+      HTTP.fetch(url,
+        method: :post,
+        body: request_body,
+        http_version: :http2,
+        signal: controller,
+        tls_backend: :ex_ssl,
+        ssl: [cacertfile: @cacertfile]
+      )
+
+    assert_receive {:server_received_request, server_pid}, 5_000
+    owner = await_owner(controller)
+    await_owner_loop(owner)
+
+    on_exit(fn ->
+      cleanup_owner(owner, controller)
+    end)
+
+    true = :erlang.suspend_process(owner)
+    send(server_pid, :send_complete_response_record)
+    assert_receive :complete_response_record_sent, 5_000
+
+    {tls_pid, ^first_record_binary} = await_owner_tls_data(owner, first_record_binary)
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    send(server_pid, :send_no_error_reset_and_close)
+    assert_receive :no_error_reset_closed, 5_000
+    assert_tls_buffered_after_peer_close(tls_pid, byte_size(second_record))
+    assert_owner_has_only_tls_data(owner, tls_pid, 1)
+
+    tls_monitor = Process.monitor(tls_pid)
+    owner_monitor = Process.monitor(owner)
+    true = :erlang.resume_process(owner)
+
+    response = HTTP.Promise.await(promise)
+    assert response.status == 200
+    assert HTTP.Response.read_all(response) == body
+    assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+  end
+
+  for {completion, end_stream_flag} <- [complete: @end_stream, incomplete: 0] do
+    @tag :early_response
+    test "handles a #{completion} NO_ERROR reset in the same HTTP/2 response batch" do
+      test_pid = self()
+      request_body = :binary.copy("p", @initial_window_size + 5)
+      body = "no-error-reset"
+
+      url =
+        start_https_h2_server!([<<"h2">>], fn socket, transport ->
+          {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+
+          {initial_body, _buffer} =
+            recv_request_body_until(socket, transport, buffer, @initial_window_size)
+
+          assert initial_body == binary_part(request_body, 0, @initial_window_size)
+
+          send_all(socket, transport, [
+            Frame.encode(:settings, 0, 0, ""),
+            Frame.encode(:headers, @end_headers, 1, response_headers(body)),
+            Frame.encode(:data, unquote(end_stream_flag), 1, body),
+            Frame.encode(:rst_stream, 0, 1, <<0::32>>)
+          ])
+
+          send(test_pid, {:no_error_response_sent, self()})
+          await_test_gate(:close_no_error_response)
+        end)
+
+      result =
+        url
+        |> HTTP.fetch(
+          method: :post,
+          body: request_body,
+          http_version: :http2,
+          tls_backend: :ex_ssl,
+          ssl: [cacertfile: @cacertfile]
+        )
+        |> HTTP.Promise.await()
+
+      case unquote(completion) do
+        :complete ->
+          assert result.status == 200
+          assert HTTP.Response.read_all(result) == body
+
+        :incomplete ->
+          assert result == {:error, {:stream_reset, :no_error}}
+      end
+
+      assert_receive {:no_error_response_sent, server_pid}, 5_000
+      send(server_pid, :close_no_error_response)
+    end
   end
 
   @tag :cross_record
@@ -794,7 +1115,8 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   for {completion, end_stream_flag} <- [complete: @end_stream, incomplete: 0] do
-    test "fails when a closed ex_ssl HTTP/2 connection still needs request body writes for a #{completion} response" do
+    @tag :early_response
+    test "handles a closed ex_ssl HTTP/2 connection with request body writes for a #{completion} response" do
       test_pid = self()
       body = :binary.copy("p", @initial_window_size + 5)
 
@@ -808,18 +1130,20 @@ defmodule HTTP.SocketClientHTTP2Test do
           assert initial_body == binary_part(body, 0, @initial_window_size)
           send(test_pid, {:server_received_request, self()})
 
-          receive do
-            :send_response_and_close ->
-              send_all(socket, transport, [
-                Frame.encode(:window_update, 0, 0, <<0::1, 5::31>>),
-                Frame.encode(:window_update, 0, 1, <<0::1, 5::31>>),
-                Frame.encode(:headers, @end_headers, 1, response_headers("complete")),
-                Frame.encode(:data, unquote(end_stream_flag), 1, "complete")
-              ])
+          await_test_gate(:send_response_and_close)
 
-              :ssl.close(socket)
-              send(test_pid, :server_closed)
-          end
+          frames = [
+            Frame.encode(:settings, 0, 0, ""),
+            Frame.encode(:window_update, 0, 0, <<0::1, 5::31>>),
+            Frame.encode(:window_update, 0, 1, <<0::1, 5::31>>),
+            Frame.encode(:headers, @end_headers, 1, response_headers("complete")),
+            Frame.encode(:data, unquote(end_stream_flag), 1, "complete")
+          ]
+
+          send_all(socket, transport, frames)
+
+          :ssl.close(socket)
+          send(test_pid, :server_closed)
         end)
 
       controller = HTTP.AbortController.new()
@@ -854,7 +1178,17 @@ defmodule HTTP.SocketClientHTTP2Test do
       owner_monitor = Process.monitor(owner)
       true = :erlang.resume_process(owner)
 
-      assert {:error, :closed} = HTTP.Promise.await(promise)
+      result = HTTP.Promise.await(promise)
+
+      case unquote(completion) do
+        :complete ->
+          assert result.status == 200
+          assert HTTP.Response.read_all(result) == "complete"
+
+        :incomplete ->
+          assert result == {:error, :closed}
+      end
+
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
     end
   end
@@ -1164,9 +1498,11 @@ defmodule HTTP.SocketClientHTTP2Test do
     ])
   end
 
-  defp response_headers(body) do
+  defp response_headers(body), do: response_headers(200, body)
+
+  defp response_headers(status, body) do
     HPACK.encode_headers([
-      {":status", "200"},
+      {":status", Integer.to_string(status)},
       {"content-length", Integer.to_string(byte_size(body))},
       {"x-protocol", "h2"}
     ])
