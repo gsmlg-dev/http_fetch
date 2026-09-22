@@ -24,6 +24,31 @@ defmodule HTTP.SSLTransportTest do
                HTTP.FetchOptions.new(http_version: :http3)
     end
 
+    test "rejects unsupported ex_ssl socket options through HTTP.fetch" do
+      for socket_opts <- [[nodelay: true], [send_timeout_close: false]] do
+        assert {:error, {:options, _reason}} =
+                 "https://127.0.0.1:1/secure"
+                 |> HTTP.fetch(tls_backend: :ex_ssl, socket_opts: socket_opts)
+                 |> HTTP.Promise.await()
+      end
+    end
+
+    test "propagates ex_ssl profile and ALPN conflicts through HTTP.fetch" do
+      profile = %SSL.ClientHello.WireProfile{extensions: [{:alpn, ["http/1.1"]}]}
+
+      assert {:error, {:options, {:alpn_advertised_protocols, :profile_conflict}}} =
+               "https://127.0.0.1:1/secure"
+               |> HTTP.fetch(
+                 tls_backend: :ex_ssl,
+                 http_version: :http2,
+                 ssl: [
+                   alpn_advertised_protocols: ["h2"],
+                   ex_ssl: [profile: profile]
+                 ]
+               )
+               |> HTTP.Promise.await()
+    end
+
     test "rejects self-signed certificates by default" do
       url = start_https_server!(fn socket -> send_response(socket, "secure") end)
 
