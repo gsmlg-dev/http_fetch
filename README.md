@@ -205,6 +205,22 @@ use `redirect: :manual` and explicitly make a new request with that identity.
 The OTP backend retains its existing redirect behavior. Published ex_ssl 0.3.0
 does not yet support client identity options.
 
+The unreleased ex_ssl source candidate also supports verified TLS 1.2 for
+HTTP/1.1, HTTP/2, WSS and EventSource. Select it with `ssl: [versions:
+[:"tlsv1.2"]]`; a mixed TLS 1.3/TLS 1.2 offer selects the peer's supported
+version. Its independent OpenSSL source gate includes 262,144-byte HTTP/2 responses
+with observed connection and stream WINDOW_UPDATE frames. This does not change
+the published 0.3.0 contract or the OTP default.
+
+TLS 1.3 session resumption in that candidate is explicit:
+`ssl: [versions: [:"tlsv1.3"], session_tickets: :auto]`. Tickets are disabled
+by default. Auto mode currently rejects client identities and mixed/TLS 1.2
+version offers; early data and PSK-only exchange are unsupported. When a server
+declines a ticket, a full handshake continues on the same connection without
+replaying request bytes. The source-only package test checks two fresh HTTP/1.1 connections
+against an independent OpenSSL peer and requires server-observed session reuse.
+This is a bounded subset, not full OTP `:ssl` parity.
+
 See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.3.0/docs/COMPATIBILITY.md).
 The [consumer contract inventory](docs/ex-ssl-consumer-contract.md) maps the
 implemented subset and intentional restrictions to its tests.

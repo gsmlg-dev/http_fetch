@@ -32,5 +32,6 @@ cp "$repo_root/mix.lock" "$work_dir/consumer/mix.lock"
 for test_file in "$repo_root"/scripts/ex_ssl_*_test.exs; do
   cp "$test_file" "$work_dir/consumer/test/$(basename "$test_file")"
 done
+cp "$repo_root/scripts/ex_ssl_tls12_peer.py" "$work_dir/consumer/test/ex_ssl_tls12_peer.py"
 printf 'ExUnit.start()\n' > "$work_dir/consumer/test/test_helper.exs"
 (cd "$work_dir/consumer" && mix deps.get && mix compile --warnings-as-errors && mix test "$@" --seed 36)

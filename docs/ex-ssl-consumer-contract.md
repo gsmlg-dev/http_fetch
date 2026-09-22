@@ -113,3 +113,31 @@ for supported names/maps and deliberate differences from OTP.
 selection, IPv6 local binding/DNS, raw option precedence/mutation, authentication
 failures and pre-I/O rejection of malformed/unsafe/conflicting options. The same
 shared adapter serves WSS and SSE. No TLS1.2 or default change is introduced here.
+
+## Phase 4 source candidate
+
+The source candidate adds verified TLS 1.2 ECDHE AES-GCM to the shared ex_ssl
+adapter. The independent OpenSSL packaged-source gate covers HTTP/1.1 and HTTP/2
+with both TLS 1.2-only and mixed offers, mixed-offer TLS 1.3 selection, WSS
+Upgrade/frame/close, and EventSource reconnect with pinned backend and
+Last-Event-ID. All seven scenarios pass in the final 47-test source gate.
+The expanded HTTP/2 fixture sends 262,144 bytes, honors connection/stream
+flow control, and requires observed WINDOW_UPDATE frames; its seven-test gate
+also passes. The released ex_ssl 0.3.0 remains TLS 1.3-only. TLS 1.2 session resumption and full
+OTP option parity are not claimed.
+
+## Phase 5 source candidate
+
+`ssl: [versions: [:"tlsv1.3"], session_tickets: :auto]` enables bounded TLS 1.3
+ticket reuse for a fresh connection to the same authenticated context. The
+default is `:disabled`; auto rejects TLS 1.2/mixed offers and configured client
+identity. Early data, persistent tickets, PSK-only key exchange, and automatic
+reconnect/replay are unsupported. An unaccepted ticket follows normal full
+handshake processing on the same socket.
+
+`scripts/ex_ssl_resumption_test.exs` uses two packaged HTTP/1.1 fetches against
+one Python/OpenSSL context and checks the peer's `session_reused` value is false
+then true. It is a source-candidate test and does not extend the released
+dependency contract. Cache policy isolation and measured performance are
+recorded in the library readiness report. This consumer check proves only the
+HTTP/1.1 adapter path; HTTP/2/WSS/SSE resumption is not separately verified.
