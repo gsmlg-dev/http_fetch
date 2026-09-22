@@ -45,3 +45,23 @@ Current validation is tracked in the ex_ssl worktree's
 [pr-14-validation.md](pr-14-validation.md). Commands must run from the umbrella
 root. Adapter-level security tests do not establish per-client-family coverage
 of every invalid option, and local OTP peers do not prove every server or runtime.
+
+## Phase 1 source candidate
+
+The unreleased ex_ssl candidate adds P-384 ECDHE/ECDSA, Ed25519 and
+RSA-PSS-PSS SHA-256/384/512. Consumer package metadata still uses ex_ssl 0.3.0;
+these new algorithms require the candidate source until a separate release.
+
+Run `EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl bash scripts/ex_ssl_source_smoke.sh`
+from the umbrella root. This builds fresh http_core/http_fetch artifacts into a
+temporary consumer and explicitly overrides ex_ssl there; repository manifests,
+lockfiles and installed sources are unchanged. It is separate from the existing
+five-package released-dependency smoke, which has no ex_ssl override.
+
+Seed 36 on OTP 28 / Elixir 1.18.5: 12 tests, zero failures (ten positive exchanges
+cover each new signature over HTTP/1.1+P-384 HRR and HTTP/2+direct P-384; five
+hostname-negative scenarios in one test; one OTP-default assertion). Both
+transport modes retain peer verification. New fixture setup initially omitted
+`http_version: :http2`, so five HTTP/2 cases failed; the corrected fixture sets
+both HTTP mode and exact profile ALPN and waits for the SETTINGS acknowledgement.
+No production workaround was added. Log: `/tmp/http-fetch-tls-plan-algorithms.log`.

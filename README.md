@@ -616,3 +616,9 @@ mix format --check-formatted
 ## License
 
 MIT License
+
+For unreleased ex_ssl algorithm candidates, the source-only integration gate is
+`EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl bash scripts/ex_ssl_source_smoke.sh`.
+It validates new algorithms against fresh HTTP package artifacts with a temporary
+source override. Published ex_ssl 0.3.0 retains its documented algorithm subset;
+see [the consumer contract](docs/ex-ssl-consumer-contract.md).
