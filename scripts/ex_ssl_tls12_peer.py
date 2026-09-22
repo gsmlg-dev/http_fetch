@@ -4,6 +4,7 @@ import argparse
 import base64
 import hashlib
 import json
+import select
 import socket
 import ssl
 import struct
@@ -238,6 +239,10 @@ def main():
                     websocket(connection)
                 else:
                     sse(connection, index)
+                if args.mode == "h2":
+                    if not select.select([sys.stdin], [], [], 10)[0] or sys.stdin.buffer.readline() != b"go\n":
+                        raise ValueError("missing_h2_release")
+                    event("released")
                 if args.mode != "sse":
                     try:
                         connection.unwrap().close()

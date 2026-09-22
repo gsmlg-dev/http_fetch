@@ -48,6 +48,11 @@ defmodule CandidateTLS12Test do
         response = HTTP.Promise.await(promise, @timeout)
         assert response.status == 200
         assert HTTP.Response.read_all(response) == :binary.copy("B", expected_bytes)
+
+        if mode == "h2" do
+          true = Port.command(peer.handle, "go\n")
+          assert {:ok, _} = event(peer, "released")
+        end
       end)
     end
   end
