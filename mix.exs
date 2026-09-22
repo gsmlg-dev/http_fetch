@@ -1,7 +1,7 @@
 defmodule HttpFetch.Umbrella.MixProject do
   use Mix.Project
 
-  @version "0.12.0"
+  @version "0.13.0"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
   @e2e_apps ~w(http_fetch http_event_source http_web_transport http_web_socket)
 
