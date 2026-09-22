@@ -12,6 +12,28 @@ defmodule HTTP.HTTP2Test do
   @initial_window_size 65_535
   @max_window_size 2_147_483_647
 
+  describe "outbound_control_only?/1" do
+    test "only permits acknowledgements and window updates after the upload is sent" do
+      controls = [
+        Frame.encode(:settings, @ack, 0, ""),
+        Frame.encode(:ping, @ack, 0, "12345678"),
+        Frame.encode(:window_update, 0, 1, <<0::1, 1::31>>)
+      ]
+
+      conn = %HTTP.HTTP2{outbound: controls}
+      assert HTTP.HTTP2.outbound_control_only?(conn)
+      refute HTTP.HTTP2.outbound_control_only?(%{conn | pending_body: "unsent"})
+
+      for required <- [
+            Frame.encode(:data, @end_stream, 1, "upload"),
+            Frame.encode(:settings, 0, 0, ""),
+            Frame.encode(:ping, 0, 0, "12345678")
+          ] do
+        refute HTTP.HTTP2.outbound_control_only?(%{conn | outbound: [required | controls]})
+      end
+    end
+  end
+
   describe "serialize_request/1" do
     test "serializes the connection preface, settings, and request headers" do
       request = %HTTP.Request{
