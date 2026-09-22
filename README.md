@@ -176,6 +176,15 @@ subsequent RST_STREAM(NO_ERROR), as required by
 [RFC 9113 §8.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-8.1).
 Completion requires END_STREAM and the complete HEADERS/CONTINUATION field
 block; an unfinished upload neither proves nor prevents response completion.
+HTTP/2 also validates Content-Length against unpadded DATA bytes before
+completion, rejects body overruns immediately, and reports mismatches as
+`:content_length_mismatch`. Valid HEAD/304 representation lengths do not require
+a body. Malformed/conflicting lengths, values longer than 20 decimal digits,
+and values outside the unsigned 64-bit bound return `:invalid_content_length`.
+Inbound frames are limited to the advertised 16,384-byte payload size and
+compressed header blocks to 65,536 bytes, including CONTINUATION fragments.
+Content-Length is forbidden on informational/204 responses and in trailers;
+DATA or HEADERS after END_STREAM is rejected rather than completed again.
 Truncation, required writes before completion, abnormal closure, cancellation
 and timeout remain errors. The original deadline and streaming backpressure
 are preserved.
@@ -185,6 +194,8 @@ For `:ex_ssl`, `socket_opts` accepts `send_timeout` and
 ClientHello profiles can be passed through `ssl: [ex_ssl: [profile: profile]]`;
 any ALPN list added by HTTP/2 selection must match the profile's ALPN list exactly.
 See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.3.0/docs/COMPATIBILITY.md).
+The [consumer contract inventory](docs/ex-ssl-consumer-contract.md) maps the
+implemented subset and intentional restrictions to its tests.
 
 Plain HTTP, WS, and Unix sockets retain their existing transports. HTTP/3 and
 WebTransport use QUIC's separate TLS implementation and ignore the shared
