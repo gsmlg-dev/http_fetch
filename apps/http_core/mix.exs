@@ -1,7 +1,7 @@
 defmodule HttpCore.MixProject do
   use Mix.Project
 
-  @version "0.11.0"
+  @version "0.12.0"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
 
   def project do
