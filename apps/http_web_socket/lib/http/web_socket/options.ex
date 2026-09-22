@@ -6,6 +6,11 @@ defmodule HTTP.WebSocket.Options do
   @default_max_message_size 16 * 1024 * 1024
   @default_max_send_queue 16 * 1024 * 1024
 
+  @string_keys %{
+    "tls_backend" => :tls_backend,
+    "tlsBackend" => :tls_backend
+  }
+
   defstruct uri: nil,
             url: nil,
             protocols: [],
@@ -16,6 +21,7 @@ defmodule HTTP.WebSocket.Options do
             connect_timeout: @default_connect_timeout,
             ssl: [],
             socket_opts: [],
+            tls_backend: :ssl,
             max_message_size: @default_max_message_size,
             max_send_queue: @default_max_send_queue,
             ref: nil
@@ -31,6 +37,7 @@ defmodule HTTP.WebSocket.Options do
           connect_timeout: timeout(),
           ssl: keyword(),
           socket_opts: keyword(),
+          tls_backend: HTTP.TLSBackend.t(),
           max_message_size: pos_integer(),
           max_send_queue: pos_integer(),
           ref: reference()
@@ -54,6 +61,7 @@ defmodule HTTP.WebSocket.Options do
          connect_timeout: Keyword.get(init, :connect_timeout, @default_connect_timeout),
          ssl: Keyword.get(init, :ssl, []),
          socket_opts: Keyword.get(init, :socket_opts, []),
+         tls_backend: Keyword.fetch!(init, :tls_backend),
          max_message_size: Keyword.get(init, :max_message_size, @default_max_message_size),
          max_send_queue: Keyword.get(init, :max_send_queue, @default_max_send_queue),
          ref: Keyword.get(init, :ref, make_ref())
@@ -129,7 +137,11 @@ defmodule HTTP.WebSocket.Options do
     end
   end
 
-  defp normalize_init(init) when is_map(init), do: init |> Map.to_list() |> normalize_init()
+  defp normalize_init(init) when is_map(init) do
+    init
+    |> Enum.map(fn {key, value} -> {normalize_key(key), value} end)
+    |> normalize_init()
+  end
 
   defp normalize_init(init) when is_list(init) do
     with {:ok, headers} <- normalize_headers(Keyword.get(init, :headers, [])),
@@ -137,18 +149,23 @@ defmodule HTTP.WebSocket.Options do
          {:ok, owner} <- normalize_owner(Keyword.get(init, :owner, self())),
          {:ok, ssl} <- normalize_keyword(Keyword.get(init, :ssl, []), :invalid_ssl_options),
          {:ok, socket_opts} <-
-           normalize_keyword(Keyword.get(init, :socket_opts, []), :invalid_socket_options) do
+           normalize_keyword(Keyword.get(init, :socket_opts, []), :invalid_socket_options),
+         {:ok, tls_backend} <- HTTP.TLSBackend.resolve(Keyword.get(init, :tls_backend)) do
       {:ok,
        init
        |> Keyword.put(:headers, headers)
        |> Keyword.put(:binary_type, binary_type)
        |> Keyword.put(:owner, owner)
        |> Keyword.put(:ssl, ssl)
-       |> Keyword.put(:socket_opts, socket_opts)}
+       |> Keyword.put(:socket_opts, socket_opts)
+       |> Keyword.put(:tls_backend, tls_backend)}
     end
   end
 
   defp normalize_init(_init), do: {:error, :invalid_options}
+
+  defp normalize_key(key) when is_binary(key), do: Map.get(@string_keys, key, key)
+  defp normalize_key(key), do: key
 
   defp normalize_headers(%HTTP.Headers{headers: headers}), do: normalize_headers(headers)
 

@@ -53,8 +53,16 @@ jobs:
             ${{ runner.os }}-mix-
 
       - name: Install dependencies
+        env:
+          MIX_ENV: test
         run: mix deps.get
 
+      - name: Compile umbrella dependencies
+        env:
+          MIX_ENV: test
+        run: mix compile --warnings-as-errors
+
       - name: Run tests
-        working-directory: apps/${{ matrix.app }}
-        run: mix test
+        env:
+          MIX_ENV: test
+        run: mix test apps/${{ matrix.app }}/test

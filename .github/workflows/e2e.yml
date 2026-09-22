@@ -62,7 +62,14 @@ jobs:
             ${{ runner.os }}-mix-
 
       - name: Install Elixir dependencies
+        env:
+          MIX_ENV: test
         run: mix deps.get
+
+      - name: Compile umbrella dependencies
+        env:
+          MIX_ENV: test
+        run: mix compile --warnings-as-errors
 
       - name: Set up Go
         if: matrix.app == 'http_fetch'
@@ -112,15 +119,14 @@ jobs:
         env:
           MIX_ENV: test
           E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
-        run: mix test.e2e
+        run: mix test apps/http_fetch/e2e
 
       - name: Run app E2E test suite if present
         if: matrix.app != 'http_fetch'
-        working-directory: apps/${{ matrix.app }}
         run: |
           set -euo pipefail
-          if [ -d e2e ]; then
-            MIX_ENV=test mix test e2e/
+          if [ -d "apps/${{ matrix.app }}/e2e" ]; then
+            MIX_ENV=test mix test "apps/${{ matrix.app }}/e2e"
           else
             echo "No e2e suite for ${{ matrix.app }}"
           fi

@@ -9,11 +9,17 @@
 
 A modern HTTP client library for Elixir that provides a fetch API similar to web browsers, built on Erlang's built-in socket modules.
 
+For development, prepare the umbrella before running a scoped app test:
+`MIX_ENV=test mix deps.get && MIX_ENV=test mix compile --warnings-as-errors`
+followed by `MIX_ENV=test mix test apps/http_fetch/test`. Running the test from
+the root keeps runtime applications of `in_umbrella` dependencies, including
+`ex_ssl`, on the code path without adding duplicate child dependencies.
+
 ## Features
 
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
 - **Full HTTP support**: GET, POST, PUT, DELETE, PATCH, HEAD methods
-- **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, `:ssl` for HTTPS, and Unix domain sockets
+- **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, selectable TLS for HTTPS, and Unix domain sockets
 - **Unix Domain Sockets**: HTTP over Unix sockets for Docker daemon, systemd, and other local services
 - **Form data support**: HTTP.FormData for multipart/form-data and file uploads
 - **Streaming request bodies**: Fetch-style `duplex: "half"` uploads over HTTP/1.1
@@ -21,7 +27,7 @@ A modern HTTP client library for Elixir that provides a fetch API similar to web
 - **Promise-based**: Async operations with chaining support
 - **Request cancellation**: AbortController support for cancelling requests
 - **Automatic JSON parsing**: Built-in JSON response handling
-- **Zero dependencies**: Uses only Erlang/OTP built-in modules
+- **Selectable TLS**: OTP `:ssl` by default, with opt-in `:ex_ssl` for verified TLS 1.3
 
 ## Browser Fetch API Compatibility
 
@@ -118,6 +124,109 @@ response =
 {:ok, docker_info} = HTTP.Response.json(response)
 IO.puts("Docker Version: #{docker_info["Version"]}")
 ```
+
+## TLS Backend Selection
+
+HTTPS fetch (HTTP/1.1 and HTTP/2), secure WebSocket, and HTTPS EventSource share
+one TLS default. OTP `:ssl` remains the default when no configuration is set:
+
+```elixir
+# config/config.exs or config/runtime.exs
+config :http_core, tls_backend: :ex_ssl
+```
+
+A flat per-call option overrides that default:
+
+```elixir
+HTTP.fetch("https://example.com", tls_backend: :ssl)
+
+HTTP.fetch("https://example.com",
+  tls_backend: :ex_ssl,
+  ssl: [cacertfile: "/path/to/ca.pem"]
+)
+
+HTTP.WebSocket.new("wss://example.com/socket", [], tls_backend: :ex_ssl)
+HTTP.EventSource.new("https://example.com/events", tls_backend: :ex_ssl)
+```
+
+`tls_backend` accepts `:ssl`, `:ex_ssl`, `"ssl"`, or `"ex_ssl"`. Maps also accept
+`"tls_backend"` and `"tlsBackend"` keys. Omitted or `nil` values inherit the shared
+configuration. The backend is captured when the request/client is created and
+retained through redirects and EventSource reconnects; runtime configuration
+changes affect new operations. Invalid selections fail explicitly.
+
+`http_core` declares `ex_ssl ~> 0.4.0` as a transitive runtime dependency.
+Consumers do not need to add it separately. `ssl: [...]` supplies TLS settings
+to the selected backend. The `ex_ssl` backend uses its own `SSL` protocol engine
+and requires peer verification. TLS 1.3 is the default; verified TLS 1.2 is
+explicitly selectable. It uses system CA certificates unless `cacerts` or
+`cacertfile` is supplied. DNS names and IP addresses are verified against the
+peer certificate. `verify: :verify_none` and unsupported TLS or TCP options
+return errors; connections never fall back to another backend automatically.
+
+A complete HTTP/2 response remains deliverable if the peer closes before the
+client can write its remaining WINDOW_UPDATE or acknowledgement frames. This
+also covers responses buffered across multiple TLS records by `ex_ssl` after a
+normal peer shutdown: the client drains the receive side before deciding whether
+the response completed. Only `:closed` on optional control writes qualifies.
+A complete early response (such as 413) stops the remaining upload, including
+request DATA queued by WINDOW_UPDATE in the same batch. It also survives a
+subsequent RST_STREAM(NO_ERROR), as required by
+[RFC 9113 §8.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-8.1).
+Completion requires END_STREAM and the complete HEADERS/CONTINUATION field
+block; an unfinished upload neither proves nor prevents response completion.
+HTTP/2 also validates Content-Length against unpadded DATA bytes before
+completion, rejects body overruns immediately, and reports mismatches as
+`:content_length_mismatch`. Valid HEAD/304 representation lengths do not require
+a body. Malformed/conflicting lengths, values longer than 20 decimal digits,
+and values outside the unsigned 64-bit bound return `:invalid_content_length`.
+Inbound frames are limited to the advertised 16,384-byte payload size and
+compressed header blocks to 65,536 bytes, including CONTINUATION fragments.
+Content-Length is forbidden on informational/204 responses and in trailers;
+DATA or HEADERS after END_STREAM is rejected rather than completed again.
+Truncation, required writes before completion, abnormal closure, cancellation
+and timeout remain errors. The original deadline and streaming backpressure
+are preserved.
+
+For `:ex_ssl`, `socket_opts` accepts `send_timeout`,
+`send_timeout_close: true`, `nodelay`, `keepalive`, `sndbuf`, `recbuf`, and local
+`ip`/`port`. The adapter forwards only this allowlist and ex_ssl validates values.
+IPv6 literals infer the family; an IPv6 local `ip` tuple selects IPv6 DNS
+resolution. Both option containers must be keyword lists. Socket options
+override matching entries in `ssl`. Custom
+ClientHello profiles can be passed through `ssl: [ex_ssl: [profile: profile]]`;
+any ALPN list added by HTTP/2 selection must match the profile's ALPN list exactly.
+Configured ex_ssl client credentials stay within the initial request origin
+during automatic redirects. A scheme,
+hostname or effective-port change returns
+`{:error, :client_identity_cross_origin_redirect}`. To authorize another origin,
+use `redirect: :manual` and explicitly make a new request with that identity.
+The OTP backend retains its existing redirect behavior.
+
+ex_ssl 0.4.0 supports verified TLS 1.2 for
+HTTP/1.1, HTTP/2, WSS and EventSource. Select it with `ssl: [versions:
+[:"tlsv1.2"]]`; a mixed TLS 1.3/TLS 1.2 offer selects the peer's supported
+version. The independent OpenSSL package gate includes 262,144-byte HTTP/2
+responses with observed connection and stream WINDOW_UPDATE frames. The OTP
+default is unchanged.
+
+TLS 1.3 session resumption is explicit:
+`ssl: [versions: [:"tlsv1.3"], session_tickets: :auto]`. Tickets are disabled
+by default. Auto mode currently rejects client identities and mixed/TLS 1.2
+version offers; early data and PSK-only exchange are unsupported. When a server
+declines a ticket, a full handshake continues on the same connection without
+replaying request bytes. The package test checks two fresh HTTP/1.1 connections
+against an independent OpenSSL peer and requires server-observed session reuse.
+This is a bounded subset, not full OTP `:ssl` parity.
+
+See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.4.0/docs/COMPATIBILITY.md).
+The [consumer contract inventory](docs/ex-ssl-consumer-contract.md) maps the
+implemented subset and intentional restrictions to its tests.
+
+Plain HTTP, WS, and Unix sockets retain their existing transports. HTTP/3 and
+WebTransport use QUIC's separate TLS implementation and ignore the shared
+setting. An explicit non-`nil` `tls_backend` on either QUIC API returns
+`{:error, :tls_backend_not_supported_for_quic}` (through the promise for fetch).
 
 ## Form Data With File Upload
 
@@ -371,7 +480,7 @@ request = %HTTP.Request{
 ```
 
 **Transport Options:**
-- `transport_options`: Socket transport options such as `timeout`, `connect_timeout`, `ssl`,
+- `transport_options`: Socket transport options such as `timeout`, `connect_timeout`, `tls_backend`, `ssl`,
   `socket_opts`, and `redirect`
 
 `redirect` defaults to `:follow` with the socket transport. Pass `redirect: :manual`
@@ -456,9 +565,21 @@ open doc/index.html
 
 ### Running Tests
 
+Run these commands from the umbrella root, including when testing one app.
+The root dependency graph includes the runtime dependencies of every umbrella
+app; invoking Mix inside a child app does not traverse its `in_umbrella`
+dependencies in the same way.
+
 ```bash
+# Prepare dependencies, including on a cold checkout
+MIX_ENV=test mix deps.get
+MIX_ENV=test mix compile --warnings-as-errors
+
 # Run all unit tests
 mix test
+
+# Run one app (replace the app name as needed)
+mix test apps/http_fetch/test
 
 # Run specific test file
 mix test apps/http_fetch/test/http/response_test.exs
@@ -486,6 +607,22 @@ MIX_ENV=test mix test.e2e
 ```
 
 In CI, the `e2e.yml` workflow handles all of this automatically.
+`mix test.e2e` keeps execution at the umbrella root. To run one suite, use
+`MIX_ENV=test mix test apps/http_web_socket/e2e` (or another app's `e2e`
+directory) after the same preparation as the unit tests.
+
+### Testing Packaged Consumers
+
+```bash
+bash scripts/external_consumer_smoke.sh
+```
+
+This builds all five current Hex packages and installs their unpacked contents
+into a temporary project outside the umbrella, with independent dependencies
+and build output and no repository lockfile. Local paths resolve the unpublished
+internal packages; `ex_ssl` is resolved only through `http_core`. The smoke
+checks runtime application startup, verified local TLS 1.3 requests with both
+TCP TLS backends, and the separate WebTransport QUIC boundary.
 
 ### Code Formatting
 
@@ -505,3 +642,12 @@ mix format --check-formatted
 ## License
 
 MIT License
+
+For cross-repository source checks, the source integration gate is
+`EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl bash scripts/ex_ssl_source_smoke.sh`.
+It validates algorithms, mTLS, TLS 1.2, and resumption against all five fresh
+package artifacts with a temporary source override. Add
+`EX_SSL_DEP_MODE=published` to resolve ex_ssl 0.4.0 from Hex while using the
+source checkout only for test certificate fixtures. The external consumer smoke
+also checks the published dependency; see
+[the consumer contract](docs/ex-ssl-consumer-contract.md).

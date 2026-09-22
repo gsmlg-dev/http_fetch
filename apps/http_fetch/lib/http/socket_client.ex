@@ -10,6 +10,9 @@ defmodule HTTP.SocketClient do
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
     cond do
+      http_version(request) == :http3 and tls_backend(request) != nil ->
+        {:error, :tls_backend_not_supported_for_quic}
+
       http_version(request) == :http3 and Request.streaming_body?(request) ->
         {:error, :streaming_request_body_unsupported_for_http3}
 
@@ -17,7 +20,9 @@ defmodule HTTP.SocketClient do
         request_http3(request, abort_controller_pid, unix_socket_path)
 
       true ->
-        request_socket(request, abort_controller_pid, unix_socket_path)
+        with {:ok, request} <- pin_tls_backend(request) do
+          request_socket(request, abort_controller_pid, unix_socket_path)
+        end
     end
   end
 
@@ -261,10 +266,14 @@ defmodule HTTP.SocketClient do
     case state.protocol_module.stream(state.protocol, data) do
       {:ok, protocol, events} ->
         state = %{state | protocol: protocol}
+        discard_closed_controls? = discard_closed_control_writes?(state, events)
 
-        case flush_protocol_writes(state) do
-          {:ok, state} -> handle_events(state, events)
-          {:error, reason} -> fail(state, reason)
+        case flush_protocol_writes(state, discard_closed_controls?) do
+          {:ok, state} ->
+            handle_events(state, events)
+
+          {:error, reason} ->
+            fail(state, reason)
         end
 
       {:error, reason} ->
@@ -366,6 +375,7 @@ defmodule HTTP.SocketClient do
   defp rearm(state) do
     case state.transport.setopts(state.socket, active: :once) do
       :ok -> owner_loop(state)
+      {:error, :closed} -> handle_closed(state)
       {:error, reason} -> fail(state, reason)
     end
   end
@@ -386,6 +396,9 @@ defmodule HTTP.SocketClient do
         )
 
         :done
+
+      {:error, :client_identity_cross_origin_redirect = reason} ->
+        fail(state, reason)
 
       {:error, _reason} ->
         send_response(state.parent, state.ref, response)
@@ -486,8 +499,9 @@ defmodule HTTP.SocketClient do
   defp connected_protocol(_transport, _socket, %{mode: :http1}), do: {:ok, :http1}
   defp connected_protocol(_transport, _socket, %{mode: :h2c}), do: {:ok, :http2}
 
-  defp connected_protocol(HTTP.Transport.SSL, socket, %{mode: :force_h2}) do
-    with {:ok, protocol} <- HTTP.Transport.SSL.negotiated_protocol(socket) do
+  defp connected_protocol(transport, socket, %{mode: :force_h2})
+       when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
+    with {:ok, protocol} <- transport.negotiated_protocol(socket) do
       case normalize_alpn_protocol(protocol) do
         "h2" -> {:ok, :http2}
         other -> {:error, {:http2_not_negotiated, other}}
@@ -495,8 +509,9 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp connected_protocol(HTTP.Transport.SSL, socket, %{mode: :auto_https}) do
-    with {:ok, protocol} <- HTTP.Transport.SSL.negotiated_protocol(socket) do
+  defp connected_protocol(transport, socket, %{mode: :auto_https})
+       when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
+    with {:ok, protocol} <- transport.negotiated_protocol(socket) do
       case normalize_alpn_protocol(protocol) do
         "h2" -> {:ok, :http2}
         _other -> {:ok, :http1}
@@ -510,14 +525,34 @@ defmodule HTTP.SocketClient do
   defp connect(transport, host, port, request, selection, timeout) do
     connect_timeout = min(connect_timeout(request), timeout)
 
-    interruptible_connect(
-      transport,
-      host,
-      port,
-      transport_opts(request, selection, timeout),
-      connect_timeout
-    )
+    with :ok <- validate_transport_option_lists(transport, request) do
+      interruptible_connect(
+        transport,
+        host,
+        port,
+        transport_opts(request, selection, timeout),
+        connect_timeout
+      )
+    end
   end
+
+  defp validate_transport_option_lists(HTTP.Transport.ExSSL, request) do
+    valid? =
+      Enum.all?([:ssl, :socket_opts], fn key ->
+        opts = Keyword.get(request.transport_options, key, [])
+
+        Keyword.keyword?(opts) and
+          length(Keyword.keys(opts)) == length(Enum.uniq(Keyword.keys(opts)))
+      end)
+
+    if valid? do
+      :ok
+    else
+      {:error, {:options, :invalid_options}}
+    end
+  end
+
+  defp validate_transport_option_lists(_transport, _request), do: :ok
 
   defp interruptible_connect(transport, host, port, opts, timeout) do
     parent = self()
@@ -611,7 +646,9 @@ defmodule HTTP.SocketClient do
       {:ok, pid} ->
         receive do
           {:send_result, ^ref, result} ->
-            close_on_error(transport, socket, result)
+            # The caller owns cleanup. A failed control write can leave readable
+            # TLS data behind, so sending must not destroy the receive side.
+            result
 
           :abort ->
             transport.close(socket)
@@ -633,13 +670,6 @@ defmodule HTTP.SocketClient do
         transport.close(socket)
         {:error, reason}
     end
-  end
-
-  defp close_on_error(_transport, _socket, :ok), do: :ok
-
-  defp close_on_error(transport, socket, {:error, reason}) do
-    transport.close(socket)
-    {:error, reason}
   end
 
   defp send_prepared_request(transport, socket, {:buffer, iodata}, deadline_at) do
@@ -709,24 +739,54 @@ defmodule HTTP.SocketClient do
   defp ack_stream_chunk(_stream, nil), do: :ok
   defp ack_stream_chunk(stream, ack_ref), do: send(stream, {:stream_chunk_ack, ack_ref})
 
-  defp flush_protocol_writes(%{protocol_module: HTTP.HTTP2, protocol: protocol} = state) do
+  defp flush_protocol_writes(
+         %{protocol_module: HTTP.HTTP2, protocol: protocol} = state,
+         discard_closed_controls?
+       ) do
     {protocol, iodata} = HTTP.HTTP2.take_outbound(protocol)
     state = %{state | protocol: protocol}
 
     case IO.iodata_to_binary(iodata) do
       "" -> {:ok, state}
-      data -> flush_protocol_write(state, data)
+      data -> flush_protocol_write(state, data, discard_closed_controls?)
     end
   end
 
-  defp flush_protocol_writes(state), do: {:ok, state}
+  defp flush_protocol_writes(state, _discard_closed_controls?), do: {:ok, state}
 
-  defp flush_protocol_write(state, data) do
+  defp discard_closed_control_writes?(
+         %{protocol_module: HTTP.HTTP2, protocol: protocol, transport: transport},
+         events
+       ) do
+    # Classify queued frames independently from any upload waiting for credit.
+    # A complete early response stops that upload in the protocol layer.
+    # In ex_ssl 0.3.0 an established socket's peer close_notify rejects writes
+    # with :closed while retaining
+    # unread plaintext; abnormal TCP closure returns :econnreset instead.
+    # This owner has not closed the socket locally. Rearming it drains that
+    # plaintext (or reports EOF); only the HTTP parser can complete a response.
+    HTTP.HTTP2.outbound_control_only?(protocol) and
+      (transport == HTTP.Transport.ExSSL or
+         (HTTP.HTTP2.complete_response?(protocol) and :done in events))
+  end
+
+  defp discard_closed_control_writes?(_state, _events), do: false
+
+  defp flush_protocol_write(state, data, discard_closed_controls?) do
     timeout = remaining_timeout(state.deadline_at)
 
     case send_request(state.transport, state.socket, data, timeout) do
-      :ok -> {:ok, state}
-      {:error, reason} -> {:error, reason}
+      :ok ->
+        {:ok, state}
+
+      {:error, :closed} when discard_closed_controls? ->
+        # Sending is over, but receiving is not necessarily over. In particular,
+        # buffered WINDOW_UPDATE frames must not restart the abandoned upload
+        # while we drain the response through the original receive/deadline loop.
+        {:ok, %{state | protocol: HTTP.HTTP2.stop_request(state.protocol)}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -750,9 +810,12 @@ defmodule HTTP.SocketClient do
     {:ok, HTTP.Transport.TCP, host, uri.port || 80}
   end
 
-  defp select_transport(%Request{url: %URI{scheme: "https", host: host} = uri}, _socket_path)
+  defp select_transport(
+         %Request{url: %URI{scheme: "https", host: host} = uri} = request,
+         _socket_path
+       )
        when is_binary(host) do
-    {:ok, HTTP.Transport.SSL, host, uri.port || 443}
+    {:ok, HTTP.TLSBackend.transport(tls_backend(request)), host, uri.port || 443}
   end
 
   defp select_transport(%Request{url: %URI{scheme: scheme}}, _socket_path) do
@@ -782,7 +845,8 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp protocol_selection(%Request{url: %URI{scheme: "https"}} = request, HTTP.Transport.SSL) do
+  defp protocol_selection(%Request{url: %URI{scheme: "https"}} = request, transport)
+       when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
     case http_version(request) do
       :http1 ->
         {:ok, %{mode: :http1, alpn_protocols: []}}
@@ -800,6 +864,18 @@ defmodule HTTP.SocketClient do
 
   defp http_version(%Request{} = request) do
     Keyword.get(request.transport_options, :http_version, :http1)
+  end
+
+  defp tls_backend(%Request{} = request), do: Keyword.get(request.transport_options, :tls_backend)
+
+  defp pin_tls_backend(%Request{} = request) do
+    with {:ok, backend} <- HTTP.TLSBackend.resolve(tls_backend(request)) do
+      {:ok,
+       %{
+         request
+         | transport_options: Keyword.put(request.transport_options, :tls_backend, backend)
+       }}
+    end
   end
 
   defp request_timeout(%Request{} = request),
@@ -906,7 +982,8 @@ defmodule HTTP.SocketClient do
 
   defp redirect_request(request, response) do
     with location when is_binary(location) <- Headers.get(response.headers, "location"),
-         %URI{} = uri <- URI.merge(request.url, location) do
+         %URI{} = uri <- URI.merge(request.url, location),
+         :ok <- validate_client_identity_redirect(request, uri) do
       request =
         request
         |> rewrite_redirect_method(response.status)
@@ -914,8 +991,27 @@ defmodule HTTP.SocketClient do
 
       {:ok, %{request | url: uri}}
     else
+      {:error, _} = error -> error
       _ -> {:error, :invalid_redirect}
     end
+  end
+
+  defp validate_client_identity_redirect(request, uri) do
+    ssl_options = Keyword.get(request.transport_options, :ssl, [])
+
+    if tls_backend(request) == :ex_ssl and
+         Enum.any?([:cert, :certfile, :key, :keyfile], &Keyword.has_key?(ssl_options, &1)) and
+         client_identity_origin(request.url) != client_identity_origin(uri) do
+      {:error, :client_identity_cross_origin_redirect}
+    else
+      :ok
+    end
+  end
+
+  defp client_identity_origin(uri) do
+    scheme = String.downcase(uri.scheme || "")
+
+    {scheme, String.downcase(uri.host || ""), uri.port || HTTP.HTTP1.default_port(scheme)}
   end
 
   defp rewrite_redirect_method(%{method: :post} = request, status) when status in [301, 302],

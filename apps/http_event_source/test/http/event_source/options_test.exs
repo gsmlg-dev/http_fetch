@@ -1,5 +1,5 @@
 defmodule HTTP.EventSource.OptionsTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias HTTP.EventSource.Options
 
@@ -55,6 +55,33 @@ defmodule HTTP.EventSource.OptionsTest do
              })
   end
 
+  test "selects TLS backends from atom and string map options" do
+    assert {:ok, %{tls_backend: :ssl}} =
+             Options.new("https://example.com/events", tls_backend: :ssl)
+
+    assert {:ok, %{tls_backend: :ex_ssl}} =
+             Options.new("https://example.com/events", %{"tlsBackend" => "ex_ssl"})
+
+    assert {:ok, %{tls_backend: :ssl}} =
+             Options.new("https://example.com/events", %{"tls_backend" => "ssl"})
+  end
+
+  test "pins the configured TLS backend when options are constructed" do
+    previous = Application.get_env(:http_core, :tls_backend)
+    on_exit(fn -> restore_tls_backend(previous) end)
+
+    Application.put_env(:http_core, :tls_backend, :ex_ssl)
+    assert {:ok, options} = Options.new("https://example.com/events")
+    assert options.tls_backend == :ex_ssl
+
+    assert {:ok, %{tls_backend: :ssl}} =
+             Options.new("https://example.com/events", tls_backend: :ssl)
+
+    Application.put_env(:http_core, :tls_backend, :ssl)
+    assert options.tls_backend == :ex_ssl
+    assert {:ok, %{tls_backend: :ssl}} = Options.new("https://example.com/events")
+  end
+
   test "rejects invalid init options" do
     assert {:error, :invalid_owner} = Options.new("http://example.com/events", owner: :bad)
 
@@ -63,5 +90,11 @@ defmodule HTTP.EventSource.OptionsTest do
 
     assert {:error, :invalid_reconnect_time} =
              Options.new("http://example.com/events", reconnect_time: -1)
+
+    assert {:error, :invalid_tls_backend} =
+             Options.new("https://example.com/events", tls_backend: :unknown)
   end
+
+  defp restore_tls_backend(nil), do: Application.delete_env(:http_core, :tls_backend)
+  defp restore_tls_backend(value), do: Application.put_env(:http_core, :tls_backend, value)
 end

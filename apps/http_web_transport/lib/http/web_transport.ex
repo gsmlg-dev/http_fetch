@@ -5,6 +5,10 @@ defmodule HTTP.WebTransport do
   This module implements the public API shape and lifecycle management for
   WebTransport sessions. The default backend speaks WebTransport extended
   CONNECT over HTTP/3 using the shared QUIC transport in `:http_core`.
+
+  QUIC uses its own TLS implementation. The shared `:http_core, :tls_backend`
+  configuration does not apply here; an explicit non-nil `tls_backend` option
+  returns `{:error, :tls_backend_not_supported_for_quic}`.
   """
 
   alias HTTP.WebTransport.CloseInfo

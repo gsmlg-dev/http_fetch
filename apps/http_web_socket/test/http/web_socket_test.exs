@@ -8,6 +8,10 @@ defmodule HTTP.WebSocketTest do
   alias HTTP.WebSocket.Event.Message
   alias HTTP.WebSocket.Event.Open
 
+  @certfile Path.expand("../support/fixtures/localhost.pem", __DIR__)
+  @cacertfile Path.expand("../support/fixtures/localhost-ca.pem", __DIR__)
+  @keyfile Path.expand("../support/fixtures/localhost.key", __DIR__)
+
   test "defines browser ready state constants" do
     assert WebSocket.connecting() == 0
     assert WebSocket.open() == 1
@@ -79,6 +83,32 @@ defmodule HTTP.WebSocketTest do
 
     assert :ok = WebSocket.send(socket, HTTP.Blob.new(<<4, 5, 6>>))
     assert_receive {:websocket_server_received, :binary, <<4, 5, 6>>}, 1_000
+  end
+
+  test "upgrades, exchanges frames, and closes over verified TLS 1.3" do
+    for backend <- [:ssl, :ex_ssl] do
+      {:ok, _server, port} =
+        HTTPWebSocket.TestServer.start_link(
+          tls: true,
+          certfile: @certfile,
+          keyfile: @keyfile,
+          open_message: "welcome"
+        )
+
+      socket =
+        WebSocket.new("wss://127.0.0.1:#{port}/socket", [],
+          tls_backend: backend,
+          ssl: [cacertfile: @cacertfile]
+        )
+
+      assert_receive {WebSocket, ^socket, %Open{}}, 1_000
+      assert_receive {WebSocket, ^socket, %Message{data: "welcome"}}, 1_000
+      assert :ok = WebSocket.send(socket, "hello")
+      assert_receive {:websocket_server_received, :text, "hello"}, 1_000
+      assert_receive {WebSocket, ^socket, %Message{data: "echo:hello"}}, 1_000
+      assert :ok = WebSocket.close(socket, 1000, "done")
+      assert_receive {WebSocket, ^socket, %Close{code: 1000, was_clean: true}}, 1_000
+    end
   end
 
   test "rejects invalid constructor input synchronously" do

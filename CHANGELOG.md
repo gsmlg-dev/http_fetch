@@ -5,7 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.12.0] - 2026-09-22
+
+### Added
+- Add verified ex_ssl 0.4.0 TLS 1.2 support across Fetch, HTTP/2, WebSocket,
+  and EventSource, and opt-in TLS 1.3 ticket resumption over fresh HTTP/1.1
+  connections. The default remains verified TLS 1.3 with tickets disabled.
+- Forward validated ex_ssl client identities, TCP socket options, and ordered
+  TLS 1.3 algorithm preferences. Pin client identities to the redirect origin.
+
+### Changed
+- Keep OTP `:ssl` as the default TCP TLS backend while allowing verified TLS
+  1.3 or explicitly selected TLS 1.2 through the optional `:ex_ssl` backend.
+  HTTP/3 and
+  WebTransport continue to use QUIC's independent TLS implementation.
+- Run individual app tests and E2E suites from the umbrella root after explicit
+  test-environment preparation, so transitive runtime applications are compiled
+  and on the code path even on cold checkouts.
+- Validate all five built packages in an isolated external consumer, including
+  transitive dependencies and verified local TLS requests.
+
+### Fixed
+- Deliver complete HTTP/2 responses when the peer closes immediately after an
+  END_STREAM DATA frame and a non-essential WINDOW_UPDATE or acknowledgement
+  returns `:closed`. Incomplete responses and required request writes before
+  response completion still fail normally.
+- Preserve unread ex_ssl TLS records when an HTTP/2 control write fails after
+  normal peer closure. Drain them through the existing active-once receiver and
+  require a complete HTTP/2 response, without extending deadlines or accepting
+  truncated responses, error resets, or protocol errors.
+- Preserve valid HTTP/2 early final responses while cancelling remaining upload
+  DATA, including queued DATA released by WINDOW_UPDATE. Accept NO_ERROR resets
+  only after response completion; require END_STREAM and a complete field block
+  even for responses with no body.
+- Enforce HTTP/2 response Content-Length and bounded frame/header parsing while
+  preserving valid cross-record and streaming completion after peer closure.
 
 ## [0.11.0] - 2026-07-04
 
