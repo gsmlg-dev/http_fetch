@@ -198,7 +198,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
          {:ok, connection, effects} <-
            Connection.commit_headers(connection, stream.id, ordered_headers,
              end_stream: Keyword.get(opts, :end_stream, is_nil(Keyword.get(opts, :body_bridge))),
-             max_frame_size: state.profile.max_header_fragment
+             max_frame_size: state.profile.max_header_fragment,
+             priority: state.profile.priority
            ),
          {:ok, state} <- write_effects(state, effects) do
       result = %{id: stream.id, ref: request_ref}
@@ -316,6 +317,10 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       case effect do
         {:headers, _id, frames} ->
           send_frames(state, frames)
+
+        {:priority, id, dependency, weight, exclusive} ->
+          payload = <<if(exclusive, do: 1, else: 0)::1, dependency::31, weight - 1::8>>
+          send_frames(state, [Frame.encode(:priority, 0, id, payload)])
 
         {:rst_stream, id, _reason} ->
           send_frames(state, [Frame.encode(:rst_stream, 0, id, <<8::32>>)])

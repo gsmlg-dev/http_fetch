@@ -113,8 +113,30 @@ defmodule HTTP.HTTP2 do
     {headers, body} = request |> base_request_headers() |> Request.put_body_headers(request)
     body = if is_binary(body), do: IO.iodata_to_binary(body), else: body
 
+    headers = maybe_add_priority_header(headers, request, profile)
+
     {:ok, WireProfile.order_headers(profile, pseudo_headers(request), regular_headers(headers)),
      body}
+  end
+
+  defp maybe_add_priority_header(%Headers{} = headers, %Request{} = request, profile) do
+    if profile.priority == :rfc9218 and not Headers.has?(headers, "priority") do
+      Headers.set(headers, "priority", priority_value(request))
+    else
+      headers
+    end
+  end
+
+  defp priority_value(%Request{} = request) do
+    values = Keyword.get(request.transport_options, :http2_priority, %{}) |> Map.new()
+    urgency = Map.get(values, :urgency, Map.get(values, "urgency", 3))
+    incremental = Map.get(values, :incremental, Map.get(values, "incremental", false))
+
+    unless is_integer(urgency) and urgency in 0..7 and is_boolean(incremental) do
+      raise ArgumentError, "invalid http2_priority: expected urgency 0..7 and boolean incremental"
+    end
+
+    "u=#{urgency}" <> if(incremental, do: ", i", else: "")
   end
 
   defp settings_frame(profile) do

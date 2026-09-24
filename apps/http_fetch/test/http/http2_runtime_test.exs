@@ -83,6 +83,27 @@ defmodule HTTP.HTTP2RuntimeTest do
     assert Enum.sort(status.stream_ids) == [1, 3, 5]
   end
 
+  test "legacy priority profile serializes PRIORITY before HEADERS" do
+    {:ok, owner} =
+      ConnectionOwner.start_link(
+        transport: transport(self()),
+        socket: :socket,
+        profile: :synthetic_test_v1
+      )
+
+    assert_receive {:wire, :socket, _}, 500
+
+    assert {:ok, %{id: 1}} =
+             ConnectionOwner.open_stream(owner, headers("/priority"), subscriber: self())
+
+    assert_receive {:wire, :socket, priority_wire}, 500
+
+    assert %{type: :priority, stream_id: 1, payload: <<0::1, 0::31, 15>>} =
+             decode_wire!(priority_wire)
+
+    assert_receive {:wire, :socket, _headers}, 500
+  end
+
   test "accepts the peer ACK for the initial SETTINGS frame" do
     {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, preface_and_settings}, 500

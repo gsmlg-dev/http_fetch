@@ -32,11 +32,14 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
   released; a new reservation cancels it.
 - ConnectionOwner enforces a GOAWAY drain deadline and closes immediately once
   all active streams are released.
+- Legacy profiles serialize a legal PRIORITY frame before HEADERS; RFC 9218
+  profiles emit a `Priority` header from validated per-request metadata without
+  mixing legacy signaling.
 
 ## Verification
 
 Focused core profile/fingerprint/connection tests pass, runtime/body bridge
-tests pass (17), PoolKey tests pass (9), and fetch tests pass (212 tests plus
+tests pass (18), PoolKey tests pass (9), and fetch tests pass (213 tests plus
 20 doctests). The full HTTP/2 socket regression suite passes (39 tests),
 including sequential h2c reuse, three overlapping requests, and simultaneous
 cold-start coalescing on one accepted socket with streams 1, 3, and 5.

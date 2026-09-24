@@ -647,6 +647,18 @@ defmodule HTTP.HTTP2Test do
       assert (first &&& 0xF0) == 0x10
     end
 
+    test "RFC 9218 profile emits Priority header without legacy PRIORITY" do
+      request = %HTTP.Request{
+        method: :get,
+        url: URI.parse("http://example.test/priority"),
+        headers: HTTP.Headers.new(),
+        transport_options: [http2_priority: %{urgency: 2, incremental: true}]
+      }
+
+      assert {:ok, headers, ""} = HTTP.HTTP2.request_headers(request, :synthetic_test_v2)
+      assert {"priority", "u=2, i"} in headers
+    end
+
     test "returns stream reset and goaway errors" do
       assert {:error, {:stream_reset, :cancel}} =
                HTTP.HTTP2.stream(

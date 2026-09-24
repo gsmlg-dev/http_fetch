@@ -203,6 +203,12 @@ defmodule HTTP.HTTP2.Connection do
               Keyword.get(opts, :max_frame_size, c.peer.values.max_frame_size)
             )
 
+          priority_effects =
+            case Keyword.get(opts, :priority, :none) do
+              :legacy -> [{:priority, id, 0, 16, false}]
+              _ -> []
+            end
+
           c = %{
             c
             | streams: Map.put(c.streams, id, s),
@@ -210,7 +216,7 @@ defmodule HTTP.HTTP2.Connection do
               committed: MapSet.put(c.committed, id)
           }
 
-          {:ok, c, [{:headers, id, frames}]}
+          {:ok, c, priority_effects ++ [{:headers, id, frames}]}
         end
     end
   end
