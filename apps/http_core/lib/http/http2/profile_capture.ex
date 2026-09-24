@@ -50,7 +50,9 @@ defmodule HTTP.HTTP2.ProfileCapture do
 
   defp validate_digest(%{fixture_digest: digest})
        when is_binary(digest) and byte_size(digest) == 64 do
-    if digest =~ ~r/\A[0-9a-f]{64}\z/, do: :ok, else: {:error, :invalid_fixture_digest}
+    if Enum.all?(String.to_charlist(digest), &hex_digit?/1),
+      do: :ok,
+      else: {:error, :invalid_fixture_digest}
   end
 
   defp validate_digest(_), do: {:error, :invalid_fixture_digest}
@@ -60,4 +62,8 @@ defmodule HTTP.HTTP2.ProfileCapture do
        do: :ok
 
   defp validate_lists(_), do: {:error, :invalid_manifest_fields}
+
+  defp hex_digit?(char) when char in ?0..?9, do: true
+  defp hex_digit?(char) when char in ?a..?f, do: true
+  defp hex_digit?(_), do: false
 end
