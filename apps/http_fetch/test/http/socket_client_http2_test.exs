@@ -60,6 +60,31 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert_receive {:h2c_accepts, 1}, 1_000
   end
 
+  test "overlaps three explicit-profile requests on one h2c socket" do
+    parent = self()
+    url = start_h2c_overlap_server!(parent, 3)
+
+    task_for = fn path ->
+      Task.async(fn ->
+        response =
+          String.replace(url, "/test", path)
+          |> HTTP.fetch(http_version: :h2c, http2_profile: :native_v1)
+          |> HTTP.Promise.await()
+
+        {path, HTTP.Response.read_all(response)}
+      end)
+    end
+
+    first = task_for.("/one")
+    assert_receive {:h2c_overlap_first, 1}, 1_000
+    tasks = [first, task_for.("/two"), task_for.("/three")]
+
+    assert Enum.sort(Task.await_many(tasks, 5_000)) ==
+             [{"/one", "/one"}, {"/three", "/three"}, {"/two", "/two"}]
+
+    assert_receive {:h2c_overlap, 1, [1, 3, 5]}, 1_000
+  end
+
   test "explicit wire profile routes the request through the long-lived owner" do
     test_pid = self()
 
@@ -1625,6 +1650,83 @@ defmodule HTTP.SocketClientHTTP2Test do
     end)
 
     "http://127.0.0.1:#{port}/test"
+  end
+
+  defp start_h2c_overlap_server!(parent, expected) do
+    {:ok, listen_socket} =
+      :gen_tcp.listen(0, [
+        :binary,
+        packet: :raw,
+        active: false,
+        ip: {127, 0, 0, 1},
+        reuseaddr: true
+      ])
+
+    {:ok, port} = :inet.port(listen_socket)
+
+    pid =
+      spawn_link(fn ->
+        {:ok, socket} = :gen_tcp.accept(listen_socket)
+
+        {preface, buffer} =
+          recv_exact(socket, :gen_tcp, byte_size(HTTP.HTTP2.connection_preface()), <<>>)
+
+        assert preface == HTTP.HTTP2.connection_preface()
+
+        {:ok, %Frame{type: :settings, stream_id: 0}, buffer} =
+          recv_frame(socket, :gen_tcp, buffer)
+
+        send_all(socket, :gen_tcp, [Frame.encode(:settings, 0, 0, "")])
+        requests = collect_h2_requests(socket, buffer, HPACK.new_decoder(), %{}, expected, parent)
+        send(parent, {:h2c_overlap, 1, Enum.sort(Map.keys(requests))})
+        reply_h2_requests(requests, socket)
+        Process.sleep(200)
+
+        :gen_tcp.close(socket)
+        :gen_tcp.close(listen_socket)
+      end)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+      :gen_tcp.close(listen_socket)
+    end)
+
+    "http://127.0.0.1:#{port}/test"
+  end
+
+  defp collect_h2_requests(_socket, _buffer, _decoder, requests, expected, _parent)
+       when map_size(requests) == expected do
+    requests
+  end
+
+  defp collect_h2_requests(socket, buffer, decoder, requests, expected, parent) do
+    case recv_frame(socket, :gen_tcp, buffer) do
+      {:ok, %Frame{type: :headers, stream_id: stream_id, flags: flags, payload: block}, buffer}
+      when stream_id > 0 ->
+        assert (flags &&& @end_headers) == @end_headers
+        {:ok, decoder, headers} = HPACK.decode(decoder, block)
+        {_, path} = Enum.find(headers, fn {name, _value} -> name == ":path" end)
+        requests = Map.put(requests, stream_id, path)
+
+        if map_size(requests) == 1, do: send(parent, {:h2c_overlap_first, 1})
+        collect_h2_requests(socket, buffer, decoder, requests, expected, parent)
+
+      {:ok, _frame, buffer} ->
+        collect_h2_requests(socket, buffer, decoder, requests, expected, parent)
+    end
+  end
+
+  defp reply_h2_requests(requests, socket) do
+    send_all(
+      socket,
+      :gen_tcp,
+      Enum.flat_map(requests, fn {stream_id, path} ->
+        [
+          Frame.encode(:headers, @end_headers, stream_id, response_headers(200, path)),
+          Frame.encode(:data, @end_stream, stream_id, path)
+        ]
+      end)
+    )
   end
 
   defp recv_h2_request(socket, transport, buffer, stream_id, decoder) do

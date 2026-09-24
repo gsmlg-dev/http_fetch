@@ -32,9 +32,9 @@ the root keeps runtime applications of `in_umbrella` dependencies, including
   ordered SETTINGS and header serialization; use `http2_profile` only with an
   explicit HTTP/2 or h2c request.
 
-HTTP/2 profile support currently covers validated serialization and bounded
-wire observation. It does not yet claim pooled multi-stream reuse or browser
-fingerprint equivalence. Available profile IDs are `native_v1`,
+HTTP/2 profile support currently covers validated serialization, bounded wire
+observation, and profile-keyed h2c connection reuse with overlapping streams.
+It does not claim browser fingerprint equivalence. Available profile IDs are `native_v1`,
 `synthetic_test_v1`, and `synthetic_test_v2`.
 
 ## Browser Fetch API Compatibility

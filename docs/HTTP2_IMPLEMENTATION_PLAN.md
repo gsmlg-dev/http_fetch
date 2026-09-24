@@ -3,7 +3,8 @@
 - 日期：2026-09-24
 - 仓库：`gsmlg-dev/http_fetch`
 - 本次核对基线：`main` / `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` / v0.13.0
-- 状态：P1/P2/P3 核心与可测试 runtime 已实现；P4/P5/P6 及默认 Fetch 接入仍在进行。
+- 状态：P1/P2/P3 核心与显式 profile 的 h2c Fetch 接入已实现并有真实 socket
+  复用/三 stream 重叠证据；P4/P5/P6 及同时冷启动去重、互操作和浏览器样本仍在进行。
 - 执行入口：配套 `CODEX_HTTP2_PROMPT.md`。
 
 ## 1. 目标与完成标准

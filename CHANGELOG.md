@@ -14,8 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add flat HTTP/2 profile, reuse, scope, and priority option validation.
 
 ### Known limitations
-- Connection pooling, concurrent socket stream reuse, backpressured HTTP/2
-  uploads, and captured browser-profile verification remain pending.
+- Simultaneous cold-connection establishment deduplication, full idle/drain
+  policy, independent mature-implementation interoperability, and captured
+  browser-profile verification remain pending. Profiled h2c pooling and
+  overlapping socket streams are available; profiled HTTPS remains on its
+  compatibility path.
 
 ## [0.13.0] - 2026-09-22
 

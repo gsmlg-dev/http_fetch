@@ -6,13 +6,15 @@ validates a finite, versioned wire configuration; `HTTP.HTTP2.Connection` and
 Fetch-process dependencies. `HTTP.HTTP2.Fingerprint` observes serialized bytes
 and produces bounded, redacted structured observations.
 
-`HTTP.HTTP2.ConnectionOwner` now owns one long-lived transport, serializes all
+`HTTP.HTTP2.ConnectionOwner` owns one long-lived transport, serializes all
 outbound effects through one writer, and routes inbound HEADERS/CONTINUATION
 after updating the shared decoder. `HTTP.HTTP2.Pool` performs bounded,
-profile-keyed reservations and monitors owners. `HTTP.SocketClient` still uses
-its legacy per-request path, so this runtime is currently an explicit lower
-level integration surface rather than the default Fetch transport.
+profile-keyed reservations and monitors owners. Explicit-profile h2c fetches
+use this owner and can reuse it across overlapping streams; default HTTP/1.1,
+unprofiled HTTP/2, and profiled HTTPS retain their existing compatibility paths.
 
 The owner does not synchronously call `HTTP.Stream.chunk/3` or wait on a
-consumer. Upload/response bridges and automatic reservation release on stream
-completion remain the next integration boundary.
+consumer. Explicit-profile streaming uploads use the bounded BodyBridge, and
+reservations release when each stream completes. Connection-establishment
+deduplication for simultaneous cold requests and idle/drain policy remain
+follow-up work.
