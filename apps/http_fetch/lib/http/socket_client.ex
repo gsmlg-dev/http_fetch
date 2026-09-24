@@ -523,6 +523,10 @@ defmodule HTTP.SocketClient do
       {:DOWN, ^monitor, :process, _owner, reason} ->
         fail_http2(state, {:request_process_down, reason})
 
+      {:http2, ^stream_id, {:http2, :goaway, _last_stream_id}} ->
+        mark_http2_draining(state)
+        await_http2_response(state)
+
       {:http2, ^stream_id, {:http2, :headers, headers, flags}} ->
         handle_http2_headers(state, headers, flags)
 
@@ -611,6 +615,12 @@ defmodule HTTP.SocketClient do
     do: HTTP.HTTP2.BodyBridge.early_response(bridge)
 
   defp maybe_cancel_http2_bridge(_state), do: :ok
+
+  defp mark_http2_draining(%{pool: pool, pool_key: key, owner: owner})
+       when is_pid(pool) and is_pid(owner),
+       do: HTTP.HTTP2.Pool.mark_draining(pool, key, owner)
+
+  defp mark_http2_draining(_state), do: :ok
 
   defp parse_status(value) when is_binary(value), do: String.to_integer(value)
   defp parse_status(value) when is_integer(value), do: value

@@ -28,6 +28,11 @@ defmodule HTTP.HTTP2.Pool do
   def fail_connect(pool, key, reason),
     do: GenServer.call(pool, {:fail_connect, key, reason})
 
+  @doc "Stops new reservations on an owner that received GOAWAY."
+  @spec mark_draining(pid(), key(), pid()) :: :ok
+  def mark_draining(pool, key, owner),
+    do: GenServer.call(pool, {:mark_draining, key, owner})
+
   @spec release(pid(), key(), reservation()) :: :ok
   def release(pool, key, reservation), do: GenServer.call(pool, {:release, key, reservation})
 
@@ -75,7 +80,15 @@ defmodule HTTP.HTTP2.Pool do
     max_streams = Keyword.get(opts, :max_streams, state.max_streams)
     entry = Map.get(state.entries, key, new_entry())
     mon = Process.monitor(owner)
-    connection = %{pid: owner, streams: 0, max_streams: max_streams, monitor: mon}
+
+    connection = %{
+      pid: owner,
+      streams: 0,
+      max_streams: max_streams,
+      monitor: mon,
+      draining: false
+    }
+
     entry = %{entry | connections: Map.put(entry.connections, owner, connection)}
 
     state = %{
@@ -148,7 +161,7 @@ defmodule HTTP.HTTP2.Pool do
       entry.connecting > 0 ->
         {:reply, :wait, state}
 
-      map_size(entry.connections) < state.max_connections ->
+      active_connections(entry) < state.max_connections ->
         {:reply, :start, put_entry(state, key, %{entry | connecting: 1})}
 
       true ->
@@ -165,6 +178,19 @@ defmodule HTTP.HTTP2.Pool do
 
     entry = %{entry | pending: [], connecting: max(entry.connecting - 1, 0)}
     {:reply, :ok, put_entry(state, key, entry)}
+  end
+
+  def handle_call({:mark_draining, key, owner}, _from, state) do
+    case get_in(state.entries, [key, :connections, owner]) do
+      nil ->
+        {:reply, :ok, state}
+
+      connection ->
+        entry = Map.fetch!(state.entries, key)
+        connection = %{connection | draining: true}
+        entry = %{entry | connections: Map.put(entry.connections, owner, connection)}
+        {:reply, :ok, put_entry(state, key, entry)}
+    end
   end
 
   def handle_call({:release, key, token}, _from, state) do
@@ -240,11 +266,16 @@ defmodule HTTP.HTTP2.Pool do
   defp available_owner(nil), do: :none
 
   defp available_owner(entry) do
-    case Enum.find(entry.connections, fn {_pid, c} -> c.streams < c.max_streams end) do
+    case Enum.find(entry.connections, fn {_pid, c} ->
+           not c.draining and c.streams < c.max_streams
+         end) do
       {owner, _} -> {:ok, owner}
       nil -> :none
     end
   end
+
+  defp active_connections(entry),
+    do: Enum.count(entry.connections, fn {_owner, connection} -> not connection.draining end)
 
   defp increment_owner(state, key, owner, token) do
     entry = Map.fetch!(state.entries, key)
@@ -283,7 +314,14 @@ defmodule HTTP.HTTP2.Pool do
   defp register_internal(state, key, owner) do
     entry = Map.get(state.entries, key, new_entry())
     monitor = Process.monitor(owner)
-    connection = %{pid: owner, streams: 0, max_streams: state.max_streams, monitor: monitor}
+
+    connection = %{
+      pid: owner,
+      streams: 0,
+      max_streams: state.max_streams,
+      monitor: monitor,
+      draining: false
+    }
 
     state
     |> put_entry(key, %{entry | connections: Map.put(entry.connections, owner, connection)})

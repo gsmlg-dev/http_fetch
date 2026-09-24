@@ -274,4 +274,16 @@ defmodule HTTP.HTTP2RuntimeTest do
     assert {:error, {:owner_start_failed, :econnrefused}} = Task.await(waiter)
     assert %{connecting: 0, pending: 0} = Pool.stats(pool)[:profile_key]
   end
+
+  test "draining owners stop new reservations but free a connection slot" do
+    {:ok, owner} =
+      ConnectionOwner.start_link(transport: transport(self()), socket: :socket, max_streams: 1)
+
+    assert_receive {:wire, :socket, _}, 500
+    {:ok, pool} = Pool.start_link(max_connections: 1)
+    assert :ok = Pool.register(pool, :profile_key, owner)
+    assert :ok = Pool.mark_draining(pool, :profile_key, owner)
+    assert :none = Pool.try_reserve(pool, :profile_key)
+    assert :start = Pool.claim_connect(pool, :profile_key)
+  end
 end

@@ -26,11 +26,13 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
 - Profile-selected HPACK output now supports static/dynamic exact indexing,
   incremental indexing, sensitive never-index, and RFC 7541 Huffman strings;
   numeric SETTINGS IDs also update directional core state.
+- GOAWAY marks pooled owners draining so new reservations select a fresh owner
+  while existing streams continue to drain.
 
 ## Verification
 
 Focused core profile/fingerprint/connection tests pass, runtime/body bridge
-tests pass (13), PoolKey tests pass (9), and fetch tests pass (208 tests plus
+tests pass (14), PoolKey tests pass (9), and fetch tests pass (209 tests plus
 20 doctests). The full HTTP/2 socket regression suite passes (39 tests),
 including sequential h2c reuse, three overlapping requests, and simultaneous
 cold-start coalescing on one accepted socket with streams 1, 3, and 5.
