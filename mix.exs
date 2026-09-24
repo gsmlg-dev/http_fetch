@@ -17,7 +17,12 @@ defmodule HttpFetch.Umbrella.MixProject do
       aliases: aliases(),
       docs: [
         main: "readme",
-        extras: ["README.md", "CHANGELOG.md"],
+        extras: [
+          "README.md",
+          "CHANGELOG.md",
+          "docs/ex-ssl-consumer-contract.md",
+          "docs/pr-14-validation.md"
+        ],
         source_ref: "v#{@version}",
         source_url: @source_url
       ]
