@@ -426,6 +426,22 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     end
   end
 
+  defp dispatch_frame(state, %{
+         type: :priority_update,
+         stream_id: 0,
+         payload: <<0::1, target_stream_id::31, value::binary>>
+       }) do
+    with {:ok, connection, _effects} <-
+           Connection.priority_update(state.connection, 0, target_stream_id, value) do
+      {:ok, %{state | connection: connection}}
+    else
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp dispatch_frame(state, %{type: :priority_update}),
+    do: {:error, :invalid_priority_update, state}
+
   defp dispatch_frame(state, %{type: :headers, stream_id: id, payload: payload, flags: flags}) do
     if state.connection.header_block do
       {:error, :expected_continuation, state}

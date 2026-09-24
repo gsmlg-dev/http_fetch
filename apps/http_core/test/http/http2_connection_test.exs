@@ -78,4 +78,27 @@ defmodule HTTP.HTTP2ConnectionTest do
     assert {:ok, conn, [{:rst_stream, 2, :cancel}]} = Connection.reject_push(conn, 1, 2, block)
     assert MapSet.member?(conn.promised, 2)
   end
+
+  test "PRIORITY_UPDATE keeps a bounded RFC 9218 field value" do
+    conn = Connection.new()
+
+    assert {:ok, conn, []} = Connection.priority_update(conn, 0, 1, "u=2, i")
+    assert conn.priorities[1] == %{value: "u=2, i", rfc9218: true}
+    assert {:error, :invalid_priority_update} = Connection.priority_update(conn, 1, 1, "u=1")
+    assert {:error, :invalid_priority_update} = Connection.priority_update(conn, 0, 1, :bad)
+    assert {:error, :invalid_priority_update} = Connection.priority_update(conn, 0, 0, "u=1")
+    assert {:error, :invalid_priority_update} = Connection.priority_update(conn, 0, 1, "")
+
+    assert {:error, :invalid_priority_update} =
+             Connection.priority_update(conn, 0, 1, String.duplicate("x", 257))
+  end
+
+  test "Frame registers PRIORITY_UPDATE type 0xF" do
+    alias HTTP.HTTP2.Frame
+    wire = Frame.encode(:priority_update, 0, 0, <<0::1, 1::31, "u=2"::binary>>)
+
+    assert {:ok, %{type: :priority_update, stream_id: 0, payload: <<0::1, 1::31, "u=2"::binary>>},
+            <<>>} =
+             Frame.decode(wire)
+  end
 end

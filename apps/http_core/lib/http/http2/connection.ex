@@ -273,8 +273,8 @@ defmodule HTTP.HTTP2.Connection do
   def handle_priority(_, _, _, _, _), do: {:error, :invalid_priority}
 
   def priority_update(%__MODULE__{} = c, frame_stream_id, target_stream_id, value)
-      when frame_stream_id == 0 and target_stream_id >= 0 and is_binary(value) and
-             byte_size(value) <= 256 do
+      when frame_stream_id == 0 and target_stream_id > 0 and is_binary(value) and
+             byte_size(value) in 1..256 do
     {:ok,
      %{c | priorities: Map.put(c.priorities, target_stream_id, %{value: value, rfc9218: true})},
      []}

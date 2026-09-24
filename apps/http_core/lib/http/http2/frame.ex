@@ -14,6 +14,7 @@ defmodule HTTP.HTTP2.Frame do
           | :goaway
           | :window_update
           | :continuation
+          | :priority_update
           | non_neg_integer()
 
   @type t :: %__MODULE__{
@@ -68,6 +69,7 @@ defmodule HTTP.HTTP2.Frame do
   def type_id(:goaway), do: 0x7
   def type_id(:window_update), do: 0x8
   def type_id(:continuation), do: 0x9
+  def type_id(:priority_update), do: 0xF
   def type_id(type) when is_integer(type) and type >= 0 and type <= 0xFF, do: type
 
   @spec type_atom(non_neg_integer()) :: type()
@@ -81,6 +83,7 @@ defmodule HTTP.HTTP2.Frame do
   def type_atom(0x7), do: :goaway
   def type_atom(0x8), do: :window_update
   def type_atom(0x9), do: :continuation
+  def type_atom(0xF), do: :priority_update
   def type_atom(type), do: type
 
   @spec flag?(non_neg_integer(), non_neg_integer()) :: boolean()
