@@ -1,7 +1,8 @@
 defmodule HTTP.HTTP2.ProfileCapture do
   @moduledoc "Builds and validates provenance manifests for HTTP/2 captures."
 
-  @required ~w(product version platform captured_at tool origin protocol connection_context fixture_digest license matched_fields known_differences)a
+  @required ~w(product version platform captured_at tool origin protocol connection_context source fixture_digest license matched_fields known_differences)a
+  @string_keys Map.new(@required, &{Atom.to_string(&1), &1})
   @sources [:synthetic, :reference_derived, :captured_verified]
   @protocols [:h2, :h2c]
   @contexts [:cold, :reused]
@@ -16,6 +17,8 @@ defmodule HTTP.HTTP2.ProfileCapture do
 
   @spec validate_manifest(map()) :: {:ok, map()} | {:error, term()}
   def validate_manifest(manifest) when is_map(manifest) do
+    manifest = normalize_keys(manifest)
+
     with :ok <- required_fields(manifest),
          :ok <- validate_source(manifest),
          :ok <- validate_protocol(manifest),
@@ -36,6 +39,33 @@ defmodule HTTP.HTTP2.ProfileCapture do
     case Enum.find(@required, &(not Map.has_key?(manifest, &1))) do
       nil -> :ok
       field -> {:error, {:missing_manifest_field, field}}
+    end
+  end
+
+  defp normalize_keys(manifest) do
+    Enum.reduce(@string_keys, manifest, fn {string_key, atom_key}, acc ->
+      if Map.has_key?(acc, atom_key) do
+        acc
+      else
+        case Map.pop(acc, string_key) do
+          {nil, _acc} -> acc
+          {value, acc} -> Map.put(acc, atom_key, value)
+        end
+      end
+    end)
+    |> normalize_enum(:source, %{
+      "synthetic" => :synthetic,
+      "reference-derived" => :reference_derived,
+      "captured-verified" => :captured_verified
+    })
+    |> normalize_enum(:protocol, %{"h2" => :h2, "h2c" => :h2c})
+    |> normalize_enum(:connection_context, %{"cold" => :cold, "reused" => :reused})
+  end
+
+  defp normalize_enum(manifest, key, values) do
+    case Map.get(manifest, key) do
+      value when is_binary(value) -> Map.put(manifest, key, Map.get(values, value, value))
+      _ -> manifest
     end
   end
 

@@ -53,6 +53,9 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
   isolation. OTP `:ssl` and `:ex_ssl` HTTP/2 socket regressions both pass.
 - Fingerprint observations now preserve a validated evidence source and reject
   oversized input or frame-count limits before parsing.
+- Capture manifest import accepts JSON-style keys and documented string
+  evidence labels through a finite normalization table; unknown fields never
+  become atoms.
 
 ## Verification
 

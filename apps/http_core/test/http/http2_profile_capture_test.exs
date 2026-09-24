@@ -49,4 +49,26 @@ defmodule HTTP.HTTP2ProfileCaptureTest do
     assert {:error, :invalid_fixture_digest} =
              ProfileCapture.validate_manifest(%{manifest | fixture_digest: "abc"})
   end
+
+  test "imports JSON-style string keys and evidence labels" do
+    manifest =
+      @attrs
+      |> Enum.into(%{}, fn {key, value} ->
+        value =
+          case {key, value} do
+            {:source, :captured_verified} -> "captured-verified"
+            {:protocol, :h2} -> "h2"
+            {:connection_context, :cold} -> "cold"
+            _ -> value
+          end
+
+        {Atom.to_string(key), value}
+      end)
+      |> Map.put("fixture_digest", ProfileCapture.digest("fixture"))
+
+    assert {:ok, normalized} = ProfileCapture.validate_manifest(manifest)
+    assert normalized.source == :captured_verified
+    assert normalized.protocol == :h2
+    assert normalized.connection_context == :cold
+  end
 end

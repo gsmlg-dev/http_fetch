@@ -11,7 +11,8 @@ Capture workflow:
 
 The executable provenance boundary is `HTTP.HTTP2.ProfileCapture`. Build a
 manifest with `build_manifest/2`, passing the fixture bytes and metadata, or
-validate an imported map with `validate_manifest/1`. The builder replaces the
+validate an imported map with `validate_manifest/1` (including JSON-style
+string keys and the documented hyphenated evidence labels). The builder replaces the
 fixture digest with a SHA-256 digest of the supplied bytes. Validation requires
 the product/version/platform, capture tool and time, origin, `:h2` or `:h2c`,
 `:cold` or `:reused` connection context, source evidence level, license,
