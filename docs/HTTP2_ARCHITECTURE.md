@@ -23,6 +23,8 @@ send credit retains at most its current BodyBridge chunk and resumes it after a
 validated WINDOW_UPDATE; it does not fail the upload or acknowledge early.
 DATA effects are split at the peer's advertised MAX_FRAME_SIZE, with
 END_STREAM applied only to the final fragment.
+When multiple streams are pending on connection credit, the owner uses a
+bounded round-robin scheduler so map iteration order cannot starve a stream.
 Simultaneous cold requests for
 one key share a single out-of-band connection claim. GOAWAY marks pooled
 owners draining so new reservations can select a replacement. The pool closes

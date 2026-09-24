@@ -8,7 +8,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   use GenServer
   import Bitwise
 
-  alias HTTP.HTTP2.{Connection, Frame, Settings, WireProfile}
+  alias HTTP.HTTP2.{Connection, Frame, Scheduler, Settings, WireProfile}
 
   @preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
   @default_queue_bytes 1_048_576
@@ -81,6 +81,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         profile_digest: digest,
         connection: connection,
         streams: %{},
+        scheduler: Scheduler.new(),
         refs: %{},
         buffer: <<>>,
         init_settings: [],
@@ -215,7 +216,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
               body_bridge: Keyword.get(opts, :body_bridge),
               pending_body: nil
             }),
-          refs: Map.put(state.refs, request_ref, stream.id)
+          refs: Map.put(state.refs, request_ref, stream.id),
+          scheduler: Scheduler.add(state.scheduler, stream.id)
       }
 
       {:reply, {:ok, result}, state}
@@ -254,7 +256,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         state = %{
           state
           | streams: Map.delete(state.streams, id),
-            refs: Map.delete(state.refs, ref)
+            refs: Map.delete(state.refs, ref),
+            scheduler: Scheduler.remove(state.scheduler, id)
         }
 
         if state.lifecycle == :draining and map_size(state.streams) == 0 do
@@ -566,7 +569,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
             streams =
               update_in(state.streams, [id, :pending_body], fn _ -> {bridge, chunk, ack_ref} end)
 
-            {:ok, %{state | streams: streams}}
+            {:ok, %{state | streams: streams, scheduler: Scheduler.add(state.scheduler, id)}}
 
           {:error, reason} ->
             send(bridge, {:body_error, reason})
@@ -628,7 +631,15 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   defp dispatch_event(state, _), do: {:ok, state}
 
   defp drain_pending_body(state, 0) do
-    Enum.reduce_while(Map.keys(state.streams), {:ok, state}, fn id, {:ok, state} ->
+    ids =
+      state.streams
+      |> Enum.filter(fn {_id, entry} -> not is_nil(entry.pending_body) end)
+      |> Enum.map(&elem(&1, 0))
+
+    {ids, scheduler} = Scheduler.ready(state.scheduler, ids)
+    state = %{state | scheduler: scheduler}
+
+    Enum.reduce_while(ids, {:ok, state}, fn id, {:ok, state} ->
       case drain_pending_body(state, id) do
         {:ok, state} -> {:cont, {:ok, state}}
         {:error, reason, state} -> {:halt, {:error, reason, state}}

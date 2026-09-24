@@ -5,8 +5,8 @@
 - 本次核对基线：`main` / `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` / v0.13.0
 - 状态：P1/P2/P3 核心与显式 profile 的 h2c Fetch 接入已实现并有真实 socket
   复用、三 stream 重叠及同时冷启动去重证据；P4 已加入窗口恢复和 peer
-  MAX_FRAME_SIZE 分帧回归，P5 已加入有界 provenance manifest 校验；公平调度、
-  完整互操作矩阵、P6 gates 和真实浏览器样本仍在进行。
+  MAX_FRAME_SIZE 分帧和 round-robin pending-stream 调度回归，P5 已加入有界
+  provenance manifest 校验；完整互操作矩阵、P6 gates 和真实浏览器样本仍在进行。
 - 执行入口：配套 `CODEX_HTTP2_PROMPT.md`。
 
 ## 1. 目标与完成标准
