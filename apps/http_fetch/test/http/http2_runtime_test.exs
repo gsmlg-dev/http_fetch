@@ -182,6 +182,25 @@ defmodule HTTP.HTTP2RuntimeTest do
     assert ConnectionOwner.status(owner).stream_ids == [1]
   end
 
+  test "cancelling an upload stream stops its body bridge" do
+    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+    assert_receive {:wire, :socket, _}, 500
+
+    stream = upload_stream(self())
+    {:ok, bridge} = BodyBridge.start_link(stream, owner)
+
+    assert {:ok, %{id: id, ref: ref}} =
+             ConnectionOwner.open_stream(owner, headers("/cancel-upload"),
+               body_bridge: bridge,
+               subscriber: self()
+             )
+
+    assert_receive {:wire, :socket, _headers}, 500
+    assert :ok = ConnectionOwner.cancel(owner, ref)
+    assert_receive {:http2, ^id, {:http2, :cancelled}}, 500
+    assert %{stopped?: true} = BodyBridge.status(bridge)
+  end
+
   test "pool reserves capacity atomically for a registered owner" do
     {:ok, owner} =
       ConnectionOwner.start_link(transport: transport(self()), socket: :socket, max_streams: 1)

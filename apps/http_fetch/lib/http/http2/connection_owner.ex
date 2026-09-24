@@ -155,7 +155,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       when map_size(state.streams) >= state.max_streams,
       do: {:reply, {:error, :capacity}, state}
 
-  def handle_call({:open_stream, headers, opts}, _from, state) do
+  def handle_call({:open_stream, headers, opts}, from, state) do
     request_ref = Keyword.get(opts, :request_ref, make_ref())
 
     with {:ok, stream, connection} <-
@@ -175,7 +175,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
           streams:
             Map.put(state.streams, stream.id, %{
               ref: request_ref,
-              pid: Keyword.get(opts, :subscriber, self()),
+              pid: Keyword.get(opts, :subscriber, elem(from, 0)),
               committed?: true,
               body_bridge: Keyword.get(opts, :body_bridge),
               pending_body: nil
@@ -197,6 +197,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
           {:ok, connection, effects} ->
             case write_effects(state, effects) do
               {:ok, state} ->
+                cancel_body_bridge(state, id)
                 notify_stream(state, id, {:http2, :cancelled})
                 {:reply, :ok, %{state | connection: connection}}
 
@@ -214,7 +215,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     case stream_id(state, ref_or_id) do
       {:ok, id} ->
         ref = get_in(state, [:streams, id, :ref])
-        {:reply, :ok, %{state | streams: Map.delete(state.streams, id), refs: Map.delete(state.refs, ref)}}
+
+        {:reply, :ok,
+         %{state | streams: Map.delete(state.streams, id), refs: Map.delete(state.refs, ref)}}
 
       :error ->
         {:reply, :ok, state}
@@ -518,6 +521,17 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     case get_in(state, [:streams, id, :pid]) do
       pid when is_pid(pid) -> send(pid, {:http2, id, message})
       _ -> :ok
+    end
+  end
+
+  defp cancel_body_bridge(state, id) do
+    case get_in(state, [:streams, id, :body_bridge]) do
+      bridge when is_pid(bridge) ->
+        _ = HTTP.HTTP2.BodyBridge.cancel(bridge)
+        :ok
+
+      _ ->
+        :ok
     end
   end
 

@@ -19,9 +19,6 @@ defmodule HTTP.SocketClient do
       http_version(request) == :http3 ->
         request_http3(request, abort_controller_pid, unix_socket_path)
 
-      http2_request?(request) ->
-        HTTP.HTTP2.Client.request(request, abort_controller_pid, unix_socket_path)
-
       true ->
         with {:ok, request} <- pin_tls_backend(request) do
           request_socket(request, abort_controller_pid, unix_socket_path)
@@ -908,10 +905,6 @@ defmodule HTTP.SocketClient do
       Keyword.has_key?(request.transport_options, :http2_scope) or
       Keyword.has_key?(request.transport_options, :http2_priority) or
       Keyword.get(request.transport_options, :http2_reuse) == false
-  end
-
-  defp http2_request?(%Request{} = request) do
-    http_version(request) in [:http2, :h2c] or http2_profile?(request)
   end
 
   defp tls_backend(%Request{} = request), do: Keyword.get(request.transport_options, :tls_backend)
