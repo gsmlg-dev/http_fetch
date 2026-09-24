@@ -329,6 +329,22 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert HTTP.Response.read_all(response) == "forced-ex-ssl-h2"
   end
 
+  test "reuses one HTTPS h2 socket for sequential explicit-profile requests" do
+    parent = self()
+    url = start_https_h2_reuse_server!(parent)
+
+    options = [http_version: :http2, http2_profile: :native_v1, ssl: [verify: :verify_none]]
+
+    first = url |> HTTP.fetch(options) |> HTTP.Promise.await()
+    second = url |> HTTP.fetch(options) |> HTTP.Promise.await()
+
+    assert_receive {:https_h2_accepts, 1}, 1_000
+    assert first.status == 200
+    assert second.status == 200
+    assert HTTP.Response.read_all(first) == "/one"
+    assert HTTP.Response.read_all(second) == "/test"
+  end
+
   test "delivers a complete ex_ssl HTTP/2 response queued before a peer close" do
     test_pid = self()
 
@@ -1801,6 +1817,65 @@ defmodule HTTP.SocketClientHTTP2Test do
           {:ok, socket} ->
             handler.(socket, :ssl)
             :ok = :ssl.close(socket)
+
+          {:error, _reason} ->
+            :ok
+        end
+
+        :ssl.close(listen_socket)
+      end)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+      :ssl.close(listen_socket)
+    end)
+
+    "https://127.0.0.1:#{port}/test"
+  end
+
+  defp start_https_h2_reuse_server!(parent) do
+    {:ok, listen_socket} =
+      :ssl.listen(
+        0,
+        [
+          :binary,
+          packet: :raw,
+          active: false,
+          ip: {127, 0, 0, 1},
+          reuseaddr: true,
+          certfile: @certfile,
+          keyfile: @keyfile,
+          alpn_preferred_protocols: [<<"h2">>]
+        ]
+      )
+
+    {:ok, {{127, 0, 0, 1}, port}} = :ssl.sockname(listen_socket)
+
+    pid =
+      spawn_link(fn ->
+        {:ok, transport_socket} = :ssl.transport_accept(listen_socket, 5_000)
+
+        case :ssl.handshake(transport_socket) do
+          {:ok, socket} ->
+            send(parent, {:https_h2_accepts, 1})
+            {_headers, buffer} = recv_client_h2_request(socket, :ssl)
+
+            send_all(socket, :ssl, [
+              Frame.encode(:settings, 0, 0, ""),
+              Frame.encode(:headers, @end_headers, 1, response_headers(200, "/one")),
+              Frame.encode(:data, @end_stream, 1, "/one")
+            ])
+
+            buffer = assert_settings_ack(socket, :ssl, buffer)
+            {:ok, decoder, _headers} = HPACK.decode(HPACK.new_decoder(), <<>>)
+            {path, _buffer} = recv_h2_request(socket, :ssl, buffer, 3, decoder)
+
+            send_all(socket, :ssl, [
+              Frame.encode(:headers, @end_headers, 3, response_headers(200, path)),
+              Frame.encode(:data, @end_stream, 3, path)
+            ])
+
+            :ssl.close(socket)
 
           {:error, _reason} ->
             :ok
