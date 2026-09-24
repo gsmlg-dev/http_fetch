@@ -33,6 +33,11 @@ defmodule HTTP.HTTP2.WireProfile do
             push: :disabled
 
   @type t :: %__MODULE__{}
+
+  # These factories intentionally expose the stable `t()` contract. Dialyzer
+  # otherwise infers each literal profile as a narrower singleton struct and
+  # reports the public contract as a supertype.
+  @dialyzer {:nowarn_function, native_v1: 0, synthetic_test_v1: 0, synthetic_test_v2: 0}
   @allowed [
     :id,
     :revision,

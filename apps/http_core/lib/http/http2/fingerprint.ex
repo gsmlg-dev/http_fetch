@@ -8,6 +8,10 @@ defmodule HTTP.HTTP2.Fingerprint do
   @max_observed_bytes 1_048_576
   @max_frames 4096
 
+  # Keep the public observation/diff contracts structural and forward
+  # compatible; Dialyzer infers the current map literals more narrowly.
+  @dialyzer {:nowarn_function, observe: 2, diff: 2}
+
   @spec observe(binary(), keyword()) :: {:ok, map()} | {:error, term()}
   def observe(bytes, opts \\ []) when is_binary(bytes) do
     capture? = Keyword.get(opts, :raw_capture, false)
