@@ -132,22 +132,25 @@ defmodule HTTP.HTTP2.WireProfile do
   def compile(options) when is_map(options) do
     unknown = Map.keys(options) -- @allowed
 
-    if unknown != [] or not Map.has_key?(options, :id) do
-      if not Map.has_key?(options, :id),
-        do: {:error, :missing_id},
-        else: {:error, {:unknown_fields, Enum.sort(unknown)}}
-    else
-      options = Map.put_new(options, :revision, 1)
-      options = Map.put_new(options, :source, :synthetic)
-      options = Map.put_new(options, :evidence, :synthetic)
-      options = Map.put_new(options, :settings, [])
-      options = Map.put_new(options, :connection_initial_window, 65_535)
-      options = Map.put_new(options, :stream_initial_window, 65_535)
+    cond do
+      not Map.has_key?(options, :id) ->
+        {:error, :missing_id}
 
-      options =
-        Map.put_new(options, :pseudo_headers, [":method", ":scheme", ":authority", ":path"])
+      unknown != [] ->
+        {:error, {:unknown_fields, Enum.sort(unknown)}}
 
-      validate(struct(__MODULE__, options))
+      true ->
+        options = Map.put_new(options, :revision, 1)
+        options = Map.put_new(options, :source, :synthetic)
+        options = Map.put_new(options, :evidence, :synthetic)
+        options = Map.put_new(options, :settings, [])
+        options = Map.put_new(options, :connection_initial_window, 65_535)
+        options = Map.put_new(options, :stream_initial_window, 65_535)
+
+        options =
+          Map.put_new(options, :pseudo_headers, [":method", ":scheme", ":authority", ":path"])
+
+        validate(struct(__MODULE__, options))
     end
   end
 

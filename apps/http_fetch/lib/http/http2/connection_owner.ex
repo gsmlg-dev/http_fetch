@@ -447,11 +447,12 @@ defmodule HTTP.HTTP2.ConnectionOwner do
          stream_id: 0,
          payload: <<0::1, target_stream_id::31, value::binary>>
        }) do
-    with {:ok, connection, _effects} <-
-           Connection.priority_update(state.connection, 0, target_stream_id, value) do
-      {:ok, %{state | connection: connection}}
-    else
-      {:error, reason} -> {:error, reason, state}
+    case Connection.priority_update(state.connection, 0, target_stream_id, value) do
+      {:ok, connection, _effects} ->
+        {:ok, %{state | connection: connection}}
+
+      {:error, reason} ->
+        {:error, reason, state}
     end
   end
 
@@ -609,8 +610,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       {id, _entry} ->
         case Connection.send_data(state.connection, id, <<>>, true) do
           {:ok, connection, effects} ->
-            with {:ok, state} <- write_effects(%{state | connection: connection}, effects),
-                 do: {:ok, state}
+            write_effects(%{state | connection: connection}, effects)
 
           {:error, reason} ->
             {:error, reason, state}

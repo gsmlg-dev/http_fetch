@@ -85,12 +85,13 @@ socket memory behavior.
 The full fetch application tests pass, and the full core test suite now passes
 (`209 passed`). The unsupported-options test uses a kernel-assigned closed
 port, so its refusal assertion is stable across platforms. Fresh
-warnings-as-errors compilation, format, and diff checks pass. Credo currently
-crashes in its token-position checker on an existing sigil under Elixir 1.20;
-this is an environment/tooling limitation, not a passed CI-version Credo run.
-Dialyzer passes with narrow, documented contracts for the intentionally
-structural public observation APIs. `mix docs` completes with existing hidden
-module/type reference warnings; linked validation extras are included.
+warnings-as-errors compilation, format, and diff checks pass. Credo passes
+under Elixir 1.19.5/OTP 28 after equivalent readability/refactoring cleanup;
+the local Elixir 1.20 run still crashes in Credo's token-position checker, and
+the exact CI Elixir 1.18 image was not available locally. Dialyzer passes with
+narrow, documented contracts for the intentionally structural public
+observation APIs. `mix docs` completes with existing hidden module/type
+reference warnings; linked validation extras are included.
 
 An independent `hyper-h2` 4.2.0 cleartext server accepted the client's
 prior-knowledge preface, SETTINGS, HPACK request headers, and stream, then

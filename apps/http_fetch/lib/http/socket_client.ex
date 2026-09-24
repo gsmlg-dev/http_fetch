@@ -213,49 +213,60 @@ defmodule HTTP.SocketClient do
               run_http2_reused_owner(parent, ref, request, owner, reservation, key, deadline_at)
 
             {:connect, claim} ->
-              with {:ok, socket} <- connect(transport, host, port, request, selection, timeout) do
-                case maybe_http2_owner(
-                       parent,
-                       ref,
-                       request,
-                       selection,
-                       transport,
-                       socket,
-                       deadline_at,
-                       claim
-                     ) do
-                  {:handled, result} ->
-                    _ = Process.cancel_timer(timer_ref)
-                    result
-
-                  :legacy ->
-                    fail_http2_connect(claim, :http2_not_negotiated)
-
-                    initialize_legacy_owner(
-                      parent,
-                      ref,
-                      request,
-                      unix_socket_path,
-                      redirects,
-                      redirected?,
-                      deadline_at,
-                      timer_ref,
-                      transport,
-                      socket,
-                      selection
-                    )
-                end
-              else
-                {:error, reason} ->
-                  fail_http2_connect(claim, reason)
-                  send_error(parent, ref, reason)
-              end
+              handle_new_connection(
+                %{
+                  parent: parent,
+                  ref: ref,
+                  request: request,
+                  unix_socket_path: unix_socket_path,
+                  redirects: redirects,
+                  redirected?: redirected?,
+                  deadline_at: deadline_at,
+                  timer_ref: timer_ref
+                },
+                transport,
+                host,
+                port,
+                selection,
+                timeout,
+                claim
+              )
           end
         else
           {:error, reason} ->
             _ = Process.cancel_timer(timer_ref)
             send_error(parent, ref, reason)
         end
+    end
+  end
+
+  defp handle_new_connection(context, transport, host, port, selection, timeout, claim) do
+    %{parent: parent, ref: ref, request: request, deadline_at: deadline_at} = context
+
+    case connect(transport, host, port, request, selection, timeout) do
+      {:ok, socket} ->
+        case maybe_http2_owner(
+               parent,
+               ref,
+               request,
+               selection,
+               transport,
+               socket,
+               deadline_at,
+               claim
+             ) do
+          {:handled, result} ->
+            _ = Process.cancel_timer(context.timer_ref)
+            result
+
+          :legacy ->
+            fail_http2_connect(claim, :http2_not_negotiated)
+            initialize_legacy_owner(context, transport, socket, selection)
+        end
+
+      {:error, reason} ->
+        fail_http2_connect(claim, reason)
+        send_error(parent, ref, reason)
     end
   end
 
@@ -273,19 +284,7 @@ defmodule HTTP.SocketClient do
             {:ok, {:reused, owner, {pool, reservation}, key}}
 
           :none ->
-            case HTTP.HTTP2.Pool.claim_connect(pool, key) do
-              :start ->
-                {:ok, {:connect, {pool, key}}}
-
-              :wait ->
-                case HTTP.HTTP2.Pool.reserve(pool, key) do
-                  {:ok, owner, reservation} ->
-                    {:ok, {:reused, owner, {pool, reservation}, key}}
-
-                  {:error, reason} ->
-                    {:error, reason}
-                end
-            end
+            reserve_or_claim_http2_owner(pool, key)
         end
       else
         _ -> {:ok, {:connect, nil}}
@@ -295,19 +294,26 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp initialize_legacy_owner(
-         parent,
-         ref,
-         request,
-         unix_socket_path,
-         redirects,
-         redirected?,
-         deadline_at,
-         timer_ref,
-         transport,
-         socket,
-         selection
-       ) do
+  defp reserve_or_claim_http2_owner(pool, key) do
+    case HTTP.HTTP2.Pool.claim_connect(pool, key) do
+      :start ->
+        {:ok, {:connect, {pool, key}}}
+
+      :wait ->
+        case HTTP.HTTP2.Pool.reserve(pool, key) do
+          {:ok, owner, reservation} ->
+            {:ok, {:reused, owner, {pool, reservation}, key}}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  defp initialize_legacy_owner(context, transport, socket, selection) do
+    %{parent: parent, ref: ref, request: request, deadline_at: deadline_at, timer_ref: timer_ref} =
+      context
+
     case initialize_protocol(transport, socket, request, selection) do
       {:ok, protocol_module, protocol, prepared_request} ->
         with :ok <-
@@ -318,22 +324,15 @@ defmodule HTTP.SocketClient do
                  deadline_at
                ),
              :ok <- activate_socket(transport, socket) do
-          state = %{
-            parent: parent,
-            ref: ref,
-            request: request,
-            unix_socket_path: unix_socket_path,
-            redirects: redirects,
-            redirected?: redirected?,
-            deadline_at: deadline_at,
-            timer_ref: timer_ref,
-            transport: transport,
-            socket: socket,
-            protocol_module: protocol_module,
-            protocol: protocol,
-            mode: nil,
-            response_sent?: false
-          }
+          state =
+            Map.merge(context, %{
+              transport: transport,
+              socket: socket,
+              protocol_module: protocol_module,
+              protocol: protocol,
+              mode: nil,
+              response_sent?: false
+            })
 
           owner_loop(state)
         else
@@ -360,9 +359,7 @@ defmodule HTTP.SocketClient do
          deadline_at,
          claim
        ) do
-    if not Keyword.has_key?(request.transport_options, :http2_profile) do
-      :legacy
-    else
+    if Keyword.has_key?(request.transport_options, :http2_profile) do
       case connected_protocol(transport, socket, selection) do
         {:ok, :http2} ->
           {:handled, run_http2_owner(parent, ref, request, transport, socket, deadline_at, claim)}
@@ -370,6 +367,8 @@ defmodule HTTP.SocketClient do
         _ ->
           :legacy
       end
+    else
+      :legacy
     end
   end
 

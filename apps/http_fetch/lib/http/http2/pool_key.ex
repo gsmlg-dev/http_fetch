@@ -193,10 +193,13 @@ defmodule HTTP.HTTP2.PoolKey do
   defp file_identity(path, name) when is_binary(path) do
     case File.stat(path, time: :posix) do
       {:ok, stat} ->
-        with {:ok, contents} <- File.read(path) do
-          {:ok, %{kind: name, digest: digest({stat.size, stat.mtime, stat.mode, contents})}, true}
-        else
-          {:error, reason} -> {:error, {:tls_file_unreadable, name, reason}}
+        case File.read(path) do
+          {:ok, contents} ->
+            {:ok, %{kind: name, digest: digest({stat.size, stat.mtime, stat.mode, contents})},
+             true}
+
+          {:error, reason} ->
+            {:error, {:tls_file_unreadable, name, reason}}
         end
 
       {:error, reason} ->
