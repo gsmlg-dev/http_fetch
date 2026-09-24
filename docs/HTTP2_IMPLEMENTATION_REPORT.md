@@ -22,8 +22,8 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
 ## Verification
 
 Focused core profile/fingerprint/connection tests pass, runtime/body bridge
-tests pass (13), PoolKey tests pass (9), and fetch tests pass (198 tests plus
-20 doctests). The full HTTP/2 socket regression suite passes (35 tests), the
+tests pass (13), PoolKey tests pass (9), and fetch tests pass (202 tests plus
+20 doctests). The full HTTP/2 socket regression suite passes (36 tests), the
 full fetch application tests pass, and core tests pass except one existing
 platform-sensitive TLS assertion (`:eaddrnotavail` instead of
 `:econnrefused`). Fresh warnings-as-errors compilation, format, and diff
