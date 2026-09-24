@@ -212,7 +212,7 @@ defmodule HTTP.SocketClient do
               _ = Process.cancel_timer(timer_ref)
               run_http2_reused_owner(parent, ref, request, owner, reservation, key, deadline_at)
 
-            :connect ->
+            {:connect, claim} ->
               with {:ok, socket} <- connect(transport, host, port, request, selection, timeout) do
                 case maybe_http2_owner(
                        parent,
@@ -221,13 +221,16 @@ defmodule HTTP.SocketClient do
                        selection,
                        transport,
                        socket,
-                       deadline_at
+                       deadline_at,
+                       claim
                      ) do
                   {:handled, result} ->
                     _ = Process.cancel_timer(timer_ref)
                     result
 
                   :legacy ->
+                    fail_http2_connect(claim, :http2_not_negotiated)
+
                     initialize_legacy_owner(
                       parent,
                       ref,
@@ -243,7 +246,9 @@ defmodule HTTP.SocketClient do
                     )
                 end
               else
-                {:error, reason} -> send_error(parent, ref, reason)
+                {:error, reason} ->
+                  fail_http2_connect(claim, reason)
+                  send_error(parent, ref, reason)
               end
           end
         else
@@ -261,14 +266,31 @@ defmodule HTTP.SocketClient do
       pool = Process.whereis(:http_fetch_http2_pool)
 
       with pool when is_pid(pool) <- pool,
-           {:ok, key} <- HTTP.HTTP2.PoolKey.build(request, profile, :h2c),
-           {:ok, owner, reservation} <- HTTP.HTTP2.Pool.try_reserve(pool, key) do
-        {:ok, {:reused, owner, {pool, reservation}, key}}
+           {:ok, key} <- HTTP.HTTP2.PoolKey.build(request, profile, :h2c) do
+        case HTTP.HTTP2.Pool.try_reserve(pool, key) do
+          {:ok, owner, reservation} ->
+            {:ok, {:reused, owner, {pool, reservation}, key}}
+
+          :none ->
+            case HTTP.HTTP2.Pool.claim_connect(pool, key) do
+              :start ->
+                {:ok, {:connect, {pool, key}}}
+
+              :wait ->
+                case HTTP.HTTP2.Pool.reserve(pool, key) do
+                  {:ok, owner, reservation} ->
+                    {:ok, {:reused, owner, {pool, reservation}, key}}
+
+                  {:error, reason} ->
+                    {:error, reason}
+                end
+            end
+        end
       else
-        _ -> {:ok, :connect}
+        _ -> {:ok, {:connect, nil}}
       end
     else
-      {:ok, :connect}
+      {:ok, {:connect, nil}}
     end
   end
 
@@ -334,14 +356,15 @@ defmodule HTTP.SocketClient do
          selection,
          transport,
          socket,
-         deadline_at
+         deadline_at,
+         claim
        ) do
     if not Keyword.has_key?(request.transport_options, :http2_profile) do
       :legacy
     else
       case connected_protocol(transport, socket, selection) do
         {:ok, :http2} ->
-          {:handled, run_http2_owner(parent, ref, request, transport, socket, deadline_at)}
+          {:handled, run_http2_owner(parent, ref, request, transport, socket, deadline_at, claim)}
 
         _ ->
           :legacy
@@ -349,7 +372,7 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp run_http2_owner(parent, ref, request, transport, socket, deadline_at) do
+  defp run_http2_owner(parent, ref, request, transport, socket, deadline_at, claim) do
     profile = Keyword.get(request.transport_options, :http2_profile, :native_v1)
 
     with {:ok, headers, body} <- HTTP.HTTP2.request_headers(request, profile),
@@ -362,7 +385,8 @@ defmodule HTTP.SocketClient do
            ),
          :ok <- transfer_http2_socket(transport, socket, owner),
          :ok <- HTTP.HTTP2.ConnectionOwner.activate(owner),
-         {:ok, pool, reservation, key} <- register_http2_owner(request, profile, owner),
+         {:ok, pool, reservation, key} <-
+           register_http2_owner(request, profile, owner, claim),
          {:ok, bridge} <- maybe_start_http2_bridge(body, owner),
          {:ok, %{id: id}} <-
            HTTP.HTTP2.ConnectionOwner.open_stream(owner, headers,
@@ -392,6 +416,7 @@ defmodule HTTP.SocketClient do
       })
     else
       {:error, reason} ->
+        fail_http2_connect(claim, reason)
         transport.close(socket)
         send_error(parent, ref, reason)
     end
@@ -435,7 +460,7 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp register_http2_owner(request, profile, owner) do
+  defp register_http2_owner(request, profile, owner, claim) do
     if request.url.scheme != "http" or
          Keyword.get(request.transport_options, :http2_reuse, true) == false do
       {:ok, nil, nil, nil}
@@ -443,8 +468,9 @@ defmodule HTTP.SocketClient do
       pool = Process.whereis(:http_fetch_http2_pool)
 
       with pool when is_pid(pool) <- pool,
-           {:ok, key} <- HTTP.HTTP2.PoolKey.build(request, profile, :h2c),
-           :ok <- HTTP.HTTP2.Pool.register(pool, key, owner),
+           {:ok, key} <- pool_key_for_registration(request, profile, claim),
+           :ok <-
+             HTTP.HTTP2.Pool.register(pool, key, owner, connecting?: is_tuple(claim)),
            {:ok, ^owner, reservation} <- HTTP.HTTP2.Pool.reserve(pool, key) do
         {:ok, pool, reservation, key}
       else
@@ -452,6 +478,16 @@ defmodule HTTP.SocketClient do
       end
     end
   end
+
+  defp pool_key_for_registration(_request, _profile, {_pool, key}), do: {:ok, key}
+
+  defp pool_key_for_registration(request, profile, _claim),
+    do: HTTP.HTTP2.PoolKey.build(request, profile, :h2c)
+
+  defp fail_http2_connect({pool, key}, reason),
+    do: HTTP.HTTP2.Pool.fail_connect(pool, key, reason)
+
+  defp fail_http2_connect(_claim, _reason), do: :ok
 
   defp transfer_http2_socket(transport, socket, owner) when is_atom(transport),
     do: transport.controlling_process(socket, owner)

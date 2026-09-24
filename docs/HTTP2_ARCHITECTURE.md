@@ -15,6 +15,6 @@ unprofiled HTTP/2, and profiled HTTPS retain their existing compatibility paths.
 
 The owner does not synchronously call `HTTP.Stream.chunk/3` or wait on a
 consumer. Explicit-profile streaming uploads use the bounded BodyBridge, and
-reservations release when each stream completes. Connection-establishment
-deduplication for simultaneous cold requests and idle/drain policy remain
+reservations release when each stream completes. Simultaneous cold requests for
+one key share a single out-of-band connection claim; idle/drain policy remains
 follow-up work.

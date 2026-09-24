@@ -19,6 +19,15 @@ defmodule HTTP.HTTP2.Pool do
   @spec try_reserve(pid(), key()) :: {:ok, pid(), reservation()} | :none
   def try_reserve(pool, key), do: GenServer.call(pool, {:try_reserve, key})
 
+  @doc "Claims the per-key connection slot for an out-of-band connector."
+  @spec claim_connect(pid(), key()) :: :start | :wait
+  def claim_connect(pool, key), do: GenServer.call(pool, {:claim_connect, key})
+
+  @doc "Fails an out-of-band connection attempt and wakes queued reservations."
+  @spec fail_connect(pid(), key(), term()) :: :ok
+  def fail_connect(pool, key, reason),
+    do: GenServer.call(pool, {:fail_connect, key, reason})
+
   @spec release(pid(), key(), reservation()) :: :ok
   def release(pool, key, reservation), do: GenServer.call(pool, {:release, key, reservation})
 
@@ -75,6 +84,9 @@ defmodule HTTP.HTTP2.Pool do
         monitors: Map.put(state.monitors, mon, {key, owner})
     }
 
+    state =
+      if Keyword.get(opts, :connecting?, false), do: decrement_connecting(state, key), else: state
+
     {:reply, :ok, dispatch_waiters(state, key)}
   end
 
@@ -127,6 +139,32 @@ defmodule HTTP.HTTP2.Pool do
       :none ->
         {:reply, :none, state}
     end
+  end
+
+  def handle_call({:claim_connect, key}, _from, state) do
+    entry = Map.get(state.entries, key, new_entry())
+
+    cond do
+      entry.connecting > 0 ->
+        {:reply, :wait, state}
+
+      map_size(entry.connections) < state.max_connections ->
+        {:reply, :start, put_entry(state, key, %{entry | connecting: 1})}
+
+      true ->
+        {:reply, :wait, state}
+    end
+  end
+
+  def handle_call({:fail_connect, key, reason}, _from, state) do
+    entry = Map.get(state.entries, key, new_entry())
+
+    Enum.each(entry.pending, fn {_token, from, _opts} ->
+      GenServer.reply(from, {:error, {:owner_start_failed, reason}})
+    end)
+
+    entry = %{entry | pending: [], connecting: max(entry.connecting - 1, 0)}
+    {:reply, :ok, put_entry(state, key, entry)}
   end
 
   def handle_call({:release, key, token}, _from, state) do

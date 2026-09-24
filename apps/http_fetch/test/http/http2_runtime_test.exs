@@ -250,4 +250,28 @@ defmodule HTTP.HTTP2RuntimeTest do
     assert :ok = Pool.release(pool, :profile_key, token)
     assert %{streams: 0} = Pool.stats(pool)[:profile_key]
   end
+
+  test "pool allows only one out-of-band connector per key" do
+    {:ok, owner} =
+      ConnectionOwner.start_link(transport: transport(self()), socket: :socket, max_streams: 1)
+
+    assert_receive {:wire, :socket, _}, 500
+    {:ok, pool} = Pool.start_link(max_connections: 2)
+
+    assert :start = Pool.claim_connect(pool, :profile_key)
+    assert :wait = Pool.claim_connect(pool, :profile_key)
+    assert :ok = Pool.register(pool, :profile_key, owner, connecting?: true)
+    assert %{connecting: 0, connections: 1} = Pool.stats(pool)[:profile_key]
+  end
+
+  test "failed out-of-band connection wakes queued reservations" do
+    {:ok, pool} = Pool.start_link(max_connections: 1)
+    assert :start = Pool.claim_connect(pool, :profile_key)
+
+    waiter = Task.async(fn -> Pool.reserve(pool, :profile_key) end)
+    Process.sleep(10)
+    assert :ok = Pool.fail_connect(pool, :profile_key, :econnrefused)
+    assert {:error, {:owner_start_failed, :econnrefused}} = Task.await(waiter)
+    assert %{connecting: 0, pending: 0} = Pool.stats(pool)[:profile_key]
+  end
 end

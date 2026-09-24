@@ -25,10 +25,10 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
 ## Verification
 
 Focused core profile/fingerprint/connection tests pass, runtime/body bridge
-tests pass (14), PoolKey tests pass (9), and fetch tests pass (204 tests plus
-20 doctests). The full HTTP/2 socket regression suite passes (38 tests),
-including sequential h2c reuse and three overlapping requests on one accepted
-socket with streams 1, 3, and 5.
+tests pass (13), PoolKey tests pass (9), and fetch tests pass (208 tests plus
+20 doctests). The full HTTP/2 socket regression suite passes (39 tests),
+including sequential h2c reuse, three overlapping requests, and simultaneous
+cold-start coalescing on one accepted socket with streams 1, 3, and 5.
 The full fetch application tests pass, and core tests pass except one existing
 platform-sensitive TLS assertion (`:eaddrnotavail` instead of
 `:econnrefused`). Fresh warnings-as-errors compilation, format, and diff
@@ -51,8 +51,8 @@ explicit-profile h2c requests also reuse an existing owner when
 `http2_reuse` is enabled, including overlapping streams after the first owner
 is established. The default HTTP/1.1 path and
 HTTP/2 requests without an explicit profile retain the legacy per-request
-adapter for compatibility. Simultaneous cold-connection establishment
-deduplication and broader concurrent queue/drain evidence remain pending.
+adapter for compatibility. Broader concurrent queue/drain evidence remains
+pending.
 Explicit-profile streaming upload now uses `BodyBridge`
 through the owner and is covered by an h2c socket test; requests without an explicit
 profile retain the legacy path. Broader interoperability and a captured

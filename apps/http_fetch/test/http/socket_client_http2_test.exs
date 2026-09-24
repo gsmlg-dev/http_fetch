@@ -85,6 +85,28 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert_receive {:h2c_overlap, 1, [1, 3, 5]}, 1_000
   end
 
+  test "coalesces simultaneous cold h2c connections per pool key" do
+    parent = self()
+    url = start_h2c_overlap_server!(parent, 3)
+
+    tasks =
+      for path <- ["/one", "/two", "/three"] do
+        Task.async(fn ->
+          response =
+            String.replace(url, "/test", path)
+            |> HTTP.fetch(http_version: :h2c, http2_profile: :native_v1)
+            |> HTTP.Promise.await()
+
+          {path, HTTP.Response.read_all(response)}
+        end)
+      end
+
+    assert Enum.sort(Task.await_many(tasks, 5_000)) ==
+             [{"/one", "/one"}, {"/three", "/three"}, {"/two", "/two"}]
+
+    assert_receive {:h2c_overlap, 1, [1, 3, 5]}, 1_000
+  end
+
   test "explicit wire profile routes the request through the long-lived owner" do
     test_pid = self()
 
