@@ -19,10 +19,22 @@ defmodule HTTP.SocketClient do
       http_version(request) == :http3 ->
         request_http3(request, abort_controller_pid, unix_socket_path)
 
+      http2_request?(request) ->
+        HTTP.HTTP2.Client.request(request, abort_controller_pid, unix_socket_path)
+
       true ->
         with {:ok, request} <- pin_tls_backend(request) do
           request_socket(request, abort_controller_pid, unix_socket_path)
         end
+    end
+  end
+
+  @doc false
+  def connect_http2(%Request{} = request, unix_socket_path, timeout) do
+    with {:ok, transport, host, port} <- select_transport(request, unix_socket_path),
+         {:ok, selection} <- protocol_selection(request, transport),
+         {:ok, socket} <- connect(transport, host, port, request, selection, timeout) do
+      {:ok, transport, socket, selection}
     end
   end
 
@@ -487,13 +499,23 @@ defmodule HTTP.SocketClient do
     if Request.streaming_body?(request) do
       {:error, :streaming_request_body_unsupported_for_http2}
     else
-      {protocol, wire_request} =
-        HTTP.HTTP2.prepare_request(HTTP.HTTP2.new(request.method), request)
+      {protocol, wire_request} = prepare_http2_request(request)
 
       {:ok, HTTP.HTTP2, protocol, {:buffer, wire_request}}
     end
   rescue
     error -> {:error, error}
+  end
+
+  defp prepare_http2_request(%Request{} = request) do
+    conn = HTTP.HTTP2.new(request.method)
+    profile = Keyword.get(request.transport_options, :http2_profile)
+
+    if profile != nil and function_exported?(HTTP.HTTP2, :prepare_request, 3) do
+      apply(HTTP.HTTP2, :prepare_request, [conn, request, profile])
+    else
+      HTTP.HTTP2.prepare_request(conn, request)
+    end
   end
 
   defp connected_protocol(_transport, _socket, %{mode: :http1}), do: {:ok, :http1}
@@ -835,7 +857,9 @@ defmodule HTTP.SocketClient do
   defp protocol_selection(%Request{url: %URI{scheme: "http"}} = request, HTTP.Transport.TCP) do
     case http_version(request) do
       version when version in [:http1, :auto] ->
-        {:ok, %{mode: :http1, alpn_protocols: []}}
+        if http2_options?(request),
+          do: {:error, :http2_options_require_http2},
+          else: {:ok, %{mode: :http1, alpn_protocols: []}}
 
       :h2c ->
         {:ok, %{mode: :h2c, alpn_protocols: []}}
@@ -849,13 +873,23 @@ defmodule HTTP.SocketClient do
        when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
     case http_version(request) do
       :http1 ->
-        {:ok, %{mode: :http1, alpn_protocols: []}}
+        if http2_options?(request),
+          do: {:error, :http2_options_require_http2},
+          else: {:ok, %{mode: :http1, alpn_protocols: []}}
 
       :http2 ->
         {:ok, %{mode: :force_h2, alpn_protocols: [<<"h2">>]}}
 
       :auto ->
-        {:ok, %{mode: :auto_https, alpn_protocols: [<<"h2">>, <<"http/1.1">>]}}
+        if http2_profile?(request) do
+          {:ok, %{mode: :force_h2, alpn_protocols: [<<"h2">>]}}
+        else
+          if http2_options?(request) do
+            {:error, :http2_options_require_http2}
+          else
+            {:ok, %{mode: :auto_https, alpn_protocols: [<<"h2">>, <<"http/1.1">>]}}
+          end
+        end
 
       :h2c ->
         {:error, :h2c_requires_cleartext}
@@ -864,6 +898,20 @@ defmodule HTTP.SocketClient do
 
   defp http_version(%Request{} = request) do
     Keyword.get(request.transport_options, :http_version, :http1)
+  end
+
+  defp http2_profile?(%Request{} = request),
+    do: Keyword.get(request.transport_options, :http2_profile) != nil
+
+  defp http2_options?(%Request{} = request) do
+    http2_profile?(request) or
+      Keyword.has_key?(request.transport_options, :http2_scope) or
+      Keyword.has_key?(request.transport_options, :http2_priority) or
+      Keyword.get(request.transport_options, :http2_reuse) == false
+  end
+
+  defp http2_request?(%Request{} = request) do
+    http_version(request) in [:http2, :h2c] or http2_profile?(request)
   end
 
   defp tls_backend(%Request{} = request), do: Keyword.get(request.transport_options, :tls_backend)

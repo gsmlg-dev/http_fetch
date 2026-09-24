@@ -6,6 +6,7 @@ defmodule HTTP.HTTP2 do
   alias HTTP.Headers
   alias HTTP.HTTP2.Frame
   alias HTTP.HTTP2.HPACK
+  alias HTTP.HTTP2.WireProfile
   alias HTTP.Request
 
   @connection_preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
@@ -50,7 +51,13 @@ defmodule HTTP.HTTP2 do
   def connection_preface, do: @connection_preface
 
   def serialize_request(%Request{} = request) do
-    {conn, wire_request} = prepare_request(new(request.method), request)
+    serialize_request(request, WireProfile.native_v1())
+  end
+
+  @spec serialize_request(Request.t(), WireProfile.t() | map() | atom() | binary()) :: iodata()
+  def serialize_request(%Request{} = request, profile) do
+    {:ok, profile} = WireProfile.compile(profile)
+    {conn, wire_request} = prepare_request(new(request.method), request, profile)
 
     if conn.pending_body != "" do
       raise ArgumentError,
@@ -62,13 +69,23 @@ defmodule HTTP.HTTP2 do
 
   @spec prepare_request(t(), Request.t()) :: {t(), iodata()}
   def prepare_request(%__MODULE__{} = conn, %Request{} = request) do
+    prepare_request(conn, request, WireProfile.native_v1())
+  end
+
+  @spec prepare_request(t(), Request.t(), WireProfile.t() | map()) :: {t(), iodata()}
+  def prepare_request(%__MODULE__{} = conn, %Request{} = request, profile) do
+    {:ok, profile} = WireProfile.compile(profile)
+
     if Request.streaming_body?(request) do
       raise ArgumentError, "HTTP/2 streaming request bodies are not supported"
     end
 
     {headers, body} = request |> request_headers() |> Request.put_body_headers(request)
     body = IO.iodata_to_binary(body)
-    header_block = request |> pseudo_headers() |> Kernel.++(regular_headers(headers))
+
+    header_block =
+      WireProfile.order_headers(profile, pseudo_headers(request), regular_headers(headers))
+
     encoded_headers = HPACK.encode_headers(header_block)
 
     header_flags =
@@ -81,10 +98,24 @@ defmodule HTTP.HTTP2 do
     {conn,
      [
        @connection_preface,
-       Frame.encode(:settings, 0, 0, ""),
+       settings_frame(profile),
+       initial_window_frame(profile),
        Frame.encode(:headers, header_flags, @client_stream_id, encoded_headers),
        outbound
      ]}
+  end
+
+  defp settings_frame(profile) do
+    {:ok, payload} = WireProfile.settings_payload(profile)
+    Frame.encode(:settings, 0, 0, payload)
+  end
+
+  defp initial_window_frame(profile) do
+    case WireProfile.initial_window_increment(profile) do
+      {:ok, 0} -> ""
+      {:ok, increment} -> Frame.encode(:window_update, 0, 0, <<0::1, increment::31>>)
+      {:error, reason} -> raise ArgumentError, "invalid HTTP/2 profile window: #{inspect(reason)}"
+    end
   end
 
   @spec stream(t(), binary()) :: {:ok, t(), [event()]} | {:error, term()}
@@ -511,7 +542,7 @@ defmodule HTTP.HTTP2 do
 
   defp take_padding(payload, pad_length) when byte_size(payload) >= pad_length do
     body_length = byte_size(payload) - pad_length
-    <<body::binary-size(body_length), _padding::binary-size(pad_length)>> = payload
+    <<body::binary-size(^body_length), _padding::binary-size(^pad_length)>> = payload
     {:ok, body}
   end
 
@@ -664,7 +695,7 @@ defmodule HTTP.HTTP2 do
       conn
     else
       chunk_size = min(min(writable, conn.max_frame_size), byte_size(conn.pending_body))
-      <<chunk::binary-size(chunk_size), rest::binary>> = conn.pending_body
+      <<chunk::binary-size(^chunk_size), rest::binary>> = conn.pending_body
       flags = if rest == "", do: @flag_end_stream, else: 0
 
       conn

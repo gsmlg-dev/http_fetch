@@ -5,6 +5,8 @@ defmodule HTTP.HTTP2.HPACK do
 
   defstruct dynamic: [], dynamic_size: 0, max_dynamic_size: 4096
 
+  def new_encoder, do: %__MODULE__{}
+
   @type header :: {String.t(), String.t()}
   @type t :: %__MODULE__{
           dynamic: [header()],
@@ -347,6 +349,12 @@ defmodule HTTP.HTTP2.HPACK do
     end)
   end
 
+  @doc "Encodes with the connection encoder and returns its updated state."
+  @spec encode_headers(t(), [header()]) :: {t(), binary()}
+  def encode_headers(%__MODULE__{} = encoder, headers) when is_list(headers) do
+    {encoder, headers |> encode_headers() |> IO.iodata_to_binary()}
+  end
+
   @spec decode(t(), binary()) :: {:ok, t(), [header()]} | {:error, term()}
   def decode(%__MODULE__{} = decoder, block) when is_binary(block) do
     decode_headers(decoder, block, [])
@@ -473,7 +481,7 @@ defmodule HTTP.HTTP2.HPACK do
   defp decode_string(<<>>), do: {:error, :truncated_hpack_string}
 
   defp take_bytes(data, length) when byte_size(data) >= length do
-    <<value::binary-size(length), rest::binary>> = data
+    <<value::binary-size(^length), rest::binary>> = data
     {:ok, value, rest}
   end
 

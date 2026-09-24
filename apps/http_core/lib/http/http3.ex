@@ -164,7 +164,7 @@ defmodule HTTP.HTTP3 do
 
   defp send_body_chunks(body, conn, stream_id, deadline_at) do
     chunk_size = min(byte_size(body), @request_body_chunk_size)
-    <<chunk::binary-size(chunk_size), rest::binary>> = body
+    <<chunk::binary-size(^chunk_size), rest::binary>> = body
     fin? = rest == ""
 
     with :ok <- send_body_chunk(conn, stream_id, chunk, fin?, deadline_at) do

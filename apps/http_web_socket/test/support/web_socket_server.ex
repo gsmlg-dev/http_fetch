@@ -193,7 +193,7 @@ defmodule HTTPWebSocket.TestServer do
   defp take_masked_payload(rest, length) when byte_size(rest) < 4 + length, do: :more
 
   defp take_masked_payload(<<mask_key::binary-size(4), rest::binary>>, length) do
-    <<payload::binary-size(length), remaining::binary>> = rest
+    <<payload::binary-size(^length), remaining::binary>> = rest
     {:ok, mask_key, payload, remaining}
   end
 

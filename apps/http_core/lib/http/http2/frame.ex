@@ -46,7 +46,7 @@ defmodule HTTP.HTTP2.Frame do
     if byte_size(rest) < length do
       :more
     else
-      <<payload::binary-size(length), remaining::binary>> = rest
+      <<payload::binary-size(^length), remaining::binary>> = rest
 
       {:ok,
        %__MODULE__{

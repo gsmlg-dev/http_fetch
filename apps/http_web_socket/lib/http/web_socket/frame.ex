@@ -165,7 +165,7 @@ defmodule HTTP.WebSocket.Frame do
   defp take_payload(rest, length) when byte_size(rest) < length, do: :more
 
   defp take_payload(rest, length) do
-    <<payload::binary-size(length), remaining::binary>> = rest
+    <<payload::binary-size(^length), remaining::binary>> = rest
     {:ok, payload, remaining}
   end
 

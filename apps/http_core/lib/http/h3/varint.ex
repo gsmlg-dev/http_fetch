@@ -64,7 +64,7 @@ defmodule HTTP.H3.Varint do
       bit_count = bytes * 8
       value_bits = bit_count - 2
       value_mask = (1 <<< value_bits) - 1
-      <<encoded::integer-size(bit_count), rest::binary>> = data
+      <<encoded::integer-size(^bit_count), rest::binary>> = data
 
       {:ok, encoded &&& value_mask, rest}
     end

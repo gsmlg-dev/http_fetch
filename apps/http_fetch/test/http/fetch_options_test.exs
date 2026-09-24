@@ -112,6 +112,33 @@ defmodule HTTP.FetchOptionsTest do
       end
     end
 
+    test "normalizes HTTP/2 options and preserves them for transport" do
+      options =
+        HTTP.FetchOptions.new(
+          http2_profile: "native-v1",
+          http2_reuse: false,
+          http2_scope: "tenant-a",
+          http2_priority: %{urgency: 2}
+        )
+
+      assert options.http2_profile == "native-v1"
+      assert options.http2_reuse == false
+      assert options.http2_scope == "tenant-a"
+      assert options.http2_priority == %{urgency: 2}
+
+      transport_options = HTTP.FetchOptions.to_transport_options(options)
+      assert transport_options[:http2_profile] == "native-v1"
+      assert transport_options[:http2_reuse] == false
+      assert transport_options[:http2_scope] == "tenant-a"
+      assert transport_options[:http2_priority] == %{urgency: 2}
+    end
+
+    test "rejects unknown HTTP/2 options" do
+      assert_raise ArgumentError, ~r/unsupported HTTP\/2 option/, fn ->
+        HTTP.FetchOptions.new(http2_unknown: true)
+      end
+    end
+
     test "does not resolve a nil TLS backend for HTTP/3" do
       assert %HTTP.FetchOptions{http_version: :http3, tls_backend: nil} =
                HTTP.FetchOptions.new(http_version: :http3)

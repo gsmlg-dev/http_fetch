@@ -107,7 +107,7 @@ defmodule HTTP.H3.Frame do
   end
 
   defp decode_payload(frame_type, length, data) when byte_size(data) >= length do
-    <<payload::binary-size(length), rest::binary>> = data
+    <<payload::binary-size(^length), rest::binary>> = data
     {:ok, %__MODULE__{type: frame_type, payload: payload}, rest}
   end
 

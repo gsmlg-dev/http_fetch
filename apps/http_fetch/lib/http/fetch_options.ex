@@ -24,6 +24,10 @@ defmodule HTTP.FetchOptions do
   - `ssl` - TLS options passed to the selected TLS backend
   - `socket_opts` - socket options passed to the underlying transport
   - `unix_socket` - Unix Domain Socket path
+  - `http2_profile` - versioned HTTP/2 wire profile (only used by HTTP/2)
+  - `http2_reuse` - whether an HTTP/2 connection may be reused; defaults to `true`
+  - `http2_scope` - non-sensitive caller isolation scope
+  - `http2_priority` - per-request HTTP/2 priority metadata
   """
 
   @string_keys %{
@@ -36,6 +40,14 @@ defmodule HTTP.FetchOptions do
     "headers" => :headers,
     "http_version" => :http_version,
     "httpVersion" => :http_version,
+    "http2_profile" => :http2_profile,
+    "http2Profile" => :http2_profile,
+    "http2_reuse" => :http2_reuse,
+    "http2Reuse" => :http2_reuse,
+    "http2_scope" => :http2_scope,
+    "http2Scope" => :http2_scope,
+    "http2_priority" => :http2_priority,
+    "http2Priority" => :http2_priority,
     "method" => :method,
     "redirect" => :redirect,
     "signal" => :signal,
@@ -62,7 +74,11 @@ defmodule HTTP.FetchOptions do
             timeout: nil,
             connect_timeout: nil,
             ssl: nil,
-            socket_opts: nil
+            socket_opts: nil,
+            http2_profile: nil,
+            http2_reuse: true,
+            http2_scope: nil,
+            http2_priority: nil
 
   @type redirect :: :follow | :manual | :error
   @type http_version :: :http1 | :http2 | :http3 | :h2c | :auto
@@ -82,7 +98,11 @@ defmodule HTTP.FetchOptions do
           timeout: integer() | nil,
           connect_timeout: integer() | nil,
           ssl: list() | nil,
-          socket_opts: list() | nil
+          socket_opts: list() | nil,
+          http2_profile: atom() | String.t() | map() | nil,
+          http2_reuse: boolean(),
+          http2_scope: atom() | String.t() | nil,
+          http2_priority: map() | keyword() | nil
         }
 
   @doc """
@@ -117,6 +137,10 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:redirect, options.redirect)
     |> maybe_add(:http_version, options.http_version)
     |> maybe_add(:tls_backend, options.tls_backend)
+    |> maybe_add(:http2_profile, options.http2_profile)
+    |> maybe_add(:http2_reuse, if(options.http2_reuse, do: nil, else: false))
+    |> maybe_add(:http2_scope, options.http2_scope)
+    |> maybe_add(:http2_priority, options.http2_priority)
   end
 
   @doc """
@@ -193,8 +217,24 @@ defmodule HTTP.FetchOptions do
       {:socket_opts, socket_opts}, acc ->
         %{acc | socket_opts: socket_opts}
 
-      {_key, _value}, acc ->
-        acc
+      {:http2_profile, profile}, acc ->
+        %{acc | http2_profile: profile}
+
+      {:http2_reuse, reuse}, acc ->
+        %{acc | http2_reuse: reuse}
+
+      {:http2_scope, scope}, acc ->
+        %{acc | http2_scope: scope}
+
+      {:http2_priority, priority}, acc ->
+        %{acc | http2_priority: priority}
+
+      {key, _value}, acc when is_atom(key) or is_binary(key) ->
+        if http2_option_key?(key) do
+          raise ArgumentError, "unsupported HTTP/2 option: #{inspect(key)}"
+        else
+          acc
+        end
     end)
   end
 
@@ -215,7 +255,11 @@ defmodule HTTP.FetchOptions do
         redirect: normalize_redirect(options.redirect),
         duplex: normalize_duplex(options.duplex),
         http_version: http_version,
-        tls_backend: normalize_tls_backend(options.tls_backend, http_version)
+        tls_backend: normalize_tls_backend(options.tls_backend, http_version),
+        http2_profile: normalize_http2_profile(options.http2_profile),
+        http2_reuse: normalize_http2_reuse(options.http2_reuse),
+        http2_scope: normalize_http2_scope(options.http2_scope),
+        http2_priority: normalize_http2_priority(options.http2_priority)
     }
   end
 
@@ -290,6 +334,54 @@ defmodule HTTP.FetchOptions do
   defp normalize_tls_backend(nil, :http3), do: nil
   defp normalize_tls_backend(tls_backend, :http3), do: tls_backend
   defp normalize_tls_backend(tls_backend, _http_version), do: resolve_tls_backend(tls_backend)
+
+  defp normalize_http2_profile(nil), do: nil
+  defp normalize_http2_profile(profile) when is_atom(profile) or is_binary(profile), do: profile
+
+  defp normalize_http2_profile(profile) when is_map(profile) do
+    allowed = [:id, :version, :synthetic]
+    allowed_strings = Enum.map(allowed, &Atom.to_string/1)
+
+    if Enum.all?(
+         Map.keys(profile),
+         &(&1 in allowed or (is_binary(&1) and &1 in allowed_strings))
+       ) do
+      profile
+    else
+      raise ArgumentError, "invalid http2_profile: unsupported profile field"
+    end
+  end
+
+  defp normalize_http2_profile(profile),
+    do: raise(ArgumentError, "invalid http2_profile: #{inspect(profile)}")
+
+  defp normalize_http2_reuse(nil), do: true
+  defp normalize_http2_reuse(value) when is_boolean(value), do: value
+
+  defp normalize_http2_reuse(value),
+    do: raise(ArgumentError, "invalid http2_reuse: #{inspect(value)}; expected boolean")
+
+  defp normalize_http2_scope(nil), do: nil
+  defp normalize_http2_scope(value) when is_atom(value) or is_binary(value), do: value
+
+  defp normalize_http2_scope(value),
+    do: raise(ArgumentError, "invalid http2_scope: #{inspect(value)}; expected atom or string")
+
+  defp normalize_http2_priority(nil), do: nil
+  defp normalize_http2_priority(value) when is_map(value) or is_list(value), do: value
+
+  defp normalize_http2_priority(value),
+    do:
+      raise(
+        ArgumentError,
+        "invalid http2_priority: #{inspect(value)}; expected map or keyword list"
+      )
+
+  defp http2_option_key?(key) when is_atom(key),
+    do: key |> Atom.to_string() |> http2_option_key?()
+
+  defp http2_option_key?(key) when is_binary(key),
+    do: String.starts_with?(key, "http2_") or String.starts_with?(key, "http2")
 
   defp resolve_tls_backend(tls_backend) do
     case HTTP.TLSBackend.resolve(tls_backend) do

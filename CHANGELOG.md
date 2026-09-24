@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Add validated versioned HTTP/2 wire profiles, ordered serialization controls,
+  pure connection/stream state models, and bounded redacted fingerprint
+  observations.
+- Add flat HTTP/2 profile, reuse, scope, and priority option validation.
+
+### Known limitations
+- Connection pooling, concurrent socket stream reuse, backpressured HTTP/2
+  uploads, and captured browser-profile verification remain pending.
+
 ## [0.13.0] - 2026-09-22
 
 ### Changed

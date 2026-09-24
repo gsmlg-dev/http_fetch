@@ -28,6 +28,14 @@ the root keeps runtime applications of `in_umbrella` dependencies, including
 - **Request cancellation**: AbortController support for cancelling requests
 - **Automatic JSON parsing**: Built-in JSON response handling
 - **Selectable TLS**: OTP `:ssl` by default, with opt-in `:ex_ssl` for verified TLS 1.3
+- **HTTP/2 wire profiles**: Versioned native and synthetic profiles can control
+  ordered SETTINGS and header serialization; use `http2_profile` only with an
+  explicit HTTP/2 or h2c request.
+
+HTTP/2 profile support currently covers validated serialization and bounded
+wire observation. It does not yet claim pooled multi-stream reuse or browser
+fingerprint equivalence. Available profile IDs are `native_v1`,
+`synthetic_test_v1`, and `synthetic_test_v2`.
 
 ## Browser Fetch API Compatibility
 

@@ -113,7 +113,7 @@ defmodule HTTP.HTTP1 do
          events
        ) do
     take_size = min(byte_size(buffer), remaining)
-    <<chunk::binary-size(take_size), rest::binary>> = buffer
+    <<chunk::binary-size(^take_size), rest::binary>> = buffer
     remaining = remaining - take_size
 
     conn = %{conn | buffer: rest, remaining: remaining}
@@ -162,7 +162,7 @@ defmodule HTTP.HTTP1 do
 
   defp parse(%__MODULE__{state: :chunk_data, buffer: buffer, chunk_size: size} = conn, events) do
     take_size = min(min(byte_size(buffer), size), @max_chunk_emit_bytes)
-    <<chunk::binary-size(take_size), rest::binary>> = buffer
+    <<chunk::binary-size(^take_size), rest::binary>> = buffer
 
     conn = %{conn | buffer: rest, chunk_size: size - take_size}
     events = if take_size > 0, do: [{:body, chunk} | events], else: events
