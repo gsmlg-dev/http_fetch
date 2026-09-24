@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pure connection/stream state models, and bounded redacted fingerprint
   observations.
 - Add flat HTTP/2 profile, reuse, scope, and priority option validation.
+- Add bounded PRIORITY_UPDATE handling, upload credit recovery after
+  WINDOW_UPDATE, peer MAX_FRAME_SIZE DATA fragmentation, and capture provenance
+  manifest validation.
 
 ### Known limitations
 - Full drain-deadline policy, broader independent mature-implementation
