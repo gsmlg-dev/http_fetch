@@ -80,7 +80,7 @@ defmodule HTTP.HTTP2 do
       raise ArgumentError, "HTTP/2 streaming request bodies are not supported"
     end
 
-    {headers, body} = request |> request_headers() |> Request.put_body_headers(request)
+    {headers, body} = request |> base_request_headers() |> Request.put_body_headers(request)
     body = IO.iodata_to_binary(body)
 
     header_block =
@@ -103,6 +103,18 @@ defmodule HTTP.HTTP2 do
        Frame.encode(:headers, header_flags, @client_stream_id, encoded_headers),
        outbound
      ]}
+  end
+
+  @doc false
+  @spec request_headers(Request.t(), WireProfile.t() | map() | atom() | binary()) ::
+          {:ok, list({String.t(), String.t()}), binary()}
+  def request_headers(%Request{} = request, profile \\ WireProfile.native_v1()) do
+    {:ok, profile} = WireProfile.compile(profile)
+    {headers, body} = request |> base_request_headers() |> Request.put_body_headers(request)
+    body = IO.iodata_to_binary(body)
+
+    {:ok, WireProfile.order_headers(profile, pseudo_headers(request), regular_headers(headers)),
+     body}
   end
 
   defp settings_frame(profile) do
@@ -727,7 +739,7 @@ defmodule HTTP.HTTP2 do
     ]
   end
 
-  defp request_headers(%Request{} = request) do
+  defp base_request_headers(%Request{} = request) do
     request.headers
     |> Request.reject_unsupported_request_framing!()
     |> Headers.set_default("User-Agent", Headers.user_agent())
