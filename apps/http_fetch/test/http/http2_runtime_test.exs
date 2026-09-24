@@ -117,6 +117,32 @@ defmodule HTTP.HTTP2RuntimeTest do
     assert_receive {:http2, 1, {:http2, :headers, [{":status", "200"}], _flags}}, 500
   end
 
+  test "inbound DATA consumes receive credit and replenishes both windows" do
+    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+    assert_receive {:wire, :socket, _}, 500
+
+    assert {:ok, %{id: 1}} =
+             ConnectionOwner.open_stream(owner, headers("/data"), subscriber: self())
+
+    assert_receive {:wire, :socket, _headers}, 500
+
+    block = HPACK.encode_headers([{":status", "200"}]) |> IO.iodata_to_binary()
+    assert :ok = ConnectionOwner.receive_bytes(owner, Frame.encode(:headers, 0x4, 1, block))
+    assert_receive {:http2, 1, {:http2, :headers, _, _}}, 500
+
+    assert :ok = ConnectionOwner.receive_bytes(owner, Frame.encode(:data, 0x1, 1, "ok"))
+    assert_receive {:http2, 1, {:http2, :data, "ok", 1}}, 500
+    assert_receive {:wire, :socket, window_wire}, 500
+
+    assert %{type: :window_update, stream_id: 0, payload: <<0::1, 2::31>>} =
+             decode_wire!(window_wire)
+
+    assert_receive {:wire, :socket, window_wire}, 500
+
+    assert %{type: :window_update, stream_id: 1, payload: <<0::1, 2::31>>} =
+             decode_wire!(window_wire)
+  end
+
   test "body bridge credit writes DATA and forwards the bridge acknowledgement" do
     {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500

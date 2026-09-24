@@ -276,6 +276,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         {:data, _id, frame} ->
           send_frames(state, [frame])
 
+        {:window_update, id, increment} ->
+          send_frames(state, [Frame.encode(:window_update, 0, id, <<0::1, increment::31>>)])
+
         _ ->
           {:cont, {:ok, state}}
       end
@@ -393,8 +396,16 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   defp dispatch_frame(state, %{type: type, stream_id: id, payload: payload, flags: flags})
        when type in [:data] do
     ref = get_in(state, [:streams, id, :ref])
-    if ref, do: notify_stream(state, id, {:http2, type, payload, flags}), else: :ok
-    {:ok, state}
+    end_stream? = Frame.flag?(flags, 0x1)
+
+    with {:ok, connection, effects} <-
+           Connection.receive_data(state.connection, id, byte_size(payload), end_stream?),
+         {:ok, state} <- write_effects(%{state | connection: connection}, effects) do
+      if ref, do: notify_stream(state, id, {:http2, type, payload, flags}), else: :ok
+      {:ok, state}
+    else
+      {:error, reason} -> {:error, reason, state}
+    end
   end
 
   defp dispatch_frame(state, _frame), do: {:ok, state}

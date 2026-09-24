@@ -13,7 +13,8 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
   bookkeeping.
 - Long-lived `ConnectionOwner` and bounded profile-keyed `Pool` runtime modules,
   with focused fake-transport tests for multi-stream writes, cancellation,
-  upload DATA/EOF/backpressure, GOAWAY drain, and inbound HPACK continuation.
+  upload DATA/EOF/backpressure, inbound DATA flow-control replenishment,
+  GOAWAY drain, and inbound HPACK continuation.
 - Bounded, redacted wire observation and structured diff.
 - Flat fetch option validation for `http2_profile`, `http2_reuse`,
   `http2_scope`, and `http2_priority`.
@@ -21,7 +22,7 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
 ## Verification
 
 Focused core profile/fingerprint/connection tests pass, runtime/body bridge
-tests pass (12), PoolKey tests pass (9), and fetch tests pass (198 tests plus
+ tests pass (13), PoolKey tests pass (9), and fetch tests pass (198 tests plus
 20 doctests), full fetch application tests pass, and core tests pass except one existing
 platform-sensitive TLS assertion (`:eaddrnotavail` instead of
 `:econnrefused`), and root compilation with warnings-as-errors passes after

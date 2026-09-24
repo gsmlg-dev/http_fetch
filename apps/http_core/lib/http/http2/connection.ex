@@ -126,6 +126,34 @@ defmodule HTTP.HTTP2.Connection do
 
   def update_receive_window(_, _, _), do: {:error, :invalid_window_update}
 
+  @doc "Consumes inbound DATA credit and returns replenishment effects."
+  def receive_data(c, id, bytes, end_stream? \\ false)
+
+  def receive_data(%__MODULE__{} = c, id, bytes, end_stream?)
+      when is_integer(bytes) and bytes >= 0 do
+    with {:ok, stream} <- Map.fetch(c.streams, id),
+         {:ok, stream} <- StreamState.receive_data(stream, bytes, end_stream?),
+         :ok <-
+           if(bytes <= c.connection_receive_window, do: :ok, else: {:error, :flow_control_error}) do
+      connection = %{
+        c
+        | streams: Map.put(c.streams, id, stream),
+          connection_receive_window: c.connection_receive_window - bytes
+      }
+
+      if bytes == 0 do
+        {:ok, connection, []}
+      else
+        {:ok, connection, [{:window_update, 0, bytes}, {:window_update, id, bytes}]}
+      end
+    else
+      :error -> {:error, :unknown_stream}
+      {:error, _} = error -> error
+    end
+  end
+
+  def receive_data(_, _, _, _), do: {:error, :invalid_data_length}
+
   def goaway(%__MODULE__{} = c, last_id) when is_integer(last_id) and last_id >= 0 do
     if c.goaway_last_stream_id && last_id > c.goaway_last_stream_id do
       {:error, :goaway_last_stream_id_increased}
