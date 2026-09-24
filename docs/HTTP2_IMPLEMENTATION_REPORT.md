@@ -21,6 +21,8 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
 - Explicit-profile h2c requests can reuse a profile-keyed `ConnectionOwner`
   across sequential fetches; reservations release after each stream while the
   owner remains pooled.
+- HPACK decoder dynamic-table capacity updates now preserve the configured
+  maximum, allowing legal shrink-and-restore sequences without stale indexes.
 
 ## Verification
 

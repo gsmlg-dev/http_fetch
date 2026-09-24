@@ -3,7 +3,7 @@ defmodule HTTP.HTTP2.HPACK do
 
   import Bitwise
 
-  defstruct dynamic: [], dynamic_size: 0, max_dynamic_size: 4096
+  defstruct dynamic: [], dynamic_size: 0, table_size: 4096, max_dynamic_size: 4096
 
   def new_encoder, do: %__MODULE__{}
 
@@ -11,6 +11,7 @@ defmodule HTTP.HTTP2.HPACK do
   @type t :: %__MODULE__{
           dynamic: [header()],
           dynamic_size: non_neg_integer(),
+          table_size: non_neg_integer(),
           max_dynamic_size: non_neg_integer()
         }
 
@@ -504,7 +505,7 @@ defmodule HTTP.HTTP2.HPACK do
 
   defp resize_dynamic_table(%__MODULE__{} = decoder, size)
        when size <= decoder.max_dynamic_size do
-    {:ok, evict_dynamic(%{decoder | max_dynamic_size: size})}
+    {:ok, evict_dynamic(%{decoder | table_size: size})}
   end
 
   defp resize_dynamic_table(_decoder, _size), do: {:error, :invalid_dynamic_table_size_update}
@@ -512,7 +513,7 @@ defmodule HTTP.HTTP2.HPACK do
   defp add_dynamic(%__MODULE__{} = decoder, {name, value} = header) do
     entry_size = byte_size(name) + byte_size(value) + 32
 
-    if entry_size > decoder.max_dynamic_size do
+    if entry_size > decoder.table_size do
       %{decoder | dynamic: [], dynamic_size: 0}
     else
       decoder
@@ -522,7 +523,7 @@ defmodule HTTP.HTTP2.HPACK do
     end
   end
 
-  defp evict_dynamic(%__MODULE__{dynamic_size: size, max_dynamic_size: max} = decoder)
+  defp evict_dynamic(%__MODULE__{dynamic_size: size, table_size: max} = decoder)
        when size <= max do
     decoder
   end

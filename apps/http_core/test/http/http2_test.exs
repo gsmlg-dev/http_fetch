@@ -603,6 +603,26 @@ defmodule HTTP.HTTP2Test do
               ]} = HPACK.decode(decoder, IO.iodata_to_binary(block))
     end
 
+    test "shrinks and restores the HPACK dynamic table without stale indexes" do
+      decoder = HPACK.new_decoder()
+      indexed = <<0x40, 0x06, "x-test", 0x03, "one">>
+
+      assert {:ok, decoder, [{"x-test", "one"}]} = HPACK.decode(decoder, indexed)
+
+      assert {:ok, decoder, []} = HPACK.decode(decoder, <<0x20>>)
+
+      assert {:error, :invalid_hpack_index} =
+               HPACK.decode(decoder, <<0xBE>>)
+
+      restore = HPACK.encode_integer(4096, 5, 0x20)
+      assert {:ok, decoder, []} = HPACK.decode(decoder, restore)
+
+      assert {:ok, decoder, [{"x-test", "three"}]} =
+               HPACK.decode(decoder, <<0x40, 0x06, "x-test", 0x05, "three">>)
+
+      assert {:ok, _decoder, [{"x-test", "three"}]} = HPACK.decode(decoder, <<0xBE>>)
+    end
+
     test "returns stream reset and goaway errors" do
       assert {:error, {:stream_reset, :cancel}} =
                HTTP.HTTP2.stream(
