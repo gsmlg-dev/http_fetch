@@ -442,6 +442,26 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   defp dispatch_frame(state, %{type: :priority_update}),
     do: {:error, :invalid_priority_update, state}
 
+  defp dispatch_frame(state, %{
+         type: :window_update,
+         stream_id: id,
+         payload: <<0::1, increment::31>>
+       })
+       when increment > 0 do
+    with {:ok, connection, effects} <-
+           Connection.update_send_window(state.connection, id, increment),
+         {:ok, state} <- write_effects(%{state | connection: connection}, effects),
+         {:ok, state} <- drain_pending_body(state, id) do
+      {:ok, state}
+    else
+      {:error, reason} -> {:error, reason, state}
+      {:error, reason, state} -> {:error, reason, state}
+    end
+  end
+
+  defp dispatch_frame(state, %{type: :window_update}),
+    do: {:error, :invalid_window_update, state}
+
   defp dispatch_frame(state, %{type: :headers, stream_id: id, payload: payload, flags: flags}) do
     if state.connection.header_block do
       {:error, :expected_continuation, state}
@@ -542,6 +562,12 @@ defmodule HTTP.HTTP2.ConnectionOwner do
               {:ok, state}
             end
 
+          {:error, :flow_control_blocked} ->
+            streams =
+              update_in(state.streams, [id, :pending_body], fn _ -> {bridge, chunk, ack_ref} end)
+
+            {:ok, %{state | streams: streams}}
+
           {:error, reason} ->
             send(bridge, {:body_error, reason})
             {:error, {:body_backpressure, reason}, state}
@@ -600,6 +626,38 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   defp dispatch_event(state, _), do: {:ok, state}
+
+  defp drain_pending_body(state, 0) do
+    Enum.reduce_while(Map.keys(state.streams), {:ok, state}, fn id, {:ok, state} ->
+      case drain_pending_body(state, id) do
+        {:ok, state} -> {:cont, {:ok, state}}
+        {:error, reason, state} -> {:halt, {:error, reason, state}}
+      end
+    end)
+  end
+
+  defp drain_pending_body(state, id) do
+    case get_in(state, [:streams, id, :pending_body]) do
+      {bridge, chunk, ack_ref} ->
+        case Connection.send_data(state.connection, id, chunk) do
+          {:ok, connection, effects} ->
+            with {:ok, state} <- write_effects(%{state | connection: connection}, effects) do
+              send(bridge, {:body_ack, ack_ref})
+              {:ok, put_in(state.streams[id].pending_body, nil)}
+            end
+
+          {:error, :flow_control_blocked} ->
+            {:ok, state}
+
+          {:error, reason} ->
+            send(bridge, {:body_error, reason})
+            {:error, {:body_backpressure, reason}, state}
+        end
+
+      _ ->
+        {:ok, state}
+    end
+  end
 
   defp activate_socket(%{transport: transport, socket: socket} = state)
        when not is_nil(socket) do

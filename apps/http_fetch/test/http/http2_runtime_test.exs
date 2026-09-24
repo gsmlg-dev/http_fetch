@@ -262,7 +262,7 @@ defmodule HTTP.HTTP2RuntimeTest do
     assert %{type: :data, stream_id: 1, flags: 1, payload: <<>>} = decode_wire!(data_wire)
   end
 
-  test "blocked body data reports backpressure without acknowledging the chunk" do
+  test "blocked body data resumes after a stream WINDOW_UPDATE" do
     {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500
 
@@ -279,11 +279,16 @@ defmodule HTTP.HTTP2RuntimeTest do
     assert_receive {:wire, :socket, _headers}, 500
     ack_ref = make_ref()
 
-    assert {:error, {:body_backpressure, :flow_control_blocked}} =
+    assert :ok =
              ConnectionOwner.send_event(owner, {:body_chunk, bridge, "x", ack_ref})
 
     refute_receive {:body_ack, ^ack_ref}, 50
-    assert_receive {:body_error, :flow_control_blocked}, 500
+
+    window_update = Frame.encode(:window_update, 0, 1, <<0::1, 1::31>>)
+    assert :ok = ConnectionOwner.receive_bytes(owner, window_update)
+    assert_receive {:wire, :socket, data_wire}, 500
+    assert %{type: :data, stream_id: 1, flags: 0, payload: "x"} = decode_wire!(data_wire)
+    assert_receive {:body_ack, ^ack_ref}, 500
     assert ConnectionOwner.status(owner).stream_ids == [1]
   end
 
