@@ -341,7 +341,19 @@ defmodule HTTP.HTTP2.HPACK do
     {256, 0x3FFFFFFF, 30}
   ]
 
-  def new_decoder, do: %__MODULE__{}
+  def new_decoder(opts \\ []) do
+    max_dynamic_size = Keyword.get(opts, :max_dynamic_size, 4096)
+    %__MODULE__{max_dynamic_size: max_dynamic_size, table_size: max_dynamic_size}
+  end
+
+  @doc "Sets the peer-advertised maximum dynamic table capacity and evicts as needed."
+  @spec set_max_dynamic_size(t(), non_neg_integer()) :: t()
+  def set_max_dynamic_size(%__MODULE__{} = decoder, size) when is_integer(size) and size >= 0 do
+    decoder
+    |> Map.put(:max_dynamic_size, size)
+    |> Map.update!(:table_size, &min(&1, size))
+    |> evict_dynamic()
+  end
 
   @spec encode_headers([header()]) :: [iodata()]
   def encode_headers(headers) when is_list(headers) do
@@ -353,7 +365,83 @@ defmodule HTTP.HTTP2.HPACK do
   @doc "Encodes with the connection encoder and returns its updated state."
   @spec encode_headers(t(), [header()]) :: {t(), binary()}
   def encode_headers(%__MODULE__{} = encoder, headers) when is_list(headers) do
-    {encoder, headers |> encode_headers() |> IO.iodata_to_binary()}
+    encode_headers(encoder, headers, [])
+  end
+
+  @doc "Encodes headers using an explicit indexing, sensitivity, and Huffman policy."
+  @spec encode_headers(t(), [header()], keyword() | map()) :: {t(), binary()}
+  def encode_headers(%__MODULE__{} = encoder, headers, options) when is_list(headers) do
+    options = Map.new(options)
+    indexing = Map.get(options, :indexing, :literal)
+    huffman = Map.get(options, :huffman, :never)
+    sensitive = Map.get(options, :sensitive, [])
+
+    {encoder, blocks} =
+      Enum.reduce(headers, {encoder, []}, fn {name, _value} = header, {encoder, blocks} ->
+        mode = if name in sensitive, do: :never, else: indexing
+        {encoder, block} = encode_header(encoder, header, mode, huffman)
+        {encoder, [blocks, block]}
+      end)
+
+    {encoder, IO.iodata_to_binary(blocks)}
+  end
+
+  defp encode_header(encoder, {name, value} = header, :incremental, huffman) do
+    case table_index(encoder, header) do
+      index when is_integer(index) ->
+        {encoder, encode_integer(index, 7, 0x80)}
+
+      :error ->
+        name_index = table_index(encoder, {name, ""})
+
+        prefix =
+          if name_index == :error,
+            do: encode_integer(0, 6, 0x40),
+            else: encode_integer(name_index, 6, 0x40)
+
+        name_part = if name_index == :error, do: encode_string(name, huffman), else: <<>>
+        encoder = add_dynamic(encoder, header)
+        {encoder, [prefix, name_part, encode_string(value, huffman)] |> IO.iodata_to_binary()}
+    end
+  end
+
+  defp encode_header(encoder, {name, value}, :never, huffman) do
+    encode_literal(encoder, name, value, 0x10, 4, huffman)
+  end
+
+  defp encode_header(encoder, {name, value}, _mode, huffman) do
+    encode_literal(encoder, name, value, 0x00, 4, huffman)
+  end
+
+  defp encode_literal(encoder, name, value, high_bits, prefix_bits, huffman) do
+    case table_index(encoder, {name, ""}) do
+      :error ->
+        {encoder,
+         [
+           encode_integer(0, prefix_bits, high_bits),
+           encode_string(name, huffman),
+           encode_string(value, huffman)
+         ]
+         |> IO.iodata_to_binary()}
+
+      index ->
+        {encoder,
+         [encode_integer(index, prefix_bits, high_bits), encode_string(value, huffman)]
+         |> IO.iodata_to_binary()}
+    end
+  end
+
+  defp table_index(encoder, header) do
+    case Enum.find_index(@static_table, &(&1 == header)) do
+      nil ->
+        case Enum.find_index(encoder.dynamic, &(&1 == header)) do
+          nil -> :error
+          index -> @static_count + index + 1
+        end
+
+      index ->
+        index + 1
+    end
   end
 
   @spec decode(t(), binary()) :: {:ok, t(), [header()]} | {:error, term()}
@@ -382,6 +470,25 @@ defmodule HTTP.HTTP2.HPACK do
 
   @spec encode_string(String.t()) :: binary()
   def encode_string(value) when is_binary(value) do
+    encode_string(value, :never)
+  end
+
+  defp encode_string(value, :always) when is_binary(value) do
+    {bits, bit_count} =
+      Enum.reduce(:binary.bin_to_list(value), {0, 0}, fn symbol, {bits, count} ->
+        {_, code, width} = Enum.at(@huffman_table, symbol)
+        {bits <<< width ||| code, count + width}
+      end)
+
+    padding = rem(8 - rem(bit_count, 8), 8)
+    total = bit_count + padding
+    bits = bits <<< padding ||| (1 <<< padding) - 1
+    encoded = if total == 0, do: <<>>, else: <<bits::unsigned-integer-size(total)>>
+
+    [encode_integer(byte_size(encoded), 7, 0x80), encoded] |> IO.iodata_to_binary()
+  end
+
+  defp encode_string(value, _huffman) when is_binary(value) do
     [encode_integer(byte_size(value), 7, 0), value] |> IO.iodata_to_binary()
   end
 

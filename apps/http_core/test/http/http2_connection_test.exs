@@ -27,6 +27,22 @@ defmodule HTTP.HTTP2ConnectionTest do
     assert {:error, :flow_control_blocked} = StreamState.send_data(stream, 1)
   end
 
+  test "numeric SETTINGS update directional state and HPACK capacity" do
+    conn = Connection.new()
+
+    assert {:ok, conn, [{:settings, _payload}]} =
+             Connection.update_local_settings(conn, [{1, 8192}])
+
+    assert conn.local.values.header_table_size == 8192
+    assert conn.decoder.max_dynamic_size == 8192
+
+    assert {:ok, conn, [{:settings_ack, [{1, 2048}]}]} =
+             Connection.update_peer_settings(conn, [{1, 2048}])
+
+    assert conn.peer.values.header_table_size == 2048
+    assert conn.encoder.max_dynamic_size == 2048
+  end
+
   test "headers are one atomic batch and cancellation preserves committed HPACK state" do
     {:ok, _stream, conn} = Connection.open_stream(Connection.new())
 

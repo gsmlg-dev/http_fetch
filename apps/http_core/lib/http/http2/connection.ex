@@ -11,6 +11,7 @@ defmodule HTTP.HTTP2.Connection do
             connection_send_window: 65_535,
             connection_receive_window: 65_535,
             encoder: HPACK.new_encoder(),
+            encoder_options: [],
             decoder: HPACK.new_decoder(),
             state: :ready,
             goaway_last_stream_id: nil,
@@ -28,7 +29,8 @@ defmodule HTTP.HTTP2.Connection do
       connection_send_window: Keyword.get(opts, :send_window, 65_535),
       connection_receive_window: Keyword.get(opts, :receive_window, 65_535),
       local: Keyword.get(opts, :local_settings, Settings.new()),
-      peer: Keyword.get(opts, :peer_settings, Settings.new())
+      peer: Keyword.get(opts, :peer_settings, Settings.new()),
+      encoder_options: Keyword.get(opts, :hpack, [])
     }
     |> then(&%{&1 | max_streams: &1.peer.values.max_concurrent_streams})
   end
@@ -81,15 +83,24 @@ defmodule HTTP.HTTP2.Connection do
   def update_peer_settings(%__MODULE__{} = c, entries) do
     with {:ok, peer, effect} <- Settings.apply_peer(c.peer, entries),
          {:ok, streams} <- apply_initial_delta(c.streams, effect.initial_window_delta) do
-      {:ok, %{c | peer: peer, streams: streams, max_streams: peer.values.max_concurrent_streams},
-       [{:settings_ack, entries}]}
+      encoder = HPACK.set_max_dynamic_size(c.encoder, peer.values.header_table_size)
+
+      {:ok,
+       %{
+         c
+         | peer: peer,
+           streams: streams,
+           encoder: encoder,
+           max_streams: peer.values.max_concurrent_streams
+       }, [{:settings_ack, entries}]}
     end
   end
 
   def update_local_settings(%__MODULE__{} = c, entries) do
     with {:ok, local} <- Settings.begin_local(c.local, entries),
          {:ok, payload} <- Settings.encode(entries) do
-      {:ok, %{c | local: local}, [{:settings, payload}]}
+      decoder = HPACK.set_max_dynamic_size(c.decoder, local.values.header_table_size)
+      {:ok, %{c | local: local, decoder: decoder}, [{:settings, payload}]}
     end
   end
 
@@ -182,7 +193,7 @@ defmodule HTTP.HTTP2.Connection do
 
       {:ok, s} ->
         with {:ok, s} <- StreamState.send_headers(s, Keyword.get(opts, :end_stream, false)) do
-          {encoder, block} = HPACK.encode_headers(c.encoder, headers)
+          {encoder, block} = HPACK.encode_headers(c.encoder, headers, c.encoder_options)
 
           frames =
             header_frames(

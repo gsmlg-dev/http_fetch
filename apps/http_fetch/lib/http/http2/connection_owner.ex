@@ -65,7 +65,12 @@ defmodule HTTP.HTTP2.ConnectionOwner do
          {:ok, digest} <- WireProfile.digest(profile) do
       transport = Keyword.get(opts, :transport, HTTP.Transport.TCP)
       socket = Keyword.get(opts, :socket)
-      connection = Connection.new(send_window: profile.connection_initial_window)
+
+      connection =
+        Connection.new(
+          send_window: profile.connection_initial_window,
+          hpack: profile.hpack
+        )
 
       state = %{
         lifecycle: :initializing,

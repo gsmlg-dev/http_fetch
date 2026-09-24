@@ -623,6 +623,30 @@ defmodule HTTP.HTTP2Test do
       assert {:ok, _decoder, [{"x-test", "three"}]} = HPACK.decode(decoder, <<0xBE>>)
     end
 
+    test "encodes profile HPACK indexing and Huffman policies" do
+      {encoder, first} =
+        HPACK.encode_headers(HPACK.new_encoder(), [{"x-test", "one"}],
+          indexing: :incremental,
+          huffman: :always
+        )
+
+      assert {:ok, _decoder, [{"x-test", "one"}]} = HPACK.decode(HPACK.new_decoder(), first)
+
+      {_encoder, second} =
+        HPACK.encode_headers(encoder, [{"x-test", "one"}], indexing: :incremental)
+
+      assert second == <<0xBE>>
+
+      {_encoder, sensitive} =
+        HPACK.encode_headers(HPACK.new_encoder(), [{"authorization", "secret"}],
+          indexing: :incremental,
+          sensitive: ["authorization"]
+        )
+
+      <<first, _rest::binary>> = sensitive
+      assert (first &&& 0xF0) == 0x10
+    end
+
     test "returns stream reset and goaway errors" do
       assert {:error, {:stream_reset, :cancel}} =
                HTTP.HTTP2.stream(

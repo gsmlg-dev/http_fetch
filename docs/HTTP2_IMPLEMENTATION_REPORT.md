@@ -23,6 +23,9 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
   owner remains pooled.
 - HPACK decoder dynamic-table capacity updates now preserve the configured
   maximum, allowing legal shrink-and-restore sequences without stale indexes.
+- Profile-selected HPACK output now supports static/dynamic exact indexing,
+  incremental indexing, sensitive never-index, and RFC 7541 Huffman strings;
+  numeric SETTINGS IDs also update directional core state.
 
 ## Verification
 
@@ -44,6 +47,8 @@ An independent `hyper-h2` 4.2.0 cleartext server accepted the client's
 prior-knowledge preface, SETTINGS, HPACK request headers, and stream, then
 returned `200`, `x-peer: hyper-h2`, and `independent:/independent`. This is a
 single-peer interoperability smoke check, not a complete RFC or stress matrix.
+The same peer also accepted `synthetic_test_v1` with Huffman-encoded request
+headers and its larger advertised header-table capacity.
 
 ## Explicitly not verified
 

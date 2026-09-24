@@ -80,6 +80,13 @@ defmodule HTTP.HTTP2.Settings do
   defp put_value({key, value}, values) when is_atom(key),
     do: Map.put(values, key, normalize(key, value))
 
+  defp put_value({key, value}, values) when is_integer(key) do
+    case Map.get(@ids, key) do
+      nil -> values
+      atom -> Map.put(values, atom, normalize(atom, value))
+    end
+  end
+
   defp put_value({_unknown, _value}, values), do: values
   defp normalize(_, value), do: value
 
