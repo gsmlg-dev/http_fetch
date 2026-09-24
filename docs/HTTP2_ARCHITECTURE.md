@@ -18,7 +18,10 @@ are accepted only on stream 0 with a bounded target and field value.
 
 The owner does not synchronously call `HTTP.Stream.chunk/3` or wait on a
 consumer. Explicit-profile streaming uploads use the bounded BodyBridge, and
-reservations release when each stream completes. Simultaneous cold requests for
+reservations release when each stream completes. A stream that reaches zero
+send credit retains at most its current BodyBridge chunk and resumes it after a
+validated WINDOW_UPDATE; it does not fail the upload or acknowledge early.
+Simultaneous cold requests for
 one key share a single out-of-band connection claim. GOAWAY marks pooled
 owners draining so new reservations can select a replacement. The pool closes
 healthy owners after a configurable idle timeout, and ConnectionOwner enforces

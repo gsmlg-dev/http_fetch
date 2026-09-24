@@ -41,6 +41,9 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
 - `HTTP.HTTP2.ProfileCapture` now builds and validates provenance manifests,
   including a digest computed from fixture bytes and explicit cold/reused
   context and evidence source fields.
+- Flow-controlled upload chunks now remain pending per stream until a valid
+  WINDOW_UPDATE restores credit; the bridge is acknowledged only after DATA is
+  serialized, with a runtime zero-window/resume regression test.
 
 ## Verification
 
