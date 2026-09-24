@@ -70,6 +70,18 @@ sequential h2c and HTTPS h2 reuse, three overlapping requests, and
 simultaneous cold-start coalescing on one accepted socket with streams 1, 3,
 and 5. The churn server asserts one TCP accept and monotonically advancing
 stream IDs; it does not claim a long-duration memory benchmark.
+
+The bounded bridge probe is reproducible with
+`MIX_ENV=test mix run --no-start scripts/http2_budget_probe.exs`. The measured
+run used 2,000 varying-size chunks and produced:
+
+```text
+chunks=2000 peak_buffered_bytes=16242 max_buffer_bytes=16384 peak_memory_words=24880 final_memory_words=5768 peak_queue_len=0
+```
+
+The memory values are BEAM process words from `process_info/2`; this is a
+bridge-budget measurement, not a claim about whole-connection or long-duration
+socket memory behavior.
 The full fetch application tests pass, and the full core test suite now passes
 (`209 passed`). The unsupported-options test uses a kernel-assigned closed
 port, so its refusal assertion is stable across platforms. Fresh
