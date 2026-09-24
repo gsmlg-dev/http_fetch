@@ -4,19 +4,30 @@ defmodule HTTP.HTTP2.Fingerprint do
   alias HTTP.HTTP2.{Frame, HPACK}
 
   @preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+  @sources [:planned, :serialized, :transport_send_ok, :peer_observed]
+  @max_observed_bytes 1_048_576
+  @max_frames 4096
 
   @spec observe(binary(), keyword()) :: {:ok, map()} | {:error, term()}
   def observe(bytes, opts \\ []) when is_binary(bytes) do
     capture? = Keyword.get(opts, :raw_capture, false)
     max_raw = min(Keyword.get(opts, :max_raw_bytes, 65_536), 65_536)
+    source = Keyword.get(opts, :source, :peer_observed)
 
-    with {preface?, rest} <- split_preface(bytes),
-         {:ok, frames} <- decode_frames(rest, []) do
+    max_bytes =
+      min(Keyword.get(opts, :max_observed_bytes, @max_observed_bytes), @max_observed_bytes)
+
+    max_frames = min(Keyword.get(opts, :max_frames, @max_frames), @max_frames)
+
+    with true <- source in @sources,
+         true <- byte_size(bytes) <= max_bytes,
+         {preface?, rest} <- split_preface(bytes),
+         {:ok, frames} <- decode_frames(rest, [], max_frames) do
       {settings, window_updates, priorities, headers, fragments} = summarize_frames(frames)
 
       observation = %{
         version: 1,
-        source: :peer_observed,
+        source: source,
         preface: preface?,
         frames: Enum.map(frames, &frame_summary/1),
         settings: settings,
@@ -29,6 +40,10 @@ defmodule HTTP.HTTP2.Fingerprint do
       }
 
       {:ok, observation}
+    else
+      false when source not in @sources -> {:error, :invalid_observation_source}
+      false -> {:error, :observation_too_large}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -58,11 +73,13 @@ defmodule HTTP.HTTP2.Fingerprint do
   defp split_preface(<<@preface, rest::binary>>), do: {true, rest}
   defp split_preface(bytes), do: {false, bytes}
 
-  defp decode_frames(<<>>, acc), do: {:ok, Enum.reverse(acc)}
+  defp decode_frames(<<>>, acc, _max_frames), do: {:ok, Enum.reverse(acc)}
 
-  defp decode_frames(bytes, acc) do
+  defp decode_frames(_bytes, _acc, 0), do: {:error, :too_many_frames}
+
+  defp decode_frames(bytes, acc, max_frames) do
     case Frame.decode(bytes) do
-      {:ok, frame, rest} -> decode_frames(rest, [frame | acc])
+      {:ok, frame, rest} -> decode_frames(rest, [frame | acc], max_frames - 1)
       :more -> {:error, :truncated_frame}
     end
   end

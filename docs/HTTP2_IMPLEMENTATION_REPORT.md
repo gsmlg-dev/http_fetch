@@ -46,6 +46,8 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
   serialized, with a runtime zero-window/resume regression test.
 - Core DATA effects now split payloads at the peer MAX_FRAME_SIZE and preserve
   END_STREAM on the final fragment, with explicit frame-size and window tests.
+- Fingerprint observations now preserve a validated evidence source and reject
+  oversized input or frame-count limits before parsing.
 
 ## Verification
 

@@ -35,4 +35,13 @@ defmodule HTTP.HTTP2FingerprintTest do
     refute diff.equal?
     assert Map.has_key?(diff.changes, :settings)
   end
+
+  test "records an explicit observation source and bounds parsing" do
+    frame = Frame.encode(:ping, 0, 0, "12345678")
+    assert {:ok, observation} = Fingerprint.observe(frame, source: :serialized)
+    assert observation.source == :serialized
+    assert {:error, :invalid_observation_source} = Fingerprint.observe(frame, source: :browser)
+    assert {:error, :too_many_frames} = Fingerprint.observe(frame <> frame, max_frames: 1)
+    assert {:error, :observation_too_large} = Fingerprint.observe(frame, max_observed_bytes: 1)
+  end
 end
