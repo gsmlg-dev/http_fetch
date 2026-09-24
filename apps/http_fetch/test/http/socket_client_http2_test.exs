@@ -42,6 +42,24 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert {":path", "/test"} in headers
   end
 
+  test "reuses one h2c socket for sequential explicit-profile requests" do
+    parent = self()
+    url = start_h2c_reuse_server!(parent)
+
+    fetch = fn path ->
+      response =
+        String.replace(url, "/test", path)
+        |> HTTP.fetch(http_version: :h2c, http2_profile: :native_v1)
+        |> HTTP.Promise.await()
+
+      assert HTTP.Response.read_all(response) == path
+    end
+
+    fetch.("/one")
+    fetch.("/two")
+    assert_receive {:h2c_accepts, 1}, 1_000
+  end
+
   test "explicit wire profile routes the request through the long-lived owner" do
     test_pid = self()
 
@@ -1550,6 +1568,76 @@ defmodule HTTP.SocketClientHTTP2Test do
     end)
 
     "http://127.0.0.1:#{port}/test"
+  end
+
+  defp start_h2c_reuse_server!(parent) do
+    {:ok, listen_socket} =
+      :gen_tcp.listen(0, [
+        :binary,
+        packet: :raw,
+        active: false,
+        ip: {127, 0, 0, 1},
+        reuseaddr: true
+      ])
+
+    {:ok, port} = :inet.port(listen_socket)
+
+    pid =
+      spawn_link(fn ->
+        {:ok, socket} = :gen_tcp.accept(listen_socket)
+        send(parent, {:h2c_accepts, 1})
+
+        {preface, buffer} =
+          recv_exact(socket, :gen_tcp, byte_size(HTTP.HTTP2.connection_preface()), <<>>)
+
+        assert preface == HTTP.HTTP2.connection_preface()
+
+        {:ok, %Frame{type: :settings, stream_id: 0}, buffer} =
+          recv_frame(socket, :gen_tcp, buffer)
+
+        {:ok, %Frame{type: :headers, stream_id: 1, flags: flags, payload: header_block}, buffer} =
+          recv_frame(socket, :gen_tcp, buffer)
+
+        assert (flags &&& @end_headers) == @end_headers
+        {:ok, decoder, _headers} = HPACK.decode(HPACK.new_decoder(), header_block)
+
+        send_all(socket, :gen_tcp, [
+          Frame.encode(:settings, 0, 0, ""),
+          Frame.encode(:headers, @end_headers, 1, response_headers(200, "/one")),
+          Frame.encode(:data, @end_stream, 1, "/one")
+        ])
+
+        buffer = assert_settings_ack(socket, :gen_tcp, buffer)
+        {path, _buffer} = recv_h2_request(socket, :gen_tcp, buffer, 3, decoder)
+
+        send_all(socket, :gen_tcp, [
+          Frame.encode(:headers, @end_headers, 3, response_headers(200, path)),
+          Frame.encode(:data, @end_stream, 3, path)
+        ])
+
+        :gen_tcp.close(socket)
+        :gen_tcp.close(listen_socket)
+      end)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+      :gen_tcp.close(listen_socket)
+    end)
+
+    "http://127.0.0.1:#{port}/test"
+  end
+
+  defp recv_h2_request(socket, transport, buffer, stream_id, decoder) do
+    case recv_frame(socket, transport, buffer) do
+      {:ok, %Frame{type: :headers, stream_id: ^stream_id, flags: flags, payload: block}, buffer} ->
+        assert (flags &&& @end_headers) == @end_headers
+        {:ok, _decoder, headers} = HPACK.decode(decoder, block)
+        {_, path} = Enum.find(headers, fn {name, _} -> name == ":path" end)
+        {path, buffer}
+
+      {:ok, _other, buffer} ->
+        recv_h2_request(socket, transport, buffer, stream_id, decoder)
+    end
   end
 
   defp start_https_h2_server!(alpn_protocols, handler) do

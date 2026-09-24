@@ -15,6 +15,10 @@ defmodule HTTP.HTTP2.Pool do
           {:ok, pid(), reservation()} | {:queued, reservation()} | {:error, term()}
   def reserve(pool, key, opts \\ []), do: GenServer.call(pool, {:reserve, key, opts})
 
+  @doc "Reserves an available stream without queueing or starting a connection."
+  @spec try_reserve(pid(), key()) :: {:ok, pid(), reservation()} | :none
+  def try_reserve(pool, key), do: GenServer.call(pool, {:try_reserve, key})
+
   @spec release(pid(), key(), reservation()) :: :ok
   def release(pool, key, reservation), do: GenServer.call(pool, {:release, key, reservation})
 
@@ -111,6 +115,17 @@ defmodule HTTP.HTTP2.Pool do
             entry = %{entry | pending: entry.pending ++ [{token, from, opts}]}
             {:noreply, put_entry(state, key, entry)}
         end
+    end
+  end
+
+  def handle_call({:try_reserve, key}, _from, state) do
+    case available_owner(Map.get(state.entries, key)) do
+      {:ok, owner} ->
+        token = make_ref()
+        {:reply, {:ok, owner, token}, increment_owner(state, key, owner, token)}
+
+      :none ->
+        {:reply, :none, state}
     end
   end
 

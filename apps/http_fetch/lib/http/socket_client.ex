@@ -205,32 +205,70 @@ defmodule HTTP.SocketClient do
 
         with {:ok, transport, host, port} <- select_transport(request, unix_socket_path),
              {:ok, selection} <- protocol_selection(request, transport),
-             {:ok, socket} <- connect(transport, host, port, request, selection, timeout) do
-          case maybe_http2_owner(parent, ref, request, selection, transport, socket, deadline_at) do
-            {:handled, result} ->
+             {:ok, socket} <-
+               maybe_reused_http2_owner(parent, ref, request, selection, deadline_at) do
+          case socket do
+            {:reused, owner, reservation, key} ->
               _ = Process.cancel_timer(timer_ref)
-              result
+              run_http2_reused_owner(parent, ref, request, owner, reservation, key, deadline_at)
 
-            :legacy ->
-              initialize_legacy_owner(
-                parent,
-                ref,
-                request,
-                unix_socket_path,
-                redirects,
-                redirected?,
-                deadline_at,
-                timer_ref,
-                transport,
-                socket,
-                selection
-              )
+            :connect ->
+              with {:ok, socket} <- connect(transport, host, port, request, selection, timeout) do
+                case maybe_http2_owner(
+                       parent,
+                       ref,
+                       request,
+                       selection,
+                       transport,
+                       socket,
+                       deadline_at
+                     ) do
+                  {:handled, result} ->
+                    _ = Process.cancel_timer(timer_ref)
+                    result
+
+                  :legacy ->
+                    initialize_legacy_owner(
+                      parent,
+                      ref,
+                      request,
+                      unix_socket_path,
+                      redirects,
+                      redirected?,
+                      deadline_at,
+                      timer_ref,
+                      transport,
+                      socket,
+                      selection
+                    )
+                end
+              else
+                {:error, reason} -> send_error(parent, ref, reason)
+              end
           end
         else
           {:error, reason} ->
             _ = Process.cancel_timer(timer_ref)
             send_error(parent, ref, reason)
         end
+    end
+  end
+
+  defp maybe_reused_http2_owner(_parent, _ref, request, selection, _deadline_at) do
+    if selection.mode == :h2c and http2_profile?(request) and
+         Keyword.get(request.transport_options, :http2_reuse, true) != false do
+      profile = Keyword.fetch!(request.transport_options, :http2_profile)
+      pool = Process.whereis(:http_fetch_http2_pool)
+
+      with pool when is_pid(pool) <- pool,
+           {:ok, key} <- HTTP.HTTP2.PoolKey.build(request, profile, :h2c),
+           {:ok, owner, reservation} <- HTTP.HTTP2.Pool.try_reserve(pool, key) do
+        {:ok, {:reused, owner, {pool, reservation}, key}}
+      else
+        _ -> {:ok, :connect}
+      end
+    else
+      {:ok, :connect}
     end
   end
 
@@ -324,6 +362,7 @@ defmodule HTTP.SocketClient do
            ),
          :ok <- transfer_http2_socket(transport, socket, owner),
          :ok <- HTTP.HTTP2.ConnectionOwner.activate(owner),
+         {:ok, pool, reservation, key} <- register_http2_owner(request, profile, owner),
          {:ok, bridge} <- maybe_start_http2_bridge(body, owner),
          {:ok, %{id: id}} <-
            HTTP.HTTP2.ConnectionOwner.open_stream(owner, headers,
@@ -346,12 +385,71 @@ defmodule HTTP.SocketClient do
         redirected?: false,
         mode: nil,
         response_sent?: false,
-        body_bridge: bridge
+        body_bridge: bridge,
+        pool: pool,
+        reservation: reservation,
+        pool_key: key
       })
     else
       {:error, reason} ->
         transport.close(socket)
         send_error(parent, ref, reason)
+    end
+  end
+
+  defp run_http2_reused_owner(parent, ref, request, owner, {pool, reservation}, key, deadline_at) do
+    profile = Keyword.get(request.transport_options, :http2_profile, :native_v1)
+
+    with {:ok, headers, body} <- HTTP.HTTP2.request_headers(request, profile),
+         {:ok, bridge} <- maybe_start_http2_bridge(body, owner),
+         {:ok, %{id: id}} <-
+           HTTP.HTTP2.ConnectionOwner.open_stream(owner, headers,
+             subscriber: self(),
+             body_bridge: bridge,
+             end_stream: body == ""
+           ),
+         :ok <- send_http2_body(owner, id, body, bridge) do
+      monitor = Process.monitor(owner)
+
+      await_http2_response(%{
+        parent: parent,
+        ref: ref,
+        request: request,
+        owner: owner,
+        monitor: monitor,
+        stream_id: id,
+        deadline_at: deadline_at,
+        redirects: 0,
+        redirected?: false,
+        mode: nil,
+        response_sent?: false,
+        body_bridge: bridge,
+        pool: pool,
+        reservation: reservation,
+        pool_key: key
+      })
+    else
+      {:error, reason} ->
+        _ = HTTP.HTTP2.Pool.release(pool, key, reservation)
+        send_error(parent, ref, reason)
+    end
+  end
+
+  defp register_http2_owner(request, profile, owner) do
+    if request.url.scheme != "http" or
+         Keyword.get(request.transport_options, :http2_reuse, true) == false do
+      {:ok, nil, nil, nil}
+    else
+      pool = Process.whereis(:http_fetch_http2_pool)
+
+      with pool when is_pid(pool) <- pool,
+           {:ok, key} <- HTTP.HTTP2.PoolKey.build(request, profile, :h2c),
+           :ok <- HTTP.HTTP2.Pool.register(pool, key, owner),
+           {:ok, ^owner, reservation} <- HTTP.HTTP2.Pool.reserve(pool, key) do
+        {:ok, pool, reservation, key}
+      else
+        _ -> {:ok, nil, nil, nil}
+      end
     end
   end
 
@@ -497,7 +595,14 @@ defmodule HTTP.SocketClient do
 
   defp finish_http2(state, _reason) do
     Process.demonitor(state.monitor, [:flush])
-    _ = GenServer.stop(state.owner, :normal)
+    _ = HTTP.HTTP2.ConnectionOwner.release_stream(state.owner, state.stream_id)
+
+    if is_pid(state.pool) and is_reference(state.reservation) do
+      _ = HTTP.HTTP2.Pool.release(state.pool, state.pool_key, state.reservation)
+    else
+      _ = GenServer.stop(state.owner, :normal)
+    end
+
     :ok
   end
 
