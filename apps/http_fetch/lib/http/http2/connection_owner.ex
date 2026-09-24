@@ -13,6 +13,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   @preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
   @default_queue_bytes 1_048_576
   @default_max_streams 100
+  @default_drain_timeout 30_000
 
   @type transport :: module() | map()
   @type t :: %{
@@ -88,7 +89,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         max_streams: Keyword.get(opts, :max_streams, @default_max_streams),
         wrote_preface?: false,
         close_reason: nil,
-        activate?: Keyword.get(opts, :activate?, true)
+        activate?: Keyword.get(opts, :activate?, true),
+        drain_timeout: Keyword.get(opts, :drain_timeout, @default_drain_timeout),
+        drain_timer: nil
       }
 
       {:ok, state, {:continue, :initialize}}
@@ -131,6 +134,13 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       {:error, error, state} -> {:noreply, %{state | close_reason: {error, reason}}}
     end
   end
+
+  def handle_info({:drain_timeout, token}, %{drain_timer: {_timer, token}} = state) do
+    notify_all(state, {:http2, :drain_timeout})
+    {:stop, :drain_timeout, %{state | drain_timer: nil, lifecycle: :closed}}
+  end
+
+  def handle_info({:drain_timeout, _timer}, state), do: {:noreply, state}
 
   @impl true
   def handle_info(message, state) do
@@ -240,8 +250,17 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       {:ok, id} ->
         ref = get_in(state, [:streams, id, :ref])
 
-        {:reply, :ok,
-         %{state | streams: Map.delete(state.streams, id), refs: Map.delete(state.refs, ref)}}
+        state = %{
+          state
+          | streams: Map.delete(state.streams, id),
+            refs: Map.delete(state.refs, ref)
+        }
+
+        if state.lifecycle == :draining and map_size(state.streams) == 0 do
+          {:stop, :normal, :ok, state}
+        else
+          {:reply, :ok, state}
+        end
 
       :error ->
         {:reply, :ok, state}
@@ -380,7 +399,22 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     case Connection.receive_goaway(state.connection, last) do
       {:ok, connection, _} ->
         notify_all(state, {:http2, :goaway, last})
-        {:ok, %{state | connection: connection, lifecycle: :draining}}
+
+        {timer_ref, timer_token} =
+          if state.drain_timeout > 0 do
+            token = make_ref()
+            {Process.send_after(self(), {:drain_timeout, token}, state.drain_timeout), token}
+          else
+            {nil, nil}
+          end
+
+        {:ok,
+         %{
+           state
+           | connection: connection,
+             lifecycle: :draining,
+             drain_timer: {timer_ref, timer_token}
+         }}
 
       {:error, reason} ->
         {:error, reason, state}

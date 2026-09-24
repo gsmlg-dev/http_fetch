@@ -114,6 +114,53 @@ defmodule HTTP.HTTP2RuntimeTest do
     assert {:error, :draining} = ConnectionOwner.open_stream(owner, headers("/new"))
   end
 
+  test "GOAWAY closes after the last stream is released" do
+    {:ok, owner} =
+      ConnectionOwner.start_link(
+        transport: transport(self()),
+        socket: :socket,
+        drain_timeout: 1_000
+      )
+
+    assert_receive {:wire, :socket, _}, 500
+
+    assert {:ok, %{ref: ref}} =
+             ConnectionOwner.open_stream(owner, headers("/drain"), subscriber: self())
+
+    assert :ok =
+             ConnectionOwner.receive_bytes(
+               owner,
+               Frame.encode(:goaway, 0, 0, <<0::1, 1::31, 0::32>>)
+             )
+
+    assert :ok = ConnectionOwner.release_stream(owner, ref)
+    refute Process.alive?(owner)
+  end
+
+  test "GOAWAY drain deadline closes an unfinished owner" do
+    {:ok, owner} =
+      ConnectionOwner.start_link(
+        transport: transport(self()),
+        socket: :socket,
+        drain_timeout: 10
+      )
+
+    Process.unlink(owner)
+    monitor = Process.monitor(owner)
+    assert_receive {:wire, :socket, _}, 500
+
+    assert {:ok, _stream} =
+             ConnectionOwner.open_stream(owner, headers("/stuck"), subscriber: self())
+
+    assert :ok =
+             ConnectionOwner.receive_bytes(
+               owner,
+               Frame.encode(:goaway, 0, 0, <<0::1, 1::31, 0::32>>)
+             )
+
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :drain_timeout}, 500
+  end
+
   test "response HEADERS and CONTINUATION update shared HPACK state atomically" do
     {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500
