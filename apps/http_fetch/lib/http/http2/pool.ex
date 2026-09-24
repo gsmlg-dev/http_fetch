@@ -88,7 +88,8 @@ defmodule HTTP.HTTP2.Pool do
       max_streams: max_streams,
       monitor: mon,
       draining: false,
-      idle_timer: nil
+      idle_timer: nil,
+      idle_token: nil
     }
 
     entry = %{entry | connections: Map.put(entry.connections, owner, connection)}
@@ -190,7 +191,7 @@ defmodule HTTP.HTTP2.Pool do
       connection ->
         entry = Map.fetch!(state.entries, key)
         if is_reference(connection.idle_timer), do: Process.cancel_timer(connection.idle_timer)
-        connection = %{connection | draining: true}
+        connection = %{connection | draining: true, idle_timer: nil, idle_token: nil}
         entry = %{entry | connections: Map.put(entry.connections, owner, connection)}
         {:reply, :ok, put_entry(state, key, entry)}
     end
@@ -263,9 +264,9 @@ defmodule HTTP.HTTP2.Pool do
     end
   end
 
-  def handle_info({:idle_expire, key, owner}, state) do
+  def handle_info({:idle_expire, key, owner, token}, state) do
     case get_in(state.entries, [key, :connections, owner]) do
-      %{streams: 0, draining: false} ->
+      %{streams: 0, draining: false, idle_token: ^token} ->
         _ = GenServer.stop(owner, :normal)
         {:noreply, state}
 
@@ -295,7 +296,13 @@ defmodule HTTP.HTTP2.Pool do
     entry = Map.fetch!(state.entries, key)
     connection = entry.connections[owner]
     if is_reference(connection.idle_timer), do: Process.cancel_timer(connection.idle_timer)
-    connection = %{connection | streams: connection.streams + 1, idle_timer: nil}
+
+    connection = %{
+      connection
+      | streams: connection.streams + 1,
+        idle_timer: nil,
+        idle_token: nil
+    }
 
     entry = %{
       entry
@@ -319,12 +326,24 @@ defmodule HTTP.HTTP2.Pool do
         entry = Map.fetch!(state.entries, key)
         streams = max(connection.streams - 1, 0)
 
-        idle_timer =
+        {idle_timer, idle_token} =
           if streams == 0 and not connection.draining and state.idle_timeout > 0 do
-            Process.send_after(self(), {:idle_expire, key, owner}, state.idle_timeout)
+            token = make_ref()
+
+            timer =
+              Process.send_after(self(), {:idle_expire, key, owner, token}, state.idle_timeout)
+
+            {timer, token}
+          else
+            {nil, nil}
           end
 
-        connection = %{connection | streams: streams, idle_timer: idle_timer}
+        connection = %{
+          connection
+          | streams: streams,
+            idle_timer: idle_timer,
+            idle_token: idle_token
+        }
 
         put_entry(state, key, %{
           entry
@@ -344,7 +363,8 @@ defmodule HTTP.HTTP2.Pool do
       max_streams: state.max_streams,
       monitor: monitor,
       draining: false,
-      idle_timer: nil
+      idle_timer: nil,
+      idle_token: nil
     }
 
     state

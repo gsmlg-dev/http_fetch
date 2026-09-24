@@ -17,5 +17,6 @@ The owner does not synchronously call `HTTP.Stream.chunk/3` or wait on a
 consumer. Explicit-profile streaming uploads use the bounded BodyBridge, and
 reservations release when each stream completes. Simultaneous cold requests for
 one key share a single out-of-band connection claim. GOAWAY marks pooled
-owners draining so new reservations can select a replacement; final idle
-timeout and complete drain policy remain follow-up work.
+owners draining so new reservations can select a replacement. The pool closes
+healthy owners after a configurable idle timeout; complete drain deadlines
+remain follow-up work.

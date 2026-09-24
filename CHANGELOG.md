@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add flat HTTP/2 profile, reuse, scope, and priority option validation.
 
 ### Known limitations
-- Full idle/drain policy, broader independent mature-implementation
+- Full drain-deadline policy, broader independent mature-implementation
   interoperability, and captured browser-profile verification remain pending.
   Profiled h2c pooling coalesces simultaneous cold connections and supports
   overlapping socket streams; profiled HTTPS remains on its compatibility path.
