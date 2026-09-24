@@ -60,11 +60,13 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
 ## Verification
 
 Focused core profile/fingerprint/connection tests pass, runtime/body bridge
-tests pass (18), PoolKey tests pass (9), and fetch tests pass (214 tests plus
-20 doctests). The full HTTP/2 socket regression suite passes (40 tests),
-including sequential h2c and HTTPS h2 reuse, three overlapping requests, and
+tests pass (18), PoolKey tests pass (9), and fetch tests pass (215 tests plus
+20 doctests). The full HTTP/2 socket regression suite passes (41 tests),
+including 20 sequential h2c churn requests with varying path payload sizes,
+sequential h2c and HTTPS h2 reuse, three overlapping requests, and
 simultaneous cold-start coalescing on one accepted socket with streams 1, 3,
-and 5.
+and 5. The churn server asserts one TCP accept and monotonically advancing
+stream IDs; it does not claim a long-duration memory benchmark.
 The full fetch application tests pass, and core tests pass except one existing
 platform-sensitive TLS assertion (`:eaddrnotavail` instead of
 `:econnrefused`). Fresh warnings-as-errors compilation, format, and diff

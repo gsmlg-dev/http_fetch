@@ -60,6 +60,27 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert_receive {:h2c_accepts, 1}, 1_000
   end
 
+  test "keeps one h2c socket through sequential churn with varying payload sizes" do
+    parent = self()
+    request_count = 20
+    url = start_h2c_churn_server!(parent, request_count)
+
+    for index <- 1..request_count do
+      path = "/churn/#{index}-#{String.duplicate("x", rem(index * 37, 401))}"
+
+      response =
+        String.replace(url, "/test", path)
+        |> HTTP.fetch(http_version: :h2c, http2_profile: :native_v1)
+        |> HTTP.Promise.await()
+
+      assert response.status == 200
+      assert HTTP.Response.read_all(response) == path
+    end
+
+    assert_receive {:h2c_churn_accepts, 1}, 1_000
+    refute_receive {:h2c_churn_accepts, 2}, 100
+  end
+
   test "overlaps three explicit-profile requests on one h2c socket" do
     parent = self()
     url = start_h2c_overlap_server!(parent, 3)
@@ -1693,6 +1714,75 @@ defmodule HTTP.SocketClientHTTP2Test do
     end)
 
     "http://127.0.0.1:#{port}/test"
+  end
+
+  defp start_h2c_churn_server!(parent, expected) do
+    {:ok, listen_socket} =
+      :gen_tcp.listen(0, [
+        :binary,
+        packet: :raw,
+        active: false,
+        ip: {127, 0, 0, 1},
+        reuseaddr: true
+      ])
+
+    {:ok, port} = :inet.port(listen_socket)
+
+    pid =
+      spawn_link(fn ->
+        {:ok, socket} = :gen_tcp.accept(listen_socket)
+        send(parent, {:h2c_churn_accepts, 1})
+
+        {preface, buffer} =
+          recv_exact(socket, :gen_tcp, byte_size(HTTP.HTTP2.connection_preface()), <<>>)
+
+        assert preface == HTTP.HTTP2.connection_preface()
+
+        {:ok, %Frame{type: :settings, stream_id: 0}, buffer} =
+          recv_frame(socket, :gen_tcp, buffer)
+
+        send_all(socket, :gen_tcp, [Frame.encode(:settings, 0, 0, "")])
+        churn_h2_requests(socket, buffer, HPACK.new_decoder(), 1, expected)
+
+        :gen_tcp.close(socket)
+        :gen_tcp.close(listen_socket)
+      end)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+      :gen_tcp.close(listen_socket)
+    end)
+
+    "http://127.0.0.1:#{port}/test"
+  end
+
+  defp churn_h2_requests(_socket, _buffer, _decoder, index, expected)
+       when index > expected,
+       do: :ok
+
+  defp churn_h2_requests(socket, buffer, decoder, index, expected) do
+    stream_id = index * 2 - 1
+    {path, decoder, buffer} = recv_h2_request_with_decoder(socket, buffer, stream_id, decoder)
+
+    send_all(socket, :gen_tcp, [
+      Frame.encode(:headers, @end_headers, stream_id, response_headers(200, path)),
+      Frame.encode(:data, @end_stream, stream_id, path)
+    ])
+
+    churn_h2_requests(socket, buffer, decoder, index + 1, expected)
+  end
+
+  defp recv_h2_request_with_decoder(socket, buffer, stream_id, decoder) do
+    case recv_frame(socket, :gen_tcp, buffer) do
+      {:ok, %Frame{type: :headers, stream_id: ^stream_id, flags: flags, payload: block}, buffer}
+      when (flags &&& @end_headers) == @end_headers ->
+        {:ok, decoder, headers} = HPACK.decode(decoder, block)
+        {_, path} = Enum.find(headers, fn {name, _} -> name == ":path" end)
+        {path, decoder, buffer}
+
+      {:ok, _other, buffer} ->
+        recv_h2_request_with_decoder(socket, buffer, stream_id, decoder)
+    end
   end
 
   defp start_h2c_overlap_server!(parent, expected) do
