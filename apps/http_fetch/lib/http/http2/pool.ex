@@ -190,7 +190,10 @@ defmodule HTTP.HTTP2.Pool do
 
       connection ->
         entry = Map.fetch!(state.entries, key)
-        if is_reference(connection.idle_timer), do: Process.cancel_timer(connection.idle_timer)
+
+        if is_reference(connection.idle_timer),
+          do: _ = Process.cancel_timer(connection.idle_timer)
+
         connection = %{connection | draining: true, idle_timer: nil, idle_token: nil}
         entry = %{entry | connections: Map.put(entry.connections, owner, connection)}
         {:reply, :ok, put_entry(state, key, entry)}
@@ -295,7 +298,7 @@ defmodule HTTP.HTTP2.Pool do
   defp increment_owner(state, key, owner, token) do
     entry = Map.fetch!(state.entries, key)
     connection = entry.connections[owner]
-    if is_reference(connection.idle_timer), do: Process.cancel_timer(connection.idle_timer)
+    if is_reference(connection.idle_timer), do: _ = Process.cancel_timer(connection.idle_timer)
 
     connection = %{
       connection

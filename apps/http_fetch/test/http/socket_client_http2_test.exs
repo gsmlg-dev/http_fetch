@@ -1875,6 +1875,7 @@ defmodule HTTP.SocketClientHTTP2Test do
               Frame.encode(:data, @end_stream, 3, path)
             ])
 
+            :timer.sleep(200)
             :ssl.close(socket)
 
           {:error, _reason} ->
