@@ -13,7 +13,8 @@ profile-keyed reservations and monitors owners. Explicit-profile h2c fetches
 use this owner and can reuse it across overlapping streams; default HTTP/1.1,
 unprofiled HTTP/2, and profiled HTTPS retain their existing compatibility paths.
 Legacy priority profiles write PRIORITY before HEADERS, while RFC 9218 profiles
-use the modern `Priority` header path.
+use the modern `Priority` header path. Inbound RFC 9218 `PRIORITY_UPDATE` frames
+are accepted only on stream 0 with a bounded target and field value.
 
 The owner does not synchronously call `HTTP.Stream.chunk/3` or wait on a
 consumer. Explicit-profile streaming uploads use the bounded BodyBridge, and

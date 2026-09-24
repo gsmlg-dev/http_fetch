@@ -35,6 +35,9 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
 - Legacy profiles serialize a legal PRIORITY frame before HEADERS; RFC 9218
   profiles emit a `Priority` header from validated per-request metadata without
   mixing legacy signaling.
+- RFC 9218 `PRIORITY_UPDATE` is registered as frame type `0xF` and accepted by
+  the owner only with a zero frame stream ID, a non-zero target stream, and a
+  bounded field value; malformed updates are rejected.
 
 ## Verification
 
