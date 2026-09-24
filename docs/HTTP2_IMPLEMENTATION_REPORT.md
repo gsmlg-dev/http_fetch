@@ -25,7 +25,7 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
 ## Verification
 
 Focused core profile/fingerprint/connection tests pass, runtime/body bridge
-tests pass (13), PoolKey tests pass (9), and fetch tests pass (204 tests plus
+tests pass (14), PoolKey tests pass (9), and fetch tests pass (204 tests plus
 20 doctests). The full HTTP/2 socket regression suite passes (38 tests),
 including sequential h2c reuse and three overlapping requests on one accepted
 socket with streams 1, 3, and 5.
@@ -37,6 +37,11 @@ currently crashes in its token-position checker on an existing sigil under
 Elixir 1.20; Dialyzer exits 2 after a Dialyxir `Protocol.UndefinedError` while
 rendering warnings. `mix docs` completes with existing hidden-module and stale
 file-reference warnings.
+
+An independent `hyper-h2` 4.2.0 cleartext server accepted the client's
+prior-knowledge preface, SETTINGS, HPACK request headers, and stream, then
+returned `200`, `x-peer: hyper-h2`, and `independent:/independent`. This is a
+single-peer interoperability smoke check, not a complete RFC or stress matrix.
 
 ## Explicitly not verified
 
@@ -50,5 +55,5 @@ adapter for compatibility. Simultaneous cold-connection establishment
 deduplication and broader concurrent queue/drain evidence remain pending.
 Explicit-profile streaming upload now uses `BodyBridge`
 through the owner and is covered by an h2c socket test; requests without an explicit
-profile retain the legacy path. Independent mature implementation
-interoperability and a captured browser profile remain pending.
+profile retain the legacy path. Broader interoperability and a captured
+browser profile remain pending.

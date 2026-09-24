@@ -83,6 +83,17 @@ defmodule HTTP.HTTP2RuntimeTest do
     assert Enum.sort(status.stream_ids) == [1, 3, 5]
   end
 
+  test "accepts the peer ACK for the initial SETTINGS frame" do
+    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+    assert_receive {:wire, :socket, preface_and_settings}, 500
+
+    <<_preface::binary-size(24), settings::binary>> = preface_and_settings
+    assert {:ok, %{type: :settings, flags: 0, stream_id: 0}, <<>>} = Frame.decode(settings)
+
+    assert :ok = ConnectionOwner.receive_bytes(owner, Frame.encode(:settings, 0x1, 0, <<>>))
+    assert ConnectionOwner.status(owner).lifecycle == :ready
+  end
+
   test "single stream cancellation emits RST and leaves neighbor alive" do
     {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500

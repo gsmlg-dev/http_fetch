@@ -261,9 +261,12 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   defp initialize_wire(state) do
-    {:ok, settings} = WireProfile.settings_payload(state.profile)
     entries = state.profile.settings
     {:ok, increment} = WireProfile.initial_window_increment(state.profile)
+
+    {:ok, connection, [{:settings, settings}]} =
+      Connection.update_local_settings(state.connection, entries)
+
     settings_frame = Frame.encode(:settings, 0, 0, settings)
 
     initial_window =
@@ -271,9 +274,16 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         do: Frame.encode(:window_update, 0, 0, <<0::1, increment::31>>),
         else: <<>>
 
-    case transport_send(state, [@preface, settings_frame, initial_window]) do
-      :ok -> {:ok, %{state | wrote_preface?: true, init_settings: entries}}
-      {:error, reason} -> {:error, reason, state}
+    case transport_send(%{state | connection: connection}, [
+           @preface,
+           settings_frame,
+           initial_window
+         ]) do
+      :ok ->
+        {:ok, %{state | connection: connection, wrote_preface?: true, init_settings: entries}}
+
+      {:error, reason} ->
+        {:error, reason, state}
     end
   end
 
