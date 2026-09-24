@@ -9,9 +9,9 @@ and produces bounded, redacted structured observations.
 `HTTP.HTTP2.ConnectionOwner` owns one long-lived transport, serializes all
 outbound effects through one writer, and routes inbound HEADERS/CONTINUATION
 after updating the shared decoder. `HTTP.HTTP2.Pool` performs bounded,
-profile-keyed reservations and monitors owners. Explicit-profile h2c fetches
-use this owner and can reuse it across overlapping streams; default HTTP/1.1,
-unprofiled HTTP/2, and profiled HTTPS retain their existing compatibility paths.
+profile-keyed reservations and monitors owners. Explicit-profile h2c and HTTPS
+h2 fetches use this owner and can reuse it across overlapping streams; default
+HTTP/1.1 and unprofiled HTTP/2 retain their existing compatibility paths.
 Legacy priority profiles write PRIORITY before HEADERS, while RFC 9218 profiles
 use the modern `Priority` header path. Inbound RFC 9218 `PRIORITY_UPDATE` frames
 are accepted only on stream 0 with a bounded target and field value.

@@ -48,6 +48,9 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
   END_STREAM on the final fragment, with explicit frame-size and window tests.
 - Pending upload streams are selected through a bounded round-robin scheduler
   during connection-level credit recovery; scheduler rotation has pure tests.
+- Explicit profiled HTTPS h2 now participates in the same pool path as h2c,
+  with `:h2` pool keys preserving TLS backend, verification, scope, and profile
+  isolation. OTP `:ssl` and `:ex_ssl` HTTP/2 socket regressions both pass.
 - Fingerprint observations now preserve a validated evidence source and reject
   oversized input or frame-count limits before parsing.
 

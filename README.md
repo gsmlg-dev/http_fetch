@@ -33,9 +33,9 @@ the root keeps runtime applications of `in_umbrella` dependencies, including
   explicit HTTP/2 or h2c request.
 
 HTTP/2 profile support currently covers validated serialization, bounded wire
-observation, bounded provenance manifests, profile-keyed h2c connection reuse
-with overlapping streams, flow-controlled upload recovery, and peer-limited
-DATA framing. Legacy PRIORITY, RFC 9218 Priority headers, and bounded
+observation, bounded provenance manifests, profile-keyed h2c/HTTPS h2
+connection reuse with overlapping streams, flow-controlled upload recovery,
+and peer-limited DATA framing. Legacy PRIORITY, RFC 9218 Priority headers, and bounded
 PRIORITY_UPDATE input are supported according to the selected profile. It does
 not claim browser fingerprint equivalence. Available profile IDs are
 `native_v1`, `synthetic_test_v1`, and `synthetic_test_v2`. Use

@@ -262,7 +262,11 @@ defmodule HTTP.SocketClientHTTP2Test do
 
     response =
       url
-      |> HTTP.fetch(http_version: :auto, ssl: [verify: :verify_none])
+      |> HTTP.fetch(
+        http_version: :auto,
+        http2_profile: :native_v1,
+        ssl: [verify: :verify_none]
+      )
       |> HTTP.Promise.await()
 
     assert_receive {:negotiated, "h2"}
@@ -316,6 +320,7 @@ defmodule HTTP.SocketClientHTTP2Test do
       url
       |> HTTP.fetch(
         http_version: :http2,
+        http2_profile: :native_v1,
         tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )

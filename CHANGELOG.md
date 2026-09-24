@@ -19,8 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Known limitations
 - Full drain-deadline policy, broader independent mature-implementation
   interoperability, and captured browser-profile verification remain pending.
-  Profiled h2c pooling coalesces simultaneous cold connections and supports
-  overlapping socket streams; profiled HTTPS remains on its compatibility path.
+  Profiled h2c and HTTPS h2 pooling support overlapping socket streams while
+  preserving TLS/profile identity isolation.
 
 ## [0.13.0] - 2026-09-22
 

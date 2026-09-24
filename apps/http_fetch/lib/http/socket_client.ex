@@ -260,13 +260,14 @@ defmodule HTTP.SocketClient do
   end
 
   defp maybe_reused_http2_owner(_parent, _ref, request, selection, _deadline_at) do
-    if selection.mode == :h2c and http2_profile?(request) and
+    if selection.mode in [:h2c, :force_h2] and http2_profile?(request) and
          Keyword.get(request.transport_options, :http2_reuse, true) != false do
       profile = Keyword.fetch!(request.transport_options, :http2_profile)
+      protocol = if selection.mode == :h2c, do: :h2c, else: :h2
       pool = Process.whereis(:http_fetch_http2_pool)
 
       with pool when is_pid(pool) <- pool,
-           {:ok, key} <- HTTP.HTTP2.PoolKey.build(request, profile, :h2c) do
+           {:ok, key} <- HTTP.HTTP2.PoolKey.build(request, profile, protocol) do
         case HTTP.HTTP2.Pool.try_reserve(pool, key) do
           {:ok, owner, reservation} ->
             {:ok, {:reused, owner, {pool, reservation}, key}}
@@ -461,7 +462,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp register_http2_owner(request, profile, owner, claim) do
-    if request.url.scheme != "http" or
+    if request.url.scheme not in ["http", "https"] or
          Keyword.get(request.transport_options, :http2_reuse, true) == false do
       {:ok, nil, nil, nil}
     else
@@ -482,7 +483,10 @@ defmodule HTTP.SocketClient do
   defp pool_key_for_registration(_request, _profile, {_pool, key}), do: {:ok, key}
 
   defp pool_key_for_registration(request, profile, _claim),
-    do: HTTP.HTTP2.PoolKey.build(request, profile, :h2c)
+    do: HTTP.HTTP2.PoolKey.build(request, profile, http2_protocol(request))
+
+  defp http2_protocol(%Request{url: %URI{scheme: "http"}}), do: :h2c
+  defp http2_protocol(%Request{url: %URI{scheme: "https"}}), do: :h2
 
   defp fail_http2_connect({pool, key}, reason),
     do: HTTP.HTTP2.Pool.fail_connect(pool, key, reason)
