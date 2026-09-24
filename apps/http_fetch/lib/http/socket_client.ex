@@ -2,6 +2,7 @@ defmodule HTTP.SocketClient do
   @moduledoc false
 
   alias HTTP.Headers
+  alias HTTP.HTTP2.Frame
   alias HTTP.Request
   alias HTTP.Response
 
@@ -205,45 +206,25 @@ defmodule HTTP.SocketClient do
         with {:ok, transport, host, port} <- select_transport(request, unix_socket_path),
              {:ok, selection} <- protocol_selection(request, transport),
              {:ok, socket} <- connect(transport, host, port, request, selection, timeout) do
-          case initialize_protocol(transport, socket, request, selection) do
-            {:ok, protocol_module, protocol, prepared_request} ->
-              with :ok <-
-                     send_prepared_request(
-                       transport,
-                       socket,
-                       prepared_request,
-                       deadline_at
-                     ),
-                   :ok <- activate_socket(transport, socket) do
-                state = %{
-                  parent: parent,
-                  ref: ref,
-                  request: request,
-                  unix_socket_path: unix_socket_path,
-                  redirects: redirects,
-                  redirected?: redirected?,
-                  deadline_at: deadline_at,
-                  timer_ref: timer_ref,
-                  transport: transport,
-                  socket: socket,
-                  protocol_module: protocol_module,
-                  protocol: protocol,
-                  mode: nil,
-                  response_sent?: false
-                }
-
-                owner_loop(state)
-              else
-                {:error, reason} ->
-                  transport.close(socket)
-                  _ = Process.cancel_timer(timer_ref)
-                  send_error(parent, ref, reason)
-              end
-
-            {:error, reason} ->
-              transport.close(socket)
+          case maybe_http2_owner(parent, ref, request, selection, transport, socket, deadline_at) do
+            {:handled, result} ->
               _ = Process.cancel_timer(timer_ref)
-              send_error(parent, ref, reason)
+              result
+
+            :legacy ->
+              initialize_legacy_owner(
+                parent,
+                ref,
+                request,
+                unix_socket_path,
+                redirects,
+                redirected?,
+                deadline_at,
+                timer_ref,
+                transport,
+                socket,
+                selection
+              )
           end
         else
           {:error, reason} ->
@@ -251,6 +232,256 @@ defmodule HTTP.SocketClient do
             send_error(parent, ref, reason)
         end
     end
+  end
+
+  defp initialize_legacy_owner(
+         parent,
+         ref,
+         request,
+         unix_socket_path,
+         redirects,
+         redirected?,
+         deadline_at,
+         timer_ref,
+         transport,
+         socket,
+         selection
+       ) do
+    case initialize_protocol(transport, socket, request, selection) do
+      {:ok, protocol_module, protocol, prepared_request} ->
+        with :ok <-
+               send_prepared_request(
+                 transport,
+                 socket,
+                 prepared_request,
+                 deadline_at
+               ),
+             :ok <- activate_socket(transport, socket) do
+          state = %{
+            parent: parent,
+            ref: ref,
+            request: request,
+            unix_socket_path: unix_socket_path,
+            redirects: redirects,
+            redirected?: redirected?,
+            deadline_at: deadline_at,
+            timer_ref: timer_ref,
+            transport: transport,
+            socket: socket,
+            protocol_module: protocol_module,
+            protocol: protocol,
+            mode: nil,
+            response_sent?: false
+          }
+
+          owner_loop(state)
+        else
+          {:error, reason} ->
+            transport.close(socket)
+            _ = Process.cancel_timer(timer_ref)
+            send_error(parent, ref, reason)
+        end
+
+      {:error, reason} ->
+        transport.close(socket)
+        _ = Process.cancel_timer(timer_ref)
+        send_error(parent, ref, reason)
+    end
+  end
+
+  defp maybe_http2_owner(
+         parent,
+         ref,
+         %Request{} = request,
+         selection,
+         transport,
+         socket,
+         deadline_at
+       ) do
+    if Request.streaming_body?(request) or
+         not Keyword.has_key?(request.transport_options, :http2_profile) do
+      :legacy
+    else
+      case connected_protocol(transport, socket, selection) do
+        {:ok, :http2} ->
+          {:handled, run_http2_owner(parent, ref, request, transport, socket, deadline_at)}
+
+        _ ->
+          :legacy
+      end
+    end
+  end
+
+  defp run_http2_owner(parent, ref, request, transport, socket, deadline_at) do
+    profile = Keyword.get(request.transport_options, :http2_profile, :native_v1)
+
+    with {:ok, headers, body} <- HTTP.HTTP2.request_headers(request, profile),
+         {:ok, owner} <-
+           HTTP.HTTP2.ConnectionOwner.start_link(
+             transport: transport,
+             socket: socket,
+             profile: profile,
+             activate?: false
+           ),
+         :ok <- transfer_http2_socket(transport, socket, owner),
+         :ok <- HTTP.HTTP2.ConnectionOwner.activate(owner),
+         {:ok, %{id: id}} <-
+           HTTP.HTTP2.ConnectionOwner.open_stream(owner, headers,
+             subscriber: self(),
+             end_stream: body == ""
+           ),
+         :ok <- send_http2_body(owner, id, body) do
+      monitor = Process.monitor(owner)
+
+      await_http2_response(%{
+        parent: parent,
+        ref: ref,
+        request: request,
+        owner: owner,
+        monitor: monitor,
+        stream_id: id,
+        deadline_at: deadline_at,
+        redirects: 0,
+        redirected?: false,
+        mode: nil,
+        response_sent?: false
+      })
+    else
+      {:error, reason} ->
+        transport.close(socket)
+        send_error(parent, ref, reason)
+    end
+  end
+
+  defp transfer_http2_socket(transport, socket, owner) when is_atom(transport),
+    do: transport.controlling_process(socket, owner)
+
+  defp transfer_http2_socket(transport, socket, owner) when is_map(transport) do
+    if is_function(transport[:controlling_process], 2),
+      do: transport.controlling_process.(socket, owner),
+      else: :ok
+  end
+
+  defp send_http2_body(_owner, _id, ""), do: :ok
+
+  defp send_http2_body(owner, id, body) when is_binary(body),
+    do: HTTP.HTTP2.ConnectionOwner.send_data(owner, id, body, true)
+
+  defp await_http2_response(state) do
+    monitor = state.monitor
+    stream_id = state.stream_id
+
+    receive do
+      :abort ->
+        _ = HTTP.HTTP2.ConnectionOwner.cancel(state.owner, state.stream_id)
+        finish_http2(state, :aborted)
+
+      {:DOWN, ^monitor, :process, _owner, reason} ->
+        fail_http2(state, {:request_process_down, reason})
+
+      {:http2, ^stream_id, {:http2, :headers, headers, flags}} ->
+        handle_http2_headers(state, headers, flags)
+
+      {:http2, ^stream_id, {:http2, :data, chunk, flags}} ->
+        handle_http2_data(state, chunk, flags)
+
+      _message ->
+        await_http2_response(state)
+    after
+      remaining_timeout(state.deadline_at) ->
+        _ = HTTP.HTTP2.ConnectionOwner.cancel(state.owner, state.stream_id)
+        finish_http2(state, :request_timeout)
+    end
+  end
+
+  defp handle_http2_headers(state, headers, flags) do
+    status =
+      headers
+      |> Enum.find_value(fn {name, value} -> if name == ":status", do: parse_status(value) end)
+
+    regular = Enum.reject(headers, fn {name, _value} -> String.starts_with?(name, ":") end)
+
+    if is_integer(status) do
+      response =
+        Response.new(
+          status: status,
+          headers: Headers.new(regular),
+          body: nil,
+          url: state.request.url,
+          redirected: state.redirected?
+        )
+
+      if Frame.flag?(flags, 0x1) do
+        send_response(state.parent, state.ref, Response.with_buffered_body(response, ""))
+        finish_http2(state, :ok)
+      else
+        if stream_response?(state.request, status, Headers.new(regular)) do
+          {:ok, stream_pid} = HTTP.Stream.start_link(stream_content_length(Headers.new(regular)))
+          send_response(state.parent, state.ref, Response.with_stream_body(response, stream_pid))
+          await_http2_response(%{state | mode: {:stream, stream_pid}, response_sent?: true})
+        else
+          await_http2_response(%{state | mode: {:buffer, response, []}})
+        end
+      end
+    else
+      fail_http2(state, :invalid_http_response)
+    end
+  end
+
+  defp handle_http2_data(%{mode: {:stream, stream_pid}} = state, chunk, flags) do
+    case HTTP.Stream.chunk(stream_pid, chunk, stream_chunk_timeout(state.deadline_at)) do
+      :ok ->
+        if Frame.flag?(flags, 0x1) do
+          HTTP.Stream.finish(stream_pid)
+          finish_http2(state, :ok)
+        else
+          await_http2_response(state)
+        end
+
+      {:error, reason} ->
+        fail_http2(state, reason)
+    end
+  end
+
+  defp handle_http2_data(%{mode: {:buffer, response, chunks}} = state, chunk, flags) do
+    chunks = [chunk | chunks]
+
+    if Frame.flag?(flags, 0x1) do
+      send_response(
+        state.parent,
+        state.ref,
+        Response.with_buffered_body(response, chunks |> Enum.reverse() |> IO.iodata_to_binary())
+      )
+
+      finish_http2(state, :ok)
+    else
+      await_http2_response(%{state | mode: {:buffer, response, chunks}})
+    end
+  end
+
+  defp handle_http2_data(state, _chunk, _flags), do: fail_http2(state, :invalid_http_response)
+
+  defp parse_status(value) when is_binary(value), do: String.to_integer(value)
+  defp parse_status(value) when is_integer(value), do: value
+  defp parse_status(_), do: nil
+
+  defp fail_http2(state, reason) do
+    if state.response_sent? do
+      case state.mode do
+        {:stream, stream_pid} -> HTTP.Stream.error(stream_pid, reason)
+        _ -> :ok
+      end
+    else
+      send_error(state.parent, state.ref, reason)
+    end
+
+    finish_http2(state, reason)
+  end
+
+  defp finish_http2(state, _reason) do
+    Process.demonitor(state.monitor, [:flush])
+    _ = GenServer.stop(state.owner, :normal)
+    :ok
   end
 
   defp owner_loop(state) do

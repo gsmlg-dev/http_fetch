@@ -42,6 +42,28 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert {":path", "/test"} in headers
   end
 
+  test "explicit wire profile routes the request through the long-lived owner" do
+    test_pid = self()
+
+    url =
+      start_h2c_server!(fn socket, transport ->
+        {request_headers, buffer} = recv_client_h2_request(socket, transport)
+        send(test_pid, {:profile_request, request_headers})
+        send_h2_response(socket, transport, "profile-owner")
+        assert_settings_ack(socket, transport, buffer)
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(http_version: :h2c, http2_profile: :native_v1)
+      |> HTTP.Promise.await()
+
+    assert response.status == 200
+    assert HTTP.Response.read_all(response) == "profile-owner"
+    assert_receive {:profile_request, headers}
+    assert {":method", "GET"} in headers
+  end
+
   test "sends WINDOW_UPDATE frames while receiving a large h2c response" do
     body = :binary.copy("x", 70_000)
 

@@ -144,7 +144,14 @@ defmodule HTTP.HTTP2.Connection do
       if bytes == 0 do
         {:ok, connection, []}
       else
-        {:ok, connection, [{:window_update, 0, bytes}, {:window_update, id, bytes}]}
+        stream = %{stream | receive_window: stream.receive_window + bytes}
+
+        {:ok,
+         %{
+           connection
+           | streams: Map.put(connection.streams, id, stream),
+             connection_receive_window: connection.connection_receive_window + bytes
+         }, [{:window_update, 0, bytes}, {:window_update, id, bytes}]}
       end
     else
       :error -> {:error, :unknown_stream}

@@ -30,6 +30,13 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
+  @spec activate(pid()) :: :ok | {:error, term()}
+  def activate(owner), do: GenServer.call(owner, :activate)
+
+  @spec send_data(pid(), pos_integer(), binary(), boolean()) :: :ok | {:error, term()}
+  def send_data(owner, id, data, end_stream? \\ false),
+    do: GenServer.call(owner, {:send_data, id, data, end_stream?})
+
   @spec open_stream(pid(), list(), keyword()) ::
           {:ok, %{id: pos_integer(), ref: reference()}} | {:error, term()}
   def open_stream(owner, headers, opts \\ []) when is_pid(owner) and is_list(headers) do
@@ -75,7 +82,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         max_queue_bytes: Keyword.get(opts, :max_queue_bytes, @default_queue_bytes),
         max_streams: Keyword.get(opts, :max_streams, @default_max_streams),
         wrote_preface?: false,
-        close_reason: nil
+        close_reason: nil,
+        activate?: Keyword.get(opts, :activate?, true)
       }
 
       {:ok, state, {:continue, :initialize}}
@@ -89,7 +97,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     case initialize_wire(state) do
       {:ok, state} ->
         state = %{state | lifecycle: :ready}
-        {:noreply, activate_socket(state)}
+        state = if state.activate?, do: activate_socket(state), else: state
+        {:noreply, state}
 
       {:error, reason, state} ->
         {:stop, reason, state}
@@ -145,6 +154,16 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     {:reply,
      Map.take(state, [:lifecycle, :profile_digest, :wrote_preface?, :bytes, :close_reason])
      |> Map.put(:stream_ids, Map.keys(state.streams)), state}
+  end
+
+  def handle_call(:activate, _from, state), do: {:reply, :ok, activate_socket(state)}
+
+  def handle_call({:send_data, id, data, end_stream?}, _from, state)
+      when is_integer(id) and is_binary(data) and is_boolean(end_stream?) do
+    case dispatch_event(state, {:data, id, data, end_stream?}) do
+      {:ok, state} -> {:reply, :ok, state}
+      {:error, reason, state} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call({:open_stream, _headers, _opts}, _from, %{lifecycle: lifecycle} = state)
@@ -404,7 +423,16 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       if ref, do: notify_stream(state, id, {:http2, type, payload, flags}), else: :ok
       {:ok, state}
     else
-      {:error, reason} -> {:error, reason, state}
+      {:error, :closed, _state} ->
+        if ref, do: notify_stream(state, id, {:http2, type, payload, flags}), else: :ok
+        {:ok, state}
+
+      {:error, :stream_closed} ->
+        if ref, do: notify_stream(state, id, {:http2, type, payload, flags}), else: :ok
+        {:ok, state}
+
+      {:error, reason} ->
+        {:error, reason, state}
     end
   end
 
@@ -451,6 +479,16 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
       nil ->
         {:error, :unknown_body_bridge, state}
+    end
+  end
+
+  defp dispatch_event(state, {:data, id, data, end_stream?}) do
+    with {:ok, connection, effects} <-
+           Connection.send_data(state.connection, id, data, end_stream?),
+         {:ok, state} <- write_effects(%{state | connection: connection}, effects) do
+      {:ok, state}
+    else
+      {:error, reason} -> {:error, reason, state}
     end
   end
 
