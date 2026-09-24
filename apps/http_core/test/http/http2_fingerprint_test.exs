@@ -43,5 +43,7 @@ defmodule HTTP.HTTP2FingerprintTest do
     assert {:error, :invalid_observation_source} = Fingerprint.observe(frame, source: :browser)
     assert {:error, :too_many_frames} = Fingerprint.observe(frame <> frame, max_frames: 1)
     assert {:error, :observation_too_large} = Fingerprint.observe(frame, max_observed_bytes: 1)
+    assert {:error, :invalid_observation_limits} = Fingerprint.observe(frame, max_frames: -1)
+    assert {:error, :invalid_observation_limits} = Fingerprint.observe(frame, max_raw_bytes: :all)
   end
 end

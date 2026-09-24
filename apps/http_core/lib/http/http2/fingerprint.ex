@@ -11,15 +11,12 @@ defmodule HTTP.HTTP2.Fingerprint do
   @spec observe(binary(), keyword()) :: {:ok, map()} | {:error, term()}
   def observe(bytes, opts \\ []) when is_binary(bytes) do
     capture? = Keyword.get(opts, :raw_capture, false)
-    max_raw = min(Keyword.get(opts, :max_raw_bytes, 65_536), 65_536)
     source = Keyword.get(opts, :source, :peer_observed)
 
-    max_bytes =
-      min(Keyword.get(opts, :max_observed_bytes, @max_observed_bytes), @max_observed_bytes)
-
-    max_frames = min(Keyword.get(opts, :max_frames, @max_frames), @max_frames)
-
-    with true <- source in @sources,
+    with {:ok, max_raw} <- bounded_limit(opts, :max_raw_bytes, 65_536),
+         {:ok, max_bytes} <- bounded_limit(opts, :max_observed_bytes, @max_observed_bytes),
+         {:ok, max_frames} <- bounded_limit(opts, :max_frames, @max_frames),
+         true <- source in @sources,
          true <- byte_size(bytes) <= max_bytes,
          {preface?, rest} <- split_preface(bytes),
          {:ok, frames} <- decode_frames(rest, [], max_frames) do
@@ -44,6 +41,13 @@ defmodule HTTP.HTTP2.Fingerprint do
       false when source not in @sources -> {:error, :invalid_observation_source}
       false -> {:error, :observation_too_large}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp bounded_limit(opts, key, maximum) do
+    case Keyword.get(opts, key, maximum) do
+      value when is_integer(value) and value >= 0 -> {:ok, min(value, maximum)}
+      _ -> {:error, :invalid_observation_limits}
     end
   end
 

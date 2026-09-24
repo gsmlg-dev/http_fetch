@@ -11,6 +11,8 @@ records ordered SETTINGS/window/header/frame summaries and redacts
 authorization and cookie values. Raw capture is disabled unless explicitly
 requested and is capped at 64 KiB. `diff/2` reports field-level changes;
 `summary` is an intentionally lossy projection and is not a browser identity.
+Invalid or negative observation limits return a structured error instead of
+attempting an unbounded parse.
 
 Current evidence is `engine_verified` for the pure profile compiler and
 observer tests. No captured browser manifest or independent browser wire
