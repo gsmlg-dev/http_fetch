@@ -239,14 +239,23 @@ defmodule HTTP.HTTP2.Connection do
              do: :ok,
              else: {:error, :flow_control_blocked}
            ) do
-      frame = Frame.encode(:data, if(end_stream?, do: 0x1, else: 0), id, data)
+      frames =
+        data
+        |> chunk_binary(c.peer.values.max_frame_size)
+        |> Enum.with_index()
+        |> Enum.map(fn {chunk, index} ->
+          final? = index == div(byte_size(data) - 1, c.peer.values.max_frame_size)
+          Frame.encode(:data, if(end_stream? and final?, do: 0x1, else: 0), id, chunk)
+        end)
+
+      frames = if data == "" and end_stream?, do: [Frame.encode(:data, 0x1, id, "")], else: frames
 
       {:ok,
        %{
          c
          | streams: Map.put(c.streams, id, stream),
            connection_send_window: c.connection_send_window - byte_size(data)
-       }, [{:data, id, frame}]}
+       }, [{:data, id, frames}]}
     else
       :error -> {:error, :unknown_stream}
       {:error, _} = error -> error

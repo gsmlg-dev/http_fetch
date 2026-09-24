@@ -21,6 +21,8 @@ consumer. Explicit-profile streaming uploads use the bounded BodyBridge, and
 reservations release when each stream completes. A stream that reaches zero
 send credit retains at most its current BodyBridge chunk and resumes it after a
 validated WINDOW_UPDATE; it does not fail the upload or acknowledge early.
+DATA effects are split at the peer's advertised MAX_FRAME_SIZE, with
+END_STREAM applied only to the final fragment.
 Simultaneous cold requests for
 one key share a single out-of-band connection claim. GOAWAY marks pooled
 owners draining so new reservations can select a replacement. The pool closes

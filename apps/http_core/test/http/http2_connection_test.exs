@@ -72,6 +72,17 @@ defmodule HTTP.HTTP2ConnectionTest do
     assert {:error, :flow_control_error} = StreamState.update_send_window(stream, 1)
   end
 
+  test "DATA effects respect peer max frame size and put END_STREAM on the last frame" do
+    peer = %{Settings.new() | values: %{Settings.new().values | max_frame_size: 2}}
+    {:ok, _stream, conn} = Connection.open_stream(Connection.new(peer_settings: peer))
+
+    assert {:ok, conn, [{:data, 1, frames}]} = Connection.send_data(conn, 1, "abcde", true)
+    assert Enum.map(frames, &(byte_size(&1) - 9)) == [2, 2, 1]
+    assert Enum.map(frames, &:binary.part(&1, 4, 1)) == [<<0>>, <<0>>, <<1>>]
+    assert {:ok, stream} = Connection.stream(conn, 1)
+    assert stream.send_window == 65_530
+  end
+
   test "disabled push is decoded for HPACK synchronization and cancelled" do
     conn = Connection.new()
     block = HPACK.encode_headers([{":method", "GET"}]) |> IO.iodata_to_binary()
