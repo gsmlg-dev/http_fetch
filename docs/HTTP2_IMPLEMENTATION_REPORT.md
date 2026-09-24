@@ -68,11 +68,11 @@ and 5.
 The full fetch application tests pass, and core tests pass except one existing
 platform-sensitive TLS assertion (`:eaddrnotavail` instead of
 `:econnrefused`). Fresh warnings-as-errors compilation, format, and diff
-checks pass. Credo
-currently crashes in its token-position checker on an existing sigil under
-Elixir 1.20; Dialyzer exits 2 after a Dialyxir `Protocol.UndefinedError` while
-rendering warnings. `mix docs` completes with existing hidden-module and stale
-file-reference warnings.
+checks pass. Credo currently crashes in its token-position checker on an
+existing sigil under Elixir 1.20; this is an environment/tooling limitation,
+not a passed CI-version Credo run. Dialyzer passes with narrow, documented
+contracts for the intentionally structural public observation APIs. `mix docs`
+completes with existing hidden-module and stale file-reference warnings.
 
 An independent `hyper-h2` 4.2.0 cleartext server accepted the client's
 prior-knowledge preface, SETTINGS, HPACK request headers, and stream, then
