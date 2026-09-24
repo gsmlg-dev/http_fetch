@@ -54,7 +54,7 @@ defmodule HTTP.HTTP2 do
     serialize_request(request, WireProfile.native_v1())
   end
 
-  @spec serialize_request(Request.t(), WireProfile.t() | map() | atom() | binary()) :: iodata()
+  @spec serialize_request(Request.t(), WireProfile.t() | map() | atom() | binary()) :: list()
   def serialize_request(%Request{} = request, profile) do
     {:ok, profile} = WireProfile.compile(profile)
     {conn, wire_request} = prepare_request(new(request.method), request, profile)
