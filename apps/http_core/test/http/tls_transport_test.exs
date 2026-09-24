@@ -107,12 +107,14 @@ defmodule HTTP.TLSTransportTest do
     assert {:error, {:options, {:nodelay, :unsupported_or_invalid}}} =
              ExSSL.connect("localhost", 0, [socket_opts: [nodelay: :invalid]], 100)
 
+    port = closed_port()
+
     assert {:error, :econnrefused} =
-             ExSSL.connect("127.0.0.1", 0, [socket_opts: [nodelay: true]], 100)
+             ExSSL.connect("127.0.0.1", port, [socket_opts: [nodelay: true]], 100)
 
     for versions <- [[:"tlsv1.2"], [:"tlsv1.3", :"tlsv1.2"]] do
       assert {:error, :econnrefused} =
-               ExSSL.connect("127.0.0.1", 0, [ssl: [versions: versions]], 100)
+               ExSSL.connect("127.0.0.1", port, [ssl: [versions: versions]], 100)
     end
 
     assert {:error, {:options, {:send_timeout_close, :unsupported_or_invalid}}} =
@@ -276,6 +278,15 @@ defmodule HTTP.TLSTransportTest do
       if Process.alive?(pid), do: Process.exit(pid, :kill)
     end)
 
+    port
+  end
+
+  defp closed_port do
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}, reuseaddr: false])
+
+    {:ok, {{127, 0, 0, 1}, port}} = :inet.sockname(listener)
+    :ok = :gen_tcp.close(listener)
     port
   end
 end

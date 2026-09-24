@@ -67,14 +67,15 @@ sequential h2c and HTTPS h2 reuse, three overlapping requests, and
 simultaneous cold-start coalescing on one accepted socket with streams 1, 3,
 and 5. The churn server asserts one TCP accept and monotonically advancing
 stream IDs; it does not claim a long-duration memory benchmark.
-The full fetch application tests pass, and core tests pass except one existing
-platform-sensitive TLS assertion (`:eaddrnotavail` instead of
-`:econnrefused`). Fresh warnings-as-errors compilation, format, and diff
-checks pass. Credo currently crashes in its token-position checker on an
-existing sigil under Elixir 1.20; this is an environment/tooling limitation,
-not a passed CI-version Credo run. Dialyzer passes with narrow, documented
-contracts for the intentionally structural public observation APIs. `mix docs`
-completes with existing hidden-module and stale file-reference warnings.
+The full fetch application tests pass, and the full core test suite now passes
+(`209 passed`). The unsupported-options test uses a kernel-assigned closed
+port, so its refusal assertion is stable across platforms. Fresh
+warnings-as-errors compilation, format, and diff checks pass. Credo currently
+crashes in its token-position checker on an existing sigil under Elixir 1.20;
+this is an environment/tooling limitation, not a passed CI-version Credo run.
+Dialyzer passes with narrow, documented contracts for the intentionally
+structural public observation APIs. `mix docs` completes with existing
+hidden-module and stale file-reference warnings.
 
 An independent `hyper-h2` 4.2.0 cleartext server accepted the client's
 prior-knowledge preface, SETTINGS, HPACK request headers, and stream, then
