@@ -76,10 +76,20 @@ file-reference warnings.
 
 An independent `hyper-h2` 4.2.0 cleartext server accepted the client's
 prior-knowledge preface, SETTINGS, HPACK request headers, and stream, then
-returned `200`, `x-peer: hyper-h2`, and `independent:/independent`. This is a
-single-peer interoperability smoke check, not a complete RFC or stress matrix.
+returned `200`, `x-peer: hyper-h2`, and `independent:/independent`. The
+reproducible fixture is `scripts/http2_hyper_h2_server.py`, pinned by
+`scripts/requirements-http2-interop.txt`; run
+`PYTHON_BIN=/path/to/python scripts/http2_hyper_h2_interop.sh` after installing
+that requirement. The verified run produced:
+
+```text
+200|hyper-h2-4.2.0|independent:/independent
+```
+
 The same peer also accepted `synthetic_test_v1` with Huffman-encoded request
-headers and its larger advertised header-table capacity.
+headers and its larger advertised header-table capacity. This remains a
+single-peer interoperability smoke check, not a complete RFC or stress
+matrix.
 
 ## Explicitly not verified
 
