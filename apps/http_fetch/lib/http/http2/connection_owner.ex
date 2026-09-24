@@ -25,6 +25,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
           refs: %{optional(reference()) => pos_integer()},
           bytes: non_neg_integer(),
           max_queue_bytes: pos_integer(),
+          queue_peak_bytes: non_neg_integer(),
           wrote_preface?: boolean()
         }
 
@@ -86,6 +87,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         buffer: <<>>,
         init_settings: [],
         bytes: 0,
+        queue_peak_bytes: 0,
         max_queue_bytes: Keyword.get(opts, :max_queue_bytes, @default_queue_bytes),
         max_streams: Keyword.get(opts, :max_streams, @default_max_streams),
         wrote_preface?: false,
@@ -168,7 +170,15 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   @impl true
   def handle_call(:status, _from, state) do
     {:reply,
-     Map.take(state, [:lifecycle, :profile_digest, :wrote_preface?, :bytes, :close_reason])
+     Map.take(state, [
+       :lifecycle,
+       :profile_digest,
+       :wrote_preface?,
+       :bytes,
+       :max_queue_bytes,
+       :queue_peak_bytes,
+       :close_reason
+     ])
      |> Map.put(:stream_ids, Map.keys(state.streams)), state}
   end
 
@@ -352,10 +362,13 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   defp send_frames(state, frames) do
     bytes = IO.iodata_length(frames)
+    queue_bytes = state.bytes + bytes
 
-    if state.bytes + bytes > state.max_queue_bytes do
+    if queue_bytes > state.max_queue_bytes do
       {:error, :writer_queue_full, state}
     else
+      state = %{state | queue_peak_bytes: max(state.queue_peak_bytes, queue_bytes)}
+
       case transport_send(state, frames) do
         :ok -> {:ok, %{state | bytes: max(state.bytes - bytes, 0)}}
         {:error, reason} -> {:error, reason, state}

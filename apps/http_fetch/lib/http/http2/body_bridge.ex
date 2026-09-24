@@ -40,7 +40,8 @@ defmodule HTTP.HTTP2.BodyBridge do
        max_buffer_bytes: Keyword.get(opts, :max_buffer_bytes, @default_max_buffer),
        eof?: false,
        stopped?: false,
-       bytes: 0
+       bytes: 0,
+       peak_buffered_bytes: 0
      }}
   end
 
@@ -64,8 +65,17 @@ defmodule HTTP.HTTP2.BodyBridge do
     do: {:reply, :ok, stop_stream(state, :early_response)}
 
   def handle_call(:status, _from, state) do
-    {:reply, Map.take(state, [:credit, :inflight, :buffered_bytes, :eof?, :stopped?, :bytes]),
-     state}
+    {:reply,
+     Map.take(state, [
+       :credit,
+       :inflight,
+       :buffered_bytes,
+       :max_buffer_bytes,
+       :peak_buffered_bytes,
+       :eof?,
+       :stopped?,
+       :bytes
+     ]), state}
   end
 
   @impl true
@@ -91,12 +101,14 @@ defmodule HTTP.HTTP2.BodyBridge do
       true ->
         send(state.owner, {:body_chunk, self(), chunk, ack_ref})
         size = byte_size(chunk)
+        buffered_bytes = state.buffered_bytes + size
 
         {:noreply,
          %{
            state
            | inflight: {ack_ref, size},
-             buffered_bytes: state.buffered_bytes + size,
+             buffered_bytes: buffered_bytes,
+             peak_buffered_bytes: max(state.peak_buffered_bytes, buffered_bytes),
              credit: state.credit - size,
              bytes: state.bytes + size
          }}

@@ -38,8 +38,12 @@ defmodule HTTP.HTTP2BodyBridgeTest do
     assert_receive {:read, ^bridge}
     send(stream, {:send_chunk, "hello"})
     assert_receive {:body_chunk, ^bridge, "hello", ref}, 500
+
+    assert %{buffered_bytes: 5, max_buffer_bytes: 65_536, peak_buffered_bytes: 5} =
+             BodyBridge.status(bridge)
+
     assert :ok = BodyBridge.ack(bridge, ref)
-    assert BodyBridge.status(bridge).inflight == nil
+    assert %{buffered_bytes: 0, inflight: nil, peak_buffered_bytes: 5} = BodyBridge.status(bridge)
   end
 
   test "credit pauses after one chunk and EOF is delivered once" do

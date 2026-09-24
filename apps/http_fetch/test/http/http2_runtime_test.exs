@@ -81,6 +81,8 @@ defmodule HTTP.HTTP2RuntimeTest do
     status = ConnectionOwner.status(owner)
     assert status.lifecycle == :ready
     assert Enum.sort(status.stream_ids) == [1, 3, 5]
+    assert status.queue_peak_bytes > 0
+    assert status.queue_peak_bytes <= status.max_queue_bytes
   end
 
   test "legacy priority profile serializes PRIORITY before HEADERS" do

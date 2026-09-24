@@ -44,6 +44,9 @@ Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).
 - Flow-controlled upload chunks now remain pending per stream until a valid
   WINDOW_UPDATE restores credit; the bridge is acknowledged only after DATA is
   serialized, with a runtime zero-window/resume regression test.
+- `BodyBridge.status/1` reports current and peak buffered bytes, while
+  `ConnectionOwner.status/1` reports the writer queue peak and configured
+  limit; focused tests assert both peaks stay within their budgets.
 - Core DATA effects now split payloads at the peer MAX_FRAME_SIZE and preserve
   END_STREAM on the final fragment, with explicit frame-size and window tests.
 - Pending upload streams are selected through a bounded round-robin scheduler
