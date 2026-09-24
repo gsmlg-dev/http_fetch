@@ -286,4 +286,17 @@ defmodule HTTP.HTTP2RuntimeTest do
     assert :none = Pool.try_reserve(pool, :profile_key)
     assert :start = Pool.claim_connect(pool, :profile_key)
   end
+
+  test "idle owners stop after the configured timeout" do
+    {:ok, owner} =
+      ConnectionOwner.start_link(transport: transport(self()), socket: :socket, max_streams: 1)
+
+    assert_receive {:wire, :socket, _}, 500
+    {:ok, pool} = Pool.start_link(max_connections: 1, idle_timeout: 10)
+    assert :ok = Pool.register(pool, :profile_key, owner)
+    assert {:ok, ^owner, token} = Pool.reserve(pool, :profile_key)
+    assert :ok = Pool.release(pool, :profile_key, token)
+    Process.sleep(30)
+    refute Process.alive?(owner)
+  end
 end

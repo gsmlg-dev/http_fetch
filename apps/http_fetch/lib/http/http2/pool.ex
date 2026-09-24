@@ -55,6 +55,7 @@ defmodule HTTP.HTTP2.Pool do
        max_connections: Keyword.get(opts, :max_connections, 2),
        max_streams: Keyword.get(opts, :max_streams, 100),
        max_pending: Keyword.get(opts, :max_pending, 100),
+       idle_timeout: Keyword.get(opts, :idle_timeout, 30_000),
        owner_factory: Keyword.get(opts, :owner_factory),
        monitors: %{}
      }}
@@ -86,7 +87,8 @@ defmodule HTTP.HTTP2.Pool do
       streams: 0,
       max_streams: max_streams,
       monitor: mon,
-      draining: false
+      draining: false,
+      idle_timer: nil
     }
 
     entry = %{entry | connections: Map.put(entry.connections, owner, connection)}
@@ -187,6 +189,7 @@ defmodule HTTP.HTTP2.Pool do
 
       connection ->
         entry = Map.fetch!(state.entries, key)
+        if is_reference(connection.idle_timer), do: Process.cancel_timer(connection.idle_timer)
         connection = %{connection | draining: true}
         entry = %{entry | connections: Map.put(entry.connections, owner, connection)}
         {:reply, :ok, put_entry(state, key, entry)}
@@ -260,6 +263,17 @@ defmodule HTTP.HTTP2.Pool do
     end
   end
 
+  def handle_info({:idle_expire, key, owner}, state) do
+    case get_in(state.entries, [key, :connections, owner]) do
+      %{streams: 0, draining: false} ->
+        _ = GenServer.stop(owner, :normal)
+        {:noreply, state}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
   defp new_entry, do: %{connections: %{}, pending: [], connecting: 0, streams: 0}
   defp put_entry(state, key, entry), do: %{state | entries: Map.put(state.entries, key, entry)}
 
@@ -279,7 +293,9 @@ defmodule HTTP.HTTP2.Pool do
 
   defp increment_owner(state, key, owner, token) do
     entry = Map.fetch!(state.entries, key)
-    connection = %{entry.connections[owner] | streams: entry.connections[owner].streams + 1}
+    connection = entry.connections[owner]
+    if is_reference(connection.idle_timer), do: Process.cancel_timer(connection.idle_timer)
+    connection = %{connection | streams: connection.streams + 1, idle_timer: nil}
 
     entry = %{
       entry
@@ -301,7 +317,14 @@ defmodule HTTP.HTTP2.Pool do
 
       connection ->
         entry = Map.fetch!(state.entries, key)
-        connection = %{connection | streams: max(connection.streams - 1, 0)}
+        streams = max(connection.streams - 1, 0)
+
+        idle_timer =
+          if streams == 0 and not connection.draining and state.idle_timeout > 0 do
+            Process.send_after(self(), {:idle_expire, key, owner}, state.idle_timeout)
+          end
+
+        connection = %{connection | streams: streams, idle_timer: idle_timer}
 
         put_entry(state, key, %{
           entry
@@ -320,7 +343,8 @@ defmodule HTTP.HTTP2.Pool do
       streams: 0,
       max_streams: state.max_streams,
       monitor: monitor,
-      draining: false
+      draining: false,
+      idle_timer: nil
     }
 
     state
