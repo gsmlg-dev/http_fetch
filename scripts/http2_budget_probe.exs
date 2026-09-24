@@ -7,11 +7,10 @@ defmodule HTTP2BudgetProbe do
   @max_chunk_bytes 16_384
 
   def run do
-    parent = self()
-    stream = spawn(fn -> producer(parent, 1) end)
+    stream = spawn(fn -> producer(1) end)
 
     {:ok, bridge} =
-      BodyBridge.start_link(stream, parent,
+      BodyBridge.start_link(stream, self(),
         max_chunk_bytes: @max_chunk_bytes,
         max_buffer_bytes: @max_chunk_bytes
       )
@@ -20,20 +19,20 @@ defmodule HTTP2BudgetProbe do
     collect(bridge, 0, 0, 0, 0)
   end
 
-  defp producer(parent, index) when index <= @chunk_count do
+  defp producer(index) when index <= @chunk_count do
     receive do
       {:read_chunk, bridge, :ack} ->
         size = rem(index * 7_919, @max_chunk_bytes) + 1
         ref = make_ref()
         send(bridge, {:stream_chunk, self(), :binary.copy(<<index &&& 255>>, size), ref})
-        producer(parent, index + 1)
+        producer(index + 1)
 
       {:stream_chunk_ack, _ref} ->
-        producer(parent, index)
+        producer(index)
     end
   end
 
-  defp producer(_parent, _index) do
+  defp producer(_index) do
     receive do
       {:read_chunk, bridge, :ack} ->
         send(bridge, {:stream_end, self()})
