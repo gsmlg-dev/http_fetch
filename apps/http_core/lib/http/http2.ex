@@ -107,11 +107,11 @@ defmodule HTTP.HTTP2 do
 
   @doc false
   @spec request_headers(Request.t(), WireProfile.t() | map() | atom() | binary()) ::
-          {:ok, list({String.t(), String.t()}), binary()}
+          {:ok, list({String.t(), String.t()}), binary() | {:stream, pid()}}
   def request_headers(%Request{} = request, profile \\ WireProfile.native_v1()) do
     {:ok, profile} = WireProfile.compile(profile)
     {headers, body} = request |> base_request_headers() |> Request.put_body_headers(request)
-    body = IO.iodata_to_binary(body)
+    body = if is_binary(body), do: IO.iodata_to_binary(body), else: body
 
     {:ok, WireProfile.order_headers(profile, pseudo_headers(request), regular_headers(headers)),
      body}

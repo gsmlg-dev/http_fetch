@@ -64,6 +64,32 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert {":method", "GET"} in headers
   end
 
+  test "explicit wire profile uploads a stream through the body bridge" do
+    {:ok, body} = HTTP.Stream.from_enumerable(["streamed", "-body"])
+
+    url =
+      start_h2c_server!(fn socket, transport ->
+        {_request_headers, buffer} = recv_client_h2_request(socket, transport)
+        {uploaded, _buffer} = recv_request_body_until_end(socket, transport, buffer)
+        assert uploaded == "streamed-body"
+        send_h2_response(socket, transport, "upload-owner")
+      end)
+
+    response =
+      url
+      |> HTTP.fetch(
+        method: :post,
+        body: body,
+        duplex: :half,
+        http_version: :h2c,
+        http2_profile: :native_v1
+      )
+      |> HTTP.Promise.await()
+
+    assert response.status == 200
+    assert HTTP.Response.read_all(response) == "upload-owner"
+  end
+
   test "sends WINDOW_UPDATE frames while receiving a large h2c response" do
     body = :binary.copy("x", 70_000)
 

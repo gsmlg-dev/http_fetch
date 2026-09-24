@@ -41,7 +41,8 @@ the full HTTP/2 socket regression suite passes. The default HTTP/1.1 path and
 HTTP/2 requests without an explicit profile retain the legacy per-request
 adapter for compatibility. The Pool is not yet used for cross-request socket
 reuse, so three-request reuse and concurrent shared-socket evidence remain
-pending. Streaming upload through `HTTP.fetch/2` still uses the legacy path;
-owner/bridge upload behavior is verified independently. Independent mature
-implementation interoperability and a captured browser profile remain
+pending. Explicit-profile streaming upload now uses `BodyBridge` through the
+owner and is covered by an h2c socket test; requests without an explicit
+profile retain the legacy path. Independent mature implementation
+interoperability, shared Pool reuse, and a captured browser profile remain
 pending.

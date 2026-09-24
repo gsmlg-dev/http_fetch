@@ -298,8 +298,7 @@ defmodule HTTP.SocketClient do
          socket,
          deadline_at
        ) do
-    if Request.streaming_body?(request) or
-         not Keyword.has_key?(request.transport_options, :http2_profile) do
+    if not Keyword.has_key?(request.transport_options, :http2_profile) do
       :legacy
     else
       case connected_protocol(transport, socket, selection) do
@@ -325,12 +324,14 @@ defmodule HTTP.SocketClient do
            ),
          :ok <- transfer_http2_socket(transport, socket, owner),
          :ok <- HTTP.HTTP2.ConnectionOwner.activate(owner),
+         {:ok, bridge} <- maybe_start_http2_bridge(body, owner),
          {:ok, %{id: id}} <-
            HTTP.HTTP2.ConnectionOwner.open_stream(owner, headers,
              subscriber: self(),
+             body_bridge: bridge,
              end_stream: body == ""
            ),
-         :ok <- send_http2_body(owner, id, body) do
+         :ok <- send_http2_body(owner, id, body, bridge) do
       monitor = Process.monitor(owner)
 
       await_http2_response(%{
@@ -344,7 +345,8 @@ defmodule HTTP.SocketClient do
         redirects: 0,
         redirected?: false,
         mode: nil,
-        response_sent?: false
+        response_sent?: false,
+        body_bridge: bridge
       })
     else
       {:error, reason} ->
@@ -362,10 +364,18 @@ defmodule HTTP.SocketClient do
       else: :ok
   end
 
-  defp send_http2_body(_owner, _id, ""), do: :ok
+  defp maybe_start_http2_bridge({:stream, stream}, owner),
+    do: HTTP.HTTP2.BodyBridge.start_link(stream, owner)
 
-  defp send_http2_body(owner, id, body) when is_binary(body),
+  defp maybe_start_http2_bridge(_body, _owner), do: {:ok, nil}
+
+  defp send_http2_body(_owner, _id, "", _bridge), do: :ok
+
+  defp send_http2_body(owner, id, body, nil) when is_binary(body),
     do: HTTP.HTTP2.ConnectionOwner.send_data(owner, id, body, true)
+
+  defp send_http2_body(_owner, _id, {:stream, _stream}, bridge) when is_pid(bridge),
+    do: HTTP.HTTP2.BodyBridge.credit(bridge, 65_536)
 
   defp await_http2_response(state) do
     monitor = state.monitor
@@ -402,6 +412,8 @@ defmodule HTTP.SocketClient do
     regular = Enum.reject(headers, fn {name, _value} -> String.starts_with?(name, ":") end)
 
     if is_integer(status) do
+      maybe_cancel_http2_bridge(state)
+
       response =
         Response.new(
           status: status,
@@ -460,6 +472,11 @@ defmodule HTTP.SocketClient do
   end
 
   defp handle_http2_data(state, _chunk, _flags), do: fail_http2(state, :invalid_http_response)
+
+  defp maybe_cancel_http2_bridge(%{body_bridge: bridge}) when is_pid(bridge),
+    do: HTTP.HTTP2.BodyBridge.early_response(bridge)
+
+  defp maybe_cancel_http2_bridge(_state), do: :ok
 
   defp parse_status(value) when is_binary(value), do: String.to_integer(value)
   defp parse_status(value) when is_integer(value), do: value
