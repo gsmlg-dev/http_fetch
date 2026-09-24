@@ -74,8 +74,8 @@ warnings-as-errors compilation, format, and diff checks pass. Credo currently
 crashes in its token-position checker on an existing sigil under Elixir 1.20;
 this is an environment/tooling limitation, not a passed CI-version Credo run.
 Dialyzer passes with narrow, documented contracts for the intentionally
-structural public observation APIs. `mix docs` completes with existing
-hidden-module and stale file-reference warnings.
+structural public observation APIs. `mix docs` completes with existing hidden
+module/type reference warnings; linked validation extras are included.
 
 An independent `hyper-h2` 4.2.0 cleartext server accepted the client's
 prior-knowledge preface, SETTINGS, HPACK request headers, and stream, then
