@@ -496,12 +496,6 @@ defmodule HTTP.SocketClient do
   defp transfer_http2_socket(transport, socket, owner) when is_atom(transport),
     do: transport.controlling_process(socket, owner)
 
-  defp transfer_http2_socket(transport, socket, owner) when is_map(transport) do
-    if is_function(transport[:controlling_process], 2),
-      do: transport.controlling_process.(socket, owner),
-      else: :ok
-  end
-
   defp maybe_start_http2_bridge({:stream, stream}, owner),
     do: HTTP.HTTP2.BodyBridge.start_link(stream, owner)
 
