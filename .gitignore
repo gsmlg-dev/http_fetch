@@ -42,3 +42,6 @@ http_fetch-*.tar
 # devenv
 .devenv/
 .devenv.*
+
+# Sanitized local ex_ssl feature-gate reports
+/.ex_ssl-results/

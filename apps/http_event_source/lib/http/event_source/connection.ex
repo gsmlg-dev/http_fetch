@@ -57,6 +57,8 @@ defmodule HTTP.EventSource.Connection do
 
   @impl true
   def init(%Options{} = options) do
+    _ = HTTP.OwnerMonitor.start(self(), options.owner)
+
     target = %EventSource{
       pid: self(),
       ref: options.ref,

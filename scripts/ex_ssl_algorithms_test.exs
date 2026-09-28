@@ -1,6 +1,6 @@
-# Run only through scripts/ex_ssl_source_smoke.sh with an explicit source checkout.
+# Run only through scripts/ex_ssl_source_smoke.sh with a pinned fixture checkout.
 Code.require_file(
-  Path.join(System.fetch_env!("EX_SSL_SOURCE_DIR"), "test/support/signature_fixtures.ex")
+  Path.join(System.fetch_env!("EX_SSL_FIXTURE_DIR"), "test/support/signature_fixtures.ex")
 )
 
 defmodule CandidateAlgorithmsTest do

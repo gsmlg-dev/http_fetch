@@ -63,6 +63,8 @@ defmodule HTTP.WebSocket.Connection do
 
   @impl true
   def init(%Options{} = options) do
+    _ = HTTP.OwnerMonitor.start(self(), options.owner)
+
     target = %WebSocket{pid: self(), ref: options.ref, url: options.url}
 
     state = %__MODULE__{

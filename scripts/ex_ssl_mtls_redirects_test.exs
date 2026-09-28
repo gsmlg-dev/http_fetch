@@ -1,6 +1,6 @@
-# Candidate source checkout only; run through ex_ssl_source_smoke.sh.
+# Run only through ex_ssl_source_smoke.sh with a pinned fixture checkout.
 for fixture <- ["signature_fixtures.ex", "client_auth_fixtures.ex"] do
-  Code.require_file(Path.join([System.fetch_env!("EX_SSL_SOURCE_DIR"), "test/support", fixture]))
+  Code.require_file(Path.join([System.fetch_env!("EX_SSL_FIXTURE_DIR"), "test/support", fixture]))
 end
 
 defmodule CandidateMTLSRedirectsTest do
