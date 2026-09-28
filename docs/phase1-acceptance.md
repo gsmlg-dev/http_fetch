@@ -1,5 +1,17 @@
 # Phase 1 acceptance and handoff
 
+## Worktree integration update (2026-09-29)
+
+At the maintainer's subsequent explicit merge request, both worktrees were
+committed and merged into `main`, in alphabetical order: TLS consumer validation
+(`2fd5fe1`, merge `8a25d86`) and QUIC Phase 1 (`6eb17a6`, merge `590ab5d`).
+Both HTTP/2 helper additions were preserved. Dependency conflicts retain the
+previously tested QUIC source combination; the requested published-dependency
+migration remains BLOCKED by upstream issue #4. The older published feature gate
+is preserved and must not be represented as passing against this Git combination.
+The uncommitted-worktree and no-merge statements below describe historical runs,
+not the current repository state. No push or release was performed during merging.
+
 Date: 2026-09-28. **G-F: PASS for the executed internal adapter subset.**
 **Joint http_fetch/Abyss G-P1 item: PASS after upgrading to ex_quic v0.2.1.**
 The previous blocker, [ex_quic issue #2](https://github.com/gsmlg-dev/ex_quic/issues/2),
@@ -23,6 +35,20 @@ or speculative dependency declaration was substituted. The existing Git sources
 remain only in the unmerged worktree pending this migration. Merge and release
 are BLOCKED; prior adapter evidence above applies only to the recorded sources,
 not to a future Hex combination. No merge, push, or release was performed.
+
+## Merge validation (2026-09-29)
+
+PASS: resolved-conflict file formatting and `git diff --check`. PASS: fresh-build
+`MIX_ENV=test mix deps.get` and `mix compile --warnings-as-errors`, using
+`MIX_BUILD_PATH=/tmp/http-fetch-merged-build` to avoid stale root build metadata.
+PASS: `HTTP_QUIC_PHASE1_REAL=1 MIX_ENV=test mix test
+apps/http_core/test/http/quic apps/http_core/test/http/owner_monitor_test.exs
+apps/http_fetch/test/http/socket_client_http2_test.exs apps/http_web_socket/test
+apps/http_event_source/test --seed 29092026` with that same build path:
+122 tests, zero failures (20 core, 43 fetch, 33 WebSocket, 26 EventSource).
+Full published-consumer and release gates were NOT RUN after merging and remain
+blocked by the dependency publication issue. Both worktrees and their merged
+branches were removed; the user-owned `04-http_fetch-plan.md` remains untracked.
 
 ## Source identity and existing work
 
