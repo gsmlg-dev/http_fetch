@@ -1,0 +1,61 @@
+{
+  "seed": 28092026,
+  "cleanup": true,
+  "role": "client",
+  "alpn": "ex-quic-phase1",
+  "legacy_quic_calls": 0,
+  "passed": true,
+  "highwaters": {
+    "mailbox": 3,
+    "application_crypto_bytes": 89,
+    "ready_bytes": 16384,
+    "receive_buffered_bytes": 0,
+    "queued_bytes": 4521,
+    "operations": 256,
+    "event_count": 16,
+    "recovery_packets": 4096,
+    "stream_records": 16,
+    "pending_datagrams": 13,
+    "in_flight_sends": 1,
+    "io_queue_entries": 1,
+    "io_queue_bytes": 1350,
+    "operation_result_bytes": 126866,
+    "tracked_references": 261,
+    "mailbox_messages": 1
+  },
+  "reset_seen": true,
+  "reads": 3386,
+  "ticket_parsed": true,
+  "transfer_ms": 8470,
+  "scenario": "baseline",
+  "local_bidi_bytes": 1048576,
+  "remote_bidi_bytes": 1048576,
+  "remote_uni_streams": 3,
+  "cancelled_after_admission": true,
+  "bidi_started_before_cancel": 4,
+  "peer_summary": {
+    "event": "summary",
+    "role": "peer",
+    "passed": true,
+    "bidi": 8,
+    "uni": 3,
+    "checksum": "57b8f65a0b5d53fa7d84474193399454cf001a3699c65c451de5f0f306ddb39a",
+    "highwater": 2097174,
+    "cancelled": true,
+    "resets": 1,
+    "impairment": {
+      "drop": 0,
+      "duplicate": 0,
+      "reorder": 0,
+      "reorder_timeout": 0
+    }
+  },
+  "source": {
+    "http_fetch_baseline": "3bf5ec6518f17800f95b54bb8c5dbda55386d44a",
+    "http_fetch_artifact": "uncommitted codex/quic-phase1 worktree",
+    "ex_quic": "5f1b8a13b6be8cd38db0fc62b8490b3f1fc3f8bb",
+    "ex_ssl": "f1327e0bb7fb2093b8dc2b07e72b26233a739963",
+    "aioquic": "1.2.0",
+    "python": "3.12.13"
+  }
+}
