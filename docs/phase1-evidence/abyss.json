@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "command": "timeout 180 bash scripts/phase1_quic_abyss.sh",
+  "exit_code": 0,
+  "source": {
+    "http_fetch_baseline": "3bf5ec6518f17800f95b54bb8c5dbda55386d44a",
+    "http_fetch_artifact": "uncommitted codex/quic-phase1 worktree",
+    "ex_quic": "5f1b8a13b6be8cd38db0fc62b8490b3f1fc3f8bb",
+    "ex_ssl": "f1327e0bb7fb2093b8dc2b07e72b26233a739963",
+    "abyss": "50e121fce66daeb9cb25a2f5dc93050ca37efc5d"
+  },
+  "alpn": "ex-quic-phase1",
+  "bidi_streams": 4,
+  "uni_streams": 2,
+  "bytes": 1572864,
+  "payload_digest_and_fin_verified_per_stream": true,
+  "client_ack_fins": 4,
+  "cleanup": "worker, endpoint and listener monitors completed"
+}

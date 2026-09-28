@@ -37,7 +37,13 @@ defmodule HttpCore.MixProject do
 
   defp deps do
     [
-      {:ex_ssl, "~> 0.5.0"},
+      # TODO(upstream): gsmlg-dev/ex_quic#4 - replace both Git sources with verified Hex releases.
+      {:ex_ssl,
+       git: "https://github.com/gsmlg-dev/ex_ssl.git",
+       ref: "f1327e0bb7fb2093b8dc2b07e72b26233a739963"},
+      {:ex_quic,
+       git: "https://github.com/gsmlg-dev/ex_quic.git",
+       ref: "5f1b8a13b6be8cd38db0fc62b8490b3f1fc3f8bb"},
       {:quic, "~> 1.6", runtime: false},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]

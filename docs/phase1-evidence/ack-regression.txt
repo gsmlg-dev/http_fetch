@@ -1,0 +1,2 @@
+VALID_CUMULATIVE_ACK_PASS: %{acked: [], lost: [], rtt_sample: nil}
+NEVER_ISSUED_ACK_REJECTION_PASS

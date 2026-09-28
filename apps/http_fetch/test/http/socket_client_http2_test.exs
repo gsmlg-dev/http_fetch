@@ -2266,7 +2266,9 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   defp assert_tls_buffered_after_peer_close(tls_pid, expected_size) do
-    assert Application.spec(:ex_ssl, :vsn) == ~c"0.5.0",
+    # Revalidated closed/size/active against G-S f1327e0b. This existing TCP
+    # regression probe is unrelated to the public-only QUIC adapter.
+    assert Application.spec(:ex_ssl, :vsn) == ~c"0.7.1",
            "revalidate this private buffer probe before testing another ex_ssl version"
 
     assert_tls_buffered_after_peer_close(
