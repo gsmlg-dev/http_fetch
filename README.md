@@ -168,7 +168,7 @@ configuration. The backend is captured when the request/client is created and
 retained through redirects and EventSource reconnects; runtime configuration
 changes affect new operations. Invalid selections fail explicitly.
 
-`http_core` declares `ex_ssl ~> 0.4.0` as a transitive runtime dependency.
+`http_core` declares `ex_ssl ~> 0.5.0` as a transitive runtime dependency.
 Consumers do not need to add it separately. `ssl: [...]` supplies TLS settings
 to the selected backend. The `ex_ssl` backend uses its own `SSL` protocol engine
 and requires peer verification. TLS 1.3 is the default; verified TLS 1.2 is
@@ -216,7 +216,7 @@ hostname or effective-port change returns
 use `redirect: :manual` and explicitly make a new request with that identity.
 The OTP backend retains its existing redirect behavior.
 
-ex_ssl 0.4.0 supports verified TLS 1.2 for
+ex_ssl 0.5.0 supports verified TLS 1.2 for
 HTTP/1.1, HTTP/2, WSS and EventSource. Select it with `ssl: [versions:
 [:"tlsv1.2"]]`; a mixed TLS 1.3/TLS 1.2 offer selects the peer's supported
 version. The independent OpenSSL package gate includes 262,144-byte HTTP/2
@@ -228,11 +228,15 @@ TLS 1.3 session resumption is explicit:
 by default. Auto mode currently rejects client identities and mixed/TLS 1.2
 version offers; early data and PSK-only exchange are unsupported. When a server
 declines a ticket, a full handshake continues on the same connection without
-replaying request bytes. The package test checks two fresh HTTP/1.1 connections
-against an independent OpenSSL peer and requires server-observed session reuse.
+replaying request bytes. The published feature gate checks fresh HTTP/1.1,
+HTTP/2, WSS and EventSource connections against an independent OpenSSL peer;
+the peer must report a full handshake followed by a resumed handshake.
+HTTP version selection (`http_version: :http2`) and TLS version selection
+(`ssl: [versions: [:"tlsv1.3"]]`) are independent. HTTP/2 response streaming
+does not enable streaming request bodies; those remain HTTP/1.1-only.
 This is a bounded subset, not full OTP `:ssl` parity.
 
-See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.4.0/docs/COMPATIBILITY.md).
+See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.5.0/docs/COMPATIBILITY.md).
 The [consumer contract inventory](docs/ex-ssl-consumer-contract.md) maps the
 implemented subset and intentional restrictions to its tests.
 
@@ -656,11 +660,31 @@ mix format --check-formatted
 
 MIT License
 
-For cross-repository source checks, the source integration gate is
-`EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl bash scripts/ex_ssl_source_smoke.sh`.
-It validates algorithms, mTLS, TLS 1.2, and resumption against all five fresh
-package artifacts with a temporary source override. Add
-`EX_SSL_DEP_MODE=published` to resolve ex_ssl 0.4.0 from Hex while using the
-source checkout only for test certificate fixtures. The external consumer smoke
-also checks the published dependency; see
-[the consumer contract](docs/ex-ssl-consumer-contract.md).
+The full published feature gate is a separate validation mode:
+
+```bash
+# From the umbrella root; requires Git, Python 3 with OpenSSL TLS 1.3/ALPN,
+# the openssl command, GNU timeout, and the normal Mix toolchain.
+EX_SSL_RESULTS_DIR=/tmp/http-fetch-published bash scripts/ex_ssl_published_feature_gate.sh
+
+# Explicit unreleased candidate validation, never a substitute for the Hex gate:
+EX_SSL_DEP_MODE=source EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl \
+  EX_SSL_RESULTS_DIR=/tmp/http-fetch-source bash scripts/ex_ssl_source_smoke.sh
+```
+
+The published gate builds all five package artifacts, uses the checked-in lock
+and an explicit test-only ex_ssl dependency, and verifies the resolved Hex
+package and loaded module provenance. It is distinct from the cold transitive
+smoke above. `EX_SSL_DEP_MODE=published bash scripts/ex_ssl_source_smoke.sh`
+is the compatibility entry point; no source runtime checkout is needed.
+Fixtures come from the immutable release commit recorded in
+`scripts/ex_ssl_fixture_manifest.env`, separately from the Hex runtime.
+
+Maintainers should require **Published ex_ssl feature gate (Elixir 1.18 / OTP 28)**.
+The separate scheduled/manual compatibility workflow covers Elixir 1.19/OTP 28
+and 1.20/OTP 29; it validates this consumer, not the library's own runtime matrix.
+See [consumer validation evidence](docs/ex-ssl-consumer-validation.md) for exact
+commands, results, provenance, and limits. Independent human security review is
+incomplete; green tests do not establish broad production readiness or improved
+performance. No connection pooling, automatic WebSocket reconnect, TLS 1.2/mTLS
+resumption, persistent tickets, or 0-RTT support is implied.

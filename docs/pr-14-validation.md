@@ -1,8 +1,8 @@
 # PR #14 validation
 
-> Historical PR #14 validation at ex_ssl 0.3.0. For the released ex_ssl 0.4.0
-> dependency and current consumer limits, see
-> [the TCP TLS consumer contract](ex-ssl-consumer-contract.md).
+> Historical PR #14 validation at ex_ssl 0.3.0. For the current released
+> dependency and consumer limits, see [the TCP TLS consumer contract](ex-ssl-consumer-contract.md)
+> and [published/source consumer validation](ex-ssl-consumer-validation.md).
 
 ## Phase 0 continuation (2026-09-22)
 

@@ -243,3 +243,46 @@ jobs:
 
       - name: Run external consumer smoke test
         run: bash scripts/external_consumer_smoke.sh
+
+  published-ex-ssl-feature-gate:
+    name: Published ex_ssl feature gate (Elixir 1.18 / OTP 28)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124
+        with:
+          elixir-version: "1.18"
+          otp-version: "28"
+
+      - name: Provision independent TLS peers
+        run: sudo apt-get update && sudo apt-get install --yes python3 openssl
+
+      - name: Prepare root test dependencies
+        env:
+          MIX_ENV: test
+        run: |
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+
+      - name: Run full published feature consumer gate
+        env:
+          EX_SSL_RESULTS_DIR: ${{ runner.temp }}/ex-ssl-feature-results
+        run: bash scripts/ex_ssl_published_feature_gate.sh
+
+      - name: Preserve HTTP/2 TLS lifecycle regressions
+        env:
+          MIX_ENV: test
+        run: mix test apps/http_fetch/test/http/socket_client_http2_test.exs --seed 36
+
+      - name: Upload sanitized feature-gate report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: published-ex-ssl-feature-gate-report
+          path: ${{ runner.temp }}/ex-ssl-feature-results/*.txt
+          if-no-files-found: error

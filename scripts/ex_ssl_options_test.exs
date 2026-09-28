@@ -1,5 +1,5 @@
-# Run only through scripts/ex_ssl_source_smoke.sh with an explicit source checkout.
-source = System.fetch_env!("EX_SSL_SOURCE_DIR")
+# Run only through scripts/ex_ssl_source_smoke.sh with a pinned fixture checkout.
+source = System.fetch_env!("EX_SSL_FIXTURE_DIR")
 Code.require_file(Path.join(source, "test/support/signature_fixtures.ex"))
 Code.require_file(Path.join(source, "test/support/client_auth_fixtures.ex"))
 
