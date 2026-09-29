@@ -88,7 +88,7 @@ TLS authentication still fail at the frozen public TLS boundary.
 
 ## Existing production backends and startup audit
 
-- `apps/http_core/mix.exs` declares ex_ssl/ex_quic as normal runtime dependencies.
+- `apps/http_core/mix.exs` declares ex_ssl/elixir_quic as normal runtime dependencies.
   Existing `quic ~> 1.6` remains `runtime: false` there; it provides the shared
   `HTTP.HTTP3` module's legacy implementation.
 - `apps/http_fetch/mix.exs` and `apps/http_web_transport/mix.exs` retain runtime

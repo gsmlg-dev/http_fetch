@@ -26,9 +26,9 @@ the earlier TLS certificate fixture revision to preserve that workload.
 | Isolated consumer and running release | PASS | Hex-only TLS/QUIC resolution, ordinary startup, UDP bind, release RPC verification |
 | http_core Hex package build | PASS | Both runtime dependencies included as Hex packages |
 | Strict test compilation and configured Credo | PASS | No compile warnings or Credo issues |
-| Scoped formatting and diff whitespace | PASS | Changed Elixir files and `git diff --check` |
+| Full formatting and diff whitespace | PASS | `mix format --check-formatted` and `git diff --check`; baseline HTTP/2 guard formatting corrected |
 | Abyss joint G-P1 combination | BLOCKED | Actual run fails with `{:error, :quic_backend_unavailable}`; Abyss still expects `QUIC` |
-| E2E HTTP fixture suite and Dialyzer after this migration | NOT RUN | Earlier evidence does not establish the new combination |
+| E2E HTTP fixture suite and Dialyzer after this migration | PASS | 58 E2E tests, zero failures; configured Dialyzer passed with four intentional ignored warnings |
 | Push and release publication | NOT RUN | No remote publication performed |
 
 Commands: `MIX_BUILD_PATH=/tmp/http-fetch-hex-build MIX_ENV=test mix deps.get`,
