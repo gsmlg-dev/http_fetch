@@ -24,8 +24,8 @@ permissions:
 env:
   ELIXIR_VERSION: "1.18"
   OTP_VERSION: "28"
-  RELEASE_APPS: "http_core http_fetch http_web_socket http_event_source http_web_transport"
-  HEX_DEP_APPS: "http_fetch http_web_socket http_event_source http_web_transport"
+  RELEASE_APPS: "http_core http_fetch http_web_socket http_event_source http_web_transport elixir_quic_http3"
+  HEX_DEP_APPS: "http_fetch http_web_socket http_event_source http_web_transport elixir_quic_http3"
 
 jobs:
   release:
