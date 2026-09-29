@@ -18,8 +18,8 @@ defmodule HTTP.HTTP2PoolKeyTest do
   end
 
   test "ordered settings and profile contents participate in the key" do
-    first = %{id: "ordered", settings: [{1, 4096}, {4, 65_535}]}
-    second = %{id: "ordered", settings: [{4, 65_535}, {1, 4096}]}
+    first = %{id: "ordered", settings: [{1, 4096}, {4, 65_535}, {2, 0}]}
+    second = %{id: "ordered", settings: [{4, 65_535}, {1, 4096}, {2, 0}]}
     assert {:ok, left} = PoolKey.build(request(), first, :h2)
     assert {:ok, right} = PoolKey.build(request(), second, :h2)
     refute left == right
@@ -87,6 +87,20 @@ defmodule HTTP.HTTP2PoolKeyTest do
     assert {:ok, key} = PoolKey.build(request(ssl: [key: secret]), WireProfile.native_v1(), :h2)
     refute inspect(key) =~ secret
     refute :erlang.term_to_binary(key) =~ secret
+  end
+
+  test "opaque ex_ssl profile structs make the TLS identity non-reusable" do
+    profile = %SSL.ClientHello.WireProfile{extensions: [{:alpn, ["http/1.1"]}]}
+
+    assert {:ok, :non_reusable, key} =
+             PoolKey.build(
+               request(ssl: [ex_ssl: [profile: profile]]),
+               WireProfile.native_v1(),
+               :h2
+             )
+
+    refute inspect(key) =~ "http/1.1"
+    refute :erlang.term_to_binary(key) =~ "http/1.1"
   end
 
   test "http2_reuse false gets a unique isolated marker" do

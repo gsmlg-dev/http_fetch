@@ -9,6 +9,7 @@ defmodule HTTP.Stream do
   """
 
   defstruct reader: nil,
+            reader_monitor: nil,
             reader_ack?: false,
             chunks: [],
             pending_ack: nil,
@@ -114,14 +115,14 @@ defmodule HTTP.Stream do
     receive do
       {:read_chunk, reader} when is_pid(reader) ->
         state
-        |> Map.put(:reader, reader)
+        |> monitor_reader(reader)
         |> Map.put(:reader_ack?, false)
         |> flush()
         |> maybe_continue()
 
       {:read_chunk, reader, :ack} when is_pid(reader) ->
         state
-        |> Map.put(:reader, reader)
+        |> monitor_reader(reader)
         |> Map.put(:reader_ack?, true)
         |> flush()
         |> maybe_continue()
@@ -153,13 +154,25 @@ defmodule HTTP.Stream do
 
       {:error, reason} ->
         state
-        |> Map.put(:error, reason)
+        |> reply_pending({:error, reason})
+        |> Map.merge(%{error: reason, chunks: []})
         |> flush()
         |> maybe_continue()
+
+      {:DOWN, monitor, :process, _reader, reason} when monitor == state.reader_monitor ->
+        _ = reply_pending(state, {:error, {:reader_down, reason}})
+        :ok
     after
       HTTP.Config.streaming_timeout() ->
         timeout(state)
     end
+  end
+
+  defp monitor_reader(%{reader: reader} = state, reader), do: state
+
+  defp monitor_reader(state, reader) do
+    if state.reader_monitor, do: Process.demonitor(state.reader_monitor, [:flush])
+    %{state | reader: reader, reader_monitor: Process.monitor(reader)}
   end
 
   defp maybe_continue(%__MODULE__{done?: true, reader: reader, chunks: [], pending_ack: nil})

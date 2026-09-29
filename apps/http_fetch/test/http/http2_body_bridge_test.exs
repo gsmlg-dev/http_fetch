@@ -44,6 +44,7 @@ defmodule HTTP.HTTP2BodyBridgeTest do
 
     assert :ok = BodyBridge.ack(bridge, ref)
     assert %{buffered_bytes: 0, inflight: nil, peak_buffered_bytes: 5} = BodyBridge.status(bridge)
+    assert_receive {:read, ^bridge}
   end
 
   test "credit pauses after one chunk and EOF is delivered once" do
@@ -55,21 +56,75 @@ defmodule HTTP.HTTP2BodyBridgeTest do
     assert_receive {:body_chunk, ^bridge, "12345", ref}, 500
     refute_receive {:read, ^bridge}, 20
     :ok = BodyBridge.ack(bridge, ref)
-    refute_receive {:read, ^bridge}, 20
-    :ok = BodyBridge.credit(bridge, 1)
     assert_receive {:read, ^bridge}
     send(stream, :eof)
     assert_receive {:body_eof, ^bridge}, 500
     assert BodyBridge.status(bridge).eof?
   end
 
-  test "oversized chunks and early responses stop the bridge" do
+  test "splits a source chunk into bounded owner chunks and acknowledges its source once" do
     stream = fake_stream(self())
-    {:ok, bridge} = BodyBridge.start_link(stream, self(), max_chunk_bytes: 4)
+    {:ok, bridge} = BodyBridge.start_link(stream, self(), max_chunk_bytes: 4, max_buffer_bytes: 8)
     :ok = BodyBridge.credit(bridge, 4)
     assert_receive {:read, ^bridge}
-    send(stream, {:send_chunk, "12345"})
-    assert_receive {:body_error, ^bridge, :chunk_too_large}, 500
+    send(stream, {:send_chunk, "12345678"})
+    assert_receive {:body_chunk, ^bridge, "1234", first}, 500
+    assert %{buffered_bytes: 8, peak_buffered_bytes: 8, credit: 0} = BodyBridge.status(bridge)
+    refute_receive {:read, ^bridge}, 20
+    assert :ok = BodyBridge.ack(bridge, first)
+    assert_receive {:body_chunk, ^bridge, "5678", second}, 500
+    assert second != first
+    refute_receive {:read, ^bridge}, 20
+    assert :ok = BodyBridge.ack(bridge, second)
+    assert %{buffered_bytes: 0, peak_buffered_bytes: 8} = BodyBridge.status(bridge)
+    assert_receive {:read, ^bridge}
+  end
+
+  test "caps admitted credit and rejects source chunks larger than the buffer" do
+    stream = fake_stream(self())
+    {:ok, bridge} = BodyBridge.start_link(stream, self(), max_chunk_bytes: 4, max_buffer_bytes: 8)
+    assert :ok = BodyBridge.credit(bridge, 100)
+    assert :ok = BodyBridge.credit(bridge, 100)
+    assert %{credit: 8} = BodyBridge.status(bridge)
+    assert_receive {:read, ^bridge}
+    refute_receive {:read, ^bridge}, 20
+    send(stream, {:send_chunk, "123456789"})
+    assert_receive {:body_error, ^bridge, :buffer_limit}, 500
     assert BodyBridge.status(bridge).stopped?
+  end
+
+  test "an intentional early response does not fail the owner" do
+    stream = fake_stream(self())
+    {:ok, bridge} = BodyBridge.start_link(stream, self())
+    assert :ok = BodyBridge.early_response(bridge)
+    assert BodyBridge.status(bridge).stopped?
+    refute_receive {:body_error, ^bridge, _reason}, 20
+  end
+
+  test "owner release stops the bridge without a body error" do
+    stream = fake_stream(self())
+    {:ok, bridge} = BodyBridge.start_link(stream, self())
+    monitor = Process.monitor(bridge)
+    GenServer.cast(bridge, :stop)
+    assert_receive {:DOWN, ^monitor, :process, ^bridge, :normal}
+    refute_receive {:body_error, ^bridge, _reason}, 20
+  end
+
+  test "early response releases an outstanding HTTP.Stream producer" do
+    {:ok, stream} = HTTP.Stream.start_link(0)
+    {:ok, bridge} = BodyBridge.start_link(stream, self())
+
+    producer =
+      Task.async(fn ->
+        first = HTTP.Stream.chunk(stream, "one")
+        second = HTTP.Stream.chunk(stream, "two")
+        {first, second}
+      end)
+
+    assert :ok = BodyBridge.credit(bridge, 3)
+    assert_receive {:body_chunk, ^bridge, "one", _ref}
+    assert :ok = BodyBridge.early_response(bridge)
+    assert {{:error, :early_response}, {:error, _reason}} = Task.await(producer, 1_000)
+    refute_receive {:body_error, ^bridge, _reason}, 20
   end
 end

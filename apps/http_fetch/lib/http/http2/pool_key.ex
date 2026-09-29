@@ -263,6 +263,8 @@ defmodule HTTP.HTTP2.PoolKey do
 
   defp safe_term?(value) when is_list(value), do: Enum.all?(value, &safe_term?/1)
 
+  defp safe_term?(%_{}), do: false
+
   defp safe_term?(value) when is_map(value),
     do: Enum.all?(value, fn {k, v} -> safe_term?(k) and safe_term?(v) end)
 

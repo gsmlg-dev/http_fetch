@@ -2,7 +2,7 @@ defmodule HTTP.SocketClient do
   @moduledoc false
 
   alias HTTP.Headers
-  alias HTTP.HTTP2.Frame
+  alias HTTP.HTTP2.{BodyBridge, ConnectionOwner, ConnectionSupervisor, Frame, Pool, PoolKey}
   alias HTTP.Request
   alias HTTP.Response
 
@@ -203,6 +203,17 @@ defmodule HTTP.SocketClient do
       timeout ->
         timer_ref = Process.send_after(self(), :deadline, timeout)
 
+        context = %{
+          parent: parent,
+          ref: ref,
+          request: request,
+          unix_socket_path: unix_socket_path,
+          redirects: redirects,
+          redirected?: redirected?,
+          deadline_at: deadline_at,
+          timer_ref: timer_ref
+        }
+
         with {:ok, transport, host, port} <- select_transport(request, unix_socket_path),
              {:ok, selection} <- protocol_selection(request, transport),
              {:ok, socket} <-
@@ -210,20 +221,12 @@ defmodule HTTP.SocketClient do
           case socket do
             {:reused, owner, reservation, key} ->
               _ = Process.cancel_timer(timer_ref)
-              run_http2_reused_owner(parent, ref, request, owner, reservation, key, deadline_at)
+
+              run_http2_reused_owner(context, owner, reservation, key)
 
             {:connect, claim} ->
               handle_new_connection(
-                %{
-                  parent: parent,
-                  ref: ref,
-                  request: request,
-                  unix_socket_path: unix_socket_path,
-                  redirects: redirects,
-                  redirected?: redirected?,
-                  deadline_at: deadline_at,
-                  timer_ref: timer_ref
-                },
+                context,
                 transport,
                 host,
                 port,
@@ -241,20 +244,11 @@ defmodule HTTP.SocketClient do
   end
 
   defp handle_new_connection(context, transport, host, port, selection, timeout, claim) do
-    %{parent: parent, ref: ref, request: request, deadline_at: deadline_at} = context
+    %{parent: parent, ref: ref, request: request} = context
 
     case connect(transport, host, port, request, selection, timeout) do
       {:ok, socket} ->
-        case maybe_http2_owner(
-               parent,
-               ref,
-               request,
-               selection,
-               transport,
-               socket,
-               deadline_at,
-               claim
-             ) do
+        case maybe_http2_owner(context, selection, transport, socket, claim) do
           {:handled, result} ->
             _ = Process.cancel_timer(context.timer_ref)
             result
@@ -270,21 +264,23 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp maybe_reused_http2_owner(_parent, _ref, request, selection, _deadline_at) do
-    if selection.mode in [:h2c, :force_h2] and http2_profile?(request) and
+  defp maybe_reused_http2_owner(_parent, _ref, request, selection, deadline_at) do
+    if selection.mode in [:h2c, :force_h2, :auto_https] and
          Keyword.get(request.transport_options, :http2_reuse, true) != false do
-      profile = Keyword.fetch!(request.transport_options, :http2_profile)
+      profile = Keyword.get(request.transport_options, :http2_profile, :native_v1)
       protocol = if selection.mode == :h2c, do: :h2c, else: :h2
       pool = Process.whereis(:http_fetch_http2_pool)
 
       with pool when is_pid(pool) <- pool,
-           {:ok, key} <- HTTP.HTTP2.PoolKey.build(request, profile, protocol) do
-        case HTTP.HTTP2.Pool.try_reserve(pool, key) do
+           {:ok, key} <- PoolKey.build(request, profile, protocol) do
+        case Pool.try_reserve(pool, key) do
           {:ok, owner, reservation} ->
             {:ok, {:reused, owner, {pool, reservation}, key}}
 
           :none ->
-            reserve_or_claim_http2_owner(pool, key)
+            if selection.mode == :auto_https,
+              do: {:ok, {:connect, nil}},
+              else: reserve_or_claim_http2_owner(pool, key, deadline_at)
         end
       else
         _ -> {:ok, {:connect, nil}}
@@ -294,19 +290,49 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp reserve_or_claim_http2_owner(pool, key) do
-    case HTTP.HTTP2.Pool.claim_connect(pool, key) do
+  defp reserve_or_claim_http2_owner(pool, key, deadline_at) do
+    case Pool.claim_connect(pool, key) do
       :start ->
         {:ok, {:connect, {pool, key}}}
 
       :wait ->
-        case HTTP.HTTP2.Pool.reserve(pool, key) do
+        case await_http2_reservation(pool, key, deadline_at) do
           {:ok, owner, reservation} ->
             {:ok, {:reused, owner, {pool, reservation}, key}}
 
           {:error, reason} ->
             {:error, reason}
         end
+    end
+  end
+
+  defp await_http2_reservation(pool, key, deadline_at) do
+    token = make_ref()
+    options = [deadline_at: deadline_at, token: token]
+    request_id = :gen_server.send_request(pool, {:reserve, key, options})
+    await_http2_reservation_reply(pool, token, request_id, deadline_at)
+  end
+
+  defp await_http2_reservation_reply(pool, token, request_id, deadline_at) do
+    receive do
+      :abort ->
+        _ = Pool.cancel(pool, token)
+        {:error, :aborted}
+
+      :deadline ->
+        _ = Pool.cancel(pool, token)
+        {:error, :request_timeout}
+
+      message ->
+        case :gen_server.check_response(message, request_id) do
+          {:reply, result} -> result
+          {:error, {reason, _server}} -> {:error, reason}
+          :no_reply -> await_http2_reservation_reply(pool, token, request_id, deadline_at)
+        end
+    after
+      remaining_timeout(deadline_at) ->
+        _ = Pool.cancel(pool, token)
+        {:error, :request_timeout}
     end
   end
 
@@ -349,47 +375,41 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp maybe_http2_owner(
-         parent,
-         ref,
-         %Request{} = request,
-         selection,
-         transport,
-         socket,
-         deadline_at,
-         claim
-       ) do
-    if Keyword.has_key?(request.transport_options, :http2_profile) do
-      case connected_protocol(transport, socket, selection) do
-        {:ok, :http2} ->
-          {:handled, run_http2_owner(parent, ref, request, transport, socket, deadline_at, claim)}
-
-        _ ->
-          :legacy
-      end
-    else
-      :legacy
+  defp maybe_http2_owner(context, selection, transport, socket, claim) do
+    case connected_protocol(transport, socket, selection) do
+      {:ok, :http2} -> {:handled, run_http2_owner(context, transport, socket, claim)}
+      _ -> :legacy
     end
   end
 
-  defp run_http2_owner(parent, ref, request, transport, socket, deadline_at, claim) do
+  defp run_http2_owner(context, transport, socket, claim) do
+    %{
+      parent: parent,
+      ref: ref,
+      request: request,
+      deadline_at: deadline_at,
+      redirects: redirects,
+      redirected?: redirected?,
+      unix_socket_path: unix_socket_path
+    } = context
+
     profile = Keyword.get(request.transport_options, :http2_profile, :native_v1)
 
-    with {:ok, headers, body} <- HTTP.HTTP2.request_headers(request, profile),
+    with {:ok, headers, body} <- HTTP.HTTP2.request_headers(request, profile, order?: false),
          {:ok, owner} <-
-           HTTP.HTTP2.ConnectionOwner.start_link(
+           ConnectionSupervisor.start_connection(
              transport: transport,
              socket: socket,
              profile: profile,
              activate?: false
            ),
          :ok <- transfer_http2_socket(transport, socket, owner),
-         :ok <- HTTP.HTTP2.ConnectionOwner.activate(owner),
+         :ok <- ConnectionOwner.activate(owner),
          {:ok, pool, reservation, key} <-
-           register_http2_owner(request, profile, owner, claim),
+           register_http2_owner(request, profile, owner, claim, deadline_at),
          {:ok, bridge} <- maybe_start_http2_bridge(body, owner),
          {:ok, %{id: id}} <-
-           HTTP.HTTP2.ConnectionOwner.open_stream(owner, headers,
+           ConnectionOwner.open_stream(owner, headers,
              subscriber: self(),
              body_bridge: bridge,
              end_stream: body == ""
@@ -405,9 +425,11 @@ defmodule HTTP.SocketClient do
         monitor: monitor,
         stream_id: id,
         deadline_at: deadline_at,
-        redirects: 0,
-        redirected?: false,
+        redirects: redirects,
+        redirected?: redirected?,
+        unix_socket_path: unix_socket_path,
         mode: nil,
+        delivery: nil,
         response_sent?: false,
         body_bridge: bridge,
         pool: pool,
@@ -422,13 +444,23 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp run_http2_reused_owner(parent, ref, request, owner, {pool, reservation}, key, deadline_at) do
+  defp run_http2_reused_owner(context, owner, {pool, reservation}, key) do
+    %{
+      parent: parent,
+      ref: ref,
+      request: request,
+      deadline_at: deadline_at,
+      redirects: redirects,
+      redirected?: redirected?,
+      unix_socket_path: unix_socket_path
+    } = context
+
     profile = Keyword.get(request.transport_options, :http2_profile, :native_v1)
 
-    with {:ok, headers, body} <- HTTP.HTTP2.request_headers(request, profile),
+    with {:ok, headers, body} <- HTTP.HTTP2.request_headers(request, profile, order?: false),
          {:ok, bridge} <- maybe_start_http2_bridge(body, owner),
          {:ok, %{id: id}} <-
-           HTTP.HTTP2.ConnectionOwner.open_stream(owner, headers,
+           ConnectionOwner.open_stream(owner, headers,
              subscriber: self(),
              body_bridge: bridge,
              end_stream: body == ""
@@ -444,9 +476,11 @@ defmodule HTTP.SocketClient do
         monitor: monitor,
         stream_id: id,
         deadline_at: deadline_at,
-        redirects: 0,
-        redirected?: false,
+        redirects: redirects,
+        redirected?: redirected?,
+        unix_socket_path: unix_socket_path,
         mode: nil,
+        delivery: nil,
         response_sent?: false,
         body_bridge: bridge,
         pool: pool,
@@ -455,12 +489,12 @@ defmodule HTTP.SocketClient do
       })
     else
       {:error, reason} ->
-        _ = HTTP.HTTP2.Pool.release(pool, key, reservation)
+        _ = Pool.release(pool, key, reservation)
         send_error(parent, ref, reason)
     end
   end
 
-  defp register_http2_owner(request, profile, owner, claim) do
+  defp register_http2_owner(request, profile, owner, claim, deadline_at) do
     if request.url.scheme not in ["http", "https"] or
          Keyword.get(request.transport_options, :http2_reuse, true) == false do
       {:ok, nil, nil, nil}
@@ -470,10 +504,14 @@ defmodule HTTP.SocketClient do
       with pool when is_pid(pool) <- pool,
            {:ok, key} <- pool_key_for_registration(request, profile, claim),
            :ok <-
-             HTTP.HTTP2.Pool.register(pool, key, owner, connecting?: is_tuple(claim)),
-           {:ok, ^owner, reservation} <- HTTP.HTTP2.Pool.reserve(pool, key) do
+             Pool.register(pool, key, owner,
+               connecting?: is_tuple(claim),
+               max_streams: 0
+             ),
+           {:ok, ^owner, reservation} <- await_http2_reservation(pool, key, deadline_at) do
         {:ok, pool, reservation, key}
       else
+        {:error, reason} -> {:error, reason}
         _ -> {:ok, nil, nil, nil}
       end
     end
@@ -482,13 +520,13 @@ defmodule HTTP.SocketClient do
   defp pool_key_for_registration(_request, _profile, {_pool, key}), do: {:ok, key}
 
   defp pool_key_for_registration(request, profile, _claim),
-    do: HTTP.HTTP2.PoolKey.build(request, profile, http2_protocol(request))
+    do: PoolKey.build(request, profile, http2_protocol(request))
 
   defp http2_protocol(%Request{url: %URI{scheme: "http"}}), do: :h2c
   defp http2_protocol(%Request{url: %URI{scheme: "https"}}), do: :h2
 
   defp fail_http2_connect({pool, key}, reason),
-    do: HTTP.HTTP2.Pool.fail_connect(pool, key, reason)
+    do: Pool.fail_connect(pool, key, reason)
 
   defp fail_http2_connect(_claim, _reason), do: :ok
 
@@ -496,48 +534,139 @@ defmodule HTTP.SocketClient do
     do: transport.controlling_process(socket, owner)
 
   defp maybe_start_http2_bridge({:stream, stream}, owner),
-    do: HTTP.HTTP2.BodyBridge.start_link(stream, owner)
+    do: BodyBridge.start_link(stream, owner)
+
+  defp maybe_start_http2_bridge(body, owner) when is_binary(body) and byte_size(body) > 0 do
+    chunks =
+      Stream.unfold(body, fn
+        "" ->
+          nil
+
+        remaining ->
+          size = min(byte_size(remaining), 16_384)
+          <<chunk::binary-size(^size), rest::binary>> = remaining
+          {:binary.copy(chunk), rest}
+      end)
+
+    with {:ok, stream} <- HTTP.Stream.from_enumerable(chunks),
+         do: BodyBridge.start_link(stream, owner)
+  end
 
   defp maybe_start_http2_bridge(_body, _owner), do: {:ok, nil}
 
   defp send_http2_body(_owner, _id, "", _bridge), do: :ok
 
   defp send_http2_body(owner, id, body, nil) when is_binary(body),
-    do: HTTP.HTTP2.ConnectionOwner.send_data(owner, id, body, true)
+    do: ConnectionOwner.send_data(owner, id, body, true)
 
-  defp send_http2_body(_owner, _id, {:stream, _stream}, bridge) when is_pid(bridge),
-    do: HTTP.HTTP2.BodyBridge.credit(bridge, 65_536)
+  defp send_http2_body(_owner, _id, _body, bridge) when is_pid(bridge),
+    do: BodyBridge.credit(bridge, 65_536)
 
   defp await_http2_response(state) do
     monitor = state.monitor
     stream_id = state.stream_id
+    delivery = state.delivery
 
     receive do
       :abort ->
-        _ = HTTP.HTTP2.ConnectionOwner.cancel(state.owner, state.stream_id)
-        finish_http2(state, :aborted)
+        cancel_http2_stream(state)
+        fail_http2(state, :aborted)
 
       {:DOWN, ^monitor, :process, _owner, reason} ->
-        fail_http2(state, {:request_process_down, reason})
+        if reason in [:normal, :closed] do
+          await_http2_response(
+            Map.put_new(state, :pending_close, {:request_process_down, reason})
+          )
+        else
+          fail_http2(state, {:request_process_down, reason})
+        end
+
+      {:DOWN, delivery_monitor, :process, _worker, reason} ->
+        if delivery != nil and delivery.monitor == delivery_monitor do
+          fail_http2(state, {:body_delivery_down, reason})
+        else
+          await_http2_response(state)
+        end
+
+      {:http2_delivery, token, result} ->
+        if delivery != nil and delivery.token == token do
+          Process.demonitor(delivery.monitor, [:flush])
+          handle_http2_delivery(%{state | delivery: nil}, result, delivery.end_stream?)
+        else
+          await_http2_response(state)
+        end
 
       {:http2, ^stream_id, {:http2, :goaway, _last_stream_id}} ->
         mark_http2_draining(state)
         await_http2_response(state)
 
-      {:http2, ^stream_id, {:http2, :headers, headers, flags}} ->
+      {:http2, ^stream_id, {:http2, :goaway, _last_stream_id, _error}} ->
+        mark_http2_draining(state)
+        await_http2_response(state)
+
+      {:http2, ^stream_id, {:http2, :headers, headers, flags}} when is_nil(delivery) ->
         handle_http2_headers(state, headers, flags)
 
-      {:http2, ^stream_id, {:http2, :data, chunk, flags}} ->
+      {:http2, ^stream_id, {:http2, :data, chunk, flags}} when is_nil(delivery) ->
         handle_http2_data(state, chunk, flags)
 
-      _message ->
-        await_http2_response(state)
+      {:http2, ^stream_id, {:http2, :reset, code}} ->
+        fail_http2(state, {:stream_reset, http2_error_code(code)})
+
+      {:http2, ^stream_id, {:http2, :stream_error, reason}} ->
+        fail_http2(state, reason)
+
+      {:http2, ^stream_id, {:http2, :body_error, reason}} ->
+        fail_http2(state, {:body_error, reason})
+
+      {:http2, ^stream_id, {:http2, :transport_closed}} ->
+        await_http2_response(Map.put(state, :pending_close, :closed))
+
+      {:http2, ^stream_id, {:http2, :transport_error, reason}} ->
+        if reason == :closed do
+          await_http2_response(Map.put(state, :pending_close, :closed))
+        else
+          fail_http2(state, {:transport_error, reason})
+        end
+
+      {:http2, ^stream_id, {:http2, :drain_timeout}} ->
+        fail_http2(state, :drain_timeout)
+
+      :deadline ->
+        cancel_http2_stream(state)
+        fail_http2(state, :request_timeout)
     after
-      remaining_timeout(state.deadline_at) ->
-        _ = HTTP.HTTP2.ConnectionOwner.cancel(state.owner, state.stream_id)
-        finish_http2(state, :request_timeout)
+      http2_receive_timeout(state) ->
+        if is_nil(delivery) and Map.has_key?(state, :pending_close) do
+          fail_http2(state, state.pending_close)
+        else
+          cancel_http2_stream(state)
+          fail_http2(state, :request_timeout)
+        end
     end
   end
+
+  # A delivery worker can leave already validated DATA queued ahead of EOF.
+  # Drain those messages before deciding truncation, without extending deadlines
+  # or delaying reset, abort, or non-close transport errors.
+  defp http2_error_code(0), do: :no_error
+  defp http2_error_code(1), do: :protocol_error
+  defp http2_error_code(2), do: :internal_error
+  defp http2_error_code(3), do: :flow_control_error
+  defp http2_error_code(4), do: :settings_timeout
+  defp http2_error_code(5), do: :stream_closed
+  defp http2_error_code(6), do: :frame_size_error
+  defp http2_error_code(7), do: :refused_stream
+  defp http2_error_code(8), do: :cancel
+  defp http2_error_code(9), do: :compression_error
+  defp http2_error_code(10), do: :connect_error
+  defp http2_error_code(11), do: :enhance_your_calm
+  defp http2_error_code(12), do: :inadequate_security
+  defp http2_error_code(13), do: :http_1_1_required
+  defp http2_error_code(code), do: code
+
+  defp http2_receive_timeout(%{delivery: nil, pending_close: _}), do: 0
+  defp http2_receive_timeout(state), do: remaining_timeout(state.deadline_at)
 
   defp handle_http2_headers(state, headers, flags) do
     status =
@@ -546,39 +675,158 @@ defmodule HTTP.SocketClient do
 
     regular = Enum.reject(headers, fn {name, _value} -> String.starts_with?(name, ":") end)
 
-    if is_integer(status) do
-      maybe_cancel_http2_bridge(state)
+    case state.mode do
+      {:stream, stream_pid} when is_nil(status) and regular == headers ->
+        if Frame.flag?(flags, 0x1) do
+          HTTP.Stream.finish(stream_pid)
+          finish_http2(state, :ok)
+        else
+          fail_http2(state, :invalid_http_response)
+        end
 
-      response =
-        Response.new(
-          status: status,
-          headers: Headers.new(regular),
-          body: nil,
-          url: state.request.url,
-          redirected: state.redirected?
-        )
+      {:buffer, response, chunks} when is_nil(status) and regular == headers ->
+        if Frame.flag?(flags, 0x1) do
+          send_response(
+            state.parent,
+            state.ref,
+            Response.with_buffered_body(
+              response,
+              chunks |> Enum.reverse() |> IO.iodata_to_binary()
+            )
+          )
 
-      if Frame.flag?(flags, 0x1) do
+          finish_http2(state, :ok)
+        else
+          fail_http2(state, :invalid_http_response)
+        end
+
+      nil when is_integer(status) and status in 100..199 ->
+        await_http2_response(state)
+
+      nil when is_integer(status) ->
+        handle_http2_final_headers(state, status, Headers.new(regular), flags)
+
+      _ ->
+        fail_http2(state, :invalid_http_response)
+    end
+  end
+
+  defp handle_http2_final_headers(state, status, headers, flags) do
+    maybe_cancel_http2_bridge(state)
+
+    response =
+      Response.new(
+        status: status,
+        headers: headers,
+        body: nil,
+        url: state.request.url,
+        redirected: state.redirected?
+      )
+
+    cond do
+      redirect_error?(state, response) ->
+        cancel_http2_stream(state)
+        fail_http2(state, :redirect)
+
+      redirect_mode(state.request) == :follow and state.redirects >= @max_redirects and
+          redirect_candidate?(state.request, status, headers) ->
+        cancel_http2_stream(state)
+        fail_http2(state, :too_many_redirects)
+
+      follow_redirect?(state, response) ->
+        follow_http2_redirect(state, response)
+
+      Frame.flag?(flags, 0x1) ->
         send_response(state.parent, state.ref, Response.with_buffered_body(response, ""))
         finish_http2(state, :ok)
-      else
-        if stream_response?(state.request, status, Headers.new(regular)) do
-          {:ok, stream_pid} = HTTP.Stream.start_link(stream_content_length(Headers.new(regular)))
-          send_response(state.parent, state.ref, Response.with_stream_body(response, stream_pid))
-          await_http2_response(%{state | mode: {:stream, stream_pid}, response_sent?: true})
-        else
-          await_http2_response(%{state | mode: {:buffer, response, []}})
-        end
-      end
-    else
-      fail_http2(state, :invalid_http_response)
+
+      stream_response?(state.request, status, headers) ->
+        {:ok, stream_pid} = HTTP.Stream.start_link(stream_content_length(headers))
+        send_response(state.parent, state.ref, Response.with_stream_body(response, stream_pid))
+        await_http2_response(%{state | mode: {:stream, stream_pid}, response_sent?: true})
+
+      true ->
+        await_http2_response(%{state | mode: {:buffer, response, []}})
+    end
+  end
+
+  defp follow_http2_redirect(state, response) do
+    case redirect_request(state.request, response) do
+      {:ok, request} ->
+        cancel_http2_stream(state)
+        finish_http2(state, :redirect)
+
+        owner(
+          state.parent,
+          state.ref,
+          request,
+          state.unix_socket_path,
+          state.redirects + 1,
+          true,
+          state.deadline_at
+        )
+
+      {:error, reason} ->
+        cancel_http2_stream(state)
+        fail_http2(state, reason)
     end
   end
 
   defp handle_http2_data(%{mode: {:stream, stream_pid}} = state, chunk, flags) do
-    case HTTP.Stream.chunk(stream_pid, chunk, stream_chunk_timeout(state.deadline_at)) do
+    end_stream? = Frame.flag?(flags, 0x1)
+
+    coordinator = self()
+    token = make_ref()
+
+    case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
+           result = HTTP.Stream.chunk(stream_pid, chunk, stream_chunk_timeout(state.deadline_at))
+           send(coordinator, {:http2_delivery, token, result})
+         end) do
+      {:ok, worker} ->
+        monitor = Process.monitor(worker)
+
+        await_http2_response(%{
+          state
+          | delivery: %{token: token, pid: worker, monitor: monitor, end_stream?: end_stream?}
+        })
+
+      {:error, reason} ->
+        fail_http2(state, {:body_delivery_start, reason})
+    end
+  end
+
+  defp handle_http2_data(%{mode: {:buffer, response, chunks}} = state, chunk, flags) do
+    chunks = [chunk | chunks]
+    end_stream? = Frame.flag?(flags, 0x1)
+
+    case acknowledge_http2_data(state, end_stream?) do
       :ok ->
-        if Frame.flag?(flags, 0x1) do
+        if end_stream? do
+          send_response(
+            state.parent,
+            state.ref,
+            Response.with_buffered_body(
+              response,
+              chunks |> Enum.reverse() |> IO.iodata_to_binary()
+            )
+          )
+
+          finish_http2(state, :ok)
+        else
+          await_http2_response(%{state | mode: {:buffer, response, chunks}})
+        end
+
+      {:error, reason} ->
+        fail_http2(state, reason)
+    end
+  end
+
+  defp handle_http2_data(state, _chunk, _flags), do: fail_http2(state, :invalid_http_response)
+
+  defp handle_http2_delivery(%{mode: {:stream, stream_pid}} = state, :ok, end_stream?) do
+    case acknowledge_http2_data(state, end_stream?) do
+      :ok ->
+        if end_stream? do
           HTTP.Stream.finish(stream_pid)
           finish_http2(state, :ok)
         else
@@ -590,37 +838,56 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp handle_http2_data(%{mode: {:buffer, response, chunks}} = state, chunk, flags) do
-    chunks = [chunk | chunks]
-
-    if Frame.flag?(flags, 0x1) do
-      send_response(
-        state.parent,
-        state.ref,
-        Response.with_buffered_body(response, chunks |> Enum.reverse() |> IO.iodata_to_binary())
-      )
-
-      finish_http2(state, :ok)
-    else
-      await_http2_response(%{state | mode: {:buffer, response, chunks}})
-    end
-  end
-
-  defp handle_http2_data(state, _chunk, _flags), do: fail_http2(state, :invalid_http_response)
+  defp handle_http2_delivery(state, {:error, reason}, _end_stream?), do: fail_http2(state, reason)
 
   defp maybe_cancel_http2_bridge(%{body_bridge: bridge}) when is_pid(bridge),
-    do: HTTP.HTTP2.BodyBridge.early_response(bridge)
+    do: safe_http2_cleanup(fn -> BodyBridge.early_response(bridge) end)
 
   defp maybe_cancel_http2_bridge(_state), do: :ok
 
+  defp cancel_http2_stream(state),
+    do:
+      safe_http2_cleanup(fn ->
+        ConnectionOwner.cancel(state.owner, state.stream_id)
+      end)
+
+  defp acknowledge_http2_data(state, end_stream?) do
+    result =
+      try do
+        ConnectionOwner.acknowledge(state.owner, state.stream_id)
+      catch
+        :exit, reason -> {:error, {:connection_owner_down, reason}}
+      end
+
+    case result do
+      :ok ->
+        :ok
+
+      {:error, :closed} when end_stream? ->
+        :ok
+
+      {:error, {:connection_owner_down, {reason, {GenServer, :call, _}}}}
+      when reason in [:normal, :noproc, :closed] ->
+        # The owner monitor/terminal message settles EOF after queued DATA.
+        :ok
+
+      other ->
+        other
+    end
+  end
+
   defp mark_http2_draining(%{pool: pool, pool_key: key, owner: owner})
        when is_pid(pool) and is_pid(owner),
-       do: HTTP.HTTP2.Pool.mark_draining(pool, key, owner)
+       do: Pool.mark_draining(pool, key, owner)
 
   defp mark_http2_draining(_state), do: :ok
 
-  defp parse_status(value) when is_binary(value), do: String.to_integer(value)
-  defp parse_status(value) when is_integer(value), do: value
+  defp parse_status(<<a, b, c>>)
+       when a in ?0..?9 and b in ?0..?9 and c in ?0..?9 do
+    status = (a - ?0) * 100 + (b - ?0) * 10 + c - ?0
+    if status in 100..599 and status != 101, do: status
+  end
+
   defp parse_status(_), do: nil
 
   defp fail_http2(state, reason) do
@@ -638,15 +905,41 @@ defmodule HTTP.SocketClient do
 
   defp finish_http2(state, _reason) do
     Process.demonitor(state.monitor, [:flush])
-    _ = HTTP.HTTP2.ConnectionOwner.release_stream(state.owner, state.stream_id)
+    stop_http2_delivery(state)
+    maybe_cancel_http2_bridge(state)
+    stop_http2_bridge(state)
+
+    safe_http2_cleanup(fn ->
+      ConnectionOwner.release_stream(state.owner, state.stream_id)
+    end)
 
     if is_pid(state.pool) and is_reference(state.reservation) do
-      _ = HTTP.HTTP2.Pool.release(state.pool, state.pool_key, state.reservation)
+      safe_http2_cleanup(fn ->
+        Pool.release(state.pool, state.pool_key, state.reservation)
+      end)
     else
-      _ = GenServer.stop(state.owner, :normal)
+      safe_http2_cleanup(fn -> GenServer.stop(state.owner, :normal) end)
     end
 
     :ok
+  end
+
+  defp stop_http2_bridge(%{body_bridge: bridge}) when is_pid(bridge),
+    do: safe_http2_cleanup(fn -> GenServer.stop(bridge, :normal) end)
+
+  defp stop_http2_bridge(_state), do: :ok
+
+  defp stop_http2_delivery(%{delivery: %{pid: worker, monitor: monitor}}) do
+    Process.demonitor(monitor, [:flush])
+    Process.exit(worker, :kill)
+  end
+
+  defp stop_http2_delivery(_state), do: :ok
+
+  defp safe_http2_cleanup(fun) do
+    fun.()
+  catch
+    :exit, _reason -> :ok
   end
 
   defp owner_loop(state) do

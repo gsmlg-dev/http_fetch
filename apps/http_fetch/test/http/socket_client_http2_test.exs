@@ -225,15 +225,16 @@ defmodule HTTP.SocketClientHTTP2Test do
         assert {:error, :timeout} = apply(transport, :recv, [socket, 0, 50])
 
         send_all(socket, transport, [
+          Frame.encode(:settings, 0, 0, ""),
           Frame.encode(:window_update, 0, 0, <<0::1, 5::31>>),
           Frame.encode(:window_update, 0, 1, <<0::1, 5::31>>)
         ])
 
+        buffer = assert_settings_ack(socket, transport, buffer)
         {rest, _buffer} = recv_request_body_until_end(socket, transport, buffer)
         assert rest == "ppppp"
 
         send_h2_response(socket, transport, "upload-ok")
-        assert_settings_ack(socket, transport, "")
       end)
 
     response =
@@ -1228,6 +1229,7 @@ defmodule HTTP.SocketClientHTTP2Test do
         http_version: :http2,
         signal: controller,
         tls_backend: :ex_ssl,
+        socket_opts: [nodelay: true],
         ssl: [cacertfile: @cacertfile]
       )
 
@@ -1269,7 +1271,7 @@ defmodule HTTP.SocketClientHTTP2Test do
 
   @tag :cross_record
   test "aborts an ex_ssl cross-record drain while stream backpressure holds the final body" do
-    {server_pid, controller, promise, owner, first_record, second_record} =
+    {server_pid, controller, promise, owner, coordinator, first_record, second_record} =
       cross_record_stream_drain_fixture(self(), 5_000)
 
     on_exit(fn ->
@@ -1291,23 +1293,15 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert_receive {:held_cross_record_stream_chunk, ^holder, ^stream, _chunk, _ack_ref},
                    5_000
 
-    await_cross_record_stream_backpressure(owner)
+    await_cross_record_stream_backpressure(coordinator)
 
+    coordinator_monitor = Process.monitor(coordinator)
     :ok = HTTP.AbortController.abort(controller)
+    assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :normal}, 5_000
     assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
 
-    reader =
-      Task.Supervisor.async_nolink(:http_fetch_task_supervisor, fn ->
-        assert_raise RuntimeError, "stream read failed: :aborted", fn ->
-          HTTP.Response.read_all(response)
-        end
-      end)
+    assert_receive {:held_cross_record_stream_error, ^holder, ^stream, :aborted}, 5_000
 
-    monitor_test_process(reader.pid)
-    await_cross_record_read_all(reader.pid)
-    send(holder, :release_cross_record_stream_chunk)
-
-    assert %RuntimeError{message: "stream read failed: :aborted"} = Task.await(reader, 5_000)
     assert_receive {:DOWN, ^stream_monitor, :process, _stream, :normal}, 5_000
     assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
   end
@@ -1317,7 +1311,7 @@ defmodule HTTP.SocketClientHTTP2Test do
     timeout = 2_000
     started_at = System.monotonic_time(:millisecond)
 
-    {server_pid, controller, promise, owner, first_record, second_record} =
+    {server_pid, controller, promise, owner, coordinator, first_record, second_record} =
       cross_record_stream_drain_fixture(self(), timeout)
 
     on_exit(fn ->
@@ -1345,27 +1339,17 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert_receive {:held_cross_record_stream_chunk, ^holder, ^stream, _chunk, _ack_ref},
                    5_000
 
-    await_cross_record_stream_backpressure(owner)
+    await_cross_record_stream_backpressure(coordinator)
 
     deadline_at = started_at + timeout
     remaining = deadline_at - System.monotonic_time(:millisecond)
     assert remaining > 0
 
-    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, remaining + 400
-
-    reader =
-      Task.Supervisor.async_nolink(:http_fetch_task_supervisor, fn ->
-        assert_raise RuntimeError, ~r/^stream read failed: :(request_timeout|timeout)$/, fn ->
-          HTTP.Response.read_all(response)
-        end
-      end)
-
-    monitor_test_process(reader.pid)
-    await_cross_record_read_all(reader.pid)
-    send(holder, :release_cross_record_stream_chunk)
-
-    assert %RuntimeError{message: message} = Task.await(reader, 5_000)
-    assert message in ["stream read failed: :request_timeout", "stream read failed: :timeout"]
+    coordinator_monitor = Process.monitor(coordinator)
+    assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :normal}, remaining + 400
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+    assert_receive {:held_cross_record_stream_error, ^holder, ^stream, reason}, 5_000
+    assert reason in [:request_timeout, :timeout]
 
     assert_receive {:DOWN, ^stream_monitor, :process, _stream, :normal}, 5_000
     assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
@@ -1507,6 +1491,7 @@ defmodule HTTP.SocketClientHTTP2Test do
         http_version: :http2,
         signal: controller,
         tls_backend: :ex_ssl,
+        socket_opts: [nodelay: true],
         ssl: [cacertfile: @cacertfile]
       )
 
@@ -1608,6 +1593,7 @@ defmodule HTTP.SocketClientHTTP2Test do
       |> HTTP.fetch(
         http_version: :http2,
         tls_backend: :ex_ssl,
+        socket_opts: [nodelay: true],
         ssl: [cacertfile: @cacertfile]
       )
       |> HTTP.Promise.await()
@@ -2097,6 +2083,7 @@ defmodule HTTP.SocketClientHTTP2Test do
   defp send_h2_response_headers(socket, transport, body) do
     send_all(socket, transport, [
       Frame.encode(:settings, 0, 0, ""),
+      Frame.encode(:settings, @ack, 0, ""),
       Frame.encode(:headers, @end_headers, 1, response_headers(body))
     ])
   end
@@ -2216,8 +2203,44 @@ defmodule HTTP.SocketClientHTTP2Test do
 
   defp await_owner(controller) do
     case :sys.get_state(controller).request_id do
-      owner when is_pid(owner) -> owner
-      nil -> flunk("socket owner was not registered before the request reached the server")
+      coordinator when is_pid(coordinator) ->
+        await_connection_owner(coordinator, System.monotonic_time(:millisecond) + 5_000)
+
+      nil ->
+        flunk("socket owner was not registered before the request reached the server")
+    end
+  end
+
+  defp await_connection_owner(coordinator, deadline_at) do
+    children =
+      :http_fetch_http2_connection_supervisor
+      |> DynamicSupervisor.which_children()
+      |> Enum.map(&elem(&1, 1))
+
+    owner =
+      case Process.info(coordinator, :monitors) do
+        {:monitors, monitors} ->
+          Enum.find_value(monitors, fn
+            {:process, pid} -> if pid in children, do: pid
+            _ -> nil
+          end)
+
+        nil ->
+          nil
+      end
+
+    cond do
+      is_pid(owner) ->
+        owner
+
+      System.monotonic_time(:millisecond) >= deadline_at ->
+        flunk("supervised HTTP/2 socket owner was not attached to the request")
+
+      true ->
+        receive do
+        after
+          10 -> await_connection_owner(coordinator, deadline_at)
+        end
     end
   end
 
@@ -2305,9 +2328,14 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   defp await_owner_loop(owner, deadline_at) do
-    if Process.info(owner, :current_function) ==
-         {:current_function, {HTTP.SocketClient, :owner_loop, 1}} and
-         Process.info(owner, :status) == {:status, :waiting} do
+    in_receive_loop? =
+      case Process.info(owner, :current_function) do
+        {:current_function, {HTTP.SocketClient, :owner_loop, 1}} -> true
+        {:current_function, {:gen_server, :loop, _arity}} -> true
+        _ -> false
+      end
+
+    if in_receive_loop? and Process.info(owner, :status) == {:status, :waiting} do
       :ok
     else
       remaining = deadline_at - System.monotonic_time(:millisecond)
@@ -2400,7 +2428,8 @@ defmodule HTTP.SocketClientHTTP2Test do
     owner = await_owner(controller)
     await_owner_loop(owner)
 
-    {server_pid, controller, promise, owner, first_record_binary, second_record}
+    coordinator = :sys.get_state(controller).request_id
+    {server_pid, controller, promise, owner, coordinator, first_record_binary, second_record}
   end
 
   defp queue_cross_record_stream_drain(server_pid, owner, first_record, second_record) do
@@ -2431,8 +2460,8 @@ defmodule HTTP.SocketClientHTTP2Test do
           send(test_pid, {:held_cross_record_stream_chunk, self(), stream, chunk, ack_ref})
 
           receive do
-            :release_cross_record_stream_chunk ->
-              send(stream, {:stream_chunk_ack, ack_ref})
+            {:stream_error, ^stream, reason} ->
+              send(test_pid, {:held_cross_record_stream_error, self(), stream, reason})
           after
             5_000 ->
               send(test_pid, {:held_cross_record_stream_chunk_timeout, self()})
@@ -2444,39 +2473,36 @@ defmodule HTTP.SocketClientHTTP2Test do
     end)
   end
 
-  defp await_cross_record_stream_backpressure(owner) do
-    await_cross_record_stream_backpressure(owner, System.monotonic_time(:millisecond) + 5_000)
+  defp await_cross_record_stream_backpressure(coordinator) do
+    deadline_at = System.monotonic_time(:millisecond) + 5_000
+    await_cross_record_stream_backpressure(coordinator, deadline_at)
   end
 
-  defp await_cross_record_stream_backpressure(owner, deadline_at) do
-    if Process.info(owner, :current_function) == {:current_function, {HTTP.Stream, :chunk, 3}} and
-         Process.info(owner, :status) == {:status, :waiting} do
+  defp await_cross_record_stream_backpressure(coordinator, deadline_at) do
+    monitors =
+      case Process.info(coordinator, :monitors) do
+        {:monitors, monitors} -> monitors
+        nil -> []
+      end
+
+    blocked? =
+      Enum.any?(monitors, fn
+        {:process, pid} when is_pid(pid) ->
+          Process.info(pid, :current_function) == {:current_function, {HTTP.Stream, :chunk, 3}} and
+            Process.info(pid, :status) == {:status, :waiting}
+
+        _ ->
+          false
+      end)
+
+    if blocked? do
       :ok
     else
       await_cross_record_condition(
-        owner,
+        coordinator,
         deadline_at,
-        "socket owner did not block on stream backpressure",
-        fn -> await_cross_record_stream_backpressure(owner, deadline_at) end
-      )
-    end
-  end
-
-  defp await_cross_record_read_all(reader) do
-    await_cross_record_read_all(reader, System.monotonic_time(:millisecond) + 5_000)
-  end
-
-  defp await_cross_record_read_all(reader, deadline_at) do
-    if Process.info(reader, :current_function) ==
-         {:current_function, {HTTP.Response, :collect_stream, 2}} and
-         Process.info(reader, :status) == {:status, :waiting} do
-      :ok
-    else
-      await_cross_record_condition(
-        reader,
-        deadline_at,
-        "response reader did not wait for stream error",
-        fn -> await_cross_record_read_all(reader, deadline_at) end
+        "response delivery worker did not block on stream backpressure",
+        fn -> await_cross_record_stream_backpressure(coordinator, deadline_at) end
       )
     end
   end

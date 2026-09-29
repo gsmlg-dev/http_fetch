@@ -16,6 +16,14 @@ defmodule HTTP.HTTP2RuntimeTest do
     }
   end
 
+  # The peer's connection preface is a non-ACK SETTINGS frame, even when empty.
+  defp start_owner(opts) do
+    {:ok, owner} = ConnectionOwner.start_link(opts)
+    :ok = ConnectionOwner.receive_bytes(owner, Frame.encode(:settings, 0, 0, <<>>))
+    assert_receive {:wire, :socket, <<0::24, 4, 1, 0::32>>}, 500
+    {:ok, owner}
+  end
+
   defp headers(path) do
     [
       {":method", "GET"},
@@ -65,7 +73,7 @@ defmodule HTTP.HTTP2RuntimeTest do
 
   test "one owner writes one preface and allocates three overlapping streams" do
     {:ok, owner} =
-      ConnectionOwner.start_link(transport: transport(self()), socket: :socket, max_streams: 3)
+      start_owner(transport: transport(self()), socket: :socket, max_streams: 3)
 
     assert_receive {:wire, :socket, preface_and_settings}, 500
     assert binary_part(preface_and_settings, 0, 24) == HTTP.HTTP2.connection_preface()
@@ -87,7 +95,7 @@ defmodule HTTP.HTTP2RuntimeTest do
 
   test "legacy priority profile serializes PRIORITY before HEADERS" do
     {:ok, owner} =
-      ConnectionOwner.start_link(
+      start_owner(
         transport: transport(self()),
         socket: :socket,
         profile: :synthetic_test_v1
@@ -107,7 +115,7 @@ defmodule HTTP.HTTP2RuntimeTest do
   end
 
   test "accepts the peer ACK for the initial SETTINGS frame" do
-    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+    {:ok, owner} = start_owner(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, preface_and_settings}, 500
 
     <<_preface::binary-size(24), settings::binary>> = preface_and_settings
@@ -118,7 +126,7 @@ defmodule HTTP.HTTP2RuntimeTest do
   end
 
   test "single stream cancellation emits RST and leaves neighbor alive" do
-    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+    {:ok, owner} = start_owner(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500
     assert {:ok, first} = ConnectionOwner.open_stream(owner, headers("/one"), subscriber: self())
     assert {:ok, second} = ConnectionOwner.open_stream(owner, headers("/two"), subscriber: self())
@@ -129,7 +137,7 @@ defmodule HTTP.HTTP2RuntimeTest do
   end
 
   test "GOAWAY drains the owner and rejects new streams" do
-    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+    {:ok, owner} = start_owner(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500
     goaway = Frame.encode(:goaway, 0, 0, <<0::1, 1::31, 0::32>>)
     assert :ok = ConnectionOwner.receive_bytes(owner, goaway)
@@ -139,7 +147,7 @@ defmodule HTTP.HTTP2RuntimeTest do
 
   test "GOAWAY closes after the last stream is released" do
     {:ok, owner} =
-      ConnectionOwner.start_link(
+      start_owner(
         transport: transport(self()),
         socket: :socket,
         drain_timeout: 1_000
@@ -162,7 +170,7 @@ defmodule HTTP.HTTP2RuntimeTest do
 
   test "GOAWAY drain deadline closes an unfinished owner" do
     {:ok, owner} =
-      ConnectionOwner.start_link(
+      start_owner(
         transport: transport(self()),
         socket: :socket,
         drain_timeout: 10
@@ -185,7 +193,7 @@ defmodule HTTP.HTTP2RuntimeTest do
   end
 
   test "response HEADERS and CONTINUATION update shared HPACK state atomically" do
-    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+    {:ok, owner} = start_owner(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500
 
     assert {:ok, %{id: 1}} =
@@ -198,8 +206,8 @@ defmodule HTTP.HTTP2RuntimeTest do
     assert_receive {:http2, 1, {:http2, :headers, [{":status", "200"}], _flags}}, 500
   end
 
-  test "inbound DATA consumes receive credit and replenishes both windows" do
-    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+  test "inbound DATA replenishes both windows after consumption ACK" do
+    {:ok, owner} = start_owner(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500
 
     assert {:ok, %{id: 1}} =
@@ -213,6 +221,7 @@ defmodule HTTP.HTTP2RuntimeTest do
 
     assert :ok = ConnectionOwner.receive_bytes(owner, Frame.encode(:data, 0x1, 1, "ok"))
     assert_receive {:http2, 1, {:http2, :data, "ok", 1}}, 500
+    assert :ok = ConnectionOwner.acknowledge(owner, 1)
     assert_receive {:wire, :socket, window_wire}, 500
 
     assert %{type: :window_update, stream_id: 0, payload: <<0::1, 2::31>>} =
@@ -225,7 +234,7 @@ defmodule HTTP.HTTP2RuntimeTest do
   end
 
   test "body bridge credit writes DATA and forwards the bridge acknowledgement" do
-    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+    {:ok, owner} = start_owner(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500
 
     stream = upload_stream(self())
@@ -246,7 +255,7 @@ defmodule HTTP.HTTP2RuntimeTest do
   end
 
   test "body bridge EOF writes an empty END_STREAM DATA frame" do
-    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+    {:ok, owner} = start_owner(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500
 
     stream = upload_stream(self())
@@ -265,7 +274,7 @@ defmodule HTTP.HTTP2RuntimeTest do
   end
 
   test "blocked body data resumes after a stream WINDOW_UPDATE" do
-    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+    {:ok, owner} = start_owner(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500
 
     settings = Frame.encode(:settings, 0, 0, <<4::16, 0::32>>)
@@ -295,7 +304,7 @@ defmodule HTTP.HTTP2RuntimeTest do
   end
 
   test "cancelling an upload stream stops its body bridge" do
-    {:ok, owner} = ConnectionOwner.start_link(transport: transport(self()), socket: :socket)
+    {:ok, owner} = start_owner(transport: transport(self()), socket: :socket)
     assert_receive {:wire, :socket, _}, 500
 
     stream = upload_stream(self())
@@ -308,14 +317,15 @@ defmodule HTTP.HTTP2RuntimeTest do
              )
 
     assert_receive {:wire, :socket, _headers}, 500
+    monitor = Process.monitor(bridge)
     assert :ok = ConnectionOwner.cancel(owner, ref)
     assert_receive {:http2, ^id, {:http2, :cancelled}}, 500
-    assert %{stopped?: true} = BodyBridge.status(bridge)
+    assert_receive {:DOWN, ^monitor, :process, ^bridge, :normal}, 500
   end
 
   test "pool reserves capacity atomically for a registered owner" do
     {:ok, owner} =
-      ConnectionOwner.start_link(transport: transport(self()), socket: :socket, max_streams: 1)
+      start_owner(transport: transport(self()), socket: :socket, max_streams: 1)
 
     assert_receive {:wire, :socket, _}, 500
     {:ok, pool} = Pool.start_link(max_connections: 1, max_streams: 1)
@@ -328,7 +338,7 @@ defmodule HTTP.HTTP2RuntimeTest do
 
   test "pool allows only one out-of-band connector per key" do
     {:ok, owner} =
-      ConnectionOwner.start_link(transport: transport(self()), socket: :socket, max_streams: 1)
+      start_owner(transport: transport(self()), socket: :socket, max_streams: 1)
 
     assert_receive {:wire, :socket, _}, 500
     {:ok, pool} = Pool.start_link(max_connections: 2)
@@ -347,12 +357,12 @@ defmodule HTTP.HTTP2RuntimeTest do
     Process.sleep(10)
     assert :ok = Pool.fail_connect(pool, :profile_key, :econnrefused)
     assert {:error, {:owner_start_failed, :econnrefused}} = Task.await(waiter)
-    assert %{connecting: 0, pending: 0} = Pool.stats(pool)[:profile_key]
+    refute Map.has_key?(Pool.stats(pool), :profile_key)
   end
 
   test "draining owners stop new reservations but free a connection slot" do
     {:ok, owner} =
-      ConnectionOwner.start_link(transport: transport(self()), socket: :socket, max_streams: 1)
+      start_owner(transport: transport(self()), socket: :socket, max_streams: 1)
 
     assert_receive {:wire, :socket, _}, 500
     {:ok, pool} = Pool.start_link(max_connections: 1)
@@ -364,7 +374,7 @@ defmodule HTTP.HTTP2RuntimeTest do
 
   test "idle owners stop after the configured timeout" do
     {:ok, owner} =
-      ConnectionOwner.start_link(transport: transport(self()), socket: :socket, max_streams: 1)
+      start_owner(transport: transport(self()), socket: :socket, max_streams: 1)
 
     assert_receive {:wire, :socket, _}, 500
     {:ok, pool} = Pool.start_link(max_connections: 1, idle_timeout: 10)

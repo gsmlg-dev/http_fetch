@@ -54,4 +54,39 @@ defmodule HTTP.StreamTest do
     assert_receive {:stream_end, ^stream}
     assert_receive {:DOWN, ^monitor_ref, :process, ^stream, :normal}
   end
+
+  test "terminal errors bypass an outstanding reader ACK and release producer" do
+    {:ok, stream} = HTTP.Stream.start_link(0)
+    send(stream, {:read_chunk, self(), :ack})
+    producer = Task.async(fn -> HTTP.Stream.chunk(stream, "pending", 1_000) end)
+    assert_receive {:stream_chunk, ^stream, "pending", _ref}
+    HTTP.Stream.error(stream, :reset)
+    assert_receive {:stream_error, ^stream, :reset}
+    assert {:error, :reset} = Task.await(producer)
+  end
+
+  test "reader death releases a blocked producer and terminates stream" do
+    {:ok, stream} = HTTP.Stream.start_link(0)
+    parent = self()
+
+    reader =
+      spawn(fn ->
+        send(stream, {:read_chunk, self(), :ack})
+
+        receive do
+          {:stream_chunk, ^stream, "pending", _ref} -> send(parent, :reader_received)
+        end
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    producer = Task.async(fn -> HTTP.Stream.chunk(stream, "pending", 1_000) end)
+    assert_receive :reader_received
+    monitor = Process.monitor(stream)
+    send(reader, :stop)
+    assert {:error, {:reader_down, :normal}} = Task.await(producer)
+    assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}
+  end
 end

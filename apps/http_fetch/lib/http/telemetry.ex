@@ -62,6 +62,22 @@ defmodule HTTP.Telemetry do
   - Measurements: `%{bytes_read: integer, duration: integer}`
   - Metadata: `%{}`
 
+  ### HTTP/2 Runtime Events
+
+  `[:http_fetch, :http2, :connection]` reports `active_streams`,
+  `buffered_receive_bytes`, `pending_upload_bytes`, `receive_budget_bytes`,
+  and `writer_batch_peak_bytes`. Metadata contains only `event` and
+  `lifecycle`; it excludes headers, bodies, URLs, scope and TLS identity.
+  Events are emitted on stream admission/release, receive admission/consumption,
+  and connection termination. Receive bytes include padding and deliveries
+  awaiting application acknowledgement; upload bytes count pending owner slices.
+  BodyBridge separately exposes its bounded source-chunk budget through status/1.
+
+  `[:http_fetch, :http2, :pool]` reports aggregate `reservations`, `waiters`,
+  `connecting`, `connections`, `draining`, and `queue_wait_us` measurements.
+  Metadata contains only finite `event` and `outcome` atoms. Pool keys, URLs,
+  request tokens, owner PIDs, and connector identities are excluded.
+
   ## Usage Example
 
       # Attach a simple logger handler
@@ -256,5 +272,21 @@ defmodule HTTP.Telemetry do
   def streaming_stop(total_bytes, duration_us) do
     measurements = %{total_bytes: total_bytes, duration: duration_us}
     :telemetry.execute([:http_fetch, :streaming, :stop], measurements, %{})
+  end
+
+  @doc false
+  def http2_connection(event, lifecycle, measurements) do
+    :telemetry.execute([:http_fetch, :http2, :connection], measurements, %{
+      event: event,
+      lifecycle: lifecycle
+    })
+  end
+
+  @doc false
+  def http2_pool(event, outcome, measurements) do
+    :telemetry.execute([:http_fetch, :http2, :pool], measurements, %{
+      event: event,
+      outcome: outcome
+    })
   end
 end
