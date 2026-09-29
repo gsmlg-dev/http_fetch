@@ -30,13 +30,18 @@ peer control-stream ownership, buffers split prefixes/frames, requires SETTINGS
 as the first frame, rejects duplicate or forbidden frames, and emits SETTINGS
 and GOAWAY events. `QuicHttp3.capabilities/0` still intentionally reports
 HTTP/3, QPACK, and WebTransport as unavailable until their session
-implementations exist.
+implementations exist. `QuicHttp3.Qpack` provides bounded prefixed-integer and
+raw-string codecs plus zero-dynamic-table literal-name field sections,
+including the never-indexed form. Huffman coding, static/dynamic table
+references, encoder/decoder stream state, and session integration remain
+pending.
 
 The next implementation slices are:
 
 1. QUIC transport capabilities required by H3: `h3` ALPN, peer-initiated
    unidirectional stream events, bounded stream operations, and QUIC DATAGRAM.
-2. QPACK static/dynamic table state and header block encoding/decoding.
+2. QPACK Huffman coding, static/dynamic table state, encoder/decoder streams,
+   and full header block interoperability.
 3. HTTP request/response sessions with flow control and cancellation.
 4. WebTransport extended CONNECT, session demultiplexing, and datagrams.
 5. Interoperability validation, production selector integration, and only then
