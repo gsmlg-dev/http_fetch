@@ -32,7 +32,7 @@ defmodule QuicHttp3.Control do
           peer_settings: [Settings.setting()] | nil,
           buffer: binary(),
           control_stream_id: non_neg_integer() | nil,
-          peer_control_stream_id: non_neg_integer() | nil,
+          peer_control_stream_id: term() | nil,
           peer_type_buffer: binary(),
           local_open?: boolean(),
           peer_open?: boolean(),
@@ -74,6 +74,12 @@ defmodule QuicHttp3.Control do
     end
   end
 
+  @doc "Return the local control stream type and SETTINGS bytes without stream-id validation."
+  @spec local_payload(t()) :: binary()
+  def local_payload(%__MODULE__{} = state) do
+    encode_type(:control) <> Frame.encode!(:settings, Settings.encode!(state.local_settings))
+  end
+
   @spec receive(t(), non_neg_integer(), binary()) :: {:ok, t(), [event()]} | {:error, term()}
   def receive(%__MODULE__{} = state, stream_id, bytes) when is_binary(bytes) do
     with :ok <- validate_peer_stream(state, stream_id),
@@ -83,6 +89,17 @@ defmodule QuicHttp3.Control do
   end
 
   def receive(_state, _stream_id, _bytes), do: {:error, :invalid_control_stream_data}
+
+  @doc "Receive bytes from an opaque peer control-stream handle."
+  @spec receive_peer(t(), term(), binary()) :: {:ok, t(), [event()]} | {:error, term()}
+  def receive_peer(%__MODULE__{} = state, stream_key, bytes) when is_binary(bytes) do
+    with :ok <- validate_peer_key(state, stream_key),
+         {:ok, state, payload} <- open_peer_stream_key(state, stream_key, bytes) do
+      parse_frames(%{state | buffer: state.buffer <> payload}, [])
+    end
+  end
+
+  def receive_peer(_state, _stream_key, _bytes), do: {:error, :invalid_control_stream_data}
 
   defp validate_peer_stream(%__MODULE__{role: role}, stream_id) do
     case Stream.classify(stream_id, role) do
@@ -96,6 +113,54 @@ defmodule QuicHttp3.Control do
 
       {:error, _reason} = error ->
         error
+    end
+  end
+
+  defp validate_peer_key(
+         %__MODULE__{peer_open?: true, peer_control_stream_id: stream_key},
+         stream_key
+       ),
+       do: :ok
+
+  defp validate_peer_key(%__MODULE__{peer_open?: true}, _stream_key),
+    do: {:error, :duplicate_peer_control_stream}
+
+  defp validate_peer_key(
+         %__MODULE__{peer_open?: false, peer_control_stream_id: existing},
+         stream_key
+       )
+       when not is_nil(existing) and existing != stream_key,
+       do: {:error, :duplicate_peer_control_stream}
+
+  defp validate_peer_key(%__MODULE__{}, stream_key) do
+    if is_nil(stream_key), do: {:error, :invalid_peer_control_stream}, else: :ok
+  end
+
+  defp open_peer_stream_key(
+         %__MODULE__{peer_open?: true, peer_control_stream_id: stream_key} = state,
+         stream_key,
+         bytes
+       ),
+       do: {:ok, state, bytes}
+
+  defp open_peer_stream_key(%__MODULE__{} = state, stream_key, bytes) do
+    data = state.peer_type_buffer <> bytes
+
+    case Stream.decode_type(data) do
+      {:ok, :control, rest} ->
+        {:ok,
+         %{
+           state
+           | peer_open?: true,
+             peer_control_stream_id: stream_key,
+             peer_type_buffer: <<>>
+         }, rest}
+
+      {:ok, _type, _rest} ->
+        {:error, :invalid_peer_control_stream_type}
+
+      :more ->
+        {:ok, %{state | peer_control_stream_id: stream_key, peer_type_buffer: data}, <<>>}
     end
   end
 

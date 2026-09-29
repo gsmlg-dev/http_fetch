@@ -3,7 +3,8 @@ defmodule QuicHttp3 do
   HTTP/3 application protocol boundary for QUIC transports.
 
   This package owns HTTP/3 semantics above QUIC. It deliberately does not
-  implement QUIC packet handling or expose the legacy `:quic_h3` API.
+  implement QUIC packet handling or expose the legacy `:quic_h3` API. The
+  transport-agnostic session is available through `QuicHttp3.Session`.
   """
 
   @http3_alpn "h3"
@@ -27,6 +28,6 @@ defmodule QuicHttp3 do
     }
   end
 
-  @doc "The HTTP/3 ALPN identifier used by the future QUIC transport adapter."
+  @doc "The HTTP/3 ALPN identifier used by the QUIC transport adapter."
   def alpn, do: @http3_alpn
 end

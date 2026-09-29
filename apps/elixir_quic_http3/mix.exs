@@ -39,7 +39,7 @@ defmodule QuicHttp3.MixProject do
   defp deps do
     [
       {:http_core, "~> 0.14.0", in_umbrella: true, hex: :http_core},
-      {:elixir_quic, "~> 0.2.2"},
+      {:elixir_quic, "~> 0.3.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
   end

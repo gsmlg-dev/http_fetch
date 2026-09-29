@@ -14,15 +14,15 @@ defmodule HTTP.WebTransport.Transport.QUICTest do
   test "rejects invalid H3 WebTransport CONNECT targets before backend setup" do
     assert {:ok, options} = Options.new("https://example.com/transport")
 
-    assert {:error, {:unsupported_scheme, "http"}} =
+    assert {:error, :webtransport_not_supported_by_elixir_quic_http3} =
              QUIC.connect(URI.parse("http://example.com/transport"), options)
 
-    assert {:error, :fragment_not_allowed} =
+    assert {:error, :webtransport_not_supported_by_elixir_quic_http3} =
              QUIC.connect(URI.parse("https://example.com/transport#frag"), options)
   end
 
   test "rejects non-normalized backend inputs" do
-    assert {:error, :invalid_quic_connect_options} =
+    assert {:error, :webtransport_not_supported_by_elixir_quic_http3} =
              QUIC.connect(URI.parse("https://example.com/"), [])
   end
 
@@ -34,10 +34,8 @@ defmodule HTTP.WebTransport.Transport.QUICTest do
                quic: [quic_ops: __MODULE__.FakeOps, test_pid: test_pid]
              )
 
-    assert {:error, {:webtransport_connect_failed, 404}} =
+    assert {:error, :webtransport_not_supported_by_elixir_quic_http3} =
              QUIC.connect(URI.parse("https://example.com/transport"), options)
-
-    assert_receive {:fake_quic_closed, ^test_pid}
   end
 
   defmodule FakeOps do

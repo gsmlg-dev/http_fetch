@@ -275,7 +275,7 @@ defmodule HTTP.WebTransport.Session do
   end
 
   def handle_info(
-        {:quic_h3, conn, {:datagram, stream_id, bytes}},
+        {:elixir_quic_http3, conn, {:datagram, stream_id, bytes}},
         %{session_ref: %{conn: conn, stream_id: stream_id}} = state
       )
       when is_binary(bytes) do
@@ -283,7 +283,7 @@ defmodule HTTP.WebTransport.Session do
   end
 
   def handle_info(
-        {:quic_h3, conn, {:stream_type_open, :bidi, stream_id, _signal_type}},
+        {:elixir_quic_http3, conn, {:stream_type_open, :bidi, stream_id, _signal_type}},
         %{session_ref: %{conn: conn, quic_conn: quic_conn}} = state
       ) do
     stream_ref = %{conn: conn, quic_conn: quic_conn, stream_id: stream_id}
@@ -294,7 +294,7 @@ defmodule HTTP.WebTransport.Session do
   end
 
   def handle_info(
-        {:quic_h3, conn, {:stream_type_open, :uni, stream_id, _stream_type}},
+        {:elixir_quic_http3, conn, {:stream_type_open, :uni, stream_id, _stream_type}},
         %{session_ref: %{conn: conn, quic_conn: quic_conn}} = state
       ) do
     stream_ref = %{conn: conn, quic_conn: quic_conn, stream_id: stream_id}
@@ -305,7 +305,7 @@ defmodule HTTP.WebTransport.Session do
   end
 
   def handle_info(
-        {:quic_h3, conn, {:stream_type_data, _kind, stream_id, bytes, fin?}},
+        {:elixir_quic_http3, conn, {:stream_type_data, _kind, stream_id, bytes, fin?}},
         %{session_ref: %{conn: conn, quic_conn: quic_conn}} = state
       )
       when is_binary(bytes) do
@@ -325,7 +325,7 @@ defmodule HTTP.WebTransport.Session do
   end
 
   def handle_info(
-        {:quic_h3, conn, {:stream_type_closed, _kind, stream_id}},
+        {:elixir_quic_http3, conn, {:stream_type_closed, _kind, stream_id}},
         %{session_ref: %{conn: conn, quic_conn: quic_conn}} = state
       ) do
     stream_ref = %{conn: conn, quic_conn: quic_conn, stream_id: stream_id}
@@ -333,18 +333,24 @@ defmodule HTTP.WebTransport.Session do
   end
 
   def handle_info(
-        {:quic_h3, conn, {:stream_type_reset, _kind, stream_id, reason}},
+        {:elixir_quic_http3, conn, {:stream_type_reset, _kind, stream_id, reason}},
         %{session_ref: %{conn: conn, quic_conn: quic_conn}} = state
       ) do
     stream_ref = %{conn: conn, quic_conn: quic_conn, stream_id: stream_id}
     {:noreply, deliver_stream(stream_ref, {:error, reason}, state)}
   end
 
-  def handle_info({:quic_h3, conn, {:closed, reason}}, %{session_ref: %{conn: conn}} = state) do
+  def handle_info(
+        {:elixir_quic_http3, conn, {:closed, reason}},
+        %{session_ref: %{conn: conn}} = state
+      ) do
     {:noreply, close_session(state, %CloseInfo{close_code: 0, reason: inspect(reason)})}
   end
 
-  def handle_info({:quic_h3, conn, {:error, reason}}, %{session_ref: %{conn: conn}} = state) do
+  def handle_info(
+        {:elixir_quic_http3, conn, {:error, reason}},
+        %{session_ref: %{conn: conn}} = state
+      ) do
     {:noreply, fail_session(state, reason)}
   end
 

@@ -38,8 +38,7 @@ defmodule HttpCore.MixProject do
   defp deps do
     [
       {:ex_ssl, "~> 0.7.2"},
-      {:elixir_quic, "~> 0.2.2"},
-      {:quic, "~> 1.6", runtime: false},
+      {:elixir_quic, "~> 0.3.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
   end
