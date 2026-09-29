@@ -1,4 +1,5 @@
 defmodule QuicHttp3.Transport do
+  # TODO(upstream): gsmlg-dev/ex_quic#5 -- expose h3 ALPN and QUIC DATAGRAM support.
   @moduledoc """
   Narrow transport contract consumed by the HTTP/3 session layer.
 
