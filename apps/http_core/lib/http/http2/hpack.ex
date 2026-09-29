@@ -3,7 +3,19 @@ defmodule HTTP.HTTP2.HPACK do
 
   import Bitwise
 
-  defstruct dynamic: [], dynamic_size: 0, table_size: 4096, max_dynamic_size: 4096
+  defstruct dynamic: [],
+            dynamic_size: 0,
+            table_size: 4096,
+            max_dynamic_size: 4096,
+            role: :encoder,
+            pending_min_size: nil,
+            pending_final_size: nil,
+            required_size_update: false,
+            required_min_size: nil,
+            max_block_bytes: 65_536,
+            max_decoded_bytes: 65_536,
+            max_field_bytes: 65_536,
+            max_fields: 256
 
   def new_encoder, do: %__MODULE__{}
 
@@ -12,7 +24,16 @@ defmodule HTTP.HTTP2.HPACK do
           dynamic: [header()],
           dynamic_size: non_neg_integer(),
           table_size: non_neg_integer(),
-          max_dynamic_size: non_neg_integer()
+          max_dynamic_size: non_neg_integer(),
+          role: :encoder | :decoder,
+          pending_min_size: non_neg_integer() | nil,
+          pending_final_size: non_neg_integer() | nil,
+          required_size_update: boolean(),
+          required_min_size: non_neg_integer() | nil,
+          max_block_bytes: pos_integer(),
+          max_decoded_bytes: pos_integer(),
+          max_field_bytes: pos_integer(),
+          max_fields: pos_integer()
         }
 
   @static_table [
@@ -343,15 +364,61 @@ defmodule HTTP.HTTP2.HPACK do
 
   def new_decoder(opts \\ []) do
     max_dynamic_size = Keyword.get(opts, :max_dynamic_size, 4096)
-    %__MODULE__{max_dynamic_size: max_dynamic_size, table_size: max_dynamic_size}
+
+    %__MODULE__{
+      role: :decoder,
+      max_dynamic_size: max_dynamic_size,
+      table_size: max_dynamic_size,
+      max_block_bytes: Keyword.get(opts, :max_block_bytes, 65_536),
+      max_decoded_bytes: Keyword.get(opts, :max_decoded_bytes, 65_536),
+      max_field_bytes: Keyword.get(opts, :max_field_bytes, 65_536),
+      max_fields: Keyword.get(opts, :max_fields, 256)
+    }
   end
 
   @doc "Sets the peer-advertised maximum dynamic table capacity and evicts as needed."
   @spec set_max_dynamic_size(t(), non_neg_integer()) :: t()
-  def set_max_dynamic_size(%__MODULE__{} = decoder, size) when is_integer(size) and size >= 0 do
+  def set_max_dynamic_size(%__MODULE__{role: :encoder} = encoder, size)
+      when is_integer(size) and size >= 0 do
+    if size == encoder.max_dynamic_size do
+      encoder
+    else
+      encoder
+      |> Map.put(:max_dynamic_size, size)
+      |> Map.put(:table_size, size)
+      |> Map.update!(:pending_min_size, fn
+        nil -> size
+        previous -> min(previous, size)
+      end)
+      |> Map.put(:pending_final_size, size)
+      |> evict_dynamic()
+    end
+  end
+
+  def set_max_dynamic_size(%__MODULE__{role: :decoder} = decoder, size)
+      when is_integer(size) and size >= 0 do
+    acknowledge_max_dynamic_size(decoder, size)
+  end
+
+  @doc "Applies an acknowledged local HEADER_TABLE_SIZE to the decoder."
+  @spec acknowledge_max_dynamic_size(t(), non_neg_integer()) :: t()
+  def acknowledge_max_dynamic_size(%__MODULE__{role: :decoder} = decoder, size)
+      when is_integer(size) and size >= 0 do
+    decreased? = size < decoder.table_size
+    required = decoder.required_size_update or decreased?
+
+    required_min_size =
+      if decreased? do
+        min(decoder.required_min_size || size, size)
+      else
+        decoder.required_min_size
+      end
+
     decoder
     |> Map.put(:max_dynamic_size, size)
     |> Map.update!(:table_size, &min(&1, size))
+    |> Map.put(:required_size_update, required)
+    |> Map.put(:required_min_size, required_min_size)
     |> evict_dynamic()
   end
 
@@ -383,7 +450,25 @@ defmodule HTTP.HTTP2.HPACK do
         {encoder, [blocks, block]}
       end)
 
-    {encoder, IO.iodata_to_binary(blocks)}
+    {encoder, updates} = pending_size_updates(encoder)
+    {encoder, IO.iodata_to_binary([updates, blocks])}
+  end
+
+  defp pending_size_updates(%__MODULE__{pending_final_size: nil} = encoder),
+    do: {encoder, <<>>}
+
+  defp pending_size_updates(%__MODULE__{} = encoder) do
+    min_size = encoder.pending_min_size
+    final_size = encoder.pending_final_size
+
+    updates =
+      if min_size == final_size do
+        encode_integer(final_size, 5, 0x20)
+      else
+        [encode_integer(min_size, 5, 0x20), encode_integer(final_size, 5, 0x20)]
+      end
+
+    {%{encoder | pending_min_size: nil, pending_final_size: nil}, updates}
   end
 
   defp encode_header(encoder, {name, value} = header, :incremental, huffman) do
@@ -446,7 +531,11 @@ defmodule HTTP.HTTP2.HPACK do
 
   @spec decode(t(), binary()) :: {:ok, t(), [header()]} | {:error, term()}
   def decode(%__MODULE__{} = decoder, block) when is_binary(block) do
-    decode_headers(decoder, block, [])
+    if byte_size(block) > decoder.max_block_bytes do
+      {:error, :hpack_block_too_large}
+    else
+      decode_headers(decoder, block, [], 0, 0, false)
+    end
   end
 
   @spec encode_integer(non_neg_integer(), 1..8, non_neg_integer()) :: binary()
@@ -492,43 +581,120 @@ defmodule HTTP.HTTP2.HPACK do
     [encode_integer(byte_size(value), 7, 0), value] |> IO.iodata_to_binary()
   end
 
-  defp decode_headers(decoder, <<>>, acc), do: {:ok, decoder, Enum.reverse(acc)}
+  defp decode_headers(%__MODULE__{required_size_update: true}, <<>>, _acc, _bytes, _count, _seen),
+    do: {:error, :missing_dynamic_table_size_update}
 
-  defp decode_headers(%__MODULE__{} = decoder, <<first, _::binary>> = block, acc) do
+  defp decode_headers(decoder, <<>>, acc, _bytes, _count, _seen),
+    do: {:ok, decoder, Enum.reverse(acc)}
+
+  defp decode_headers(
+         %__MODULE__{} = decoder,
+         <<first, _::binary>> = block,
+         acc,
+         bytes,
+         count,
+         seen_field?
+       ) do
     cond do
+      decoder.required_size_update and (first &&& 0xE0) != 0x20 ->
+        {:error, :missing_dynamic_table_size_update}
+
       (first &&& 0x80) == 0x80 ->
         with {:ok, index, rest} <- decode_integer(block, 7),
-             {:ok, header} <- lookup(decoder, index) do
-          decode_headers(decoder, rest, [header | acc])
+             {:ok, header} <- lookup(decoder, index),
+             :ok <- check_header_budget(decoder, header, bytes, count) do
+          decode_headers(
+            decoder,
+            rest,
+            [header | acc],
+            bytes + header_bytes(header),
+            count + 1,
+            true
+          )
         end
 
       (first &&& 0x40) == 0x40 ->
-        with {:ok, decoder, header, rest} <- decode_literal(decoder, block, 6, true) do
-          decode_headers(decoder, rest, [header | acc])
+        with :ok <- check_field_count(decoder, count),
+             {:ok, decoder, header, rest} <- decode_literal(decoder, block, 6, true, bytes) do
+          decode_headers(
+            decoder,
+            rest,
+            [header | acc],
+            bytes + header_bytes(header),
+            count + 1,
+            true
+          )
         end
 
       (first &&& 0x20) == 0x20 ->
-        with {:ok, size, rest} <- decode_integer(block, 5),
-             {:ok, decoder} <- resize_dynamic_table(decoder, size) do
-          decode_headers(decoder, rest, acc)
+        if seen_field? do
+          {:error, :invalid_dynamic_table_size_update}
+        else
+          with {:ok, size, rest} <- decode_integer(block, 5),
+               :ok <- check_required_size_update(decoder, size),
+               {:ok, decoder} <- resize_dynamic_table(decoder, size) do
+            decode_headers(decoder, rest, acc, bytes, count, false)
+          end
         end
 
       (first &&& 0x10) == 0x10 ->
-        with {:ok, decoder, header, rest} <- decode_literal(decoder, block, 4, false) do
-          decode_headers(decoder, rest, [header | acc])
+        with :ok <- check_field_count(decoder, count),
+             {:ok, decoder, header, rest} <- decode_literal(decoder, block, 4, false, bytes) do
+          decode_headers(
+            decoder,
+            rest,
+            [header | acc],
+            bytes + header_bytes(header),
+            count + 1,
+            true
+          )
         end
 
       true ->
-        with {:ok, decoder, header, rest} <- decode_literal(decoder, block, 4, false) do
-          decode_headers(decoder, rest, [header | acc])
+        with :ok <- check_field_count(decoder, count),
+             {:ok, decoder, header, rest} <- decode_literal(decoder, block, 4, false, bytes) do
+          decode_headers(
+            decoder,
+            rest,
+            [header | acc],
+            bytes + header_bytes(header),
+            count + 1,
+            true
+          )
         end
     end
   end
 
-  defp decode_literal(decoder, block, prefix_bits, index?) do
+  defp header_bytes({name, value}), do: byte_size(name) + byte_size(value)
+
+  defp check_field_count(decoder, count) when count >= decoder.max_fields,
+    do: {:error, :hpack_field_count_exceeded}
+
+  defp check_field_count(_decoder, _count), do: :ok
+
+  defp check_required_size_update(%__MODULE__{required_min_size: min_size}, size)
+       when is_integer(min_size) and size > min_size,
+       do: {:error, :invalid_dynamic_table_size_update}
+
+  defp check_required_size_update(_decoder, _size), do: :ok
+
+  defp check_header_budget(decoder, header, bytes, count) do
+    size = header_bytes(header)
+
+    cond do
+      count >= decoder.max_fields -> {:error, :hpack_field_count_exceeded}
+      size > decoder.max_field_bytes -> {:error, :hpack_decoded_bytes_exceeded}
+      bytes + size > decoder.max_decoded_bytes -> {:error, :hpack_decoded_bytes_exceeded}
+      true -> :ok
+    end
+  end
+
+  defp decode_literal(decoder, block, prefix_bits, index?, bytes) do
+    available = min(decoder.max_field_bytes, decoder.max_decoded_bytes - bytes)
+
     with {:ok, name_index, rest} <- decode_integer(block, prefix_bits),
-         {:ok, name, rest} <- decode_name(decoder, name_index, rest),
-         {:ok, value, rest} <- decode_string(rest) do
+         {:ok, name, rest} <- decode_name(decoder, name_index, rest, available),
+         {:ok, value, rest} <- decode_string(rest, available - byte_size(name)) do
       header = {name, value}
       decoder = if index?, do: add_dynamic(decoder, header), else: decoder
 
@@ -536,11 +702,12 @@ defmodule HTTP.HTTP2.HPACK do
     end
   end
 
-  defp decode_name(_decoder, 0, rest), do: decode_string(rest)
+  defp decode_name(_decoder, 0, rest, available), do: decode_string(rest, available)
 
-  defp decode_name(decoder, index, rest) do
+  defp decode_name(decoder, index, rest, available) do
     case lookup(decoder, index) do
-      {:ok, {name, _value}} -> {:ok, name, rest}
+      {:ok, {name, _value}} when byte_size(name) <= available -> {:ok, name, rest}
+      {:ok, _header} -> {:error, :hpack_decoded_bytes_exceeded}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -571,13 +738,17 @@ defmodule HTTP.HTTP2.HPACK do
     end
   end
 
-  defp decode_string(<<first, _::binary>> = data) do
+  defp decode_string(_data, available) when available < 0,
+    do: {:error, :hpack_decoded_bytes_exceeded}
+
+  defp decode_string(<<first, _::binary>> = data, available) do
     huffman? = (first &&& 0x80) == 0x80
 
     with {:ok, length, rest} <- decode_integer(data, 7),
+         :ok <- check_encoded_length(length, huffman?, available),
          {:ok, encoded, rest} <- take_bytes(rest, length) do
       if huffman? do
-        with {:ok, decoded} <- decode_huffman(encoded) do
+        with {:ok, decoded} <- decode_huffman(encoded, available) do
           {:ok, decoded, rest}
         end
       else
@@ -586,7 +757,12 @@ defmodule HTTP.HTTP2.HPACK do
     end
   end
 
-  defp decode_string(<<>>), do: {:error, :truncated_hpack_string}
+  defp decode_string(<<>>, _available), do: {:error, :truncated_hpack_string}
+
+  defp check_encoded_length(length, false, available) when length > available,
+    do: {:error, :hpack_decoded_bytes_exceeded}
+
+  defp check_encoded_length(_length, _huffman?, _available), do: :ok
 
   defp take_bytes(data, length) when byte_size(data) >= length do
     <<value::binary-size(^length), rest::binary>> = data
@@ -612,7 +788,13 @@ defmodule HTTP.HTTP2.HPACK do
 
   defp resize_dynamic_table(%__MODULE__{} = decoder, size)
        when size <= decoder.max_dynamic_size do
-    {:ok, evict_dynamic(%{decoder | table_size: size})}
+    {:ok,
+     evict_dynamic(%{
+       decoder
+       | table_size: size,
+         required_size_update: false,
+         required_min_size: nil
+     })}
   end
 
   defp resize_dynamic_table(_decoder, _size), do: {:error, :invalid_dynamic_table_size_update}
@@ -643,12 +825,13 @@ defmodule HTTP.HTTP2.HPACK do
     |> evict_dynamic()
   end
 
-  defp decode_huffman(data) do
+  defp decode_huffman(data, available) do
     tree = huffman_tree()
 
     data
     |> huffman_bits()
-    |> Enum.reduce_while({tree, [], 0, 0}, fn bit, {node, acc, pending_value, pending_len} ->
+    |> Enum.reduce_while({tree, [], 0, 0, 0}, fn bit,
+                                                 {node, acc, pending_value, pending_len, count} ->
       case Map.get(node, bit) do
         nil ->
           {:halt, {:error, :invalid_huffman_code}}
@@ -658,9 +841,10 @@ defmodule HTTP.HTTP2.HPACK do
           pending_len = pending_len + 1
 
           case Map.get(next, :symbol) do
-            nil -> {:cont, {next, acc, pending_value, pending_len}}
+            nil -> {:cont, {next, acc, pending_value, pending_len, count}}
             256 -> {:halt, {:error, :invalid_huffman_eos}}
-            symbol -> {:cont, {tree, [<<symbol>> | acc], 0, 0}}
+            _symbol when count >= available -> {:halt, {:error, :hpack_decoded_bytes_exceeded}}
+            symbol -> {:cont, {tree, [<<symbol>> | acc], 0, 0, count + 1}}
           end
       end
     end)
@@ -668,7 +852,7 @@ defmodule HTTP.HTTP2.HPACK do
       {:error, reason} ->
         {:error, reason}
 
-      {_node, acc, pending_value, pending_len} ->
+      {_node, acc, pending_value, pending_len, _count} ->
         if valid_huffman_padding?(pending_value, pending_len) do
           {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary()}
         else

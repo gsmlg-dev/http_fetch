@@ -34,6 +34,8 @@ defmodule HTTP.HTTP2ConnectionTest do
              Connection.update_local_settings(conn, [{1, 8192}])
 
     assert conn.local.values.header_table_size == 8192
+    assert conn.decoder.max_dynamic_size == 4096
+    {:ok, conn, []} = Connection.acknowledge_settings(conn)
     assert conn.decoder.max_dynamic_size == 8192
 
     assert {:ok, conn, [{:settings_ack, [{1, 2048}]}]} =
@@ -91,7 +93,7 @@ defmodule HTTP.HTTP2ConnectionTest do
   end
 
   test "PRIORITY_UPDATE keeps a bounded RFC 9218 field value" do
-    conn = Connection.new()
+    {:ok, _, conn} = Connection.open_stream(Connection.new())
 
     assert {:ok, conn, []} = Connection.priority_update(conn, 0, 1, "u=2, i")
     assert conn.priorities[1] == %{value: "u=2, i", rfc9218: true}

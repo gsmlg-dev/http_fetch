@@ -48,7 +48,7 @@ defmodule HTTP.HTTP2Test do
       preface_size = byte_size(preface)
       assert <<^preface::binary-size(preface_size), frames::binary>> = wire
 
-      assert {:ok, %Frame{type: :settings, stream_id: 0, payload: ""}, frames} =
+      assert {:ok, %Frame{type: :settings, stream_id: 0, payload: <<2::16, 0::32>>}, frames} =
                Frame.decode(frames)
 
       assert {:ok,

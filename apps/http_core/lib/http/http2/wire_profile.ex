@@ -65,8 +65,8 @@ defmodule HTTP.HTTP2.WireProfile do
   def native_v1 do
     %__MODULE__{
       id: "native_v1",
-      revision: 1,
-      settings: [],
+      revision: 2,
+      settings: [{2, 0}],
       connection_initial_window: 65_535,
       pseudo_headers: [":method", ":scheme", ":authority", ":path"],
       source: :native,
@@ -78,10 +78,10 @@ defmodule HTTP.HTTP2.WireProfile do
   def synthetic_test_v1 do
     %__MODULE__{
       id: "synthetic_test_v1",
-      revision: 1,
-      settings: [{4, 131_072}, {1, 8192}],
+      revision: 2,
+      settings: [{4, 131_072}, {1, 8192}, {2, 0}],
       connection_initial_window: 131_071,
-      stream_initial_window: 65_535,
+      stream_initial_window: 131_072,
       pseudo_headers: [":method", ":path", ":scheme", ":authority"],
       regular_headers: :lexicographic,
       hpack: %{
@@ -99,7 +99,7 @@ defmodule HTTP.HTTP2.WireProfile do
   def synthetic_test_v2 do
     %__MODULE__{
       id: "synthetic_test_v2",
-      revision: 1,
+      revision: 2,
       settings: [{5, 32_768}, {4, 65_535}, {2, 0}],
       connection_initial_window: 65_535,
       pseudo_headers: [":method", ":authority", ":scheme", ":path"],
@@ -143,7 +143,7 @@ defmodule HTTP.HTTP2.WireProfile do
         options = Map.put_new(options, :revision, 1)
         options = Map.put_new(options, :source, :synthetic)
         options = Map.put_new(options, :evidence, :synthetic)
-        options = Map.put_new(options, :settings, [])
+        options = Map.put_new(options, :settings, [{2, 0}])
         options = Map.put_new(options, :connection_initial_window, 65_535)
         options = Map.put_new(options, :stream_initial_window, 65_535)
 
@@ -162,7 +162,8 @@ defmodule HTTP.HTTP2.WireProfile do
          :ok <- validate_settings(p.settings),
          :ok <- validate_windows(p),
          :ok <- validate_headers(p),
-         :ok <- validate_strategies(p) do
+         :ok <- validate_strategies(p),
+         :ok <- validate_hpack(p.hpack) do
       {:ok, p}
     end
   end
@@ -212,17 +213,19 @@ defmodule HTTP.HTTP2.WireProfile do
     ordered_pseudo ++ regular
   end
 
-  defp validate_identity(%{id: id, revision: revision})
-       when is_binary(id) and id != "" and is_integer(revision) and revision > 0,
+  defp validate_identity(%{id: id, revision: revision, source: source, evidence: evidence})
+       when is_binary(id) and byte_size(id) in 1..128 and is_integer(revision) and revision > 0 and
+              ((source == :native and evidence == :engine_verified) or
+                 (source == :synthetic and evidence == :synthetic)),
        do: :ok
 
   defp validate_identity(_), do: {:error, :invalid_identity}
 
   defp validate_settings(settings) when is_list(settings) do
-    if Enum.all?(settings, fn {id, value} ->
-         is_integer(id) and id in 1..6 and is_integer(value) and value >= 0 and
-           value <= 4_294_967_295
-       end) do
+    ids = for {id, _} <- settings, do: id
+
+    if length(ids) == length(settings) and ids == Enum.uniq(ids) and
+         Enum.all?(settings, &valid_setting?/1) and {2, 0} in settings do
       :ok
     else
       {:error, :invalid_settings}
@@ -231,13 +234,32 @@ defmodule HTTP.HTTP2.WireProfile do
 
   defp validate_settings(_), do: {:error, :invalid_settings}
 
+  defp valid_setting?({id, value})
+       when is_integer(id) and id in 1..6 and is_integer(value) and value in 0..4_294_967_295 do
+    case id do
+      2 -> value == 0
+      4 -> value <= 2_147_483_647
+      5 -> value in 16_384..16_777_215
+      _ -> true
+    end
+  end
+
+  defp valid_setting?(_), do: false
+
   defp validate_windows(%{
          connection_initial_window: c,
          stream_initial_window: s,
-         receive_window_target: t
+         receive_window_target: t,
+         receive_window_threshold: threshold,
+         receive_window_increment: increment,
+         settings: settings
        })
-       when c in 65_535..2_147_483_647 and s in 0..2_147_483_647 and t in 65_535..2_147_483_647,
-       do: :ok
+       when c in 65_535..1_048_576 and s in 0..1_048_576 and t == 65_535 and
+              threshold == 32_767 and increment == 32_767 do
+    if s == settings |> Map.new() |> Map.get(4, 65_535),
+      do: :ok,
+      else: {:error, :inconsistent_stream_window}
+  end
 
   defp validate_windows(_), do: {:error, :invalid_window}
 
@@ -252,12 +274,38 @@ defmodule HTTP.HTTP2.WireProfile do
 
   defp validate_headers(_), do: {:error, :invalid_pseudo_header_order}
 
-  defp validate_strategies(%{regular_headers: r, priority: priority, push: push})
+  defp validate_strategies(%{
+         regular_headers: r,
+         priority: priority,
+         push: push,
+         padding: padding,
+         default_user_agent: user_agent,
+         max_header_fragment: header_max,
+         max_data_frame: data_max
+       })
        when r in [:input, :lexicographic, :reverse_input] and
-              priority in [:none, :legacy, :rfc9218] and push in [:disabled],
+              priority in [:none, :legacy, :rfc9218] and push == :disabled and
+              padding == :none and user_agent == :append and
+              is_integer(header_max) and header_max in 1..65_536 and
+              is_integer(data_max) and data_max in 1..16_384,
        do: :ok
 
   defp validate_strategies(_), do: {:error, :unsupported_profile_strategy}
+
+  defp validate_hpack(%{huffman: huffman, indexing: indexing, sensitive: sensitive} = hpack)
+       when huffman in [:never, :always] and indexing in [:literal, :never, :incremental] and
+              is_list(sensitive) do
+    if Enum.sort(Map.keys(hpack)) == [:huffman, :indexing, :sensitive] and
+         length(sensitive) <= 64 and
+         Enum.all?(sensitive, fn name ->
+           is_binary(name) and byte_size(name) in 1..256 and String.valid?(name) and
+             String.downcase(name) == name
+         end),
+       do: :ok,
+       else: {:error, :invalid_hpack_strategy}
+  end
+
+  defp validate_hpack(_), do: {:error, :invalid_hpack_strategy}
 
   def settings_defaults, do: @settings_defaults
 end

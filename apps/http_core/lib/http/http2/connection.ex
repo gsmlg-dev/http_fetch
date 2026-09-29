@@ -10,6 +10,7 @@ defmodule HTTP.HTTP2.Connection do
             peer: Settings.new(),
             connection_send_window: 65_535,
             connection_receive_window: 65_535,
+            connection_unacknowledged: 0,
             encoder: HPACK.new_encoder(),
             encoder_options: [],
             decoder: HPACK.new_decoder(),
@@ -56,7 +57,8 @@ defmodule HTTP.HTTP2.Connection do
           StreamState.new(id,
             send_window: c.peer.values.initial_window_size,
             receive_window: c.local.values.initial_window_size,
-            request_ref: Keyword.get(opts, :request_ref)
+            request_ref: Keyword.get(opts, :request_ref),
+            request_method: Keyword.get(opts, :request_method)
           )
 
         {:ok, stream} = StreamState.open(stream)
@@ -78,10 +80,20 @@ defmodule HTTP.HTTP2.Connection do
     do: %{c | streams: Map.put(c.streams, id, s)}
 
   def stream(%__MODULE__{} = c, id), do: Map.fetch(c.streams, id)
-  def remove_stream(%__MODULE__{} = c, id), do: %{c | streams: Map.delete(c.streams, id)}
+
+  def remove_stream(%__MODULE__{} = c, id) do
+    %{
+      c
+      | streams: Map.delete(c.streams, id),
+        committed: MapSet.delete(c.committed, id),
+        pending_headers: Map.delete(c.pending_headers, id),
+        priorities: Map.delete(c.priorities, id)
+    }
+  end
 
   def update_peer_settings(%__MODULE__{} = c, entries) do
-    with {:ok, peer, effect} <- Settings.apply_peer(c.peer, entries),
+    with :ok <- validate_peer_push(entries),
+         {:ok, peer, effect} <- Settings.apply_peer(c.peer, entries),
          {:ok, streams} <- apply_initial_delta(c.streams, effect.initial_window_delta) do
       encoder = HPACK.set_max_dynamic_size(c.encoder, peer.values.header_table_size)
 
@@ -96,16 +108,32 @@ defmodule HTTP.HTTP2.Connection do
     end
   end
 
+  defp validate_peer_push(entries) when is_list(entries) do
+    if Enum.any?(entries, fn
+         {key, 1} when key in [2, :enable_push] -> true
+         _ -> false
+       end),
+       do: {:error, :protocol_error},
+       else: :ok
+  end
+
+  defp validate_peer_push(_), do: :ok
+
   def update_local_settings(%__MODULE__{} = c, entries) do
     with {:ok, local} <- Settings.begin_local(c.local, entries),
          {:ok, payload} <- Settings.encode(entries) do
-      decoder = HPACK.set_max_dynamic_size(c.decoder, local.values.header_table_size)
-      {:ok, %{c | local: local, decoder: decoder}, [{:settings, payload}]}
+      {:ok, %{c | local: local}, [{:settings, payload}]}
     end
   end
 
-  def acknowledge_settings(%__MODULE__{} = c),
-    do: with({:ok, local} <- Settings.ack(c.local), do: {:ok, %{c | local: local}, []})
+  def acknowledge_settings(%__MODULE__{} = c) do
+    with {:ok, local} <- Settings.ack(c.local) do
+      decoder =
+        HPACK.acknowledge_max_dynamic_size(c.decoder, local.acknowledged_values.header_table_size)
+
+      {:ok, %{c | local: local, decoder: decoder}, []}
+    end
+  end
 
   def update_send_window(%__MODULE__{} = c, 0, increment),
     do: add_connection_window(c, :connection_send_window, increment)
@@ -137,7 +165,7 @@ defmodule HTTP.HTTP2.Connection do
 
   def update_receive_window(_, _, _), do: {:error, :invalid_window_update}
 
-  @doc "Consumes inbound DATA credit and returns replenishment effects."
+  @doc "Consumes inbound DATA wire credit without replenishing it."
   def receive_data(c, id, bytes, end_stream? \\ false)
 
   def receive_data(%__MODULE__{} = c, id, bytes, end_stream?)
@@ -152,18 +180,7 @@ defmodule HTTP.HTTP2.Connection do
           connection_receive_window: c.connection_receive_window - bytes
       }
 
-      if bytes == 0 do
-        {:ok, connection, []}
-      else
-        stream = %{stream | receive_window: stream.receive_window + bytes}
-
-        {:ok,
-         %{
-           connection
-           | streams: Map.put(connection.streams, id, stream),
-             connection_receive_window: connection.connection_receive_window + bytes
-         }, [{:window_update, 0, bytes}, {:window_update, id, bytes}]}
-      end
+      {:ok, %{connection | connection_unacknowledged: c.connection_unacknowledged + bytes}, []}
     else
       :error -> {:error, :unknown_stream}
       {:error, _} = error -> error
@@ -171,6 +188,29 @@ defmodule HTTP.HTTP2.Connection do
   end
 
   def receive_data(_, _, _, _), do: {:error, :invalid_data_length}
+
+  @doc "Restores receive credit after wire bytes have been consumed or safely buffered."
+  def acknowledge_data(%__MODULE__{} = c, id, bytes)
+      when is_integer(bytes) and bytes > 0 do
+    with {:ok, stream} <- Map.fetch(c.streams, id),
+         true <- bytes <= stream.unacknowledged and bytes <= c.connection_unacknowledged,
+         {:ok, stream} <- StreamState.acknowledge_data(stream, bytes),
+         true <- c.connection_receive_window + bytes <= @max_window do
+      {:ok,
+       %{
+         c
+         | streams: Map.put(c.streams, id, stream),
+           connection_receive_window: c.connection_receive_window + bytes,
+           connection_unacknowledged: c.connection_unacknowledged - bytes
+       }, [{:window_update, 0, bytes}, {:window_update, id, bytes}]}
+    else
+      :error -> {:error, :unknown_stream}
+      false -> {:error, :invalid_acknowledgement}
+      {:error, _} = error -> error
+    end
+  end
+
+  def acknowledge_data(_, _, _), do: {:error, :invalid_acknowledgement}
 
   def goaway(%__MODULE__{} = c, last_id) when is_integer(last_id) and last_id >= 0 do
     if c.goaway_last_stream_id && last_id > c.goaway_last_stream_id do
@@ -184,6 +224,22 @@ defmodule HTTP.HTTP2.Connection do
 
   @doc "Commits a complete header block as one non-interleavable effect batch."
   def commit_headers(%__MODULE__{} = c, id, headers, opts \\ []) when is_list(headers) do
+    requested_max = Keyword.get(opts, :max_frame_size, c.peer.values.max_frame_size)
+
+    if is_integer(requested_max) and requested_max > 0 do
+      commit_headers_with_max(
+        c,
+        id,
+        headers,
+        opts,
+        min(requested_max, c.peer.values.max_frame_size)
+      )
+    else
+      {:error, :invalid_frame_size}
+    end
+  end
+
+  defp commit_headers_with_max(c, id, headers, opts, max_frame_size) do
     case Map.fetch(c.streams, id) do
       :error ->
         {:error, :unknown_stream}
@@ -200,7 +256,7 @@ defmodule HTTP.HTTP2.Connection do
               id,
               block,
               Keyword.get(opts, :end_stream, false),
-              Keyword.get(opts, :max_frame_size, c.peer.values.max_frame_size)
+              max_frame_size
             )
 
           priority_effects =
@@ -262,6 +318,43 @@ defmodule HTTP.HTTP2.Connection do
     end
   end
 
+  @doc "Sends at most the currently eligible DATA prefix and returns the remainder."
+  def send_data_prefix(%__MODULE__{} = c, id, data, end_stream?, quantum)
+      when is_binary(data) and is_boolean(end_stream?) and is_integer(quantum) and quantum > 0 do
+    case Map.fetch(c.streams, id) do
+      {:ok, stream} ->
+        eligible =
+          Enum.min([
+            byte_size(data),
+            max(c.connection_send_window, 0),
+            max(stream.send_window, 0),
+            c.peer.values.max_frame_size,
+            quantum
+          ])
+
+        cond do
+          data == "" and end_stream? ->
+            with {:ok, next, effects} <- send_data(c, id, "", true),
+                 do: {:ok, next, 0, "", effects}
+
+          eligible == 0 ->
+            {:error, :flow_control_blocked}
+
+          true ->
+            <<prefix::binary-size(^eligible), remainder::binary>> = data
+
+            with {:ok, next, effects} <-
+                   send_data(c, id, prefix, end_stream? and remainder == ""),
+                 do: {:ok, next, eligible, remainder, effects}
+        end
+
+      :error ->
+        {:error, :unknown_stream}
+    end
+  end
+
+  def send_data_prefix(_, _, _, _, _), do: {:error, :invalid_data_length}
+
   def handle_priority(c, id, dependency, weight, exclusive \\ false)
 
   def handle_priority(%__MODULE__{} = c, id, dependency, weight, exclusive)
@@ -284,9 +377,17 @@ defmodule HTTP.HTTP2.Connection do
   def priority_update(%__MODULE__{} = c, frame_stream_id, target_stream_id, value)
       when frame_stream_id == 0 and target_stream_id > 0 and is_binary(value) and
              byte_size(value) in 1..256 do
-    {:ok,
-     %{c | priorities: Map.put(c.priorities, target_stream_id, %{value: value, rfc9218: true})},
-     []}
+    case Map.get(c.streams, target_stream_id) do
+      %StreamState{state: state} when state != :closed ->
+        {:ok,
+         %{
+           c
+           | priorities: Map.put(c.priorities, target_stream_id, %{value: value, rfc9218: true})
+         }, []}
+
+      _ ->
+        {:ok, c, []}
+    end
   end
 
   def priority_update(_, _, _, _), do: {:error, :invalid_priority_update}

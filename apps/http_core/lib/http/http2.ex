@@ -109,14 +109,25 @@ defmodule HTTP.HTTP2 do
   @spec request_headers(Request.t(), WireProfile.t() | map() | atom() | binary()) ::
           {:ok, list({String.t(), String.t()}), binary() | {:stream, pid()}}
   def request_headers(%Request{} = request, profile \\ WireProfile.native_v1()) do
+    request_headers(request, profile, [])
+  end
+
+  def request_headers(%Request{} = request, profile, opts) when is_list(opts) do
     {:ok, profile} = WireProfile.compile(profile)
     {headers, body} = request |> base_request_headers() |> Request.put_body_headers(request)
     body = if is_binary(body), do: IO.iodata_to_binary(body), else: body
 
     headers = maybe_add_priority_header(headers, request, profile)
 
-    {:ok, WireProfile.order_headers(profile, pseudo_headers(request), regular_headers(headers)),
-     body}
+    pseudo = pseudo_headers(request)
+    regular = regular_headers(headers)
+
+    ordered =
+      if Keyword.get(opts, :order?, true),
+        do: WireProfile.order_headers(profile, pseudo, regular),
+        else: pseudo ++ regular
+
+    {:ok, ordered, body}
   end
 
   defp maybe_add_priority_header(%Headers{} = headers, %Request{} = request, profile) do

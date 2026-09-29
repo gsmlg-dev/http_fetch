@@ -2,6 +2,7 @@ defmodule HTTP.HTTP2.Settings do
   @moduledoc "Pure, directional HTTP/2 SETTINGS state."
 
   @max_window 2_147_483_647
+  @max_pending 8
   @ids %{
     1 => :header_table_size,
     2 => :enable_push,
@@ -19,7 +20,12 @@ defmodule HTTP.HTTP2.Settings do
     max_frame_size: 16_384,
     max_header_list_size: :infinity
   }
-  defstruct values: @default, pending_ack?: false, last_entries: []
+  defstruct values: @default,
+            pending_ack?: false,
+            last_entries: [],
+            pending: [],
+            acknowledged_values: @default
+
   @type entry :: {atom() | non_neg_integer(), non_neg_integer()}
   @type t :: %__MODULE__{values: map(), pending_ack?: boolean(), last_entries: [entry()]}
 
@@ -63,13 +69,25 @@ defmodule HTTP.HTTP2.Settings do
   def apply_peer(_, _), do: {:error, :invalid_settings}
 
   def begin_local(%__MODULE__{} = state, entries) do
-    with :ok <- validate_entries(entries) do
+    with :ok <- validate_entries(entries),
+         :ok <-
+           if(length(state.pending) < @max_pending, do: :ok, else: {:error, :settings_queue_full}) do
       values = Enum.reduce(entries, state.values, &put_value/2)
-      {:ok, %{state | values: values, last_entries: entries, pending_ack?: true}}
+
+      {:ok,
+       %{
+         state
+         | values: values,
+           last_entries: entries,
+           pending_ack?: true,
+           pending: state.pending ++ [values]
+       }}
     end
   end
 
-  def ack(%__MODULE__{pending_ack?: true} = state), do: {:ok, %{state | pending_ack?: false}}
+  def ack(%__MODULE__{pending: [values | rest]} = state),
+    do: {:ok, %{state | pending_ack?: rest != [], pending: rest, acknowledged_values: values}}
+
   def ack(%__MODULE__{pending_ack?: false}), do: {:error, :unexpected_settings_ack}
   def validate(entries) when is_list(entries), do: validate_entries(entries)
   def validate(_), do: {:error, :invalid_settings}
