@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Route explicit HTTP/2 and h2c requests through supervised, profile-aware pooled
+  owners, including requests without an explicit wire profile.
+- Reclaim completed protocol streams; slice binary and streaming uploads by
+  available peer credit; bound download admission and return stream credit on
+  consumption.
+- Validate frame boundaries, response phases and lengths, HPACK table updates,
+  and peer settings; preserve typed reset/GOAWAY outcomes and original deadlines.
+- Advertise no server push in wire-profile revision 2, with cold/warm header
+  ordering applied once. Keep synthetic profiles explicitly synthetic.
+- Add redacted connection/pool telemetry and independent peer/package/soak gates.
+
+### Known limitations
+- HTTP/2 production acceptance remains in progress; see
+  `docs/http2-production-validation.md` for failing or unrun blocking gates.
+
 ## [0.14.0] - 2026-09-29
 
 ### Added

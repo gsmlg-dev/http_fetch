@@ -22,7 +22,7 @@ the root keeps runtime applications of `in_umbrella` dependencies, including
 - **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, selectable TLS for HTTPS, and Unix domain sockets
 - **Unix Domain Sockets**: HTTP over Unix sockets for Docker daemon, systemd, and other local services
 - **Form data support**: HTTP.FormData for multipart/form-data and file uploads
-- **Streaming request bodies**: Fetch-style `duplex: "half"` uploads over HTTP/1.1
+- **Streaming request bodies**: Fetch-style `duplex: "half"` uploads over HTTP/1.1 and HTTP/2
 - **Type-safe configuration**: HTTP.FetchOptions for structured request configuration
 - **Promise-based**: Async operations with chaining support
 - **Request cancellation**: AbortController support for cancelling requests
@@ -32,15 +32,19 @@ the root keeps runtime applications of `in_umbrella` dependencies, including
   ordered SETTINGS and header serialization; use `http2_profile` only with an
   explicit HTTP/2 or h2c request.
 
-HTTP/2 profile support currently covers validated serialization, bounded wire
-observation, bounded provenance manifests, profile-keyed h2c/HTTPS h2
-connection reuse with overlapping streams, flow-controlled upload recovery,
-and peer-limited DATA framing. Legacy PRIORITY, RFC 9218 Priority headers, and bounded
-PRIORITY_UPDATE input are supported according to the selected profile. It does
-not claim browser fingerprint equivalence. Available profile IDs are
-`native_v1`, `synthetic_test_v1`, and `synthetic_test_v2`. Use
-`HTTP.HTTP2.ProfileCapture.build_manifest/2` for explicit capture provenance;
-real browser samples are not bundled.
+Explicit HTTP/2 and h2c prior knowledge use supervised pooled connections with
+multiplexing, flow-controlled binary/streaming uploads and bounded download
+buffers. The default HTTP version remains HTTP/1. Profiles control ordered
+SETTINGS, header serialization and supported priority behavior on cold and warm
+connections. Available IDs are `native_v1`, `synthetic_test_v1`, and
+`synthetic_test_v2`; revision 2 explicitly disables server push. Synthetic
+profiles do not claim browser fingerprint equivalence. Use
+`HTTP.HTTP2.ProfileCapture.build_manifest/2` for capture provenance.
+
+Production acceptance is still in progress. See
+[the validation record](docs/http2-production-validation.md) for executed gates,
+resource budgets and remaining blockers; implementation coverage alone is not a
+production-readiness claim.
 
 ## Browser Fetch API Compatibility
 
