@@ -16,11 +16,19 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
       Peer.start(self(), fn socket ->
         {id, true} = Peer.request(socket)
         :ok = :gen_tcp.send(socket, Peer.frame(1, 4, id, <<0x88>>))
+
+        receive do
+          :reset_after_response -> :ok
+        after
+          2_000 -> raise "response delivery barrier timed out"
+        end
+
         :ok = :gen_tcp.send(socket, Peer.frame(3, 0, id, <<7::32>>))
       end)
 
     response = fetch(url)
     assert response.status == 200
+    send(peer, :reset_after_response)
 
     assert_raise RuntimeError, ~r/stream read failed: \{:stream_reset, :refused_stream\}/, fn ->
       HTTP.Response.read_all(response)
