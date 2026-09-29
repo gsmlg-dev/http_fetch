@@ -213,7 +213,8 @@ defmodule HTTP.HTTP2.WireProfile do
   end
 
   defp validate_identity(%{id: id, revision: revision})
-       when is_binary(id) and id != "" and is_integer(revision) and revision > 0, do: :ok
+       when is_binary(id) and id != "" and is_integer(revision) and revision > 0,
+       do: :ok
 
   defp validate_identity(_), do: {:error, :invalid_identity}
 

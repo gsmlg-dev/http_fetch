@@ -83,12 +83,14 @@ defmodule HTTP.HTTP2.StreamState do
   def closed?(_), do: false
 
   defp can_send_headers(%__MODULE__{state: state, headers?: false})
-       when state in [:idle, :open, :half_closed_remote], do: :ok
+       when state in [:idle, :open, :half_closed_remote],
+       do: :ok
 
   defp can_send_headers(_), do: {:error, :invalid_headers_transition}
 
   defp can_receive_headers(%__MODULE__{state: state, headers?: false})
-       when state in [:idle, :open, :half_closed_local], do: :ok
+       when state in [:idle, :open, :half_closed_local],
+       do: :ok
 
   defp can_receive_headers(_), do: {:error, :invalid_headers_transition}
 
