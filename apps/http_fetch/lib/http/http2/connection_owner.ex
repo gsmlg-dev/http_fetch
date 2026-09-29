@@ -584,11 +584,10 @@ defmodule HTTP.HTTP2.ConnectionOwner do
           {:ok, %{state | bytes: max(state.bytes - bytes, 0)}}
 
         {:error, :closed} when kind == :control ->
-          if can_drain_closed_writer?(state) do
-            {:ok, drain_closed_writer(state)}
-          else
-            fail_write(state, :closed)
-          end
+          # A closed write side does not invalidate bytes already buffered for
+          # parsing. Retire the connection and let END_STREAM/EOF decide each
+          # request; the drain timer and original request deadlines still apply.
+          {:ok, drain_closed_writer(state)}
 
         {:error, :einval} when kind == :control ->
           # OTP TCP/TLS senders can report einval while their close notification is
@@ -596,7 +595,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
           # response is protocol-complete; required writes and partial responses
           # must still fail. The connection is never reused after this failure.
           if state.transport in [HTTP.Transport.TCP, HTTP.Transport.SSL] and
-               can_drain_closed_writer?(state) do
+               responses_complete?(state) do
             {:ok, drain_closed_writer(state)}
           else
             fail_write(state, :einval)
@@ -608,12 +607,11 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     end
   end
 
-  defp can_drain_closed_writer?(state) do
-    state.transport == HTTP.Transport.ExSSL or
-      (map_size(state.streams) > 0 and
-         Enum.all?(state.connection.streams, fn {_, stream} ->
-           stream.response_phase == :complete
-         end))
+  defp responses_complete?(state) do
+    map_size(state.streams) > 0 and
+      Enum.all?(state.connection.streams, fn {_, stream} ->
+        stream.response_phase == :complete
+      end)
   end
 
   defp fail_write(state, reason) do
@@ -623,8 +621,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     {:error, reason, %{state | lifecycle: :closed, close_reason: reason}}
   end
 
-  # ex_ssl rejects writes after authenticated close_notify while retaining unread
-  # plaintext. Stop admission/uploads, then let the parser and original request
+  # Transports can reject writes while complete or partial response bytes remain
+  # buffered (including ex_ssl after close_notify). Stop admission/uploads, then
+  # let the parser and original request
   # deadlines decide completion; a failed control write is never END_STREAM.
   defp drain_closed_writer(state) do
     if state.pool, do: GenServer.cast(state.pool, {:owner_draining, state.pool_key, self()})

@@ -100,6 +100,30 @@ defmodule HTTP.HTTP2.ProductionBoundaryTest do
     refute_receive {:http2, ^first, _}
   end
 
+  test "closed optional SETTINGS ACK does not discard complete buffered response frames" do
+    failure = :atomics.new(1, [])
+
+    transport = %{
+      send: fn _, _ ->
+        if :atomics.get(failure, 1) == 0, do: :ok, else: {:error, :closed}
+      end
+    }
+
+    {:ok, owner} = ConnectionOwner.start_link(transport: transport, activate?: false)
+    assert {:ok, %{id: id}} = ConnectionOwner.open_stream(owner, [{":method", "GET"}])
+    :atomics.put(failure, 1, 1)
+    bytes = wire(4, 0, 0, <<>>) <> wire(1, 4, id, <<0x88>>) <> wire(0, 1, id, "complete")
+    assert :ok = ConnectionOwner.receive_bytes(owner, bytes)
+    assert_receive {:http2, ^id, {:http2, :headers, _, _}}
+    assert_receive {:http2, ^id, {:http2, :data, "complete", 1}}
+    assert ConnectionOwner.status(owner).lifecycle == :draining
+
+    assert {:error, :draining} =
+             ConnectionOwner.open_stream(owner, [{":method", "GET"}])
+
+    assert :ok = ConnectionOwner.release_stream(owner, id)
+  end
+
   test "padded DATA and priority HEADERS deliver application bytes only" do
     owner = owner()
     ready(owner)
