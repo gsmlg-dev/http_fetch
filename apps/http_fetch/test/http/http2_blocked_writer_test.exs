@@ -36,6 +36,8 @@ defmodule HTTP.HTTP2BlockedWriterTest do
 
     on_exit(fn -> send(peer, :close) end)
 
+    baseline_tasks = Task.Supervisor.children(:http_fetch_task_supervisor)
+
     body = :binary.copy("x", 64 * 1024 * 1024)
     started = System.monotonic_time(:millisecond)
 
@@ -64,6 +66,13 @@ defmodule HTTP.HTTP2BlockedWriterTest do
     assert {:error, {:transport_error, :timeout}} = HTTP.Promise.await(promise)
     assert System.monotonic_time(:millisecond) - started < 5_000
     assert_receive {:DOWN, ^monitor, :process, ^owner, _reason}, 2_000
+
+    remaining_tasks = Task.Supervisor.children(:http_fetch_task_supervisor) -- baseline_tasks
+
+    Enum.each(remaining_tasks, fn pid ->
+      task_monitor = Process.monitor(pid)
+      assert_receive {:DOWN, ^task_monitor, :process, ^pid, _reason}, 2_000
+    end)
 
     refute Enum.any?(Pool.stats(:http_fetch_http2_pool), fn {key, _} ->
              key.port == port

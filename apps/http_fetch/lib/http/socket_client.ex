@@ -406,37 +406,44 @@ defmodule HTTP.SocketClient do
          :ok <- transfer_http2_socket(transport, socket, owner),
          :ok <- ConnectionOwner.activate(owner),
          {:ok, pool, reservation, key} <-
-           register_http2_owner(request, profile, owner, claim, deadline_at),
-         {:ok, bridge} <- maybe_start_http2_bridge(body, owner),
-         {:ok, %{id: id}} <-
-           ConnectionOwner.open_stream(owner, headers,
-             subscriber: self(),
-             body_bridge: bridge,
-             end_stream: body == ""
-           ),
-         :ok <- send_http2_body(owner, id, body, bridge) do
-      monitor = Process.monitor(owner)
+           register_http2_owner(request, profile, owner, claim, deadline_at) do
+      case start_http2_stream(owner, headers, body) do
+        {:ok, id, bridge} ->
+          monitor = Process.monitor(owner)
 
-      await_http2_response(%{
-        parent: parent,
-        ref: ref,
-        request: request,
-        owner: owner,
-        monitor: monitor,
-        stream_id: id,
-        deadline_at: deadline_at,
-        redirects: redirects,
-        redirected?: redirected?,
-        unix_socket_path: unix_socket_path,
-        mode: nil,
-        delivery: nil,
-        response_sent?: false,
-        body_bridge: bridge,
-        pool: pool,
-        reservation: reservation,
-        pool_key: key
-      })
+          await_http2_response(%{
+            parent: parent,
+            ref: ref,
+            request: request,
+            owner: owner,
+            monitor: monitor,
+            stream_id: id,
+            deadline_at: deadline_at,
+            redirects: redirects,
+            redirected?: redirected?,
+            unix_socket_path: unix_socket_path,
+            mode: nil,
+            delivery: nil,
+            response_sent?: false,
+            body_bridge: bridge,
+            pool: pool,
+            reservation: reservation,
+            pool_key: key
+          })
+
+        {:error, reason} ->
+          if is_pid(pool) and is_reference(reservation),
+            do: safe_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
+
+          if not is_pid(pool),
+            do: safe_http2_cleanup(fn -> GenServer.stop(owner, :normal) end)
+
+          send_error(parent, ref, reason)
+      end
     else
+      {:error, reason, :registered} ->
+        send_error(parent, ref, reason)
+
       {:error, reason} ->
         fail_http2_connect(claim, reason)
         transport.close(socket)
@@ -457,37 +464,32 @@ defmodule HTTP.SocketClient do
 
     profile = Keyword.get(request.transport_options, :http2_profile, :native_v1)
 
-    with {:ok, headers, body} <- HTTP.HTTP2.request_headers(request, profile, order?: false),
-         {:ok, bridge} <- maybe_start_http2_bridge(body, owner),
-         {:ok, %{id: id}} <-
-           ConnectionOwner.open_stream(owner, headers,
-             subscriber: self(),
-             body_bridge: bridge,
-             end_stream: body == ""
-           ),
-         :ok <- send_http2_body(owner, id, body, bridge) do
-      monitor = Process.monitor(owner)
+    {:ok, headers, body} = HTTP.HTTP2.request_headers(request, profile, order?: false)
 
-      await_http2_response(%{
-        parent: parent,
-        ref: ref,
-        request: request,
-        owner: owner,
-        monitor: monitor,
-        stream_id: id,
-        deadline_at: deadline_at,
-        redirects: redirects,
-        redirected?: redirected?,
-        unix_socket_path: unix_socket_path,
-        mode: nil,
-        delivery: nil,
-        response_sent?: false,
-        body_bridge: bridge,
-        pool: pool,
-        reservation: reservation,
-        pool_key: key
-      })
-    else
+    case start_http2_stream(owner, headers, body) do
+      {:ok, id, bridge} ->
+        monitor = Process.monitor(owner)
+
+        await_http2_response(%{
+          parent: parent,
+          ref: ref,
+          request: request,
+          owner: owner,
+          monitor: monitor,
+          stream_id: id,
+          deadline_at: deadline_at,
+          redirects: redirects,
+          redirected?: redirected?,
+          unix_socket_path: unix_socket_path,
+          mode: nil,
+          delivery: nil,
+          response_sent?: false,
+          body_bridge: bridge,
+          pool: pool,
+          reservation: reservation,
+          pool_key: key
+        })
+
       {:error, reason} ->
         _ = Pool.release(pool, key, reservation)
         send_error(parent, ref, reason)
@@ -503,13 +505,18 @@ defmodule HTTP.SocketClient do
 
       with pool when is_pid(pool) <- pool,
            {:ok, key} <- pool_key_for_registration(request, profile, claim),
-           :ok <-
-             Pool.register(pool, key, owner,
-               connecting?: is_tuple(claim),
-               max_streams: 0
-             ),
-           {:ok, ^owner, reservation} <- await_http2_reservation(pool, key, deadline_at) do
-        {:ok, pool, reservation, key}
+           :ok <- Pool.register(pool, key, owner, connecting?: is_tuple(claim), max_streams: 0) do
+        case await_http2_reservation(pool, key, deadline_at) do
+          {:ok, ^owner, reservation} ->
+            {:ok, pool, reservation, key}
+
+          {:ok, _other_owner, reservation} ->
+            _ = Pool.release(pool, key, reservation)
+            {:error, :owner_mismatch, :registered}
+
+          {:error, reason} ->
+            {:error, reason, :registered}
+        end
       else
         {:error, reason} -> {:error, reason}
         _ -> {:ok, nil, nil, nil}
@@ -534,7 +541,7 @@ defmodule HTTP.SocketClient do
     do: transport.controlling_process(socket, owner)
 
   defp maybe_start_http2_bridge({:stream, stream}, owner),
-    do: BodyBridge.start_link(stream, owner)
+    do: with({:ok, bridge} <- BodyBridge.start_link(stream, owner), do: {:ok, bridge, nil})
 
   defp maybe_start_http2_bridge(body, owner) when is_binary(body) and byte_size(body) > 0 do
     chunks =
@@ -548,11 +555,69 @@ defmodule HTTP.SocketClient do
           {:binary.copy(chunk), rest}
       end)
 
-    with {:ok, stream} <- HTTP.Stream.from_enumerable(chunks),
-         do: BodyBridge.start_link(stream, owner)
+    with {:ok, stream} <- HTTP.Stream.from_enumerable(chunks) do
+      case BodyBridge.start_link(stream, owner) do
+        {:ok, bridge} ->
+          {:ok, bridge, stream}
+
+        {:error, reason} ->
+          stop_internal_http2_stream(stream)
+          {:error, reason}
+      end
+    end
   end
 
-  defp maybe_start_http2_bridge(_body, _owner), do: {:ok, nil}
+  defp maybe_start_http2_bridge(_body, _owner), do: {:ok, nil, nil}
+
+  defp start_http2_stream(owner, headers, body) do
+    with {:ok, bridge, internal_stream} <- maybe_start_http2_bridge(body, owner) do
+      opened =
+        try do
+          ConnectionOwner.open_stream(owner, headers,
+            subscriber: self(),
+            body_bridge: bridge,
+            end_stream: body == ""
+          )
+        catch
+          :exit, _ -> {:error, :owner_closed}
+        end
+
+      case opened do
+        {:ok, %{id: id}} ->
+          sent =
+            try do
+              send_http2_body(owner, id, body, bridge)
+            catch
+              :exit, _ -> {:error, :body_bridge_down}
+            end
+
+          case sent do
+            :ok ->
+              {:ok, id, bridge}
+
+            {:error, reason} ->
+              discard_http2_bridge(bridge, internal_stream)
+              safe_http2_cleanup(fn -> ConnectionOwner.release_stream(owner, id) end)
+              {:error, reason}
+          end
+
+        {:error, reason} ->
+          discard_http2_bridge(bridge, internal_stream)
+          {:error, reason}
+      end
+    end
+  end
+
+  defp discard_http2_bridge(bridge, internal_stream) do
+    if is_pid(bridge), do: safe_http2_cleanup(fn -> BodyBridge.discard(bridge) end)
+    if is_pid(internal_stream), do: stop_internal_http2_stream(internal_stream)
+    :ok
+  end
+
+  defp stop_internal_http2_stream(stream) do
+    Process.unlink(stream)
+    Process.exit(stream, :shutdown)
+  end
 
   defp send_http2_body(_owner, _id, "", _bridge), do: :ok
 

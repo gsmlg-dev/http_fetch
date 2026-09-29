@@ -21,6 +21,7 @@ defmodule HTTP.HTTP2.BodyBridge do
 
   def ack(bridge, ref) when is_pid(bridge), do: GenServer.call(bridge, {:ack, ref})
   def cancel(bridge), do: GenServer.call(bridge, :cancel)
+  def discard(bridge), do: GenServer.call(bridge, :discard)
   def early_response(bridge), do: GenServer.call(bridge, :early_response)
   def status(bridge), do: GenServer.call(bridge, :status)
 
@@ -65,6 +66,9 @@ defmodule HTTP.HTTP2.BodyBridge do
   def handle_call({:ack, _ref}, _from, state), do: {:reply, {:error, :unknown_ack}, state}
 
   def handle_call(:cancel, _from, state), do: {:reply, :ok, stop_stream(state, :cancelled)}
+
+  def handle_call(:discard, _from, state),
+    do: {:stop, :normal, :ok, stop_stream(state, :cancelled, false)}
 
   def handle_call(:early_response, _from, state),
     do: {:reply, :ok, stop_stream(state, :early_response, false)}
