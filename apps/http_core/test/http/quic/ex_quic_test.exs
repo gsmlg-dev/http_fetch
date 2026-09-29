@@ -167,7 +167,7 @@ defmodule HTTP.QUIC.ExQuicTest do
       refute Enum.any?(imports, fn {module, function, _arity} ->
                module in [:quic, :quic_h3] or
                  (module == :sys and function == :get_state) or
-                 module in [QUIC.Connection, QUIC.Endpoint]
+                 module in [Quic.Connection, Quic.Endpoint]
              end)
     end
   end

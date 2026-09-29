@@ -1,15 +1,17 @@
 alias HTTP.QUIC.ExQuic, as: Adapter
 running = Enum.map(Application.started_applications(), &elem(&1, 0))
 
-for app <- [:http_core, :ex_quic, :ex_ssl, :crypto, :public_key, :ssl] do
+for app <- [:http_core, :elixir_quic, :ex_ssl, :crypto, :public_key, :ssl] do
   unless app in running, do: raise("runtime application missing: #{app}")
 end
 
-for app <- [:ex_quic, :ex_ssl] do
+for app <- [:elixir_quic, :ex_ssl] do
   unless app in Application.spec(:http_core, :applications), do: raise("http_core missing #{app}")
 end
 
-unless :ex_ssl in Application.spec(:ex_quic, :applications), do: raise("ex_quic missing ex_ssl")
+unless :ex_ssl in Application.spec(:elixir_quic, :applications),
+  do: raise("elixir_quic missing ex_ssl")
+
 false = :quic in running
 false = :quic_h3 in running
 true = Code.ensure_loaded?(SSL.QUIC)
@@ -33,9 +35,9 @@ end
 IO.inspect(
   %{
     ex_ssl: Application.spec(:ex_ssl, :vsn),
-    ex_quic: Application.spec(:ex_quic, :vsn),
+    elixir_quic: Application.spec(:elixir_quic, :vsn),
     ssl_module: :code.which(SSL.QUIC),
-    quic_module: :code.which(QUIC)
+    quic_module: :code.which(Quic)
   },
   label: "PHASE1_STARTUP_PASS"
 )

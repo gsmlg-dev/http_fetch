@@ -5,27 +5,27 @@ specification. This adapter does not implement HTTP/3, QPACK or WebTransport.
 
 ## Authority and source combination
 
-- ex_quic G-T: [`5f1b8a13b6be8cd38db0fc62b8490b3f1fc3f8bb`](https://github.com/gsmlg-dev/ex_quic/tree/5f1b8a13b6be8cd38db0fc62b8490b3f1fc3f8bb),
-  [consumer contract](https://github.com/gsmlg-dev/ex_quic/blob/5f1b8a13b6be8cd38db0fc62b8490b3f1fc3f8bb/docs/consumer-contract.md),
-  [I/O contract](https://github.com/gsmlg-dev/ex_quic/blob/5f1b8a13b6be8cd38db0fc62b8490b3f1fc3f8bb/docs/io-contract.md),
-  [acceptance](https://github.com/gsmlg-dev/ex_quic/blob/5f1b8a13b6be8cd38db0fc62b8490b3f1fc3f8bb/docs/phase1-acceptance.md).
-- ex_ssl G-S: [`f1327e0bb7fb2093b8dc2b07e72b26233a739963`](https://github.com/gsmlg-dev/ex_ssl/tree/f1327e0bb7fb2093b8dc2b07e72b26233a739963),
-  [TLS interface](https://github.com/gsmlg-dev/ex_ssl/blob/f1327e0bb7fb2093b8dc2b07e72b26233a739963/docs/QUIC_TLS_INTERFACE.md),
-  [acceptance](https://github.com/gsmlg-dev/ex_ssl/blob/f1327e0bb7fb2093b8dc2b07e72b26233a739963/docs/phase1-acceptance.md).
+- ex_quic G-T: [`c9ad458add5a496949bd1c89b50128c8ab777da9`](https://github.com/gsmlg-dev/ex_quic/tree/c9ad458add5a496949bd1c89b50128c8ab777da9),
+  [consumer contract](https://github.com/gsmlg-dev/ex_quic/blob/c9ad458add5a496949bd1c89b50128c8ab777da9/docs/consumer-contract.md),
+  [I/O contract](https://github.com/gsmlg-dev/ex_quic/blob/c9ad458add5a496949bd1c89b50128c8ab777da9/docs/io-contract.md),
+  [acceptance](https://github.com/gsmlg-dev/ex_quic/blob/c9ad458add5a496949bd1c89b50128c8ab777da9/docs/phase1-acceptance.md).
+- ex_ssl G-S: [`fb47051355c9d0a29caee046fa060a745ad0ce5b`](https://github.com/gsmlg-dev/ex_ssl/tree/fb47051355c9d0a29caee046fa060a745ad0ce5b),
+  [TLS interface](https://github.com/gsmlg-dev/ex_ssl/blob/fb47051355c9d0a29caee046fa060a745ad0ce5b/docs/QUIC_TLS_INTERFACE.md),
+  [acceptance](https://github.com/gsmlg-dev/ex_ssl/blob/fb47051355c9d0a29caee046fa060a745ad0ce5b/docs/phase1-acceptance.md).
 - Optional joint fixture only: Abyss G-A
   [`50e121fce66daeb9cb25a2f5dc93050ca37efc5d`](https://github.com/gsmlg-dev/abyss/tree/50e121fce66daeb9cb25a2f5dc93050ca37efc5d),
   [public service](https://github.com/gsmlg-dev/abyss/blob/50e121fce66daeb9cb25a2f5dc93050ca37efc5d/docs/quic-service.md).
   Abyss is not a production dependency.
 
-Both direct http_core and transitive ex_quic declarations use the exact same
-ex_ssl Git URL and SHA. No override hides a conflicting requirement. The pinned
-ex_ssl project version is 0.7.1; the source SHA, rather than that version string,
-identifies G-S. The ex_quic pin identifies v0.2.1. These source dependencies are
-not a claim that a new http_core Hex package can be published unchanged.
+Runtime dependencies are Hex `elixir_quic` 0.2.2 (OTP application
+`:elixir_quic`, public facade `Quic`) and Hex `ex_ssl` 0.7.2. The upstream
+engine requires `ex_ssl == 0.7.2`, compatible with http_core's `~> 0.7.2`.
+`mix.lock` records both package checksums. The SHAs above identify documentation
+and fixture provenance, not runtime Git dependencies. No override is used.
 
 ## Adapter mapping
 
-`HTTP.QUIC.ExQuic` is internal (`@moduledoc false`). Its normal driver is `QUIC`;
+`HTTP.QUIC.ExQuic` is internal (`@moduledoc false`). Its normal driver is `Quic`;
 the final optional driver argument is a strict contract-test seam. No production
 HTTP route selects it. Neither existing `HTTP.Transport` (one TCP/TLS socket)
 nor `HTTP.WebTransport.Transport` (HTTP/3 application sessions and datagrams)
@@ -33,18 +33,18 @@ represents this raw stream interface correctly.
 
 | Consumer call | Frozen upstream operation / local responsibility |
 | --- | --- |
-| `client(host, tls, endpoint_options)` | Normalize credentials/options, then `QUIC.client(tls: normalized, ...)`; default owner remains the calling process |
-| `local(endpoint)` | `QUIC.local/1` |
-| `connect(endpoint, remote, options)` | `QUIC.connect/3`; remote is an IP/port, DNS resolution is the caller's responsibility |
+| `client(host, tls, endpoint_options)` | Normalize credentials/options, then `Quic.client(tls: normalized, ...)`; default owner remains the calling process |
+| `local(endpoint)` | `Quic.local/1` |
+| `connect(endpoint, remote, options)` | `Quic.connect/3`; remote is an IP/port, DNS resolution is the caller's responsibility |
 | `attach`, `ready`, `info` | Same public upstream operations; readiness remains distinct from HTTP/session success |
-| `open_stream` | `QUIC.open_stream/3`, bidi or uni; retains opaque handles unchanged |
-| `send_stream` | `QUIC.send_stream/4`; binary, at most 16 KiB; returns admission reference, never a delivery receipt |
-| `read` | `QUIC.read/3`; explicit positive limit at most 16 KiB |
-| `events` | `QUIC.events/3`; positive limit at most 128, default 32 |
+| `open_stream` | `Quic.open_stream/3`, bidi or uni; retains opaque handles unchanged |
+| `send_stream` | `Quic.send_stream/4`; binary, at most 16 KiB; returns admission reference, never a delivery receipt |
+| `read` | `Quic.read/3`; explicit positive limit at most 16 KiB |
+| `events` | `Quic.events/3`; positive limit at most 128, default 32 |
 | `reset_stream`, `stop_stream` | Same public operations; one send/receive half, not the connection |
-| `close` | `QUIC.close/4`; preserves application code, opaque reason and terminal errors |
-| `operation_status` | `QUIC.operation_status/2`; connection or endpoint plus the original operation reference |
-| `capabilities` | `QUIC.capabilities/0`, including `http3: false` |
+| `close` | `Quic.close/4`; preserves application code, opaque reason and terminal errors |
+| `operation_status` | `Quic.operation_status/2`; connection or endpoint plus the original operation reference |
+| `capabilities` | `Quic.capabilities/0`, including `http3: false` |
 | `stop_endpoint` | Standard bounded OTP endpoint shutdown; distinct from stream cancellation |
 | `normalize_message` | Accepts only ready/closed notifications for the exact connection handle, including its generation; unrelated/late generations return `:unknown` |
 

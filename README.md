@@ -168,7 +168,7 @@ configuration. The backend is captured when the request/client is created and
 retained through redirects and EventSource reconnects; runtime configuration
 changes affect new operations. Invalid selections fail explicitly.
 
-`http_core` declares `ex_ssl ~> 0.5.0` as a transitive runtime dependency.
+`http_core` declares `ex_ssl ~> 0.7.2` as a transitive runtime dependency.
 Consumers do not need to add it separately. `ssl: [...]` supplies TLS settings
 to the selected backend. The `ex_ssl` backend uses its own `SSL` protocol engine
 and requires peer verification. TLS 1.3 is the default; verified TLS 1.2 is

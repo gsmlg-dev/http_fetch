@@ -11,8 +11,8 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$work_dir/consumer" "$work_dir/http_core"
-# A standalone source artifact: Git dependencies are intentionally not a Hex
-# publication. Do not reuse the umbrella build, lockfile or adjacent repositories.
+# Resolve published packages in an isolated consumer. Do not reuse the umbrella
+# build, lockfile or adjacent repositories.
 cp "$repo_root/apps/http_core/mix.exs" "$work_dir/http_core/"
 cp -R "$repo_root/apps/http_core/lib" "$work_dir/http_core/"
 cp "$repo_root/scripts/phase1_release_check.exs" "$work_dir/consumer/check.exs"
@@ -31,9 +31,12 @@ mix deps.tree --only runtime
 mix compile --warnings-as-errors
 mix run -e '
 lock = Mix.Dep.Lock.read()
-{:git, _, "f1327e0bb7fb2093b8dc2b07e72b26233a739963", _} = lock[:ex_ssl]
-{:git, _, "5f1b8a13b6be8cd38db0fc62b8490b3f1fc3f8bb", _} = lock[:ex_quic]
-[:ex_ssl] = for dep <- Mix.Dep.cached(), dep.app == :ex_ssl, do: dep.app
+{:hex, :ex_ssl, "0.7.2", "cba8ff536d7571537e75d112d2712ba49b5b406bc475acc1dda253b513229ab3", _, _, "hexpm", "f0f9532a6ac8b2dcb701b491394705df8f10c31f63fc7e5aad157eebb909aecb"} = lock[:ex_ssl]
+{:hex, :elixir_quic, "0.2.2", "8dd7017d98d76c2bf0b875859d015d6694cc8206bc246dc423c7b77b5333425b", _, _, "hexpm", "2c73402421edf4156db843bbf11fe26aa5cd78eb1ae7acac863ed41fa47e8c74"} = lock[:elixir_quic]
+for app <- [:ex_ssl, :elixir_quic] do
+  [dep] = for dependency <- Mix.Dep.cached(), dependency.app == app, do: dependency
+  true = dep.scm == Hex.SCM
+end
 Code.eval_file("check.exs")
 '
 mix release --path "$work_dir/release"

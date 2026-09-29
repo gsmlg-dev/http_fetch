@@ -12,7 +12,7 @@ defmodule HTTP.QUIC.IntegrationTest do
 
   @moduletag skip: System.get_env("HTTP_QUIC_PHASE1_REAL") != "1"
   test "adapter carries bounded raw streams over a standalone ex_quic endpoint" do
-    {:ok, server} = QUIC.listen(tls: server_tls(), streams: stream_limits())
+    {:ok, server} = Quic.listen(tls: server_tls(), streams: stream_limits())
     on_exit(fn -> stop(server) end)
 
     {:ok, client} = Adapter.client("localhost", client_tls(), streams: stream_limits())
@@ -110,7 +110,7 @@ defmodule HTTP.QUIC.IntegrationTest do
          [cacertfile: Path.join(@fixtures, "localhost-ca.pem"), alpn: ["ex-quic-phase1-wrong"]]}
       ],
       fn {scenario, tls} ->
-        {:ok, server} = QUIC.listen(tls: server_tls(), streams: stream_limits())
+        {:ok, server} = Quic.listen(tls: server_tls(), streams: stream_limits())
         on_exit(fn -> stop(server) end)
         {:ok, client} = Adapter.client("localhost", tls, streams: stream_limits())
         on_exit(fn -> stop(client) end)
@@ -128,7 +128,7 @@ defmodule HTTP.QUIC.IntegrationTest do
   end
 
   test "consumer death removes its endpoint and invalidates the connection handle" do
-    {:ok, server} = QUIC.listen(tls: server_tls(), streams: stream_limits())
+    {:ok, server} = Quic.listen(tls: server_tls(), streams: stream_limits())
     on_exit(fn -> stop(server) end)
     remote = Adapter.local(server)
     parent = self()
@@ -162,7 +162,7 @@ defmodule HTTP.QUIC.IntegrationTest do
   defp accept_and_attach(endpoint) do
     receive do
       {:quic_accept, ^endpoint} ->
-        assert {:ok, connection} = QUIC.accept(endpoint)
+        assert {:ok, connection} = Quic.accept(endpoint)
         assert :ok = Adapter.attach(connection, self())
         connection
     after

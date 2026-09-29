@@ -1,5 +1,60 @@
 # Phase 1 acceptance and handoff
 
+## Published Hex migration (2026-09-29, current)
+
+This entry supersedes earlier source-pin, publication-blocker, and joint-gate
+status below. The engine publication requested in ex_quic #4 is verified by
+Hex metadata and actual package resolution, although the upstream issue remains
+open. Runtime dependencies are `elixir_quic ~> 0.2.2` and `ex_ssl ~> 0.7.2`;
+`mix.lock` resolves 0.2.2 and 0.7.2 with Hex checksums, no Git runtime dependency
+or override. The engine itself requires ex_ssl `== 0.7.2`. OTP application and
+facade names changed to `:elixir_quic` and `Quic`; the internal adapter name is
+unchanged. Production HTTP/3 and WebTransport retain the existing `quic` library.
+
+Source provenance: engine v0.2.2 `c9ad458add5a496949bd1c89b50128c8ab777da9`;
+TLS v0.7.2 `fb47051355c9d0a29caee046fa060a745ad0ce5b`. The consumer mapping
+links the corresponding immutable public contracts. The independent peer wrapper
+fetches only pinned test assets, separately from Hex runtime libraries; it keeps
+the earlier TLS certificate fixture revision to preserve that workload.
+
+| Acceptance item | Status | Executed evidence |
+| --- | --- | --- |
+| G-F internal adapter on published dependencies | PASS | Real UDP, strict contracts, TLS negatives, deadlines and cleanup |
+| Five-app regressions | PASS | 529 tests + 20 doctests, zero failures; seed 29092026 |
+| Independent peer baseline and impairment | PASS | 1 MiB each bidi direction, uni streams, cancellation, bounded reads, cleanup; zero legacy QUIC calls |
+| Published TLS feature consumer | PASS | Nine groups, 68 tests, exact Hex provenance |
+| Isolated consumer and running release | PASS | Hex-only TLS/QUIC resolution, ordinary startup, UDP bind, release RPC verification |
+| http_core Hex package build | PASS | Both runtime dependencies included as Hex packages |
+| Strict test compilation and configured Credo | PASS | No compile warnings or Credo issues |
+| Scoped formatting and diff whitespace | PASS | Changed Elixir files and `git diff --check` |
+| Abyss joint G-P1 combination | BLOCKED | Actual run fails with `{:error, :quic_backend_unavailable}`; Abyss still expects `QUIC` |
+| E2E HTTP fixture suite and Dialyzer after this migration | NOT RUN | Earlier evidence does not establish the new combination |
+| Push and release publication | NOT RUN | No remote publication performed |
+
+Commands: `MIX_BUILD_PATH=/tmp/http-fetch-hex-build MIX_ENV=test mix deps.get`,
+`mix compile --warnings-as-errors`, and `HTTP_QUIC_PHASE1_REAL=1 mix test
+apps/http_core/test apps/http_fetch/test apps/http_web_socket/test
+apps/http_event_source/test apps/http_web_transport/test --seed 29092026`, using
+that same environment. The initial test run exposed the namespace rename; after
+adapting to the published facade, the complete five-app rerun passed.
+
+Additional entry points: `bash scripts/phase1_quic_independent.sh`, the same
+command with `PHASE1_SCENARIO=impaired`, `bash scripts/phase1_consumer_release.sh`,
+`EX_SSL_RESULTS_DIR=/tmp/http-fetch-hex-feature-gate
+scripts/ex_ssl_published_feature_gate.sh`, and `mix credo`. Raw peer results are
+in `docs/phase1-evidence/independent-hex-0.2.2.json` and
+`independent-impaired-hex-0.2.2.json`. From `apps/http_core`,
+`MIX_ENV=prod mix hex.build --unpack -o /tmp/http-core-hex-022-package` passed.
+
+`bash scripts/phase1_quic_abyss.sh` failed against the unchanged pinned Abyss
+`50e121fce66daeb9cb25a2f5dc93050ca37efc5d` (also current upstream main).
+[abyss #5](https://github.com/gsmlg-dev/abyss/issues/5) tracks the required facade
+migration; no shim, fallback, or adjacent-repository edit was introduced. This
+blocks only the joint combination, not G-F. Historical joint PASS evidence
+below applies only to the old source combination. This remains internal raw
+QUIC readiness, not an HTTP/3 replacement.
+
+
 ## Worktree integration update (2026-09-29)
 
 At the maintainer's subsequent explicit merge request, both worktrees were

@@ -8,12 +8,12 @@ defmodule HTTP.Phase1.Independent do
   @deadline 15_000
 
   def run do
-    fixture = Path.expand("../deps/ex_ssl/test/fixtures/server_flight", __DIR__)
+    fixture = System.fetch_env!("HTTP_QUIC_TLS_FIXTURES")
 
     peer_script =
       Path.join(System.tmp_dir!(), "http-fetch-peer-#{System.unique_integer([:positive])}.py")
 
-    source = Path.expand("../deps/ex_quic/scripts/phase1/peer.py", __DIR__)
+    source = System.fetch_env!("HTTP_QUIC_PEER_SCRIPT")
     File.write!(peer_script, File.read!(source) |> String.replace("phase1-streams", @alpn))
     Process.put(:peer_script, peer_script)
     tracer = start_boundary_trace()

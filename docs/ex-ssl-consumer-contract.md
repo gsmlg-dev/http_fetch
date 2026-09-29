@@ -1,6 +1,6 @@
 # TCP TLS consumer contract
 
-Current dependency: released Hex ex_ssl **0.5.0**, validated from consumer
+Current dependency: released Hex ex_ssl **0.7.2**, validated from consumer
 baseline `b4ad2f5` (the completed 0.13.0 release metadata). OTP `:ssl` stays the
 default; ex_ssl is explicitly selected. The historical phase records below
 retain their original versions and counts. Current commands and evidence are in
@@ -38,7 +38,7 @@ is dropped to make a connection succeed.
 The cross-record fixture suspends the HTTP owner after it enters its receive
 loop, proves its sole first plaintext delivery, releases later peer output, and
 checks authenticated closure with retained plaintext before resuming. Its private
-ex_ssl state probe is test-only, revalidated and guarded to version 0.5.0, and checks exact byte
+ex_ssl state probe is test-only, revalidated and guarded to version 0.7.2, and checks exact byte
 count plus passive mode. Larger streaming responses drain incrementally through
 flow control before the final gated records; they do not require an oversized
 passive TLS buffer.

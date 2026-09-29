@@ -1,5 +1,11 @@
 # Phase 1 implementation plan
 
+Current update (2026-09-29): runtime dependencies migrated to Hex `elixir_quic`
+0.2.2 and `ex_ssl` 0.7.2, without Git overrides. The engine facade is now `Quic`.
+G-F adapter validation passes on the published combination. The Abyss joint
+G-P1 item is blocked by [abyss #5](https://github.com/gsmlg-dev/abyss/issues/5).
+Earlier source-pin planning below is historical; see the latest acceptance entry.
+
 Baseline: `3bf5ec6518f17800f95b54bb8c5dbda55386d44a`, inspected 2026-09-28.
 Worktree: `.trees/codex/quic-phase1`, branch `codex/quic-phase1`.
 The original untracked `04-http_fetch-plan.md` and earlier consumer-validation

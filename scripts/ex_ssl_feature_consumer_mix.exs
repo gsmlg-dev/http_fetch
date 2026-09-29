@@ -6,7 +6,7 @@ defmodule ExSslFeatureConsumer.MixProject do
 
     ex_ssl =
       case System.fetch_env!("EX_SSL_DEP_MODE") do
-        "published" -> {:ex_ssl, "~> 0.5.0"}
+        "published" -> {:ex_ssl, "~> 0.7.2"}
         "source" -> {:ex_ssl, path: System.fetch_env!("EX_SSL_SOURCE_DIR"), override: true}
       end
 

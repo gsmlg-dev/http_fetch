@@ -64,6 +64,7 @@ defmodule HTTP.Phase1.AbyssJoint do
 
     limits = [max_data: 16_384, max_stream_data: 16_384, max_buffer: 65_536]
 
+    # TODO(upstream): gsmlg-dev/abyss#5 - support the published Quic facade.
     {:ok, listener} =
       Abyss.QUIC.start_link(
         handler: {HTTP.Phase1.AbyssCollector, self()},
