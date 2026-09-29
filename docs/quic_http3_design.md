@@ -24,15 +24,19 @@ evidence.
 The first slice establishes the application boundary and transport contract.
 `QuicHttp3.Frame`, `QuicHttp3.Settings`, and `QuicHttp3.Varint` delegate to the
 existing `http_core` codecs so there is one wire implementation during the
-migration. `QuicHttp3.capabilities/0` intentionally reports HTTP/3, QPACK, and
-WebTransport as unavailable until their session implementations exist.
+migration. `QuicHttp3.Stream` classifies QUIC stream identifiers and incremental
+unidirectional stream type prefixes. `QuicHttp3.Control` validates local and
+peer control-stream ownership, buffers split prefixes/frames, requires SETTINGS
+as the first frame, rejects duplicate or forbidden frames, and emits SETTINGS
+and GOAWAY events. `QuicHttp3.capabilities/0` still intentionally reports
+HTTP/3, QPACK, and WebTransport as unavailable until their session
+implementations exist.
 
 The next implementation slices are:
 
 1. QUIC transport capabilities required by H3: `h3` ALPN, peer-initiated
    unidirectional stream events, bounded stream operations, and QUIC DATAGRAM.
-2. H3 control stream and SETTINGS state, stream classification, frame handling,
-   and QPACK.
+2. QPACK static/dynamic table state and header block encoding/decoding.
 3. HTTP request/response sessions with flow control and cancellation.
 4. WebTransport extended CONNECT, session demultiplexing, and datagrams.
 5. Interoperability validation, production selector integration, and only then
