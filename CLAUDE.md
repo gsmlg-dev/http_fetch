@@ -22,11 +22,15 @@ This is an Elixir library providing a browser-like HTTP fetch API built on Erlan
 - **HTTP.AbortController** (`apps/http_fetch/lib/http/abort_controller.ex`): Request cancellation via Agent-based controller
 - **HTTP.FetchOptions** (`apps/http_fetch/lib/http/fetch_options.ex`): Options processing and validation for `fetch/2`
 - **HTTP.Telemetry** (`apps/http_fetch/lib/http/telemetry.ex`): Comprehensive telemetry events for requests, responses, streaming, and errors
+- **QuicHttp3** (`apps/elixir_quic_http3/lib/quic_http3.ex`): HTTP/3 application-layer boundary over generic QUIC transports; it does not replace the legacy `:quic_h3` backend yet
 
 ### Application Structure
 - This is a Mix umbrella with independent protocol apps under `apps/`.
 - Shared HTTP primitives live in `apps/http_core`; concrete protocol clients
   depend on `:http_core` instead of each other.
+- `apps/elixir_quic_http3` owns the future HTTP/3/QPACK session layer and
+  depends on `:elixir_quic`; it must not move HTTP/3 semantics into the QUIC
+  transport library.
 - **HTTPFetch.Application** (`apps/http_fetch/lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
 
 ### Key Design Patterns
