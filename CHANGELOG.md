@@ -7,16 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-29
+
 ### Added
+- Add an internal authenticated QUIC client adapter with bounded stream I/O,
+  cancellation, operation outcome tracking, and lifecycle validation.
+- Add published TLS consumer provenance and independent resumption coverage
+  for HTTP/1.1, HTTP/2, WebSocket, and EventSource.
 - Add validated versioned HTTP/2 wire profiles, ordered serialization controls,
-  pure connection/stream state models, and bounded redacted fingerprint
-  observations.
+  pure connection/stream state models, and bounded redacted fingerprint observations.
 - Add flat HTTP/2 profile, reuse, scope, and priority option validation.
 - Add bounded PRIORITY_UPDATE handling, upload credit recovery after
   WINDOW_UPDATE, peer MAX_FRAME_SIZE DATA fragmentation, and capture provenance
   manifest validation.
 
+### Changed
+- Use Hex `elixir_quic ~> 0.2.2` and `ex_ssl ~> 0.7.2`, with no runtime Git pins.
+- Preserve OTP TLS defaults and existing production HTTP/3/WebTransport paths.
+
 ### Known limitations
+- The new adapter does not implement HTTP/3 sessions or QPACK. The Abyss joint
+  raw-stream test awaits its published-engine namespace migration (abyss #5).
 - Full drain-deadline policy, broader independent mature-implementation
   interoperability, and captured browser-profile verification remain pending.
   Profiled h2c and HTTPS h2 pooling support overlapping socket streams while
