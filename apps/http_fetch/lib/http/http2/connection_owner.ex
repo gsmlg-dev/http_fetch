@@ -591,11 +591,12 @@ defmodule HTTP.HTTP2.ConnectionOwner do
           end
 
         {:error, :einval} when kind == :control ->
-          # OTP's TLS sender can report einval while its close notification is
+          # OTP TCP/TLS senders can report einval while their close notification is
           # still in flight. Only retire an optional control write after every
           # response is protocol-complete; required writes and partial responses
           # must still fail. The connection is never reused after this failure.
-          if state.transport == HTTP.Transport.SSL and can_drain_closed_writer?(state) do
+          if state.transport in [HTTP.Transport.TCP, HTTP.Transport.SSL] and
+               can_drain_closed_writer?(state) do
             {:ok, drain_closed_writer(state)}
           else
             fail_write(state, :einval)
