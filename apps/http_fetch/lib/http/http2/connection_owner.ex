@@ -8,7 +8,16 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   use GenServer
   import Bitwise
 
-  alias HTTP.HTTP2.{Boundary, Connection, Frame, Scheduler, Settings, StreamState, WireProfile}
+  alias HTTP.HTTP2.{
+    Boundary,
+    Connection,
+    Frame,
+    HPACK,
+    Scheduler,
+    Settings,
+    StreamState,
+    WireProfile
+  }
 
   @preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
   @default_queue_bytes 1_048_576
@@ -97,6 +106,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         max_streams: Keyword.get(opts, :max_streams, @default_max_streams),
         wrote_preface?: false,
         close_reason: nil,
+        upload_stalls: %{},
         write_closed?: false,
         activate?: Keyword.get(opts, :activate?, true),
         drain_timeout: Keyword.get(opts, :drain_timeout, @default_drain_timeout),
@@ -131,8 +141,11 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       {:ok, state} ->
         timer = Process.send_after(self(), :settings_timeout, state.settings_timeout)
         state = %{state | lifecycle: :ready, settings_timer: timer}
-        state = if state.activate?, do: activate_socket(state), else: state
-        {:noreply, state}
+
+        case if(state.activate?, do: activate_socket(state), else: {:ok, state}) do
+          {:ok, state} -> {:noreply, state}
+          {:error, reason} -> {:stop, reason, %{state | lifecycle: :closed, close_reason: reason}}
+        end
 
       {:error, reason, state} ->
         {:stop, reason, state}
@@ -226,7 +239,14 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       {:data, data} ->
         case process_bytes(state, data) do
           {:reply, :ok, state} ->
-            {:noreply, activate_socket(state)}
+            case activate_socket(state) do
+              {:ok, state} ->
+                {:noreply, state}
+
+              {:error, reason} ->
+                notify_transport_error(state, reason)
+                {:stop, :normal, %{state | lifecycle: :closed, close_reason: reason}}
+            end
 
           {:reply, {:error, reason}, state} ->
             notify_transport_error(state, reason)
@@ -264,8 +284,21 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   def handle_call(:activate, _from, state) do
     case set_transport_options(state, send_timeout: state.write_timeout, send_timeout_close: true) do
-      :ok -> {:reply, :ok, activate_socket(state)}
-      {:error, reason} -> {:stop, :normal, {:error, reason}, %{state | close_reason: reason}}
+      :ok ->
+        case activate_socket(state) do
+          {:ok, state} ->
+            {:reply, :ok, state}
+
+          {:error, reason} ->
+            notify_transport_error(state, reason)
+
+            {:stop, :normal, {:error, reason},
+             %{state | lifecycle: :closed, close_reason: reason}}
+        end
+
+      {:error, reason} ->
+        notify_transport_error(state, reason)
+        {:stop, :normal, {:error, reason}, %{state | lifecycle: :closed, close_reason: reason}}
     end
   end
 
@@ -399,6 +432,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
             {:error, reason, state} -> %{state | lifecycle: :closed, close_reason: reason}
           end
 
+        state = finish_upload_stall(state, id, :stopped)
+
         state = %{
           state
           | streams: Map.delete(state.streams, id),
@@ -447,7 +482,15 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   @impl true
-  def terminate(_reason, state) do
+  def terminate(reason, state) do
+    Enum.each(state.upload_stalls, fn {_id, started} -> emit_stall(started, :closed) end)
+
+    HTTP.Telemetry.http2_runtime(
+      :connection_close,
+      close_category(state.close_reason || reason),
+      %{}
+    )
+
     emit_runtime(state, :closed)
     Enum.each(Map.keys(state.streams), &stop_body_bridge(state, &1))
     close_transport(state)
@@ -654,6 +697,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         {:ok, state}
 
       {:ok, stream} ->
+        HTTP.Telemetry.http2_runtime(:peer_reset, :received, %{error_code: code})
         {:ok, stream} = StreamState.rst(stream, code)
         state = terminal_stream(state, id, {:http2, :reset, code})
         events = Enum.reject(state.response_events, fn {stream_id, _} -> stream_id == id end)
@@ -720,6 +764,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
        }) do
     case Connection.receive_goaway(state.connection, last) do
       {:ok, connection, _} ->
+        HTTP.Telemetry.http2_runtime(:peer_goaway, :received, %{error_code: error})
         if state.pool, do: GenServer.cast(state.pool, {:owner_draining, state.pool_key, self()})
 
         state =
@@ -979,7 +1024,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   defp decode_headers(state, id, block, flags) do
-    case HTTP.HTTP2.HPACK.decode(state.connection.decoder, block) do
+    case HPACK.decode(state.connection.decoder, block) do
       {:ok, decoder, headers} ->
         state = %{state | connection: %{state.connection | decoder: decoder}}
 
@@ -1144,6 +1189,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         case Connection.send_data_prefix(state.connection, id, chunk, false, quantum) do
           {:ok, connection, _sent, rest, effects} ->
             with {:ok, state} <- write_effects(%{state | connection: connection}, effects) do
+              state = finish_upload_stall(state, id, :resumed)
+
               if rest == "" do
                 send(bridge, {:body_ack, ack_ref})
                 {:ok, put_in(state.streams[id].pending_body, nil)}
@@ -1157,7 +1204,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
             end
 
           {:error, :flow_control_blocked} ->
-            {:ok, state}
+            {:ok, start_upload_stall(state, id)}
 
           {:error, reason} ->
             send(bridge, {:body_error, reason})
@@ -1197,12 +1244,12 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       end
 
     case result do
-      :ok -> state
-      {:error, reason} -> %{state | lifecycle: :closed, close_reason: reason}
+      :ok -> {:ok, state}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp activate_socket(state), do: state
+  defp activate_socket(state), do: {:ok, state}
 
   defp normalize_transport(%{transport: transport, socket: socket}, message) do
     cond do
@@ -1236,6 +1283,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   defp terminal_stream(state, id, message) do
+    state = finish_upload_stall(state, id, :stopped)
     notify_stream(state, id, message)
     stop_body_bridge(state, id)
 
@@ -1268,6 +1316,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
     %{
       active_streams: map_size(state.streams),
+      protocol_streams: map_size(state.connection.streams),
       buffered_receive_bytes: state.connection.connection_unacknowledged,
       pending_upload_bytes: pending,
       receive_budget_bytes: state.max_receive_buffer_bytes,
@@ -1277,6 +1326,41 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   defp emit_runtime(state, event),
     do: HTTP.Telemetry.http2_connection(event, state.lifecycle, runtime_measurements(state))
+
+  defp start_upload_stall(state, id) do
+    %{state | upload_stalls: Map.put_new(state.upload_stalls, id, System.monotonic_time())}
+  end
+
+  defp finish_upload_stall(state, id, outcome) do
+    case Map.pop(state.upload_stalls, id) do
+      {nil, _} ->
+        state
+
+      {started, stalls} ->
+        emit_stall(started, outcome)
+        %{state | upload_stalls: stalls}
+    end
+  end
+
+  defp emit_stall(started, outcome) do
+    duration_us =
+      System.convert_time_unit(System.monotonic_time() - started, :native, :microsecond)
+
+    HTTP.Telemetry.http2_runtime(:flow_control_stall, outcome, %{
+      count: 1,
+      duration_us: duration_us
+    })
+  end
+
+  defp close_category(nil), do: :normal
+  defp close_category(:normal), do: :normal
+  defp close_category(:closed), do: :transport_closed
+  defp close_category(:settings_timeout), do: :settings_timeout
+  defp close_category(:pool_down), do: :pool_down
+  defp close_category(:drain_timeout), do: :drain_timeout
+  defp close_category(:protocol_error), do: :protocol_error
+  defp close_category(:flow_control_error), do: :flow_control_error
+  defp close_category(_), do: :other_error
 
   defp report_capacity(%{pool: pool} = state) when is_pid(pool) do
     limit = state.connection.max_streams

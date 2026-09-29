@@ -64,7 +64,7 @@ defmodule HTTP.Telemetry do
 
   ### HTTP/2 Runtime Events
 
-  `[:http_fetch, :http2, :connection]` reports `active_streams`,
+  `[:http_fetch, :http2, :connection]` reports `active_streams`, `protocol_streams`,
   `buffered_receive_bytes`, `pending_upload_bytes`, `receive_budget_bytes`,
   and `writer_batch_peak_bytes`. Metadata contains only `event` and
   `lifecycle`; it excludes headers, bodies, URLs, scope and TLS identity.
@@ -77,6 +77,13 @@ defmodule HTTP.Telemetry do
   `connecting`, `connections`, `draining`, and `queue_wait_us` measurements.
   Metadata contains only finite `event` and `outcome` atoms. Pool keys, URLs,
   request tokens, owner PIDs, and connector identities are excluded.
+
+  `[:http_fetch, :http2, :runtime]` reports connection close, peer reset,
+  GOAWAY, and upload flow-control stall events. Metadata contains only fixed
+  `event` and `outcome` atoms. Peer error codes and stall durations are numeric
+  measurements, never tags. `[:http_fetch, :http2, :body_bridge]` reports a
+  bridge's final byte count, peak buffer size, and lifetime in microseconds;
+  its `outcome` is a fixed atom, with no source or owner identity.
 
   ## Usage Example
 
@@ -288,5 +295,18 @@ defmodule HTTP.Telemetry do
       event: event,
       outcome: outcome
     })
+  end
+
+  @doc false
+  def http2_runtime(event, outcome, measurements) do
+    :telemetry.execute([:http_fetch, :http2, :runtime], measurements, %{
+      event: event,
+      outcome: outcome
+    })
+  end
+
+  @doc false
+  def http2_body_bridge(outcome, measurements) do
+    :telemetry.execute([:http_fetch, :http2, :body_bridge], measurements, %{outcome: outcome})
   end
 end

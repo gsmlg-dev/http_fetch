@@ -46,6 +46,7 @@ defmodule HTTP.HTTP2.BodyBridge do
        max_buffer_bytes: Keyword.get(opts, :max_buffer_bytes, @default_max_buffer),
        eof?: false,
        stopped?: false,
+       started_at: System.monotonic_time(),
        bytes: 0,
        peak_buffered_bytes: 0
      }}
@@ -96,7 +97,7 @@ defmodule HTTP.HTTP2.BodyBridge do
         {:noreply, state}
 
       not state.read_pending? or state.source_ref != nil ->
-        {:stop, :protocol_error, state}
+        {:stop, :protocol_error, finish(state, :protocol_error)}
 
       byte_size(chunk) > state.max_buffer_bytes ->
         {:noreply, stop_stream(state, :buffer_limit)}
@@ -127,7 +128,7 @@ defmodule HTTP.HTTP2.BodyBridge do
       {:noreply, state}
     else
       send(state.owner, {:body_eof, self()})
-      {:noreply, %{state | eof?: true, stopped?: true, read_pending?: false}}
+      {:noreply, finish(%{state | eof?: true, read_pending?: false}, :eof)}
     end
   end
 
@@ -136,7 +137,7 @@ defmodule HTTP.HTTP2.BodyBridge do
       {:noreply, state}
     else
       send(state.owner, {:body_error, self(), reason})
-      {:noreply, %{state | stopped?: true, read_pending?: false}}
+      {:noreply, finish(%{state | read_pending?: false}, :source_error)}
     end
   end
 
@@ -156,7 +157,7 @@ defmodule HTTP.HTTP2.BodyBridge do
       {:noreply, state}
     else
       send(state.owner, {:body_error, self(), {:stream_down, reason}})
-      {:stop, :normal, %{state | stopped?: true}}
+      {:stop, :normal, finish(state, :source_down)}
     end
   end
 
@@ -212,6 +213,26 @@ defmodule HTTP.HTTP2.BodyBridge do
     end
 
     if notify_owner?, do: send(state.owner, {:body_error, self(), reason})
+    finish(state, bridge_outcome(reason))
+  end
+
+  defp finish(%{stopped?: true} = state, _outcome), do: state
+
+  defp finish(state, outcome) do
+    duration_us =
+      System.convert_time_unit(System.monotonic_time() - state.started_at, :native, :microsecond)
+
+    HTTP.Telemetry.http2_body_bridge(outcome, %{
+      duration_us: duration_us,
+      bytes: state.bytes,
+      peak_buffered_bytes: state.peak_buffered_bytes
+    })
+
     %{state | stopped?: true}
   end
+
+  defp bridge_outcome(:cancelled), do: :cancelled
+  defp bridge_outcome(:early_response), do: :early_response
+  defp bridge_outcome(:owner_down), do: :owner_down
+  defp bridge_outcome(:buffer_limit), do: :buffer_limit
 end
