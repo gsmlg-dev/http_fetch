@@ -5,16 +5,15 @@ defmodule HTTP.Test.HTTP2ScriptedPeer do
   def frame(type, flags, id, payload),
     do: <<byte_size(payload)::24, type, flags, 0::1, id::31, payload::binary>>
 
-  def start(test, script) do
+  def start(test, script, opts \\ []) do
     {:ok, listener} = :gen_tcp.listen(0, [:binary, packet: :raw, active: false, reuseaddr: true])
     {:ok, {_, port}} = :inet.sockname(listener)
 
     pid =
       spawn_link(fn ->
         {:ok, socket} = :gen_tcp.accept(listener, 5_000)
-        :gen_tcp.close(listener)
         {:ok, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"} = :gen_tcp.recv(socket, 24, 5_000)
-        :ok = :gen_tcp.send(socket, frame(4, 0, 0, <<>>))
+        :ok = :gen_tcp.send(socket, frame(4, 0, 0, Keyword.get(opts, :settings, <<>>)))
         script.(socket)
         send(test, {:peer_complete, self()})
 
@@ -23,7 +22,11 @@ defmodule HTTP.Test.HTTP2ScriptedPeer do
         after
           5_000 -> :gen_tcp.close(socket)
         end
+
+        :gen_tcp.close(listener)
       end)
+
+    :ok = :gen_tcp.controlling_process(listener, pid)
 
     {"http://localhost:#{port}/test", pid}
   end

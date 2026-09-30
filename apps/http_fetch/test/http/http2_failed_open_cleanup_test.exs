@@ -4,8 +4,13 @@ defmodule HTTP.HTTP2FailedOpenCleanupTest do
   alias HTTP.HTTP2.{ConnectionOwner, Pool}
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer
 
-  def handle_event(_, measurements, metadata, parent),
+  def handle_event([:http_fetch, :http2, :body_bridge], measurements, metadata, parent),
     do: send(parent, {:bridge_finished, measurements, metadata})
+
+  def handle_event([:http_fetch, :http2, :connection], measurements, %{event: :released}, parent),
+    do: send(parent, {:owner_released, self(), measurements})
+
+  def handle_event(_, _, _, _), do: :ok
 
   def handle_stream_creation(_, _, _, parent) do
     send(parent, {:stream_creation, self()})
@@ -27,9 +32,9 @@ defmodule HTTP.HTTP2FailedOpenCleanupTest do
     handler = "failed-open-#{System.unique_integer([:positive])}"
 
     :ok =
-      :telemetry.attach(
+      :telemetry.attach_many(
         handler,
-        [:http_fetch, :http2, :body_bridge],
+        [[:http_fetch, :http2, :body_bridge], [:http_fetch, :http2, :connection]],
         &__MODULE__.handle_event/4,
         self()
       )
@@ -43,6 +48,7 @@ defmodule HTTP.HTTP2FailedOpenCleanupTest do
     assert "first" == url |> HTTP.fetch(opts) |> HTTP.Promise.await() |> HTTP.Response.read_all()
 
     {pool, key, owner} = pooled_owner(URI.parse(url).port)
+    assert_receive {:owner_released, ^owner, %{active_streams: 0, protocol_streams: 0}}, 5_000
 
     assert %{lifecycle: :ready, active_streams: 0, protocol_streams: 0} =
              ConnectionOwner.status(owner)
@@ -91,6 +97,7 @@ defmodule HTTP.HTTP2FailedOpenCleanupTest do
 
     :sys.replace_state(owner, fn state -> %{state | max_streams: 100} end)
     assert "third" == url |> HTTP.fetch(opts) |> HTTP.Promise.await() |> HTTP.Response.read_all()
+    assert_receive {:owner_released, ^owner, %{active_streams: 0, protocol_streams: 0}}, 5_000
 
     assert %{lifecycle: :ready, active_streams: 0, protocol_streams: 0} =
              ConnectionOwner.status(owner)
@@ -115,9 +122,9 @@ defmodule HTTP.HTTP2FailedOpenCleanupTest do
       )
 
     :ok =
-      :telemetry.attach(
+      :telemetry.attach_many(
         bridge_handler,
-        [:http_fetch, :http2, :body_bridge],
+        [[:http_fetch, :http2, :body_bridge], [:http_fetch, :http2, :connection]],
         &__MODULE__.handle_event/4,
         self()
       )
@@ -151,9 +158,12 @@ defmodule HTTP.HTTP2FailedOpenCleanupTest do
 
     :ok = :telemetry.detach(barrier)
     :sys.replace_state(owner, fn state -> %{state | max_streams: 100} end)
+    :ok = Pool.update_capacity(pool, key, owner, 100)
 
     assert "sibling" ==
              url |> HTTP.fetch(opts) |> HTTP.Promise.await() |> HTTP.Response.read_all()
+
+    assert_receive {:owner_released, ^owner, %{active_streams: 0, protocol_streams: 0}}, 5_000
 
     assert %{lifecycle: :ready, active_streams: 0, protocol_streams: 0} =
              ConnectionOwner.status(owner)

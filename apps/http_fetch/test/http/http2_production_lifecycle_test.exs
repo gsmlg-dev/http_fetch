@@ -11,6 +11,25 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
     |> HTTP.Promise.await()
   end
 
+  test "scripted peer reserves its origin port while the pooled socket is alive" do
+    {url, peer} =
+      Peer.start(self(), fn socket ->
+        {id, true} = Peer.request(socket)
+        :ok = Peer.response(socket, id, "ok")
+      end)
+
+    response = fetch(url)
+    assert HTTP.Response.read_all(response) == "ok"
+    assert_receive {:peer_complete, ^peer}, 5_000
+
+    assert {:error, :eaddrinuse} =
+             :gen_tcp.listen(URI.parse(url).port, [:binary, reuseaddr: true])
+
+    monitor = Process.monitor(peer)
+    send(peer, :close)
+    assert_receive {:DOWN, ^monitor, :process, ^peer, :normal}, 5_000
+  end
+
   test "RST_STREAM fails an already returned response stream" do
     {url, peer} =
       Peer.start(self(), fn socket ->
@@ -103,6 +122,36 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
     end
 
     assert_receive {:peer_complete, ^peer}
+    send(peer, :close)
+  end
+
+  test "expiry before final headers fails the promise instead of returning a response" do
+    test_pid = self()
+
+    {url, peer} =
+      Peer.start(test_pid, fn socket ->
+        {id, true} = Peer.request(socket)
+        send(test_pid, {:awaiting_headers, self(), id})
+        receive do: (:close -> :ok)
+      end)
+
+    task = Task.async(fn -> fetch(url) end)
+    assert_receive {:awaiting_headers, ^peer, 1}, 5_000
+    port = URI.parse(url).port
+
+    owner =
+      :http_fetch_http2_pool
+      |> :sys.get_state()
+      |> Map.fetch!(:entries)
+      |> Enum.find_value(fn {key, entry} ->
+        if key.port == port, do: entry.connections |> Map.keys() |> List.first()
+      end)
+
+    %{streams: %{1 => %{pid: coordinator}}} = :sys.get_state(owner)
+    send(coordinator, :deadline)
+    assert {:error, :request_timeout} = Task.await(task, 5_000)
+    send(peer, :close)
+    assert_receive {:peer_complete, ^peer}, 5_000
     send(peer, :close)
   end
 

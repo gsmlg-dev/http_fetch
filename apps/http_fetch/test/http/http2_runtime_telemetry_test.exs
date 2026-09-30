@@ -4,7 +4,7 @@ defmodule HTTP.HTTP2RuntimeTelemetryTest do
   alias HTTP.HTTP2.{BodyBridge, ConnectionOwner, Frame}
 
   def handle_event(name, measurements, metadata, parent),
-    do: send(parent, {:telemetry, name, measurements, metadata})
+    do: send(parent, {:telemetry, self(), name, measurements, metadata})
 
   setup do
     handler = "http2-runtime-#{System.unique_integer([:positive])}"
@@ -43,7 +43,7 @@ defmodule HTTP.HTTP2RuntimeTelemetryTest do
 
     assert :ok = ConnectionOwner.receive_bytes(pid, Frame.encode(:rst_stream, 0, id, <<123::32>>))
 
-    assert_receive {:telemetry, [:http_fetch, :http2, :runtime], %{error_code: 123},
+    assert_receive {:telemetry, ^pid, [:http_fetch, :http2, :runtime], %{error_code: 123},
                     %{event: :peer_reset, outcome: :received}}
 
     assert :ok =
@@ -52,19 +52,19 @@ defmodule HTTP.HTTP2RuntimeTelemetryTest do
                Frame.encode(:goaway, 0, 0, <<0::1, id::31, 456::32>>)
              )
 
-    assert_receive {:telemetry, [:http_fetch, :http2, :runtime], %{error_code: 456},
+    assert_receive {:telemetry, ^pid, [:http_fetch, :http2, :runtime], %{error_code: 456},
                     %{event: :peer_goaway, outcome: :received}}
 
     monitor = Process.monitor(pid)
     assert :ok = ConnectionOwner.release_stream(pid, id)
 
-    assert_receive {:telemetry, [:http_fetch, :http2, :connection],
+    assert_receive {:telemetry, ^pid, [:http_fetch, :http2, :connection],
                     %{active_streams: 0, protocol_streams: 0},
                     %{event: :released, lifecycle: :draining}}
 
     assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}
 
-    assert_receive {:telemetry, [:http_fetch, :http2, :runtime], %{},
+    assert_receive {:telemetry, ^pid, [:http_fetch, :http2, :runtime], %{},
                     %{event: :connection_close, outcome: :normal}}
   end
 
@@ -86,7 +86,7 @@ defmodule HTTP.HTTP2RuntimeTelemetryTest do
 
     assert_receive {:body_ack, ^ref}
 
-    assert_receive {:telemetry, [:http_fetch, :http2, :runtime],
+    assert_receive {:telemetry, ^pid, [:http_fetch, :http2, :runtime],
                     %{count: 1, duration_us: duration},
                     %{event: :flow_control_stall, outcome: :resumed}}
 
@@ -105,12 +105,12 @@ defmodule HTTP.HTTP2RuntimeTelemetryTest do
     assert :ok = BodyBridge.cancel(bridge)
     assert :ok = BodyBridge.cancel(bridge)
 
-    assert_receive {:telemetry, [:http_fetch, :http2, :body_bridge],
+    assert_receive {:telemetry, ^bridge, [:http_fetch, :http2, :body_bridge],
                     %{bytes: 0, peak_buffered_bytes: 0, duration_us: duration},
                     %{outcome: :cancelled}}
 
     assert is_integer(duration) and duration >= 0
-    refute_receive {:telemetry, [:http_fetch, :http2, :body_bridge], _, _}, 20
+    refute_receive {:telemetry, ^bridge, [:http_fetch, :http2, :body_bridge], _, _}, 20
     send(source, :stop)
   end
 end

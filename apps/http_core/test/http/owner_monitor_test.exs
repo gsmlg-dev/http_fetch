@@ -26,12 +26,12 @@ defmodule HTTP.OwnerMonitorTest do
       Process.exit(connection, :kill)
     end)
 
-    assert_receive {:watching, guardian}
+    assert_receive {:watching, guardian}, 5_000
     connection_ref = Process.monitor(connection)
     guardian_ref = Process.monitor(guardian)
     send(owner, :stop)
-    assert_receive {:DOWN, ^connection_ref, :process, ^connection, :shutdown}
-    assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, _}
+    assert_receive {:DOWN, ^connection_ref, :process, ^connection, :shutdown}, 5_000
+    assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, _}, 5_000
   end
 
   test "normal connection completion reaps its monitor without stopping the owner" do
@@ -48,10 +48,10 @@ defmodule HTTP.OwnerMonitorTest do
       end)
 
     on_exit(fn -> Process.exit(connection, :kill) end)
-    assert_receive {:watching, guardian}
+    assert_receive {:watching, guardian}, 5_000
     guardian_ref = Process.monitor(guardian)
     send(connection, :done)
-    assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, :normal}
+    assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, :normal}, 5_000
     assert Process.alive?(parent)
   end
 end

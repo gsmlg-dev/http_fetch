@@ -1022,6 +1022,10 @@ defmodule HTTP.SocketClientHTTP2Test do
         buffer = assert_settings_ack(socket, transport, buffer)
         buffer = assert_window_update(socket, transport, buffer, 0, byte_size(response_body))
         buffer = assert_window_update(socket, transport, buffer, 1, byte_size(response_body))
+
+        assert {:ok, %Frame{type: :rst_stream, stream_id: 1, payload: <<8::32>>}, buffer} =
+                 recv_frame(socket, transport, buffer)
+
         assert buffer == ""
         send(test_pid, {:otp_early_response_settings_acknowledged, self()})
         await_test_gate(:close_otp_early_response)
@@ -2012,6 +2016,7 @@ defmodule HTTP.SocketClientHTTP2Test do
             send_h2_response(socket, :ssl, "ticket-barrier")
             assert_settings_ack(socket, :ssl, buffer)
             send(parent, {:ticket_barrier, self()})
+            await_test_gate(:close_ticket_connection)
           end
 
           :ssl.close(socket)
@@ -2030,6 +2035,7 @@ defmodule HTTP.SocketClientHTTP2Test do
     response =
       HTTP.fetch(url,
         http_version: :http2,
+        http2_reuse: false,
         tls_backend: :ex_ssl,
         ssl: resumption_options(true)
       )
@@ -2038,6 +2044,12 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert response.status == 200
     assert HTTP.Response.read_all(response) == "ticket-barrier"
     assert_receive {:ticket_barrier, ^peer}, 5_000
+
+    refute Enum.any?(HTTP.HTTP2.Pool.stats(Process.whereis(:http_fetch_http2_pool)), fn {key, _} ->
+             key.port == port
+           end)
+
+    send(peer, :close_ticket_connection)
     url
   end
 
