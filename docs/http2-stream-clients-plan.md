@@ -159,6 +159,20 @@ strict quality gates, with raw-wire capability/tunnel regressions and independen
 Fetch/SSE mixed routes. Its source/BEAM manifests and archive are recorded in the
 validation document. P4 public WebSocket integration and P5 acceptance remain.
 
+P4 is implemented and locally validated. WebSocket opens RFC 8441 tunnels through
+the shared Stream adapter, keeps HTTP/1 opening asynchronous, and restricts auto
+fallback to protocol/capability unavailability before establishment. Its codec,
+ACK/raw/send/control queues and fragment counts are bounded; close preserves the
+current frame's byte order and releases only the logical stream. Internal terminal
+errors stop parsing later bytes, while accepted bytes preceding external terminal
+events still drain. Binary masking now builds binary words without per-byte lists.
+The final independent audit passed 834 tests plus 20 doctests and all quality
+checks, standalone traffic/start-stop checks and mixed/fault gates. Three WS
+routes completed 10,000 round trips and 1,000 real cycles passed. Phase evidence
+and exact snapshot differences are recorded in the validation document. P5 will
+freeze version 0.16.0 and rerun all executable acceptance, including Fetch42 and
+genuine 1,800-second Fetch and mixed-client soaks, before authorized publication.
+
 WebSocket buffering must reject an oversized declared frame before receiving its
 payload. Shared telemetry must preserve Fetch event names without calling Fetch.
 Profile ordering must explicitly retain `:protocol` for Extended CONNECT without

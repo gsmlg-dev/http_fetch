@@ -27,6 +27,69 @@ defmodule HTTP.WebSocket.Handshake do
     {:ok, request}
   end
 
+  @extended_prohibited ~w(host connection upgrade keep-alive proxy-connection transfer-encoding sec-websocket-key sec-websocket-accept)
+
+  @spec extended_connect_request(URI.t(), [String.t()], [{String.t(), String.t()}]) ::
+          {:ok, HTTP.Request.t()} | {:error, term()}
+  def extended_connect_request(%URI{} = uri, protocols, headers) do
+    with :ok <- validate_extended_headers(headers, :request) do
+      headers = [{"sec-websocket-version", "13"} | headers] |> maybe_add_protocols(protocols)
+
+      {:ok,
+       %HTTP.Request{
+         method: :connect,
+         url: HTTP.Runtime.Options.origin_uri(uri),
+         headers: HTTP.Headers.new(headers)
+       }}
+    end
+  end
+
+  @spec validate_extended_response(non_neg_integer(), HTTP.Headers.t() | list(), [String.t()]) ::
+          {:ok, %{protocol: String.t(), extensions: String.t()}} | {:error, term()}
+  def validate_extended_response(status, headers, requested_protocols) do
+    headers = to_headers(headers)
+
+    with :ok <- validate_extended_status(status),
+         :ok <- validate_extended_headers(headers.headers, :response),
+         {:ok, protocol} <- validate_protocol(headers, requested_protocols),
+         {:ok, extensions} <- validate_extensions(headers) do
+      {:ok, %{protocol: protocol, extensions: extensions}}
+    end
+  end
+
+  defp validate_extended_status(status) when status in 200..299, do: :ok
+  defp validate_extended_status(status), do: {:error, {:unexpected_status, status}}
+
+  defp validate_extended_headers(headers, direction) do
+    prohibited =
+      if direction == :request,
+        do:
+          @extended_prohibited ++
+            ~w(sec-websocket-version sec-websocket-protocol sec-websocket-extensions),
+        else: @extended_prohibited
+
+    if Enum.all?(headers, fn
+         {name, value} when is_binary(name) and is_binary(value) ->
+           valid_token?(name) and String.downcase(name) not in prohibited and
+             String.valid?(value) and
+             not Enum.any?(:binary.bin_to_list(value), &((&1 < 32 and &1 != 9) or &1 == 127))
+
+         _ ->
+           false
+       end),
+       do: :ok,
+       else: {:error, :invalid_extended_connect_headers}
+  end
+
+  defp valid_token?(value) when is_binary(value) and byte_size(value) > 0,
+    do:
+      Enum.all?(
+        :binary.bin_to_list(value),
+        &(&1 >= 33 and &1 <= 126 and &1 not in ~c"()<>@,;:\\\"/[]?={} \t")
+      )
+
+  defp valid_token?(_value), do: false
+
   @spec parse_response(binary()) ::
           {:ok, non_neg_integer(), HTTP.Headers.t(), binary()}
           | {:more, binary()}
@@ -191,25 +254,27 @@ defmodule HTTP.WebSocket.Handshake do
   end
 
   defp validate_protocol(headers, requested_protocols) do
-    selected = HTTP.Headers.get(headers, "sec-websocket-protocol")
-
-    cond do
-      is_nil(selected) ->
+    case HTTP.Headers.get_all(headers, "sec-websocket-protocol") do
+      [] ->
         {:ok, ""}
 
-      selected in requested_protocols ->
-        {:ok, selected}
+      [selected] ->
+        cond do
+          not valid_token?(selected) -> {:error, :invalid_protocol_selection}
+          selected in requested_protocols -> {:ok, selected}
+          true -> {:error, {:unexpected_protocol, selected}}
+        end
 
-      true ->
-        {:error, {:unexpected_protocol, selected}}
+      _ ->
+        {:error, :invalid_protocol_selection}
     end
   end
 
   defp validate_extensions(headers) do
-    case HTTP.Headers.get(headers, "sec-websocket-extensions") do
-      nil -> {:ok, ""}
-      "" -> {:ok, ""}
-      value -> {:error, {:unsupported_extensions, value}}
+    case HTTP.Headers.get_all(headers, "sec-websocket-extensions") do
+      [] -> {:ok, ""}
+      [""] -> {:ok, ""}
+      values -> {:error, {:unsupported_extensions, Enum.join(values, ", ")}}
     end
   end
 

@@ -310,6 +310,8 @@ HTTP.WebSocket.protocol(socket)
 HTTP.WebSocket.extensions(socket)
 HTTP.WebSocket.binary_type(socket)
 HTTP.WebSocket.url(socket)
+HTTP.WebSocket.http_version(socket) # :http1, :http2, or nil while opening
+HTTP.WebSocket.status(socket)
 ```
 
 Plain Elixir binaries are sent as text frames. Use `HTTP.WebSocket.array_buffer/1`
@@ -321,6 +323,43 @@ or `HTTP.Blob` for binary frames:
 :ok = HTTP.WebSocket.send(socket, HTTP.Blob.new(<<0, 1, 2>>))
 :ok = HTTP.WebSocket.close(socket, 1000, "done")
 ```
+
+HTTP/1 remains the default. Select `http_version: :http2` for TLS h2 with RFC 8441
+peer permission, or `:h2c` for cleartext prior knowledge. `:auto` on WSS permits
+one separate HTTP/1 connection before establishment when ALPN or peer capability
+is unavailable. Authentication, certificate, malformed-handshake and established
+session failures do not trigger fallback or message replay. Cleartext `:auto`
+uses HTTP/1. Explicit profiles require their H2 wire identity; contradictory
+ALPN and H2 Unix-socket options are rejected before networking.
+
+```elixir
+socket = HTTP.WebSocket.new("wss://example.com/socket", [],
+  http_version: :http2, delivery: :ack, tls_backend: :ssl)
+
+receive do
+  {HTTP.WebSocket, ^socket, %HTTP.WebSocket.Event.Message{data: data}, ref} ->
+    consume(data)
+    :ok = HTTP.WebSocket.acknowledge(socket, ref)
+end
+```
+
+ACK delivery charges queued and in-flight messages against `max_queue_bytes` and
+`max_queue_events` (default 64). Legacy delivery keeps its original envelope and
+uses a finite internal queue with terminal slow-owner overload; it cannot bound
+unrelated messages in the owner's mailbox. Frames and assembled messages default
+to 16 MiB, with at most 16,384 fragment parts. Outbound admission allows 64 pending
+application frames and 16 control frames. `buffered_amount/1` counts unsent
+application payload bytes, excluding masked frame headers; admission can return
+`:send_queue_full` under pressure. Closing finishes the current frame, discards
+queued application frames, and prioritizes the Close frame. A missing peer Close
+is abnormal, including HTTP/2 END_STREAM without a WebSocket Close.
+
+`opening_timeout` defaults to the legacy `timeout`; `idle_timeout` defaults to
+`:infinity` and pauses during local ACK pressure; `close_timeout` defaults to
+5,000 ms. An H2 client closes only its logical stream. Compatible TLS, profile,
+scope and connection options allow Fetch, SSE and WS to share the same runtime
+owner. See [validation](docs/http2-stream-clients-validation.md) for acceptance
+commands and measured resource limits.
 
 Elixir differences from the browser API: invalid constructor input returns
 `{:error, reason}` instead of raising a DOM exception, and events are process

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Startup/dependency proof only; this gate does not exercise SSE or WS HTTP/2 adapters.
+# Package dependency/startup proof, plus H2 traffic when a peer URL is supplied.
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

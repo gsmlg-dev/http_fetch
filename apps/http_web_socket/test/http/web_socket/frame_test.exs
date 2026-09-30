@@ -82,6 +82,35 @@ defmodule HTTP.WebSocket.FrameTest do
              Frame.parse(Frame.new_parser(max_message_size: 2), server_frame(0x1, "abc"))
   end
 
+  test "masking a bounded large payload does not allocate per-byte term heaps" do
+    parent = self()
+
+    worker =
+      spawn_link(fn ->
+        {:ok, frame} = Frame.encode(:binary, :binary.copy("x", 131_072))
+        send(parent, {:encoded, self(), frame, Process.info(self(), :memory)})
+        receive do: (:stop -> :ok)
+      end)
+
+    on_exit(fn -> if Process.alive?(worker), do: Process.exit(worker, :kill) end)
+    assert_receive {:encoded, ^worker, frame, {:memory, bytes}}, 5_000
+    assert bytes <= 8 * 1024 * 1024
+    <<0x82, 0xFF, 131_072::64, key::binary-size(4), masked::binary>> = frame
+    assert :crypto.exor(masked, :binary.copy(key, 32_768)) == :binary.copy("x", 131_072)
+    send(worker, :stop)
+  end
+
+  test "masking preserves XOR alignment for every trailing byte length" do
+    for size <- 64..67 do
+      payload = :binary.copy("a", size)
+
+      assert {:ok, <<0x82, _length, key::binary-size(4), masked::binary>>} =
+               Frame.encode(:binary, payload)
+
+      assert unmask(masked, key) == payload
+    end
+  end
+
   defp server_frame(opcode, payload, opts \\ []) do
     fin = if Keyword.get(opts, :fin?, true), do: 0x80, else: 0x00
     <<fin ||| opcode, byte_size(payload), payload::binary>>

@@ -30,16 +30,18 @@ defmodule HTTP.TLSTransportTest do
       end
 
       test "worker ownership transfer, ALPN and active-once delivery survive worker exit" do
+        parent = self()
+
         port =
           peer(
             fn socket ->
               assert {:ok, "ping"} = :ssl.recv(socket, 4, 5_000)
               :ok = :ssl.send(socket, "pong")
+              send(parent, {:peer_replied, self()})
+              receive do: (:allow_peer_close -> :ok)
             end,
             alpn_preferred_protocols: ["h2"]
           )
-
-        parent = self()
 
         {worker, monitor} =
           spawn_monitor(fn ->
@@ -62,7 +64,9 @@ defmodule HTTP.TLSTransportTest do
         assert :ok = @transport.send(socket, "ping")
         assert_receive {:ssl, ^socket, "pong"} = message, 5_000
         assert {:data, "pong"} = @transport.normalize_message(message, socket)
+        assert_receive {:peer_replied, peer}, 5_000
         assert :ok = @transport.setopts(socket, active: :once)
+        send(peer, :allow_peer_close)
         assert_receive {:ssl_closed, ^socket} = message, 5_000
         assert :closed = @transport.normalize_message(message, socket)
         assert :unknown = @transport.normalize_message({:ssl, :other_socket, "pong"}, socket)

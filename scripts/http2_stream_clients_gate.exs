@@ -14,6 +14,9 @@ defmodule HTTPStreamClientsGate do
     stream_heap_bytes: 8_388_608,
     stream_binary_bytes: 4_194_304,
     stream_mailbox: 256,
+    monitor_heap_bytes: 65_536,
+    monitor_binary_bytes: 65_536,
+    monitor_workers: 8,
     owners: 4,
     stream_workers: 8,
     queue_bytes: 2_097_152,
@@ -398,9 +401,11 @@ defmodule HTTPStreamClientsGate do
   defp sample(sources, quiescent \\ false) do
     owners = DynamicSupervisor.which_children(:http_fetch_http2_connection_supervisor)
     workers = Task.Supervisor.children(:http_runtime_task_supervisor)
+    monitors = owner_monitors()
 
-    if length(owners) > @budgets.owners or length(workers) > @budgets.stream_workers,
-      do: raise("owner/worker bound exceeded")
+    if length(owners) > @budgets.owners or length(workers) > @budgets.stream_workers or
+         length(monitors) > @budgets.monitor_workers or (quiescent and monitors != []),
+       do: raise("owner/worker bound exceeded")
 
     records =
       Enum.map(owners, fn {_, pid, _, _} -> resources(pid, :owner, quiescent) end) ++
@@ -408,11 +413,28 @@ defmodule HTTPStreamClientsGate do
           status = EventSource.status(source)
           check_queue(status)
           resources(source.pid, :session, quiescent)
-        end) ++ Enum.map(workers, &resources(&1, :stream, quiescent))
+        end) ++
+        Enum.map(workers, &resources(&1, :stream, quiescent)) ++
+        Enum.map(monitors, &resources(&1, :monitor, quiescent))
 
-    sample = %{owners: length(owners), workers: length(workers), processes: records}
+    sample = %{
+      owners: length(owners),
+      workers: length(workers),
+      monitor_workers: length(monitors),
+      processes: records
+    }
+
     Process.put(:samples, [sample | Process.get(:samples)])
     IO.puts(JSON.encode!(Map.put(sample, :kind, "resource_sample")))
+  end
+
+  defp owner_monitors do
+    Enum.filter(Process.list(), fn pid ->
+      case Process.info(pid, :current_function) do
+        {:current_function, {HTTP.OwnerMonitor, _, _}} -> true
+        _ -> false
+      end
+    end)
   end
 
   defp check_queue(status) do
@@ -458,7 +480,7 @@ defmodule HTTPStreamClientsGate do
   end
 
   defp maxima(samples) do
-    for role <- [:owner, :session, :stream], into: %{} do
+    for role <- [:owner, :session, :stream, :monitor], into: %{} do
       records = for sample <- samples, record <- sample.processes, record.role == role, do: record
 
       {role,

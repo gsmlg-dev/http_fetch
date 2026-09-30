@@ -9,6 +9,19 @@ defmodule HTTP.WebSocket do
       {HTTP.WebSocket, socket, %HTTP.WebSocket.Event.Error{}}
       {HTTP.WebSocket, socket, %HTTP.WebSocket.Event.Close{}}
 
+  HTTP/1 is the default. Select `http_version: :http2`, `:h2c`, or `:auto`
+  explicitly; `http_version/1` reports the negotiated HTTP version, while
+  `protocol/1` continues to report the selected WebSocket subprotocol.
+
+  With `delivery: :ack`, message events include a delivery reference:
+
+      {HTTP.WebSocket, socket, %HTTP.WebSocket.Event.Message{}, ref}
+
+  Call `acknowledge/2` after consuming each message. Open, Error, and Close
+  retain their three-element event envelopes. Receive queues, pending sends,
+  and fragmented messages have finite configurable limits. Established sessions
+  default to `idle_timeout: :infinity`; opening and close deadlines are separate.
+
   Plain Elixir binaries are sent as text frames. Use `array_buffer/1` or
   `HTTP.Blob` for binary frames.
 
@@ -77,6 +90,31 @@ defmodule HTTP.WebSocket do
 
   @spec protocol(t()) :: String.t()
   def protocol(socket), do: connection_call(socket, :protocol, "")
+
+  @doc "Returns the negotiated HTTP version, or nil before establishment."
+  @spec http_version(t()) :: :http1 | :http2 | nil
+  def http_version(socket), do: connection_call(socket, :http_version, nil)
+
+  @doc "Returns connection state and bounded delivery and send queue usage."
+  @spec status(t()) :: map()
+  def status(socket) do
+    connection_call(socket, :status, %{
+      http_version: nil,
+      ready_state: @closed,
+      buffered_amount: 0,
+      queued_bytes: 0,
+      queued_events: 0,
+      inflight?: false,
+      raw_bytes: 0,
+      pending_send_frames: 0,
+      control_frames: 0,
+      fallback?: false
+    })
+  end
+
+  @doc "Acknowledges an ACK-mode message delivery reference."
+  @spec acknowledge(t(), reference()) :: :ok | {:error, term()}
+  def acknowledge(socket, ref), do: connection_call(socket, {:acknowledge, ref}, :ok)
 
   @spec binary_type(t()) :: :blob | :array_buffer
   def binary_type(socket), do: connection_call(socket, :binary_type, :blob)

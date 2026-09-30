@@ -253,20 +253,96 @@ consumer repair report:
 archive SHA256 `c6fba63ca09220b9d1068240ea2e063d38aaaa046068259926719e48e5b873ce`.
 This is P3 evidence; WS adapter and final frozen-release acceptance remain P4/P5.
 
+## P4 — public WebSocket adapter and independent traffic
+
+The final app source uses the shared tunnel Stream API and preserves HTTP/1 as
+the default. Strict h2/h2c requires peer SETTINGS 8 permission. WSS `:auto` allows
+one separate HTTP/1 attempt only for ALPN/capability unavailability before
+establishment, within the same opening deadline. Authentication, TLS identity,
+malformed response and established-session failures do not downgrade or replay.
+Actual negotiated version and fallback are exposed separately from subprotocol.
+
+ACK delivery, parser/raw retention, application/control send queues and fragment
+counts are finite. Controls follow a partially transmitted frame; closing drops
+queued application frames and prioritizes Close. Clean H2 closure requires a real
+masked WebSocket Close exchange and both stream directions ending. END_STREAM
+without peer Close remains 1006 locally; 1006 is never transmitted. Idle uses this
+stream's activity and pauses for deliberate ACK pressure. Runtime and owner death
+settle reservations. New bounded runtime telemetry retains legacy client events.
+
+Independent audit commands used `ERL_FLAGS='+S 4:4' MIX_ENV=test` and an absolute
+isolated build. `mix deps.get --check-locked`, strict compile, full seeded tests
+(`342781`), format, Credo and Dialyzer all passed: **834 tests + 20 doctests**,
+three existing gated core skips, and four existing intentional Dialyzer skips.
+Per-app tests: core 274, HTTP3 30, runtime 59, Fetch 309, WS 75, WebTransport 24,
+SSE 63. Preserved Fetch F1/F2 assertions passed.
+
+The pinned hyper-h2 4.2.0/wsproto 1.2.0 peer verified CONNECT headers, masking,
+duplex data, Close and END_STREAM independently. Executed phase routes:
+
+| Workload | h2c | TLS `:ssl` | TLS `:ex_ssl` |
+| --- | --- | --- | --- |
+| 10,000 text/binary round trips + 131,072-byte binary | PASS, 421,813 ms | PASS, 423,593 ms | PASS, 429,503 ms |
+| Two SSE + three WS + Fetch, ACK pressure and sibling progress | PASS | PASS | PASS |
+| Capability, handshake/frame errors, reset/GOAWAY, both zero windows and shrink/resume | PASS | PASS | PASS |
+| 1,000 actual open/echo/clean-close cycles | PASS, 85,321 ms | NOT RUN | NOT RUN |
+
+Every gate has separate public-workload and wire PASS markers. Each echo sends
+10,001 messages including its extra large binary. Generic mixed/fault `count`
+metadata is not a 10,000-operation workload. Earlier launches preceded final
+masking/telemetry/fixture changes; P5 must rerun the frozen candidate. The final
+audit repeated h2c mixed/faults and SSE hyper-h2 mixed/faults. The last WS fault
+rerun used explicit post-Open barriers for malformed/oversized/fragment-limit
+input, retaining all negative assertions. Initial failed fixture observations are
+preserved rather than counted as PASS.
+
+`scripts/http_runtime_package_traffic_gate.py` passed seven original package
+metadata audits and four isolated consumers declaring only their selected
+top-level client(s). The peer observed four actual h2c connections; the combined
+consumer shared one connection across all three clients. Live WS traffic and SSE
+state survived Fetch application stop/restart with unchanged runtime PIDs. No
+direct hidden Fetch or ex_ssl dependency was added.
+
+Frozen WS gate budgets: four owners, eight stream workers, eight owner-monitor
+workers, 8 MiB process heap, 4 MiB referenced binaries, mailbox 256, receive/send
+queues 1 MiB, 64 delivery events, 16 application/control frames, raw bytes 1 MiB.
+Defined smaller ACK-pressure limits were also asserted. A blocked-send sample
+exposed 16,365,544-byte heap allocation from per-byte masking lists; the regression
+and binary-word repair passed without raising budgets or forcing GC. Samples
+include owner/session/stream/monitor processes and distinguish sampled maxima
+from continuous peaks. Gate cleanup requires zero logical/protocol streams,
+reservations, admissions, workers and monitor processes.
+
+P4 evidence: final 310-file source manifest SHA256
+`cecefd585d5ecb49fc28a5f457355c3421a4471ec81c791eb92c3d468d129199`;
+646 unchanged BEAM files, manifest SHA256
+`501374fadb0eadb178b0fee28bf79a617d2e607a0ed4c68906cfa532a56cdab5`.
+The archive documents earlier five-path runner/fixture drift with no app drift,
+contains source, red/green/audit logs, seeds, wire records and checksums:
+[`p4-cecefd585d5e.tar.gz`](http2-stream-clients-evidence/p4-cecefd585d5e.tar.gz),
+SHA256 `a356bffa2592adc84c3a07b3add60e98c7d635407c71ce988074eac08aa199f0`.
+Short soak checks are marked `acceptance:false`; they do not prove 30-minute
+acceptance. The second full mixed Node peer and final frozen workloads remain P5.
+
+Remote P2 repair CI/Test passed (`36767141810`, `36767141833`). P3 CI passed
+(`36770202018`); its Test run (`36770201727`) failed an existing active-once
+peer-close race. P4 adds an explicit peer-close ordering barrier without changing
+the transport assertions. P4/P5 remote outcomes and publication remain pending.
+
 ## Remaining acceptance status
 
 | Family | Status | Evidence required |
 | --- | --- | --- |
-| A0 | P1/P2 PASS | Extraction/F1/F2 and standalone startup; WS traffic pending |
+| A0 | P1–P4 PASS | Extraction/F1/F2 and standalone startup/traffic |
 | A1–A3 | P2 PASS | SSE wire/lifecycle/bounds, six peer/backend routes |
-| B1 | P3 core/runtime subset PASS | Capability/header/tunnel policy; public WS handshake pending |
-| B2–B3 | NOT RUN | Public WS duplex, frame/delivery/flow/close bounds |
-| C1–C3 | SSE/Fetch subset PASS | WS mixed connection/sibling/isolation pending |
-| D1–D2 | SSE/runtime subset PASS | WS backend traffic and final package closure pending |
+| B1 | P3/P4 PASS | Core and public capability/header/handshake/fallback |
+| B2–B3 | P4 PASS | Public WS duplex, frame/delivery/flow/close bounds |
+| C1–C3 | P2–P4 PASS | Shared mixed connection, sibling and existing isolation/capacity tests |
+| D1–D2 | P4 PASS | Three WS routes and isolated seven-package traffic closure |
 | D3 | NOT RUN | Frozen full/static/interop/churn/30-minute soak, 42 Fetch gates |
 
 Finite acceptance budgets and sampled maxima will be recorded before workloads;
 an explicit completion marker and >=1,800,000 ms are required for soak PASS.
 Local acceptance, remote CI, package publication and production rollout are
 separate outcomes. P1/P2 remote status and P2 local repairs are recorded above;
-P3–P5 remote CI and publication are NOT RUN.
+P3 remote status is recorded above; P4/P5 remote CI and publication remain pending.

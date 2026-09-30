@@ -14,13 +14,16 @@ defmodule HTTP.WebSocket.Telemetry do
   end
 
   @spec connect_stop(URI.t(), String.t(), non_neg_integer()) :: :ok
-  def connect_stop(url, protocol, duration) do
+  @spec connect_stop(URI.t(), String.t(), non_neg_integer(), :http1 | :http2, boolean()) :: :ok
+  def connect_stop(url, protocol, duration, http_version \\ :http1, fallback \\ false) do
     :telemetry.execute([:http_web_socket, :connect, :stop], %{duration: duration}, %{
       url: url,
       scheme: url.scheme,
       host: url.host,
       port: url.port,
-      protocol: protocol
+      protocol: protocol,
+      http_version: http_version,
+      fallback: fallback
     })
   end
 

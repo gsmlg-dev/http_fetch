@@ -137,6 +137,8 @@ defmodule HTTPRuntimeConsumerGate do
       "new consumer pool is not empty"
     )
 
+    if url = System.get_env("HTTP_RUNTIME_CONSUMER_URL"), do: traffic!(selected, url)
+
     for client <- selected do
       :ok = Application.stop(client)
 
@@ -145,10 +147,7 @@ defmodule HTTPRuntimeConsumerGate do
         "stopping #{client} restarted or killed shared runtime"
       )
 
-      assert!(
-        apply(HTTP.HTTP2.Pool, :stats, [runtime[:http_fetch_http2_pool]]) == %{},
-        "shared runtime stopped responding"
-      )
+      await_release!(System.monotonic_time(:millisecond) + 10_000)
     end
 
     IO.puts(
@@ -158,9 +157,115 @@ defmodule HTTPRuntimeConsumerGate do
         clients: selected,
         runtime_children: length(children),
         fetch_visible: :http_fetch in selected,
-        pool_keys: 0
+        pool_keys: map_size(apply(HTTP.HTTP2.Pool, :stats, [runtime[:http_fetch_http2_pool]]))
       })
     )
+  end
+
+  defp traffic!(selected, url) do
+    opts = [http_version: :h2c, connect_timeout: 30_000, http2_scope: "package-traffic"]
+
+    source =
+      if :http_event_source in selected do
+        source = apply(HTTP.EventSource, :new, [url <> "/sse/hold", opts ++ [delivery: :ack]])
+        event!(HTTP.EventSource, source, HTTP.EventSource.Event.Open)
+        assert!(apply(HTTP.EventSource, :http_version, [source]) == :http2, "SSE used HTTP/1")
+        {event, ref} = event!(HTTP.EventSource, source, HTTP.EventSource.Event.Message)
+        assert!(event.data == "sibling-1", "wrong standalone SSE bytes")
+        :ok = apply(HTTP.EventSource, :acknowledge, [source, ref])
+        source
+      end
+
+    socket =
+      if :http_web_socket in selected do
+        ws_url = String.replace_prefix(url, "http://", "ws://")
+        count = if length(selected) == 3, do: 2, else: 1
+
+        socket =
+          apply(HTTP.WebSocket, :new, [
+            ws_url <> "/ws/echo?count=#{count}",
+            [],
+            opts ++ [delivery: :ack]
+          ])
+
+        event!(HTTP.WebSocket, socket, HTTP.WebSocket.Event.Open)
+        assert!(apply(HTTP.WebSocket, :http_version, [socket]) == :http2, "WS used HTTP/1")
+        :ok = apply(HTTP.WebSocket, :send, [socket, "package-message"])
+        {event, ref} = event!(HTTP.WebSocket, socket, HTTP.WebSocket.Event.Message)
+        assert!(event.data == "package-message", "wrong standalone WS echo")
+        :ok = apply(HTTP.WebSocket, :acknowledge, [socket, ref])
+        socket
+      end
+
+    if :http_fetch in selected do
+      promise = apply(HTTP, :fetch, [url <> "/fetch/package", opts])
+      response = apply(HTTP.Promise, :await, [promise, 30_000])
+      assert!(response.status == 200, "standalone Fetch failed")
+
+      assert!(
+        apply(HTTP.Response, :read_all, [response]) == "/fetch/package",
+        "wrong Fetch bytes"
+      )
+    end
+
+    if not is_nil(source) and not is_nil(socket) do
+      runtime = runtime_processes!()
+      :ok = Application.stop(:http_fetch)
+      assert!(runtime_processes!() == runtime, "Fetch shutdown killed shared owners")
+      :ok = apply(HTTP.WebSocket, :send, [socket, "after-fetch-stop"])
+      {event, ref} = event!(HTTP.WebSocket, socket, HTTP.WebSocket.Event.Message)
+      assert!(event.data == "after-fetch-stop", "live WS failed after Fetch shutdown")
+      :ok = apply(HTTP.WebSocket, :acknowledge, [socket, ref])
+      assert!(apply(HTTP.EventSource, :http_version, [source]) == :http2, "live SSE was lost")
+      {:ok, _} = Application.ensure_all_started(:http_fetch)
+      assert!(runtime_processes!() == runtime, "Fetch restart duplicated shared owners")
+    end
+
+    if source, do: :ok = apply(HTTP.EventSource, :close, [source])
+
+    if socket do
+      :ok = apply(HTTP.WebSocket, :close, [socket, 1000])
+      close = event!(HTTP.WebSocket, socket, HTTP.WebSocket.Event.Close)
+      assert!(close.code == 1000 and close.was_clean, "standalone WS close incomplete")
+    end
+
+    await_release!(System.monotonic_time(:millisecond) + 10_000)
+
+    IO.puts(JSON.encode!(%{result: "PASS", gate: "isolated_http2_traffic", clients: selected}))
+  end
+
+  defp event!(module, client, type) do
+    receive do
+      {^module, ^client, %{__struct__: ^type} = event} -> event
+      {^module, ^client, %{__struct__: ^type} = event, ref} -> {event, ref}
+      {^module, ^client, event} -> raise "unexpected standalone event: #{inspect(event)}"
+    after
+      30_000 -> raise "standalone #{inspect(type)} deadline"
+    end
+  end
+
+  defp await_release!(deadline) do
+    stats = apply(HTTP.HTTP2.Pool, :stats, [Process.whereis(:http_fetch_http2_pool)])
+
+    owners = DynamicSupervisor.which_children(:http_fetch_http2_connection_supervisor)
+
+    active? =
+      Enum.any?(owners, fn {_, pid, _, _} ->
+        status = apply(HTTP.HTTP2.ConnectionOwner, :status, [pid])
+        status.active_streams != 0 or status.protocol_streams != 0
+      end)
+
+    if active? or Task.Supervisor.children(:http_runtime_task_supervisor) != [] or
+         Enum.any?(stats, fn {_key, value} -> value.streams != 0 or value.pending != 0 end) do
+      assert!(System.monotonic_time(:millisecond) < deadline, "standalone reservations leaked")
+
+      receive do
+      after
+        5 -> :ok
+      end
+
+      await_release!(deadline)
+    end
   end
 
   defp runtime_processes! do

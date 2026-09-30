@@ -16,6 +16,8 @@ defmodule HTTP.WebSocket.Frame do
             fragmented_opcode: nil,
             fragmented_chunks: [],
             fragmented_size: 0,
+            fragmented_parts: 0,
+            max_frame_parts: 16_384,
             max_message_size: @default_max_message_size
 
   @type opcode :: :text | :binary | :close | :ping | :pong
@@ -28,7 +30,10 @@ defmodule HTTP.WebSocket.Frame do
   @type t :: %__MODULE__{}
 
   def new_parser(opts \\ []) do
-    %__MODULE__{max_message_size: Keyword.get(opts, :max_message_size, @default_max_message_size)}
+    %__MODULE__{
+      max_message_size: Keyword.get(opts, :max_message_size, @default_max_message_size),
+      max_frame_parts: Keyword.get(opts, :max_frame_parts, 16_384)
+    }
   end
 
   @spec encode(opcode(), binary(), keyword()) :: {:ok, binary()} | {:error, term()}
@@ -60,6 +65,44 @@ defmodule HTTP.WebSocket.Frame do
   end
 
   def close_payload(_code, _reason), do: {:error, :invalid_close_code}
+
+  @spec protocol_close_payload(non_neg_integer() | nil, binary()) ::
+          {:ok, binary()} | {:error, term()}
+  def protocol_close_payload(nil, ""), do: {:ok, <<>>}
+
+  def protocol_close_payload(code, reason) when is_integer(code) and is_binary(reason) do
+    cond do
+      not valid_received_close_code?(code) -> {:error, :invalid_close_code}
+      byte_size(reason) > 123 -> {:error, :close_reason_too_long}
+      not String.valid?(reason) -> {:error, :invalid_close_reason}
+      true -> {:ok, <<code::16, reason::binary>>}
+    end
+  end
+
+  def protocol_close_payload(_code, _reason), do: {:error, :invalid_close_code}
+
+  @spec incomplete?(t()) :: boolean()
+  def incomplete?(%__MODULE__{} = parser),
+    do: parser.buffer != <<>> or not is_nil(parser.fragmented_opcode)
+
+  @spec parse_some(t(), binary()) :: {:ok, t(), [event()], binary()} | {:error, close_error()}
+  def parse_some(%__MODULE__{} = parser, data) when is_binary(data),
+    do: parser |> append(data) |> parse_one()
+
+  defp parse_one(%__MODULE__{buffer: buffer} = parser) when byte_size(buffer) < 2,
+    do: {:ok, parser, [], <<>>}
+
+  defp parse_one(%__MODULE__{buffer: buffer} = parser) do
+    with {:ok, frame, rest} <- take_frame(buffer, parser),
+         {:ok, parser, events} <- handle_frame(%{parser | buffer: <<>>}, frame) do
+      if events == [],
+        do: parse_one(%{parser | buffer: rest}),
+        else: {:ok, parser, events, rest}
+    else
+      :more -> {:ok, parser, [], <<>>}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   @spec parse(t(), binary()) :: {:ok, t(), [event()]} | {:error, close_error()}
   def parse(%__MODULE__{} = parser, data) when is_binary(data) do
@@ -122,7 +165,7 @@ defmodule HTTP.WebSocket.Frame do
   end
 
   defp parse_frames(%__MODULE__{buffer: buffer} = parser, events) do
-    with {:ok, frame, rest} <- take_frame(buffer),
+    with {:ok, frame, rest} <- take_frame(buffer, parser),
          {:ok, parser, new_events} <- handle_frame(%{parser | buffer: rest}, frame) do
       parse_frames(parser, Enum.reverse(new_events) ++ events)
     else
@@ -131,7 +174,7 @@ defmodule HTTP.WebSocket.Frame do
     end
   end
 
-  defp take_frame(<<first, second, rest::binary>>) do
+  defp take_frame(<<first, second, rest::binary>>, parser) do
     fin? = (first &&& 0x80) != 0
     rsv = first &&& 0x70
     opcode = first &&& 0x0F
@@ -139,11 +182,40 @@ defmodule HTTP.WebSocket.Frame do
     length_code = second &&& 0x7F
 
     with :ok <- validate_header(rsv, opcode, masked?),
+         :ok <- validate_frame_sequence(parser, opcode, fin?),
          {:ok, length, payload_rest} <- take_length(length_code, rest),
+         :ok <- validate_declared_size(parser, opcode, length),
          {:ok, payload, rest} <- take_payload(payload_rest, length) do
       {:ok, %{fin?: fin?, opcode: opcode, payload: payload}, rest}
     end
   end
+
+  defp validate_frame_sequence(_parser, opcode, false) when opcode in [@close, @ping, @pong],
+    do: {:error, {1002, :fragmented_control_frame}}
+
+  defp validate_frame_sequence(%{fragmented_opcode: nil}, @continuation, _fin?),
+    do: {:error, {1002, :unexpected_continuation}}
+
+  defp validate_frame_sequence(%{fragmented_opcode: existing}, opcode, _fin?)
+       when not is_nil(existing) and opcode in [@text, @binary],
+       do: {:error, {1002, :fragment_already_started}}
+
+  defp validate_frame_sequence(parser, @continuation, _fin?) do
+    if parser.fragmented_parts < parser.max_frame_parts,
+      do: :ok,
+      else: {:error, {1009, :too_many_frame_parts}}
+  end
+
+  defp validate_frame_sequence(_parser, _opcode, _fin?), do: :ok
+
+  defp validate_declared_size(_parser, opcode, length) when opcode in [@close, @ping, @pong] do
+    if length <= 125, do: :ok, else: {:error, {1002, :control_payload_too_large}}
+  end
+
+  defp validate_declared_size(parser, @continuation, length),
+    do: validate_size(parser, parser.fragmented_size + length)
+
+  defp validate_declared_size(parser, _opcode, length), do: validate_size(parser, length)
 
   defp take_length(length, rest) when length <= 125, do: {:ok, length, rest}
 
@@ -212,8 +284,9 @@ defmodule HTTP.WebSocket.Frame do
        %{
          parser
          | fragmented_opcode: opcode,
-           fragmented_chunks: [payload],
-           fragmented_size: byte_size(payload)
+           fragmented_chunks: [:binary.copy(payload)],
+           fragmented_size: byte_size(payload),
+           fragmented_parts: 1
        }, []}
     end
   end
@@ -234,14 +307,28 @@ defmodule HTTP.WebSocket.Frame do
     size = parser.fragmented_size + byte_size(payload)
 
     with :ok <- validate_size(parser, size) do
-      chunks = [payload | parser.fragmented_chunks]
+      chunks = [:binary.copy(payload) | parser.fragmented_chunks]
 
       if fin? do
         message = chunks |> Enum.reverse() |> IO.iodata_to_binary()
-        parser = %{parser | fragmented_opcode: nil, fragmented_chunks: [], fragmented_size: 0}
+
+        parser = %{
+          parser
+          | fragmented_opcode: nil,
+            fragmented_chunks: [],
+            fragmented_size: 0,
+            fragmented_parts: 0
+        }
+
         emit_fragmented_message(parser, opcode, message)
       else
-        {:ok, %{parser | fragmented_chunks: chunks, fragmented_size: size}, []}
+        {:ok,
+         %{
+           parser
+           | fragmented_chunks: chunks,
+             fragmented_size: size,
+             fragmented_parts: parser.fragmented_parts + 1
+         }, []}
       end
     end
   end
@@ -292,19 +379,19 @@ defmodule HTTP.WebSocket.Frame do
     end
   end
 
-  defp valid_received_close_code?(code) when code in [1005, 1006, 1015], do: false
+  defp valid_received_close_code?(code) when code in [1004, 1005, 1006, 1015], do: false
   defp valid_received_close_code?(code) when code < 1000, do: false
   defp valid_received_close_code?(code) when code in 1000..1014, do: true
   defp valid_received_close_code?(code) when code in 3000..4999, do: true
   defp valid_received_close_code?(_code), do: false
 
-  defp mask(payload, <<a, b, c, d>>) do
-    payload
-    |> :binary.bin_to_list()
-    |> Enum.with_index()
-    |> Enum.map(fn {byte, index} ->
-      bxor(byte, Enum.at([a, b, c, d], rem(index, 4)))
-    end)
-    |> :binary.list_to_bin()
+  defp mask(payload, <<key::32>>) do
+    complete_size = div(byte_size(payload), 4) * 4
+    <<complete::binary-size(^complete_size), tail::binary>> = payload
+    masked = for <<word::32 <- complete>>, into: <<>>, do: <<bxor(word, key)::32>>
+    tail_bits = bit_size(tail)
+    <<tail_word::size(^tail_bits)>> = tail
+    tail_key = key >>> (32 - tail_bits)
+    <<masked::binary, bxor(tail_word, tail_key)::size(tail_bits)>>
   end
 end
