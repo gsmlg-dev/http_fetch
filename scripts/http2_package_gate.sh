@@ -25,12 +25,24 @@ defmodule HTTP2PackageConsumer.MixProject do
 end
 ELIXIR
 cp "$repo_root/scripts/http2_production_gate.exs" "$consumer_dir/gate.exs"
+cp "$repo_root/mix.lock" "$consumer_dir/mix.lock"
+mkdir -p "$consumer_dir/test/http" "$consumer_dir/test/support"
+cp "$repo_root/apps/http_fetch/test/support/http2_scripted_peer.ex" "$consumer_dir/test/support/"
+cp -R "$repo_root/apps/http_fetch/test/support/fixtures" "$consumer_dir/test/support/"
+for test in http2_early_response_closure_test http2_pool_progress_test http2_queue_socket_progress_test \
+  http2_production_lifecycle_test http2_body_bridge_test socket_client_http2_test; do
+  cp "$repo_root/apps/http_fetch/test/http/$test.exs" "$consumer_dir/test/http/"
+done
+printf 'ExUnit.start()\nCode.require_file("support/http2_scripted_peer.ex", __DIR__)\n' > "$consumer_dir/test/test_helper.exs"
 (
   cd "$consumer_dir"
   export HTTP_FETCH_PACKAGE_DIR="$package_dir"
   export MIX_BUILD_PATH="$work_dir/consumer-build"
-  MIX_ENV=prod mix deps.get
+  MIX_ENV=prod mix deps.get --check-locked
   MIX_ENV=prod mix compile --warnings-as-errors
   MIX_ENV=prod mix run gate.exs
+  MIX_ENV=test mix deps.get --check-locked
+  MIX_ENV=test mix compile --warnings-as-errors
+  MIX_ENV=test mix test --seed 342781 --max-cases 8
 )
 printf 'package_consumer=%s\n' "$consumer_dir"
