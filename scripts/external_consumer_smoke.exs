@@ -12,6 +12,14 @@ defmodule ExternalConsumerSmoke do
       {:ok, _} = Application.ensure_all_started(app)
     end
 
+    assert :http_core in Application.spec(:http_runtime, :applications),
+           "http_runtime must start its http_core dependency"
+
+    for app <- [:http_fetch, :http_web_socket, :http_event_source] do
+      assert :http_runtime in Application.spec(app, :applications),
+             "#{app} must start its http_runtime dependency"
+    end
+
     assert Enum.any?(Application.started_applications(), fn {app, _, _} -> app == :ex_ssl end),
            ":ex_ssl was not started through http_core's package dependency"
 
@@ -72,11 +80,16 @@ defmodule ExternalConsumerSmoke do
     package_dir = System.fetch_env!("HTTP_FETCH_PACKAGE_DIR")
     core = metadata!(package_dir, "http_core")
     core_version = Map.fetch!(core, <<"version">>)
+    runtime = metadata!(package_dir, "http_runtime")
+
+    assert Map.fetch!(runtime, <<"version">>) == core_version,
+           "http_runtime package must use the shared package version"
 
     assert requirement!(core, <<"ex_ssl">>) == <<"~> 0.7.2">>,
            "http_core package must require ex_ssl ~> 0.7.2"
 
     for app <- [
+          "http_runtime",
           "elixir_quic_http3",
           "http_fetch",
           "http_web_socket",
@@ -85,6 +98,11 @@ defmodule ExternalConsumerSmoke do
         ] do
       assert requirement!(metadata!(package_dir, app), <<"http_core">>) == "~> " <> core_version,
              "#{app} package must require the built http_core version"
+    end
+
+    for app <- ["http_fetch", "http_web_socket", "http_event_source"] do
+      assert requirement!(metadata!(package_dir, app), "http_runtime") == "~> " <> core_version,
+             "#{app} package must require the built http_runtime version"
     end
 
     for app <- ["http_fetch", "http_web_transport"] do

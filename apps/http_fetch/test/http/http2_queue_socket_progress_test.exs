@@ -4,7 +4,7 @@ defmodule HTTP.HTTP2QueueSocketProgressTest do
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer
 
   setup do
-    :ok = Supervisor.terminate_child(HTTPFetch.Application, Pool)
+    :ok = Supervisor.terminate_child(HTTPRuntime.Application, Pool)
 
     {:ok, pool} =
       start_supervised(
@@ -12,7 +12,7 @@ defmodule HTTP.HTTP2QueueSocketProgressTest do
       )
 
     on_exit(fn ->
-      {:ok, _pool} = Supervisor.restart_child(HTTPFetch.Application, Pool)
+      {:ok, _pool} = Supervisor.restart_child(HTTPRuntime.Application, Pool)
     end)
 
     %{pool: pool}

@@ -104,7 +104,21 @@ isolated build directory successfully compiles unchanged v0.15.1 with warnings
 as errors. Relative MIX_BUILD_PATH is unsuitable for these child projects.
 No source defect or dependency workaround is inferred from that cache failure.
 
-P0 inspection is in progress. The existing SSE parser has only a line bound;
+P0 is complete and committed as `592cd780`. Baseline core/Fetch/SSE/WS suites
+passed 633 tests and 20 doctests (three existing gated core skips).
+P1 extraction is implemented and independently reviewed. Shared dialing retains
+Fetch's existing protocol selection and cancellable worker algorithm. New stream
+tasks expose generation-qualified notifications and opaque, idempotent FIFO
+transport settlement; remote end releases after settlement, while GOAWAY keeps
+accepted streams alive. Opening deadlines/liveness are checked before owner
+writes, and cancellation/exclusive shutdown do not block behind a stalled owner.
+The runtime caps supervised stream/dial tasks at 2,048; adapters must monitor
+returned stream PIDs to settle runtime restarts. HTTP/1 and bodyful requests are
+explicitly rejected by this initial bodyless stream adapter before admission.
+Four unpacked standalone consumers passed, with no Fetch modules in SSE/WS
+consumers and stable shared-runtime PIDs across individual client shutdown.
+
+The existing SSE parser has only a line bound;
 WebSocket buffering must reject an oversized declared frame before receiving its
 payload. Shared telemetry must preserve Fetch event names without calling Fetch.
 Profile ordering must explicitly retain `:protocol` for Extended CONNECT without

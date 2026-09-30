@@ -58,6 +58,7 @@ defmodule HttpFetch.MixProject do
   defp deps do
     [
       {:http_core, "~> 0.15.1", in_umbrella: true, hex: :http_core},
+      {:http_runtime, "~> 0.15.1", in_umbrella: true, hex: :http_runtime},
       {:elixir_quic_http3, "~> 0.15.1", in_umbrella: true, hex: :elixir_quic_http3},
       {:telemetry, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},

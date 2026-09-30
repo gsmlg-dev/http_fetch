@@ -24,8 +24,8 @@ permissions:
 env:
   ELIXIR_VERSION: "1.18"
   OTP_VERSION: "28"
-  RELEASE_APPS: "http_core elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport"
-  HEX_DEP_APPS: "http_fetch http_web_socket http_event_source http_web_transport elixir_quic_http3"
+  RELEASE_APPS: "http_core http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport"
+  HEX_DEP_APPS: "http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport"
 
 jobs:
   release:
@@ -104,7 +104,7 @@ jobs:
 
             body =
               Regex.replace(
-                ~r/\{:(http_core|elixir_quic_http3), "~> [^"]+", in_umbrella: true, hex: :(?:http_core|elixir_quic_http3)\}/,
+                ~r/\{:(http_core|http_runtime|elixir_quic_http3), "~> [^"]+", in_umbrella: true, hex: :(?:http_core|http_runtime|elixir_quic_http3)\}/,
                 body,
                 fn _, app -> "{:#{app}, \"~> #{version}\", in_umbrella: true, hex: :#{app}}" end
               )
@@ -128,6 +128,22 @@ jobs:
             expected="{:http_core, \"~> ${RELEASE_VERSION}\", in_umbrella: true, hex: :http_core}"
             if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
               echo "::error::apps/${app}/mix.exs does not use local http_core ${RELEASE_VERSION} before testing"
+              exit 1
+            fi
+          done
+
+          for app in http_fetch http_web_socket http_event_source; do
+            expected="{:http_runtime, \"~> ${RELEASE_VERSION}\", in_umbrella: true, hex: :http_runtime}"
+            if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
+              echo "::error::apps/${app}/mix.exs does not use local http_runtime ${RELEASE_VERSION} before testing"
+              exit 1
+            fi
+          done
+
+          for app in http_fetch http_web_transport; do
+            expected="{:elixir_quic_http3, \"~> ${RELEASE_VERSION}\", in_umbrella: true, hex: :elixir_quic_http3}"
+            if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
+              echo "::error::apps/${app}/mix.exs does not use local elixir_quic_http3 ${RELEASE_VERSION} before testing"
               exit 1
             fi
           done
@@ -230,7 +246,7 @@ jobs:
 
             body =
               Regex.replace(
-                ~r/\{:(http_core|elixir_quic_http3), "~> [^"]+", in_umbrella: true, hex: :(?:http_core|elixir_quic_http3)\}/,
+                ~r/\{:(http_core|http_runtime|elixir_quic_http3), "~> [^"]+", in_umbrella: true, hex: :(?:http_core|http_runtime|elixir_quic_http3)\}/,
                 body,
                 fn _, app -> "{:#{app}, \"~> #{version}\"}" end
               )

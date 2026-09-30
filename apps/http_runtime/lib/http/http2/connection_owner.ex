@@ -155,6 +155,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     end
   end
 
+  def handle_info(:http2_shutdown_exclusive, state), do: {:stop, :normal, state}
+
   def handle_info(:close_after_write_failure, state), do: {:stop, :normal, state}
 
   def handle_info(:settings_timeout, state) do
@@ -181,21 +183,14 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
     case Enum.find(state.streams, fn {_id, entry} -> entry.monitor == monitor end) do
       {id, _entry} ->
-        case handle_call({:cancel, id}, nil, state) do
-          {:reply, _, state} ->
-            case handle_call({:release_stream, id}, nil, state) do
-              {:reply, _, state} -> {:noreply, state}
-              {:stop, reason, _, state} -> {:stop, reason, state}
-            end
-
-          {:stop, reason, _, state} ->
-            {:stop, reason, state}
-        end
+        discard_request(state, id)
 
       nil ->
         {:noreply, state}
     end
   end
+
+  def handle_info({:http2_release_request, ref}, state), do: discard_request(state, ref)
 
   def handle_info(:drain_bodies, state) do
     case drain_pending_body(state, 0) do
@@ -319,54 +314,18 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       do: {:reply, {:error, :capacity}, state}
 
   def handle_call({:open_stream, headers, opts}, from, state) do
-    request_ref = Keyword.get(opts, :request_ref, make_ref())
+    deadline = Keyword.get(opts, :deadline_at)
+    subscriber = Keyword.get(opts, :subscriber, elem(from, 0))
 
-    with {:ok, stream, connection} <-
-           Connection.open_stream(state.connection,
-             request_ref: request_ref,
-             request_method:
-               if(List.keyfind(headers, ":method", 0) == {":method", "HEAD"}, do: :head)
-           ),
-         ordered_headers <- order_headers(state.profile, headers),
-         {:ok, connection, effects} <-
-           Connection.commit_headers(connection, stream.id, ordered_headers,
-             end_stream: Keyword.get(opts, :end_stream, is_nil(Keyword.get(opts, :body_bridge))),
-             max_frame_size: state.profile.max_header_fragment,
-             priority: state.profile.priority
-           ),
-         {:ok, state} <- write_effects(state, effects) do
-      result = %{id: stream.id, ref: request_ref}
+    cond do
+      is_integer(deadline) and deadline <= System.monotonic_time(:millisecond) ->
+        {:reply, {:error, :opening_timeout}, state}
 
-      state = %{
-        state
-        | connection: connection,
-          streams:
-            Map.put(state.streams, stream.id, %{
-              ref: request_ref,
-              pid: Keyword.get(opts, :subscriber, elem(from, 0)),
-              monitor: Process.monitor(Keyword.get(opts, :subscriber, elem(from, 0))),
-              committed?: true,
-              terminal?: false,
-              body_bridge: Keyword.get(opts, :body_bridge),
-              upload_stopped?: false,
-              pending_body: nil,
-              deliveries: :queue.new()
-            }),
-          refs: Map.put(state.refs, request_ref, stream.id),
-          scheduler: Scheduler.add(state.scheduler, stream.id)
-      }
+      is_integer(deadline) and not Process.alive?(subscriber) ->
+        {:reply, {:error, :subscriber_down}, state}
 
-      emit_runtime(state, :opened)
-      {:reply, {:ok, result}, state}
-    else
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-
-      {:error, reason, failed_state} ->
-        notify_transport_error(failed_state, reason)
-
-        {:stop, :normal, {:error, reason},
-         %{failed_state | lifecycle: :closed, close_reason: reason}}
+      true ->
+        do_open_stream(headers, opts, from, state)
     end
   end
 
@@ -487,7 +446,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   def terminate(reason, state) do
     Enum.each(state.upload_stalls, fn {_id, started} -> emit_stall(started, :closed) end)
 
-    HTTP.Telemetry.http2_runtime(
+    HTTP.Runtime.Telemetry.http2_runtime(
       :connection_close,
       close_category(state.close_reason || reason),
       %{}
@@ -497,6 +456,71 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     Enum.each(Map.keys(state.streams), &stop_body_bridge(state, &1))
     close_transport(state)
     :ok
+  end
+
+  defp discard_request(state, ref) do
+    case handle_call({:cancel, ref}, nil, state) do
+      {:reply, _, state} ->
+        case handle_call({:release_stream, ref}, nil, state) do
+          {:reply, _, state} -> {:noreply, state}
+          {:stop, reason, _, state} -> {:stop, reason, state}
+        end
+
+      {:stop, reason, _, state} ->
+        {:stop, reason, state}
+    end
+  end
+
+  defp do_open_stream(headers, opts, from, state) do
+    request_ref = Keyword.get(opts, :request_ref, make_ref())
+
+    with {:ok, stream, connection} <-
+           Connection.open_stream(state.connection,
+             request_ref: request_ref,
+             request_method:
+               if(List.keyfind(headers, ":method", 0) == {":method", "HEAD"}, do: :head)
+           ),
+         ordered_headers <- order_headers(state.profile, headers),
+         {:ok, connection, effects} <-
+           Connection.commit_headers(connection, stream.id, ordered_headers,
+             end_stream: Keyword.get(opts, :end_stream, is_nil(Keyword.get(opts, :body_bridge))),
+             max_frame_size: state.profile.max_header_fragment,
+             priority: state.profile.priority
+           ),
+         {:ok, state} <- write_effects(state, effects) do
+      result = %{id: stream.id, ref: request_ref}
+
+      state = %{
+        state
+        | connection: connection,
+          streams:
+            Map.put(state.streams, stream.id, %{
+              ref: request_ref,
+              pid: Keyword.get(opts, :subscriber, elem(from, 0)),
+              monitor: Process.monitor(Keyword.get(opts, :subscriber, elem(from, 0))),
+              committed?: true,
+              terminal?: false,
+              body_bridge: Keyword.get(opts, :body_bridge),
+              upload_stopped?: false,
+              pending_body: nil,
+              deliveries: :queue.new()
+            }),
+          refs: Map.put(state.refs, request_ref, stream.id),
+          scheduler: Scheduler.add(state.scheduler, stream.id)
+      }
+
+      emit_runtime(state, :opened)
+      {:reply, {:ok, result}, state}
+    else
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+
+      {:error, reason, failed_state} ->
+        notify_transport_error(failed_state, reason)
+
+        {:stop, :normal, {:error, reason},
+         %{failed_state | lifecycle: :closed, close_reason: reason}}
+    end
   end
 
   defp initialize_wire(state) do
@@ -700,7 +724,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         {:ok, %{state | connection: Connection.put_stream(state.connection, stream)}}
 
       {:ok, stream} ->
-        HTTP.Telemetry.http2_runtime(:peer_reset, :received, %{error_code: code})
+        HTTP.Runtime.Telemetry.http2_runtime(:peer_reset, :received, %{error_code: code})
         {:ok, stream} = StreamState.rst(stream, code)
         state = terminal_stream(state, id, {:http2, :reset, code})
         events = Enum.reject(state.response_events, fn {stream_id, _} -> stream_id == id end)
@@ -767,7 +791,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
        }) do
     case Connection.receive_goaway(state.connection, last) do
       {:ok, connection, _} ->
-        HTTP.Telemetry.http2_runtime(:peer_goaway, :received, %{error_code: error})
+        HTTP.Runtime.Telemetry.http2_runtime(:peer_goaway, :received, %{error_code: error})
         if state.pool, do: GenServer.cast(state.pool, {:owner_draining, state.pool_key, self()})
 
         state =
@@ -1382,7 +1406,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   defp emit_runtime(state, event),
-    do: HTTP.Telemetry.http2_connection(event, state.lifecycle, runtime_measurements(state))
+    do:
+      HTTP.Runtime.Telemetry.http2_connection(event, state.lifecycle, runtime_measurements(state))
 
   defp start_upload_stall(state, id) do
     %{state | upload_stalls: Map.put_new(state.upload_stalls, id, System.monotonic_time())}
@@ -1403,7 +1428,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     duration_us =
       System.convert_time_unit(System.monotonic_time() - started, :native, :microsecond)
 
-    HTTP.Telemetry.http2_runtime(:flow_control_stall, outcome, %{
+    HTTP.Runtime.Telemetry.http2_runtime(:flow_control_stall, outcome, %{
       count: 1,
       duration_us: duration_us
     })

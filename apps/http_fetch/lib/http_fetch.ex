@@ -15,9 +15,7 @@ defmodule HTTPFetch.Application do
   def start(_type, _args) do
     children = [
       {Task.Supervisor, name: :http_fetch_task_supervisor},
-      {Registry, keys: :unique, name: HTTP.AbortController},
-      {HTTP.HTTP2.ConnectionSupervisor, name: :http_fetch_http2_connection_supervisor},
-      {HTTP.HTTP2.Pool, name: :http_fetch_http2_pool}
+      {Registry, keys: :unique, name: HTTP.AbortController}
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: HTTPFetch.Application)

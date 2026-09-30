@@ -290,6 +290,11 @@ defmodule HTTP.HTTP2.Pool do
     do: {:noreply, set_draining(state, key, owner)}
 
   @impl true
+  def handle_info({:http2_release_reservation, key, token}, state) do
+    {:reply, :ok, state} = handle_call({:release, key, token}, nil, state)
+    {:noreply, state}
+  end
+
   def handle_info({:start_owner, key, _opts, {:ok, owner}}, state) when is_pid(owner) do
     state = finish_connect(state, key)
     {:noreply, state |> register_internal(key, owner) |> dispatch_waiters(key)}
@@ -919,7 +924,7 @@ defmodule HTTP.HTTP2.Pool do
         }
       end)
 
-    HTTP.Telemetry.http2_pool(event, outcome, %{
+    HTTP.Runtime.Telemetry.http2_pool(event, outcome, %{
       reservations: map_size(state.reservations),
       waiters: waiters,
       connecting: connecting,

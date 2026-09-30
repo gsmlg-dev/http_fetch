@@ -638,7 +638,9 @@ directory) after the same preparation as the unit tests.
 bash scripts/external_consumer_smoke.sh
 ```
 
-This builds all five current Hex packages and installs their unpacked contents
+This builds all seven current Hex packages (`http_core`, `http_runtime`,
+`elixir_quic_http3`, `http_fetch`, `http_web_socket`, `http_event_source`, and
+`http_web_transport`) and installs their unpacked contents
 into a temporary project outside the umbrella, with independent dependencies
 and build output and no repository lockfile. Local paths resolve the unpublished
 internal packages; `ex_ssl` is resolved only through `http_core`. The smoke

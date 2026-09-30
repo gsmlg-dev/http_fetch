@@ -110,7 +110,7 @@ for group in "${required_groups[@]}"; do
   [[ -f "$repo_root/scripts/$group" ]] || { echo "required feature group missing: $group" >&2; exit 2; }
 done
 
-for app in http_core elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport; do
+for app in http_core http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport; do
   (
     cd "$repo_root/apps/$app"
     MIX_ENV=prod MIX_BUILD_PATH="$work_dir/package-build/$app" \

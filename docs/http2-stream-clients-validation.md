@@ -24,11 +24,47 @@ stale cached 0.11.0 app metadata; a relative build-path attempt failed because
 child dependency paths resolve relative to different project roots. Neither is
 counted as a source test failure or silently treated as a passed gate.
 
-## Acceptance status
+## P1 extraction and bodyless stream contract
+
+Seven independently constructed packages passed original Hex metadata audits.
+Four isolated consumers declared only their selected top-level client(s): Fetch,
+SSE, WS, or all three. Temporary extracted shared dependency paths were rewritten
+after auditing original metadata; no developer umbrella code path, hidden Fetch,
+or direct ex_ssl dependency supplied startup. Standalone SSE/WS had no HTTP or
+HTTP.Telemetry module visible. All three shared supervision children and their
+PIDs survived individual client application shutdown. This proves distribution
+and supervision, not new SSE/WS H2 traffic.
+
+```sh
+ERL_FLAGS='+S 2:2' bash scripts/http_runtime_consumer_gate.sh
+MIX_BUILD_PATH=/tmp/http-stream-clients-p1-build MIX_ENV=test mix compile --warnings-as-errors
+MIX_BUILD_PATH=/tmp/http-stream-clients-p1-build MIX_ENV=test mix test apps/http_core/test apps/http_fetch/test apps/http_runtime/test apps/http_event_source/test apps/http_web_socket/test
+MIX_BUILD_PATH=/tmp/http-stream-clients-p1-build MIX_ENV=test mix credo --all
+MIX_BUILD_PATH=/tmp/http-stream-clients-p1-build mix format --check-formatted
+```
+
+All commands passed. The final scoped suite passed 655 tests and 20 doctests
+(seed 903949), with three existing gated core skips. Runtime has 22 passing tests including the compatible
+telemetry contracts; h2c generation-qualified DATA, independently encoded credit
+and PING barriers; out-of-order, duplicate and unknown delivery references;
+same-connection sibling cancellation; owner/subscriber death; stalled TLS dialing
+cancellation; accepted GOAWAY followed by DATA; HEADERS/empty DATA/final DATA EOF
+without an extra reset; ACK-delayed EOF release; expired/cancelled queued opens;
+exclusive stalled-owner shutdown; and HTTP/1/bodyful pre-admission rejection.
+The original F1/F2 suites and all existing scoped core/Fetch/SSE/WS tests passed.
+The only changed historical test seam is the pool's supervising application.
+
+Logs are collected under `/tmp/http-stream-clients-evidence/p1/`, including failed
+intermediate attempts and successful final reruns. Independent source review
+found and closed cancellation, EOF and GOAWAY issues before this phase's commit;
+no accepted Fetch algorithm or regression assertion was disabled. Final-source
+acceptance and all new client/independent traffic workloads still require P2–P5.
+
+## Remaining acceptance status
 
 | Family | Status | Evidence required |
 | --- | --- | --- |
-| A0 | NOT RUN | New runtime extraction, F1/F2, standalone clients |
+| A0 | P1 PASS | Extraction/F1/F2 and standalone startup; adapters pending |
 | A1–A3 | NOT RUN | SSE wire/lifecycle/bounds and independent peers |
 | B1–B3 | NOT RUN | RFC8441 capability, WS duplex, flow/bounds |
 | C1–C3 | NOT RUN | Mixed connection/sibling/isolation proof |

@@ -26,8 +26,9 @@ This is an Elixir library providing a browser-like HTTP fetch API built on Erlan
 
 ### Application Structure
 - This is a Mix umbrella with independent protocol apps under `apps/`.
-- Shared HTTP primitives live in `apps/http_core`; concrete protocol clients
-  depend on `:http_core` instead of each other.
+- Shared HTTP primitives live in `apps/http_core`; pooled HTTP/2 connection
+  ownership and stream I/O live in `apps/http_runtime`. Fetch, EventSource and
+  WebSocket depend on both shared applications instead of each other.
 - `apps/elixir_quic_http3` owns the future HTTP/3/QPACK session layer and
   depends on `:elixir_quic`; it must not move HTTP/3 semantics into the QUIC
   transport library.
@@ -93,7 +94,9 @@ deps.get`, `MIX_ENV=test mix compile --warnings-as-errors`, then `mix test
 apps/<app>/test`. Running Mix inside a child app does not traverse the runtime
 dependencies of its `in_umbrella` dependencies. E2E uses the same root preparation
 and `mix test apps/<app>/e2e`, or `mix test.e2e` for all E2E suites.
-Run `bash scripts/external_consumer_smoke.sh` to build all five packages and
+Run `bash scripts/external_consumer_smoke.sh` to build all seven packages
+(`http_core`, `http_runtime`, `elixir_quic_http3`, `http_fetch`, `http_web_socket`,
+`http_event_source`, and `http_web_transport`) and
 verify an isolated non-umbrella consumer, including transitive TLS dependencies.
 
 ## Important Implementation Details

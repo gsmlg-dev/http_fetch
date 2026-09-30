@@ -44,10 +44,26 @@ jobs:
             fi
           done
 
-          for app in http_fetch http_web_socket http_event_source http_web_transport; do
+          for app in http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport; do
             expected='{:http_core, "~> '"${VERSION}"'", in_umbrella: true, hex: :http_core}'
             if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
               echo "::error::apps/${app}/mix.exs does not depend on http_core ${VERSION} with umbrella + Hex metadata"
+              exit 1
+            fi
+          done
+
+          for app in http_fetch http_web_socket http_event_source; do
+            expected='{:http_runtime, "~> '"${VERSION}"'", in_umbrella: true, hex: :http_runtime}'
+            if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
+              echo "::error::apps/${app}/mix.exs does not depend on http_runtime ${VERSION} with umbrella + Hex metadata"
+              exit 1
+            fi
+          done
+
+          for app in http_fetch http_web_transport; do
+            expected='{:elixir_quic_http3, "~> '"${VERSION}"'", in_umbrella: true, hex: :elixir_quic_http3}'
+            if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
+              echo "::error::apps/${app}/mix.exs does not depend on elixir_quic_http3 ${VERSION} with umbrella + Hex metadata"
               exit 1
             fi
           done
@@ -191,6 +207,8 @@ jobs:
       matrix:
         app:
           - http_core
+          - http_runtime
+          - elixir_quic_http3
           - http_fetch
           - http_web_socket
           - http_event_source
