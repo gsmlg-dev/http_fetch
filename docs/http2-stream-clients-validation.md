@@ -477,3 +477,21 @@ Implementation and local acceptance are complete. Candidate remote CI/Test passe
 The manual slower acceptance workflow is available but was not dispatched; the
 complete local archive supplies final executable evidence. Publication checks are
 pending at this evidence commit. Production rollout has not been performed.
+
+The evidence-only commit `3abfbe1` passed CI (`36785324372`) but its separate Test
+run (`36785324392`, seed `965078`) found a task-baseline fixture race in
+`HTTP.HTTP2FailedOpenCleanupTest`: an unrelated pre-existing task was present
+before the failed POST and had exited at the final exact-set comparison. The
+current child set was empty; this observation does not show a leaked failed-POST
+task. Release attempt `36785324660` passed its own full unit suite and Credo but
+was canceled during validation before package publication. The fixture requires
+an explicit task-settlement barrier, followed by a new frozen acceptance run.
+The preceding archive remains the accepted `d99b9de` evidence; it is not evidence
+for the forthcoming fixture change or a completed release.
+The test-only repair waits for the monitored initial task set, explicitly
+monitors the failed Promise task to normal termination, and settles the final
+task set before the unchanged equality assertion. Pool, owner, bridge and sibling
+assertions remain intact. The scoped fixture and complete Fetch suite passed
+seeds `965078` and `342781` (309 tests plus 20 doctests each); format and Credo
+passed. No runtime/application source changed. The repaired source is frozen for
+a complete new acceptance run before another release attempt.

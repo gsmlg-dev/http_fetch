@@ -136,8 +136,11 @@ defmodule HTTP.HTTP2FailedOpenCleanupTest do
     end)
 
     opts = [http_version: :h2c, timeout: 2_000]
+    await_task_children_exit()
     children_before = MapSet.new(Task.Supervisor.children(:http_fetch_task_supervisor))
     failed = HTTP.fetch(url, opts ++ [method: :post, body: "payload"])
+    failed_pid = failed.task.pid
+    failed_ref = Process.monitor(failed_pid)
     assert_receive {:stream_creation, worker}
     {pool, key, owner} = pooled_owner(URI.parse(url).port)
     assert %{streams: 1} = Pool.stats(pool)[key]
@@ -145,11 +148,14 @@ defmodule HTTP.HTTP2FailedOpenCleanupTest do
     send(worker, :continue_stream_creation)
 
     assert {:error, :capacity} = HTTP.Promise.await(failed)
+    assert_receive {:DOWN, ^failed_ref, :process, ^failed_pid, :normal}, 5_000
     assert_receive {:bridge_finished, %{bytes: 0}, %{outcome: :cancelled}}
     assert %{streams: 0, pending: 0, connections: 1} = Pool.stats(pool)[key]
 
     assert %{lifecycle: :ready, active_streams: 0, protocol_streams: 0} =
              ConnectionOwner.status(owner)
+
+    await_task_children_exit()
 
     assert MapSet.equal?(
              MapSet.new(Task.Supervisor.children(:http_fetch_task_supervisor)),
@@ -167,6 +173,30 @@ defmodule HTTP.HTTP2FailedOpenCleanupTest do
 
     assert %{lifecycle: :ready, active_streams: 0, protocol_streams: 0} =
              ConnectionOwner.status(owner)
+  end
+
+  defp await_task_children_exit do
+    await_task_children_exit(System.monotonic_time(:millisecond) + 5_000)
+  end
+
+  defp await_task_children_exit(deadline) do
+    case Task.Supervisor.children(:http_fetch_task_supervisor) do
+      [] ->
+        :ok
+
+      children ->
+        for pid <- children do
+          monitor = Process.monitor(pid)
+          timeout = max(deadline - System.monotonic_time(:millisecond), 0)
+          assert_receive {:DOWN, ^monitor, :process, ^pid, reason}, timeout
+          assert reason in [:normal, :noproc]
+        end
+
+        if System.monotonic_time(:millisecond) >= deadline,
+          do: flunk("completed fetch tasks did not leave their supervisor")
+
+        await_task_children_exit(deadline)
+    end
   end
 
   defp pooled_owner(port) do
