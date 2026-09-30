@@ -391,20 +391,89 @@ semantics EOF case. It retains protocol checks, exact input bytes and terminal
 assertions. All six peer/backend SSE routes and both fixture self-checks passed
 before refreezing; no application runtime source changed.
 
-## Remaining acceptance status
+## P5 frozen candidate — accepted executable results
+
+Executable candidate: commit `d99b9de655b3367c91eea0d59af14cc4b0afa7a7`,
+Git tree `01dd03d447f709b27dea32f74d95050edadfbc18`. The complete tree was exported
+outside the checkout. Each gate verifies tracked blobs and rejects added
+executable files. Both isolated test builds contain 646 BEAM files, unchanged
+after all finite gates. Subsequent evidence/documentation commits must preserve
+the executable source of this candidate.
+
+Finite results: 834 tests plus 20 doctests, zero failures, three existing gated
+core skips; strict compile, format, full Credo, HPACK, preserved F1/F2/runtime
+regressions, three seeded Fetch repeats, documentation generation and Dialyzer
+passed. Dialyzer retains four existing intentional skips and no unnecessary skips.
+The published ex_ssl consumer/provenance suite passed. Seeds and complete commands
+are retained in the final ledger and logs.
+
+Both independent peers passed all SSE routes/modes on h2c and TLS with OTP `:ssl`
+and explicit `:ex_ssl`: six 10,000-event runs with forced reconnect, plus 1,001
+opens/1,000 actual reconnects per peer. The EOF/Open counts are asserted by the
+frozen gate contract and corroborated by ordered wire cursors/ranges. Final SSE
+quiescence combines the gate's settle assertions and its owner-only resource
+sample; the log does not print a separate EOF counter or quiescent flag.
+
+WebSocket echo passed 10,000 round trips plus a 131,072-byte binary on h2c
+(421,635 ms), TLS `:ssl` (425,705 ms) and TLS `:ex_ssl` (430,171 ms). All three
+routes passed hyper-h2/wsproto mixed/fault gates and the independent Node mixed
+gate. Churn passed 1,000 actual open/echo/clean-close cycles (93,343 ms).
+All six original Fetch reuse runs passed 10,000 requests at peer limits 1/2/100.
+
+Seven local packages and four isolated top-level consumers passed metadata,
+dependency/startup and real H2 traffic checks. The combined consumer shared one
+connection and preserved live SSE/WS across Fetch stop/restart. Remote candidate
+CI passed (`36781638609`, 14 jobs), as did Test (`36781638418`, seven app jobs).
+Both genuine soaks passed, with separate completed-workload and wire markers:
+
+| Workload | Actual active duration | Completed traffic | Final cleanup |
+| --- | --- | --- | --- |
+| Mixed TLS `:ex_ssl`, hyper-h2/wsproto | 1,800,103 ms | 3,285 WS messages, 3,288 SSE messages, 1,643 Fetch requests | Zero logical/protocol streams, reservations, admissions, workers, monitors and sessions |
+| Fetch TLS `:ex_ssl`, Node/nghttp2 | 1,800,161 ms | 61,712 requests | Zero active/protocol streams and reservations |
+
+The mixed run completed separate slow-consumer, actual cancellation and GOAWAY
+draining intervals; wire accounting includes the canceled session. It retained
+two SSE and two WS sessions while Fetch progressed and explicitly replaced
+sessions after draining. Its 1,650 resource samples had maxima of 198,136-byte
+process heap, 538,549-byte referenced binaries and mailbox 12. Eligible idle
+connection owners may remain after all logical clients settle.
+
+Across all new-client gates, SSE sampled owner/session/stream heap maxima were
+199,744 / 1,805,528 / 110,424 bytes; referenced binaries were 363,984 / 1,169,575 /
+487,229 bytes; mailbox maxima were 64 / 39 / 5. Owner monitors peaked at 2,816-byte
+heap and zero referenced binaries/mailbox. All WS gates together sampled maxima
+of 199,000-byte heap, 1,015,587-byte referenced binaries and mailbox 12. The finite
+budgets printed before workloads passed for every recorded sample. These are
+sampled maxima, not continuous peaks or bounds on unrelated owner messages.
+
+The final auditor passed all 42 Fetch ledger entries and 36 new gate results,
+plus preparation/wrapper records. It checked workload sizes, both elapsed-time
+markers, protocol/peer evidence, budgets, final settling and log/source hashes.
+All 357 source-manifest entries match; manifest SHA256
+`74a2ba91db427b70965d1a4a1ddfbe68de5effe94b88a5bb96896c14077777fd`.
+Both 646-file BEAM manifests remained unchanged through all soaks: clients
+`f1be7ea630295a7626525e5691efce3350356e4f178636ae852a3507ebcf4c81`,
+Fetch `ccf43bf9477f6624f8440b1d2c5b68606d8de090f9a904d622ce6ca013705031`.
+
+Accessible exact source, raw logs, commands, result ledgers, peer/toolchain
+versions, independent audit, failed-candidate/repair evidence and checksums:
+[`p5-01dd03d447f7.tar.gz`](http2-stream-clients-evidence/p5-01dd03d447f7.tar.gz),
+archive SHA256 `e10829e0ba1cf47c50f5e204b931eb89d437a4a1020f69e1e91f5ff705ab46e3`.
+Release verification is recorded separately below after publication.
+
+## Final acceptance status
 
 | Family | Status | Evidence required |
 | --- | --- | --- |
-| A0 | P1–P4 PASS | Extraction/F1/F2 and standalone startup/traffic |
-| A1–A3 | P2 PASS | SSE wire/lifecycle/bounds, six peer/backend routes |
-| B1 | P3/P4 PASS | Core and public capability/header/handshake/fallback |
-| B2–B3 | P4 PASS | Public WS duplex, frame/delivery/flow/close bounds |
-| C1–C3 | P2–P4 PASS | Shared mixed connection, sibling and existing isolation/capacity tests |
-| D1–D2 | P4 PASS | Three WS routes and isolated seven-package traffic closure |
-| D3 | NOT RUN | Frozen full/static/interop/churn/30-minute soak, 42 Fetch gates |
+| A0 | P5 PASS | Extraction/F1/F2 and standalone startup/traffic |
+| A1–A3 | P5 PASS | SSE wire/lifecycle/bounds, six peer/backend routes and two actual reconnect churn runs |
+| B1 | P5 PASS | Core and public capability/header/handshake/fallback |
+| B2–B3 | P5 PASS | Public WS duplex, frame/delivery/flow/close bounds, three echo routes and actual cycles |
+| C1–C3 | P5 PASS | Two independent shared mixed peers, sibling/isolation/capacity tests, full mixed soak |
+| D1–D2 | P5 PASS | Three transport routes and isolated seven-package traffic closure |
+| D3 | P5 PASS | Frozen full/static/interop/churn, both genuine 30-minute soaks and 42 preserved Fetch gates |
 
-Finite acceptance budgets and sampled maxima will be recorded before workloads;
-an explicit completion marker and >=1,800,000 ms are required for soak PASS.
-Local acceptance, remote CI, package publication and production rollout are
-separate outcomes. P1/P2 remote status and P2 local repairs are recorded above;
-P3 remote status is recorded above; P4/P5 remote CI and publication remain pending.
+Implementation and local acceptance are complete. Candidate remote CI/Test passed.
+The manual slower acceptance workflow is available but was not dispatched; the
+complete local archive supplies final executable evidence. Publication checks are
+pending at this evidence commit. Production rollout has not been performed.

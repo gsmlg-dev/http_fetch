@@ -190,3 +190,14 @@ completed-workload markers. Signal interruption settles runner process groups;
 candidate drift or added executable files fail before acceptance can pass.
 Published consumer mode runs only after release and checks Hex SCM, exact versions,
 package identities, isolated code paths and fresh locks without local path pins.
+
+P5 executable acceptance is complete on commit
+`d99b9de655b3367c91eea0d59af14cc4b0afa7a7`, tree
+`01dd03d447f709b27dea32f74d95050edadfbc18`. All 42 preserved Fetch gates and 36
+new gates passed, including both genuine 1,800-second soaks. The final report
+maps A0–D3 to outcomes, sampled resources, exact workload counts and an accessible
+source/log/checksum archive. The initial Node SSE terminal-fixture race was fixed
+with explicit post-Open controls and all final routes rerun; no runtime change
+followed the accepted P4 source. Evidence/docs-only commits preserve this
+executable candidate. Authorized release and fresh published consumers follow
+the completed acceptance; production rollout remains a separate operation.
