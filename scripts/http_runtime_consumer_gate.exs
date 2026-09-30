@@ -6,6 +6,12 @@ defmodule HTTPRuntimeConsumerGate do
     packages = System.fetch_env!("HTTP_RUNTIME_PACKAGE_DIR")
     metadata = Map.new(@apps, &{&1, metadata!(packages, &1)})
     version = Map.fetch!(metadata["http_core"], "version")
+    release = System.get_env("HTTP_RUNTIME_CONSUMER_RELEASE")
+
+    assert!(
+      release == nil or release == version,
+      "published package version differs from request"
+    )
 
     for app <- @apps do
       assert!(metadata[app]["version"] == version, "#{app} package version differs from core")
@@ -45,7 +51,7 @@ defmodule HTTPRuntimeConsumerGate do
 
     # Local unpublished packages are resolved transitively through these temporary paths.
     # Their original hex_metadata.config files remain untouched and were audited above.
-    for app <- @apps do
+    for app <- if(release, do: [], else: @apps) do
       path = Path.join([packages, app, "mix.exs"])
       source = File.read!(path)
 
@@ -95,6 +101,22 @@ defmodule HTTPRuntimeConsumerGate do
 
     for client <- selected, do: {:ok, _} = Application.ensure_all_started(client)
     resolved = Enum.map(Mix.Dep.cached(), & &1.app)
+
+    if release = System.get_env("HTTP_RUNTIME_CONSUMER_RELEASE") do
+      for app <- [:http_core, :http_runtime | selected] do
+        dep = Enum.find(Mix.Dep.cached(), &(&1.app == app))
+
+        assert!(
+          dep.scm == Hex.SCM and dep.opts[:hex] == Atom.to_string(app),
+          "#{app} is not the published Hex app"
+        )
+
+        assert!(
+          to_string(Application.spec(app, :vsn)) == release,
+          "#{app} loaded version differs from published candidate"
+        )
+      end
+    end
 
     for app <- [:http_core, :http_runtime, :ex_ssl] do
       assert!(app in resolved, "missing transitive dependency #{app}")

@@ -161,6 +161,7 @@ def main():
     signal.signal(signal.SIGTERM, interrupted)
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=['echo', 'faults', 'mixed', 'churn', 'soak'], default='echo')
+    parser.add_argument('--peer', choices=['hyper-h2', 'node'], default='hyper-h2')
     parser.add_argument('--count', type=int, default=10000)
     parser.add_argument('--tls', action='store_true')
     parser.add_argument('--backend', choices=['ssl', 'ex_ssl'], default='ssl')
@@ -177,11 +178,17 @@ def main():
         parser.error('ex_ssl requires actual TLS')
     if args.mode == 'soak' and args.seconds < (12 if args.soak_check else 1800):
         parser.error('soak requires >=1800 seconds; explicit --soak-check requires >=12')
+    if args.peer == 'node' and args.mode != 'mixed':
+        parser.error('Node RFC 8441 peer supports mixed mode only')
     import h2
     import hpack
     import hyperframe
     import wsproto
     assert (h2.__version__, hpack.__version__, hyperframe.__version__, wsproto.__version__) == ('4.2.0', '4.1.0', '6.1.0', '1.2.0')
+    node_versions = None
+    if args.peer == 'node':
+        node_versions = json.loads(subprocess.check_output(['node', '-p', 'JSON.stringify(process.versions)'], text=True))
+        assert (node_versions['node'], node_versions['nghttp2']) == ('24.19.0', '1.69.0')
     root = Path(__file__).resolve().parent.parent
     fixtures = root / 'apps/http_fetch/test/support/fixtures'
     evidence = Evidence()
@@ -189,10 +196,16 @@ def main():
     result = None
 
     def launch(label, capability):
-        command = [sys.executable, str(root / 'scripts/http2_websocket_peer.py'), '--capability', str(capability)]
-        if args.tls:
+        peer_env = os.environ.copy()
+        if args.peer == 'node':
+            command = ['node', str(root / 'scripts/http2_websocket_peer.mjs')]
+            peer_env.update(H2_PEER_TLS='1' if args.tls else '0',
+                            H2_PEER_CERT=str(fixtures / 'localhost.pem'), H2_PEER_KEY=str(fixtures / 'localhost.key'))
+        else:
+            command = [sys.executable, str(root / 'scripts/http2_websocket_peer.py'), '--capability', str(capability)]
+        if args.tls and args.peer == 'hyper-h2':
             command += ['--tls', '--cert', str(fixtures / 'localhost.pem'), '--key', str(fixtures / 'localhost.key')]
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+        process = subprocess.Popen(command, env=peer_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
         processes.append(process)
         thread = threading.Thread(target=evidence.drain, args=(process, label), daemon=True)
         thread.start()
@@ -211,7 +224,11 @@ def main():
     try:
         main_peer = launch('main', 1)
         disabled = launch('disabled', 0) if args.mode == 'faults' and not args.peer_check else None
-        print(json.dumps(dict(kind='fixture_provenance', source_sha256={str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in [root / 'scripts/http2_websocket_peer.py', root / 'scripts/http2_websocket_gate.py', root / 'scripts/http2_websocket_gate.exs']}, versions=dict(h2=h2.__version__, hpack=hpack.__version__, hyperframe=hyperframe.__version__, wsproto=wsproto.__version__))), flush=True)
+        peer_source = root / ('scripts/http2_websocket_peer.mjs' if args.peer == 'node' else 'scripts/http2_websocket_peer.py')
+        versions = dict(h2=h2.__version__, hpack=hpack.__version__, hyperframe=hyperframe.__version__, wsproto=wsproto.__version__)
+        if node_versions:
+            versions.update(node=node_versions['node'], nghttp2=node_versions['nghttp2'])
+        print(json.dumps(dict(kind='fixture_provenance', peer=args.peer, source_sha256={str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in [peer_source, root / 'scripts/http2_websocket_gate.py', root / 'scripts/http2_websocket_gate.exs']}, versions=versions)), flush=True)
         if args.peer_check:
             peer_check(main_peer['port'], args.tls, fixtures / 'localhost-ca.pem', args.count)
             completed = dict(result='PASS', completed=True, mode='fixture-check', count=args.count, public_client=False)
@@ -286,10 +303,17 @@ def main():
             assert complete[0]['maximum_client_payload'] > 65_535
             assert int(complete[0]['client_frames'].get('1', 0)) > 0 and int(complete[0]['client_frames'].get('2', 0)) > 0
         elif args.mode == 'mixed':
+            assert len(connections) == 1, 'mixed workload opened an extra connection'
+            if args.peer == 'node':
+                assert any(record.get('kind') == 'settings_advertised' and
+                           record.get('enable_connect_protocol') is True for record in records)
             mixed = [record for record in records if record.get('kind') in ('connect', 'sse', 'fetch', 'control')]
             assert len({record['connection'] for record in mixed}) == 1, 'Fetch/SSE/WS did not share one wire connection'
             assert len([record for record in mixed if record['kind'] == 'sse']) >= 2
             assert len(connects) >= 3 and any(record.get('case') == 'pressure' for record in connects)
+            assert len(complete) == 3 and sorted(record['messages'] for record in complete) == [0, 1, 2]
+            assert all(record['client_close_code'] == 1000 and record['retained_frame_bytes'] == 0 and
+                       record['masked_frames'] == record['messages'] + 1 for record in complete)
         elif args.mode == 'faults':
             assert {record['case'] for record in records if record.get('kind') == 'fault_triggered'} == {'malformed', 'oversized', 'parts'}
             assert any(record.get('kind') == 'server_reset' for record in records)
@@ -320,7 +344,7 @@ def main():
         if evidence.errors:
             raise RuntimeError(str(list(evidence.errors)))
         print(json.dumps(dict(result='PASS', completed=True, mode='wire-audit', public_client=not args.peer_check,
-                              requested_mode=args.mode, count=args.count, observations=len(records),
+                              requested_mode=args.mode, peer=args.peer, count=args.count, observations=len(records),
                               clean_wire_sessions=len(complete), acceptance=not args.soak_check,
                               elapsed_soak_seconds=args.seconds if args.mode == 'soak' else None)), flush=True)
         if args.peer_check:

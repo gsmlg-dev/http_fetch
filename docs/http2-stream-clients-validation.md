@@ -329,6 +329,54 @@ Remote P2 repair CI/Test passed (`36767141810`, `36767141833`). P3 CI passed
 peer-close race. P4 adds an explicit peer-close ordering barrier without changing
 the transport assertions. P4/P5 remote outcomes and publication remain pending.
 
+## P5 entrypoint and candidate preparation
+
+Version metadata and all shared dependency requirements are frozen at 0.16.0.
+The executable runner preserves the original 42 Fetch gates and adds 36 new
+gates: 20 SSE routes/churn, 12 WS echo/fault/mixed routes, WS churn, isolated
+package traffic, documentation generation and the genuine mixed soak. Both
+independent H2 servers now observe all three client types on one connection.
+The new Node fixture passed h2c and both TLS routes during preparation; its
+ordinary GET responses wait for the explicit request end before responding,
+preventing a fixture-generated premature NO_ERROR reset. No client reset assertion
+was weakened. Original phase SSE churn had 1,000 opens (999 reconnects); final
+churn uses 1,001 opens per independent peer to prove 1,000 actual reconnects.
+
+From the root clone, prepare the pinned peers and export the executable candidate:
+
+```sh
+MIX_ENV=test mix deps.get --check-locked
+python3 -m venv /tmp/http2-peers
+/tmp/http2-peers/bin/pip install -r scripts/requirements-http2-stream-clients.txt
+candidate_tree=$(git rev-parse 'HEAD^{tree}')
+candidate_source=$(mktemp -d /tmp/http2-candidate.XXXXXXXX)
+git archive "$candidate_tree" | tar -x -C "$candidate_source"
+ERL_FLAGS='+S 4:4' /tmp/http2-peers/bin/python \
+  "$candidate_source/scripts/http2_stream_clients_acceptance.py" \
+  --source "$candidate_source" --repository "$PWD" --tree "$candidate_tree" \
+  --evidence /tmp/http2-final-acceptance
+```
+
+Use the pinned Node 24.19.0/nghttp2 1.69.0 environment. The evidence directory must
+not already exist. Source blobs and added executable files are checked before and
+after gates; builds/logs are outside the source export. ExDoc runs in a separate
+development build. Both 30-minute workloads run alongside finite gates. A failed
+or interrupted command cannot produce an acceptance PASS. The manual
+`HTTP2 Stream Clients Acceptance` workflow runs this same entrypoint and uploads
+logs, results, commands and source manifests.
+
+P4 remote Test passed (`36778732987`). CI (`36778733087`) failed the older WSS
+published ex_ssl ALPN-policy fixture, which expected a socket after an incompatible
+constructor input. A surgical fixture repair now asserts the exact
+`:incompatible_alpn` constructor error and independently zero connections after
+ticket warming. Trust, hostname, Fetch and ticket-identity assertions remain
+unchanged. The full published ex_ssl gate passed nine groups/68 tests using
+published ex_ssl 0.7.2 with both pinned checksums; final-source acceptance reruns it.
+
+The exported final executable candidate, all full acceptance outcomes, archive
+checksum, final remote CI and release verification will be recorded after execution.
+No short preparation check is claimed as final acceptance or publication.
+
 ## Remaining acceptance status
 
 | Family | Status | Evidence required |

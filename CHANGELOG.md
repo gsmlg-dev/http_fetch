@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-01
+
+### Added
+- Extract `http_runtime` as the shared, independently installable HTTP/2 owner,
+  pool and stream application used by Fetch, EventSource and WebSocket.
+- Add explicitly selected HTTP/2/h2c EventSource and RFC 8441 WebSocket support,
+  acknowledged delivery, finite parsing/send/delivery bounds and actual-version
+  accessors. Preserve HTTP/1 defaults and explicit TLS backend selection.
+- Add independent SSE/WebSocket/mixed peers, standalone package traffic gates and
+  a reproducible final acceptance entrypoint with original Fetch42 workloads.
+
+### Fixed
+- Preserve ordinary Fetch early-response upload cleanup while accepted CONNECT
+  tunnels remain duplex; gate admission on peer capability without blocking
+  ordinary siblings or consuming stream capacity while waiting.
+- Settle logical stream resources on close, owner death, reset and runtime restart,
+  retain accepted bytes before terminal errors, and stop parsing after an internal
+  WebSocket terminal failure.
+- Mask WebSocket payloads using binary words to avoid per-byte list heap growth.
+
+### Validation
+- See `docs/http2-stream-clients-validation.md` for exact phase/final-candidate
+  results, source and artifact checksums, backend/peer matrices and resource
+  observations. Short runner checks are explicitly distinct from 30-minute soaks.
+
 ## [0.15.1] - 2026-09-30
 
 ### Fixed

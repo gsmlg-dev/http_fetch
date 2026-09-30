@@ -23,8 +23,8 @@ parser.add_argument('--limit', type=int, default=16)
 parser.add_argument('--timeout', type=int, default=600)
 parser.add_argument('--peer-check', action='store_true', help='Validate independent fixtures without claiming public-client acceptance')
 args = parser.parse_args()
-if args.count < (1000 if args.mode == 'churn' else 10000):
-    parser.error('acceptance workloads require count >= 10000 (churn >= 1000)')
+if args.count < (1001 if args.mode == 'churn' else 10000):
+    parser.error('acceptance requires >=10000 events, or >=1001 churn opens for 1000 reconnects')
 if not args.tls and args.backend != 'ssl':
     parser.error('ex_ssl matrix requires --tls')
 import h2

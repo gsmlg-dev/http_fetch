@@ -1,0 +1,51 @@
+name: HTTP2 Stream Clients Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      ERL_FLAGS: "+S 4:4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18"
+          otp-version: "28"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.19.0"
+      - name: Prepare dependencies and pinned independent peers
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          MIX_ENV=test mix deps.get --check-locked
+          python3 -m venv /tmp/http2-peers
+          /tmp/http2-peers/bin/pip install -r scripts/requirements-http2-stream-clients.txt
+      - name: Freeze and validate the complete executable candidate
+        run: |
+          mkdir /tmp/http2-candidate
+          candidate_tree=$(git rev-parse 'HEAD^{tree}')
+          git archive "$candidate_tree" | tar -x -C /tmp/http2-candidate
+          /tmp/http2-peers/bin/python /tmp/http2-candidate/scripts/http2_stream_clients_acceptance.py \
+            --source /tmp/http2-candidate --repository "$GITHUB_WORKSPACE" \
+            --tree "$candidate_tree" --evidence /tmp/http2-acceptance
+      - name: Save acceptance logs and manifests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: http2-stream-clients-acceptance
+          path: |
+            /tmp/http2-acceptance/*.log
+            /tmp/http2-acceptance/*.json
+            /tmp/http2-acceptance/fetch42/*.log
+            /tmp/http2-acceptance/fetch42/*.json
+            /tmp/http2-acceptance/fetch42/*.tsv
+            /tmp/http2-acceptance/fetch42/published-exssl/
+          retention-days: 30

@@ -41,10 +41,10 @@ connections. Available IDs are `native_v1`, `synthetic_test_v1`, and
 profiles do not claim browser fingerprint equivalence. Use
 `HTTP.HTTP2.ProfileCapture.build_manifest/2` for capture provenance.
 
-Production acceptance is still in progress. See
-[the validation record](docs/http2-production-validation.md) for executed gates,
-resource budgets and remaining blockers; implementation coverage alone is not a
-production-readiness claim.
+See the [Fetch validation record](docs/http2-production-validation.md) and
+[stream-client validation record](docs/http2-stream-clients-validation.md) for
+executed gates, candidate provenance, resource budgets and phase status. These
+records distinguish local acceptance, remote CI, publication and rollout.
 
 ## Browser Fetch API Compatibility
 

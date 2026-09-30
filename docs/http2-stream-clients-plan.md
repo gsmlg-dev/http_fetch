@@ -178,3 +178,15 @@ payload. Shared telemetry must preserve Fetch event names without calling Fetch.
 Profile ordering must explicitly retain `:protocol` for Extended CONNECT without
 changing ordinary Fetch wire bytes. Acceptance budgets must be frozen before
 running workloads and evidence invalidated after executable changes.
+
+P5 preparation freezes the shared seven-package version at 0.16.0. The explicit
+slow entrypoint is `scripts/http2_stream_clients_acceptance.py`; its manual CI
+workflow exports an immutable Git tree and saves gate logs/manifests. It runs all
+42 preserved Fetch gates plus 36 new SSE/WS/package/docs gates. SSE churn uses
+1,001 stream opens to prove 1,000 actual reconnects, and WS uses 1,000 cycles.
+Both hyper-h2 and Node/nghttp2 independently observe simultaneous Fetch/SSE/WS
+traffic. The Fetch and mixed-client soaks each require genuine 1,800-second
+completed-workload markers. Signal interruption settles runner process groups;
+candidate drift or added executable files fail before acceptance can pass.
+Published consumer mode runs only after release and checks Hex SCM, exact versions,
+package identities, isolated code paths and fresh locks without local path pins.

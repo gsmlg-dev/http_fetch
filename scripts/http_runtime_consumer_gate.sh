@@ -14,8 +14,14 @@ apps=(http_core http_runtime elixir_quic_http3 http_fetch http_web_socket http_e
 for app in "${apps[@]}"; do
   (
     cd "$repo_root/apps/$app"
-    MIX_ENV=prod MIX_BUILD_PATH="$work_dir/package-build" \
-      mix hex.build --unpack -o "$HTTP_RUNTIME_PACKAGE_DIR/$app"
+    if [[ -n "${HTTP_RUNTIME_CONSUMER_RELEASE:-}" ]]; then
+      MIX_ENV=prod MIX_BUILD_PATH="$work_dir/package-build" \
+        mix hex.package fetch "$app" "$HTTP_RUNTIME_CONSUMER_RELEASE" \
+        --unpack -o "$HTTP_RUNTIME_PACKAGE_DIR/$app"
+    else
+      MIX_ENV=prod MIX_BUILD_PATH="$work_dir/package-build" \
+        mix hex.build --unpack -o "$HTTP_RUNTIME_PACKAGE_DIR/$app"
+    fi
   )
 done
 
@@ -32,8 +38,12 @@ defmodule RuntimeConsumer.MixProject do
   def application, do: [extra_applications: [:logger]]
   defp deps do
     packages = System.fetch_env!("HTTP_RUNTIME_PACKAGE_DIR")
-    for client <- String.split(System.fetch_env!("HTTP_RUNTIME_CONSUMER_CLIENTS"), ","),
-      do: {String.to_atom(client), path: Path.join(packages, client)}
+    for client <- String.split(System.fetch_env!("HTTP_RUNTIME_CONSUMER_CLIENTS"), ",") do
+      case System.get_env("HTTP_RUNTIME_CONSUMER_RELEASE") do
+        nil -> {String.to_atom(client), path: Path.join(packages, client)}
+        version -> {String.to_atom(client), "== " <> version}
+      end
+    end
   end
 end
 ELIXIR
@@ -43,10 +53,17 @@ ELIXIR
     cd "$consumer_dir"
     export HTTP_RUNTIME_CONSUMER_CLIENTS="$selected"
     export MIX_ENV=prod MIX_BUILD_PATH="$consumer_dir/build" MIX_DEPS_PATH="$consumer_dir/deps"
+    if [[ -n "${HTTP_RUNTIME_CONSUMER_RELEASE:-}" ]]; then
+      mix deps.get
+    fi
     mix deps.get --check-locked
     mix deps.tree --only runtime
     mix compile --warnings-as-errors
     mix run gate.exs verify
+    if [[ -n "${HTTP_RUNTIME_CONSUMER_RELEASE:-}" ]]; then
+      sha256sum mix.lock
+      cat mix.lock
+    fi
   )
 done
 printf '{"result":"PASS","gate":"http_runtime_consumers","consumers":4,"packages":7}\n'

@@ -54,7 +54,8 @@ defmodule CandidateResumptionPolicyTest do
             [server_name_indication: ~c"wrong.test"],
             [alpn_advertised_protocols: ["incompatible/1"]]
           ] do
-        pre_io? = unquote(family) == :sse and Keyword.has_key?(change, :alpn_advertised_protocols)
+        pre_io? =
+          unquote(family) in [:wss, :sse] and Keyword.has_key?(change, :alpn_advertised_protocols)
 
         with_rejecting_peer(
           f,
@@ -109,6 +110,13 @@ defmodule CandidateResumptionPolicyTest do
         connect_timeout: @timeout
       )
 
+    case socket do
+      {:error, :incompatible_alpn} = error -> error
+      %WebSocket{} -> await_rejected_socket(socket)
+    end
+  end
+
+  defp await_rejected_socket(socket) do
     monitor = Process.monitor(socket.pid)
 
     try do
