@@ -37,7 +37,7 @@ defmodule HTTP.HTTP2.Scheduler do
     {ordered, %{scheduler | cursor: next_cursor}}
   end
 
-  defp pop_id([], _id, _acc), do: {false, []}
+  defp pop_id([], _id, acc), do: {false, Enum.reverse(acc)}
 
   defp pop_id([id | rest], id, acc), do: {true, Enum.reverse(acc, rest)}
   defp pop_id([head | rest], id, acc), do: pop_id(rest, id, [head | acc])

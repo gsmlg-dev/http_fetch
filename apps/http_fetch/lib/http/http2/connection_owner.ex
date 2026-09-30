@@ -348,6 +348,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
               committed?: true,
               terminal?: false,
               body_bridge: Keyword.get(opts, :body_bridge),
+              upload_stopped?: false,
               pending_body: nil,
               deliveries: :queue.new()
             }),
@@ -421,6 +422,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   def handle_call({:release_stream, ref_or_id}, _from, state) do
     case stream_id(state, ref_or_id) do
       {:ok, id} ->
+        state = close_unfinished_upload(state, id)
         ref = get_in(state, [:streams, id, :ref])
         Process.demonitor(state.streams[id].monitor, [:flush])
         stop_body_bridge(state, id)
@@ -693,8 +695,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   defp dispatch_frame(state, %{type: :rst_stream, stream_id: id, payload: <<code::32>>}) do
     case Connection.stream(state.connection, id) do
-      {:ok, %{response_phase: :complete}} when code == 0 ->
-        {:ok, state}
+      {:ok, %{response_phase: :complete} = stream} when code == 0 ->
+        {:ok, stream} = StreamState.rst(stream, code)
+        {:ok, %{state | connection: Connection.put_stream(state.connection, stream)}}
 
       {:ok, stream} ->
         HTTP.Telemetry.http2_runtime(:peer_reset, :received, %{error_code: code})
@@ -1031,8 +1034,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         case Connection.stream(state.connection, id) do
           {:ok, stream} ->
             case StreamState.receive_response_headers(stream, headers, Frame.flag?(flags, 1)) do
-              {:ok, stream, _phase} ->
+              {:ok, stream, phase} ->
                 state = %{state | connection: Connection.put_stream(state.connection, stream)}
+                state = stop_upload(state, id, phase)
 
                 {:ok,
                  %{
@@ -1102,6 +1106,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   defp dispatch_event(state, {:body_chunk, bridge, chunk, ack_ref})
        when is_pid(bridge) and is_binary(chunk) do
     case Enum.find(state.streams, fn {_id, entry} -> entry.body_bridge == bridge end) do
+      {_id, %{upload_stopped?: true}} ->
+        {:ok, state}
+
       {id, %{pending_body: nil}} ->
         state = put_in(state.streams[id].pending_body, {bridge, chunk, ack_ref})
         drain_pending_body(state, id)
@@ -1110,7 +1117,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         {:error, :body_buffer_full, state}
 
       nil ->
-        {:error, :unknown_body_bridge, state}
+        {:ok, state}
     end
   end
 
@@ -1127,6 +1134,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   defp dispatch_event(state, {:body_eof, bridge}) when is_pid(bridge) do
     case Enum.find(state.streams, fn {_id, entry} -> entry.body_bridge == bridge end) do
+      {_id, %{upload_stopped?: true}} ->
+        {:ok, state}
+
       {id, _entry} ->
         case Connection.send_data(state.connection, id, <<>>, true) do
           {:ok, connection, effects} ->
@@ -1137,12 +1147,15 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         end
 
       nil ->
-        {:error, :unknown_body_bridge, state}
+        {:ok, state}
     end
   end
 
   defp dispatch_event(state, {:body_error, bridge, reason}) when is_pid(bridge) do
     case Enum.find(state.streams, fn {_id, entry} -> entry.body_bridge == bridge end) do
+      {_id, %{upload_stopped?: true}} ->
+        {:ok, state}
+
       {id, _entry} ->
         case Connection.cancel_headers(state.connection, id) do
           {:ok, connection, effects} ->
@@ -1156,7 +1169,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         end
 
       nil ->
-        {:error, :unknown_body_bridge, state}
+        {:ok, state}
     end
   end
 
@@ -1282,14 +1295,58 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     end
   end
 
+  defp stop_upload(state, _id, :informational), do: state
+
+  defp stop_upload(state, id, _phase) do
+    entry = state.streams[id]
+
+    if entry.upload_stopped? do
+      state
+    else
+      if is_pid(entry.body_bridge), do: GenServer.cast(entry.body_bridge, :early_response)
+
+      state
+      |> finish_upload_stall(id, :stopped)
+      |> put_in([:streams, id], %{entry | upload_stopped?: true, pending_body: nil})
+      |> Map.update!(:scheduler, &Scheduler.remove(&1, id))
+    end
+  end
+
+  defp close_unfinished_upload(state, id) do
+    stream = state.connection.streams[id]
+
+    if stream.state != :closed and not stream.end_stream_sent? do
+      {:ok, connection, effects} = Connection.cancel_headers(state.connection, id)
+
+      case write_effects(%{state | connection: connection}, effects) do
+        {:ok, state} -> state
+        {:error, reason, state} -> %{state | lifecycle: :closed, close_reason: reason}
+      end
+    else
+      state
+    end
+  end
+
   defp terminal_stream(state, id, message) do
     state = finish_upload_stall(state, id, :stopped)
     notify_stream(state, id, message)
     stop_body_bridge(state, id)
 
     case state.streams[id] do
-      nil -> state
-      entry -> put_in(state.streams[id], %{entry | terminal?: true, pending_body: nil})
+      nil ->
+        state
+
+      entry ->
+        state
+        |> put_in([:streams, id], %{
+          entry
+          | terminal?: true,
+            upload_stopped?: true,
+            pending_body: nil
+        })
+        |> Map.update!(:connection, fn connection ->
+          Connection.put_stream(connection, StreamState.close(connection.streams[id]))
+        end)
     end
   end
 

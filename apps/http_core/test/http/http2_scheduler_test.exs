@@ -16,4 +16,10 @@ defmodule HTTP.HTTP2SchedulerTest do
     assert Scheduler.add(scheduler, 5).order == [1, 5]
     assert Scheduler.add(scheduler, 7).order == [1, 5, 7]
   end
+
+  test "releasing an already stopped upload does not discard sibling scheduler work" do
+    scheduler = Scheduler.new([1, 3, 5]) |> Scheduler.remove(3) |> Scheduler.remove(3)
+    assert scheduler.order == [1, 5]
+    assert {[1, 5], _scheduler} = Scheduler.ready(scheduler, [1, 5])
+  end
 end

@@ -54,10 +54,15 @@ defmodule HTTP.HTTP2.BodyBridge do
   end
 
   @impl true
+  def handle_call({:credit, _bytes}, _from, %{stopped?: true} = state),
+    do: {:reply, :ok, state}
+
   def handle_call({:credit, bytes}, _from, state) do
     credit = min(state.credit + bytes, state.max_buffer_bytes - state.buffered_bytes)
     {:reply, :ok, advance(%{state | credit: credit})}
   end
+
+  def handle_call({:ack, _ref}, _from, %{stopped?: true} = state), do: {:reply, :ok, state}
 
   def handle_call({:ack, ref}, _from, %{inflight: {ref, size}} = state) do
     {:reply, :ok, settle_slice(state, size)}
@@ -88,6 +93,9 @@ defmodule HTTP.HTTP2.BodyBridge do
   end
 
   @impl true
+  def handle_cast(:early_response, state),
+    do: {:noreply, stop_stream(state, :early_response, false)}
+
   def handle_cast(:stop, state) do
     _ = stop_stream(state, :cancelled, false)
     {:stop, :normal, state}
@@ -232,7 +240,16 @@ defmodule HTTP.HTTP2.BodyBridge do
       peak_buffered_bytes: state.peak_buffered_bytes
     })
 
-    %{state | stopped?: true}
+    %{
+      state
+      | stopped?: true,
+        credit: 0,
+        inflight: nil,
+        pending_chunk: nil,
+        source_ref: nil,
+        read_pending?: false,
+        buffered_bytes: 0
+    }
   end
 
   defp bridge_outcome(:cancelled), do: :cancelled
