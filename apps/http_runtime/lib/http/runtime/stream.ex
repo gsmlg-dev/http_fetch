@@ -36,7 +36,7 @@ defmodule HTTP.Runtime.Stream do
 
   defp run(request, subscriber, generation, opts) do
     monitor = Process.monitor(subscriber)
-    deadline = System.monotonic_time(:millisecond) + Keyword.get(opts, :opening_timeout, 30_000)
+    deadline = opening_deadline(Keyword.get(opts, :opening_timeout, 30_000))
 
     with {:ok, backend} <- HTTP.TLSBackend.resolve(request.transport_options[:tls_backend]),
          request = %{
@@ -114,7 +114,7 @@ defmodule HTTP.Runtime.Stream do
         pool,
         {:reserve, key,
          [
-           deadline_at: deadline,
+           deadline_at: pool_deadline(deadline),
            token: token,
            connect?: is_nil(registered_owner),
            registered_owner: registered_owner
@@ -127,11 +127,11 @@ defmodule HTTP.Runtime.Stream do
   defp await_reservation(pool, token, request_id, deadline, monitor) do
     receive do
       :abort ->
-        Pool.cancel(pool, token)
+        _ = Pool.cancel(pool, token)
         {:error, :aborted}
 
       {:DOWN, ^monitor, :process, _pid, _reason} ->
-        Pool.cancel(pool, token)
+        _ = Pool.cancel(pool, token)
         {:error, :subscriber_down}
 
       message ->
@@ -142,7 +142,7 @@ defmodule HTTP.Runtime.Stream do
         end
     after
       remaining(deadline) ->
-        Pool.cancel(pool, token)
+        _ = Pool.cancel(pool, token)
         {:error, :opening_timeout}
     end
   end
@@ -419,5 +419,10 @@ defmodule HTTP.Runtime.Stream do
     do: send(subscriber, {:http_runtime, generation, self(), event})
 
   defp profile(request), do: request.transport_options[:http2_profile] || :native_v1
+  defp opening_deadline(:infinity), do: :infinity
+  defp opening_deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
+  defp pool_deadline(:infinity), do: nil
+  defp pool_deadline(deadline), do: deadline
+  defp remaining(:infinity), do: :infinity
   defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 end

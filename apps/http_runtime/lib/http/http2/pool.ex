@@ -47,7 +47,8 @@ defmodule HTTP.HTTP2.Pool do
   @spec cancel(pid(), reservation()) :: :ok | {:error, :unknown_reservation}
   def cancel(pool, reservation), do: GenServer.call(pool, {:cancel, reservation})
 
-  @spec register(pid(), key(), pid(), keyword()) :: :ok
+  @spec register(pid(), key(), pid(), keyword()) ::
+          :ok | {:error, :connector_cancelled | :owner_closed | :connection_capacity}
   def register(pool, key, owner, opts \\ []),
     do: GenServer.call(pool, {:register, key, owner, opts})
 

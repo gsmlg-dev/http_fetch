@@ -72,7 +72,7 @@ defmodule HTTP.Runtime.Dialer do
   defp interruptible_connect(transport, host, port, opts, timeout, cancel_monitor) do
     parent = self()
     ref = make_ref()
-    deadline_at = System.monotonic_time(:millisecond) + timeout
+    deadline_at = connect_deadline(timeout)
 
     case Task.Supervisor.start_child(:http_runtime_task_supervisor, fn ->
            result = connect_in_worker(transport, host, port, opts, timeout, parent, ref)
@@ -277,5 +277,8 @@ defmodule HTTP.Runtime.Dialer do
   defp tls_backend(%Request{} = request), do: Keyword.get(request.transport_options, :tls_backend)
 
   defp request_timeout(request), do: Keyword.get(request.transport_options, :timeout, 30_000)
+  defp connect_deadline(:infinity), do: :infinity
+  defp connect_deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
+  defp remaining_timeout(:infinity), do: :infinity
   defp remaining_timeout(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 end

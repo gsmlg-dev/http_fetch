@@ -54,6 +54,21 @@ exclusive stalled-owner shutdown; and HTTP/1/bodyful pre-admission rejection.
 The original F1/F2 suites and all existing scoped core/Fetch/SSE/WS tests passed.
 The only changed historical test seam is the pool's supervising application.
 
+P1 remote Test run `36753921036` passed. CI run `36753920980` failed on four
+new Dialyzer warnings: three deliberately discarded pool cancellation results
+and the pool registration API's inaccurate `:ok`-only return specification.
+A follow-up repair explicitly matches discarded results and documents the
+existing registration errors without changing pool algorithms or adding ignores.
+It also preserves explicit infinite opening timeouts at the stream/dialer
+boundary, using the pool's existing nil-deadline contract. Two new cancellation
+regressions first reproduced the arithmetic failure; finite and infinite stalled
+TLS dialing now settle on close/subscriber death.
+
+An isolated P1-plus-repair source export passed strict compilation, formatting,
+47 runtime/F1/F2 tests, and Dialyzer (four existing skips, zero new warnings).
+Logs are `p1/repair-{compile,regressions,dialyzer}.log`; P2 work was excluded from
+this repair snapshot. Remote CI for the follow-up remains pending until pushed.
+
 Logs are collected under `/tmp/http-stream-clients-evidence/p1/`, including failed
 intermediate attempts and successful final reruns. Independent source review
 found and closed cancellation, EOF and GOAWAY issues before this phase's commit;
@@ -74,4 +89,5 @@ acceptance and all new client/independent traffic workloads still require P2–P
 Finite acceptance budgets and sampled maxima will be recorded before workloads;
 an explicit completion marker and >=1,800,000 ms are required for soak PASS.
 Local acceptance, remote CI, package publication and production rollout are
-separate outcomes. Remote CI for this implementation and publication are NOT RUN.
+separate outcomes. P1 remote status is recorded above; P2–P5 remote CI and
+publication are NOT RUN.

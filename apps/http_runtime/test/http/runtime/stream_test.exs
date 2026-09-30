@@ -438,8 +438,8 @@ defmodule HTTP.Runtime.StreamTest do
     assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 5_000
   end
 
-  for cancellation <- [:close, :subscriber_death] do
-    test "#{cancellation} interrupts a stalled TLS handshake and closes the dial socket" do
+  for cancellation <- [:close, :subscriber_death], timeout <- [5_000, :infinity] do
+    test "#{cancellation} interrupts a stalled TLS handshake with #{timeout} timeout and closes the dial socket" do
       test_pid = self()
 
       {url, peer} =
@@ -453,7 +453,14 @@ defmodule HTTP.Runtime.StreamTest do
         )
 
       subscriber = subscriber(test_pid)
-      {stream, _generation} = start_stream(url, subscriber, http_version: :http2)
+
+      {stream, _generation} =
+        start_stream(url, subscriber,
+          http_version: :http2,
+          connect_timeout: unquote(timeout),
+          opening_timeout: unquote(timeout)
+        )
+
       monitor = Process.monitor(stream)
       assert_receive {:dial_accepted, ^peer}, 5_000
 
@@ -476,7 +483,7 @@ defmodule HTTP.Runtime.StreamTest do
         http_version: Keyword.get(opts, :http_version, :h2c),
         http2_scope: Keyword.get(opts, :scope, "stream-#{System.unique_integer([:positive])}"),
         http2_reuse: Keyword.get(opts, :reuse, true),
-        connect_timeout: 5_000,
+        connect_timeout: Keyword.get(opts, :connect_timeout, 5_000),
         tls_backend: :ssl
       ]
     }
