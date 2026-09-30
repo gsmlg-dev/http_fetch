@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-30
+
+### Added
+- Include `elixir_quic_http3` in the coordinated six-package release, with
+  versioned HTTP/3 dependencies for Fetch and WebTransport and standalone
+  package-consumer validation.
+
 ### Changed
 - Route explicit HTTP/2 and h2c requests through supervised, profile-aware pooled
   owners, including requests without an explicit wire profile.

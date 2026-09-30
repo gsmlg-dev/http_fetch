@@ -227,9 +227,8 @@ defmodule QuicHttp3.Control do
     do: {:error, :duplicate_settings}
 
   defp handle_frame(%__MODULE__{} = state, %{type: 7, payload: payload}) do
-    with {:ok, id, <<>>} <- QuicHttp3.Varint.decode(payload) do
-      {:ok, %{state | goaway_id: id}, {:goaway, id}}
-    else
+    case QuicHttp3.Varint.decode(payload) do
+      {:ok, id, <<>>} -> {:ok, %{state | goaway_id: id}, {:goaway, id}}
       _ -> {:error, :invalid_goaway}
     end
   end

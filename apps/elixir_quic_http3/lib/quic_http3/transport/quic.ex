@@ -25,9 +25,8 @@ defmodule QuicHttp3.Transport.Quic do
     {ops, options} = Keyword.pop(options, :ops, Quic)
 
     with {:ok, profile} <- profile(options),
-         {:ok, datagram} <- datagram_options(Keyword.get(options, :datagram, @default_datagram)),
-         {:ok, endpoint} <- ops.client(endpoint_options(options, profile, datagram)) do
-      {:ok, endpoint}
+         {:ok, datagram} <- datagram_options(Keyword.get(options, :datagram, @default_datagram)) do
+      ops.client(endpoint_options(options, profile, datagram))
     end
   end
 

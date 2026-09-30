@@ -24,7 +24,7 @@ permissions:
 env:
   ELIXIR_VERSION: "1.18"
   OTP_VERSION: "28"
-  RELEASE_APPS: "http_core http_fetch http_web_socket http_event_source http_web_transport elixir_quic_http3"
+  RELEASE_APPS: "http_core elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport"
   HEX_DEP_APPS: "http_fetch http_web_socket http_event_source http_web_transport elixir_quic_http3"
 
 jobs:
@@ -104,9 +104,9 @@ jobs:
 
             body =
               Regex.replace(
-                ~r/\{:http_core, "~> [^"]+", in_umbrella: true, hex: :http_core\}/,
+                ~r/\{:(http_core|elixir_quic_http3), "~> [^"]+", in_umbrella: true, hex: :(?:http_core|elixir_quic_http3)\}/,
                 body,
-                ~s({:http_core, "~> #{version}", in_umbrella: true, hex: :http_core})
+                fn _, app -> "{:#{app}, \"~> #{version}\", in_umbrella: true, hex: :#{app}}" end
               )
 
             File.write!(path, body)
@@ -230,9 +230,9 @@ jobs:
 
             body =
               Regex.replace(
-                ~r/\{:http_core, "~> [^"]+", in_umbrella: true, hex: :http_core\}/,
+                ~r/\{:(http_core|elixir_quic_http3), "~> [^"]+", in_umbrella: true, hex: :(?:http_core|elixir_quic_http3)\}/,
                 body,
-                ~s({:http_core, "~> #{version}"})
+                fn _, app -> "{:#{app}, \"~> #{version}\"}" end
               )
 
             File.write!(path, body)

@@ -80,8 +80,23 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
         :ok = :gen_tcp.send(socket, Peer.frame(1, 4, id, <<0x88>>))
       end)
 
-    response = fetch(url, timeout: 200)
+    response = fetch(url)
     assert response.status == 200
+
+    # Deliver the timer event only after the response has actually been returned.
+    # Real timer expiry during a backpressured drain is covered by socket_client_http2_test.
+    port = URI.parse(url).port
+
+    owner =
+      :http_fetch_http2_pool
+      |> :sys.get_state()
+      |> Map.fetch!(:entries)
+      |> Enum.find_value(fn {key, entry} ->
+        if key.port == port, do: entry.connections |> Map.keys() |> List.first()
+      end)
+
+    %{streams: %{1 => %{pid: coordinator}}} = :sys.get_state(owner)
+    send(coordinator, :deadline)
 
     assert_raise RuntimeError, "stream read failed: :request_timeout", fn ->
       HTTP.Response.read_all(response)

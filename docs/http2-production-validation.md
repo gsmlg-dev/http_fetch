@@ -1,6 +1,16 @@
 # HTTP/2 production validation
 
-**Production contract: NOT MET. Work stopped under AGENTS scope policy.**
+**Production contract: NOT MET.** The historical acceptance stop below remains
+part of the audit trail. During the subsequently authorized 0.15.0 release
+preparation, full tests passed (661 tests, 20 doctests, zero failures, three gated
+QUIC skips), along with format, Credo, Dialyzer and a six-package external
+consumer. Release preparation fixed the HTTP/3 style findings and package
+metadata/consumer omissions. The returned-stream deadline regression now
+injects the timer event after response delivery; the real deadline under
+backpressured ex_ssl drain remains covered. The final 30-minute soak and
+complete final independent HTTP/2 matrix are still NOT RUN.
+
+### Historical acceptance stop
 The final full-suite attempt found two failures in the unchanged, out-of-scope
 `HTTP.OwnerMonitorTest` (100 ms `:watching` assertions). No fix or retry of those
 tests was attempted. The upload-admission cleanup fix is committed;

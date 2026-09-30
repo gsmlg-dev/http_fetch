@@ -76,9 +76,21 @@ defmodule ExternalConsumerSmoke do
     assert requirement!(core, <<"ex_ssl">>) == <<"~> 0.7.2">>,
            "http_core package must require ex_ssl ~> 0.7.2"
 
-    for app <- ["http_fetch", "http_web_socket", "http_event_source", "http_web_transport"] do
+    for app <- [
+          "elixir_quic_http3",
+          "http_fetch",
+          "http_web_socket",
+          "http_event_source",
+          "http_web_transport"
+        ] do
       assert requirement!(metadata!(package_dir, app), <<"http_core">>) == "~> " <> core_version,
              "#{app} package must require the built http_core version"
+    end
+
+    for app <- ["http_fetch", "http_web_transport"] do
+      assert requirement!(metadata!(package_dir, app), "elixir_quic_http3") ==
+               "~> " <> core_version,
+             "#{app} package must require the built elixir_quic_http3 version"
     end
   end
 

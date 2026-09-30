@@ -15,6 +15,7 @@ defmodule ExSslFeatureConsumer.MixProject do
       version: "0.0.0",
       deps: [
         {:http_core, path: Path.join(packages, "http_core")},
+        {:elixir_quic_http3, path: Path.join(packages, "elixir_quic_http3")},
         {:http_fetch, path: Path.join(packages, "http_fetch")},
         {:http_web_socket, path: Path.join(packages, "http_web_socket")},
         {:http_event_source, path: Path.join(packages, "http_event_source")},

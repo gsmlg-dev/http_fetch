@@ -697,7 +697,8 @@ defmodule QuicHttp3.Qpack do
   defp token_byte?(byte) when byte in ?a..?z, do: true
 
   defp token_byte?(byte)
-       when byte in [?!, ?#, ?$, ?%, ?&, ?', ?*, ?+, ?-, ?., ?^, ?_, ?`, ?|, ?~], do: true
+       when byte in [?!, ?#, ?$, ?%, ?&, ?', ?*, ?+, ?-, ?., ?^, ?_, ?`, ?|, ?~],
+       do: true
 
   defp token_byte?(_byte), do: false
 
