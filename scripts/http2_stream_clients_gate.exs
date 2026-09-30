@@ -174,6 +174,7 @@ defmodule HTTPStreamClientsGate do
     numbered(url, "/sse/numbered", opts, protocol, count, 1)
     source = source(url, "/sse/semantics", opts)
     opened(source, protocol)
+    "1" = fetch(url, "/control/semantics", opts)
     {%Message{type: "custom", data: "λ\nsecond", last_event_id: "7"}, nil} = message(source)
     {%Message{data: "reset", last_event_id: ""}, nil} = message(source)
     {%Message{data: "final", last_event_id: "done"}, nil} = message(source)
@@ -195,6 +196,7 @@ defmodule HTTPStreamClientsGate do
     close(source)
     source = source(url, "/sse/overflow", Keyword.put(opts, :max_event_size, 4096))
     opened(source, protocol)
+    "1" = fetch(url, "/control/overflow", opts)
 
     receive do
       {EventSource, ^source, %Error{reason: :event_too_large}} -> :ok

@@ -101,13 +101,14 @@ def serve(raw, cid):
                         if cursor == 'done':
                             respond(sid, [], status=204)
                         else:
-                            payload = '\ufeff: comment\r\nretry: 1\r\nid: 7\revent: custom\ndata: λ\r\ndata: second\n\nid:\ndata: reset\n\nid: done\ndata: final\n\ndata: incomplete'.encode()
-                            respond(sid, [payload])
+                            held[sid] = path
+                            respond(sid, [], keep=True)
                     elif path == '/sse/large':
                         payload = b'id: 1\n' + (b'data: ' + b'x' * 64 + b'\n') * 2048 + b'\n'
                         respond(sid, [payload], length=len(payload), keep=True)
                     elif path == '/sse/overflow':
-                        respond(sid, (b'data: ' + b'x' * 64 + b'\n' for _ in range(1024)), keep=True)
+                        held[sid] = path
+                        respond(sid, [], keep=True)
                     elif path == '/sse/pressure':
                         respond(sid, batches(1, count), keep=True)
                     elif path in ('/sse/hold', '/sse/reset', '/sse/goaway'):
@@ -116,7 +117,22 @@ def serve(raw, cid):
                     elif path.startswith('/control/'):
                         affected = 0
                         for stream, endpoint in list(held.items()):
-                            if path == '/control/held' and endpoint == '/sse/hold':
+                            if path == '/control/semantics' and endpoint == '/sse/semantics':
+                                if stream in pending:
+                                    raise ValueError('semantics control before initial headers drain')
+                                payload = '\ufeff: comment\r\nretry: 1\r\nid: 7\revent: custom\ndata: λ\r\ndata: second\n\nid:\ndata: reset\n\nid: done\ndata: final\n\ndata: incomplete'.encode()
+                                held.pop(stream)
+                                pending[stream] = [iter([payload]), b'', 0, itertools.cycle([1, 7, 113, 4096, 8192]), False, None]
+                                log(kind='semantics_triggered', connection=cid, stream=stream, payload_bytes=len(payload))
+                                affected += 1
+                            elif path == '/control/overflow' and endpoint == '/sse/overflow':
+                                if stream in pending:
+                                    raise ValueError('overflow control before initial headers drain')
+                                lines = (b'data: ' + b'x' * 64 + b'\n' for _ in range(1024))
+                                pending[stream] = [iter(lines), b'', 0, itertools.cycle([1, 7, 113, 4096, 8192]), True, None]
+                                log(kind='overflow_triggered', connection=cid, stream=stream, lines=1024, line_bytes=71)
+                                affected += 1
+                            elif path == '/control/held' and endpoint == '/sse/hold':
                                 respond_state = pending.get(stream)
                                 if respond_state:
                                     raise ValueError('control before initial event drain')

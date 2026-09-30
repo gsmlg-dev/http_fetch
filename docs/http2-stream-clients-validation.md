@@ -377,6 +377,20 @@ The exported final executable candidate, all full acceptance outcomes, archive
 checksum, final remote CI and release verification will be recorded after execution.
 No short preparation check is claimed as final acceptance or publication.
 
+The first P5 executable candidate was commit `9d2f6fb`, tree
+`d541635d31beeb6867b78c57b6418db53ed59698`. Its frozen full regression run passed
+834 tests plus 20 doctests, and remote CI/Test passed (`36780516073`,
+`36780515935`). Full acceptance failed: the Node SSE oversized-event fixture sent
+terminal input before the gate queried the current negotiated-version accessor
+after Open. The three Node SSE routes failed that assertion. The run was then
+interrupted; unfinished workloads, including both soaks, are NOT RUN. This
+candidate is not accepted for release. The failure and interruption logs are
+retained with final evidence; the repaired fixture requires a new frozen run.
+The repair adds explicit post-Open controls for oversized input and the legacy
+semantics EOF case. It retains protocol checks, exact input bytes and terminal
+assertions. All six peer/backend SSE routes and both fixture self-checks passed
+before refreezing; no application runtime source changed.
+
 ## Remaining acceptance status
 
 | Family | Status | Evidence required |

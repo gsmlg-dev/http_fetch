@@ -79,13 +79,16 @@ server.on('stream', (stream, headers) => {
     respond(numbered(), last === count, {}, { first, last, count: last - first + 1 });
   } else if (path === '/sse/semantics') {
     if (cursor === 'done') { stream.respond({ ':status': 204 }); stream.end(); }
-    else respond([Buffer.from('\ufeff: comment\r\nretry: 1\r\nid: 7\revent: custom\ndata: λ\r\ndata: second\n\nid:\ndata: reset\n\nid: done\ndata: final\n\ndata: incomplete')]);
+    else {
+      held.set(stream.id, { stream, endpoint: path });
+      stream.respond({ ':status': 200, 'content-type': 'text/event-stream' });
+    }
   } else if (path === '/sse/large') {
     const payload = Buffer.from('id: 1\n' + ('data: ' + 'x'.repeat(64) + '\n').repeat(2048) + '\n');
     respond([payload], true, { 'content-length': String(payload.length) });
   } else if (path === '/sse/overflow') {
-    function* lines() { for (let n = 0; n < 1024; n++) yield Buffer.from('data: ' + 'x'.repeat(64) + '\n'); }
-    respond(lines(), true);
+    held.set(stream.id, { stream, endpoint: path });
+    stream.respond({ ':status': 200, 'content-type': 'text/event-stream' });
   } else if (path === '/sse/pressure') respond(batches(1, count), true);
   else if (['/sse/hold', '/sse/reset', '/sse/goaway'].includes(path)) {
     const abort = new AbortController();
@@ -98,7 +101,15 @@ server.on('stream', (stream, headers) => {
   } else if (path.startsWith('/control/')) {
     let affected = 0;
     for (const item of held.values()) {
-      if (path === '/control/held' && item.endpoint === '/sse/hold') { write(item.stream, [event(2)], true); affected++; }
+      if (path === '/control/semantics' && item.endpoint === '/sse/semantics') {
+        const payload = Buffer.from('\ufeff: comment\r\nretry: 1\r\nid: 7\revent: custom\ndata: λ\r\ndata: second\n\nid:\ndata: reset\n\nid: done\ndata: final\n\ndata: incomplete');
+        held.delete(item.stream.id); write(item.stream, [payload]); affected++;
+        log({ kind: 'semantics_triggered', connection: id, stream: item.stream.id, payload_bytes: payload.length });
+      } else if (path === '/control/overflow' && item.endpoint === '/sse/overflow') {
+        function* lines() { for (let n = 0; n < 1024; n++) yield Buffer.from('data: ' + 'x'.repeat(64) + '\n'); }
+        write(item.stream, lines(), true); affected++;
+        log({ kind: 'overflow_triggered', connection: id, stream: item.stream.id, lines: 1024, line_bytes: 71 });
+      } else if (path === '/control/held' && item.endpoint === '/sse/hold') { write(item.stream, [event(2)], true); affected++; }
       else if (path === '/control/reset' && item.endpoint === '/sse/reset') {
         // close(8) ends the writable side first and can emit END_STREAM before
         // RST_STREAM. Aborting destroys it directly with NGHTTP2_CANCEL.

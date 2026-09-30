@@ -88,7 +88,7 @@ def peer_check(port):
     conn.initiate_connection()
     sock.sendall(conn.data_to_send())
 
-    def request(path, cursor='', stop_after=None):
+    def request(path, cursor='', stop_after=None, trigger=None):
         sid = conn.get_next_available_stream_id()
         headers = [(':method', 'GET'), (':scheme', 'https' if args.tls else 'http'), (':authority', f'localhost:{port}'), (':path', path)]
         if cursor:
@@ -96,7 +96,7 @@ def peer_check(port):
         conn.send_headers(sid, headers, end_stream=True)
         sock.sendall(conn.data_to_send())
         payload, response = bytearray(), None
-        done = False
+        done, triggered = False, False
         while not done:
             incoming = sock.recv(65536)
             if not incoming:
@@ -104,6 +104,11 @@ def peer_check(port):
             for event in conn.receive_data(incoming):
                 if isinstance(event, ResponseReceived) and event.stream_id == sid:
                     response = dict(event.headers)
+                    if trigger and not triggered:
+                        control = conn.get_next_available_stream_id()
+                        conn.send_headers(control, [(':method', 'GET'), (':scheme', 'https' if args.tls else 'http'),
+                            (':authority', f'localhost:{port}'), (':path', trigger)], end_stream=True)
+                        triggered = True
                 elif isinstance(event, DataReceived):
                     conn.acknowledge_received_data(event.flow_controlled_length, event.stream_id)
                     if event.stream_id == sid:
@@ -130,7 +135,7 @@ def peer_check(port):
     expected_large = b'id: 1\n' + (b'data: ' + b'x' * 64 + b'\n') * 2048 + b'\n'
     headers, large = request('/sse/large', stop_after=len(expected_large))
     assert large == expected_large and int(headers['content-length']) == len(large)
-    _, semantics = request('/sse/semantics')
+    _, semantics = request('/sse/semantics', trigger='/control/semantics')
     assert semantics.startswith(b'\xef\xbb\xbf') and semantics.endswith(b'data: incomplete')
     headers, body = request('/sse/semantics', 'done')
     assert headers[':status'] == '204' and not body
@@ -214,6 +219,12 @@ try:
             if [item['cursor'] for item in numbered] != expected or len({item['connection'] for item in numbered}) != 1:
                 raise RuntimeError('cursor or compatible reconnect connection mismatch')
         if args.mode == 'sse':
+            semantics = [item for item in observations if item.get('kind') == 'semantics_triggered']
+            if len(semantics) != 1:
+                raise RuntimeError('missing controlled semantics EOF evidence')
+            overflow = [item for item in observations if item.get('kind') == 'overflow_triggered']
+            if len(overflow) != 1 or overflow[0]['lines'] != 1024 or overflow[0]['line_bytes'] != 71:
+                raise RuntimeError('missing exact controlled overflow input evidence')
             pressure = [item for item in requests if item['endpoint'] == '/sse/pressure']
             sibling = [item for item in requests if item['endpoint'] in ('/fetch/paused', '/fetch/after-pause')]
             if len(pressure) != 1 or len(sibling) != 2 or len({item['connection'] for item in pressure + sibling}) != 1:
