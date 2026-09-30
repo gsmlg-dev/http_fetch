@@ -116,12 +116,16 @@ def main():
     def run(name, command, timeout):
         if stopped.is_set():
             return dict(gate=name, exit_status=130, not_run=True)
+        gate_env = env.copy()
+        hex_home = evidence / 'hex-cache' / name
+        hex_home.mkdir(parents=True, exist_ok=False)
+        gate_env['HEX_HOME'] = str(hex_home)
         start = time.monotonic()
         path = evidence / f'{name}.log'
         with path.open('w') as log:
             log.write(f'candidate_tree={args.tree}\ncommand={shlex.join(command)}\n')
             log.flush()
-            process = subprocess.Popen(command, cwd=source, env=env, stdout=log,
+            process = subprocess.Popen(command, cwd=source, env=gate_env, stdout=log,
                                        stderr=subprocess.STDOUT, start_new_session=True)
             with active_lock:
                 active.add(process)

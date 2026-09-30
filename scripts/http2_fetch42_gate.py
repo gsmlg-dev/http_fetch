@@ -174,11 +174,15 @@ def main():
     def run(gate):
         if stopped.is_set():
             return None
+        gate_env = env.copy()
+        hex_home = evidence / 'hex-cache' / gate
+        hex_home.mkdir(parents=True, exist_ok=False)
+        gate_env['HEX_HOME'] = str(hex_home)
         started = time.monotonic()
         with (evidence / f'{gate}.log').open('w') as log:
             log.write(f'candidate_tree={args.tree}\ncommand={shlex.join(gates[gate])}\n')
             log.flush()
-            process = subprocess.Popen(gates[gate], cwd=source, env=env,
+            process = subprocess.Popen(gates[gate], cwd=source, env=gate_env,
                                        stdout=log, stderr=subprocess.STDOUT,
                                        start_new_session=True)
             with active_lock:

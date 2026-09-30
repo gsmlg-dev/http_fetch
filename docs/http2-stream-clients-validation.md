@@ -495,3 +495,17 @@ assertions remain intact. The scoped fixture and complete Fetch suite passed
 seeds `965078` and `342781` (309 tests plus 20 doctests each); format and Credo
 passed. No runtime/application source changed. The repaired source is frozen for
 a complete new acceptance run before another release attempt.
+
+Repair candidate `cac815f`, tree `f3e70158648bb7ea2570de44706c1f5eef012e16`,
+passed remote CI (`36786347089`, all 14 jobs) and Test (`36786347028`, all seven
+apps; Fetch seed `788851`). Its fresh local full tests and three Fetch repeats
+also passed, but Fetch42's packaged ex_ssl prerequisite failed before traffic:
+Hex 2.4.0 returned `{:error, :eaccess}` while concurrent consumers persisted the
+shared registry `cache.ets`. The run was interrupted and unfinished workloads,
+including both soaks, are NOT RUN. This tooling failure is retained; it does not
+establish final acceptance. Per-gate isolated Hex homes avoid sharing this mutable
+cache without changing any workload, protocol assertion or application source.
+The isolation repair passed fresh-home dependency setup and strict compilation,
+then both packaged TLS gates concurrently (82 package tests each and explicit
+public traffic PASS). The workload inventory and source/interruption guards are
+unchanged. A complete new frozen run follows this runner-only change.
