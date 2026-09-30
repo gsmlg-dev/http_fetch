@@ -1,0 +1,112 @@
+# HTTP/2 stream clients implementation plan
+
+Baseline: `b5d17bfe3a6be9fbb20a3f3c185dc36773b9f367` (v0.15.1).
+The task is `CODEX_HTTP2_EVENTSOURCE_WEBSOCKET_PROMPT.md`, phases P0–P5.
+The user's current instruction authorizes per-step commits/pushes and a release
+after final acceptance; it supersedes the prompt's historical publication ban.
+User-owned prompts/reviews and the deleted historical prompt remain untouched.
+
+## Dependency and ownership contract
+
+`http_core` owns pure HTTP/2 state, codecs and transport primitives.
+`http_runtime -> http_core + telemetry` owns the existing pool and connection
+owners, their supervision, generic dialing, and logical stream I/O.
+`http_fetch`, `http_event_source`, and `http_web_socket` each depend on
+`http_runtime` and `http_core`; no concrete client depends on another.
+Fetch retains BodyBridge, HTTP.Stream, responses, promises and abort adapters.
+Keep the existing owner/pool algorithms and module names. Shared runtime code
+must have no Fetch module or task-supervisor dependency.
+
+## Stream contract
+
+Admission/opening have a monotonic deadline. A handle records connection owner,
+stream ID, request reference and attempt generation. Only the owner writes or
+rearms the transport. Ordered notifications carry informational/final headers,
+DATA, trailers, remote end and terminal errors. DATA credit is settled after
+bounded parser admission, independently of complete event/message delivery.
+Writes are finite and cancellable, preserve frame byte order, and never block
+control processing while windows are zero. Release/reset are idempotent.
+
+Immutable purpose is `:request` or `:extended_connect`. Fetch retains F1 upload
+abandonment on final headers. SSE opens an ordinary bodyless GET. Accepted
+Extended CONNECT keeps both stream directions usable and does not use ordinary
+response Content-Length/body-forbidden/upload-abandonment rules. Rejection never
+establishes a tunnel. F2 connector promotion/deadlines/monitoring remain intact.
+
+## Option matrix
+
+Both clients keep HTTP/1 by default and validate flat/string-alias options:
+`http_version`, `http2_profile`, `http2_scope`, `http2_reuse`.
+
+| Selection | Cleartext HTTP/WS | TLS HTTPS/WSS |
+| --- | --- | --- |
+| `:http1` | Existing behavior | HTTP/1-compatible ALPN |
+| `:h2c` | Prior knowledge | Reject |
+| `:http2` | Reject | Require h2 ALPN |
+| `:auto` | Existing HTTP/1 | Negotiate h2/HTTP1; explicit profile requires h2 |
+
+Reject H2 Unix sockets and contradictory ALPN before dialing. Preserve the
+selected TLS backend (`:ssl` default, `:ex_ssl` explicit). Expose actual HTTP
+version separately from WebSocket subprotocol. Auto WS capability fallback is
+one separate HTTP/1 connection before establishment only; certificate, malformed
+response, subprotocol/extension and ambiguous write failures never downgrade.
+
+Legacy envelopes remain unchanged; acknowledged delivery uses opaque refs with
+idempotent settlement. Define finite parser, assembled event/message, delivery
+byte/count, write, worker and timer budgets. A paused acknowledged consumer must
+not starve mixed siblings. Default established idle timeout may be infinite;
+opening and close deadlines are finite. SSE reconnects carry attempt tokens and
+Last-Event-ID without stale parser fragments; WS never replays/reconnects.
+
+## Requirement-to-test map
+
+| Gate | Deterministic or independent proof |
+| --- | --- |
+| A0 | Extraction/F1/F2 suites; standalone runtime/client package startup |
+| A1 | SSE raw-wire UTF8/BOM/CRLF/event/status/MIME/204/redirect cases |
+| A2 | SSE cursor/reconnect, stale generation, owner death, reset/GOAWAY, idle |
+| A3 | Above-window event, many short lines, acknowledged pause bounds |
+| B1 | Raw SETTINGS 0x8 absent/0/1/invalid/reversed/delayed; exact CONNECT |
+| B2 | Independent RFC8441 codec/peer, bidirectional split frames/control/close |
+| B3 | Zero/shrunk windows, producer/consumer pressure, bounded close/writes |
+| C1 | Independently observed single connection carrying Fetch + SSE + WS |
+| C2 | Mixed sibling survival under cancellation/reset/overload/paused consumer |
+| C3 | TLS/profile/scope isolation, capacity and existing F2 promotion |
+| D1 | h2c and TLS ssl/ex_ssl matrix with actual protocol/settings/stream IDs |
+| D2 | Selected-only standalone and mixed consumer, metadata/startup/shutdown |
+| D3 | Frozen full/static/package/interop/churn/soak and Fetch 42-gate ledger |
+
+## Sequence and acceptance
+
+1. P0: inspect baseline, run existing suites, record contracts and this mapping.
+2. P1: extract runtime/telemetry/dialing and stream API; migrate Fetch; prove F1/F2
+   and individual package consumers before adapters depend on it.
+3. P2: SSE options, bounded parser/delivery, asynchronous opening/reconnect and
+   H2 adapter; deterministic tests and two independent SSE peers must pass.
+4. P3: RFC8441 capability, immutable duplex purpose, header/profile support and
+   protocol negatives while keeping Fetch/SSE tests green.
+5. P4: WS H2 handshake, duplex frame I/O, bounded delivery/write/close and limited
+   fallback; independent RFC8441 peer and mixed clients must pass.
+6. P5: freeze executable candidate; run all required gates, 10,000 SSE events,
+   10,000 WS messages, 1,000 reconnect/open-close cycles, >=1,800-second mixed
+   soak, and unchanged Fetch 42-gate acceptance. Archive sanitized logs, exact
+   commands, peer versions, budgets/maxima, seeds and checksum manifest.
+
+Commit and push each completed phase. Release next minor version after successful
+final acceptance using the repository workflow; verify CI, release/tag, all seven
+Hex packages and standalone consumers. Do not count historical Fetch acceptance
+as new stream-client acceptance. Record FAIL/BLOCKED/NOT RUN honestly.
+
+## Risks and current progress
+
+The baseline compile initially sees stale local 0.11.0 app metadata. An absolute
+isolated build directory successfully compiles unchanged v0.15.1 with warnings
+as errors. Relative MIX_BUILD_PATH is unsuitable for these child projects.
+No source defect or dependency workaround is inferred from that cache failure.
+
+P0 inspection is in progress. The existing SSE parser has only a line bound;
+WebSocket buffering must reject an oversized declared frame before receiving its
+payload. Shared telemetry must preserve Fetch event names without calling Fetch.
+Profile ordering must explicitly retain `:protocol` for Extended CONNECT without
+changing ordinary Fetch wire bytes. Acceptance budgets must be frozen before
+running workloads and evidence invalidated after executable changes.
