@@ -231,7 +231,7 @@ defmodule HTTP.SocketClient do
                 host,
                 port,
                 selection,
-                timeout,
+                remaining_timeout(deadline_at),
                 claim
               )
           end
@@ -300,15 +300,25 @@ defmodule HTTP.SocketClient do
           {:ok, owner, reservation} ->
             {:ok, {:reused, owner, {pool, reservation}, key}}
 
+          {:connect, _token} ->
+            {:ok, {:connect, {pool, key}}}
+
           {:error, reason} ->
             {:error, reason}
         end
     end
   end
 
-  defp await_http2_reservation(pool, key, deadline_at) do
+  defp await_http2_reservation(pool, key, deadline_at, registered_owner \\ nil) do
     token = make_ref()
-    options = [deadline_at: deadline_at, token: token]
+
+    options = [
+      deadline_at: deadline_at,
+      token: token,
+      connect?: is_nil(registered_owner),
+      registered_owner: registered_owner
+    ]
+
     request_id = :gen_server.send_request(pool, {:reserve, key, options})
     await_http2_reservation_reply(pool, token, request_id, deadline_at)
   end
@@ -506,7 +516,7 @@ defmodule HTTP.SocketClient do
       with pool when is_pid(pool) <- pool,
            {:ok, key} <- pool_key_for_registration(request, profile, claim),
            :ok <- Pool.register(pool, key, owner, connecting?: is_tuple(claim), max_streams: 0) do
-        case await_http2_reservation(pool, key, deadline_at) do
+        case await_http2_reservation(pool, key, deadline_at, owner) do
           {:ok, ^owner, reservation} ->
             {:ok, pool, reservation, key}
 

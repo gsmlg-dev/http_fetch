@@ -12,7 +12,7 @@ defmodule HTTP.HTTP2.Pool do
 
   @doc "Atomically reserves one stream slot for `key`."
   @spec reserve(pid(), key(), keyword()) ::
-          {:ok, pid(), reservation()} | {:queued, reservation()} | {:error, term()}
+          {:ok, pid(), reservation()} | {:connect, reservation()} | {:error, term()}
   def reserve(pool, key, opts \\ []) do
     timeout =
       case Keyword.get(opts, :deadline_at) do
@@ -74,6 +74,7 @@ defmodule HTTP.HTTP2.Pool do
        monitors: %{},
        callers: %{},
        connectors: %{},
+       promotions: %{},
        deadlines: %{}
      }}
   end
@@ -94,8 +95,12 @@ defmodule HTTP.HTTP2.Pool do
     {:reply, entries, state}
   end
 
-  def handle_call({:register, key, owner, opts}, _from, state) when is_pid(owner) do
+  def handle_call({:register, key, owner, opts}, from, state) when is_pid(owner) do
     cond do
+      Keyword.get(opts, :connecting?, false) and
+          not connector_caller?(state, key, elem(from, 0)) ->
+        {:reply, {:error, :connector_cancelled}, state}
+
       not Process.alive?(owner) ->
         {:reply, {:error, :owner_closed}, state}
 
@@ -200,24 +205,12 @@ defmodule HTTP.HTTP2.Pool do
     end
   end
 
-  def handle_call({:fail_connect, key, reason}, _from, state) do
-    entry = Map.get(state.entries, key, new_entry())
-
-    Enum.each(entry.pending, fn {_token, from, _opts} ->
-      GenServer.reply(from, {:error, {:owner_start_failed, reason}})
-    end)
-
-    state =
-      Enum.reduce(entry.pending, state, fn {token, _, _}, acc -> forget_caller(acc, token) end)
-
-    entry = %{entry | pending: [], connecting: max(entry.connecting - 1, 0)}
-
-    {:reply, :ok,
-     state
-     |> put_entry(key, entry)
-     |> forget_connector(key)
-     |> prune_key(key)
-     |> emit_pool(:connection, :connect_failed)}
+  def handle_call({:fail_connect, key, reason}, from, state) do
+    if connector_caller?(state, key, elem(from, 0)) do
+      fail_connection(state, key, reason)
+    else
+      {:reply, :ok, state}
+    end
   end
 
   def handle_call({:mark_draining, key, owner}, _from, state) do
@@ -235,7 +228,9 @@ defmodule HTTP.HTTP2.Pool do
 
         connection = %{connection | draining: true, idle_timer: nil, idle_token: nil}
         entry = %{entry | connections: Map.put(entry.connections, owner, connection)}
-        {:reply, :ok, state |> put_entry(key, entry) |> emit_pool(:connection, :draining)}
+
+        {:reply, :ok,
+         state |> put_entry(key, entry) |> dispatch_all() |> emit_pool(:connection, :draining)}
     end
   end
 
@@ -258,13 +253,22 @@ defmodule HTTP.HTTP2.Pool do
     end
   end
 
+  def handle_call({:cancel, token}, _from, state) when is_map_key(state.promotions, token) do
+    {:reply, :ok, state |> cancel_token(token) |> emit_pool(:reservation, :cancelled)}
+  end
+
   def handle_call({:cancel, token}, _from, state) do
     case Map.pop(state.reservations, token) do
       {nil, reservations} ->
         {state, found?} = remove_pending(state, token)
 
         if found?,
-          do: {:reply, :ok, state |> forget_caller(token) |> emit_pool(:reservation, :cancelled)},
+          do:
+            {:reply, :ok,
+             state
+             |> forget_caller(token)
+             |> dispatch_all()
+             |> emit_pool(:reservation, :cancelled)},
           else: {:reply, {:error, :unknown_reservation}, %{state | reservations: reservations}}
 
       {%{key: key, owner: owner}, reservations} ->
@@ -308,7 +312,8 @@ defmodule HTTP.HTTP2.Pool do
         state =
           Enum.reduce(pending, state, fn {token, _, _}, acc -> forget_caller(acc, token) end)
 
-        {:noreply, state |> put_entry(key, %{entry | pending: []}) |> prune_key(key)}
+        {:noreply,
+         state |> put_entry(key, %{entry | pending: []}) |> prune_key(key) |> dispatch_all()}
 
       _ ->
         {:noreply, state}
@@ -334,7 +339,7 @@ defmodule HTTP.HTTP2.Pool do
         state = drop_owner_reservations(state, key, pid)
 
         {:noreply,
-         state |> dispatch_waiters(key) |> prune_key(key) |> emit_pool(:connection, :owner_down)}
+         state |> prune_key(key) |> dispatch_all() |> emit_pool(:connection, :owner_down)}
 
       {{:caller, token, ^pid}, monitors} ->
         state = %{state | monitors: monitors, callers: Map.delete(state.callers, token)}
@@ -342,21 +347,12 @@ defmodule HTTP.HTTP2.Pool do
 
       {{:connector, key, ^pid}, monitors} ->
         state = %{state | monitors: monitors, connectors: Map.delete(state.connectors, key)}
-        entry = Map.get(state.entries, key, new_entry())
-
-        Enum.each(entry.pending, fn {_token, from, _opts} ->
-          GenServer.reply(from, {:error, :connector_down})
-        end)
-
-        state =
-          Enum.reduce(entry.pending, state, fn {token, _, _}, acc -> forget_caller(acc, token) end)
-
-        entry = %{entry | pending: [], connecting: max(entry.connecting - 1, 0)}
 
         {:noreply,
          state
-         |> put_entry(key, entry)
+         |> finish_connect(key)
          |> prune_key(key)
+         |> dispatch_all()
          |> emit_pool(:connection, :connector_down)}
     end
   end
@@ -378,11 +374,15 @@ defmodule HTTP.HTTP2.Pool do
         {:noreply, state}
 
       _ ->
-        case find_pending(state, token) do
-          nil ->
+        case {Map.get(state.promotions, token), find_pending(state, token)} do
+          {key, _} when not is_nil(key) ->
+            {:noreply,
+             state |> cancel_token(token) |> emit_pool(:reservation, :deadline_exceeded)}
+
+          {nil, nil} ->
             {:noreply, cancel_deadline(state, token)}
 
-          from ->
+          {nil, from} ->
             GenServer.reply(from, {:error, :deadline_exceeded})
 
             {:noreply,
@@ -430,12 +430,21 @@ defmodule HTTP.HTTP2.Pool do
                 monitors: Map.put(state.monitors, monitor, {:connector, key, connector})
             }
 
-            {:noreply, state |> start_deadline(token, deadline) |> emit_pool(:queued, :waiting)}
+            {:noreply,
+             state
+             |> start_deadline(token, deadline)
+             |> emit_pool(:queued, :waiting)
+             |> dispatch_waiters(key)}
 
           true ->
             entry = %{entry | pending: entry.pending ++ [{token, from, queued_opts}]}
             state = state |> put_entry(key, entry) |> monitor_caller(token, from)
-            {:noreply, state |> start_deadline(token, deadline) |> emit_pool(:queued, :waiting)}
+
+            {:noreply,
+             state
+             |> start_deadline(token, deadline)
+             |> emit_pool(:queued, :waiting)
+             |> dispatch_waiters(key)}
         end
     end
   end
@@ -560,13 +569,49 @@ defmodule HTTP.HTTP2.Pool do
     do_dispatch(state, key, entry)
   end
 
+  defp dispatch_all(state),
+    do: Enum.reduce(Map.keys(state.entries), state, &dispatch_waiters(&2, &1))
+
   defp do_dispatch(state, _key, nil), do: state
   defp do_dispatch(state, _key, %{pending: []}), do: state
 
   defp do_dispatch(state, key, entry) do
+    [{token, from, opts} | rest] = entry.pending
+    deadline = Keyword.get(opts, :deadline_at)
+    registered_owner = Keyword.get(opts, :registered_owner)
+
+    cond do
+      not Process.alive?(elem(from, 0)) ->
+        state
+        |> put_entry(key, %{entry | pending: rest})
+        |> forget_caller(token)
+        |> dispatch_waiters(key)
+
+      is_pid(registered_owner) and not Map.has_key?(entry.connections, registered_owner) ->
+        GenServer.reply(from, {:error, :owner_closed})
+
+        state
+        |> put_entry(key, %{entry | pending: rest})
+        |> forget_caller(token)
+        |> dispatch_waiters(key)
+
+      is_integer(deadline) and deadline <= now_ms() ->
+        GenServer.reply(from, {:error, :deadline_exceeded})
+
+        state
+        |> put_entry(key, %{entry | pending: rest})
+        |> forget_caller(token)
+        |> dispatch_waiters(key)
+
+      true ->
+        dispatch_eligible(state, key, entry)
+    end
+  end
+
+  defp dispatch_eligible(state, key, entry) do
     case available_owner(entry) do
       :none ->
-        state
+        promote_connector(state, key, entry)
 
       {:ok, owner} ->
         [{token, from, opts} | rest] = entry.pending
@@ -599,6 +644,30 @@ defmodule HTTP.HTTP2.Pool do
     end
   end
 
+  defp promote_connector(state, key, %{pending: [{token, from, opts} | rest]} = entry) do
+    if Keyword.get(opts, :connect?, false) and entry.connecting == 0 and
+         Enum.all?(entry.connections, fn {_owner, connection} ->
+           connection.draining or connection.max_streams > 0
+         end) and
+         can_connect?(state, key) and is_nil(state.owner_factory) do
+      pid = elem(from, 0)
+      monitor = Process.monitor(pid)
+      state = put_entry(state, key, %{entry | pending: rest, connecting: 1})
+
+      state = %{
+        state
+        | connectors: Map.put(state.connectors, key, {pid, monitor}),
+          promotions: Map.put(state.promotions, token, key),
+          monitors: Map.put(state.monitors, monitor, {:connector, key, pid})
+      }
+
+      GenServer.reply(from, {:connect, token})
+      emit_pool(state, :connection, :promoted, queue_wait_us(opts))
+    else
+      state
+    end
+  end
+
   defp remove_pending(state, token) do
     Enum.reduce(state.entries, {state, false}, fn {key, entry}, {state, found} ->
       {pending, removed} =
@@ -620,6 +689,25 @@ defmodule HTTP.HTTP2.Pool do
 
   defp now_ms, do: System.monotonic_time(:millisecond)
 
+  defp fail_connection(state, key, reason) do
+    entry = Map.get(state.entries, key, new_entry())
+
+    Enum.each(entry.pending, fn {_token, from, _opts} ->
+      GenServer.reply(from, {:error, {:owner_start_failed, reason}})
+    end)
+
+    state =
+      Enum.reduce(entry.pending, state, fn {token, _, _}, acc -> forget_caller(acc, token) end)
+
+    {:reply, :ok,
+     state
+     |> put_entry(key, %{entry | pending: []})
+     |> finish_connect(key)
+     |> prune_key(key)
+     |> dispatch_all()
+     |> emit_pool(:connection, :connect_failed)}
+  end
+
   defp set_capacity(state, key, owner, limit)
        when (is_integer(limit) and limit >= 0) or limit == :infinity do
     case get_in(state.entries, [key, :connections, owner]) do
@@ -637,7 +725,7 @@ defmodule HTTP.HTTP2.Pool do
           | connections: Map.put(entry.connections, owner, %{connection | max_streams: effective})
         }
 
-        state |> put_entry(key, entry) |> dispatch_waiters(key)
+        state |> put_entry(key, entry) |> dispatch_all()
     end
   end
 
@@ -656,10 +744,12 @@ defmodule HTTP.HTTP2.Pool do
 
         connection = %{connection | draining: true, idle_timer: nil, idle_token: nil}
 
-        put_entry(state, key, %{
+        state
+        |> put_entry(key, %{
           entry
           | connections: Map.put(entry.connections, owner, connection)
         })
+        |> dispatch_all()
     end
   end
 
@@ -727,8 +817,25 @@ defmodule HTTP.HTTP2.Pool do
     end
   end
 
-  defp finish_connect(state, key),
-    do: state |> forget_connector(key) |> decrement_connecting(key)
+  defp finish_connect(state, key) do
+    state =
+      Enum.reduce(state.promotions, state, fn
+        {token, ^key}, acc ->
+          %{acc | promotions: Map.delete(acc.promotions, token)} |> forget_caller(token)
+
+        _, acc ->
+          acc
+      end)
+
+    state |> forget_connector(key) |> decrement_connecting(key)
+  end
+
+  defp connector_caller?(state, key, pid) do
+    case Map.get(state.connectors, key) do
+      {^pid, _monitor} -> true
+      _ -> false
+    end
+  end
 
   defp start_deadline(state, _token, nil), do: state
 
@@ -751,10 +858,17 @@ defmodule HTTP.HTTP2.Pool do
   end
 
   defp cancel_token(state, token) do
+    case Map.get(state.promotions, token) do
+      nil -> cancel_reservation(state, token)
+      key -> state |> finish_connect(key) |> prune_key(key) |> dispatch_all()
+    end
+  end
+
+  defp cancel_reservation(state, token) do
     case Map.pop(state.reservations, token) do
       {nil, _} ->
         {state, _} = remove_pending(state, token)
-        forget_caller(state, token)
+        state |> forget_caller(token) |> dispatch_all()
 
       {%{key: key, owner: owner}, reservations} ->
         %{state | reservations: reservations}
