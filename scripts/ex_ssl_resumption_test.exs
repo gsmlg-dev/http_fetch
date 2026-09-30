@@ -273,6 +273,7 @@ defmodule CandidateResumptionTest do
       HTTP.fetch("https://127.0.0.1:#{peer.port}/resumption",
         tls_backend: :ex_ssl,
         http_version: :http2,
+        http2_reuse: false,
         ssl: tls_options(fixtures, "h2", ticket_option(tickets)),
         timeout: @timeout,
         connect_timeout: @timeout
