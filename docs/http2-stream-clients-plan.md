@@ -130,6 +130,35 @@ without raising parser/event limits. Invalid queued input does not discard alrea
 accepted acknowledged deliveries. The independent backend matrix and churn are
 recorded in the validation document; full final-source acceptance remains P5.
 
+P3 adds peer SETTINGS 8 capability and immutable `:request` / `:extended_connect`
+stream purposes. Capability waiters consume no pool stream slots; ordinary siblings
+can pass an unknown-capability waiter, and known refusal is typed without opening
+CONNECT or discarding a healthy owner. Later enablement is per owner; capability
+and concurrent-stream capacity are observed atomically before waiter dispatch. CONNECT
+pseudo-header ordering extends each profile after `:method`; ordinary ordering and
+factory settings remain unchanged. A 2xx response enters `:tunnel`, keeps outbound
+scheduling, and ignores ordinary response body/Content-Length rules. Rejection
+retains ordinary response bounds and denies tunnel writes.
+
+The internal stream writer admits one frame-sized write at a time, capped by
+`max_write_bytes` (default 16 MiB + 14 framing bytes). Adapters must bound their
+own queue and wait for `:done`; the runtime forwards generation-qualified accepted,
+progress, done, and error notifications. The owner schedules 16 KiB quanta through
+its existing scheduler alongside Fetch uploads. Zero credit does not block control
+processing or cancellation. Remote EOF retains a tunnel reservation until local
+half-close and receive settlement, or explicit cancellation. Local half-close is
+an empty END_STREAM DATA write, allowed at zero credit. Empty non-terminal writes
+complete as no-ops. Invalid/non-finite writer limits reject before admission;
+opening-stage writes receive typed errors. New SETTINGS 8 violations send a
+PROTOCOL_ERROR GOAWAY, preserving preceding opt-in byte-stream data. A bounded,
+monitored capability wait also covers exclusive
+(non-reused) owners before their initial SETTINGS.
+
+P3 is complete: the final scoped suite passed 738 tests plus 20 doctests and all
+strict quality gates, with raw-wire capability/tunnel regressions and independent
+Fetch/SSE mixed routes. Its source/BEAM manifests and archive are recorded in the
+validation document. P4 public WebSocket integration and P5 acceptance remain.
+
 WebSocket buffering must reject an oversized declared frame before receiving its
 payload. Shared telemetry must preserve Fetch event names without calling Fetch.
 Profile ordering must explicitly retain `:protocol` for Extended CONNECT without

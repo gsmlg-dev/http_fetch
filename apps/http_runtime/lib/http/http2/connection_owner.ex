@@ -100,6 +100,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         response_events: [],
         init_settings: [],
         peer_settings?: false,
+        capability_waiters: %{},
         bytes: 0,
         queue_peak_bytes: 0,
         max_queue_bytes: Keyword.get(opts, :max_queue_bytes, @default_queue_bytes),
@@ -186,7 +187,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         discard_request(state, id)
 
       nil ->
-        {:noreply, state}
+        {:noreply, %{state | capability_waiters: Map.delete(state.capability_waiters, monitor)}}
     end
   end
 
@@ -197,6 +198,57 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   def handle_info({:http2_acknowledge_data, id}, state),
     do: async_reply(handle_call({:acknowledge, id}, nil, state))
+
+  def handle_info({:http2_await_capability, pid, generation}, state) do
+    cond do
+      state.peer_settings? ->
+        send(
+          pid,
+          {:http2_capability, generation,
+           state.connection.peer.values.enable_connect_protocol == 1}
+        )
+
+        {:noreply, state}
+
+      map_size(state.capability_waiters) >= state.max_streams ->
+        send(pid, {:http2_capability, generation, {:error, :capacity}})
+        {:noreply, state}
+
+      true ->
+        monitor = Process.monitor(pid)
+
+        {:noreply,
+         %{
+           state
+           | capability_waiters: Map.put(state.capability_waiters, monitor, {pid, generation})
+         }}
+    end
+  end
+
+  # Stream tasks submit one bounded write at a time. References qualify both the
+  # stream generation and each write, so delayed submissions cannot reach reuse.
+  def handle_info({:http2_write, id, generation, ref, data, end_stream?}, state)
+      when is_binary(data) and is_boolean(end_stream?) do
+    entry = state.streams[id]
+    stream = state.connection.streams[id]
+
+    reason = write_admission_reason(entry, stream, generation, data)
+
+    if reason do
+      if entry && entry.ref == generation,
+        do: notify_stream(state, id, {:write, ref, {:error, reason}})
+
+      {:noreply, state}
+    else
+      state = put_in(state.streams[id].pending_write, {ref, data, end_stream?})
+      notify_stream(state, id, {:write, ref, :accepted})
+
+      case drain_pending_body(state, 0) do
+        {:ok, state} -> {:noreply, state}
+        {:error, reason, state} -> {:stop, reason, state}
+      end
+    end
+  end
 
   def handle_info(:drain_bodies, state) do
     case drain_pending_body(state, 0) do
@@ -321,9 +373,13 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   def handle_call({:open_stream, headers, opts}, from, state) do
     deadline = Keyword.get(opts, :deadline_at)
+    write_limit = Keyword.get(opts, :max_write_bytes, 16_777_230)
     subscriber = Keyword.get(opts, :subscriber, elem(from, 0))
 
     cond do
+      not is_integer(write_limit) or write_limit <= 0 ->
+        {:reply, {:error, :invalid_max_write_bytes}, state}
+
       is_integer(deadline) and deadline <= System.monotonic_time(:millisecond) ->
         {:reply, {:error, :opening_timeout}, state}
 
@@ -483,10 +539,11 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     with {:ok, stream, connection} <-
            Connection.open_stream(state.connection,
              request_ref: request_ref,
+             purpose: Keyword.get(opts, :purpose, :request),
              request_method:
                if(List.keyfind(headers, ":method", 0) == {":method", "HEAD"}, do: :head)
            ),
-         ordered_headers <- order_headers(state.profile, headers),
+         ordered_headers <- order_headers(state.profile, headers, stream.purpose),
          {:ok, connection, effects} <-
            Connection.commit_headers(connection, stream.id, ordered_headers,
              end_stream: Keyword.get(opts, :end_stream, is_nil(Keyword.get(opts, :body_bridge))),
@@ -509,6 +566,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
               body_bridge: Keyword.get(opts, :body_bridge),
               upload_stopped?: false,
               pending_body: nil,
+              pending_write: nil,
+              max_write_bytes: Keyword.get(opts, :max_write_bytes, 16_777_230),
               byte_stream?: Keyword.get(opts, :byte_stream, false),
               deliveries: :queue.new()
             }),
@@ -689,6 +748,12 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         {:reply, :ok, %{state | response_events: []}}
 
       {:reply, error, state} ->
+        # Opt-in byte streams keep admitted bytes before a connection terminal
+        # error. Ordinary Fetch delivery retains its accepted response policy.
+        state.response_events
+        |> Enum.reverse()
+        |> Enum.each(fn {id, event} -> flush_terminal_byte_event(state, id, event) end)
+
         {:reply, error, %{state | response_events: []}}
     end
   end
@@ -782,11 +847,20 @@ defmodule HTTP.HTTP2.ConnectionOwner do
            {:ok, connection, effects} <-
              Connection.update_peer_settings(state.connection, entries),
            {:ok, state} <- write_effects(%{state | connection: connection}, effects) do
-        state = %{state | connection: connection, peer_settings?: true}
+        Enum.each(state.capability_waiters, fn {monitor, {pid, generation}} ->
+          Process.demonitor(monitor, [:flush])
+
+          send(
+            pid,
+            {:http2_capability, generation, connection.peer.values.enable_connect_protocol == 1}
+          )
+        end)
+
+        state = %{state | connection: connection, peer_settings?: true, capability_waiters: %{}}
         report_capacity(state)
         drain_pending_body(state, 0)
       else
-        {:error, reason} -> {:error, reason, state}
+        {:error, reason} -> settings_failure(state, reason)
         {:error, reason, _} -> {:error, reason, state}
       end
     end
@@ -981,6 +1055,18 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   defp dispatch_frame(state, _frame), do: {:ok, state}
 
+  defp settings_failure(state, reason)
+       when reason in [:invalid_enable_connect_protocol, :enable_connect_protocol_reversed] do
+    # RFC 8441 section 3 requires a connection PROTOCOL_ERROR. No server-initiated
+    # streams are processed by this client, so the GOAWAY last-stream ID is zero.
+    case send_frames(state, [Frame.encode(:goaway, 0, 0, <<0::1, 0::31, 1::32>>)]) do
+      {:ok, state} -> {:error, reason, state}
+      {:error, _write_reason, state} -> {:error, reason, state}
+    end
+  end
+
+  defp settings_failure(state, reason), do: {:error, reason, state}
+
   defp queue_data(state, id, payload, flags, wire_bytes) do
     entry = state.streams[id]
 
@@ -1093,6 +1179,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
             case StreamState.receive_response_headers(stream, headers, Frame.flag?(flags, 1)) do
               {:ok, stream, phase} ->
                 state = %{state | connection: Connection.put_stream(state.connection, stream)}
+                phase = upload_phase(stream, phase)
                 state = stop_upload(state, id, phase)
 
                 {:ok,
@@ -1237,7 +1324,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   defp drain_pending_body(state, 0) do
     ids =
       state.streams
-      |> Enum.filter(fn {_id, entry} -> not is_nil(entry.pending_body) end)
+      |> Enum.filter(fn {_id, entry} ->
+        not is_nil(entry.pending_body) or not is_nil(entry.pending_write)
+      end)
       |> Enum.map(&elem(&1, 0))
 
     {ids, scheduler} = Scheduler.ready(state.scheduler, ids)
@@ -1282,6 +1371,69 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         end
 
       _ ->
+        drain_pending_write(state, id)
+    end
+  end
+
+  defp write_admission_reason(entry, stream, generation, data) do
+    cond do
+      is_nil(entry) or entry.ref != generation ->
+        :unknown_stream
+
+      stream.purpose != :extended_connect or stream.response_phase != :tunnel ->
+        :extended_connect_not_established
+
+      stream.end_stream_sent? ->
+        :local_end
+
+      entry.terminal? ->
+        :closed
+
+      not is_nil(entry.pending_write) ->
+        :write_pending
+
+      byte_size(data) > entry.max_write_bytes ->
+        :write_buffer_full
+
+      true ->
+        nil
+    end
+  end
+
+  defp drain_pending_write(state, id) do
+    case get_in(state, [:streams, id, :pending_write]) do
+      {ref, "", false} ->
+        notify_stream(state, id, {:write, ref, :done})
+        {:ok, put_in(state.streams[id].pending_write, nil)}
+
+      {ref, data, end_stream?} ->
+        quantum = min(state.profile.max_data_frame, 16_384)
+
+        case Connection.send_data_prefix(state.connection, id, data, end_stream?, quantum) do
+          {:ok, connection, sent, rest, effects} ->
+            with {:ok, state} <- write_effects(%{state | connection: connection}, effects) do
+              if sent > 0, do: notify_stream(state, id, {:write, ref, {:progress, sent}})
+
+              if rest == "" do
+                notify_stream(state, id, {:write, ref, :done})
+                {:ok, put_in(state.streams[id].pending_write, nil)}
+              else
+                send(self(), :drain_bodies)
+
+                {:ok,
+                 put_in(state.streams[id].pending_write, {ref, :binary.copy(rest), end_stream?})}
+              end
+            end
+
+          {:error, :flow_control_blocked} ->
+            {:ok, state}
+
+          {:error, reason} ->
+            notify_stream(state, id, {:write, ref, {:error, reason}})
+            {:ok, put_in(state.streams[id].pending_write, nil)}
+        end
+
+      nil ->
         {:ok, state}
     end
   end
@@ -1352,7 +1504,10 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     end
   end
 
-  defp stop_upload(state, _id, :informational), do: state
+  defp upload_phase(%{response_phase: :tunnel}, _phase), do: :tunnel
+  defp upload_phase(_stream, phase), do: phase
+
+  defp stop_upload(state, _id, phase) when phase in [:informational, :tunnel], do: state
 
   defp stop_upload(state, id, _phase) do
     entry = state.streams[id]
@@ -1400,12 +1555,17 @@ defmodule HTTP.HTTP2.ConnectionOwner do
           entry
           | terminal?: true,
             upload_stopped?: true,
-            pending_body: nil
+            pending_body: nil,
+            pending_write: nil
         })
         |> Map.update!(:connection, fn connection ->
           Connection.put_stream(connection, StreamState.close(connection.streams[id]))
         end)
     end
+  end
+
+  defp flush_terminal_byte_event(state, id, event) do
+    if get_in(state, [:streams, id, :byte_stream?]), do: notify_stream(state, id, event)
   end
 
   defp flush_byte_stream_events(state, id) do
@@ -1439,6 +1599,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     pending =
       Enum.reduce(state.streams, 0, fn
         {_id, %{pending_body: {_bridge, bytes, _ref}}}, total -> total + byte_size(bytes)
+        {_id, %{pending_write: {_ref, bytes, _end}}}, total -> total + byte_size(bytes)
         _, total -> total
       end)
 
@@ -1494,7 +1655,16 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   defp report_capacity(%{pool: pool} = state) when is_pid(pool) do
     limit = state.connection.max_streams
     limit = if limit == :infinity, do: state.max_streams, else: min(limit, state.max_streams)
-    GenServer.cast(pool, {:owner_capacity, state.pool_key, self(), limit})
+
+    if state.peer_settings? do
+      GenServer.cast(
+        pool,
+        {:owner_settings, state.pool_key, self(),
+         %{extended_connect: state.connection.peer.values.enable_connect_protocol == 1}, limit}
+      )
+    else
+      GenServer.cast(pool, {:owner_capacity, state.pool_key, self(), limit})
+    end
   end
 
   defp report_capacity(_), do: :ok
@@ -1506,11 +1676,11 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     end
   end
 
-  defp order_headers(profile, headers) do
+  defp order_headers(profile, headers, purpose) do
     {pseudo, regular} =
       Enum.split_with(headers, fn {name, _} -> String.starts_with?(name, ":") end)
 
-    WireProfile.order_headers(profile, pseudo, regular)
+    WireProfile.order_headers(profile, pseudo, regular, purpose)
   end
 
   defp transport_send(%{transport: transport, socket: socket}, data) do

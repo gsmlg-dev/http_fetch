@@ -9,7 +9,8 @@ defmodule HTTP.HTTP2.Settings do
     3 => :max_concurrent_streams,
     4 => :initial_window_size,
     5 => :max_frame_size,
-    6 => :max_header_list_size
+    6 => :max_header_list_size,
+    8 => :enable_connect_protocol
   }
   @keys Map.new(@ids, fn {id, key} -> {key, id} end)
   @default %{
@@ -18,7 +19,8 @@ defmodule HTTP.HTTP2.Settings do
     max_concurrent_streams: :infinity,
     initial_window_size: 65_535,
     max_frame_size: 16_384,
-    max_header_list_size: :infinity
+    max_header_list_size: :infinity,
+    enable_connect_protocol: 0
   }
   defstruct values: @default,
             pending_ack?: false,
@@ -53,7 +55,8 @@ defmodule HTTP.HTTP2.Settings do
   def apply(%__MODULE__{} = state, entries), do: apply_peer(state, entries)
 
   def apply_peer(%__MODULE__{} = state, entries) when is_list(entries) do
-    with :ok <- validate_entries(entries) do
+    with :ok <- validate_entries(entries),
+         :ok <- validate_connect_transition(state.values, entries) do
       old = state.values
       values = Enum.reduce(entries, old, &put_value/2)
 
@@ -70,6 +73,7 @@ defmodule HTTP.HTTP2.Settings do
 
   def begin_local(%__MODULE__{} = state, entries) do
     with :ok <- validate_entries(entries),
+         :ok <- validate_connect_transition(state.values, entries),
          :ok <-
            if(length(state.pending) < @max_pending, do: :ok, else: {:error, :settings_queue_full}) do
       values = Enum.reduce(entries, state.values, &put_value/2)
@@ -108,6 +112,22 @@ defmodule HTTP.HTTP2.Settings do
   defp put_value({_unknown, _value}, values), do: values
   defp normalize(_, value), do: value
 
+  defp validate_connect_transition(values, entries) do
+    Enum.reduce_while(entries, values.enable_connect_protocol, fn
+      {key, value}, current when key in [8, :enable_connect_protocol] ->
+        if current == 1 and value == 0,
+          do: {:halt, {:error, :enable_connect_protocol_reversed}},
+          else: {:cont, value}
+
+      _, current ->
+        {:cont, current}
+    end)
+    |> case do
+      {:error, _} = error -> error
+      _ -> :ok
+    end
+  end
+
   defp validate_entries(entries) do
     Enum.reduce_while(entries, :ok, fn {id, value}, _ ->
       case validate_entry(id, value) do
@@ -126,6 +146,9 @@ defmodule HTTP.HTTP2.Settings do
 
       numeric_id == 2 and value not in [0, 1] ->
         {:error, :invalid_enable_push}
+
+      numeric_id == 8 and value not in [0, 1] ->
+        {:error, :invalid_enable_connect_protocol}
 
       numeric_id == 4 and value > @max_window ->
         {:error, :invalid_initial_window_size}

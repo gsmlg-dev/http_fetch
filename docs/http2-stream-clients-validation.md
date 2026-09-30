@@ -187,13 +187,80 @@ final source. Remote CI for the repairs remains pending. Release and production
 rollout have not occurred; full Fetch 42-gate and mixed 1,800-second acceptance
 remain P5.
 
+## P3 Extended CONNECT and duplex runtime
+
+The pure core models peer `ENABLE_CONNECT_PROTOCOL`, including invalid values and
+1-to-0 reversal within one SETTINGS frame. Only peer permission allows Extended
+CONNECT. New immutable stream purpose keeps accepted tunnels duplex while the
+original ordinary Fetch F1/F2 paths retain their cleanup/admission algorithms.
+Successful 2xx tunnels ignore ordinary Content-Length/body-forbidden semantics;
+rejected responses remain ordinary and deny outbound tunnel DATA.
+
+Generation-qualified runtime writes allow one bounded pending write, report
+transport progress, and share the existing owner scheduler with Fetch uploads.
+The opening task remains cancellable while waiting for SETTINGS, admission, or
+zero DATA credit. Ordered remote EOF does not release a tunnel until local end
+and receive settlement. Raw tests prove empty write completion, zero-credit
+half-close, rejection, byte/count admission, and sibling completion plus HTTP/2
+PING and cancellation while a tunnel is parked.
+
+Parent verification (absolute isolated build, root Mix project):
+
+```sh
+MIX_ENV=test MIX_BUILD_PATH=/tmp/http-stream-clients-p3-parent-build mix test apps/http_core/test apps/http_runtime/test apps/http_fetch/test apps/http_event_source/test apps/http_web_socket/test --seed 342781 --max-cases 8
+MIX_ENV=test MIX_BUILD_PATH=/tmp/http-stream-clients-p3-parent-build mix test apps/http_runtime/test/http/runtime/tunnel_stream_test.exs apps/http_runtime/test/http/runtime/tunnel_capability_test.exs
+MIX_ENV=test MIX_BUILD_PATH=/tmp/http-stream-clients-p3-parent-build mix compile --warnings-as-errors
+MIX_ENV=test MIX_BUILD_PATH=/tmp/http-stream-clients-p3-parent-build mix credo
+MIX_BUILD_PATH=/tmp/http-stream-clients-p3-parent-build mix format --check-formatted
+MIX_ENV=test MIX_BUILD_PATH=/tmp/http-stream-clients-p3-parent-build mix dialyzer
+MIX_ENV=test MIX_BUILD_PATH=/tmp/http-stream-clients-p3-parent-build /tmp/http2-stream-clients-venv/bin/python scripts/http2_stream_clients_gate.py --peer hyper-h2 --mode mixed
+MIX_ENV=test MIX_BUILD_PATH=/tmp/http-stream-clients-p3-parent-build /tmp/http2-stream-clients-venv/bin/python scripts/http2_stream_clients_gate.py --peer node --tls --backend ex_ssl --mode mixed
+```
+
+All final commands passed on the archived P3 source. The combined run passed
+**738 tests plus 20 doctests**, seed 342781, zero failures, three existing gated
+core skips: core 274, runtime 59, Fetch 309, WS 33, SSE 63. The targeted tunnel
+suite passed 11 tests. The raw capability oracle checks exact CONNECT fields,
+absence of prohibited Upgrade/key fields, SETTINGS waiting/cancellation, local
+advertisement versus peer permission, later enablement on a reused owner, and
+stale-generation isolation. Fifteen pool capability tests include atomic
+capability/capacity observation: enabling CONNECT together with zero stream
+capacity keeps the waiter queued until a later capacity update.
+
+Both independent mixed routes completed public/wire PASS markers. Each uses
+three SSE sessions and 100 Fetch requests with a single-connection oracle and
+cancellation/sibling checks; generic runner `count: 10000` metadata is not claimed
+as a 10,000-message mixed workload. Dialyzer has zero new warnings and four
+intentional existing skips; the profile type was narrowed to its validated policy
+without adding an ignore. Source-derived writer-limit and terminal-byte defects
+were reproduced before repair. New SETTINGS 8 violations emit connection
+PROTOCOL_ERROR GOAWAY; opt-in byte streams preserve DATA preceding that terminal
+error. Ordinary Fetch response delivery and F1/F2 behavior remain unchanged.
+
+An independent audit passed its earlier 737-test snapshot and all quality/mixed
+checks. Its source-drift records distinguish that snapshot from the subsequent
+terminal-byte repair and the final 738-test checks. The archive also retains a
+partial-integration run made before the new atomic pool cast was compiled; it is
+not counted as a candidate failure or PASS.
+
+P3 provenance: 299 source/config/test/fixture files, source manifest SHA256
+`35b9337f671f3e35b6687fdf2d3e6a22c76b12c5cb713b4eef6eb91bd977bf73`;
+638 BEAM modules, manifest SHA256
+`56ed3cd69a7535f7c9c07eba1f2be610323e0256a7b56e1760b4027e29696476`.
+Accessible source, commands, red/green logs, audit results and the P2 published
+consumer repair report:
+[`p3-35b9337f671f.tar.gz`](http2-stream-clients-evidence/p3-35b9337f671f.tar.gz),
+archive SHA256 `c6fba63ca09220b9d1068240ea2e063d38aaaa046068259926719e48e5b873ce`.
+This is P3 evidence; WS adapter and final frozen-release acceptance remain P4/P5.
+
 ## Remaining acceptance status
 
 | Family | Status | Evidence required |
 | --- | --- | --- |
 | A0 | P1/P2 PASS | Extraction/F1/F2 and standalone startup; WS traffic pending |
 | A1–A3 | P2 PASS | SSE wire/lifecycle/bounds, six peer/backend routes |
-| B1–B3 | NOT RUN | RFC8441 capability, WS duplex, flow/bounds |
+| B1 | P3 core/runtime subset PASS | Capability/header/tunnel policy; public WS handshake pending |
+| B2–B3 | NOT RUN | Public WS duplex, frame/delivery/flow/close bounds |
 | C1–C3 | SSE/Fetch subset PASS | WS mixed connection/sibling/isolation pending |
 | D1–D2 | SSE/runtime subset PASS | WS backend traffic and final package closure pending |
 | D3 | NOT RUN | Frozen full/static/interop/churn/30-minute soak, 42 Fetch gates |

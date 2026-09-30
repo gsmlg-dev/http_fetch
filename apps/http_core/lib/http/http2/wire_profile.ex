@@ -32,7 +32,7 @@ defmodule HTTP.HTTP2.WireProfile do
             padding: :none,
             push: :disabled
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{regular_headers: :input | :lexicographic | :reverse_input}
 
   # These factories intentionally expose the stable `t()` contract. Dialyzer
   # otherwise infers each literal profile as a narrower singleton struct and
@@ -59,7 +59,7 @@ defmodule HTTP.HTTP2.WireProfile do
     :padding,
     :push
   ]
-  @settings_defaults %{1 => 4096, 2 => 0, 3 => 100, 4 => 65_535, 5 => 16_384, 6 => 0}
+  @settings_defaults %{1 => 4096, 2 => 0, 3 => 100, 4 => 65_535, 5 => 16_384, 6 => 0, 8 => 0}
 
   @spec native_v1() :: t()
   def native_v1 do
@@ -195,11 +195,23 @@ defmodule HTTP.HTTP2.WireProfile do
 
   @spec order_headers(t(), [{String.t(), String.t()}], [{String.t(), String.t()}]) ::
           [{String.t(), String.t()}]
-  def order_headers(%__MODULE__{} = p, pseudo, regular) do
+  @spec order_headers(
+          t(),
+          [{String.t(), String.t()}],
+          [{String.t(), String.t()}],
+          :request | :extended_connect
+        ) :: [{String.t(), String.t()}]
+  def order_headers(%__MODULE__{} = p, pseudo, regular, purpose \\ :request)
+      when purpose in [:request, :extended_connect] do
     pseudo_map = Map.new(pseudo)
 
+    pseudo_order =
+      if purpose == :extended_connect,
+        do: Enum.flat_map(p.pseudo_headers, &extended_pseudo_order/1),
+        else: p.pseudo_headers
+
     ordered_pseudo =
-      Enum.flat_map(p.pseudo_headers, fn name ->
+      Enum.flat_map(pseudo_order, fn name ->
         if Map.has_key?(pseudo_map, name), do: [{name, pseudo_map[name]}], else: []
       end)
 
@@ -212,6 +224,9 @@ defmodule HTTP.HTTP2.WireProfile do
 
     ordered_pseudo ++ regular
   end
+
+  defp extended_pseudo_order(":method"), do: [":method", ":protocol"]
+  defp extended_pseudo_order(name), do: [name]
 
   defp validate_identity(%{id: id, revision: revision, source: source, evidence: evidence})
        when is_binary(id) and byte_size(id) in 1..128 and is_integer(revision) and revision > 0 and
@@ -235,11 +250,13 @@ defmodule HTTP.HTTP2.WireProfile do
   defp validate_settings(_), do: {:error, :invalid_settings}
 
   defp valid_setting?({id, value})
-       when is_integer(id) and id in 1..6 and is_integer(value) and value in 0..4_294_967_295 do
+       when is_integer(id) and id in [1, 2, 3, 4, 5, 6, 8] and is_integer(value) and
+              value in 0..4_294_967_295 do
     case id do
       2 -> value == 0
       4 -> value <= 2_147_483_647
       5 -> value in 16_384..16_777_215
+      8 -> value in [0, 1]
       _ -> true
     end
   end

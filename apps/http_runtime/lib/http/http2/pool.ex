@@ -56,6 +56,12 @@ defmodule HTTP.HTTP2.Pool do
   def update_capacity(pool, key, owner, limit),
     do: GenServer.call(pool, {:update_capacity, key, owner, limit})
 
+  @doc "Updates capability observed in valid peer SETTINGS for one connection."
+  @spec update_capabilities(pid(), key(), pid(), map()) ::
+          :ok | {:error, :unknown_owner | :invalid_capabilities}
+  def update_capabilities(pool, key, owner, capabilities),
+    do: GenServer.call(pool, {:update_capabilities, key, owner, capabilities})
+
   @spec stats(pid()) :: map()
   def stats(pool), do: GenServer.call(pool, :stats)
 
@@ -146,11 +152,27 @@ defmodule HTTP.HTTP2.Pool do
   def handle_call({:update_capacity, _, _, _}, _, state),
     do: {:reply, {:error, :invalid_capacity}, state}
 
+  def handle_call({:update_capabilities, key, owner, %{extended_connect: enabled}}, _from, state)
+      when is_boolean(enabled) do
+    if get_in(state.entries, [key, :connections, owner]) do
+      {:reply, :ok, set_capabilities(state, key, owner, enabled)}
+    else
+      {:reply, {:error, :unknown_owner}, state}
+    end
+  end
+
+  def handle_call({:update_capabilities, _, _, _}, _, state),
+    do: {:reply, {:error, :invalid_capabilities}, state}
+
   def handle_call({:reserve, key, opts}, from, state) do
     token = Keyword.get(opts, :token, make_ref())
     deadline = Keyword.get(opts, :deadline_at)
 
     cond do
+      Keyword.has_key?(opts, :required_capability) and
+          Keyword.get(opts, :required_capability) != :extended_connect ->
+        {:reply, {:error, :invalid_required_capability}, state}
+
       not is_reference(token) or Map.has_key?(state.callers, token) ->
         {:reply, {:error, :invalid_reservation}, state}
 
@@ -284,8 +306,21 @@ defmodule HTTP.HTTP2.Pool do
   end
 
   @impl true
+  def handle_cast({:owner_settings, key, owner, %{extended_connect: enabled}, limit}, state)
+      when is_boolean(enabled) and
+             ((is_integer(limit) and limit >= 0) or limit == :infinity),
+      do: {:noreply, set_settings(state, key, owner, enabled, limit)}
+
+  def handle_cast({:owner_settings, _, _, _, _}, state), do: {:noreply, state}
+
   def handle_cast({:owner_capacity, key, owner, limit}, state),
     do: {:noreply, set_capacity(state, key, owner, limit)}
+
+  def handle_cast({:owner_capabilities, key, owner, %{extended_connect: enabled}}, state)
+      when is_boolean(enabled),
+      do: {:noreply, set_capabilities(state, key, owner, enabled)}
+
+  def handle_cast({:owner_capabilities, _, _, _}, state), do: {:noreply, state}
 
   def handle_cast({:owner_draining, key, owner}, state),
     do: {:noreply, set_draining(state, key, owner)}
@@ -398,7 +433,10 @@ defmodule HTTP.HTTP2.Pool do
   end
 
   defp reserve_available(state, key, opts, from, token, deadline) do
-    case available_owner(Map.get(state.entries, key)) do
+    case available_owner(Map.get(state.entries, key), opts) do
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+
       {:ok, owner} ->
         state = state |> monitor_caller(token, from) |> increment_owner(key, owner, token)
         {:reply, {:ok, owner, token}, emit_pool(state, :reservation, :granted)}
@@ -411,7 +449,7 @@ defmodule HTTP.HTTP2.Pool do
           length(entry.pending) >= state.max_pending ->
             {:reply, {:error, :pending_capacity}, state}
 
-          can_connect?(state, key) and
+          can_connect?(state, key) and capability_connect_eligible?(entry, opts) and
               is_function(state.owner_factory, 2) ->
             # The factory runs in a separate process; its result is fed back as
             # an ordinary message and never blocks this pool mailbox.
@@ -458,14 +496,42 @@ defmodule HTTP.HTTP2.Pool do
   defp new_entry, do: %{connections: %{}, pending: [], connecting: 0, streams: 0}
   defp put_entry(state, key, entry), do: %{state | entries: Map.put(state.entries, key, entry)}
 
-  defp available_owner(nil), do: :none
+  defp available_owner(entry, opts \\ [])
+  defp available_owner(nil, _opts), do: :none
 
-  defp available_owner(entry) do
-    case Enum.find(entry.connections, fn {_pid, c} ->
-           not c.draining and c.streams < c.max_streams
-         end) do
-      {owner, _} -> {:ok, owner}
-      nil -> :none
+  defp available_owner(entry, opts) do
+    if unsupported_capability?(entry, opts) do
+      {:error, :extended_connect_not_supported}
+    else
+      case Enum.find(entry.connections, fn {_pid, c} ->
+             not c.draining and c.streams < c.max_streams and capability_matches?(c, opts)
+           end) do
+        {owner, _} -> {:ok, owner}
+        nil -> :none
+      end
+    end
+  end
+
+  defp capability_matches?(connection, opts) do
+    Keyword.get(opts, :required_capability) != :extended_connect or
+      connection.extended_connect == true
+  end
+
+  defp unsupported_capability?(entry, opts) do
+    if Keyword.get(opts, :required_capability) == :extended_connect do
+      registered_owner = Keyword.get(opts, :registered_owner)
+      candidates = Enum.reject(entry.connections, fn {_, c} -> c.draining end)
+
+      case Map.get(entry.connections, registered_owner) do
+        %{extended_connect: false} ->
+          true
+
+        _ ->
+          candidates != [] and entry.connecting == 0 and
+            Enum.all?(candidates, fn {_, c} -> c.extended_connect == false end)
+      end
+    else
+      false
     end
   end
 
@@ -551,6 +617,7 @@ defmodule HTTP.HTTP2.Pool do
     connection = %{
       pid: owner,
       streams: 0,
+      extended_connect: :unknown,
       max_streams: max_streams || state.max_streams,
       monitor: monitor,
       draining: false,
@@ -615,50 +682,96 @@ defmodule HTTP.HTTP2.Pool do
   end
 
   defp dispatch_eligible(state, key, entry) do
-    case available_owner(entry) do
-      :none ->
+    candidate =
+      Enum.find_value(entry.pending, fn {_token, from, opts} = waiter ->
+        case waiter_result(entry, from, opts) do
+          :none -> nil
+          result -> {waiter, result}
+        end
+      end)
+
+    case candidate do
+      nil ->
         promote_connector(state, key, entry)
 
-      {:ok, owner} ->
-        [{token, from, opts} | rest] = entry.pending
-        state = state |> put_entry(key, %{entry | pending: rest}) |> cancel_deadline(token)
-
-        state =
-          cond do
-            not Process.alive?(elem(from, 0)) ->
-              state
-              |> forget_caller(token)
-              |> emit_pool(:reservation, :caller_down, queue_wait_us(opts))
-
-            is_integer(Keyword.get(opts, :deadline_at)) and
-                Keyword.fetch!(opts, :deadline_at) <= now_ms() ->
-              GenServer.reply(from, {:error, :deadline_exceeded})
-
-              state
-              |> forget_caller(token)
-              |> emit_pool(:reservation, :deadline_exceeded, queue_wait_us(opts))
-
-            true ->
-              GenServer.reply(from, {:ok, owner, token})
-
-              state
-              |> increment_owner(key, owner, token)
-              |> emit_pool(:reservation, :granted, queue_wait_us(opts))
-          end
-
+      {{token, from, opts} = waiter, result} ->
+        pending = List.delete(entry.pending, waiter)
+        state = state |> put_entry(key, %{entry | pending: pending}) |> cancel_deadline(token)
+        state = settle_waiter(state, key, token, from, opts, result)
         do_dispatch(state, key, Map.fetch!(state.entries, key))
     end
   end
 
-  defp promote_connector(state, key, %{pending: [{token, from, opts} | rest]} = entry) do
-    if Keyword.get(opts, :connect?, false) and entry.connecting == 0 and
+  defp waiter_result(entry, from, opts) do
+    registered_owner = Keyword.get(opts, :registered_owner)
+
+    cond do
+      not Process.alive?(elem(from, 0)) ->
+        {:error, :caller_down}
+
+      is_pid(registered_owner) and not Map.has_key?(entry.connections, registered_owner) ->
+        {:error, :owner_closed}
+
+      is_integer(Keyword.get(opts, :deadline_at)) and
+          Keyword.fetch!(opts, :deadline_at) <= now_ms() ->
+        {:error, :deadline_exceeded}
+
+      true ->
+        available_owner(entry, opts)
+    end
+  end
+
+  defp settle_waiter(state, key, token, from, opts, result) do
+    cond do
+      not Process.alive?(elem(from, 0)) ->
+        state
+        |> forget_caller(token)
+        |> emit_pool(:reservation, :caller_down, queue_wait_us(opts))
+
+      is_integer(Keyword.get(opts, :deadline_at)) and
+          Keyword.fetch!(opts, :deadline_at) <= now_ms() ->
+        GenServer.reply(from, {:error, :deadline_exceeded})
+
+        state
+        |> forget_caller(token)
+        |> emit_pool(:reservation, :deadline_exceeded, queue_wait_us(opts))
+
+      true ->
+        grant_waiter(state, key, token, from, opts, result)
+    end
+  end
+
+  defp grant_waiter(state, key, token, from, opts, {:ok, owner}) do
+    GenServer.reply(from, {:ok, owner, token})
+
+    state
+    |> increment_owner(key, owner, token)
+    |> emit_pool(:reservation, :granted, queue_wait_us(opts))
+  end
+
+  defp grant_waiter(state, _key, token, from, opts, {:error, reason}) do
+    GenServer.reply(from, {:error, reason})
+
+    state
+    |> forget_caller(token)
+    |> emit_pool(:reservation, reason, queue_wait_us(opts))
+  end
+
+  defp promote_connector(state, key, entry) do
+    candidate =
+      Enum.find(entry.pending, fn {_, _, opts} -> capability_connect_eligible?(entry, opts) end)
+
+    if not is_nil(candidate) and Keyword.get(elem(candidate, 2), :connect?, false) and
+         entry.connecting == 0 and
          Enum.all?(entry.connections, fn {_owner, connection} ->
            connection.draining or connection.max_streams > 0
          end) and
          can_connect?(state, key) and is_nil(state.owner_factory) do
+      {token, from, opts} = candidate
       pid = elem(from, 0)
       monitor = Process.monitor(pid)
-      state = put_entry(state, key, %{entry | pending: rest, connecting: 1})
+      pending = List.delete(entry.pending, candidate)
+      state = put_entry(state, key, %{entry | pending: pending, connecting: 1})
 
       state = %{
         state
@@ -672,6 +785,13 @@ defmodule HTTP.HTTP2.Pool do
     else
       state
     end
+  end
+
+  defp capability_connect_eligible?(entry, opts) do
+    Keyword.get(opts, :required_capability) != :extended_connect or
+      not Enum.any?(entry.connections, fn {_, c} ->
+        not c.draining and c.extended_connect == :unknown
+      end)
   end
 
   defp remove_pending(state, token) do
@@ -736,6 +856,40 @@ defmodule HTTP.HTTP2.Pool do
   end
 
   defp set_capacity(state, _, _, _), do: state
+
+  defp set_settings(state, key, owner, enabled, limit) do
+    case get_in(state.entries, [key, :connections, owner]) do
+      nil ->
+        state
+
+      connection ->
+        entry = Map.fetch!(state.entries, key)
+
+        effective =
+          if(limit == :infinity, do: state.max_streams, else: min(limit, state.max_streams))
+
+        connection = %{connection | extended_connect: enabled, max_streams: effective}
+
+        state
+        |> put_entry(key, %{entry | connections: Map.put(entry.connections, owner, connection)})
+        |> dispatch_all()
+    end
+  end
+
+  defp set_capabilities(state, key, owner, enabled) do
+    case get_in(state.entries, [key, :connections, owner]) do
+      nil ->
+        state
+
+      connection ->
+        entry = Map.fetch!(state.entries, key)
+        connection = %{connection | extended_connect: enabled}
+
+        state
+        |> put_entry(key, %{entry | connections: Map.put(entry.connections, owner, connection)})
+        |> dispatch_waiters(key)
+    end
+  end
 
   defp set_draining(state, key, owner) do
     case get_in(state.entries, [key, :connections, owner]) do

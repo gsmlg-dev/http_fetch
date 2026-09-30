@@ -8,6 +8,9 @@ defmodule HTTP.Runtime.Stream do
   must monitor the returned task PID: a shared-runtime restart terminates tasks,
   and its DOWN notification is the terminal signal when forwarding is unavailable.
   Ordinary remote end releases after all DATA transport references are settled.
+  Extended CONNECT retains its reservation until both directions end or the
+  adapter cancels. Adapters submit one bounded write at a time and await :done
+  before another submission; progress reports transport-accepted bytes.
   """
   alias HTTP.HTTP2.{ConnectionOwner, ConnectionSupervisor, Pool, PoolKey}
   alias HTTP.Request
@@ -17,15 +20,23 @@ defmodule HTTP.Runtime.Stream do
 
   @spec start(Request.t(), pid(), keyword()) :: {:ok, pid(), reference()} | {:error, term()}
   def start(%Request{} = request, subscriber, opts \\ []) when is_pid(subscriber) do
-    generation = Keyword.get(opts, :generation, make_ref())
+    with :ok <- validate_writer_limit(Keyword.get(opts, :max_write_bytes, 16_777_230)),
+         :ok <- validate_purpose(Keyword.get(opts, :purpose, :request)) do
+      generation = Keyword.get(opts, :generation, make_ref())
 
-    case Task.Supervisor.start_child(:http_runtime_task_supervisor, fn ->
-           run(request, subscriber, generation, opts)
-         end) do
-      {:ok, pid} -> {:ok, pid, generation}
-      {:error, reason} -> {:error, reason}
+      case Task.Supervisor.start_child(:http_runtime_task_supervisor, fn ->
+             run(request, subscriber, generation, opts)
+           end) do
+        {:ok, pid} -> {:ok, pid, generation}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
+
+  defp validate_writer_limit(limit) when is_integer(limit) and limit > 0, do: :ok
+  defp validate_writer_limit(_), do: {:error, :invalid_max_write_bytes}
+  defp validate_purpose(purpose) when purpose in [:request, :extended_connect], do: :ok
+  defp validate_purpose(_), do: {:error, :invalid_stream_purpose}
 
   @doc "Settles the oldest DATA notification after bounded parser admission."
   def acknowledge(stream, delivery_ref) when is_reference(delivery_ref),
@@ -34,8 +45,26 @@ defmodule HTTP.Runtime.Stream do
   @doc "Cancels only this stream; repeated cancellation is harmless."
   def close(stream), do: send(stream, :abort)
 
+  @doc "Submits one bounded write; progress is reported with the returned reference."
+  def write(stream, bytes, end_stream? \\ false)
+      when is_binary(bytes) and is_boolean(end_stream?) do
+    ref = make_ref()
+    send(stream, {:write, ref, bytes, end_stream?})
+    ref
+  end
+
+  @doc "Half-closes the local tunnel direction after the previous write completes."
+  def half_close(stream), do: write(stream, "", true)
+
   defp run(request, subscriber, generation, opts) do
     monitor = Process.monitor(subscriber)
+    purpose = Keyword.get(opts, :purpose, :request)
+
+    request = %{
+      request
+      | transport_options: Keyword.put(request.transport_options, :stream_purpose, purpose)
+    }
+
     deadline = opening_deadline(Keyword.get(opts, :opening_timeout, 30_000))
 
     with {:ok, backend} <- HTTP.TLSBackend.resolve(request.transport_options[:tls_backend]),
@@ -47,8 +76,23 @@ defmodule HTTP.Runtime.Stream do
            Dialer.select_transport(request, request.transport_options[:unix_socket]),
          {:ok, selection} <- Dialer.protocol_selection(request, transport),
          {:ok, headers, ""} <-
-           HTTP.HTTP2.request_headers(request, profile(request), order?: false),
-         {:ok, lease} <- acquire(request, selection, transport, host, port, deadline, monitor) do
+           stream_headers(request, purpose),
+         {:ok, lease} <-
+           acquire(
+             request,
+             selection,
+             transport,
+             host,
+             port,
+             deadline,
+             {subscriber, generation, monitor}
+           ) do
+      lease =
+        Map.merge(lease, %{
+          purpose: purpose,
+          max_write_bytes: Keyword.get(opts, :max_write_bytes, 16_777_230)
+        })
+
       open(lease, headers, subscriber, generation, monitor, deadline)
     else
       {:error, reason} ->
@@ -68,7 +112,7 @@ defmodule HTTP.Runtime.Stream do
 
     case PoolKey.build(request, profile(request), protocol) do
       {:ok, key} ->
-        case reserve(pool, key, deadline, monitor) do
+        case reserve(pool, key, deadline, monitor, required_capability(request)) do
           {:ok, owner, reservation} ->
             {:ok,
              %{owner: owner, pool: pool, key: key, reservation: reservation, protocol: protocol}}
@@ -106,7 +150,7 @@ defmodule HTTP.Runtime.Stream do
     end
   end
 
-  defp reserve(pool, key, deadline, monitor, registered_owner \\ nil) do
+  defp reserve(pool, key, deadline, monitor, capability, registered_owner \\ nil) do
     token = make_ref()
 
     request_id =
@@ -118,13 +162,19 @@ defmodule HTTP.Runtime.Stream do
            token: token,
            connect?: is_nil(registered_owner),
            registered_owner: registered_owner
-         ]}
+         ] ++ if(is_nil(capability), do: [], else: [required_capability: capability])}
       )
 
     await_reservation(pool, token, request_id, deadline, monitor)
   end
 
-  defp await_reservation(pool, token, request_id, deadline, monitor) do
+  defp await_reservation(
+         pool,
+         token,
+         request_id,
+         deadline,
+         {subscriber, generation, monitor} = context
+       ) do
     receive do
       :abort ->
         _ = Pool.cancel(pool, token)
@@ -134,11 +184,15 @@ defmodule HTTP.Runtime.Stream do
         _ = Pool.cancel(pool, token)
         {:error, :subscriber_down}
 
+      {:write, ref, _bytes, _end_stream?} ->
+        notify(subscriber, generation, {:write, ref, {:error, :extended_connect_not_established}})
+        await_reservation(pool, token, request_id, deadline, context)
+
       message ->
         case :gen_server.check_response(message, request_id) do
           {:reply, result} -> result
           {:error, {reason, _server}} -> {:error, reason}
-          :no_reply -> await_reservation(pool, token, request_id, deadline, monitor)
+          :no_reply -> await_reservation(pool, token, request_id, deadline, context)
         end
     after
       remaining(deadline) ->
@@ -166,7 +220,7 @@ defmodule HTTP.Runtime.Stream do
                request,
                selection,
                remaining(deadline),
-               monitor
+               elem(monitor, 2)
              ) do
         case Dialer.connected_protocol(transport, socket, selection) do
           {:ok, :http2} ->
@@ -198,7 +252,7 @@ defmodule HTTP.Runtime.Stream do
       {:ok, owner} ->
         with :ok <- transport.controlling_process(socket, owner),
              :ok <- ConnectionOwner.activate(owner) do
-          register(pool, key, owner, deadline, monitor, protocol)
+          register(pool, key, owner, deadline, monitor, protocol, required_capability(request))
         else
           {:error, reason} ->
             stop_owner(owner)
@@ -211,13 +265,13 @@ defmodule HTTP.Runtime.Stream do
     end
   end
 
-  defp register(nil, key, owner, _deadline, _monitor, protocol),
+  defp register(nil, key, owner, _deadline, _monitor, protocol, _capability),
     do: {:ok, %{owner: owner, pool: nil, key: key, reservation: nil, protocol: protocol}}
 
-  defp register(pool, key, owner, deadline, monitor, protocol) do
+  defp register(pool, key, owner, deadline, monitor, protocol, capability) do
     case Pool.register(pool, key, owner, connecting?: true, max_streams: 0) do
       :ok ->
-        case reserve(pool, key, deadline, monitor, owner) do
+        case reserve(pool, key, deadline, monitor, capability, owner) do
           {:ok, selected_owner, reservation} ->
             {:ok,
              %{
@@ -241,21 +295,33 @@ defmodule HTTP.Runtime.Stream do
   defp open(lease, headers, subscriber, generation, subscriber_monitor, deadline) do
     owner_monitor = Process.monitor(lease.owner)
 
+    context = {subscriber, generation, subscriber_monitor}
+    capability = await_capability(lease, deadline, context, owner_monitor)
+
     request_id =
-      :gen_server.send_request(
-        lease.owner,
-        {:open_stream, headers,
-         [
-           subscriber: self(),
-           end_stream: true,
-           request_ref: generation,
-           deadline_at: deadline,
-           byte_stream: true
-         ]}
-      )
+      if capability == :ok,
+        do:
+          :gen_server.send_request(
+            lease.owner,
+            {:open_stream, headers,
+             [
+               subscriber: self(),
+               end_stream: lease.purpose == :request,
+               purpose: lease.purpose,
+               max_write_bytes: lease.max_write_bytes,
+               request_ref: generation,
+               deadline_at: deadline,
+               byte_stream: true
+             ]}
+          )
 
     try do
-      case await_open(request_id, deadline, subscriber_monitor, owner_monitor) do
+      result =
+        if capability == :ok,
+          do: await_open(request_id, deadline, context, owner_monitor),
+          else: capability
+
+      case result do
         {:ok, handle} ->
           notify(
             subscriber,
@@ -269,7 +335,13 @@ defmodule HTTP.Runtime.Stream do
             generation,
             subscriber_monitor,
             owner_monitor,
-            %{order: :queue.new(), pending: %{}, remote_end?: false}
+            %{
+              order: :queue.new(),
+              pending: %{},
+              remote_end?: false,
+              local_end?: lease.purpose == :request,
+              write: nil
+            }
           )
 
         {:error, reason} ->
@@ -282,7 +354,12 @@ defmodule HTTP.Runtime.Stream do
     end
   end
 
-  defp await_open(request_id, deadline, subscriber_monitor, owner_monitor) do
+  defp await_open(
+         request_id,
+         deadline,
+         {subscriber, generation, subscriber_monitor} = context,
+         owner_monitor
+       ) do
     receive do
       :abort ->
         {:error, :aborted}
@@ -293,11 +370,15 @@ defmodule HTTP.Runtime.Stream do
       {:DOWN, ^owner_monitor, :process, _pid, reason} ->
         {:error, {:owner_down, reason}}
 
+      {:write, ref, _bytes, _end_stream?} ->
+        notify(subscriber, generation, {:write, ref, {:error, :extended_connect_not_established}})
+        await_open(request_id, deadline, context, owner_monitor)
+
       message ->
         case :gen_server.check_response(message, request_id) do
           {:reply, result} -> result
           {:error, {reason, _server}} -> {:error, {:owner_down, reason}}
-          :no_reply -> await_open(request_id, deadline, subscriber_monitor, owner_monitor)
+          :no_reply -> await_open(request_id, deadline, context, owner_monitor)
         end
     after
       remaining(deadline) -> {:error, :opening_timeout}
@@ -306,6 +387,7 @@ defmodule HTTP.Runtime.Stream do
 
   defp relay(lease, _subscriber, _generation, _subscriber_monitor, _owner_monitor, %{
          remote_end?: true,
+         local_end?: true,
          pending: pending
        })
        when map_size(pending) == 0 do
@@ -334,6 +416,17 @@ defmodule HTTP.Runtime.Stream do
 
       {:http2, id, {:http2, :goaway, last, error}} when id == lease.id ->
         notify(subscriber, generation, {:goaway, last, error})
+        relay(lease, subscriber, generation, subscriber_monitor, owner_monitor, deliveries)
+
+      {:write, ref, bytes, end_stream?} ->
+        deliveries =
+          submit_write(lease, subscriber, generation, deliveries, ref, bytes, end_stream?)
+
+        relay(lease, subscriber, generation, subscriber_monitor, owner_monitor, deliveries)
+
+      {:http2, id, {:write, ref, event}} when id == lease.id ->
+        notify(subscriber, generation, {:write, ref, event})
+        deliveries = write_result(deliveries, ref, event)
         relay(lease, subscriber, generation, subscriber_monitor, owner_monitor, deliveries)
 
       {:http2, id, event} when id == lease.id ->
@@ -369,6 +462,89 @@ defmodule HTTP.Runtime.Stream do
         relay(lease, subscriber, generation, subscriber_monitor, owner_monitor, deliveries)
     end
   end
+
+  defp submit_write(lease, subscriber, generation, deliveries, ref, bytes, end_stream?) do
+    reason =
+      cond do
+        lease.purpose != :extended_connect -> :extended_connect_not_established
+        deliveries.local_end? -> :local_end
+        not is_nil(deliveries.write) -> :write_pending
+        byte_size(bytes) > lease.max_write_bytes -> :write_buffer_full
+        true -> nil
+      end
+
+    if reason do
+      notify(subscriber, generation, {:write, ref, {:error, reason}})
+      deliveries
+    else
+      send(lease.owner, {:http2_write, lease.id, generation, ref, bytes, end_stream?})
+      %{deliveries | write: {ref, end_stream?}}
+    end
+  end
+
+  defp write_result(%{write: {ref, end_stream?}} = deliveries, ref, :done),
+    do: %{deliveries | write: nil, local_end?: end_stream?}
+
+  defp write_result(%{write: {ref, _}} = deliveries, ref, {:error, _}),
+    do: %{deliveries | write: nil}
+
+  defp write_result(deliveries, _ref, _event), do: deliveries
+
+  defp await_capability(%{purpose: :request}, _deadline, _context, _owner), do: :ok
+
+  defp await_capability(
+         lease,
+         deadline,
+         {_subscriber, generation, _monitor} = context,
+         owner_monitor
+       ) do
+    send(lease.owner, {:http2_await_capability, self(), generation})
+    await_capability_result(deadline, context, owner_monitor)
+  end
+
+  defp await_capability_result(
+         deadline,
+         {subscriber, generation, subscriber_monitor} = context,
+         owner_monitor
+       ) do
+    receive do
+      {:http2_capability, ^generation, true} ->
+        :ok
+
+      {:http2_capability, ^generation, false} ->
+        {:error, :extended_connect_not_supported}
+
+      {:http2_capability, ^generation, {:error, reason}} ->
+        {:error, reason}
+
+      {:write, ref, _bytes, _end_stream?} ->
+        notify(subscriber, generation, {:write, ref, {:error, :extended_connect_not_established}})
+        await_capability_result(deadline, context, owner_monitor)
+
+      :abort ->
+        {:error, :aborted}
+
+      {:DOWN, ^subscriber_monitor, :process, _pid, _reason} ->
+        {:error, :subscriber_down}
+
+      {:DOWN, ^owner_monitor, :process, _pid, reason} ->
+        {:error, {:owner_down, reason}}
+    after
+      remaining(deadline) -> {:error, :opening_timeout}
+    end
+  end
+
+  defp required_capability(request) do
+    if request.transport_options[:stream_purpose] == :extended_connect, do: :extended_connect
+  end
+
+  defp stream_headers(request, :request),
+    do: HTTP.HTTP2.request_headers(request, profile(request), order?: false)
+
+  defp stream_headers(request, :extended_connect),
+    do: HTTP.HTTP2.extended_connect_headers(request, profile(request), order?: false)
+
+  defp stream_headers(_request, _purpose), do: {:error, :invalid_stream_purpose}
 
   defp remote_end(deliveries, subscriber, generation, flags) do
     if Bitwise.band(flags, 1) == 1 and not deliveries.remote_end? do

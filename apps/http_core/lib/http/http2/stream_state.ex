@@ -11,6 +11,7 @@ defmodule HTTP.HTTP2.StreamState do
             response_phase: :awaiting_final,
             response_status: nil,
             request_method: nil,
+            purpose: :request,
             expected_content_length: nil,
             received_body_bytes: 0,
             end_stream_sent?: false,
@@ -26,7 +27,8 @@ defmodule HTTP.HTTP2.StreamState do
       send_window: Keyword.get(opts, :send_window, 65_535),
       receive_window: Keyword.get(opts, :receive_window, 65_535),
       request_ref: Keyword.get(opts, :request_ref),
-      request_method: Keyword.get(opts, :request_method)
+      request_method: Keyword.get(opts, :request_method),
+      purpose: Keyword.get(opts, :purpose, :request)
     }
   end
 
@@ -49,9 +51,17 @@ defmodule HTTP.HTTP2.StreamState do
 
   def send_data(%__MODULE__{} = s, bytes, end_stream?) when is_integer(bytes) and bytes >= 0 do
     cond do
-      s.state not in [:open, :half_closed_remote] -> {:error, :stream_closed}
-      bytes > 0 and bytes > s.send_window -> {:error, :flow_control_blocked}
-      true -> {:ok, transition_local(%{s | send_window: s.send_window - bytes}, end_stream?)}
+      s.purpose == :extended_connect and s.response_phase != :tunnel ->
+        {:error, :extended_connect_not_established}
+
+      s.state not in [:open, :half_closed_remote] ->
+        {:error, :stream_closed}
+
+      bytes > 0 and bytes > s.send_window ->
+        {:error, :flow_control_blocked}
+
+      true ->
+        {:ok, transition_local(%{s | send_window: s.send_window - bytes}, end_stream?)}
     end
   end
 
@@ -104,6 +114,10 @@ defmodule HTTP.HTTP2.StreamState do
   def receive_response_headers(_, _, _), do: {:error, :invalid_response_headers}
 
   @doc "Tracks application DATA bytes independently of flow-control wire bytes."
+  def receive_response_data(%__MODULE__{response_phase: :tunnel} = s, bytes, end_stream?)
+      when is_integer(bytes) and bytes >= 0 and is_boolean(end_stream?),
+      do: {:ok, %{s | received_body_bytes: s.received_body_bytes + bytes}}
+
   def receive_response_data(%__MODULE__{response_phase: :body} = s, bytes, end_stream?)
       when is_integer(bytes) and bytes >= 0 and is_boolean(end_stream?) do
     total = s.received_body_bytes + bytes
@@ -145,15 +159,34 @@ defmodule HTTP.HTTP2.StreamState do
 
   def update_receive_window(_, _), do: {:error, :invalid_window_update_increment}
 
-  def sendable?(%__MODULE__{state: state, send_window: window}),
-    do: state in [:open, :half_closed_remote] and window > 0
+  def sendable?(%__MODULE__{} = s),
+    do:
+      s.state in [:open, :half_closed_remote] and s.send_window > 0 and
+        (s.purpose == :request or s.response_phase == :tunnel)
 
   def closed?(%__MODULE__{state: :closed}), do: true
   def closed?(_), do: false
 
   defp receive_initial_response_headers(s, headers, end_stream?) do
-    with {:ok, status} <- parse_response_status(headers),
-         {:ok, content_length} <- parse_content_length(headers) do
+    with {:ok, status} <- parse_response_status(headers) do
+      if s.purpose == :extended_connect and status in 200..299 do
+        {:ok,
+         s
+         |> Map.merge(%{
+           headers?: true,
+           response_phase: :tunnel,
+           response_status: status,
+           expected_content_length: nil
+         })
+         |> transition_remote(end_stream?), :final}
+      else
+        receive_http_response_headers(s, headers, status, end_stream?)
+      end
+    end
+  end
+
+  defp receive_http_response_headers(s, headers, status, end_stream?) do
+    with {:ok, content_length} <- parse_content_length(headers) do
       cond do
         (status < 200 or status == 204) and content_length != nil ->
           {:error, :invalid_content_length}
@@ -181,8 +214,6 @@ defmodule HTTP.HTTP2.StreamState do
            })
            |> transition_remote(end_stream?), :final}
       end
-    else
-      {:error, reason} -> {:error, reason}
     end
   end
 

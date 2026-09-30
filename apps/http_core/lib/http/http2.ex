@@ -130,6 +130,109 @@ defmodule HTTP.HTTP2 do
     {:ok, ordered, body}
   end
 
+  @doc false
+  @spec extended_connect_headers(
+          Request.t(),
+          WireProfile.t() | map() | atom() | binary(),
+          keyword()
+        ) ::
+          {:ok, [{String.t(), String.t()}], binary()} | {:error, term()}
+  def extended_connect_headers(request, profile, opts \\ [])
+
+  def extended_connect_headers(%Request{} = request, profile, opts) when is_list(opts) do
+    with {:ok, profile} <- WireProfile.compile(profile),
+         :ok <- validate_extended_body(request.body),
+         {:ok, url} <- extended_connect_url(request.url),
+         {:ok, regular} <- extended_regular_headers(request.headers) do
+      pseudo = [
+        {":method", "CONNECT"},
+        {":protocol", "websocket"},
+        {":scheme", url.scheme},
+        {":authority", Request.authority(url)},
+        {":path", Request.origin_form(url)}
+      ]
+
+      headers =
+        if Keyword.get(opts, :order?, true),
+          do: WireProfile.order_headers(profile, pseudo, regular, :extended_connect),
+          else: pseudo ++ regular
+
+      {:ok, headers, ""}
+    end
+  end
+
+  def extended_connect_headers(_, _, _), do: {:error, :invalid_extended_connect_request}
+
+  defp validate_extended_body(body) when body in [nil, ""], do: :ok
+  defp validate_extended_body(_), do: {:error, :extended_connect_body_not_supported}
+
+  defp extended_connect_url(%URI{scheme: scheme, host: host, userinfo: nil, fragment: nil} = url)
+       when scheme in ["ws", "wss", "http", "https"] and is_binary(host) and host != "" do
+    scheme =
+      case scheme do
+        "ws" -> "http"
+        "wss" -> "https"
+        other -> other
+      end
+
+    if valid_extended_url_parts?(url),
+      do: {:ok, %{url | scheme: scheme}},
+      else: {:error, :invalid_extended_connect_url}
+  end
+
+  defp extended_connect_url(_), do: {:error, :invalid_extended_connect_url}
+
+  defp valid_extended_url_parts?(url) do
+    (url.port == nil or (is_integer(url.port) and url.port in 1..65_535)) and
+      safe_extended_url_part?(url.host) and safe_extended_url_part?(url.path) and
+      safe_extended_url_part?(url.query) and
+      (url.path in [nil, ""] or String.starts_with?(url.path, "/"))
+  end
+
+  defp safe_extended_url_part?(nil), do: true
+
+  defp safe_extended_url_part?(part) when is_binary(part),
+    do: Enum.all?(:binary.bin_to_list(part), &(&1 > 32 and &1 != 127))
+
+  defp safe_extended_url_part?(_), do: false
+
+  defp extended_regular_headers(%Headers{headers: entries}) do
+    Enum.reduce_while(entries, {:ok, []}, fn
+      {name, value}, {:ok, acc} when is_binary(name) and is_binary(value) ->
+        name = String.downcase(name)
+
+        if valid_extended_header?(name, value),
+          do: {:cont, {:ok, [{name, value} | acc]}},
+          else: {:halt, {:error, {:invalid_extended_connect_header, name}}}
+
+      _, _ ->
+        {:halt, {:error, :invalid_extended_connect_headers}}
+    end)
+    |> case do
+      {:ok, entries} -> {:ok, Enum.reverse(entries)}
+      error -> error
+    end
+  end
+
+  defp extended_regular_headers(_), do: {:error, :invalid_extended_connect_headers}
+
+  defp valid_extended_header?(name, value) do
+    valid_token?(name) and safe_header_value?(value) and
+      name not in [
+        "connection",
+        "host",
+        "keep-alive",
+        "proxy-connection",
+        "transfer-encoding",
+        "upgrade",
+        "sec-websocket-key",
+        "sec-websocket-accept",
+        "content-length"
+      ] and
+      (name != "te" or value == "trailers") and
+      (value == "" or (:binary.first(value) not in [9, 32] and :binary.last(value) not in [9, 32]))
+  end
+
   defp maybe_add_priority_header(%Headers{} = headers, %Request{} = request, profile) do
     if profile.priority == :rfc9218 and not Headers.has?(headers, "priority") do
       Headers.set(headers, "priority", priority_value(request))

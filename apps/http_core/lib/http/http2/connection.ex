@@ -37,7 +37,15 @@ defmodule HTTP.HTTP2.Connection do
   end
 
   def open_stream(%__MODULE__{} = c, opts \\ []) do
+    purpose = Keyword.get(opts, :purpose, :request)
+
     cond do
+      purpose not in [:request, :extended_connect] ->
+        {:error, :invalid_stream_purpose}
+
+      purpose == :extended_connect and c.peer.values.enable_connect_protocol != 1 ->
+        {:error, :extended_connect_not_supported}
+
       c.state != :ready ->
         {:error, :draining}
 
@@ -58,7 +66,8 @@ defmodule HTTP.HTTP2.Connection do
             send_window: c.peer.values.initial_window_size,
             receive_window: c.local.values.initial_window_size,
             request_ref: Keyword.get(opts, :request_ref),
-            request_method: Keyword.get(opts, :request_method)
+            request_method: Keyword.get(opts, :request_method),
+            purpose: purpose
           )
 
         {:ok, stream} = StreamState.open(stream)
