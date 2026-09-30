@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-09-30
+
+### Fixed
+- Stop abandoned HTTP/2 uploads atomically after final response headers, retain
+  incomplete response bodies and trailers, and close unfinished request halves
+  before releasing peer capacity without replaying upload DATA.
+- Promote queued, never-sent requests when connection capacity becomes available,
+  including owner shutdown, draining, cross-origin capacity release, and a
+  saturated surviving sibling, while preserving deadlines and connection limits.
+- Preserve sibling upload scheduling when an already-stopped stream is removed
+  again during cleanup.
+
+### Validation
+- Add deterministic wire-level early-response, queued-admission, lifecycle and
+  package-consumer regressions with explicit event barriers.
+- Complete all 42 local HTTP/2 acceptance gates, including both independent peers,
+  supported transports, 10-MiB transfers, 10,000-request reuse workloads and a
+  full 30-minute mixed soak. See `docs/http2-production-validation.md` for exact
+  candidate provenance, outcomes, resource bounds and archived evidence.
+
 ## [0.15.0] - 2026-09-30
 
 ### Added
