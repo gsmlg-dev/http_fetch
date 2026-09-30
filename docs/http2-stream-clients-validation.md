@@ -75,15 +75,99 @@ found and closed cancellation, EOF and GOAWAY issues before this phase's commit;
 no accepted Fetch algorithm or regression assertion was disabled. Final-source
 acceptance and all new client/independent traffic workloads still require P2–P5.
 
+## P2 EventSource and byte-stream lifecycle
+
+P2 passed 700 scoped tests and 20 doctests, seed 342781, with the three existing
+gated core skips. Strict compile, formatting, Credo and Dialyzer passed (four
+intentional Dialyzer skips, no new warnings). The scopes were core, runtime, Fetch,
+EventSource and WebSocket; Fetch F1/F2 assertions and algorithms were preserved.
+New raw-wire/lifecycle tests cover headers/MIME/204, UTF8/BOM/CRLF, empty cursor,
+above-window events, total bytes/parts, ACK pause/order/idempotence, EOF/reset,
+redirect credentials/downgrades/limits, cancellation/owner death, stale timers,
+and accepted events before parser-fatal shutdown.
+
+The 18 independent cases all passed: hyper-h2 and Node, each over h2c, OTP `:ssl`
+TLS and explicit `:ex_ssl` TLS, each in SSE, faults and mixed modes. Every case
+required both public workload and independent wire-audit PASS markers and zero
+runtime task errors/timeouts. SSE mode delivered exactly 10,000 ordered events
+with forced cursor resumption, above-window event assembly and bounded ACK pause.
+Faults verified exact abrupt reset and accepted GOAWAY/replacement semantics.
+Mixed mode independently observed three SSE streams plus 100 Fetch requests on
+one connection, then surviving siblings after cancellation. Two supplementary
+1,001-attempt churn cases proved exactly 1,000 reconnects per peer, ordered IDs
+and cursors, one connection, and zero final streams/reservations/workers.
+
+```sh
+MIX_BUILD_PATH=/tmp/http-stream-clients-p2-build MIX_ENV=test mix compile --warnings-as-errors
+MIX_BUILD_PATH=/tmp/http-stream-clients-p2-build MIX_ENV=test mix test apps/http_runtime/test apps/http_event_source/test apps/http_fetch/test apps/http_core/test apps/http_web_socket/test --seed 342781 --max-cases 8
+MIX_BUILD_PATH=/tmp/http-stream-clients-p2-build MIX_ENV=test mix format --check-formatted
+MIX_BUILD_PATH=/tmp/http-stream-clients-p2-build MIX_ENV=test mix credo --all
+MIX_BUILD_PATH=/tmp/http-stream-clients-p2-build MIX_ENV=test mix dialyzer --format short
+# Repeat each mode for both peers and all routes; TLS adds --tls --backend ssl|ex_ssl.
+python scripts/http2_stream_clients_gate.py --peer hyper-h2 --mode sse
+python scripts/http2_stream_clients_gate.py --peer node --mode faults
+python scripts/http2_stream_clients_gate.py --peer hyper-h2 --mode mixed
+python scripts/http2_stream_clients_gate.py --peer hyper-h2 --mode churn --count 1001
+python scripts/http2_stream_clients_gate.py --peer node --mode churn --count 1001
+```
+
+Use a Python environment installed from `scripts/requirements-http2-stream-clients.txt`;
+peer versions were h2 4.2.0/hpack 4.1.0/hyperframe 6.1.0, Node 24.19.0/nghttp2
+1.69.0. The exact matrix commands and each log checksum are in the archive.
+Its 240 executable/config/fixture files were invariant across workloads at
+SHA256 `f9272c1a897d783dc09acc096192b0e93e3be3390e137578b20a986d999c0990`;
+638 prepared BEAMs were invariant at
+`78a786c094c102897ba6a1541ebf18c2c51fd1026ae93015a06d8e159b7f3593`.
+HEAD was `c4ddad58` plus the included, individually hashed P2 source. Documentation
+and evidence were added afterward; P5 will freeze the final executable candidate.
+
+Finite per-process acceptance limits: owner/session/stream memory 8 MiB each;
+referenced binaries 2/4/4 MiB; active mailbox 256 each (quiescent owner 16);
+four owners/eight workers. Default parser/event is 1 MiB/16,384 parts, line 64 KiB;
+ACK delivery 2 MiB/64 messages. Raw input reserves its profile receive window
+in addition to a 1 MiB safe-admission allowance, with 128 retained chunks.
+Legacy overload and excessive retained chunk counts terminate explicitly.
+Samples at opening, every 500 events, pause barriers and quiescence observed:
+
+| Process | Maximum memory bytes | Maximum referenced binary bytes | Maximum mailbox |
+| --- | ---: | ---: | ---: |
+| Owner | 198,472 | 383,136 | 64 |
+| SSE | 1,812,928 | 782,174 | 31 |
+| Stream worker | 110,664 | 511,733 | 6 |
+
+These are sampled maxima, not continuous peaks. Assertions enforced the frozen
+limits. DATA credit returns on bounded raw/parser admission; delivery ACKs are
+separate. Valid queued events survive transport and parser terminal errors.
+Opening/reconnect/idle/worker events have attempt tokens; finite idle pauses during
+local ACK backpressure. New shared stream telemetry uses bounded labels/numeric
+counters; existing Fetch and EventSource event prefixes remain compatible.
+
+Source-derived red evidence identified infinite-opening arithmetic, blocking EOF
+settlement behind a stalled owner, same-batch DATA/reset loss, parser-fatal loss of
+accepted deliveries, and TLS frame-count pressure. The byte-stream path now packs
+safe raw input and coalesces adjacent pending DATA under pressure without raising
+event/parser limits. Fetch does not opt into this new byte-stream delivery policy.
+Fixture failures and their repairs remain distinct from these production defects.
+
+Accessible evidence:
+[`p2-f9272c1a897d.tar.gz`](http2-stream-clients-evidence/p2-f9272c1a897d.tar.gz),
+SHA256 `382434321fd4e8a4f64e199cb4a6d902ebb88ef446ff0adf99e5435b8d915dc0`.
+The archive contains source files, exact commands, seeds, peer/wire logs, budgets,
+completion markers, selected red reproductions and `MANIFEST.sha256`.
+
+P1 follow-up remote Test `36758709094` and CI `36758708788` passed at `c4ddad58`.
+P2 remote CI is pending its commit/push; release and production rollout have not
+occurred. Full final Fetch 42-gate and mixed 1,800-second acceptance remain P5.
+
 ## Remaining acceptance status
 
 | Family | Status | Evidence required |
 | --- | --- | --- |
-| A0 | P1 PASS | Extraction/F1/F2 and standalone startup; adapters pending |
-| A1–A3 | NOT RUN | SSE wire/lifecycle/bounds and independent peers |
+| A0 | P1/P2 PASS | Extraction/F1/F2 and standalone startup; WS traffic pending |
+| A1–A3 | P2 PASS | SSE wire/lifecycle/bounds, six peer/backend routes |
 | B1–B3 | NOT RUN | RFC8441 capability, WS duplex, flow/bounds |
-| C1–C3 | NOT RUN | Mixed connection/sibling/isolation proof |
-| D1–D2 | NOT RUN | New client backend matrix and package closure |
+| C1–C3 | SSE/Fetch subset PASS | WS mixed connection/sibling/isolation pending |
+| D1–D2 | SSE/runtime subset PASS | WS backend traffic and final package closure pending |
 | D3 | NOT RUN | Frozen full/static/interop/churn/30-minute soak, 42 Fetch gates |
 
 Finite acceptance budgets and sampled maxima will be recorded before workloads;

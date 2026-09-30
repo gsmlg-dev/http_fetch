@@ -1,0 +1,6 @@
+# Development-only independent interoperability peers; never Mix runtime deps.
+h2==4.2.0
+hpack==4.1.0
+hyperframe==6.1.0
+wsproto==1.2.0
+h11==0.16.0

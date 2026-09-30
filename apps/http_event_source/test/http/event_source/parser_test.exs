@@ -61,6 +61,44 @@ defmodule HTTP.EventSource.ParserTest do
     assert {:error, :invalid_utf8} = Parser.parse(parser, <<"data: ", 0xFF, "\n">>)
   end
 
+  test "bounds retained event bytes and parts across chunks" do
+    parser = Parser.new(max_event_size: 8, max_event_parts: 3)
+    assert {:ok, parser, []} = Parser.parse(parser, "data: ab\n")
+    assert {:ok, parser, []} = Parser.parse(parser, "data: cd\n")
+    assert {:error, :event_too_large} = Parser.parse(parser, "data: ef\n")
+
+    parser = Parser.new(max_event_parts: 2)
+    assert {:ok, parser, []} = Parser.parse(parser, "data:\ndata:\n")
+    assert {:error, :too_many_event_parts} = Parser.parse(parser, "data:\n")
+  end
+
+  test "bounds metadata and unfinished input and resets data accounting on dispatch" do
+    assert {:error, :event_too_large} =
+             Parser.parse(Parser.new(max_event_size: 4), "event: abcde\n")
+
+    assert {:error, :event_too_large} =
+             Parser.parse(Parser.new(max_event_size: 4), "data:")
+
+    assert {:ok, parser, [_first, _second]} =
+             Parser.parse(Parser.new(max_event_size: 4), "data: ab\n\ndata: cd\n\n")
+
+    assert parser.event_bytes == 0
+    assert parser.event_parts == 0
+  end
+
+  test "copies retained fragments and discards an incomplete event at EOF" do
+    assert {:ok, parser, []} = Parser.parse(Parser.new(), "data: hello\n")
+    assert {:ok, parser, []} = Parser.close(parser)
+    assert parser.data_parts == []
+    assert parser.event_bytes == 0
+  end
+
+  test "rejects unsafe server cursors but preserves the NUL ignore policy" do
+    assert {:error, :invalid_last_event_id} = Parser.parse(Parser.new(), "id: bad\tvalue\n")
+    assert {:ok, parser, []} = Parser.parse(Parser.new(), <<"id: bad", 0, "value\n">>)
+    assert parser.last_event_id == ""
+  end
+
   test "enforces max line size" do
     parser = Parser.new(max_line_size: 4)
 

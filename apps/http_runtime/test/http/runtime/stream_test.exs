@@ -421,6 +421,62 @@ defmodule HTTP.Runtime.StreamTest do
     end
   end
 
+  test "fragmented bytes coalesce under pressure without losing bounded FIFO credit" do
+    {url, _peer} =
+      peer(fn socket ->
+        {id, _flags} = request(socket)
+        :ok = :gen_tcp.send(socket, frame(1, 4, id, <<0x88>>))
+      end)
+
+    {stream, generation} = start_stream(url, self())
+
+    assert_receive {:http_runtime, ^generation, ^stream, {:opened, %{owner: owner, id: id}}},
+                   5_000
+
+    assert_receive {:http_runtime, ^generation, ^stream, {:headers, _, _}}, 5_000
+
+    bytes = IO.iodata_to_binary(for _ <- 1..256, do: frame(0, 0, id, "x"))
+    assert :ok = ConnectionOwner.receive_bytes(owner, bytes)
+
+    deliveries =
+      for _ <- 1..64 do
+        assert_receive {:http_runtime, ^generation, ^stream, {:data, data, 0, ref}}, 5_000
+        {data, ref}
+      end
+
+    assert IO.iodata_to_binary(Enum.map(deliveries, &elem(&1, 0))) == String.duplicate("x", 256)
+    assert %{buffered_receive_bytes: 256} = ConnectionOwner.status(owner)
+    assert :queue.len(:sys.get_state(owner).streams[id].deliveries) == 64
+    Enum.each(deliveries, fn {_, ref} -> Stream.acknowledge(stream, ref) end)
+    acknowledge_barrier(stream, make_ref())
+    assert %{buffered_receive_bytes: 0} = ConnectionOwner.status(owner)
+    close_stream(stream)
+  end
+
+  test "settled remote EOF does not keep its task blocked behind a stalled owner" do
+    {url, _peer} =
+      peer(fn socket ->
+        {id, _flags} = request(socket)
+        :ok = :gen_tcp.send(socket, [frame(1, 4, id, <<0x88>>), frame(0, 1, id, "done")])
+      end)
+
+    {stream, generation} = start_stream(url, self())
+    monitor = Process.monitor(stream)
+    assert_receive {:http_runtime, ^generation, ^stream, {:opened, %{owner: owner}}}, 5_000
+    assert_receive {:http_runtime, ^generation, ^stream, {:data, "done", 1, ref}}, 5_000
+    assert_receive {:http_runtime, ^generation, ^stream, :remote_end}, 5_000
+    :ok = :sys.suspend(owner)
+
+    try do
+      Stream.acknowledge(stream, ref)
+      assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 1_000
+    after
+      :ok = :sys.resume(owner)
+    end
+
+    assert %{active_streams: 0, protocol_streams: 0} = ConnectionOwner.status(owner)
+  end
+
   test "shared owner death settles the logical stream with its generation" do
     {url, _peer} =
       peer(fn socket ->

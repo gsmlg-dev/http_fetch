@@ -95,6 +95,128 @@ defmodule HTTP.EventSource.OptionsTest do
              Options.new("https://example.com/events", tls_backend: :unknown)
   end
 
+  test "defaults keep HTTP1 and finite parser and delivery bounds" do
+    assert {:ok, options} = Options.new("http://example.com/events")
+    assert options.http_version == :http1
+    assert options.delivery == :legacy
+    assert options.http2_profile == nil
+    assert options.http2_scope == nil
+    assert options.http2_reuse == true
+
+    for value <- [
+          options.max_event_size,
+          options.max_event_parts,
+          options.max_queue_bytes,
+          options.max_queue_events
+        ] do
+      assert is_integer(value) and value > 0
+    end
+  end
+
+  test "normalizes camelCase shared runtime and event bound aliases" do
+    assert {:ok, options} =
+             Options.new("https://example.com/events", %{
+               "httpVersion" => "http2",
+               "http2Profile" => :native_v1,
+               "http2Scope" => "tenant-a",
+               "http2Reuse" => false,
+               "delivery" => "ack",
+               "maxQueueBytes" => 1024,
+               "maxQueueEvents" => 3,
+               "maxEventSize" => 512,
+               "maxEventParts" => 8,
+               "maxRedirects" => 2
+             })
+
+    assert options.http_version == :http2
+    assert options.http2_profile.id == "native_v1"
+    assert options.http2_scope == "tenant-a"
+    assert options.http2_reuse == false
+    assert options.delivery == :ack
+    assert options.max_queue_bytes == 1024
+    assert options.max_queue_events == 3
+    assert options.max_event_size == 512
+    assert options.max_event_parts == 8
+    assert options.max_redirects == 2
+  end
+
+  test "rejects route, profile and ALPN contradictions before a connection exists" do
+    for {url, init, reason} <- [
+          {"http://example.com/events", [http_version: :http2], :http2_requires_tls},
+          {"https://example.com/events", [http_version: :h2c], :h2c_requires_cleartext},
+          {"http://example.com/events", [http_version: :auto, http2_profile: :native_v1],
+           :http2_options_require_http2},
+          {"https://example.com/events", [http_version: :http1, http2_reuse: false],
+           :http2_options_require_http2},
+          {"http://example.com/events",
+           [http_version: :h2c, unix_socket: "/tmp/unused-sse-options.sock"],
+           {:unsupported_http_version_for_unix_socket, :h2c}},
+          {"https://example.com/events",
+           [http_version: :http2, ssl: [alpn_advertised_protocols: ["http/1.1"]]],
+           :incompatible_alpn}
+        ] do
+      assert {:error, ^reason} = Options.new(url, init)
+    end
+  end
+
+  test "event and acknowledged delivery budgets must be finite and positive" do
+    for {key, reason} <- [
+          {:max_event_size, {:invalid_option, :max_event_size}},
+          {:max_event_parts, {:invalid_option, :max_event_parts}},
+          {:max_queue_bytes, :invalid_max_queue_bytes},
+          {:max_queue_events, :invalid_max_queue_events}
+        ],
+        value <- [0, -1, :infinity, 1.5] do
+      assert {:error, ^reason} = Options.new("http://example.com/events", [{key, value}])
+    end
+
+    assert {:error, :event_limit_exceeds_delivery_limit} =
+             Options.new("http://example.com/events",
+               delivery: :ack,
+               max_event_size: 32,
+               max_queue_bytes: 38
+             )
+
+    assert {:ok, _} =
+             Options.new("http://example.com/events",
+               delivery: :ack,
+               max_event_size: 32,
+               max_queue_bytes: 39,
+               max_queue_events: 1
+             )
+
+    assert {:ok, %{max_redirects: 0}} =
+             Options.new("http://example.com/events", max_redirects: 0)
+
+    assert {:error, {:invalid_option, :max_redirects}} =
+             Options.new("http://example.com/events", max_redirects: :infinity)
+  end
+
+  test "cursor constructor rejects every header control byte and invalid UTF8" do
+    for byte <- Enum.to_list(0..31) ++ [127] do
+      assert {:error, :invalid_last_event_id} =
+               Options.new("http://example.com/events", last_event_id: "a" <> <<byte>> <> "b")
+    end
+
+    assert {:error, :invalid_last_event_id} =
+             Options.new("http://example.com/events", last_event_id: <<255>>)
+
+    assert {:ok, %{last_event_id: "λ 7"}} =
+             Options.new("http://example.com/events", last_event_id: "λ 7")
+  end
+
+  test "caller headers cannot inject cursor lines or HTTP2 connection fields" do
+    for headers <- [
+          [{"Last-Event-ID", "7\r\nx-secret: injected"}],
+          [{":method", "POST"}],
+          [{"Connection", "keep-alive"}],
+          [{"Upgrade", "h2c"}]
+        ] do
+      assert {:error, :invalid_headers} =
+               Options.new("http://example.com/events", http_version: :h2c, headers: headers)
+    end
+  end
+
   defp restore_tls_backend(nil), do: Application.delete_env(:http_core, :tls_backend)
   defp restore_tls_backend(value), do: Application.put_env(:http_core, :tls_backend, value)
 end

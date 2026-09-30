@@ -8,6 +8,42 @@ defmodule HTTP.EventSource do
       {HTTP.EventSource, source, %HTTP.EventSource.Event.Message{}}
       {HTTP.EventSource, source, %HTTP.EventSource.Event.Error{}}
 
+  HTTP/1 is the default. Select `http_version: :h2c` for cleartext prior
+  knowledge, `:http2` for required TLS h2, or `:auto` for TLS ALPN negotiation.
+  Automatic fallback to HTTP/1 occurs only when ALPN selects HTTP/1 before
+  establishment and no explicit `http2_profile` is supplied. The TLS backend
+  remains fixed. `http2_scope` and `http2_reuse` follow the shared runtime's
+  connection policy; established sessions have no Fetch total-request deadline.
+
+  Parser limits default to `max_line_size: 65_536`, `max_event_size: 1_048_576`
+  and `max_event_parts: 16_384`. The event byte cap includes retained data,
+  event type, cursor and unfinished input; invalid UTF-8 completed lines remain
+  fatal. Redirects default to `max_redirects: 5`; TLS downgrades are rejected,
+  cross-origin credentials are removed, and client identity cannot cross origins.
+
+  `delivery: :ack` emits Message events as
+  `{HTTP.EventSource, source, message, delivery_ref}`. Call `acknowledge/2` to
+  receive the next delivery. Open and Error retain their ordinary envelopes.
+  The finite FIFO defaults to `max_queue_bytes: 2_097_152` and
+  `max_queue_events: 64`, including the in-flight message. Acknowledged mode
+  requires `max_queue_bytes >= max_event_size + 7` to reserve a complete event.
+  Parked transport input is capped at 1 MiB plus the profile's advertised stream
+  receive window, including unused in-flight allowance, and 128 chunks. Transport
+  credit returns on safe bounded raw/parser admission; excessive retained chunk
+  counts terminate explicitly. Accepted deliveries drain before a fatal parser
+  error is reported. Idle timing
+  pauses while an application delivery is awaiting acknowledgement.
+
+  Legacy delivery preserves the original envelope and terminates with
+  `:consumer_overloaded` when the owner's mailbox reaches the configured count
+  or a message exceeds its byte limit. It does not bound unrelated producers
+  in that mailbox. Overload is fatal and does not reconnect.
+
+  The reconnect cursor advances on parser dispatch, independently of application
+  acknowledgement. Reconnection can replay events and does not guarantee
+  exactly-once delivery. Incomplete events at EOF are discarded; an empty ID
+  removes the Last-Event-ID header on subsequent requests.
+
   Custom server-sent event names are delivered through the message event's
   `type` field.
 
@@ -75,6 +111,18 @@ defmodule HTTP.EventSource do
 
   @spec reconnect_time(t()) :: non_neg_integer()
   def reconnect_time(source), do: connection_call(source, :reconnect_time, 0)
+
+  @doc "Returns the negotiated HTTP version, or nil before establishment."
+  @spec http_version(t()) :: :http1 | :http2 | nil
+  def http_version(source), do: connection_call(source, :http_version, nil)
+
+  @doc "Returns current delivery and parser usage and the logical HTTP/2 stream handle."
+  @spec status(t()) :: map()
+  def status(source), do: connection_call(source, :status, %{ready_state: @closed})
+
+  @doc "Settles an acknowledged Message delivery. Unknown and duplicate references are harmless."
+  @spec acknowledge(t(), reference()) :: :ok
+  def acknowledge(source, ref), do: connection_call(source, {:acknowledge, ref}, :ok)
 
   @spec close(t()) :: :ok
   def close(source), do: connection_call(source, :close, :ok)

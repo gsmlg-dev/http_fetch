@@ -14,6 +14,12 @@ defmodule HTTP.EventSource.Options do
     "idleTimeout" => :idle_timeout,
     "last_event_id" => :last_event_id,
     "lastEventId" => :last_event_id,
+    "max_event_size" => :max_event_size,
+    "maxEventSize" => :max_event_size,
+    "max_event_parts" => :max_event_parts,
+    "maxEventParts" => :max_event_parts,
+    "max_redirects" => :max_redirects,
+    "maxRedirects" => :max_redirects,
     "max_line_size" => :max_line_size,
     "maxLineSize" => :max_line_size,
     "max_reconnect_time" => :max_reconnect_time,
@@ -47,6 +53,16 @@ defmodule HTTP.EventSource.Options do
             tls_backend: :ssl,
             unix_socket: nil,
             max_line_size: @default_max_line_size,
+            http_version: :http1,
+            http2_profile: nil,
+            http2_scope: nil,
+            http2_reuse: true,
+            delivery: :legacy,
+            max_queue_bytes: 2_097_152,
+            max_queue_events: 64,
+            max_event_size: 1_048_576,
+            max_event_parts: 16_384,
+            max_redirects: 5,
             ref: nil
 
   @type t :: %__MODULE__{
@@ -71,7 +87,10 @@ defmodule HTTP.EventSource.Options do
   @spec new(String.t() | URI.t(), keyword() | map()) :: {:ok, t()} | {:error, term()}
   def new(url, init \\ []) do
     with {:ok, uri} <- normalize_url(url),
-         {:ok, init} <- normalize_init(init) do
+         {:ok, init} <- normalize_init(init),
+         {:ok, init} <- HTTP.Runtime.Options.validate(uri, init),
+         :ok <- validate_limits(init),
+         :ok <- validate_delivery_capacity(init) do
       {:ok,
        %__MODULE__{
          uri: uri,
@@ -89,6 +108,16 @@ defmodule HTTP.EventSource.Options do
          tls_backend: Keyword.fetch!(init, :tls_backend),
          unix_socket: Keyword.get(init, :unix_socket),
          max_line_size: Keyword.get(init, :max_line_size, @default_max_line_size),
+         http_version: Keyword.get(init, :http_version, :http1),
+         http2_profile: Keyword.get(init, :http2_profile),
+         http2_scope: Keyword.get(init, :http2_scope),
+         http2_reuse: Keyword.get(init, :http2_reuse, true),
+         delivery: Keyword.get(init, :delivery, :legacy),
+         max_queue_bytes: Keyword.get(init, :max_queue_bytes, 2_097_152),
+         max_queue_events: Keyword.get(init, :max_queue_events, 64),
+         max_event_size: Keyword.get(init, :max_event_size, 1_048_576),
+         max_event_parts: Keyword.get(init, :max_event_parts, 16_384),
+         max_redirects: Keyword.get(init, :max_redirects, 5),
          ref: Keyword.get(init, :ref, make_ref())
        }}
     end
@@ -117,10 +146,14 @@ defmodule HTTP.EventSource.Options do
   defp normalize_init(init) when is_map(init) do
     init
     |> Enum.map(fn {key, value} -> {normalize_key(key), value} end)
+    |> HTTP.Runtime.Options.normalize_keys()
     |> normalize_init()
   end
 
   defp normalize_init(init) when is_list(init) do
+    init = Enum.map(init, fn {key, value} -> {normalize_key(key), value} end)
+    init = HTTP.Runtime.Options.normalize_keys(init)
+
     with {:ok, headers} <- normalize_headers(Keyword.get(init, :headers, [])),
          {:ok, owner} <- normalize_owner(Keyword.get(init, :owner, self())),
          {:ok, with_credentials} <-
@@ -207,7 +240,8 @@ defmodule HTTP.EventSource.Options do
   defp normalize_boolean(_value, error), do: {:error, error}
 
   defp normalize_last_event_id(value) when is_binary(value) do
-    if binary_part_contains?(value, [<<0>>, "\n", "\r"]) do
+    if not String.valid?(value) or
+         Enum.any?(:binary.bin_to_list(value), &(&1 < 32 or &1 == 127)) do
       {:error, :invalid_last_event_id}
     else
       {:ok, value}
@@ -235,7 +269,28 @@ defmodule HTTP.EventSource.Options do
   defp normalize_unix_socket(value) when is_binary(value), do: {:ok, value}
   defp normalize_unix_socket(_value), do: {:error, :invalid_unix_socket}
 
-  defp binary_part_contains?(value, parts) do
-    Enum.any?(parts, fn part -> :binary.match(value, part) != :nomatch end)
+  defp validate_delivery_capacity(init) do
+    if init[:delivery] == :ack and
+         Keyword.get(init, :max_queue_bytes, 2_097_152) <
+           Keyword.get(init, :max_event_size, 1_048_576) + 7,
+       do: {:error, :event_limit_exceeds_delivery_limit},
+       else: :ok
+  end
+
+  defp validate_limits(init) do
+    Enum.reduce_while(
+      [{:max_event_size, 1_048_576}, {:max_event_parts, 16_384}, {:max_redirects, 5}],
+      :ok,
+      fn {key, default}, :ok ->
+        value = Keyword.get(init, key, default)
+        minimum = if key == :max_redirects, do: 0, else: 1
+
+        if is_integer(value) and value >= minimum do
+          {:cont, :ok}
+        else
+          {:halt, {:error, {:invalid_option, key}}}
+        end
+      end
+    )
   end
 end

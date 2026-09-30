@@ -353,6 +353,8 @@ Browser-compatible accessors are exposed with Elixir naming:
 HTTP.EventSource.ready_state(source)
 HTTP.EventSource.with_credentials(source)
 HTTP.EventSource.url(source)
+HTTP.EventSource.http_version(source) # :http1, :http2, or nil while opening
+HTTP.EventSource.status(source)
 HTTP.EventSource.close(source)
 ```
 
@@ -360,6 +362,41 @@ The client reconnects after dropped streams, honors `retry:` fields, and sends
 `Last-Event-ID` after receiving event IDs. Elixir differences from the browser
 API: invalid constructor input returns `{:error, reason}`, and events are
 process messages instead of `EventTarget` callbacks.
+
+HTTP/1 remains the default. Select `http_version: :http2` for required TLS h2,
+`:h2c` for cleartext prior knowledge, or `:auto` for TLS ALPN negotiation.
+HTTP/2 uses the shared runtime and can share an eligible connection with Fetch.
+An explicit `http2_profile` requires h2; `http2_scope` and `http2_reuse` retain
+the same isolation rules. OTP `:ssl` remains the default TLS backend.
+
+For bounded consumer delivery, use opaque acknowledgements:
+
+```elixir
+source = HTTP.EventSource.new("https://example.com/events",
+  http_version: :http2, delivery: :ack)
+
+receive do
+  {HTTP.EventSource, ^source, %HTTP.EventSource.Event.Message{data: data}, ref} ->
+    IO.inspect(data)
+    :ok = HTTP.EventSource.acknowledge(source, ref)
+end
+```
+
+The default parser caps a line at 64 KiB, an assembled event at 1 MiB, and its
+parts at 16,384. The acknowledged FIFO includes its in-flight message and defaults
+to 2 MiB/64 events; its byte limit must fit `max_event_size + 7`. Raw input reserves
+the advertised receive window in addition to a 1 MiB admitted-byte budget and has
+a 128-chunk limit. Legacy delivery keeps its original envelope and permanently
+stops on conservative owner-mailbox overload. Invalid responses/UTF-8/oversized
+events are fatal; 204 permanently stops; ordinary EOF/reset may reconnect.
+Accepted acknowledged deliveries drain before terminal errors. The cursor advances
+on parsing rather than application acknowledgement, so reconnects can replay.
+
+`[:http_runtime, :stream, :open | :queue | :reconnect | :error | :close | :fallback]`
+events add bounded client/version/outcome labels and numeric queue/raw counters.
+Established idle timeout defaults to infinity and pauses for local acknowledged
+backpressure. See [stream-client validation](docs/http2-stream-clients-validation.md)
+for independent peers, resource budgets and current phase status.
 
 ## API Reference
 

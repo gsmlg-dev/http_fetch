@@ -29,4 +29,13 @@ defmodule HTTP.Runtime.Telemetry do
       outcome: outcome
     })
   end
+
+  @doc "Bounded-label stream-client telemetry; measurements must contain numeric values."
+  def stream(client, event, protocol, outcome, measurements \\ %{}) do
+    :telemetry.execute([:http_runtime, :stream, event], measurements, %{
+      client: client,
+      http_version: protocol,
+      outcome: outcome
+    })
+  end
 end

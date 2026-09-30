@@ -192,6 +192,12 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   def handle_info({:http2_release_request, ref}, state), do: discard_request(state, ref)
 
+  def handle_info({:http2_release_completed, ref}, state),
+    do: async_reply(handle_call({:release_stream, ref}, nil, state))
+
+  def handle_info({:http2_acknowledge_data, id}, state),
+    do: async_reply(handle_call({:acknowledge, id}, nil, state))
+
   def handle_info(:drain_bodies, state) do
     case drain_pending_body(state, 0) do
       {:ok, state} -> {:noreply, state}
@@ -503,6 +509,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
               body_bridge: Keyword.get(opts, :body_bridge),
               upload_stopped?: false,
               pending_body: nil,
+              byte_stream?: Keyword.get(opts, :byte_stream, false),
               deliveries: :queue.new()
             }),
           refs: Map.put(state.refs, request_ref, stream.id),
@@ -960,22 +967,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         {:ok, stream} ->
           state = %{state | connection: Connection.put_stream(connection, stream)}
 
-          cond do
-            payload == "" and not Frame.flag?(flags, 1) ->
-              acknowledge_bytes(state, id, wire_bytes)
-
-            :queue.len(state.streams[id].deliveries) >= 128 ->
-              fail_stream(state, id, :delivery_buffer_full)
-
-            true ->
-              state = %{
-                state
-                | response_events: [{id, {:http2, :data, payload, flags}} | state.response_events]
-              }
-
-              state = update_in(state.streams[id].deliveries, &:queue.in(wire_bytes, &1))
-              return_connection_credit(state)
-          end
+          if payload == "" and not Frame.flag?(flags, 1),
+            do: acknowledge_bytes(state, id, wire_bytes),
+            else: queue_data(state, id, payload, flags, wire_bytes)
 
         {:error, reason} ->
           fail_stream(state, id, reason)
@@ -986,6 +980,45 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   defp dispatch_frame(state, _frame), do: {:ok, state}
+
+  defp queue_data(state, id, payload, flags, wire_bytes) do
+    entry = state.streams[id]
+
+    case state.response_events do
+      [{^id, {:http2, :data, previous, previous_flags}} | rest]
+      when entry.byte_stream? and :erlang.band(previous_flags, 1) == 0 ->
+        if :queue.len(entry.deliveries) >= 64 do
+          {{:value, bytes}, deliveries} = :queue.out_r(entry.deliveries)
+
+          state = %{
+            state
+            | response_events: [{id, {:http2, :data, previous <> payload, flags}} | rest]
+          }
+
+          state = put_in(state.streams[id].deliveries, :queue.in(bytes + wire_bytes, deliveries))
+          return_connection_credit(state)
+        else
+          queue_delivery(state, id, payload, flags, wire_bytes)
+        end
+
+      _ ->
+        queue_delivery(state, id, payload, flags, wire_bytes)
+    end
+  end
+
+  defp queue_delivery(state, id, payload, flags, wire_bytes) do
+    if :queue.len(state.streams[id].deliveries) >= 128 do
+      fail_stream(state, id, :delivery_buffer_full)
+    else
+      state = %{
+        state
+        | response_events: [{id, {:http2, :data, payload, flags}} | state.response_events]
+      }
+
+      state = update_in(state.streams[id].deliveries, &:queue.in(wire_bytes, &1))
+      return_connection_credit(state)
+    end
+  end
 
   defp acknowledge_bytes(state, _id, 0), do: {:ok, state}
 
@@ -1352,6 +1385,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   defp terminal_stream(state, id, message) do
+    state = flush_byte_stream_events(state, id)
     state = finish_upload_stall(state, id, :stopped)
     notify_stream(state, id, message)
     stop_body_bridge(state, id)
@@ -1373,6 +1407,19 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         end)
     end
   end
+
+  defp flush_byte_stream_events(state, id) do
+    if get_in(state, [:streams, id, :byte_stream?]) do
+      {pending, rest} = Enum.split_with(state.response_events, fn {stream, _} -> stream == id end)
+      pending |> Enum.reverse() |> Enum.each(fn {_, event} -> notify_stream(state, id, event) end)
+      %{state | response_events: rest}
+    else
+      state
+    end
+  end
+
+  defp async_reply({:reply, _result, state}), do: {:noreply, state}
+  defp async_reply({:stop, reason, _result, state}), do: {:stop, reason, state}
 
   defp notify_transport_error(%{lifecycle: :closed}, _reason), do: :ok
 

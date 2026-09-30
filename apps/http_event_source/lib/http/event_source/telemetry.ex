@@ -14,13 +14,14 @@ defmodule HTTP.EventSource.Telemetry do
   end
 
   @spec connect_stop(URI.t(), non_neg_integer(), non_neg_integer()) :: :ok
-  def connect_stop(url, status, duration) do
+  def connect_stop(url, status, duration, http_version \\ :http1) do
     :telemetry.execute([:http_event_source, :connect, :stop], %{duration: duration}, %{
       url: url,
       scheme: url.scheme,
       host: url.host,
       port: url.port,
-      status: status
+      status: status,
+      http_version: http_version
     })
   end
 

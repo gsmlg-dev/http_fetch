@@ -118,7 +118,18 @@ explicitly rejected by this initial bodyless stream adapter before admission.
 Four unpacked standalone consumers passed, with no Fetch modules in SSE/WS
 consumers and stable shared-runtime PIDs across individual client shutdown.
 
-The existing SSE parser has only a line bound;
+P2 implements ordinary H2 GET event streaming, explicit acknowledged delivery,
+total event/part bounds, asynchronous opening, attempt-qualified timers and bounded
+redirects. Public negotiated version is `:http1` or `:http2`; the internal stream
+handle preserves `:h2` versus `:h2c` route provenance. Byte-stream clients preserve
+valid pending DATA before terminal notifications; Fetch's default delivery path
+and F1/F2 algorithms remain unchanged. Runtime ACK/EOF settlement is asynchronous.
+Raw SSE input admits at most 1 MiB before withholding credit and reserves the
+advertised stream window separately; adjacent safely admitted chunks are packed
+without raising parser/event limits. Invalid queued input does not discard already
+accepted acknowledged deliveries. The independent backend matrix and churn are
+recorded in the validation document; full final-source acceptance remains P5.
+
 WebSocket buffering must reject an oversized declared frame before receiving its
 payload. Shared telemetry must preserve Fetch event names without calling Fetch.
 Profile ordering must explicitly retain `:protocol` for Extended CONNECT without

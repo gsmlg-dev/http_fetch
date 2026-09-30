@@ -245,7 +245,13 @@ defmodule HTTP.Runtime.Stream do
       :gen_server.send_request(
         lease.owner,
         {:open_stream, headers,
-         [subscriber: self(), end_stream: true, request_ref: generation, deadline_at: deadline]}
+         [
+           subscriber: self(),
+           end_stream: true,
+           request_ref: generation,
+           deadline_at: deadline,
+           byte_stream: true
+         ]}
       )
 
     try do
@@ -303,7 +309,7 @@ defmodule HTTP.Runtime.Stream do
          pending: pending
        })
        when map_size(pending) == 0 do
-    ConnectionOwner.release_stream(lease.owner, lease.id)
+    send(lease.owner, {:http2_release_completed, lease.id})
   end
 
   defp relay(lease, subscriber, generation, subscriber_monitor, owner_monitor, deliveries) do
@@ -385,7 +391,7 @@ defmodule HTTP.Runtime.Stream do
     case :queue.out(deliveries.order) do
       {{:value, ref}, rest} ->
         if deliveries.pending[ref] do
-          ConnectionOwner.acknowledge(lease.owner, lease.id)
+          send(lease.owner, {:http2_acknowledge_data, lease.id})
 
           drain_settled(lease, %{
             deliveries

@@ -10,7 +10,11 @@ defmodule HTTP.EventSource.Parser do
             event_type: "",
             last_event_id: "",
             id_changed?: false,
-            max_line_size: @default_max_line_size
+            max_line_size: @default_max_line_size,
+            max_event_size: 1_048_576,
+            max_event_parts: 16_384,
+            event_bytes: 0,
+            event_parts: 0
 
   @type event ::
           {:event, String.t(), String.t(), String.t()}
@@ -31,6 +35,8 @@ defmodule HTTP.EventSource.Parser do
   def new(opts \\ []) do
     %__MODULE__{
       max_line_size: Keyword.get(opts, :max_line_size, @default_max_line_size),
+      max_event_size: Keyword.get(opts, :max_event_size, 1_048_576),
+      max_event_parts: Keyword.get(opts, :max_event_parts, 16_384),
       last_event_id: Keyword.get(opts, :last_event_id, "")
     }
   end
@@ -43,8 +49,39 @@ defmodule HTTP.EventSource.Parser do
     |> parse_lines([])
   end
 
+  @doc false
+  def parse_some(%__MODULE__{} = parser, data) when is_binary(data) do
+    case parser |> append(data) |> strip_bom() do
+      {:wait, parser} -> {:ok, parser, [], <<>>}
+      {:ok, parser} -> parse_some_lines(parser)
+    end
+  end
+
+  defp parse_some_lines(parser) do
+    case read_line(parser.buffer, parser.max_line_size) do
+      {:ok, line, rest} ->
+        with {:ok, parser, events} <- process_line(%{parser | buffer: rest}, line) do
+          if events == [] do
+            parse_some_lines(parser)
+          else
+            {:ok, %{parser | buffer: <<>>}, events, :binary.copy(rest)}
+          end
+        end
+
+      :more ->
+        if retained_bytes(parser) > parser.max_event_size do
+          {:error, :event_too_large}
+        else
+          {:ok, %{parser | buffer: :binary.copy(parser.buffer)}, [], <<>>}
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
   @spec close(t()) :: {:ok, t(), [event()]} | {:error, term()}
-  def close(%__MODULE__{buffer: <<>>} = parser), do: {:ok, parser, []}
+  def close(%__MODULE__{buffer: <<>>} = parser), do: {:ok, discard(parser), []}
 
   def close(%__MODULE__{buffer: buffer} = parser) do
     parser =
@@ -55,7 +92,7 @@ defmodule HTTP.EventSource.Parser do
       end
 
     case parse_lines(parser, []) do
-      {:ok, parser, events} -> {:ok, %{parser | buffer: <<>>}, events}
+      {:ok, parser, events} -> {:ok, discard(parser), events}
       {:error, _reason} = error -> error
     end
   end
@@ -89,7 +126,11 @@ defmodule HTTP.EventSource.Parser do
         end
 
       :more ->
-        {:ok, parser, Enum.reverse(acc)}
+        if retained_bytes(parser) > parser.max_event_size do
+          {:error, :event_too_large}
+        else
+          {:ok, %{parser | buffer: :binary.copy(parser.buffer)}, Enum.reverse(acc)}
+        end
 
       {:error, _reason} = error ->
         error
@@ -177,15 +218,26 @@ defmodule HTTP.EventSource.Parser do
   defp strip_one_leading_space(<<" ", rest::binary>>), do: rest
   defp strip_one_leading_space(value), do: value
 
-  defp process_field(parser, "event", value), do: {:ok, %{parser | event_type: value}, []}
+  defp process_field(parser, "event", value) do
+    bounded(%{parser | event_type: :binary.copy(value)})
+  end
 
   defp process_field(%__MODULE__{data_parts: parts} = parser, "data", value) do
-    {:ok, %{parser | data_parts: [value <> "\n" | parts]}, []}
+    bounded(%{
+      parser
+      | data_parts: [value <> "\n" | parts],
+        event_bytes: parser.event_bytes + byte_size(value) + 1,
+        event_parts: parser.event_parts + 1
+    })
   end
 
   defp process_field(parser, "id", value) do
     if :binary.match(value, <<0>>) == :nomatch do
-      {:ok, %{parser | last_event_id: value, id_changed?: true}, []}
+      if safe_cursor?(value) do
+        bounded(%{parser | last_event_id: :binary.copy(value), id_changed?: true})
+      else
+        {:error, :invalid_last_event_id}
+      end
     else
       {:ok, parser, []}
     end
@@ -221,8 +273,51 @@ defmodule HTTP.EventSource.Parser do
 
     event = {:event, type, data, parser.last_event_id}
 
-    parser = %{parser | data_parts: [], event_type: "", id_changed?: false}
+    parser = %{
+      parser
+      | data_parts: [],
+        event_type: "",
+        id_changed?: false,
+        event_bytes: 0,
+        event_parts: 0
+    }
+
     {:ok, parser, [event]}
+  end
+
+  defp retained_bytes(parser) do
+    parser.event_bytes + byte_size(parser.event_type) + byte_size(parser.last_event_id) +
+      byte_size(parser.buffer)
+  end
+
+  defp bounded(parser) do
+    cond do
+      parser.event_parts > parser.max_event_parts ->
+        {:error, :too_many_event_parts}
+
+      parser.event_bytes + byte_size(parser.event_type) + byte_size(parser.last_event_id) >
+          parser.max_event_size ->
+        {:error, :event_too_large}
+
+      true ->
+        {:ok, parser, []}
+    end
+  end
+
+  defp discard(parser) do
+    %{
+      parser
+      | buffer: <<>>,
+        data_parts: [],
+        event_type: "",
+        id_changed?: false,
+        event_bytes: 0,
+        event_parts: 0
+    }
+  end
+
+  defp safe_cursor?(value) do
+    String.valid?(value) and Enum.all?(:binary.bin_to_list(value), &(&1 >= 32 and &1 != 127))
   end
 
   defp trim_final_lf(<<>>), do: <<>>
