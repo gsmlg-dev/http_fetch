@@ -104,6 +104,44 @@ defmodule HTTP.EventSource.LifecycleTest do
     end
   end
 
+  for {protocol, version, reason} <- [
+        {:http, :http1, :timeout},
+        {:h2, :h2c, :opening_timeout}
+      ] do
+    test "#{version} opening deadline retains its public timeout reason" do
+      {url, peer} = peer(unquote(protocol))
+      source = source(url, http_version: unquote(version), connect_timeout: 30_000)
+      assert_receive {:peer_request, ^peer, _}, 5_000
+      state = :sys.get_state(source.pid)
+      assert is_reference(state.opening_timer)
+      send(source.pid, {:opening_timeout, state.generation})
+      assert_receive {EventSource, ^source, %Error{reason: unquote(reason)}}, 5_000
+      assert EventSource.ready_state(source) == EventSource.connecting()
+      assert :sys.get_state(source.pid).opening_timer == nil
+      refute_receive {EventSource, ^source, %Open{}}, 0
+    end
+  end
+
+  test "HTTP/1 opening deadline cancels a held TLS worker and retains timeout" do
+    {url, peer} = peer(:raw)
+
+    source =
+      source(String.replace(url, "http:", "https:"),
+        ssl: [verify: :verify_none],
+        connect_timeout: 30_000
+      )
+
+    assert_receive {:peer_input, ^peer, <<22, _::binary>>}, 5_000
+    state = :sys.get_state(source.pid)
+    assert is_pid(state.worker)
+    monitor = Process.monitor(state.worker)
+    send(source.pid, {:opening_timeout, state.generation})
+    assert_receive {EventSource, ^source, %Error{reason: :timeout}}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, _, _}, 5_000
+    assert :sys.get_state(source.pid).worker == nil
+    refute_receive {EventSource, ^source, %Open{}}, 0
+  end
+
   test "accepted headers invalidate the opening deadline and replaced idle token" do
     {url, peer} = peer()
     source = source(url, idle_timeout: 30_000)

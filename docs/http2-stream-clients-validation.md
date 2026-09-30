@@ -156,8 +156,36 @@ The archive contains source files, exact commands, seeds, peer/wire logs, budget
 completion markers, selected red reproductions and `MANIFEST.sha256`.
 
 P1 follow-up remote Test `36758709094` and CI `36758708788` passed at `c4ddad58`.
-P2 remote CI is pending its commit/push; release and production rollout have not
-occurred. Full final Fetch 42-gate and mixed 1,800-second acceptance remain P5.
+P2 CI run `36763526295` at `708ca13f` passed quality/package jobs but failed the
+published ex_ssl lifecycle gate: the new HTTP/1 opening timer reported
+`:opening_timeout` instead of the established `:timeout`. The repair retains
+`:timeout` for HTTP/1, including a held TLS handshake, and `:opening_timeout` for
+HTTP/2. Three deterministic regressions cover both protocols and worker cleanup;
+the scoped EventSource suite passed 63 tests, seed 785226, plus strict root
+compilation, owned-file formatting and scoped Credo.
+
+The full published ex_ssl consumer rerun then exposed an older policy fixture's
+assumption that incompatible SSE ALPN always creates a client process. P2 now
+rejects contradictory ALPN at construction, as required. The SSE-only gate
+adaptation warms an authenticated ticket, asserts exactly
+`{:error, :incompatible_alpn}`, and uses a message barrier followed by independent
+listener checks to prove zero connection attempts. Trust/hostname failures and
+all Fetch/WebSocket handshake assertions remain unchanged.
+
+```sh
+MIX_ENV=test MIX_BUILD_PATH=/tmp/http-stream-clients-p3-pool-build mix test apps/http_event_source/test
+EX_SSL_RESULTS_DIR=/tmp/http-stream-clients-p2-ci-published-results-final EX_SSL_GATE_TIMEOUT_SECONDS=900 scripts/ex_ssl_published_feature_gate.sh
+```
+
+The full published consumer gate passed all nine groups (76 tests, seed 36), using
+Hex ex_ssl 0.7.2 and its pinned fixture/checksum provenance. Repair logs are
+`/tmp/http-stream-clients-p2-ci-{lifecycle-red,sse-final,published-gate,published-gate-final}.log`;
+the sanitized report is
+`/tmp/http-stream-clients-p2-ci-published-results-final/ex_ssl_feature_gate-published.txt`.
+The existing P2 archive predates these repairs; P5 must freeze and revalidate the
+final source. Remote CI for the repairs remains pending. Release and production
+rollout have not occurred; full Fetch 42-gate and mixed 1,800-second acceptance
+remain P5.
 
 ## Remaining acceptance status
 
@@ -173,5 +201,5 @@ occurred. Full final Fetch 42-gate and mixed 1,800-second acceptance remain P5.
 Finite acceptance budgets and sampled maxima will be recorded before workloads;
 an explicit completion marker and >=1,800,000 ms are required for soak PASS.
 Local acceptance, remote CI, package publication and production rollout are
-separate outcomes. P1 remote status is recorded above; P2–P5 remote CI and
-publication are NOT RUN.
+separate outcomes. P1/P2 remote status and P2 local repairs are recorded above;
+P3–P5 remote CI and publication are NOT RUN.

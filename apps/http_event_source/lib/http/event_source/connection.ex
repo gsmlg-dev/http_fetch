@@ -164,8 +164,10 @@ defmodule HTTP.EventSource.Connection do
         {:opening_timeout, generation},
         %{generation: generation, opening_timer: timer, ready_state: @connecting} = state
       )
-      when not is_nil(timer),
-      do: {:noreply, reconnect(state, :opening_timeout)}
+      when not is_nil(timer) do
+    reason = if is_pid(state.stream), do: :opening_timeout, else: :timeout
+    {:noreply, reconnect(state, reason)}
+  end
 
   def handle_info({:idle_timeout, token}, %{idle_timer: {_timer, token}} = state),
     do: {:noreply, reconnect(state, :idle_timeout)}

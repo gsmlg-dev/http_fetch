@@ -54,18 +54,26 @@ defmodule CandidateResumptionPolicyTest do
             [server_name_indication: ~c"wrong.test"],
             [alpn_advertised_protocols: ["incompatible/1"]]
           ] do
-        with_rejecting_peer(f, unquote(family), fn port ->
-          warm_ticket(port, f, unquote(family))
+        pre_io? = unquote(family) == :sse and Keyword.has_key?(change, :alpn_advertised_protocols)
 
-          assert {:error, reason} =
-                   rejected_client(
-                     unquote(family),
-                     port,
-                     Keyword.merge(ssl(f, unquote(family)), change)
-                   )
+        with_rejecting_peer(
+          f,
+          unquote(family),
+          fn port ->
+            warm_ticket(port, f, unquote(family))
 
-          refute reason in [:timeout, :connect_timeout, :request_timeout]
-        end)
+            assert {:error, reason} =
+                     rejected_client(
+                       unquote(family),
+                       port,
+                       Keyword.merge(ssl(f, unquote(family)), change)
+                     )
+
+            if pre_io?, do: assert(reason == :incompatible_alpn)
+            refute reason in [:timeout, :connect_timeout, :request_timeout]
+          end,
+          pre_io?
+        )
       end
     end
   end
@@ -124,6 +132,13 @@ defmodule CandidateResumptionPolicyTest do
         max_reconnect_time: 60_000
       )
 
+    case source do
+      {:error, :incompatible_alpn} = error -> error
+      %EventSource{} -> await_rejected_source(source)
+    end
+  end
+
+  defp await_rejected_source(source) do
     monitor = Process.monitor(source.pid)
 
     try do
@@ -158,7 +173,7 @@ defmodule CandidateResumptionPolicyTest do
     assert HTTP.Response.read_all(response) == "barrier"
   end
 
-  defp with_rejecting_peer(f, family, client) do
+  defp with_rejecting_peer(f, family, client, pre_io? \\ false) do
     {:ok, listener} =
       :ssl.listen(0,
         mode: :binary,
@@ -184,21 +199,33 @@ defmodule CandidateResumptionPolicyTest do
 
         warm_response(socket, family)
         :ssl.close(socket)
-        {:ok, tcp} = :ssl.transport_accept(listener, @timeout)
 
-        case :ssl.handshake(tcp, @timeout) do
-          {:ok, socket} ->
-            # A resumed handshake would bypass the changed policy and is forbidden,
-            # even if the client later failed for an unrelated HTTP reason.
-            assert {:ok, [session_resumption: false]} =
-                     :ssl.connection_information(socket, [:session_resumption])
+        if pre_io? do
+          # Check only after the constructor's exact rejection is observed.
+          # Any attempted ticket reuse would enqueue a transport connection.
+          receive do
+            :assert_no_connection ->
+              assert {:error, :timeout} = :ssl.transport_accept(listener, 0)
+          after
+            @timeout -> flunk("constructor rejection barrier was not received")
+          end
+        else
+          {:ok, tcp} = :ssl.transport_accept(listener, @timeout)
 
-            assert {:error, reason} = :ssl.recv(socket, 0, @timeout)
-            refute reason == :timeout
-            :ssl.close(socket)
+          case :ssl.handshake(tcp, @timeout) do
+            {:ok, socket} ->
+              # A resumed handshake would bypass the changed policy and is forbidden,
+              # even if the client later failed for an unrelated HTTP reason.
+              assert {:ok, [session_resumption: false]} =
+                       :ssl.connection_information(socket, [:session_resumption])
 
-          {:error, reason} ->
-            refute reason == :timeout
+              assert {:error, reason} = :ssl.recv(socket, 0, @timeout)
+              refute reason == :timeout
+              :ssl.close(socket)
+
+            {:error, reason} ->
+              refute reason == :timeout
+          end
         end
 
         :ok
@@ -206,6 +233,7 @@ defmodule CandidateResumptionPolicyTest do
 
     try do
       client.(port)
+      if pre_io?, do: send(peer.pid, :assert_no_connection)
       assert :ok = Task.await(peer, @timeout + 1_000)
       assert {:error, :timeout} = :ssl.transport_accept(listener, 0)
     after
