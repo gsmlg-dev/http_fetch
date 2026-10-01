@@ -226,14 +226,14 @@ defmodule HTTP.HTTP2PoolProgressTest do
       handler,
       [:http_fetch, :http2, :pool],
       fn _, _, metadata, _ ->
-        if self() == pool and metadata.event == :queued, do: send(test_pid, :queued)
+        if self() == pool and metadata.event == :queued, do: send(test_pid, {:queued, handler})
       end,
       nil
     )
 
     on_exit(fn -> :telemetry.detach(handler) end)
     state = :sys.get_state(pool)
-    unless Map.has_key?(state.callers, token), do: assert_receive(:queued, 2_000)
+    unless Map.has_key?(state.callers, token), do: assert_receive({:queued, ^handler}, 2_000)
     :telemetry.detach(handler)
     assert Map.has_key?(:sys.get_state(pool).callers, token)
   end

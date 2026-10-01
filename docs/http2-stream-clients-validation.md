@@ -649,3 +649,33 @@ Strict compilation, formatting, Credo and diff check passed. Deterministic
 red/green and remote failure logs are preserved with the preparation evidence.
 A new whole-source candidate must pass all 78 gates and remote CI/Test before
 release.
+
+Candidate 9e928de, tree fdf637f3f5b3293a1b7806863103a4ad9aee65c1, passed
+remote CI/Test (36818892219 / 36818892158), but the first cold Fetch repeat
+failed the preserved F2 promotion-death fixture at queued_barrier (seed 342781).
+The other two repeats passed; the failure is not counted as accepted or explained
+by retries. This local run was interrupted cleanly, exit 130, with both unfinished
+soaks NOT RUN.
+
+The helper sent an uncorrelated :queued notification. When its state read already
+found the first token, it skipped receiving that notification; the next barrier
+could consume the stale message before the second caller registered. An actor
+oracle retained the first notification and withheld the second reservation,
+deterministically reproducing the exact final caller-map assertion failure.
+Correlating send/receive with the unique telemetry-handler reference fixes the
+ordering. The same controlled sequence now completes both registrations, first
+caller death, second promotion and exact empty-state cleanup. All original F2
+assertions and the two-second barrier deadline remain intact; no runtime source
+changed. The parent independently verified all 13 pool-progress tests.
+
+The requirements audit also corrected two stale HTTP API documentation statements
+to describe accepted HTTP/2 streaming uploads and flow-controlled DATA framing.
+The correction is documentation only and does not change Fetch behavior. Final
+whole-source acceptance must include both changes.
+
+Final preparatory verification passed 309 Fetch tests plus 20 doctests at seed
+342781, strict compilation, scoped format, required plain Credo and diff check.
+Independent source/evidence review found no blockers. An extra strict-Credo
+invocation exited 14 with pre-existing findings in unrelated files; its log is
+retained separately, no unrelated fixes were attempted, and it is not reported
+as the required passing Credo command.

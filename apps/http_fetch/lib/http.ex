@@ -11,7 +11,7 @@ defmodule HTTP do
 
   - **Async by default**: All requests use Task.Supervisor with `async_nolink/4`
   - **Automatic streaming**: Responses >5MB or with unknown Content-Length automatically stream
-  - **Request streaming**: Pass an `HTTP.Stream` PID as `body` with `duplex: "half"` for HTTP/1.1 uploads
+  - **Request streaming**: Pass an `HTTP.Stream` PID as `body` with `duplex: "half"` for HTTP/1.1 or HTTP/2 uploads
   - **Request cancellation**: Via `HTTP.AbortController` for aborting in-flight requests
   - **Promise chaining**: JavaScript-like promise interface with `then/3` support
   - **Unix Domain Sockets**: Support for HTTP over Unix sockets (Docker daemon, systemd, etc.)
@@ -102,7 +102,7 @@ defmodule HTTP do
                 - `:body`: The request body. Buffered bodies may be binary or iodata; streaming
                            bodies may be an `HTTP.Stream` PID when `duplex: "half"` is set.
                 - `:duplex`: Set to `:half` or `"half"` to enable Fetch-style request body streaming.
-                             Streaming uploads currently use HTTP/1.1 chunked request framing.
+                             HTTP/1.1 uses chunked framing; HTTP/2 uses flow-controlled DATA frames.
                 - `:content_type`: The Content-Type header value. If not provided for methods with body,
                                    defaults to "application/octet-stream" when a body is present.
                 - `:redirect`: Redirect mode, one of `:follow`, `:manual`, or `:error`. Defaults to `:follow`.
