@@ -1,7 +1,7 @@
 defmodule HTTP.HTTP2ProductionPoolTest do
   use ExUnit.Case, async: true
 
-  alias HTTP.HTTP2.{ConnectionSupervisor, Pool}
+  alias HTTP.HTTP2.{ConnectionOwner, ConnectionSupervisor, Pool}
 
   defmodule IdleOwner do
     use GenServer
@@ -191,16 +191,18 @@ defmodule HTTP.HTTP2ProductionPoolTest do
             supervisor
           )
 
-        send(parent, {:started, result})
+        send(parent, {:started, self(), result})
 
         receive do
           :stop -> :ok
         end
       end)
 
-    assert_receive {:started, {:ok, owner}}
-    assert_receive {:wire, _}
     ref = Process.monitor(caller)
+    assert_receive {:started, ^caller, {:ok, owner}}, 5_000
+    # start_link acknowledges init before handle_continue writes the preface.
+    assert %{lifecycle: :ready} = ConnectionOwner.status(owner)
+    assert_receive {:wire, _}
     send(caller, :stop)
     assert_receive {:DOWN, ^ref, :process, ^caller, _}
     assert Process.alive?(owner)

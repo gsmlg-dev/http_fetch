@@ -625,3 +625,27 @@ confirmed zero failures. Strict compilation, format, Credo and diff checks
 passed. Only the F1 fixture changed, with no production-source change. The
 newly introduced warm-response wait is bounded by the existing five-second
 deadline. A new whole-source acceptance run follows this precondition repair.
+
+Candidate 6ca77f8, tree 1d3bdec76c69039019b3cdcd2e61a26d866d787d, passed
+remote CI run 36817563489, but remote Test run 36817563483 failed at the
+temporary-owner fixture's default 100 ms startup wait (seed 138478). No owner
+initialization error was reported. The local acceptance run was interrupted
+cleanly, exit 130; both unfinished soaks remain NOT RUN. Its partial gates do
+not establish final acceptance.
+
+The fixture has no 100 ms startup contract. A deterministic private-supervisor
+suspension and exact start_child trace reproduces the empty-mailbox failure;
+an explicit resume followed by startup and initialization completion passes
+the original wire, caller-death, owner-alive and exact child assertions. The
+natural original file passed at the remote seed; exact remote scheduler timing
+is not claimed reproduced. The repair identifies the startup sender, monitors
+that caller before waiting, bounds startup at five seconds, and observes owner
+ready status before testing caller death. No runtime source or other receive
+deadline changed.
+
+The final source passed 11 scoped tests and 309 Fetch tests plus 20 doctests,
+seed 138478/max-cases 8. Parent independently reran the 11 scoped tests.
+Strict compilation, formatting, Credo and diff check passed. Deterministic
+red/green and remote failure logs are preserved with the preparation evidence.
+A new whole-source candidate must pass all 78 gates and remote CI/Test before
+release.
