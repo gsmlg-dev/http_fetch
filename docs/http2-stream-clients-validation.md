@@ -837,7 +837,9 @@ The independent peer observed four connections: Fetch, SSE, WS and one shared
 mixed connection. Live mixed SSE/WS and shared-runtime PIDs survived Fetch
 stop/restart. No developer umbrella path, Git pin or hidden direct Fetch/ex_ssl
 dependency supplied startup. Exact fresh lock snapshots/checksums and wire logs
-are retained. Published-consumer traffic is h2c; TLS backend acceptance and
+are retained. Module path isolation is asserted inside the frozen consumer
+gate rather than printed as actual path strings in the raw log.
+Published-consumer traffic is h2c; TLS backend acceptance and
 published-ex_ssl provenance are recorded in the separate complete 78-gate run.
 
 At release verification, local HEAD, origin/main and tag v0.16.0 all matched
@@ -851,7 +853,7 @@ Accessible release workflow/output, all Hex APIs/tarballs/checksums, independent
 artifact report, actual published consumers/locks/wire output, GitHub release
 metadata, Git parity and evidence-head CI/Test:
 [`v0.16.0-publication.tar.gz`](http2-stream-clients-evidence/v0.16.0-publication.tar.gz),
-SHA256 `7fa34348a422a34b5f1ff583ccdfd2cd892a1f7a225c7f82e850cc2c4e8081af`. All 36 archived regular-file checksums passed.
+SHA256 `52328f2e3f71f4c19f0606915e3bd50eb84aa8657d2f6e8bbb70f8db2cf8073e`. All 36 archived regular-file checksums passed.
 
 P0–P5 and authorized publication are complete. The explicit manual slow
 acceptance workflow was not dispatched; its full local entrypoint passed and
