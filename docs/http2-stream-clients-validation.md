@@ -2,8 +2,10 @@
 
 P0–P5 implementation and final local acceptance are complete on `a80fd3d`.
 All 78 gates, both genuine 30-minute soaks and exact-candidate remote CI/Test
-passed. Version 0.16.0 publication verification follows this record. Historical
-Fetch evidence is preserved in `http2-production-validation.md` and its archives.
+passed. All seven version 0.16.0 packages and the GitHub release are published
+and independently verified; fresh Hex-only consumers passed actual H2 traffic.
+Historical Fetch evidence is preserved in `http2-production-validation.md` and
+its archives.
 
 ## P0 baseline
 
@@ -798,3 +800,58 @@ Frozen budgets remain the P2/P4 values documented above and printed before
 each workload. Monitor heap/binary budgets are 64 KiB with eight workers; no
 budget was raised for these final checks. The artifact includes every sample
 and the explicit limitations of queue/EOF contract assertions.
+
+## v0.16.0 publication verification
+
+[Release workflow 36824021755](https://github.com/gsmlg-dev/http_fetch/actions/runs/36824021755)
+passed on evidence head `69815b5aabaf6642865648c0c16f21294caf8952`.
+Its executable source is identical to accepted `a80fd3d`. The workflow passed
+842 tests plus 20 doctests, 51 E2E tests, strict compilation, format, Credo,
+Dialyzer, docs and all seven package builds. It newly published every package
+and its docs, then pushed `v0.16.0` and created the public, non-prerelease
+[GitHub release](https://github.com/gsmlg-dev/http_fetch/releases/tag/v0.16.0).
+Evidence-head CI/Test also passed (36823719643 / 36823719644).
+
+Independent Hex verification passed all seven API/tarball identities, seven
+outer API checksums, seven inner CHECKSUMs, eleven internal dependency edges,
+GitHub provenance and the complete 101-library-file inventory. Every packaged
+library byte matches the accepted source. Inner checksums and full requirements
+are retained in the publication archive; outer artifact SHA256 values are:
+
+| Published package | Outer SHA256 |
+| --- | --- |
+| [http_core 0.16.0](https://hex.pm/packages/http_core/0.16.0) | `dd419171d89ab3340cdb63bbedd4259b9fde0cf823c14c51a8d6c930f3bc15e6` |
+| [http_runtime 0.16.0](https://hex.pm/packages/http_runtime/0.16.0) | `a1bca96c9318913a738a68e205fa0b3a64ced6cb6b251eaa3b21d4ed8eb15eed` |
+| [elixir_quic_http3 0.16.0](https://hex.pm/packages/elixir_quic_http3/0.16.0) | `e6a1ec0efdd7fbc4342f8f4839af97011feefcc08397c546e2c4473a1f7c523d` |
+| [http_fetch 0.16.0](https://hex.pm/packages/http_fetch/0.16.0) | `8d3aed01366f409f3fa225e4668afd1fbc8b22a3114028552b8c4b0a302e7a2d` |
+| [http_web_socket 0.16.0](https://hex.pm/packages/http_web_socket/0.16.0) | `532e9c28ab36dd0e03272db6bd05b496b31585c72aec78a7ab53d0b259488245` |
+| [http_event_source 0.16.0](https://hex.pm/packages/http_event_source/0.16.0) | `be9cd743ac317fb3e9cb71b0577ba89fd373db23ceefba6826c432ab471af861` |
+| [http_web_transport 0.16.0](https://hex.pm/packages/http_web_transport/0.16.0) | `0f04ef4c449aaf1dd9e98550c7927327b34d9600587db2d09238e93609c17afd` |
+
+Fresh post-publication consumers declared only their selected top-level client(s),
+using exact Hex `== 0.16.0` dependencies and a unique empty HEX_HOME. All seven
+published metadata packages and four isolated consumers passed strict compilation,
+Hex SCM/version/loaded-path checks, dependency startup and actual h2c traffic.
+The independent peer observed four connections: Fetch, SSE, WS and one shared
+mixed connection. Live mixed SSE/WS and shared-runtime PIDs survived Fetch
+stop/restart. No developer umbrella path, Git pin or hidden direct Fetch/ex_ssl
+dependency supplied startup. Exact fresh lock snapshots/checksums and wire logs
+are retained. Published-consumer traffic is h2c; TLS backend acceptance and
+published-ex_ssl provenance are recorded in the separate complete 78-gate run.
+
+At release verification, local HEAD, origin/main and tag v0.16.0 all matched
+`69815b5aabaf6642865648c0c16f21294caf8952`, with zero divergence. This later
+publication-evidence commit changes only docs/archive; the immutable release tag
+continues to identify the published source. Executable equivalence is verified
+against both the accepted candidate and release tag. User-owned prompt/review
+files and the historical prompt deletion remain untouched.
+
+Accessible release workflow/output, all Hex APIs/tarballs/checksums, independent
+artifact report, actual published consumers/locks/wire output, GitHub release
+metadata, Git parity and evidence-head CI/Test:
+[`v0.16.0-publication.tar.gz`](http2-stream-clients-evidence/v0.16.0-publication.tar.gz),
+SHA256 `a61409394cdd12d3b87d8d295c6316b3318c6d3e9871c306db1abb026c4dc3be`. All 36 archived regular-file checksums passed.
+
+P0–P5 and authorized publication are complete. The explicit manual slow
+acceptance workflow was not dispatched; its full local entrypoint passed and
+is preserved in the acceptance archive. No production deployment was performed.

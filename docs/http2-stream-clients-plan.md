@@ -234,3 +234,10 @@ A0–D3 mapping and a checksum-verified accessible archive are recorded in the
 validation document. All preserved F1/F2 assertions remain intact. The later
 evidence commits preserve executable source; authorized version 0.16.0
 publication and fresh Hex-only consumers follow separately.
+
+Authorized v0.16.0 publication is complete: release workflow 36824021755
+passed all unit/E2E/static/docs/package gates, published all seven packages and
+created the tag/GitHub release. Independent Hex checksums/identities/dependency
+edges and all 101 packaged library files match the accepted source. Four fresh
+Hex-only consumers passed actual standalone and mixed H2 traffic. Publication
+evidence and checksums are accessible from the validation document.
