@@ -461,7 +461,7 @@ versions, independent audit, failed-candidate/repair evidence and checksums:
 archive SHA256 `e10829e0ba1cf47c50f5e204b931eb89d437a4a1020f69e1e91f5ff705ab46e3`.
 Release verification is recorded separately below after publication.
 
-## Final acceptance status
+## Historical candidate acceptance status
 
 | Family | Status | Evidence required |
 | --- | --- | --- |
@@ -509,3 +509,49 @@ The isolation repair passed fresh-home dependency setup and strict compilation,
 then both packaged TLS gates concurrently (82 package tests each and explicit
 public traffic PASS). The workload inventory and source/interruption guards are
 unchanged. A complete new frozen run follows this runner-only change.
+
+Cache-isolated candidate `e82f398`, tree
+`d675aa795801cb592ff65684fafcf180cf1c5896`, passed remote CI (`36787203401`)
+and Test (`36787203414`), plus both concurrently packaged TLS prerequisites.
+Its external-consumer gate then timed out waiting for HTTP/1 WebSocket Open;
+the helper discarded non-Open events, so the initial log did not identify the
+backend or terminal reason. The peer sends its upgrade and message before
+immediate TLS close. The incomplete run was interrupted and both soaks remain
+NOT RUN. The failure requires explicit diagnostics and opening/handoff
+investigation before selecting a fixture or runtime repair. The cache issue did
+not recur, and no failure is counted as accepted traffic.
+
+The H1 diagnosis reproduced two adapter defects with real TLS and deterministic
+process barriers: a valid 101 response plus frame was discarded when ex_ssl
+terminated after passive recv but before ownership transfer; separately,
+transferred DATA/EOF could be processed before the opening worker result.
+Installed published ex_ssl 0.7.2 preserves plaintext on normal authenticated peer
+EOF; its recv can return final bytes and then terminate. This does not establish
+an upstream data-loss bug. The adapter preserves validated handshake bytes on
+terminal transfer, prepends those bytes to later staged input and defers parsing
+and terminal delivery until the opening result. Staging retains existing finite
+raw-byte/count bounds; opening deadline, local close and owner death remain
+effective. EOF without a WebSocket Close stays abnormal (local code 1006).
+The external-consumer helper now reports exact backend/event failures instead of
+discarding its own socket's errors. The peer still closes immediately after
+sending the upgrade and message. A new whole-source acceptance run is required
+for this runtime change before release.
+
+Independent review also found the closed-transfer branch must retain its closed
+transport handle while parsing buffered control frames. A deterministic valid
+Close fixture reproduced a nil-transport crash in the first repair draft. The
+final branch retains the handle and uses the existing HTTP/1 closed-send policy,
+preserving complete peer-Close classification and abnormal EOF classification.
+This is separate from H2 END_STREAM, which still cannot manufacture a clean WS
+close. The original fixture sends immediate TLS EOF unchanged.
+
+Before freeze, root-scoped WebSocket tests passed 82 tests, zero failures, seed
+342781. Parent independently reran the same suite on the final source and the
+fresh-home seven-package external consumer (OTP ssl and published ex_ssl H1 TLS
+traffic); both exited zero. Strict test compilation, root format and full Credo
+passed. Test cleanup now waits for exact session/worker DOWN outcomes inside the
+barrier before idempotent emergency cleanup, avoiding a resume-vs-exit race.
+Deterministic original red (four tests/two failures), buffered-Close draft red
+(eight tests/one failure) and final green evidence are retained separately from
+the required upcoming 78-gate run. No production runtime outside the WebSocket
+H1 seam changed; Fetch F1/F2 assertions and all workload thresholds remain intact.

@@ -206,8 +206,8 @@ defmodule ExternalConsumerSmoke do
         ] do
       socket = HTTP.WebSocket.new("wss://localhost:#{port}/", [], options)
       assert match?(%HTTP.WebSocket{}, socket), "WebSocket #{label} did not start"
-      await_web_socket_open(socket)
-      await_web_socket_message(socket, "consumer-ws")
+      await_web_socket_open(socket, label)
+      await_web_socket_message(socket, "consumer-ws", label)
     end
   end
 
@@ -297,21 +297,27 @@ defmodule ExternalConsumerSmoke do
     end
   end
 
-  defp await_web_socket_open(socket) do
+  defp await_web_socket_open(socket, label) do
     receive do
-      {HTTP.WebSocket, ^socket, %HTTP.WebSocket.Event.Open{}} -> :ok
-      _ -> await_web_socket_open(socket)
+      {HTTP.WebSocket, ^socket, %HTTP.WebSocket.Event.Open{}} ->
+        :ok
+
+      {HTTP.WebSocket, ^socket, event} ->
+        raise "WebSocket #{label} received #{inspect(event)} before Open"
     after
-      5_000 -> raise "WebSocket did not open"
+      5_000 -> raise "WebSocket #{label} did not open"
     end
   end
 
-  defp await_web_socket_message(socket, expected) do
+  defp await_web_socket_message(socket, expected, label) do
     receive do
-      {HTTP.WebSocket, ^socket, %HTTP.WebSocket.Event.Message{data: ^expected}} -> :ok
-      _ -> await_web_socket_message(socket, expected)
+      {HTTP.WebSocket, ^socket, %HTTP.WebSocket.Event.Message{data: ^expected}} ->
+        :ok
+
+      {HTTP.WebSocket, ^socket, event} ->
+        raise "WebSocket #{label} received #{inspect(event)} before #{expected}"
     after
-      5_000 -> raise "WebSocket did not deliver #{expected}"
+      5_000 -> raise "WebSocket #{label} did not deliver #{expected}"
     end
   end
 

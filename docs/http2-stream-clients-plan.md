@@ -191,7 +191,7 @@ candidate drift or added executable files fail before acceptance can pass.
 Published consumer mode runs only after release and checks Hex SCM, exact versions,
 package identities, isolated code paths and fresh locks without local path pins.
 
-P5 executable acceptance is complete on commit
+Historical P5 executable acceptance completed on commit
 `d99b9de655b3367c91eea0d59af14cc4b0afa7a7`, tree
 `01dd03d447f709b27dea32f74d95050edadfbc18`. All 42 preserved Fetch gates and 36
 new gates passed, including both genuine 1,800-second soaks. The final report
@@ -201,3 +201,11 @@ with explicit post-Open controls and all final routes rerun; no runtime change
 followed the accepted P4 source. Evidence/docs-only commits preserve this
 executable candidate. Authorized release and fresh published consumers follow
 the completed acceptance; production rollout remains a separate operation.
+
+The later task-baseline fixture, Hex-cache isolation and HTTP/1 WebSocket
+handoff repairs require a fresh frozen candidate. The original accepted archive
+remains historical evidence; final acceptance and publication are pending until
+the new whole-source run finishes. The H1 repair preserves validated Upgrade
+bytes on terminal ownership transfer and stages subsequent data/EOF in order
+within existing raw-byte/count bounds. Opening deadline and cancellation remain
+active while the result is pending. F1/F2 and all 78 gates are rerun unchanged.

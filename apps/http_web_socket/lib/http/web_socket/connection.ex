@@ -245,7 +245,11 @@ defmodule HTTP.WebSocket.Connection do
     case result do
       {:ok, negotiated, extra} ->
         state = established(state, negotiated, :http1)
-        advance(admit_raw(state, extra, nil))
+        advance(admit_raw(state, extra, nil, :front))
+
+      {:closed, negotiated, extra} ->
+        state = established(%{state | remote_end?: true}, negotiated, :http1)
+        advance(admit_raw(state, extra, nil, :front))
 
       {:error, reason} ->
         fail(state, reason)
@@ -359,6 +363,8 @@ defmodule HTTP.WebSocket.Connection do
             :transfer ->
               case transport.controlling_process(socket, parent) do
                 :ok -> {:ok, negotiated, extra}
+                # Upgrade validation and buffered frames precede this terminal outcome.
+                {:error, :closed} -> {:closed, negotiated, extra}
                 error -> error
               end
 
@@ -638,9 +644,11 @@ defmodule HTTP.WebSocket.Connection do
     queue_control(state, :close, payload)
   end
 
-  defp admit_raw(state, <<>>, ref), do: settle_raw(state, <<>>, ref)
+  defp admit_raw(state, data, ref, position \\ :back)
 
-  defp admit_raw(state, data, ref) do
+  defp admit_raw(state, <<>>, ref, _position), do: settle_raw(state, <<>>, ref)
+
+  defp admit_raw(state, data, ref, position) do
     if state.raw_bytes + byte_size(data) > raw_limit(state) do
       park_terminal(state, :consumer_overloaded, 1006, "", false)
     else
@@ -654,7 +662,11 @@ defmodule HTTP.WebSocket.Connection do
 
       state = %{
         state
-        | raw_queue: pack_raw(state.raw_queue, :binary.copy(data), ref),
+        | raw_queue:
+            if(position == :front,
+              do: :queue.in_r({:binary.copy(data), ref}, state.raw_queue),
+              else: pack_raw(state.raw_queue, :binary.copy(data), ref)
+            ),
           raw_bytes: state.raw_bytes + byte_size(data)
       }
 
@@ -698,6 +710,8 @@ defmodule HTTP.WebSocket.Connection do
 
     %{state | raw_queue: :queue.new(), raw_bytes: 0}
   end
+
+  defp drain_raw(%{http_version: nil, worker: worker} = state) when is_pid(worker), do: state
 
   defp drain_raw(state) do
     if parser_capacity?(state) do
@@ -822,6 +836,10 @@ defmodule HTTP.WebSocket.Connection do
 
   defp timeout_terminal(state), do: state.terminal || {nil, 1006, "", false}
 
+  defp transport_terminal(%{http_version: nil, worker: worker} = state, reason)
+       when is_pid(worker),
+       do: {:noreply, park_terminal(state, reason, 1006, "", false)}
+
   defp transport_terminal(state, reason) do
     state = state |> park_terminal(reason, 1006, "", false) |> detach()
     advance(state)
@@ -832,10 +850,17 @@ defmodule HTTP.WebSocket.Connection do
       state
       | terminal: state.terminal || {reason, code, text, require_write?},
         remote_end?: true,
-        ready_state: @closing
+        ready_state:
+          if(is_nil(state.http_version) and is_pid(state.worker),
+            do: state.ready_state,
+            else: @closing
+          )
     }
     |> cancel_timer(:idle_timer)
   end
+
+  defp advance(%{http_version: nil, worker: worker} = state) when is_pid(worker),
+    do: {:noreply, state}
 
   defp advance(state) do
     state = drain_raw(state)
