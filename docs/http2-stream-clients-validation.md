@@ -594,3 +594,34 @@ barrier is emitted. Parent independently reran the Node cleartext mixed gate
 with exact cancellation and zero final workers/monitors. Syntax, script format
 and diff checks passed. No runtime source changed. Final acceptance still
 requires a new exported candidate and all 78 complete outcomes.
+
+Candidate 1485fd6, tree 6e834f833383292aa6c4f86895dd7906aa301d01, passed
+remote CI/Test and the repaired mixed gates, but its scoped preserved Fetch
+runtime suite failed: the complete-413 binary-upload fixture timed out waiting
+for POST headers after warming its connection (37 tests, one failure). The
+full unit suite also passed in this run. This is not accepted or explained by
+a blanket retry. The failed run was stopped cleanly; both unfinished soaks are
+NOT RUN. F1/F2 assertions and existing deadlines remain intact while the cause
+is investigated.
+
+The failure is deterministically reproduced by withholding warm coordinator
+release after its 200 response: the pool still has one reservation at the
+peer's one-stream limit, and the immediate POST opens a second TCP/H2 socket.
+The original single-socket script then times out waiting for that POST. Async
+ExUnit tests do not overlap the synchronous global-pool replacement fixtures.
+The surgical F1 test repair captures and monitors the exact warm coordinator
+before allowing its response, waits for normal termination after reservation
+release, and verifies owner quiescence before the tested POST. This establishes
+the intended reusable-slot precondition; it leaves early response, blocked
+upload, reset, bridge/coordinator cleanup, sibling traffic and stream-ID
+assertions unchanged. Runtime algorithms and original deadlines are preserved.
+
+The deterministic original same-socket/stream-3 regression exits nonzero before
+the warm barrier and passes afterward with the complete 413/CANCEL and cleanup
+contract. Final verification passed nine F1 tests, the exact runtime gate
+(core five tests plus Fetch 37 tests), and 309 Fetch tests plus 20 doctests,
+seed 342781/max-cases 8. Parent independently reran the exact runtime gate and
+confirmed zero failures. Strict compilation, format, Credo and diff checks
+passed. Only the F1 fixture changed, with no production-source change. The
+newly introduced warm-response wait is bounded by the existing five-second
+deadline. A new whole-source acceptance run follows this precondition repair.

@@ -220,3 +220,8 @@ The SSE mixed fixture now waits for independently observed cancellation of the
 exact stream before its two-sibling trigger. Local close is not a remote
 acknowledgement. The new bounded barrier retains all mixed traffic assertions;
 both peers and all transport routes passed preparatory checks.
+
+F1 warm-up now explicitly waits for the exact coordinator to terminate after
+releasing its reservation. Delivery of the warm response alone did not ensure
+a free reusable slot. This test-only precondition repair preserves all early
+response/cleanup/wire assertions and requires refreezing the full candidate.

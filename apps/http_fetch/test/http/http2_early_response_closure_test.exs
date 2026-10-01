@@ -15,7 +15,7 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
         Peer.start(
           test_pid,
           fn socket ->
-            warm_connection(socket)
+            warm_connection(socket, test_pid)
             {id, false} = Peer.request(socket)
             send(test_pid, {:request_headers, self(), id})
             receive do: (:respond -> :ok)
@@ -31,7 +31,7 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
         )
 
       body = upload(unquote(kind))
-      assert fetch(url).status == 200
+      warm_fetch(url, peer)
       task = Task.async(fn -> fetch(url, method: :post, body: body, duplex: "half") end)
       assert_receive {:request_headers, ^peer, 3}, 5_000
       owner = owner_for(url)
@@ -85,7 +85,7 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
         Peer.start(
           test_pid,
           fn socket ->
-            warm_connection(socket)
+            warm_connection(socket, test_pid)
             {id, false} = Peer.request(socket)
             send(test_pid, {:request_headers, self(), id})
             receive do: (:shrink -> :ok)
@@ -128,7 +128,7 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
           settings: <<4::16, 16_384::32, 3::16, 2::32>>
         )
 
-      assert fetch(url).status == 200
+      warm_fetch(url, peer)
       task = Task.async(fn -> fetch(url, method: :post, body: source, duplex: "half") end)
       assert_receive {:request_headers, ^peer, 3}, 5_000
       assert_receive {:producer_read, ^source, bridge}, 5_000
@@ -179,7 +179,7 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
 
     {url, peer} =
       Peer.start(test_pid, fn socket ->
-        warm_connection(socket)
+        warm_connection(socket, test_pid)
         {id, false} = Peer.request(socket)
         assert Peer.body(socket, id) == "complete"
 
@@ -194,7 +194,7 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
         :ok = Peer.response(socket, next_id, "reused")
       end)
 
-    assert fetch(url).status == 200
+    warm_fetch(url, peer)
     response = fetch(url, method: :post, body: "complete")
     assert HTTP.Response.read_all(response) == ""
     assert_receive {:completed_upload, ^peer}, 5_000
@@ -245,18 +245,43 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
     source
   end
 
-  defp warm_connection(socket), do: warm_connection(socket, nil, false)
+  defp warm_connection(socket, test_pid), do: warm_connection(socket, test_pid, nil, false)
 
-  defp warm_connection(socket, id, true) when is_integer(id) do
+  defp warm_connection(socket, test_pid, id, true) when is_integer(id) do
+    send(test_pid, {:warm_headers, self(), id})
+
+    receive do
+      :warm_response -> :ok
+    after
+      5_000 -> flunk("missing warm response barrier")
+    end
+
     :ok = :gen_tcp.send(socket, Peer.frame(1, 5, id, <<0x88>>))
   end
 
-  defp warm_connection(socket, id, acknowledged?) do
+  defp warm_connection(socket, test_pid, id, acknowledged?) do
     case Peer.recv(socket) do
-      {1, 5, request_id, _} -> warm_connection(socket, request_id, acknowledged?)
-      {4, 1, 0, <<>>} -> warm_connection(socket, id, true)
-      _ -> warm_connection(socket, id, acknowledged?)
+      {1, 5, request_id, _} -> warm_connection(socket, test_pid, request_id, acknowledged?)
+      {4, 1, 0, <<>>} -> warm_connection(socket, test_pid, id, true)
+      _ -> warm_connection(socket, test_pid, id, acknowledged?)
     end
+  end
+
+  defp warm_fetch(url, peer) do
+    promise = HTTP.fetch(url, http_version: :h2c, timeout: 10_000)
+    assert_receive {:warm_headers, ^peer, 1}, 5_000
+    owner = owner_for(url)
+    %{streams: %{1 => %{pid: coordinator}}} = :sys.get_state(owner)
+    monitor = Process.monitor(coordinator)
+    send(peer, :warm_response)
+    assert HTTP.Promise.await(promise).status == 200
+
+    # Response delivery precedes cleanup. The exact coordinator exits only after
+    # releasing its pool reservation, so the next request can reuse stream slot 1.
+    assert_receive {:DOWN, ^monitor, :process, ^coordinator, :normal}, 5_000
+
+    assert %{active_streams: 0, protocol_streams: 0, pending_upload_bytes: 0} =
+             ConnectionOwner.status(owner)
   end
 
   defp fetch(url, opts \\ []) do
