@@ -209,3 +209,9 @@ the new whole-source run finishes. The H1 repair preserves validated Upgrade
 bytes on terminal ownership transfer and stages subsequent data/EOF in order
 within existing raw-byte/count bounds. Opening deadline and cancellation remain
 active while the result is pending. F1/F2 and all 78 gates are rerun unchanged.
+
+Final requirements review adds explicit H2 SSE comment-heartbeat idle coverage:
+connection PING and sibling DATA do not refresh its token; acknowledged local
+pausing remains covered separately. This test and corrected README option/package
+statements require refreezing the whole source before final acceptance. Runtime
+algorithms remain those of da7adbb.

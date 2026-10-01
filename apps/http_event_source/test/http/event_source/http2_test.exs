@@ -90,6 +90,85 @@ defmodule HTTP.EventSource.HTTP2Test do
     send(peer, :stop)
   end
 
+  test "only this SSE stream's body activity refreshes its idle timer" do
+    parent = self()
+    heartbeat = ": heartbeat\n\n"
+    ping = "sse-idle"
+
+    {url, peer} =
+      peer(fn socket ->
+        {sse, _, _} = request(socket)
+        :ok = :gen_tcp.send(socket, response_headers(sse))
+
+        receive do
+          :heartbeat -> :ok = :gen_tcp.send(socket, frame(0, 0, sse, heartbeat))
+        after
+          5_000 -> flunk("missing heartbeat barrier")
+        end
+
+        # Stream credit proves the comment body reached the SSE consumer.
+        assert {8, 0, ^sse, <<0::1, credit::31>>} = next_frame(socket, 8, sse)
+        assert credit == byte_size(heartbeat)
+        send(parent, {:heartbeat_consumed, self()})
+
+        receive do
+          :ping -> :ok = :gen_tcp.send(socket, frame(6, 0, 0, ping))
+        after
+          5_000 -> flunk("missing PING barrier")
+        end
+
+        assert {6, 1, 0, ^ping} = next_frame(socket, 6, 0)
+        send(parent, {:ping_acknowledged, self()})
+
+        {fetch, _, _} = request(socket)
+
+        :ok =
+          :gen_tcp.send(socket, [
+            frame(1, 4, fetch, headers([{":status", "200"}, {"content-length", "5"}])),
+            frame(0, 1, fetch, "fetch")
+          ])
+
+        assert {3, 0, ^sse, <<8::32>>} = next_frame(socket, 3, sse)
+        send(parent, {:idle_stream_reset, self()})
+      end)
+
+    scope = "sse-idle-#{System.unique_integer([:positive])}"
+    source = source(url, http2_scope: scope, idle_timeout: 30_000, reconnect_time: 30_000)
+    assert_receive {EventSource, ^source, %Open{}}, 5_000
+    %{stream_handle: %{owner: owner}} = EventSource.status(source)
+    {initial_timer, initial_token} = :sys.get_state(source.pid).idle_timer
+
+    send(peer, :heartbeat)
+    assert_receive {:heartbeat_consumed, ^peer}, 5_000
+    {heartbeat_timer, heartbeat_token} = :sys.get_state(source.pid).idle_timer
+    assert heartbeat_token != initial_token
+    assert Process.read_timer(initial_timer) == false
+    assert is_integer(Process.read_timer(heartbeat_timer))
+    refute_receive {EventSource, ^source, %Message{}}, 0
+
+    send(source.pid, {:idle_timeout, initial_token})
+    assert EventSource.ready_state(source) == EventSource.open()
+
+    send(peer, :ping)
+    assert_receive {:ping_acknowledged, ^peer}, 5_000
+    assert :sys.get_state(source.pid).idle_timer == {heartbeat_timer, heartbeat_token}
+
+    promise = HTTP.fetch(url, http_version: :h2c, http2_scope: scope, connect_timeout: 30_000)
+    assert HTTP.Promise.await(promise).body == "fetch"
+    assert :sys.get_state(source.pid).idle_timer == {heartbeat_timer, heartbeat_token}
+    assert EventSource.ready_state(source) == EventSource.open()
+    refute_receive {EventSource, ^source, %Error{}}, 0
+
+    # Exercise the current deadline token directly, without an elapsed-time claim.
+    send(source.pid, {:idle_timeout, heartbeat_token})
+    assert_receive {EventSource, ^source, %Error{reason: :idle_timeout}}, 5_000
+    assert_receive {:idle_stream_reset, ^peer}, 5_000
+    assert Process.alive?(owner)
+    assert EventSource.ready_state(source) == EventSource.connecting()
+    assert :ok = EventSource.close(source)
+    send(peer, :stop)
+  end
+
   test "an event larger than one receive window returns credit during bounded assembly" do
     parent = self()
 

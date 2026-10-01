@@ -555,3 +555,16 @@ Deterministic original red (four tests/two failures), buffered-Close draft red
 (eight tests/one failure) and final green evidence are retained separately from
 the required upcoming 78-gate run. No production runtime outside the WebSocket
 H1 seam changed; Fetch F1/F2 assertions and all workload thresholds remain intact.
+
+The final requirement audit found the H2 SSE idle contract needed an explicit
+regression beyond the existing H1 activity and H2 ACK-pause cases. The added
+raw-wire test proves a comment heartbeat replaces the stream's idle token;
+connection PING/ACK and a completed Fetch sibling on the same connection leave
+that token unchanged. Injecting the current deadline token produces the exact
+idle error/reset while the shared owner survives. No sleep or elapsed-time claim
+is used. The H2 file passed 11 tests, independently rerun by the parent; the full
+SSE suite passed 64 tests, seed 342781. Runtime source did not change. README now
+documents accepted H2 uploads, all seven package artifacts, and the existing
+TLS-auto scope/reuse profile restriction. A new whole-source candidate includes
+this test and these corrections; da7adbb's incomplete run remains preparatory
+evidence, with unfinished soaks NOT RUN.

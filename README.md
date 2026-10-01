@@ -236,8 +236,9 @@ replaying request bytes. The published feature gate checks fresh HTTP/1.1,
 HTTP/2, WSS and EventSource connections against an independent OpenSSL peer;
 the peer must report a full handshake followed by a resumed handshake.
 HTTP version selection (`http_version: :http2`) and TLS version selection
-(`ssl: [versions: [:"tlsv1.3"]]`) are independent. HTTP/2 response streaming
-does not enable streaming request bodies; those remain HTTP/1.1-only.
+(`ssl: [versions: [:"tlsv1.3"]]`) are independent. Fetch supports streaming request
+bodies over HTTP/1.1 and HTTP/2; HTTP/2 uses the bounded upload bridge and preserves
+early-response upload cleanup.
 This is a bounded subset, not full OTP `:ssl` parity.
 
 See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.5.0/docs/COMPATIBILITY.md).
@@ -330,7 +331,9 @@ one separate HTTP/1 connection before establishment when ALPN or peer capability
 is unavailable. Authentication, certificate, malformed-handshake and established
 session failures do not trigger fallback or message replay. Cleartext `:auto`
 uses HTTP/1. Explicit profiles require their H2 wire identity; contradictory
-ALPN and H2 Unix-socket options are rejected before networking.
+ALPN and H2 Unix-socket options are rejected before networking. With WSS `:auto`,
+a custom `http2_scope` or `http2_reuse: false` requires an explicit H2 profile;
+otherwise construction returns `{:error, :http2_options_require_http2}`.
 
 ```elixir
 socket = HTTP.WebSocket.new("wss://example.com/socket", [],
@@ -406,7 +409,10 @@ HTTP/1 remains the default. Select `http_version: :http2` for required TLS h2,
 `:h2c` for cleartext prior knowledge, or `:auto` for TLS ALPN negotiation.
 HTTP/2 uses the shared runtime and can share an eligible connection with Fetch.
 An explicit `http2_profile` requires h2; `http2_scope` and `http2_reuse` retain
-the same isolation rules. OTP `:ssl` remains the default TLS backend.
+the same isolation rules. With TLS `:auto`, a custom scope or
+`http2_reuse: false` requires an explicit H2 profile; otherwise construction
+returns `{:error, :http2_options_require_http2}`. OTP `:ssl` remains the default
+TLS backend.
 
 For bounded consumer delivery, use opaque acknowledgements:
 
@@ -754,7 +760,7 @@ EX_SSL_DEP_MODE=source EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl \
   EX_SSL_RESULTS_DIR=/tmp/http-fetch-source bash scripts/ex_ssl_source_smoke.sh
 ```
 
-The published gate builds all five package artifacts, uses the checked-in lock
+The published gate builds all seven package artifacts, uses the checked-in lock
 and an explicit test-only ex_ssl dependency, and verifies the resolved Hex
 package and loaded module provenance. It is distinct from the cold transitive
 smoke above. `EX_SSL_DEP_MODE=published bash scripts/ex_ssl_source_smoke.sh`
