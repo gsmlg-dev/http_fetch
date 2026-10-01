@@ -568,3 +568,29 @@ documents accepted H2 uploads, all seven package artifacts, and the existing
 TLS-auto scope/reuse profile restriction. A new whole-source candidate includes
 this test and these corrections; da7adbb's incomplete run remains preparatory
 evidence, with unfinished soaks NOT RUN.
+
+Candidate 4ef1358, tree 83c954e405afefe57e3d982e408df653504f0803, failed
+Node's cleartext SSE mixed gate: `/control/held` returned three entries after
+local cancellation where the gate required two. The capture records the control
+request before the peer's cancellation callback. This requires a deterministic
+peer-observed cancellation barrier; local close is not a remote acknowledgement.
+The exact two live siblings, their next ordered events, 100 Fetch requests and
+same-connection assertions remain required. This run was stopped cleanly, with
+unfinished soaks NOT RUN; it is not accepted. No failure is silently retried.
+
+A raw independent H2 oracle reproduced this ordering deterministically:
+control HEADERS then cancellation RST returned three, while RST then control
+returned two. The runtime's local close initiates asynchronous owner cleanup;
+it does not promise a peer acknowledgement. The repaired fixture adds a bounded
+control request for the captured stream ID and requires the peer to observe its
+exact CANCEL RST before advancing the existing held-sibling trigger. This
+strengthens the wire oracle rather than changing runtime cancellation semantics.
+
+The barrier repair passed all six mixed peer/backend routes, each with public
+workload and independent wire PASS. Raw control-before-RST and RST-before-control
+oracles both now return exactly two live siblings. Withholding the target RST
+fails boundedly on both peers at approximately 10.01 seconds; no successful
+barrier is emitted. Parent independently reran the Node cleartext mixed gate
+with exact cancellation and zero final workers/monitors. Syntax, script format
+and diff checks passed. No runtime source changed. Final acceptance still
+requires a new exported candidate and all 78 complete outcomes.

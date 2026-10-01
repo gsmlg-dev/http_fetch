@@ -6,6 +6,7 @@ import json
 import socket
 import ssl
 import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 
 import h2
@@ -52,7 +53,7 @@ def batches(first, last):
 
 def serve(raw, cid):
     sock = raw
-    pending, held = {}, {}
+    pending, held, cancelled, cancellation_waiters = {}, {}, {}, {}
     try:
         if context:
             sock = context.wrap_socket(raw, server_side=True)
@@ -72,7 +73,23 @@ def serve(raw, cid):
             if status != 204:
                 pending[sid] = [iter(chunks), b'', 0, itertools.cycle([1, 7, 113, 4096, 8192]), keep, completed]
 
+        def cancellation_observed(control, target):
+            if cancelled.pop(target) != 8:
+                raise ValueError('expected held stream CANCEL')
+            payload = str(target).encode()
+            log(kind='cancellation_observed', connection=cid, stream=target, control_stream=control, code=8)
+            connection.send_headers(control, [(':status', '200'), ('content-length', str(len(payload)))])
+            pending[control] = [iter([payload]), b'', 0, itertools.cycle([8192]), False, None]
+
         while True:
+            if cancellation_waiters:
+                deadline = min(deadline for _, deadline in cancellation_waiters.values())
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('cancellation barrier deadline')
+                sock.settimeout(remaining)
+            else:
+                sock.settimeout(180)
             data = sock.recv(65536)
             if not data:
                 log(kind='connection_closed', connection=cid)
@@ -114,6 +131,14 @@ def serve(raw, cid):
                     elif path in ('/sse/hold', '/sse/reset', '/sse/goaway'):
                         held[sid] = path
                         respond(sid, [event(first)], keep=True)
+                    elif path == '/control/cancelled':
+                        target = int(query['stream'][0])
+                        if target in cancelled:
+                            cancellation_observed(sid, target)
+                        elif held.get(target) == '/sse/hold' and not cancellation_waiters:
+                            cancellation_waiters[target] = (sid, time.monotonic() + 10)
+                        else:
+                            raise ValueError('invalid or overlapping cancellation barrier')
                     elif path.startswith('/control/'):
                         affected = 0
                         for stream, endpoint in list(held.items()):
@@ -167,8 +192,13 @@ def serve(raw, cid):
                         raise ValueError('unknown fixture endpoint')
                 elif isinstance(received, StreamReset):
                     pending.pop(received.stream_id, None)
-                    held.pop(received.stream_id, None)
+                    endpoint = held.pop(received.stream_id, None)
                     log(kind='client_reset', connection=cid, stream=received.stream_id, code=int(received.error_code))
+                    if endpoint == '/sse/hold':
+                        cancelled[received.stream_id] = int(received.error_code)
+                        waiter = cancellation_waiters.pop(received.stream_id, None)
+                        if waiter:
+                            cancellation_observed(waiter[0], received.stream_id)
                 elif isinstance(received, ConnectionTerminated):
                     return
             progress = True

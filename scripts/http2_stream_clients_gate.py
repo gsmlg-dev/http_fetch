@@ -230,9 +230,25 @@ try:
             if len(pressure) != 1 or len(sibling) != 2 or len({item['connection'] for item in pressure + sibling}) != 1:
                 raise RuntimeError('paused source reconnected or sibling Fetch changed connection')
         if args.mode == 'mixed':
-            mixed = [item for item in requests if item['endpoint'] in ('/sse/hold', '/control/held') or item['endpoint'].startswith('/fetch/')]
+            mixed = [item for item in requests if item['endpoint'] in ('/sse/hold', '/control/cancelled', '/control/held') or item['endpoint'].startswith('/fetch/')]
             if len({item['connection'] for item in mixed}) != 1:
                 raise RuntimeError('Fetch/SSE did not share one independently observed connection')
+            holds = [item for item in mixed if item['endpoint'] == '/sse/hold']
+            barriers = [item for item in observations if item.get('kind') == 'cancellation_observed']
+            cancellations = [item for item in mixed if item['endpoint'] == '/control/cancelled']
+            controls = [item for item in mixed if item['endpoint'] == '/control/held']
+            fetches = [item for item in mixed if item['endpoint'].startswith('/fetch/mixed-')]
+            if len(holds) != 3 or len(barriers) != 1 or len(cancellations) != 1 or len(controls) != 1 or len(fetches) != 100:
+                raise RuntimeError('mixed workload or cancellation barrier count mismatch')
+            barrier = barriers[0]
+            if barrier['control_stream'] != cancellations[0]['stream'] or barrier['connection'] != cancellations[0]['connection']:
+                raise RuntimeError('cancellation response does not match the barrier request')
+            resets = [item for item in observations if item.get('kind') == 'client_reset'
+                      and item['connection'] == barrier['connection'] and item['stream'] == barrier['stream']]
+            if barrier['code'] != 8 or barrier['stream'] not in [item['stream'] for item in holds] or len(resets) != 1 or resets[0]['code'] != 8:
+                raise RuntimeError('missing exact held-stream CANCEL observation')
+            if not observations.index(resets[0]) < observations.index(barrier) < observations.index(controls[0]):
+                raise RuntimeError('sibling trigger preceded observed held-stream cancellation')
         connection_records = [item for item in observations if item.get('kind') == 'connection']
         if not connection_records or not any(item.get('kind') == 'settings' for item in observations):
             raise RuntimeError('missing protocol/settings evidence')

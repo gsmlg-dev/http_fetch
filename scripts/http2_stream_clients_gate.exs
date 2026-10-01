@@ -274,7 +274,21 @@ defmodule HTTPStreamClientsGate do
 
     sample(sources)
     [cancelled | live] = sources
+    cancelled_id = EventSource.status(cancelled).stream_handle.id
     close(cancelled)
+    expected_id = Integer.to_string(cancelled_id)
+    ^expected_id = fetch(url, "/control/cancelled?stream=#{cancelled_id}", opts)
+
+    IO.puts(
+      JSON.encode!(%{
+        kind: "cancellation_barrier",
+        stream: cancelled_id,
+        code: 8,
+        protocol: actual_protocol(protocol),
+        backend: opts[:tls_backend]
+      })
+    )
+
     "2" = fetch(url, "/control/held", opts)
 
     for source <- live do

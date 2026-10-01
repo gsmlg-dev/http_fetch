@@ -215,3 +215,8 @@ connection PING and sibling DATA do not refresh its token; acknowledged local
 pausing remains covered separately. This test and corrected README option/package
 statements require refreezing the whole source before final acceptance. Runtime
 algorithms remain those of da7adbb.
+
+The SSE mixed fixture now waits for independently observed cancellation of the
+exact stream before its two-sibling trigger. Local close is not a remote
+acknowledgement. The new bounded barrier retains all mixed traffic assertions;
+both peers and all transport routes passed preparatory checks.

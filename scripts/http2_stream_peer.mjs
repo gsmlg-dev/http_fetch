@@ -43,7 +43,7 @@ function write(stream, chunks, keep = false, complete) {
 }
 server.on('session', session => {
   const id = ++nextConnection;
-  connections.set(session, { id, held: new Map() });
+  connections.set(session, { id, held: new Map(), cancelled: new Map(), cancellationPending: false });
   log({ kind: 'connection', connection: id, protocol: tls ? 'h2' : 'h2c', alpn: tls ? session.socket.alpnProtocol : null });
   session.on('remoteSettings', value => log({ kind: 'settings', connection: id, settings: value }));
   session.on('error', error => log({ peer_error: error.code, connection: id }));
@@ -51,7 +51,8 @@ server.on('session', session => {
 });
 server.on('stream', (stream, headers) => {
   const session = stream.session;
-  const { id, held } = connections.get(session);
+  const state = connections.get(session);
+  const { id, held, cancelled } = state;
   const target = new URL(headers[':path'], 'http://localhost');
   const path = target.pathname, cursor = headers['last-event-id'] || '';
   const count = Number(target.searchParams.get('count') || 10000);
@@ -68,6 +69,7 @@ server.on('stream', (stream, headers) => {
   stream.on('close', () => {
     held.delete(stream.id);
     if (stream.rstCode) log({ kind: 'client_reset', connection: id, stream: stream.id, code: stream.rstCode });
+    if (path === '/sse/hold') cancelled.set(stream.id, stream.rstCode);
   });
   const respond = (chunks, keep = false, extra = {}, complete) => {
     stream.respond({ ':status': 200, 'content-type': 'text/event-stream', ...extra });
@@ -98,6 +100,33 @@ server.on('stream', (stream, headers) => {
       abort.abort();
     } });
     respond([event(first)], true);
+  } else if (path === '/control/cancelled') {
+    const targetId = Number(target.searchParams.get('stream'));
+    const item = held.get(targetId);
+    if (!Number.isInteger(targetId) || (!cancelled.has(targetId) && item?.endpoint !== '/sse/hold') || state.cancellationPending) {
+      throw new Error('invalid or overlapping cancellation barrier');
+    }
+    const complete = () => {
+      if (cancelled.get(targetId) !== http2.constants.NGHTTP2_CANCEL) throw new Error('expected held stream CANCEL');
+      cancelled.delete(targetId);
+      state.cancellationPending = false;
+      const payload = Buffer.from(String(targetId));
+      log({ kind: 'cancellation_observed', connection: id, stream: targetId, control_stream: stream.id, code: 8 });
+      stream.respond({ ':status': 200, 'content-length': String(payload.length) });
+      stream.end(payload);
+    };
+    if (cancelled.has(targetId)) complete();
+    else {
+      state.cancellationPending = true;
+      const timer = setTimeout(() => {
+        item.stream.removeListener('close', observed);
+        log({ peer_error: 'cancellation_timeout', connection: id, stream: targetId });
+        stream.close(http2.constants.NGHTTP2_INTERNAL_ERROR);
+      }, 10000);
+      const observed = () => { clearTimeout(timer); complete(); };
+      item.stream.once('close', observed);
+      stream.once('close', () => { clearTimeout(timer); item.stream.removeListener('close', observed); });
+    }
   } else if (path.startsWith('/control/')) {
     let affected = 0;
     for (const item of held.values()) {
