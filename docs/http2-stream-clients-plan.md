@@ -225,3 +225,12 @@ F1 warm-up now explicitly waits for the exact coordinator to terminate after
 releasing its reservation. Delivery of the warm response alone did not ensure
 a free reusable slot. This test-only precondition repair preserves all early
 response/cleanup/wire assertions and requires refreezing the full candidate.
+
+P5 is complete on executable candidate `a80fd3d`, tree
+`99ed0ffd672f8fa0c23f118b5c298972d6971a21`. All 42 Fetch and 36 new gates,
+842 tests plus 20 doctests, both genuine 1,800-second soaks and exact-candidate
+remote CI/Test passed. Final source/BEAM manifests, exact counts, resource samples,
+A0–D3 mapping and a checksum-verified accessible archive are recorded in the
+validation document. All preserved F1/F2 assertions remain intact. The later
+evidence commits preserve executable source; authorized version 0.16.0
+publication and fresh Hex-only consumers follow separately.

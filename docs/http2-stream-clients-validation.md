@@ -1,8 +1,9 @@
 # HTTP/2 stream clients validation
 
-Work is in progress. No new EventSource/WebSocket HTTP/2 acceptance or release
-is claimed by this baseline record. Historical Fetch evidence is preserved in
-`http2-production-validation.md` and its archives.
+P0–P5 implementation and final local acceptance are complete on `a80fd3d`.
+All 78 gates, both genuine 30-minute soaks and exact-candidate remote CI/Test
+passed. Version 0.16.0 publication verification follows this record. Historical
+Fetch evidence is preserved in `http2-production-validation.md` and its archives.
 
 ## P0 baseline
 
@@ -391,7 +392,7 @@ semantics EOF case. It retains protocol checks, exact input bytes and terminal
 assertions. All six peer/backend SSE routes and both fixture self-checks passed
 before refreezing; no application runtime source changed.
 
-## P5 frozen candidate — accepted executable results
+## Historical P5 frozen candidate — accepted executable results
 
 Executable candidate: commit `d99b9de655b3367c91eea0d59af14cc4b0afa7a7`,
 Git tree `01dd03d447f709b27dea32f74d95050edadfbc18`. The complete tree was exported
@@ -710,3 +711,90 @@ reran the stream test file on the final source. Strict compilation, targeted
 format, targeted Credo and diff check passed. An initial invalid Credo option
 invocation is retained separately from the corrected passing command. Final
 acceptance requires a new whole-source export, all 78 gates and remote CI/Test.
+
+## Final P5 acceptance — a80fd3d
+
+Accepted whole-source commit `a80fd3d46a6aba9eadc43c789ad92fbf734081da`, tree `99ed0ffd672f8fa0c23f118b5c298972d6971a21`.
+All 42 preserved Fetch gates and 36 new gates passed, including exact F1/F2,
+strict compilation, full regressions, formatting, required Credo, Dialyzer,
+HPACK, TLS lifecycle/published-ex_ssl provenance, package consumers and ExDoc.
+The full regression log records 842 tests plus 20 doctests, zero failures and
+three existing gated core skips. Four intentional Dialyzer skips remain.
+Three additional Fetch repeats each passed 309 tests plus 20 doctests.
+
+The independent hyper-h2 and Node/nghttp2 peers passed all six SSE backend
+routes with 10,000 ordered events and forced cursor resumption. Both SSE churn
+runs completed 1,001 opens / 1,000 reconnects. WS completed 10,000 numbered
+round trips plus a 131,072-byte binary on each of h2c, OTP ssl and explicit
+ex_ssl, and 1,000 actual open/echo/clean-close cycles. Both peers observed
+simultaneous Fetch/SSE/WS sharing one connection. All six preserved Fetch reuse
+runs completed 10,000 requests. Seven original package identities and four
+isolated top-level consumers passed actual H2 traffic and start/stop checks.
+These volumes are exact workload assertions; mixed/fault configuration counts
+are not reported as additional 10,000-message runs.
+
+| Soak | Actual duration | Completed traffic | Cleanup |
+| --- | ---: | --- | --- |
+| Mixed TLS ex_ssl / hyper-h2 + wsproto | 1,800,103 ms active | 3,285 WS, 3,288 SSE, 1,643 Fetch | Zero logical/protocol streams, reservations, admissions, workers, monitors and sessions |
+| Fetch TLS ex_ssl / Node + nghttp2 | 1,800,092 ms | 61,952 Fetch requests | Zero active/protocol streams and reservations |
+
+The mixed run completed slow-consumer, exact cancellation and GOAWAY draining
+intervals, retaining live SSE/WS while Fetch progressed and replacing sessions
+on the eligible owner after drain. Eligible idle owners may remain after cleanup.
+All frozen resource budgets passed. Sampled maxima and every sample are in
+`audit.json` and raw logs; these are sampled maxima, not continuous peaks or
+bounds on unrelated messages in the application owner's mailbox.
+
+| Family | Status | Executed evidence |
+| --- | --- | --- |
+| A0 | PASS | final-full-tests, final-runtime-regressions, package-traffic |
+| A1 | PASS | SSE unit/raw-wire tests and six sse-*-sse routes |
+| A2 | PASS | SSE idle/cursor/stale attempt, six fault routes and both churn runs |
+| A3 | PASS | SSE above-window, ACK pause and parser/queue/resource budgets |
+| B1 | PASS | capability/profile/tunnel tests and three WS fault routes |
+| B2 | PASS | three ws-*-echo routes, independent frame oracle and actual Close cycles |
+| B3 | PASS | zero/shrunk windows, bounded producer/consumer/close tests and fault routes |
+| C1 | PASS | six WS mixed routes, two peers and package-traffic shared connection |
+| C2 | PASS | exact stream cancellation barriers, reset/pressure and sibling progress |
+| C3 | PASS | isolation/capacity/F2 tests, six Fetch reuse runs and mixed gates |
+| D1 | PASS | h2c / ssl / ex_ssl positive and negative wire/backend matrix |
+| D2 | PASS | seven metadata packages, four isolated consumers, shared runtime survival |
+| D3 | PASS | full 42 + 36 ledger, two genuine 1,800-second soaks, static/docs checks |
+
+Immutable source verification passed for all 358 tracked entries;
+source manifest SHA256 `0e52026f3f0c093bf89c284769e8a340979d61b76706b51ee5d60f8b2c476e6a`. The exported whole
+source was checked before and after every gate. Both 646-file compiled manifests
+remained identical throughout finite gates and soaks: clients `95c0abdbd3db410269fa3ec6260b83a5c00ffe9e28680495f1aa551d751858b5`;
+Fetch `d4c6fce64a06ef418c7e822fa88465b005427191d478d26344c44315463bf7b3`. The evidence auditor additionally verified exact cancellation
+identity/code and wire order before the held-sibling trigger. Its copied-archive
+rerun and all regular-file/link checksums passed.
+
+Remote CI `36820622545` and
+Test `36820622617` passed for
+this exact candidate. Accessible full source, commands, raw wire/public outputs,
+ledgers, budgets, seed/toolchain records, source/BEAM hashes, independent audits,
+failed/interrupted candidates, repair red/green evidence and checksum manifest:
+[`p5-99ed0ffd672f.tar.gz`](http2-stream-clients-evidence/p5-99ed0ffd672f.tar.gz),
+SHA256 `2f05ccda052a68cae28a3d0c01afa5e9eb94c4a6054f35ec875279f1d02fdbe3`.
+
+Historical accepted and failed candidates above retain their original outcomes.
+Their partial results do not substitute for this final acceptance. The manual
+slow acceptance workflow was not dispatched; the complete local run supplies
+these final gates. Publication and fresh Hex-only consumers are recorded
+separately after authorized release. No production deployment was performed.
+
+Final new-client sampled maxima across all completed gates. The log field
+`heap_bytes` records `Process.info(pid, :memory)`, including process overhead:
+
+| Process | Process memory bytes | Referenced binary bytes | Mailbox |
+| --- | ---: | ---: | ---: |
+| SSE owner | 198,304 | 370,989 | 64 |
+| SSE session | 1,119,960 | 637,574 | 0 |
+| SSE stream | 109,608 | 262,849 | 0 |
+| SSE monitor | 2,816 | 0 | 0 |
+| WS owner/session/stream/monitor aggregate | 198,104 | 878,832 | 35 |
+
+Frozen budgets remain the P2/P4 values documented above and printed before
+each workload. Monitor heap/binary budgets are 64 KiB with eight workers; no
+budget was raised for these final checks. The artifact includes every sample
+and the explicit limitations of queue/EOF contract assertions.
