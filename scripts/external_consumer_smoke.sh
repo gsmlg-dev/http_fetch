@@ -9,7 +9,7 @@ package_dir="$work_dir/packages"
 consumer_dir="$work_dir/consumer"
 mkdir -p "$package_dir"
 
-apps=(http_core http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport)
+apps=(http_core http_runtime http_fetch http_web_socket http_event_source http_web_transport)
 
 for app in "${apps[@]}"; do
   (
@@ -36,9 +36,8 @@ defmodule ExternalConsumer.MixProject do
     package_dir = System.fetch_env!("HTTP_FETCH_PACKAGE_DIR")
 
     [
-      {:http_core, path: Path.join(package_dir, "http_core")},
-      {:http_runtime, path: Path.join(package_dir, "http_runtime")},
-      {:elixir_quic_http3, path: Path.join(package_dir, "elixir_quic_http3")},
+      {:http_core, path: Path.join(package_dir, "http_core"), override: true},
+      {:http_runtime, path: Path.join(package_dir, "http_runtime"), override: true},
       {:http_fetch, path: Path.join(package_dir, "http_fetch")},
       {:http_web_socket, path: Path.join(package_dir, "http_web_socket")},
       {:http_event_source, path: Path.join(package_dir, "http_event_source")},

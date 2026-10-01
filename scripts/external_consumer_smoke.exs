@@ -90,7 +90,6 @@ defmodule ExternalConsumerSmoke do
 
     for app <- [
           "http_runtime",
-          "elixir_quic_http3",
           "http_fetch",
           "http_web_socket",
           "http_event_source",
@@ -106,9 +105,12 @@ defmodule ExternalConsumerSmoke do
     end
 
     for app <- ["http_fetch", "http_web_transport"] do
-      assert requirement!(metadata!(package_dir, app), "elixir_quic_http3") ==
-               "~> " <> core_version,
-             "#{app} package must require the built elixir_quic_http3 version"
+      requirements = Map.fetch!(metadata!(package_dir, app), <<"requirements">>)
+
+      assert not Enum.any?(requirements, fn requirement ->
+               Map.new(requirement)[<<"name">>] == "elixir_quic_http3"
+             end),
+             "#{app} package must not require the removed elixir_quic_http3 package"
     end
   end
 

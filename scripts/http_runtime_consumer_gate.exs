@@ -1,5 +1,5 @@
 defmodule HTTPRuntimeConsumerGate do
-  @apps ~w(http_core http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport)
+  @apps ~w(http_core http_runtime http_fetch http_web_socket http_event_source http_web_transport)
   @clients ~w(http_fetch http_event_source http_web_socket)a
 
   def prepare do
@@ -41,7 +41,10 @@ defmodule HTTPRuntimeConsumerGate do
     end
 
     for app <- ["http_fetch", "http_web_transport"] do
-      assert_requirement!(metadata[app], "elixir_quic_http3", version)
+      assert!(
+        not Map.has_key?(requirements(metadata[app]), "elixir_quic_http3"),
+        "#{app} must not require the removed elixir_quic_http3 package"
+      )
     end
 
     assert!(
@@ -61,7 +64,7 @@ defmodule HTTPRuntimeConsumerGate do
 
       rewritten =
         Regex.replace(
-          ~r/\{:(http_core|http_runtime|elixir_quic_http3), "~> [^"]+", in_umbrella: true, hex: :(?:http_core|http_runtime|elixir_quic_http3)\}/,
+          ~r/\{:(http_core|http_runtime), "~> [^"]+", in_umbrella: true, hex: :(?:http_core|http_runtime)\}/,
           source,
           fn _, dependency ->
             "{:#{dependency}, path: #{inspect(Path.join(packages, dependency))}}"

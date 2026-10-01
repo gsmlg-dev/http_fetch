@@ -22,16 +22,17 @@ This is an Elixir library providing a browser-like HTTP fetch API built on Erlan
 - **HTTP.AbortController** (`apps/http_fetch/lib/http/abort_controller.ex`): Request cancellation via Agent-based controller
 - **HTTP.FetchOptions** (`apps/http_fetch/lib/http/fetch_options.ex`): Options processing and validation for `fetch/2`
 - **HTTP.Telemetry** (`apps/http_fetch/lib/http/telemetry.ex`): Comprehensive telemetry events for requests, responses, streaming, and errors
-- **QuicHttp3** (`apps/elixir_quic_http3/lib/quic_http3.ex`): HTTP/3 application-layer boundary over generic QUIC transports; it does not replace the legacy `:quic_h3` backend yet
 
 ### Application Structure
 - This is a Mix umbrella with independent protocol apps under `apps/`.
 - Shared HTTP primitives live in `apps/http_core`; pooled HTTP/2 connection
   ownership and stream I/O live in `apps/http_runtime`. Fetch, EventSource and
   WebSocket depend on both shared applications instead of each other.
-- `apps/elixir_quic_http3` owns the future HTTP/3/QPACK session layer and
-  depends on `:elixir_quic`; it must not move HTTP/3 semantics into the QUIC
-  transport library.
+- The HTTP/3/QPACK application moved to
+  [`gsmlg-dev/ex_quic`](https://github.com/gsmlg-dev/ex_quic/tree/main/apps/elixir_quic_http3).
+  This umbrella no longer contains or depends on `:elixir_quic_http3`; HTTP/3
+  and WebTransport selectors here still return explicit unsupported results
+  while independent integration and interoperability work remains.
 - **HTTPFetch.Application** (`apps/http_fetch/lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
 
 ### Key Design Patterns
@@ -94,8 +95,8 @@ deps.get`, `MIX_ENV=test mix compile --warnings-as-errors`, then `mix test
 apps/<app>/test`. Running Mix inside a child app does not traverse the runtime
 dependencies of its `in_umbrella` dependencies. E2E uses the same root preparation
 and `mix test apps/<app>/e2e`, or `mix test.e2e` for all E2E suites.
-Run `bash scripts/external_consumer_smoke.sh` to build all seven packages
-(`http_core`, `http_runtime`, `elixir_quic_http3`, `http_fetch`, `http_web_socket`,
+Run `bash scripts/external_consumer_smoke.sh` to build all six packages
+(`http_core`, `http_runtime`, `http_fetch`, `http_web_socket`,
 `http_event_source`, and `http_web_transport`) and
 verify an isolated non-umbrella consumer, including transitive TLS dependencies.
 

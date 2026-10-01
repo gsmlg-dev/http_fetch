@@ -28,7 +28,6 @@ jobs:
         app:
           - http_core
           - http_runtime
-          - elixir_quic_http3
           - http_fetch
           - http_web_socket
           - http_event_source

@@ -10,7 +10,7 @@ unset MIX_BUILD_PATH MIX_DEPS_PATH MIX_ENV GIT_DIR GIT_WORK_TREE
 export HTTP_RUNTIME_PACKAGE_DIR="$work_dir/packages"
 export HTTP_RUNTIME_REPO_ROOT="$repo_root"
 mkdir -p "$HTTP_RUNTIME_PACKAGE_DIR"
-apps=(http_core http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport)
+apps=(http_core http_runtime http_fetch http_web_socket http_event_source http_web_transport)
 for app in "${apps[@]}"; do
   (
     cd "$repo_root/apps/$app"
@@ -66,4 +66,4 @@ ELIXIR
     fi
   )
 done
-printf '{"result":"PASS","gate":"http_runtime_consumers","consumers":4,"packages":7}\n'
+printf '{"result":"PASS","gate":"http_runtime_consumers","consumers":4,"packages":6}\n'

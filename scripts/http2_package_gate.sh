@@ -5,7 +5,7 @@ work_dir=$(mktemp -d /tmp/http2-package-gate.XXXXXX)
 package_dir="$work_dir/packages"
 consumer_dir="$work_dir/consumer"
 mkdir -p "$package_dir" "$consumer_dir"
-apps=(http_core http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport)
+apps=(http_core http_runtime http_fetch http_web_socket http_event_source http_web_transport)
 for app in "${apps[@]}"; do
   (
     cd "$repo_root/apps/$app"
@@ -19,7 +19,7 @@ defmodule HTTP2PackageConsumer.MixProject do
   def application, do: [extra_applications: [:logger]]
   defp deps do
     root = System.fetch_env!("HTTP_FETCH_PACKAGE_DIR")
-    for app <- [:http_core, :http_runtime, :elixir_quic_http3, :http_fetch, :http_web_socket, :http_event_source, :http_web_transport],
+    for app <- [:http_core, :http_runtime, :http_fetch, :http_web_socket, :http_event_source, :http_web_transport],
       do: {app, path: Path.join(root, Atom.to_string(app)), override: true}
   end
 end
