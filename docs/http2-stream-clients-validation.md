@@ -806,8 +806,9 @@ and the explicit limitations of queue/EOF contract assertions.
 [Release workflow 36824021755](https://github.com/gsmlg-dev/http_fetch/actions/runs/36824021755)
 passed on evidence head `69815b5aabaf6642865648c0c16f21294caf8952`.
 Its executable source is identical to accepted `a80fd3d`. The workflow passed
-842 tests plus 20 doctests, 51 E2E tests, strict compilation, format, Credo,
-Dialyzer, docs and all seven package builds. It newly published every package
+a unit run of 842 tests plus 20 doctests, zero failures and three existing core
+skips; all 51 E2E tests, strict compilation, format, Credo, Dialyzer, docs and
+all seven package builds. It newly published every package
 and its docs, then pushed `v0.16.0` and created the public, non-prerelease
 [GitHub release](https://github.com/gsmlg-dev/http_fetch/releases/tag/v0.16.0).
 Evidence-head CI/Test also passed (36823719643 / 36823719644).
@@ -850,7 +851,7 @@ Accessible release workflow/output, all Hex APIs/tarballs/checksums, independent
 artifact report, actual published consumers/locks/wire output, GitHub release
 metadata, Git parity and evidence-head CI/Test:
 [`v0.16.0-publication.tar.gz`](http2-stream-clients-evidence/v0.16.0-publication.tar.gz),
-SHA256 `a61409394cdd12d3b87d8d295c6316b3318c6d3e9871c306db1abb026c4dc3be`. All 36 archived regular-file checksums passed.
+SHA256 `7fa34348a422a34b5f1ff583ccdfd2cd892a1f7a225c7f82e850cc2c4e8081af`. All 36 archived regular-file checksums passed.
 
 P0–P5 and authorized publication are complete. The explicit manual slow
 acceptance workflow was not dispatched; its full local entrypoint passed and
