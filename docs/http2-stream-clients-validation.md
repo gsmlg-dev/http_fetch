@@ -679,3 +679,34 @@ Independent source/evidence review found no blockers. An extra strict-Credo
 invocation exited 14 with pre-existing findings in unrelated files; its log is
 retained separately, no unrelated fixes were attempted, and it is not reported
 as the required passing Credo command.
+
+Candidate f053ce6, tree db8fff399fe228938baa59e8ca96c1231233d534, passed
+remote CI 36819731919 but failed Runtime Test in run 36819731803 (seed 950590).
+The suspended-exclusive-owner close fixture's peer SETTINGS-ACK send returned
+closed. The public opened event follows local request HEADERS transmission,
+but does not acknowledge peer SETTINGS processing or response transmission.
+Immediate local cancellation can therefore close the exclusive socket before
+the fixture completes those writes. The candidate was interrupted, with explicit
+Fetch42 interruption as well; the wrapper exited 130. Its unfinished soaks are
+NOT RUN. No failure is retried into an acceptance claim.
+
+The fixture must establish its intended response-header precondition before
+suspending the owner and testing responsive cancellation. Investigation and
+deterministic ordering evidence are retained with the preparation logs. The
+owner-survival, stream termination, owner normal termination and exact peer
+socket-closure assertions remain required, without broad closed-error suppression.
+
+The delayed-peer oracle deterministically reproduces the original exact
+SETTINGS-ACK MatchError after normal exclusive-owner termination and observed
+socket EOF. Releasing the peer to complete its ACK/response before suspension
+passes the same cancellation/cleanup sequence. The final fixture waits for its
+exact generation-qualified 200 response headers before suspending the owner.
+Both local close and subscriber death retain their original deadlines and all
+survival/normal-DOWN/socket-closure assertions. Only four test assertion lines
+were added; no runtime source changed.
+
+The 59-test runtime suite passed at seed 950590/max-cases 8. Parent independently
+reran the stream test file on the final source. Strict compilation, targeted
+format, targeted Credo and diff check passed. An initial invalid Credo option
+invocation is retained separately from the corrected passing command. Final
+acceptance requires a new whole-source export, all 78 gates and remote CI/Test.

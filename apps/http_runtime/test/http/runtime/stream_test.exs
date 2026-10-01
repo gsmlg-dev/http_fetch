@@ -401,6 +401,10 @@ defmodule HTTP.Runtime.StreamTest do
                       {:http_runtime, ^generation, ^stream, {:opened, %{owner: owner}}}},
                      5_000
 
+      assert_receive {:forwarded,
+                      {:http_runtime, ^generation, ^stream, {:headers, [{":status", "200"}], 4}}},
+                     5_000
+
       owner_monitor = Process.monitor(owner)
       :ok = :sys.suspend(owner)
 
