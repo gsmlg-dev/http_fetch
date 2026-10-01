@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-01
+
+### Changed
+- Remove the `elixir_quic_http3` sub-app after its migration to
+  `gsmlg-dev/ex_quic`, including unused dependencies from Fetch and WebTransport.
+- Update six-package CI, release, and consumer tooling and current documentation
+  to reflect the new ownership boundary. HTTP/3 and WebTransport selectors
+  remain explicitly unsupported pending integration and interoperability work.
+
+### Fixed
+- Keep isolated package consumers on explicit shared local dependency overrides
+  after removing the migrated package.
+
 ## [0.16.0] - 2026-10-01
 
 ### Added
