@@ -34,15 +34,28 @@ MIX_ENV=test mix compile --warnings-as-errors
 MIX_ENV=test mix test apps/http_fetch/test
 ```
 
-Use the same root preparation and replace the path for any other app under
-`apps/`. The E2E workflow uses the same root-scoped form for `apps/*/e2e`.
+Use the same root preparation and replace the path for any app under `apps/`,
+including `apps/ex_ssl/test`, `apps/elixir_quic/test`, and
+`apps/elixir_quic_http3/test`. Run E2E suites from the umbrella root with
+`MIX_ENV=test mix test.e2e` or scope them with
+`MIX_ENV=test mix test apps/<app>/e2e`. These root-scoped forms retain the
+runtime dependency closure of umbrella apps.
 
 ## Project layout
 
-This is a Mix umbrella with independent child apps under `apps/`. Shared HTTP
-primitives live in `apps/http_core`; concrete protocol clients such as
-`apps/http_fetch`, `apps/http_web_socket`, `apps/http_event_source`, and
-`apps/http_web_transport` depend on `:http_core` instead of each other.
+This is a Mix umbrella with nine independently packaged apps under `apps/`.
+`apps/http_core` owns shared HTTP primitives and the TLS/QUIC integration
+boundary; `apps/http_runtime` owns pooled HTTP/2 connections. Fetch,
+EventSource, and WebSocket depend on both `:http_core` and `:http_runtime`.
+WebTransport and the HTTP/3 companion depend on `:http_core`; HTTP/3 also
+depends on `:elixir_quic`. `:elixir_quic` depends on `:ex_ssl`.
+
+The imported applications are `apps/ex_ssl` (`SSL`), `apps/elixir_quic`
+(`Quic`), and `apps/elixir_quic_http3` (`QuicHttp3`). Their source provenance,
+licenses, constraints, and current release status are recorded in
+[`docs/migration-provenance.md`](docs/migration-provenance.md). The HTTP/3 and
+WebTransport selectors remain unsupported; app presence and negotiated ALPN do
+not establish protocol support.
 
 Entry point is `HTTP.fetch/2` in `apps/http_fetch/lib/http.ex`. It is async by default
 (`Task.Supervisor` + the internal socket transport) and returns an `HTTP.Promise`.
@@ -78,8 +91,8 @@ For module-by-module details, see the table in `CLAUDE.md` and read
 ## Style
 
 - `mix format` is authoritative; do not hand-format Elixir.
-- The formatter scope is the umbrella root plus `apps/http_fetch` (see
-  `.formatter.exs` and `apps/http_fetch/.formatter.exs`).
+- The formatter scope is the umbrella root plus all nine `apps/*`
+  (see `.formatter.exs` and each app's `.formatter.exs`).
 - Credo is run in CI; run `mix credo` locally before pushing.
 
 ## Repo etiquette

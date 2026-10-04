@@ -1,0 +1,62 @@
+name: Changed umbrella apps
+
+on:
+  workflow_call:
+    inputs:
+      workflow_file:
+        required: true
+        type: string
+      manual_module:
+        required: false
+        type: string
+        default: ''
+    outputs:
+      apps:
+        description: JSON array of directly affected apps
+        value: ${{ jobs.detect.outputs.apps }}
+      has_changes:
+        description: Whether the array is nonempty
+        value: ${{ jobs.detect.outputs.has_changes }}
+      full_gate:
+        description: Whether shared automation or graph inputs require all candidate consumers
+        value: ${{ jobs.detect.outputs.full_gate }}
+      historical_tls:
+        description: Whether TLS or shared inputs require historical compatibility coverage
+        value: ${{ jobs.detect.outputs.historical_tls }}
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.paths.outputs.apps }}
+      has_changes: ${{ steps.paths.outputs.has_changes }}
+      full_gate: ${{ steps.paths.outputs.full_gate }}
+      historical_tls: ${{ steps.paths.outputs.historical_tls }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: paths
+        env:
+          WORKFLOW_FILE: ${{ inputs.workflow_file }}
+          MANUAL_MODULE: ${{ inputs.manual_module }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BASE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            base="$PR_BASE"
+          else
+            base="$PUSH_BASE"
+          fi
+          python3 scripts/ci/changed_apps.py \
+            --workflow "$WORKFLOW_FILE" \
+            --event "$EVENT_NAME" \
+            --base "$base" \
+            --head "$HEAD_SHA" \
+            --manual-module "$MANUAL_MODULE"

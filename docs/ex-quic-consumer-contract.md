@@ -1,107 +1,76 @@
-# Internal QUIC consumer mapping
+# QUIC consumer contract
 
-This is a mapping to frozen upstream interfaces, not another QUIC protocol
-specification. This adapter does not implement HTTP/3, QPACK or WebTransport.
+This document maps the imported public QUIC and TLS interfaces to the HTTP
+umbrella. It is not a QUIC conformance claim or an HTTP/3 support claim. Source
+identity and license records are in
+[migration provenance](migration-provenance.md); implementation evidence and
+limits are in [`docs/quic/`](quic/consumer-contract.md).
 
-## Authority and source combination
+## Packages and authority
 
-- ex_quic G-T: [`c9ad458add5a496949bd1c89b50128c8ab777da9`](https://github.com/gsmlg-dev/ex_quic/tree/c9ad458add5a496949bd1c89b50128c8ab777da9),
-  [consumer contract](https://github.com/gsmlg-dev/ex_quic/blob/c9ad458add5a496949bd1c89b50128c8ab777da9/docs/consumer-contract.md),
-  [I/O contract](https://github.com/gsmlg-dev/ex_quic/blob/c9ad458add5a496949bd1c89b50128c8ab777da9/docs/io-contract.md),
-  [acceptance](https://github.com/gsmlg-dev/ex_quic/blob/c9ad458add5a496949bd1c89b50128c8ab777da9/docs/phase1-acceptance.md).
-- ex_ssl G-S: [`fb47051355c9d0a29caee046fa060a745ad0ce5b`](https://github.com/gsmlg-dev/ex_ssl/tree/fb47051355c9d0a29caee046fa060a745ad0ce5b),
-  [TLS interface](https://github.com/gsmlg-dev/ex_ssl/blob/fb47051355c9d0a29caee046fa060a745ad0ce5b/docs/QUIC_TLS_INTERFACE.md),
-  [acceptance](https://github.com/gsmlg-dev/ex_ssl/blob/fb47051355c9d0a29caee046fa060a745ad0ce5b/docs/phase1-acceptance.md).
-- Optional joint fixture only: Abyss G-A
-  [`50e121fce66daeb9cb25a2f5dc93050ca37efc5d`](https://github.com/gsmlg-dev/abyss/tree/50e121fce66daeb9cb25a2f5dc93050ca37efc5d),
-  [public service](https://github.com/gsmlg-dev/abyss/blob/50e121fce66daeb9cb25a2f5dc93050ca37efc5d/docs/quic-service.md).
-  Abyss is not a production dependency.
+| Package | OTP app / public namespace | Dependency role |
+| --- | --- | --- |
+| `ex_ssl` | `:ex_ssl` / `SSL` | TLS provider; no internal runtime dependency |
+| `elixir_quic` | `:elixir_quic` / `Quic` | QUIC v1 transport; depends on `ex_ssl` |
+| `http_core` | `:http_core` / `HTTP.*` | Shared HTTP and TLS/QUIC integration; depends on `ex_ssl` and `elixir_quic` |
+| `http_runtime` | `:http_runtime` / `HTTP.Runtime.*` | Shared HTTP/2 owner; depends on `http_core` |
+| `elixir_quic_http3` | `:elixir_quic_http3` / `QuicHttp3` | Experimental HTTP/3 application; depends on `http_core` and `elixir_quic` |
+| `http_fetch` | `:http_fetch` / `HTTP` | Fetch consumer; depends on `http_core` and `http_runtime` |
+| `http_event_source` | `:http_event_source` / `HTTP.EventSource` | EventSource consumer; depends on `http_core` and `http_runtime` |
+| `http_web_socket` | `:http_web_socket` / `HTTP.WebSocket` | WebSocket consumer; depends on `http_core` and `http_runtime` |
+| `http_web_transport` | `:http_web_transport` / `HTTP.WebTransport` | WebTransport application boundary; depends on `http_core` |
 
-Runtime dependencies are Hex `elixir_quic` 0.2.2 (OTP application
-`:elixir_quic`, public facade `Quic`) and Hex `ex_ssl` 0.7.2. The upstream
-engine requires `ex_ssl == 0.7.2`, compatible with http_core's `~> 0.7.2`.
-`mix.lock` records both package checksums. The SHAs above identify documentation
-and fixture provenance, not runtime Git dependencies. No override is used.
+All internal dependencies use exact `== 0.16.1` candidate requirements,
+`in_umbrella: true`, and the corresponding Hex identity. Six package versions
+at 0.16.1 were published before this migration, with different dependency
+metadata. The three imported package versions are not published; this local
+graph cannot yet be resolved as nine packages from Hex. Issue
+[#16](https://github.com/gsmlg-dev/http_fetch/issues/16) remains open pending
+the next coordinated release.
 
-## Adapter mapping
+## TLS to QUIC boundary
 
-`HTTP.QUIC.ExQuic` is internal (`@moduledoc false`). Its normal driver is `Quic`;
-the final optional driver argument is a strict contract-test seam. No production
-HTTP route selects it. Neither existing `HTTP.Transport` (one TCP/TLS socket)
-nor `HTTP.WebTransport.Transport` (HTTP/3 application sessions and datagrams)
-represents this raw stream interface correctly.
+Production QUIC code calls public `SSL.QUIC` and `SSL.Fingerprint` functions.
+It does not import private TLS handshake, transcript, PKIX, or traffic-state
+modules. `SSL.QUIC` owns certificate authentication and the TLS transcript/key
+schedule. Its input levels are `:initial`, `:handshake`, and `:application`;
+the QUIC connection reassembles CRYPTO stream offsets and supplies contiguous
+handshake bytes. Process the returned TLS action list in order. Retain each
+emitted byte range once and retransmit it without advancing TLS again.
 
-| Consumer call | Frozen upstream operation / local responsibility |
-| --- | --- |
-| `client(host, tls, endpoint_options)` | Normalize credentials/options, then `Quic.client(tls: normalized, ...)`; default owner remains the calling process |
-| `local(endpoint)` | `Quic.local/1` |
-| `connect(endpoint, remote, options)` | `Quic.connect/3`; remote is an IP/port, DNS resolution is the caller's responsibility |
-| `attach`, `ready`, `info` | Same public upstream operations; readiness remains distinct from HTTP/session success |
-| `open_stream` | `Quic.open_stream/3`, bidi or uni; retains opaque handles unchanged |
-| `send_stream` | `Quic.send_stream/4`; binary, at most 16 KiB; returns admission reference, never a delivery receipt |
-| `read` | `Quic.read/3`; explicit positive limit at most 16 KiB |
-| `events` | `Quic.events/3`; positive limit at most 128, default 32 |
-| `reset_stream`, `stop_stream` | Same public operations; one send/receive half, not the connection |
-| `close` | `Quic.close/4`; preserves application code, opaque reason and terminal errors |
-| `operation_status` | `Quic.operation_status/2`; connection or endpoint plus the original operation reference |
-| `capabilities` | `Quic.capabilities/0`, including `http3: false` |
-| `stop_endpoint` | Standard bounded OTP endpoint shutdown; distinct from stream cancellation |
-| `normalize_message` | Accepts only ready/closed notifications for the exact connection handle, including its generation; unrelated/late generations return `:unknown` |
+The QUIC transport owns Initial and packet/header-protection keys, packet-number
+spaces, stream state, transport-parameter semantics, and packet lifecycle.
+Authenticated transport parameters and TLS handshake completion are separate
+facts. Do not infer peer authentication or application readiness from ALPN or
+fingerprint matches. QUIC endpoints and all peer-driven parser/buffer paths keep
+the documented bounds; see the source [QUIC architecture](quic/architecture.md)
+and [testing requirements](quic/testing.md).
 
-No new adapter process or application byte queue is introduced. The application
-must serialize operations through the attached owner. Upstream pull queues,
-stream limits, coalesced notifications, operation-result retention and ownership
-monitors provide their documented bounds; arbitrary local producers can still
-fill a BEAM mailbox. Endpoint options are limited to stream limits, maximum
-connections, event limit and operation limit; callers cannot replace normalized
-TLS, I/O, owner or diagnostic delivery through this container.
+`ex_ssl` implements TLS through its own engine with OTP crypto and public-key
+primitives. It does not use OTP `:ssl` to perform production TLS handshakes.
+The shared TCP clients still default to OTP `:ssl`; selecting ex_ssl for TCP
+does not change the QUIC TLS path. A non-`nil` TCP `tls_backend` supplied to
+the QUIC API is rejected explicitly.
 
-`:blocked` means definite non-admission; `{:unknown, ref}` does not. Unknown
-writes, reads, event pulls or opens retain the original result and reference.
-Resolve via `operation_status`; cache eviction or process death may leave the
-outcome unknown permanently. The adapter never retries, changes references,
-turns unknown into not-sent, or falls back to the legacy library. The real test
-harnesses have finite deadlines and retry only definite blocks.
+## Application and selector boundary
 
-## TLS normalization
+`Quic` provides raw QUIC streams and optional unreliable DATAGRAMs. Application
+ALPN is opaque metadata; the transport does not dispatch HTTP/3 from `h3`.
+`QuicHttp3` is a separate HTTP/3 application package with independent
+capability reporting. At the imported revision:
 
-`HTTP.QUIC.TLSOptions.normalize/2` runs before endpoint creation and before TLS
-feed. Explicit `cacerts` (DER list/PEM bundle) or `cacertfile` is required; sources
-cannot conflict. Client `cert`/`key` or `certfile`/`keyfile` are loaded and validated
-through the existing identity loader. File reads are bounded and errors redact
-paths and credential contents. No credentials are loaded in a feed callback.
+- `Quic.capabilities().http3` is `false`.
+- `QuicHttp3.capabilities()` reports `http3: false`, `qpack: false`, and
+  `webtransport: false`.
+- `HTTP.HTTP3` returns `:http3_not_supported_by_elixir_quic_http3`.
+- The WebTransport QUIC selector remains unsupported.
 
-The default reference identity derives from the host: DNS or a parsed numeric
-IPv4/IPv6 address. An explicit `reference_identity` replaces it. Optional
-`server_name_indication` maps to upstream `server_name`; absent SNI does not
-remove identity verification. Only `verify_peer` is accepted. Unsupported legacy
-TCP options, duplicate/malformed options and `verify_none` fail explicitly.
+The internal `HTTP.QUIC.ExQuic` adapter, where used directly, accepts a TLS
+keyword list plus bounded endpoint settings, normalizes verification before
+starting a connection, and forwards opaque QUIC handles and operation results.
+It does not retry unknown operations or reinterpret raw stream success as an
+HTTP/3 session. Its optional driver argument is a test seam; production uses
+`Quic`. There is no legacy transport or native-library fallback.
 
-`alpn` is an opaque binary list; the internal default is `ex-quic-phase1`.
-HTTP/3 ALPN is rejected in this preparatory interface. Ordered numeric `ciphers`,
-`groups` and `signature_algorithms` must be available according to public
-`SSL.QUIC.capabilities/0`. `depth`, hostname checking and a record-free
-`SSL.ClientHello.WireProfile` are supported. Upstream construction validates the
-profile's exact ALPN and engine-supplied local transport parameters; the adapter
-never manufactures transport parameters for validation. Invalid profiles or
-TLS authentication still fail at the frozen public TLS boundary.
-
-## Existing production backends and startup audit
-
-- `apps/http_core/mix.exs` declares ex_ssl/elixir_quic as normal runtime dependencies.
-  Existing `quic ~> 1.6` remains `runtime: false` there; it provides the shared
-  `HTTP.HTTP3` module's legacy implementation.
-- `apps/http_fetch/mix.exs` and `apps/http_web_transport/mix.exs` retain runtime
-  `quic`; the other children depend on http_core transitively.
-- `HTTP.HTTP3` calls `:quic_h3` and ensures `:quic` starts before connecting.
-  Fetch's `http_version: :http3` route remains there.
-- `HTTP.WebTransport.Transport.QUIC` calls both `:quic_h3` and `:quic`, including
-  its existing application session/stream operations and startup.
-- `HTTP.H3.Frame`, `Settings`, `Varint` and `WebTransport` remain codecs/helpers;
-  no QPACK or HTTP/3 client-session implementation is added.
-- OTP `:ssl` remains the default. Explicit TCP TLS selection for QUIC remains
-  rejected by `HTTP.TLSBackend`. There is no new production HTTP/3 selector.
-
-See [acceptance](phase1-acceptance.md) for executed commands and limits. G-F is
-independent of G-A; the Abyss raw-handler combination is a separate G-P1 item.
-Abyss supplies a general service, while application servers own HTTP/3 or DoQ.
+See [the HTTP/3 boundary](quic_http3_design.md) for the protocol split and
+[TLS consumer contract](ex-ssl-consumer-contract.md) for TCP-specific behavior.

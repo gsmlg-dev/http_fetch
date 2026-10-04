@@ -8,6 +8,7 @@ defmodule HttpFetch.Umbrella.MixProject do
   def project do
     [
       apps_path: "apps",
+      apps: ci_apps(),
       version: @version,
       elixir: "~> 1.18",
       name: "HTTP Fetch",
@@ -20,7 +21,11 @@ defmodule HttpFetch.Umbrella.MixProject do
         extras: [
           "README.md",
           "CHANGELOG.md",
+          "docs/migration-provenance.md",
+          "docs/migration-validation.md",
           "docs/ex-ssl-consumer-contract.md",
+          "docs/ex-quic-consumer-contract.md",
+          "docs/quic_http3_design.md",
           "docs/pr-14-validation.md"
         ],
         source_ref: "v#{@version}",
@@ -41,6 +46,45 @@ defmodule HttpFetch.Umbrella.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
+  end
+
+  # CI compiles the selected package and the siblings required by that package.
+  # A normal invocation leaves app selection to Mix and includes the full umbrella.
+  defp ci_apps do
+    case System.get_env("HTTP_FETCH_CI_APP") do
+      nil ->
+        nil
+
+      "ex_ssl" ->
+        [:ex_ssl]
+
+      "elixir_quic" ->
+        [:ex_ssl, :elixir_quic]
+
+      "http_core" ->
+        [:ex_ssl, :elixir_quic, :http_core]
+
+      "elixir_quic_http3" ->
+        [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3]
+
+      "http_runtime" ->
+        [:ex_ssl, :elixir_quic, :http_core, :http_runtime]
+
+      "http_fetch" ->
+        [:ex_ssl, :elixir_quic, :http_core, :http_runtime, :http_fetch]
+
+      "http_event_source" ->
+        [:ex_ssl, :elixir_quic, :http_core, :http_runtime, :http_event_source]
+
+      "http_web_socket" ->
+        [:ex_ssl, :elixir_quic, :http_core, :http_runtime, :http_web_socket]
+
+      "http_web_transport" ->
+        [:ex_ssl, :elixir_quic, :http_core, :http_web_transport]
+
+      other ->
+        raise "invalid HTTP_FETCH_CI_APP: #{inspect(other)}"
+    end
   end
 
   defp dialyzer do

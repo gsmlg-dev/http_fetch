@@ -6,291 +6,152 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
-env:
-  ELIXIR_VERSION: "1.18"
-  OTP_VERSION: "28"
-
 jobs:
-  version:
-    name: Version Metadata
-    runs-on: ubuntu-latest
+  changes:
+    uses: ./.github/workflows/changes.yml
+    with:
+      workflow_file: ci.yml
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Validate shared version metadata
-        run: |
-          set -euo pipefail
-
-          VERSION=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' mix.exs)
-          if [ -z "${VERSION}" ]; then
-            echo "::error::Root mix.exs is missing @version"
-            exit 1
-          fi
-
-          for mix_file in mix.exs apps/*/mix.exs; do
-            app_version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' "${mix_file}")
-            if [ "${app_version}" != "${VERSION}" ]; then
-              echo "::error::${mix_file} version ${app_version} does not match root version ${VERSION}"
-              exit 1
-            fi
-          done
-
-          for app in http_runtime http_fetch http_web_socket http_event_source http_web_transport; do
-            expected='{:http_core, "~> '"${VERSION}"'", in_umbrella: true, hex: :http_core}'
-            if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
-              echo "::error::apps/${app}/mix.exs does not depend on http_core ${VERSION} with umbrella + Hex metadata"
-              exit 1
-            fi
-          done
-
-          for app in http_fetch http_web_socket http_event_source; do
-            expected='{:http_runtime, "~> '"${VERSION}"'", in_umbrella: true, hex: :http_runtime}'
-            if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
-              echo "::error::apps/${app}/mix.exs does not depend on http_runtime ${VERSION} with umbrella + Hex metadata"
-              exit 1
-            fi
-          done
-
-  compile:
-    name: Compile
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
-
-      - name: Restore dependencies cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
-
-      - name: Install dependencies
-        run: mix deps.get
-
-      - name: Compile with warnings as errors
-        run: mix compile --warnings-as-errors
-
-      - name: Compile test environment with warnings as errors
-        env:
-          MIX_ENV: test
-        run: |
-          mix deps.get
-          mix compile --warnings-as-errors
-
-  format:
-    name: Format Check
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
-
-      - name: Restore dependencies cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
-
-      - name: Install dependencies
-        run: mix deps.get
-
-      - name: Check code formatting
-        run: mix format --check-formatted
-
-  credo:
-    name: Credo
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
-
-      - name: Restore dependencies cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
-
-      - name: Install dependencies
-        run: mix deps.get
-
-      - name: Run Credo
-        run: mix credo
-
-  dialyzer:
-    name: Dialyzer
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
-
-      - name: Restore dependencies cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
-
-      - name: Install dependencies
-        run: mix deps.get
-
-      - name: Restore Dialyzer PLT cache
-        uses: actions/cache@v4
-        with:
-          path: apps/http_fetch/priv/plts
-          key: ${{ runner.os }}-dialyzer-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-dialyzer-
-
-      - name: Run Dialyzer
-        run: mix dialyzer --format github
-
-  package:
-    name: Package ${{ matrix.app }}
-    runs-on: ubuntu-latest
-
+  checks:
+    name: Static checks and package (${{ matrix.app }})
+    needs: changes
+    if: needs.changes.outputs.has_changes == 'true'
     strategy:
       fail-fast: false
       matrix:
-        app:
-          - http_core
-          - http_runtime
-          - http_fetch
-          - http_web_socket
-          - http_event_source
-          - http_web_transport
-
+        app: ${{ fromJSON(needs.changes.outputs.apps) }}
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+      HTTP_FETCH_CI_APP: ${{ matrix.app }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
         with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
-
-      - name: Restore dependencies cache
-        uses: actions/cache@v4
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: actions/cache@v4
         with:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
-
+            apps/http_fetch/priv/plts
+          key: ci-${{ matrix.app }}-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs', format('apps/{0}/mix.exs', matrix.app)) }}
       - name: Install dependencies
-        run: mix deps.get
+        run: mix deps.get --check-locked
+      - name: Check root and app formatting
+        run: |
+          mix format --check-formatted mix.exs .formatter.exs config/config.exs
+          (cd "apps/${HTTP_FETCH_CI_APP}" && mix format --check-formatted)
+      - name: Check imported harness formatting
+        if: matrix.app == 'ex_ssl' || matrix.app == 'elixir_quic' || matrix.app == 'elixir_quic_http3'
+        run: |
+          case "$HTTP_FETCH_CI_APP" in
+            ex_ssl) (cd apps/ex_ssl/e2e && mix format --check-formatted) ;;
+            elixir_quic) mix format --check-formatted scripts/phase1/interop.exs scripts/phase1/release_check.exs scripts/datagram/interop.exs ;;
+            elixir_quic_http3) mix format --check-formatted apps/elixir_quic_http3/e2e/transport_smoke.exs ;;
+          esac
+      - name: Compile selected closure
+        run: mix compile --warnings-as-errors
+      - name: Check selected app with Credo
+        run: mix credo --files-included "apps/${HTTP_FETCH_CI_APP}/**/*.{ex,exs}"
+      - name: Check selected closure with Dialyzer
+        run: mix dialyzer --format github
+      - name: Build selected portable Hex package
+        run: |
+          version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' mix.exs)
+          python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives" --package "$HTTP_FETCH_CI_APP"
+      - name: Check automation regressions
+        if: matrix.app == 'ex_ssl'
+        run: |
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+          python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
+      - name: Check git diff
+        run: git diff --check
 
-      - name: Build package
-        working-directory: apps/${{ matrix.app }}
-        run: mix hex.build --unpack -o /tmp/${{ matrix.app }}_pkg
-
-  external-consumer:
-    name: External consumer smoke
+  candidate-consumer:
+    name: Candidate Hex consumers and TLS smoke
+    needs: changes
+    if: needs.changes.outputs.full_gate == 'true'
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
         with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
-
-      - name: Install dependencies
+          elixir-version: '1.18'
+          otp-version: '28'
+      - name: Build and validate all candidate archives
+        run: |
+          version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' mix.exs)
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
+          elixir scripts/release/archives.exs "$version" "$RUNNER_TEMP/archives"
+      - name: Resolve all nine and run external TLS and HTTP/2 smoke
+        run: |
+          python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
+          python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode external
+      - name: Verify isolated runtime and real HTTP/2 traffic
         env:
-          MIX_ENV: prod
-        run: mix deps.get
-
-      - name: Run external consumer smoke test
-        run: bash scripts/external_consumer_smoke.sh
+          HTTP_FETCH_ARCHIVE_DIR: ${{ runner.temp }}/archives
+          HTTP_FETCH_RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+        run: |
+          python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt
+          python3 scripts/http_runtime_package_traffic_gate.py
+      - name: Run all candidate TLS feature groups
+        env:
+          EX_SSL_DEP_MODE: candidate
+          EX_SSL_CANDIDATE_ARCHIVE_DIR: ${{ runner.temp }}/archives
+          EX_SSL_RESULTS_DIR: ${{ runner.temp }}/ex-ssl-candidate-results
+          HTTP_FETCH_RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+        run: bash scripts/ex_ssl_source_smoke.sh
+      - name: Preserve candidate TLS feature report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-ex-ssl-feature-report
+          path: ${{ runner.temp }}/ex-ssl-candidate-results/*.txt
+          if-no-files-found: warn
 
   published-ex-ssl-feature-gate:
-    name: Published ex_ssl feature gate (Elixir 1.18 / OTP 28)
+    name: Historical published ex_ssl 0.7.2 compatibility
+    needs: changes
+    if: needs.changes.outputs.historical_tls == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124
+      - uses: actions/checkout@v4
         with:
-          elixir-version: "1.18"
-          otp-version: "28"
-
+          ref: v0.16.1
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
       - name: Provision independent TLS peers
         run: sudo apt-get update && sudo apt-get install --yes python3 openssl
-
-      - name: Prepare root test dependencies
+      - name: Prepare historical test dependencies
         env:
           MIX_ENV: test
         run: |
           mix deps.get --check-locked
           mix compile --warnings-as-errors
-
-      - name: Run full published feature consumer gate
+      - name: Run historical published feature consumer gate
         env:
           EX_SSL_RESULTS_DIR: ${{ runner.temp }}/ex-ssl-feature-results
         run: bash scripts/ex_ssl_published_feature_gate.sh
-
-      - name: Preserve HTTP/2 TLS lifecycle regressions
+      - name: Preserve historical HTTP/2 TLS lifecycle regressions
         env:
           MIX_ENV: test
         run: mix test apps/http_fetch/test/http/socket_client_http2_test.exs --seed 36
-
-      - name: Upload sanitized feature-gate report
+      - name: Upload feature-gate report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@v4
         with:
           name: published-ex-ssl-feature-gate-report
           path: ${{ runner.temp }}/ex-ssl-feature-results/*.txt

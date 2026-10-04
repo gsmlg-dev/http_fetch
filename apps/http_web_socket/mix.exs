@@ -18,7 +18,7 @@ defmodule HttpWebSocket.MixProject do
       aliases: aliases(),
       description: "A browser-like WebSocket client API for Elixir",
       package: [
-        files: ["lib", "mix.exs"],
+        files: ["lib", "mix.exs", "LICENSE"],
         maintainers: ["Jonathan Gao"],
         licenses: ["MIT"],
         links: %{"GitHub" => @source_url}
@@ -49,8 +49,8 @@ defmodule HttpWebSocket.MixProject do
 
   defp deps do
     [
-      {:http_core, "~> 0.16.1", in_umbrella: true, hex: :http_core},
-      {:http_runtime, "~> 0.16.1", in_umbrella: true, hex: :http_runtime},
+      {:http_core, "== 0.16.1", in_umbrella: true, hex: :http_core},
+      {:http_runtime, "== 0.16.1", in_umbrella: true, hex: :http_runtime},
       {:telemetry, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]

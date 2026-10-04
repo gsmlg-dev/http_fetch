@@ -17,8 +17,8 @@ if [[ "${EX_SSL_GATE_IN_TIMEOUT:-}" != 1 ]]; then
   exec env EX_SSL_GATE_IN_TIMEOUT=1 timeout --preserve-status "$EX_SSL_GATE_TIMEOUT_SECONDS" "$0" "$@"
 fi
 
-if [[ "$EX_SSL_DEP_MODE" != source && "$EX_SSL_DEP_MODE" != published ]]; then
-  echo "EX_SSL_DEP_MODE must be source or published" >&2
+if [[ "$EX_SSL_DEP_MODE" != source && "$EX_SSL_DEP_MODE" != published && "$EX_SSL_DEP_MODE" != candidate ]]; then
+  echo "EX_SSL_DEP_MODE must be source, published, or candidate" >&2
   exit 2
 fi
 if (( $# != 0 )); then
@@ -103,6 +103,12 @@ else
 fi
 
 export EX_SSL_DEP_MODE EX_SSL_FIXTURE_DIR="$fixture_dir"
+if [[ "$EX_SSL_DEP_MODE" == candidate ]]; then
+  : "${EX_SSL_CANDIDATE_ARCHIVE_DIR:?Set EX_SSL_CANDIDATE_ARCHIVE_DIR to the nine candidate Hex archives}"
+  version=${HTTP_FETCH_RELEASE_VERSION:-$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' "$repo_root/mix.exs")}
+  python3 "$repo_root/scripts/release/consumer_gate.py" "$version" "$EX_SSL_CANDIDATE_ARCHIVE_DIR" --mode feature
+  exit 0
+fi
 export HTTP_FETCH_PACKAGE_DIR="$work_dir/packages"
 mkdir -p "$HTTP_FETCH_PACKAGE_DIR" "$consumer_dir/test" "$EX_SSL_RESULTS_DIR" "$group_log_dir"
 

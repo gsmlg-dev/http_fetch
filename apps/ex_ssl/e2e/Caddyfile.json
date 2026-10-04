@@ -1,0 +1,45 @@
+{
+  "admin": {"disabled": true},
+  "apps": {
+    "ja3.config": {"sort_extensions": false},
+    "ja3.cache": {},
+    "tls": {
+      "certificates": {
+        "load_files": [
+          {
+            "certificate": "/etc/caddy/e2e/server.pem",
+            "key": "/etc/caddy/e2e/server-key.pem"
+          }
+        ]
+      }
+    },
+    "http": {
+      "servers": {
+        "e2e": {
+          "listen": ["0.0.0.0:8443"],
+          "protocols": ["h1"],
+          "listener_wrappers": [
+            {"wrapper": "ja3"},
+            {"wrapper": "ja4"},
+            {"wrapper": "tls"}
+          ],
+          "tls_connection_policies": [{}],
+          "routes": [
+            {
+              "match": [{"path": ["/fingerprint"]}],
+              "handle": [
+                {"handler": "ja3"},
+                {"handler": "ja4"},
+                {
+                  "handler": "static_response",
+                  "headers": {"Content-Type": ["text/plain; charset=utf-8"]},
+                  "body": "control=ex_ssl-caddy-e2e\nja3={http.request.header.JA3}\nja4={http.request.header.X-JA4}\n"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}

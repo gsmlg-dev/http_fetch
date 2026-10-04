@@ -20,7 +20,7 @@ defmodule HttpFetch.MixProject do
       description:
         "A browser-like HTTP fetch API for Elixir using Erlang's built-in socket modules",
       package: [
-        files: ["lib", "mix.exs"],
+        files: ["lib", "mix.exs", "LICENSE", "README.md", "CHANGELOG.md"],
         maintainers: ["Jonathan Gao"],
         licenses: ["MIT"],
         links: %{"GitHub" => @source_url}
@@ -57,8 +57,8 @@ defmodule HttpFetch.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:http_core, "~> 0.16.1", in_umbrella: true, hex: :http_core},
-      {:http_runtime, "~> 0.16.1", in_umbrella: true, hex: :http_runtime},
+      {:http_core, "== 0.16.1", in_umbrella: true, hex: :http_core},
+      {:http_runtime, "== 0.16.1", in_umbrella: true, hex: :http_runtime},
       {:telemetry, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
       {:briefly, "~> 0.4", only: :test},

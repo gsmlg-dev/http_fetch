@@ -3,279 +3,237 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      release-version:
+      version:
+        description: Shared nine-package version (stable major.minor.patch)
         required: true
-        description: "Release version, e.g. 1.2.3"
-        default: "0.1.0"
         type: string
-      git-ref:
+      git_ref:
+        description: Branch to release from
         required: true
-        description: "Branch to release from"
-        default: "main"
+        default: main
         type: string
-
-concurrency:
-  group: ${{ github.workflow }}-${{ inputs['release-version'] }}
-  cancel-in-progress: false
+      publish_docs:
+        description: Publish package documentation after all packages are verified
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
 
-env:
-  ELIXIR_VERSION: "1.18"
-  OTP_VERSION: "28"
-  RELEASE_APPS: "http_core http_runtime http_fetch http_web_socket http_event_source http_web_transport"
-  HEX_DEP_APPS: "http_runtime http_fetch http_web_socket http_event_source http_web_transport"
+concurrency:
+  group: release-all-http-fetch-packages
+  cancel-in-progress: false
 
 jobs:
   release:
-    name: Publish all packages to hex.pm
+    name: Validate and release all nine packages
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
-      RELEASE_VERSION: ${{ inputs['release-version'] }}
-      RELEASE_BRANCH: ${{ inputs['git-ref'] }}
-
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_BRANCH: ${{ inputs.git_ref }}
+      RELEASE_APPS: ex_ssl elixir_quic http_core http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs['git-ref'] }}
+          ref: ${{ inputs.git_ref }}
           fetch-depth: 0
 
-      - name: Validate release branch
+      - name: Validate immutable tag and branch
+        id: revision
         run: |
           set -euo pipefail
-          if ! git ls-remote --heads origin "${RELEASE_BRANCH}" | grep -q "refs/heads/${RELEASE_BRANCH}$"; then
-            echo "::error::release git-ref must be a branch so the version bump can be pushed"
-            exit 1
+          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          git check-ref-format --branch "$RELEASE_BRANCH"
+          test "$(git branch --show-current)" = "$RELEASE_BRANCH"
+          if git rev-parse --verify --quiet "refs/tags/v$RELEASE_VERSION"; then
+            git merge-base --is-ancestor "refs/tags/v$RELEASE_VERSION" HEAD
+            if ! git cat-file -e "refs/tags/v$RELEASE_VERSION:scripts/release/consumer_gate.py" 2>/dev/null; then
+              echo "Existing tag lacks the nine-package release contract; it cannot be reused." >&2
+              exit 1
+            fi
+            git checkout --detach "refs/tags/v$RELEASE_VERSION"
+            echo "existing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "existing=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          elixir-version: '1.18'
+          otp-version: '28'
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: '1.22'
 
-      - name: Restore Elixir dependencies cache
-        uses: actions/cache@v4
+      - uses: astral-sh/setup-uv@v5
         with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-mix-
+          python-version: '3.12'
 
-      - name: Restore Go module cache
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('apps/http_fetch/priv/test_server/go.sum', 'apps/http_fetch/priv/test_server/go.mod') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Set release version
+      - name: Prepare or validate versions and exact internal graph
         run: |
-          set -euo pipefail
-          elixir -e '
-          version = System.fetch_env!("RELEASE_VERSION")
-          hex_dep_apps = System.fetch_env!("HEX_DEP_APPS") |> String.split()
-
-          for mix_file <- ["mix.exs" | Path.wildcard("apps/*/mix.exs")] do
-            body = File.read!(mix_file)
-            body = Regex.replace(~r/@version "[^"]+"/, body, ~s(@version "#{version}"))
-
-            File.write!(mix_file, body)
-          end
-
-          for app <- hex_dep_apps do
-            path = "apps/#{app}/mix.exs"
-
-            body = File.read!(path)
-
-            body =
-              Regex.replace(
-                ~r/\{:(http_core|http_runtime), "~> [^"]+", in_umbrella: true, hex: :(?:http_core|http_runtime)\}/,
-                body,
-                fn _, app -> "{:#{app}, \"~> #{version}\", in_umbrella: true, hex: :#{app}}" end
-              )
-
-            File.write!(path, body)
-          end
-          '
-
-      - name: Validate shared release version
-        run: |
-          set -euo pipefail
-          for mix_file in mix.exs apps/*/mix.exs; do
-            app_version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' "${mix_file}")
-            if [ "${app_version}" != "${RELEASE_VERSION}" ]; then
-              echo "::error::${mix_file} version ${app_version} does not match requested release ${RELEASE_VERSION}"
-              exit 1
-            fi
-          done
-
-          for app in ${HEX_DEP_APPS}; do
-            expected="{:http_core, \"~> ${RELEASE_VERSION}\", in_umbrella: true, hex: :http_core}"
-            if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
-              echo "::error::apps/${app}/mix.exs does not use local http_core ${RELEASE_VERSION} before testing"
-              exit 1
-            fi
-          done
-
-          for app in http_fetch http_web_socket http_event_source; do
-            expected="{:http_runtime, \"~> ${RELEASE_VERSION}\", in_umbrella: true, hex: :http_runtime}"
-            if ! grep -Fq "${expected}" "apps/${app}/mix.exs"; then
-              echo "::error::apps/${app}/mix.exs does not use local http_runtime ${RELEASE_VERSION} before testing"
-              exit 1
-            fi
-          done
-
-          if ! grep -q "^## \\[${RELEASE_VERSION}\\]" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md is missing section ${RELEASE_VERSION}"
-            exit 1
+          if [ "${{ steps.revision.outputs.existing }}" = true ]; then
+            elixir scripts/release/versions.exs validate "$RELEASE_VERSION"
+          else
+            elixir scripts/release/versions.exs prepare "$RELEASE_VERSION"
           fi
 
-      - name: Install dependencies
-        run: mix deps.get
+      - name: Check release changelog section
+        run: |
+          grep -Fq "## [$RELEASE_VERSION]" CHANGELOG.md || {
+            echo "CHANGELOG.md is missing section $RELEASE_VERSION" >&2
+            exit 1
+          }
 
-      - name: Check source code format
-        run: mix format --check-formatted
+      - name: Install locked dependencies
+        run: |
+          mix deps.get --check-locked
+          MIX_ENV=test mix deps.get --check-locked
 
-      - name: Compile with warnings as errors
+      - name: Compile all applications in default environment
         run: mix compile --warnings-as-errors
 
-      - name: Run unit tests
-        run: mix test
+      - name: Validate all source and automation
+        env:
+          MIX_ENV: test
+        run: |
+          unset HTTP_FETCH_CI_APP
+          mix format --check-formatted
+          mix format --check-formatted scripts/phase1/interop.exs scripts/phase1/release_check.exs scripts/datagram/interop.exs
+          mix format --check-formatted scripts/release/versions.exs scripts/release/archives.exs
+          mix compile --warnings-as-errors
+          mix test --seed 28092026
+          mix test apps/ex_ssl/test --include integration --seed 743209
+          mix credo
+          mix dialyzer --format github
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+          python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
+          git diff --check
+          git diff --exit-code -- mix.lock
 
-      - name: Run Credo
-        run: mix credo
-
-      - name: Run Dialyzer
-        run: mix dialyzer --format github
-
-      - name: Build the e2e test server
-        working-directory: apps/http_fetch/priv/test_server
-        run: go build -o ../test_server/server .
-
-      - name: Start the e2e test server
-        id: server
+      - name: Build and run Go HTTP E2E server
         run: |
           set -euo pipefail
+          (cd apps/http_fetch/priv/test_server && go build -o ../test_server/server .)
           ./apps/http_fetch/priv/test_server/server > .e2e_port &
-          SERVER_PID=$!
-          echo "SERVER_PID=${SERVER_PID}" >> "$GITHUB_OUTPUT"
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; rm -f .e2e_port' EXIT
           for i in {1..50}; do
             if [ -s .e2e_port ]; then
-              PORT=$(grep -oE '[0-9]+' .e2e_port | head -n1)
-              if curl -fs "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
-                echo "E2E_BASE_URL=http://127.0.0.1:${PORT}" >> "$GITHUB_ENV"
-                echo "Test server ready on port ${PORT}"
+              port=$(grep -oE '[0-9]+' .e2e_port | head -n1)
+              if curl -fs "http://127.0.0.1:$port/" >/dev/null 2>&1; then
+                E2E_BASE_URL="http://127.0.0.1:$port" MIX_ENV=test mix test.e2e
                 exit 0
               fi
             fi
             sleep 0.2
           done
-          echo "::error::E2E test server failed to start within 10s"
-          kill "${SERVER_PID}" 2>/dev/null || true
           exit 1
 
-      - name: Run E2E test suite
+      - name: Run all local imported transport gates
         env:
-          E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
-        run: mix test.e2e
-
-      - name: Stop the e2e test server
-        if: always()
+          MIX_ENV: test
         run: |
-          if [ -n "${{ steps.server.outputs.SERVER_PID }}" ]; then
-            kill "${{ steps.server.outputs.SERVER_PID }}" 2>/dev/null || true
-          fi
-          rm -f .e2e_port
+          mix run apps/elixir_quic_http3/e2e/transport_smoke.exs
+          mix run scripts/interop/run.exs client "$RUNNER_TEMP/quic-client"
+          mix run scripts/interop/run.exs server "$RUNNER_TEMP/quic-server"
+          mix run scripts/interop/stream_interop.exs
+          mix run scripts/datagram/interop.exs client
+          mix run scripts/datagram/interop.exs server
 
-      - name: Build docs
+      - name: Verify QUIC reliable streams under impairment
+        env:
+          MIX_ENV: test
+          PHASE1_INTEROP_RUN: '1'
+          PHASE1_SCENARIO: impaired
+        run: |
+          mix run scripts/phase1/interop.exs client
+          mix run scripts/phase1/interop.exs server
+          PHASE1_EXTERNAL=1 mix run scripts/phase1/interop.exs server
+
+      - name: Build pinned Caddy TLS fingerprint fixture
+        run: docker build --tag ex-ssl-e2e:local apps/ex_ssl/e2e
+
+      - name: Verify Caddy JA3 and JA4 observations
+        env:
+          MIX_BUILD_PATH: ${{ runner.temp }}/ex-ssl-e2e-harness
+        run: |
+          set -euo pipefail
+          docker run -d --name ex-ssl-e2e --publish 127.0.0.1:8443:8443 ex-ssl-e2e:local
+          trap 'docker logs ex-ssl-e2e || true; docker rm -f ex-ssl-e2e || true' EXIT
+          for i in {1..30}; do
+            if nc -z 127.0.0.1 8443; then break; fi
+            sleep 1
+          done
+          nc -z 127.0.0.1 8443
+          (cd apps/ex_ssl/e2e && mix deps.get && mix compile --warnings-as-errors && mix test)
+
+      - name: Run pinned aioquic comparison
+        run: |
+          uv run --python 3.12 --with aioquic==1.2.0 python scripts/interop/test_peer.py
+          uv venv --clear "$RUNNER_TEMP/ex-ssl-quic-py" --python 3.12
+          uv pip install --python "$RUNNER_TEMP/ex-ssl-quic-py/bin/python" -r apps/ex_ssl/e2e/quic_tls/requirements.txt
+          QUIC_TLS_PYTHON="$RUNNER_TEMP/ex-ssl-quic-py/bin/python" MIX_ENV=test mix run apps/ex_ssl/e2e/quic_tls/run.exs
+
+      - name: Build documentation
         run: mix docs
 
-      - name: Build package smoke tests
+      - name: Build, inspect, and independently consume all nine archives
         run: |
-          set -euo pipefail
-          for app in ${RELEASE_APPS}; do
-            (cd "apps/${app}" && mix hex.build --unpack -o "/tmp/${app}_pkg")
-          done
+          python3 scripts/release/stage.py build "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
+          elixir scripts/release/archives.exs "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
+          python3 scripts/release/archive_audit.py "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
+          python3 scripts/release/stage.py verify "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
+          python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
+          python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode external
 
-      - name: Commit version bump
+      - name: Verify real HTTP/2 package traffic and TLS feature groups
+        env:
+          HTTP_FETCH_ARCHIVE_DIR: ${{ runner.temp }}/archives
+          HTTP_FETCH_RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+          EX_SSL_DEP_MODE: candidate
+          EX_SSL_CANDIDATE_ARCHIVE_DIR: ${{ runner.temp }}/archives
         run: |
-          set -euo pipefail
+          python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt
+          python3 scripts/http_runtime_package_traffic_gate.py
+          bash scripts/ex_ssl_source_smoke.sh
+
+      - name: Preflight Hex and GitHub immutability before any remote write
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/release/hex_packages.py preflight "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
+          python3 scripts/release/github_assets.py preflight "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
+
+      - name: Check Hex publication credentials
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: |
+          test -n "$HEX_API_KEY" || { echo "HEX_API_KEY is required to publish all nine packages" >&2; exit 1; }
+
+      - name: Commit version and create immutable tag
+        if: steps.revision.outputs.existing == 'false'
+        run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add mix.exs apps/*/mix.exs
-          if git diff --cached --quiet; then
-            echo "Release version already committed"
-          else
-            git commit -m "chore(release): v${RELEASE_VERSION}"
-          fi
+          if ! git diff --cached --quiet; then git commit -m "chore(release): v$RELEASE_VERSION"; fi
+          git tag "v$RELEASE_VERSION"
+          git push --atomic origin "HEAD:refs/heads/$RELEASE_BRANCH" "refs/tags/v$RELEASE_VERSION"
 
-      - name: Replace umbrella deps with Hex deps for publishing
-        run: |
-          set -euo pipefail
-          elixir -e '
-          version = System.fetch_env!("RELEASE_VERSION")
-          hex_dep_apps = System.fetch_env!("HEX_DEP_APPS") |> String.split()
+      - name: Publish and verify packages in dependency order
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: python3 scripts/release/hex_packages.py publish "$RELEASE_VERSION" "$RUNNER_TEMP/archives" "$RUNNER_TEMP/stage"
 
-          for app <- hex_dep_apps do
-            path = "apps/#{app}/mix.exs"
+      - name: Attach and verify all immutable GitHub release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release/github_assets.py complete "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
 
-            body = File.read!(path)
-
-            body =
-              Regex.replace(
-                ~r/\{:(http_core|http_runtime), "~> [^"]+", in_umbrella: true, hex: :(?:http_core|http_runtime)\}/,
-                body,
-                fn _, app -> "{:#{app}, \"~> #{version}\"}" end
-              )
-
-            File.write!(path, body)
-          end
-          '
-          if grep -R "in_umbrella: true" apps/*/mix.exs; then
-            echo "::error::Found in_umbrella deps after preparing Hex publish metadata"
-            exit 1
-          fi
-
-      - name: Publish packages to hex.pm
-        run: |
-          set -euo pipefail
-          for app in ${RELEASE_APPS}; do
-            if mix hex.info "${app}" "${RELEASE_VERSION}" >/dev/null 2>&1; then
-              echo "${app} ${RELEASE_VERSION} already exists on hex.pm; skipping"
-            else
-              (cd "apps/${app}" && mix deps.get && mix hex.publish --yes)
-            fi
-          done
-
-      - name: Push version bump and tag
-        run: |
-          set -euo pipefail
-          tag="v${RELEASE_VERSION}"
-          if git rev-parse "${tag}" >/dev/null 2>&1; then
-            echo "::error::Tag ${tag} already exists locally"
-            exit 1
-          fi
-          git tag "${tag}"
-          git push origin "HEAD:${RELEASE_BRANCH}"
-          git push origin "refs/tags/${tag}"
-
-      - name: Create GitHub Release
-        run: |
-          gh release create "v${RELEASE_VERSION}" \
-            --title "v${RELEASE_VERSION}" \
-            --generate-notes
+      - name: Publish package documentation separately
+        if: inputs.publish_docs
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: python3 scripts/release/docs.py "$RELEASE_VERSION" "$RUNNER_TEMP/stage" --publish

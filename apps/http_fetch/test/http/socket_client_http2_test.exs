@@ -2301,10 +2301,17 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   defp assert_tls_buffered_after_peer_close(tls_pid, expected_size) do
-    # Revalidated closed/size/active against published ex_ssl 0.7.2. This existing TCP
-    # regression probe is unrelated to the public-only QUIC adapter.
-    assert Application.spec(:ex_ssl, :vsn) == ~c"0.7.2",
-           "revalidate this private buffer probe before testing another ex_ssl version"
+    # The imported connection source matches the reviewed source used to
+    # validate this closed/size/active probe. Revalidate on any source change.
+    source = SSL.Connection.module_info(:compile)[:source] |> List.to_string()
+    assert File.regular?(source), "connection source is unavailable for private buffer probe"
+
+    assert :crypto.hash(:sha256, File.read!(source)) |> Base.encode16(case: :lower) ==
+             "22053e2d36e12ee64a5d9f637e40487fe69920b9a2aa690b23d43f53e76b4ffe",
+           "revalidate this private buffer probe after changing SSL.Connection source"
+
+    assert Application.spec(:ex_ssl, :vsn) == Application.spec(:http_fetch, :vsn),
+           "ex_ssl and http_fetch versions must match"
 
     assert_tls_buffered_after_peer_close(
       tls_pid,

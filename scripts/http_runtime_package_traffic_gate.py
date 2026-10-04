@@ -67,7 +67,7 @@ def main():
         closed = [record for record in records if record.get('kind') == 'wire_complete']
         assert len(closed) == 2 and [record['messages'] for record in closed] == [1, 2]
         print(json.dumps(dict(result='PASS', completed=True, gate='isolated_package_http2_traffic',
-                              packages=6, consumers=4, connections=4, mixed_shared_connection=True)), flush=True)
+                              packages=9, consumers=4, connections=4, mixed_shared_connection=True)), flush=True)
     finally:
         if consumer and consumer.poll() is None:
             os.killpg(consumer.pid, signal.SIGTERM)

@@ -1,11 +1,20 @@
-# TCP TLS consumer contract
+# TLS consumer contract
 
-Current dependency: released Hex ex_ssl **0.7.2**, validated from consumer
-baseline `b4ad2f5` (the completed 0.13.0 release metadata). OTP `:ssl` stays the
-default; ex_ssl is explicitly selected. The historical phase records below
-retain their original versions and counts. Current commands and evidence are in
-[consumer validation](ex-ssl-consumer-validation.md). This inventory does not
-claim full OTP compatibility or completed independent human security review.
+The current umbrella source provides `ex_ssl` (`:ex_ssl`, public facade `SSL`)
+from `gsmlg-dev/ex_quic@14974913390e12d03a78a2903d18e55a04fa89d6`. Its
+historical upstream TLS source identity is
+`gsmlg-dev/ex_ssl@fb47051355c9d0a29caee046fa060a745ad0ce5b` (`v0.7.2`); see
+[migration provenance](migration-provenance.md) and the imported
+[QUIC/TLS contract](quic/ex-ssl-quic-contract.md). In the local candidate,
+`elixir_quic` depends on `ex_ssl`, and `http_core` depends on both with exact
+`== 0.16.1` umbrella/Hex metadata. Those new package versions are not published.
+
+OTP `:ssl` remains the default for TCP. ex_ssl is explicitly selected for the
+existing TCP clients; QUIC consumes public `SSL.QUIC` APIs independently of
+that backend setting. The historical phase records below retain their original
+versions and counts. Current migration checks are tracked in
+[migration validation](migration-validation.md). This inventory does not claim
+full OTP compatibility or completed independent human security review.
 
 | Requirement | Status | Production boundary | Executable coverage |
 | --- | --- | --- | --- |
@@ -28,7 +37,10 @@ claim full OTP compatibility or completed independent human security review.
 
 Only `HTTP.Transport.SSL` calls OTP `:ssl` in production. TLS listen, accept,
 handshake, and peer traffic in test support are reference-server operations.
-QUIC calls in HTTP/3/WebTransport are outside this TCP TLS contract.
+QUIC calls in HTTP/3/WebTransport are outside this TCP adapter contract. The
+imported QUIC stack uses ex_ssl's separate TLS API; its current HTTP/3 and
+WebTransport selectors remain unsupported. See the
+[QUIC consumer contract](ex-quic-consumer-contract.md).
 
 Public `ssl:` and `socket_opts:` containers remain backend-specific. The OTP
 adapter preserves its existing option behavior. The ex_ssl adapter validates
@@ -198,5 +210,7 @@ Peer verification remains mandatory. Resumption is disabled unless requested;
 TLS 1.2/mixed-version and mTLS resumption combinations fail explicitly. There is
 no 0-RTT, persistent-ticket storage, connection pool, backend fallback, uncertain
 byte replay or automatic WebSocket reconnect. HTTP/3 and WebTransport retain
-QUIC TLS. Independent human security review remains incomplete, and no performance
-or broad production-readiness claim follows from these checks.
+the separate QUIC TLS path through `SSL.QUIC`; a TCP backend selection does not
+replace it. The imported `QuicHttp3` capabilities remain false for HTTP/3,
+QPACK, and WebTransport. Independent human security review remains incomplete,
+and no performance or broad production-readiness claim follows from these checks.

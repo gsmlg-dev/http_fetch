@@ -1,0 +1,226 @@
+{
+  "external": false,
+  "seed": 28092026,
+  "cleanup": true,
+  "role": "client",
+  "alpn": "phase1-streams",
+  "routes_after_cleanup": 0,
+  "passed": true,
+  "peer_events": [
+    {
+      "event": "listening",
+      "at_ns": 2167848305261026,
+      "port": 45379,
+      "alpn": "phase1-streams"
+    },
+    {
+      "event": "handshake",
+      "at_ns": 2167848443944393,
+      "alpn": "phase1-streams"
+    },
+    {
+      "event": "session_ticket_sent",
+      "at_ns": 2167848444125494,
+      "bytes": 64,
+      "lifetime": 86400
+    },
+    {
+      "event": "impairment",
+      "at_ns": 2167848477008347,
+      "action": "drop",
+      "direction": "send",
+      "packet_bytes": 1200
+    },
+    {
+      "event": "matrix_sent",
+      "at_ns": 2167848477055000,
+      "bidi": 4,
+      "uni": 3,
+      "write_bytes": 16384,
+      "cumulative_bidi": 1048576,
+      "cancelled": 17
+    },
+    {
+      "event": "impairment",
+      "at_ns": 2167848477398628,
+      "action": "drop",
+      "direction": "receive",
+      "packet_bytes": 1350
+    },
+    {
+      "event": "impairment",
+      "at_ns": 2167848477528193,
+      "action": "duplicate",
+      "direction": "send",
+      "packet_bytes": 1200
+    },
+    {
+      "event": "impairment",
+      "at_ns": 2167848477591306,
+      "action": "reorder_hold",
+      "direction": "receive",
+      "packet_bytes": 1350
+    },
+    {
+      "event": "impairment",
+      "at_ns": 2167848477618481,
+      "action": "reorder_release"
+    },
+    {
+      "event": "impairment",
+      "at_ns": 2167848477794364,
+      "action": "reorder_hold",
+      "direction": "send",
+      "packet_bytes": 1200
+    },
+    {
+      "event": "impairment",
+      "at_ns": 2167848477811143,
+      "action": "reorder_release"
+    },
+    {
+      "event": "impairment",
+      "at_ns": 2167848477952529,
+      "action": "duplicate",
+      "direction": "receive",
+      "packet_bytes": 1350
+    },
+    {
+      "event": "uni_fin_barrier",
+      "at_ns": 2167848492185970,
+      "local_uni": [
+        3,
+        7,
+        11
+      ],
+      "remote_uni": [
+        2,
+        6,
+        10
+      ]
+    },
+    {
+      "event": "stream_fin",
+      "at_ns": 2167848493727580,
+      "stream_id": 2,
+      "bytes": 5
+    },
+    {
+      "event": "stream_fin",
+      "at_ns": 2167848494160083,
+      "stream_id": 6,
+      "bytes": 5
+    },
+    {
+      "event": "stream_fin",
+      "at_ns": 2167848494334680,
+      "stream_id": 10,
+      "bytes": 6
+    },
+    {
+      "event": "stream_reset",
+      "at_ns": 2167848519696186,
+      "stream_id": 16,
+      "code": 81
+    },
+    {
+      "event": "stream_fin",
+      "at_ns": 2167849161702382,
+      "stream_id": 8,
+      "bytes": 262144
+    },
+    {
+      "event": "stream_fin",
+      "at_ns": 2167849169152893,
+      "stream_id": 12,
+      "bytes": 262144
+    },
+    {
+      "event": "stream_fin",
+      "at_ns": 2167849180585927,
+      "stream_id": 0,
+      "bytes": 262144
+    },
+    {
+      "event": "stream_fin",
+      "at_ns": 2167849209759624,
+      "stream_id": 4,
+      "bytes": 262144
+    },
+    {
+      "event": "stream_fin",
+      "at_ns": 2167855904442683,
+      "stream_id": 1,
+      "bytes": 262144
+    },
+    {
+      "event": "stream_fin",
+      "at_ns": 2167855905956857,
+      "stream_id": 5,
+      "bytes": 262144
+    },
+    {
+      "event": "stream_fin",
+      "at_ns": 2167855907387912,
+      "stream_id": 9,
+      "bytes": 262144
+    },
+    {
+      "event": "stream_fin",
+      "at_ns": 2167855908981163,
+      "stream_id": 13,
+      "bytes": 262144
+    },
+    {
+      "event": "summary",
+      "at_ns": 2167855936273088,
+      "role": "peer",
+      "passed": true,
+      "bidi": 8,
+      "uni": 3,
+      "checksum": "57b8f65a0b5d53fa7d84474193399454cf001a3699c65c451de5f0f306ddb39a",
+      "highwater": 2097168,
+      "cancelled": true,
+      "resets": 1,
+      "impairment": {
+        "drop": 2,
+        "duplicate": 2,
+        "reorder": 2,
+        "reorder_timeout": 0
+      }
+    }
+  ],
+  "highwaters": {
+    "mailbox": 10,
+    "connection_mailbox": 0,
+    "application_crypto_bytes": 89,
+    "ready_bytes": 16384,
+    "receive_buffered_bytes": 2301,
+    "queued_bytes": 52084,
+    "operations": 256,
+    "event_count": 19,
+    "recovery_packets": 4096,
+    "stream_records": 16,
+    "pending_datagrams": 18,
+    "in_flight_sends": 1,
+    "io_queue_entries": 1,
+    "io_queue_bytes": 1350,
+    "operation_result_bytes": 131107,
+    "tracked_references": 261,
+    "mailbox_messages": 1
+  },
+  "reset_seen": true,
+  "reads": 3113,
+  "ticket_parsed": true,
+  "transfer_ms": 7484,
+  "scenario": "impaired",
+  "local_bidi_bytes": 1048576,
+  "remote_bidi_bytes": 1048576,
+  "remote_uni_streams": 3,
+  "cancelled_after_admission": true,
+  "bidi_started_before_cancel": 4,
+  "command": "PHASE1_INTEROP_RUN=1 PHASE1_SCENARIO=impaired mix run scripts/phase1/interop.exs client",
+  "exit_status": 0,
+  "independent_peer": "aioquic 1.2.0",
+  "runtime": "Elixir 1.18.5 / OTP 28.5.0.5"
+}

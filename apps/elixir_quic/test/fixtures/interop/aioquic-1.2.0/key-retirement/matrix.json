@@ -1,0 +1,159 @@
+{
+  "source_parent": "34f071e0c5a86d6fc0e224214d36282aebe258ae",
+  "rows": [
+    {
+      "role": "client",
+      "scenario": "baseline",
+      "command": "INTEROP_SCENARIO=baseline mix run scripts/interop/run.exs client _build/interop/key-retirement-final/client-baseline",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "client",
+      "scenario": "retry",
+      "command": "INTEROP_SCENARIO=retry mix run scripts/interop/run.exs client _build/interop/key-retirement-final/client-retry",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "client",
+      "scenario": "drop_initial",
+      "command": "INTEROP_SCENARIO=drop_initial mix run scripts/interop/run.exs client _build/interop/key-retirement-final/client-drop_initial",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "client",
+      "scenario": "drop_handshake",
+      "command": "INTEROP_SCENARIO=drop_handshake mix run scripts/interop/run.exs client _build/interop/key-retirement-final/client-drop_handshake",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "client",
+      "scenario": "reorder",
+      "command": "INTEROP_SCENARIO=reorder mix run scripts/interop/run.exs client _build/interop/key-retirement-final/client-reorder",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "client",
+      "scenario": "duplicate",
+      "command": "INTEROP_SCENARIO=duplicate mix run scripts/interop/run.exs client _build/interop/key-retirement-final/client-duplicate",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "client",
+      "scenario": "corrupt",
+      "command": "INTEROP_SCENARIO=corrupt mix run scripts/interop/run.exs client _build/interop/key-retirement-final/client-corrupt",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "client",
+      "scenario": "wrong_ca",
+      "command": "INTEROP_SCENARIO=wrong_ca mix run scripts/interop/run.exs client _build/interop/key-retirement-final/client-wrong_ca",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "client",
+      "scenario": "wrong_hostname",
+      "command": "INTEROP_SCENARIO=wrong_hostname mix run scripts/interop/run.exs client _build/interop/key-retirement-final/client-wrong_hostname",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "client",
+      "scenario": "wrong_alpn",
+      "command": "INTEROP_SCENARIO=wrong_alpn mix run scripts/interop/run.exs client _build/interop/key-retirement-final/client-wrong_alpn",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "client",
+      "scenario": "drop_handshake_done",
+      "command": "INTEROP_SCENARIO=drop_handshake_done mix run scripts/interop/run.exs client _build/interop/key-retirement-final/client-drop_handshake_done",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "server",
+      "scenario": "baseline",
+      "command": "INTEROP_SCENARIO=baseline mix run scripts/interop/run.exs server _build/interop/key-retirement-final/server-baseline",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "server",
+      "scenario": "retry",
+      "command": "INTEROP_SCENARIO=retry mix run scripts/interop/run.exs server _build/interop/key-retirement-final/server-retry",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "server",
+      "scenario": "drop_initial",
+      "command": "INTEROP_SCENARIO=drop_initial mix run scripts/interop/run.exs server _build/interop/key-retirement-final/server-drop_initial",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "server",
+      "scenario": "drop_handshake",
+      "command": "INTEROP_SCENARIO=drop_handshake mix run scripts/interop/run.exs server _build/interop/key-retirement-final/server-drop_handshake",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "server",
+      "scenario": "reorder",
+      "command": "INTEROP_SCENARIO=reorder mix run scripts/interop/run.exs server _build/interop/key-retirement-final/server-reorder",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "server",
+      "scenario": "duplicate",
+      "command": "INTEROP_SCENARIO=duplicate mix run scripts/interop/run.exs server _build/interop/key-retirement-final/server-duplicate",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "server",
+      "scenario": "corrupt",
+      "command": "INTEROP_SCENARIO=corrupt mix run scripts/interop/run.exs server _build/interop/key-retirement-final/server-corrupt",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "server",
+      "scenario": "wrong_ca",
+      "command": "INTEROP_SCENARIO=wrong_ca mix run scripts/interop/run.exs server _build/interop/key-retirement-final/server-wrong_ca",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "server",
+      "scenario": "wrong_hostname",
+      "command": "INTEROP_SCENARIO=wrong_hostname mix run scripts/interop/run.exs server _build/interop/key-retirement-final/server-wrong_hostname",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "server",
+      "scenario": "wrong_alpn",
+      "command": "INTEROP_SCENARIO=wrong_alpn mix run scripts/interop/run.exs server _build/interop/key-retirement-final/server-wrong_alpn",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "role": "server",
+      "scenario": "drop_handshake_done",
+      "command": "INTEROP_SCENARIO=drop_handshake_done mix run scripts/interop/run.exs server _build/interop/key-retirement-final/server-drop_handshake_done",
+      "exit_code": 0,
+      "passed": true
+    }
+  ]
+}

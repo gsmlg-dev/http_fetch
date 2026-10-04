@@ -1,0 +1,5 @@
+# Historical negative vector from reviewed commit 109b3b3.
+# Its origin was not documented as an actual wire capture. It is retained only
+# to prove that a certificate-authenticated offer without extension 13 is not
+# treated as offering every implemented signature scheme.
+010000640303000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F000002130101000039002B0003020304000A00040002001D003300260024001D00208520F0098930A754748B7DDCB43EF75A0DBF3A0D26381AF4EBA4A98EAA9B4E6A

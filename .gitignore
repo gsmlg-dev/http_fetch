@@ -23,6 +23,7 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 http_fetch-*.tar
 /apps/http_fetch/http_fetch-*.tar
+/apps/*/*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
@@ -31,6 +32,7 @@ http_fetch-*.tar
 # Dialyzer PLT files
 /priv/plts/
 /apps/http_fetch/priv/plts/
+/apps/*/priv/plts/
 
 # e2e test server port file (written when running locally)
 /.e2e_port

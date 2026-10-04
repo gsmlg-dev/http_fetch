@@ -4,7 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Elixir library providing a browser-like HTTP fetch API built on Erlang's `:gen_tcp` and `:ssl` modules. It implements Promise-based async operations with request cancellation, streaming support, and comprehensive telemetry integration.
+This is an Elixir umbrella providing a browser-like HTTP fetch API, shared HTTP
+protocol clients, and experimental TLS/QUIC packages. TCP sockets use Erlang's
+`:gen_tcp`; OTP `:ssl` remains the default TCP TLS backend. The imported QUIC
+stack uses the independent `ex_ssl` TLS engine.
 
 ## Core Architecture
 
@@ -28,11 +31,20 @@ This is an Elixir library providing a browser-like HTTP fetch API built on Erlan
 - Shared HTTP primitives live in `apps/http_core`; pooled HTTP/2 connection
   ownership and stream I/O live in `apps/http_runtime`. Fetch, EventSource and
   WebSocket depend on both shared applications instead of each other.
-- The HTTP/3/QPACK application moved to
-  [`gsmlg-dev/ex_quic`](https://github.com/gsmlg-dev/ex_quic/tree/main/apps/elixir_quic_http3).
-  This umbrella no longer contains or depends on `:elixir_quic_http3`; HTTP/3
-  and WebTransport selectors here still return explicit unsupported results
-  while independent integration and interoperability work remains.
+- The umbrella contains nine packages: `ex_ssl`, `elixir_quic`, `http_core`,
+  `http_runtime`, `elixir_quic_http3`, `http_fetch`, `http_web_socket`,
+  `http_event_source`, and `http_web_transport`. The three TLS/QUIC sources were
+  imported from `gsmlg-dev/ex_quic@14974913390e12d03a78a2903d18e55a04fa89d6`;
+  see [migration provenance](docs/migration-provenance.md).
+- Package dependencies retain exact `== 0.16.1` requirements with
+  `in_umbrella: true` and their Hex identities. The original six packages at
+  `0.16.1` are already published; the imported package versions are local
+  candidate metadata and have not been published. A later coordinated release
+  is required to publish the complete graph.
+- `ex_ssl` owns `SSL` and the TLS handshake APIs. `elixir_quic` owns `Quic` and
+  consumes only public `SSL.QUIC` APIs. `elixir_quic_http3` owns `QuicHttp3`.
+  The HTTP/3 and WebTransport selectors remain explicitly unsupported;
+  `QuicHttp3.capabilities/0` reports them unavailable.
 - **HTTPFetch.Application** (`apps/http_fetch/lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
 
 ### Key Design Patterns
@@ -95,10 +107,10 @@ deps.get`, `MIX_ENV=test mix compile --warnings-as-errors`, then `mix test
 apps/<app>/test`. Running Mix inside a child app does not traverse the runtime
 dependencies of its `in_umbrella` dependencies. E2E uses the same root preparation
 and `mix test apps/<app>/e2e`, or `mix test.e2e` for all E2E suites.
-Run `bash scripts/external_consumer_smoke.sh` to build all six packages
-(`http_core`, `http_runtime`, `http_fetch`, `http_web_socket`,
-`http_event_source`, and `http_web_transport`) and
-verify an isolated non-umbrella consumer, including transitive TLS dependencies.
+Run `bash scripts/external_consumer_smoke.sh` to build all nine umbrella
+packages and verify an isolated non-umbrella consumer, including TLS/QUIC
+dependency metadata. This local source-candidate gate is distinct from a
+published-Hex consumer gate.
 
 ## Important Implementation Details
 

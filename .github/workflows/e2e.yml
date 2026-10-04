@@ -1,138 +1,210 @@
 name: E2E
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
     inputs:
-      version:
-        description: "Git ref (tag, branch, or SHA) to test, e.g. v0.9.1 or main"
+      module:
+        description: Umbrella app to verify
         required: true
-        default: "main"
+        type: choice
+        default: all
+        options: [all, ex_ssl, elixir_quic, http_core, http_runtime, elixir_quic_http3, http_fetch, http_web_socket, http_event_source, http_web_transport]
+      version:
+        description: Optional release version; empty tests the selected branch
+        required: false
         type: string
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
-env:
-  ELIXIR_VERSION: "1.18"
-  OTP_VERSION: "28"
-
 jobs:
-  e2e:
-    name: E2E ${{ matrix.app }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  changes:
+    uses: ./.github/workflows/changes.yml
+    with:
+      workflow_file: e2e.yml
+      manual_module: ${{ inputs.module || 'all' }}
 
+  e2e:
+    name: E2E (${{ matrix.app }})
+    needs: changes
+    if: needs.changes.outputs.has_changes == 'true'
     strategy:
       fail-fast: false
       matrix:
-        app:
-          - http_core
-          - http_runtime
-          - http_fetch
-          - http_web_socket
-          - http_event_source
-          - http_web_transport
-
+        app: ${{ fromJSON(needs.changes.outputs.apps) }}
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+      HTTP_FETCH_CI_APP: ${{ matrix.app }}
     steps:
-      - name: Checkout
+      - name: Select source revision
+        id: source
+        env:
+          VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == workflow_dispatch && -n "$VERSION" ]]; then
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "Invalid release version: expected a version such as 0.3.0" >&2
+              exit 1
+            fi
+            echo "ref=v${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout selected source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}
-          fetch-depth: 0
+          ref: ${{ steps.source.outputs.ref }}
 
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+      - name: Validate selected module
+        run: test -d "apps/${HTTP_FETCH_CI_APP}"
+
+      - uses: erlef/setup-beam@v1
         with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: '1.18'
+          otp-version: '28'
 
-      - name: Restore Elixir dependencies cache
+      - name: Setup uv
+        if: matrix.app == 'ex_ssl' || matrix.app == 'elixir_quic'
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache dependencies
         uses: actions/cache@v4
         with:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-mix-
+          key: e2e-${{ matrix.app }}-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs', format('apps/{0}/mix.exs', matrix.app)) }}
 
-      - name: Install Elixir dependencies
-        env:
-          MIX_ENV: test
-        run: mix deps.get
+      - name: Install dependencies and compile selected closure
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+          mix compile --warnings-as-errors
 
-      - name: Compile umbrella dependencies
+      - name: Compare TLS QUIC boundary with aioquic
+        if: matrix.app == 'ex_ssl'
+        run: |
+          uv venv --clear _build/ex_ssl-quic-py --python 3.12
+          uv pip install --python _build/ex_ssl-quic-py/bin/python -r apps/ex_ssl/e2e/quic_tls/requirements.txt
+          QUIC_TLS_PYTHON="$PWD/_build/ex_ssl-quic-py/bin/python" mix run apps/ex_ssl/e2e/quic_tls/run.exs
+
+      - name: Build pinned Caddy fingerprint fixture
+        if: matrix.app == 'ex_ssl'
+        run: docker build --tag ex-ssl-e2e:local apps/ex_ssl/e2e
+
+      - name: Start Caddy fingerprint fixture
+        if: matrix.app == 'ex_ssl'
+        run: |
+          docker run -d --name ex-ssl-e2e --publish 127.0.0.1:8443:8443 ex-ssl-e2e:local
+          ready=false
+          for _ in {1..30}; do
+            if nc -z 127.0.0.1 8443; then ready=true; break; fi
+            sleep 1
+          done
+          if [[ "$ready" != true ]]; then docker logs ex-ssl-e2e; exit 1; fi
+
+      - name: Verify Caddy JA3 and JA4 observations
+        if: matrix.app == 'ex_ssl'
+        working-directory: apps/ex_ssl/e2e
         env:
-          MIX_ENV: test
-        run: mix compile --warnings-as-errors
+          MIX_BUILD_PATH: ${{ github.workspace }}/_build/ex_ssl-e2e-harness
+        run: |
+          mix deps.get
+          mix compile --warnings-as-errors
+          mix test
+
+      - name: Stop Caddy fingerprint fixture
+        if: always() && matrix.app == 'ex_ssl'
+        run: |
+          docker logs ex-ssl-e2e || true
+          docker rm -f ex-ssl-e2e || true
+
+      - name: Verify QUIC client, server and stream interop
+        if: matrix.app == 'elixir_quic'
+        run: |
+          mkdir -p _build/interop
+          mix run scripts/interop/run.exs client _build/interop/client
+          mix run scripts/interop/run.exs server _build/interop/server
+          mix run scripts/interop/stream_interop.exs
+          uv run --python 3.12 --with aioquic==1.2.0 python scripts/interop/test_peer.py
+
+      - name: Verify reliable streams under impairment
+        if: matrix.app == 'elixir_quic'
+        env:
+          PHASE1_INTEROP_RUN: '1'
+          PHASE1_SCENARIO: impaired
+        run: |
+          mix run scripts/phase1/interop.exs client
+          mix run scripts/phase1/interop.exs server
+          PHASE1_EXTERNAL=1 mix run scripts/phase1/interop.exs server
+
+      - name: Verify QUIC DATAGRAM with aioquic
+        if: matrix.app == 'elixir_quic'
+        run: |
+          mix run scripts/datagram/interop.exs client
+          mix run scripts/datagram/interop.exs server
+
+      - name: Verify HTTP/3 adapter over local UDP
+        if: matrix.app == 'elixir_quic_http3'
+        run: mix run apps/elixir_quic_http3/e2e/transport_smoke.exs
 
       - name: Set up Go
         if: matrix.app == 'http_fetch'
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: '1.22'
 
-      - name: Restore Go module cache
-        if: matrix.app == 'http_fetch'
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('apps/http_fetch/priv/test_server/go.sum', 'apps/http_fetch/priv/test_server/go.mod') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Build the http_fetch e2e test server
+      - name: Build HTTP fetch E2E server
         if: matrix.app == 'http_fetch'
         working-directory: apps/http_fetch/priv/test_server
         run: go build -o ../test_server/server .
 
-      - name: Start the http_fetch e2e test server
+      - name: Start HTTP fetch E2E server
         if: matrix.app == 'http_fetch'
         id: server
         run: |
           set -euo pipefail
           ./apps/http_fetch/priv/test_server/server > .e2e_port &
-          SERVER_PID=$!
-          echo "SERVER_PID=${SERVER_PID}" >> "$GITHUB_OUTPUT"
+          echo "SERVER_PID=$!" >> "$GITHUB_OUTPUT"
           for i in {1..50}; do
             if [ -s .e2e_port ]; then
               PORT=$(grep -oE '[0-9]+' .e2e_port | head -n1)
               if curl -fs "http://127.0.0.1:${PORT}/" >/dev/null 2>&1; then
                 echo "E2E_BASE_URL=http://127.0.0.1:${PORT}" >> "$GITHUB_ENV"
-                echo "Test server ready on port ${PORT}"
                 exit 0
               fi
             fi
             sleep 0.2
           done
-          echo "::error::E2E test server failed to start within 10s"
-          kill "${SERVER_PID}" 2>/dev/null || true
+          kill "$!" 2>/dev/null || true
           exit 1
 
-      - name: Run http_fetch E2E test suite
-        if: matrix.app == 'http_fetch'
+      - name: Run destination app E2E suite
+        if: matrix.app == 'http_fetch' || matrix.app == 'http_web_socket' || matrix.app == 'http_event_source' || matrix.app == 'http_web_transport' || matrix.app == 'http_core' || matrix.app == 'http_runtime'
         env:
-          MIX_ENV: test
           E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
-        run: mix test apps/http_fetch/e2e
-
-      - name: Run app E2E test suite if present
-        if: matrix.app != 'http_fetch'
         run: |
-          set -euo pipefail
-          if [ -d "apps/${{ matrix.app }}/e2e" ]; then
-            MIX_ENV=test mix test "apps/${{ matrix.app }}/e2e"
+          if compgen -G "apps/${HTTP_FETCH_CI_APP}/e2e/*_test.exs" > /dev/null; then
+            mix test "apps/${HTTP_FETCH_CI_APP}/e2e"
           else
-            echo "No e2e suite for ${{ matrix.app }}"
+            echo "No E2E ExUnit suite for ${HTTP_FETCH_CI_APP}"
           fi
 
-      - name: Stop the http_fetch e2e test server
+      - name: Stop HTTP fetch E2E server
         if: always() && matrix.app == 'http_fetch'
         run: |
           if [ -n "${{ steps.server.outputs.SERVER_PID }}" ]; then

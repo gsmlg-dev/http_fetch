@@ -15,6 +15,14 @@ followed by `MIX_ENV=test mix test apps/http_fetch/test`. Running the test from
 the root keeps runtime applications of `in_umbrella` dependencies, including
 `ex_ssl`, on the code path without adding duplicate child dependencies.
 
+The umbrella contains nine packages. Six were published as `0.16.1` before the
+TLS/QUIC source migration; the imported `ex_ssl`, `elixir_quic`, and
+`elixir_quic_http3` `0.16.1` sources are an unpublished local integration
+candidate. That already-published version of the original six packages is
+immutable, so the combined nine-package graph requires a later coordinated
+release. See the [migration provenance](docs/migration-provenance.md) and
+[validation record](docs/migration-validation.md).
+
 ## Features
 
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
@@ -172,7 +180,9 @@ configuration. The backend is captured when the request/client is created and
 retained through redirects and EventSource reconnects; runtime configuration
 changes affect new operations. Invalid selections fail explicitly.
 
-`http_core` declares `ex_ssl ~> 0.7.2` as a transitive runtime dependency.
+The local candidate `http_core` declares `ex_ssl == 0.16.1` and
+`elixir_quic == 0.16.1` as transitive runtime dependencies. This nine-package
+version graph has not been published.
 Consumers do not need to add it separately. `ssl: [...]` supplies TLS settings
 to the selected backend. The `ex_ssl` backend uses its own `SSL` protocol engine
 and requires peer verification. TLS 1.3 is the default; verified TLS 1.2 is
@@ -249,6 +259,11 @@ Plain HTTP, WS, and Unix sockets retain their existing transports. HTTP/3 and
 WebTransport use QUIC's separate TLS implementation and ignore the shared
 setting. An explicit non-`nil` `tls_backend` on either QUIC API returns
 `{:error, :tls_backend_not_supported_for_quic}` (through the promise for fetch).
+The umbrella now contains experimental `ex_ssl`, `elixir_quic`, and
+`elixir_quic_http3` applications. `QuicHttp3.capabilities/0` currently reports
+`http3: false`, `qpack: false`, and `webtransport: false`; the HTTP/3 and
+WebTransport production selectors remain explicitly unsupported. The raw QUIC
+transport does not select an application protocol merely from ALPN.
 
 ## Form Data With File Upload
 
@@ -709,7 +724,8 @@ export E2E_BASE_URL="http://127.0.0.1:$PORT"
 MIX_ENV=test mix test.e2e
 ```
 
-In CI, the `e2e.yml` workflow handles all of this automatically.
+In CI, the `e2e.yml` and `release.yml` workflows run the applicable E2E gates,
+including the pinned Caddy TLS fingerprint fixture on CI runners.
 `mix test.e2e` keeps execution at the umbrella root. To run one suite, use
 `MIX_ENV=test mix test apps/http_web_socket/e2e` (or another app's `e2e`
 directory) after the same preparation as the unit tests.
@@ -720,14 +736,20 @@ directory) after the same preparation as the unit tests.
 bash scripts/external_consumer_smoke.sh
 ```
 
-This builds all six current Hex packages (`http_core`, `http_runtime`,
-`http_fetch`, `http_web_socket`, `http_event_source`, and `http_web_transport`)
-and installs their unpacked contents
-into a temporary project outside the umbrella, with independent dependencies
-and build output and no repository lockfile. Local paths resolve the unpublished
-internal packages; `ex_ssl` is resolved only through `http_core`. The smoke
+This builds all nine portable candidate archives (`ex_ssl`, `elixir_quic`,
+`http_core`, `http_runtime`, `elixir_quic_http3`, `http_fetch`,
+`http_web_socket`, `http_event_source`, and `http_web_transport`), serves them
+from a signed local Hex registry with the locked `telemetry` tarball, and
+resolves a temporary consumer through Hex without repository paths or overrides.
+The smoke
 checks runtime application startup, verified local TLS 1.3 requests with both
-TCP TLS backends, and the separate WebTransport QUIC boundary.
+TCP TLS backends, exact dependency metadata, and the unsupported HTTP/3 and
+WebTransport boundary. `python3 scripts/release/consumer_gate.py 0.16.1 /absolute/path/to/archives`
+checks each package independently; set
+`EX_SSL_DEP_MODE=candidate EX_SSL_CANDIDATE_ARCHIVE_DIR=/absolute/path/to/archives`
+and run `bash scripts/ex_ssl_source_smoke.sh` for the full candidate TLS feature
+suite. The published `ex_ssl` 0.7.2 feature gate is historical compatibility
+coverage. No nine-package release at 0.16.1 is available from Hex.pm.
 
 ### Code Formatting
 
@@ -748,29 +770,23 @@ mix format --check-formatted
 
 MIT License
 
-The full published feature gate is a separate validation mode:
+The candidate TLS feature gate runs all nine feature groups against the signed
+local Hex registry. It requires the pinned fixture checkout specified by
+`scripts/ex_ssl_fixture_manifest.env`. Current outcomes are tracked in
+[migration validation](docs/migration-validation.md).
 
 ```bash
-# From the umbrella root; requires Git, Python 3 with OpenSSL TLS 1.3/ALPN,
-# the openssl command, GNU timeout, and the normal Mix toolchain.
-EX_SSL_RESULTS_DIR=/tmp/http-fetch-published bash scripts/ex_ssl_published_feature_gate.sh
-
-# Explicit unreleased candidate validation, never a substitute for the Hex gate:
-EX_SSL_DEP_MODE=source EX_SSL_SOURCE_DIR=/absolute/path/to/ex_ssl \
-  EX_SSL_RESULTS_DIR=/tmp/http-fetch-source bash scripts/ex_ssl_source_smoke.sh
+# From the umbrella root; this builds nine portable archives without publishing.
+python3 scripts/release/stage.py build 0.16.1 /tmp/http-fetch-stage /tmp/http-fetch-archives
+EX_SSL_DEP_MODE=candidate EX_SSL_CANDIDATE_ARCHIVE_DIR=/tmp/http-fetch-archives \
+  EX_SSL_RESULTS_DIR=/tmp/http-fetch-candidate bash scripts/ex_ssl_source_smoke.sh
 ```
 
-The published gate builds all six package artifacts, uses the checked-in lock
-and an explicit test-only ex_ssl dependency, and verifies the resolved Hex
-package and loaded module provenance. It is distinct from the cold transitive
-smoke above. `EX_SSL_DEP_MODE=published bash scripts/ex_ssl_source_smoke.sh`
-is the compatibility entry point; no source runtime checkout is needed.
-Fixtures come from the immutable release commit recorded in
-`scripts/ex_ssl_fixture_manifest.env`, separately from the Hex runtime.
-
-Maintainers should require **Published ex_ssl feature gate (Elixir 1.18 / OTP 28)**.
-The separate scheduled/manual compatibility workflow covers Elixir 1.19/OTP 28
-and 1.20/OTP 29; it validates this consumer, not the library's own runtime matrix.
+The candidate gate checks `Hex.SCM`, exact package version, startup, and every
+feature group. The published `ex_ssl` 0.7.2 gate remains a historical
+compatibility check run from the pre-migration `v0.16.1` tag in CI; it cannot
+validate this local nine-package graph. The separate scheduled/manual
+compatibility workflow covers its existing Elixir/OTP matrix.
 See [consumer validation evidence](docs/ex-ssl-consumer-validation.md) for exact
 commands, results, provenance, and limits. Independent human security review is
 incomplete; green tests do not establish broad production readiness or improved
