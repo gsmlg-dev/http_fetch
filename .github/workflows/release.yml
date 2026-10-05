@@ -179,6 +179,9 @@ jobs:
       - name: Build documentation
         run: mix docs
 
+      - name: Verify HTTP/3 companion with pinned independent aioquic
+        run: uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/session_gate.py
+
       - name: Build, inspect, and independently consume all nine archives
         run: |
           python3 scripts/release/stage.py build "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
@@ -195,7 +198,7 @@ jobs:
           EX_SSL_DEP_MODE: candidate
           EX_SSL_CANDIDATE_ARCHIVE_DIR: ${{ runner.temp }}/archives
         run: |
-          python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt
+          uv pip install --python "$(command -v python3)" --requirement scripts/requirements-http2-stream-clients.txt
           python3 scripts/http_runtime_package_traffic_gate.py
           bash scripts/ex_ssl_source_smoke.sh
 

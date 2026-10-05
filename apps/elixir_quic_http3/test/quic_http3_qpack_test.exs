@@ -5,6 +5,43 @@ defmodule QuicHttp3.QpackTest do
 
   import Bitwise, only: [<<<: 2]
 
+  test "static-only sections permit a nonzero nonnegative Base" do
+    assert {:ok, [{":status", "200"}]} = Qpack.decode_header_block(<<0, 1, 0xD9>>)
+    assert {:error, :dynamic_table_not_supported} = Qpack.decode_header_block(<<0, 0x80, 0xD9>>)
+  end
+
+  test "mixed literal, indexed and name-reference fields preserve input order" do
+    fields = [
+      {"x-test", "a"},
+      {"content-length", "0"},
+      {"x-test", "b"},
+      {"content-type", "custom"},
+      {"x-test", "c"}
+    ]
+
+    assert {:ok, bytes} = Qpack.encode_header_block(fields, indexed: true)
+    assert {:ok, ^fields} = Qpack.decode_header_block(bytes)
+  end
+
+  test "all static indexes match RFC 9204 Appendix A independent fixtures" do
+    rows =
+      File.read!(Path.join(__DIR__, "fixtures/qpack-rfc9204-static.tsv"))
+      |> String.split("\n", trim: true)
+      |> Enum.reject(&String.starts_with?(&1, "#"))
+
+    assert length(rows) == 99
+
+    for row <- rows do
+      [index, name, value] = String.split(row, "\t")
+      index = String.to_integer(index)
+      assert {:ok, {^name, ^value}} = Qpack.static(index)
+      {:ok, encoded} = Qpack.encode_integer(index, 6, 0xC0)
+      assert {:ok, [{^name, ^value}]} = Qpack.decode_header_block(<<0, 0>> <> encoded)
+    end
+
+    assert {:error, :invalid_static_index} = Qpack.static(99)
+  end
+
   test "encodes and decodes prefixed integers with continuation bytes" do
     assert {:ok, <<0x1F, 0xFB, 0x0B>>} = Qpack.encode_integer(1_562, 5, 0)
     assert {:ok, 1_562, <<>>} = Qpack.decode_integer(<<0x1F, 0xFB, 0x0B>>, 5)
@@ -53,6 +90,15 @@ defmodule QuicHttp3.QpackTest do
 
     assert {:ok, encoded} = Qpack.encode_header_block(fields, never_indexed: true)
     assert {:ok, ^fields} = Qpack.decode_header_block(encoded)
+  end
+
+  test "never-indexed retains its flag when a static exact match exists" do
+    fields = [{":path", "/"}]
+
+    assert {:ok, <<0, 0, 0x71, 1, ?/>> = bytes} =
+             Qpack.encode_header_block(fields, indexed: true, never_indexed: true)
+
+    assert {:ok, ^fields} = Qpack.decode_header_block(bytes)
   end
 
   test "encodes and decodes static indexed and name-reference fields" do

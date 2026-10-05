@@ -40,7 +40,8 @@ defmodule QuicHttp3.SessionTest do
     assert {:ok, _session, _ref} = Session.request(session, [{":path", "/"}], "body", [])
     assert_received {{:open, :bidi}, {:ok, {:stream, :bidi}}}
     assert_received {:send, {:ok, {{:stream, :bidi}, _headers, false}}}
-    assert_received {:send, {:ok, {{:stream, :bidi}, "body", true}}}
+    data_frame = Frame.encode!(:data, "body")
+    assert_received {:send, {:ok, {{:stream, :bidi}, ^data_frame, true}}}
   end
 
   test "partial response frames are retained across reads", %{session: session} do

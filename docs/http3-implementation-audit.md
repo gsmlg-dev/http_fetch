@@ -12,8 +12,8 @@ completion requires all required gates and the final release to succeed.
 | Package | Release target | State |
 | --- | --- | --- |
 | WP0: baseline | 0.16.2 | Commit pushed; release attempt failed at baseline Dialyzer |
-| WP1: transport and resumable state | 0.16.3 | 41 focused tests PASS; review PASS; release attempt pending |
-| WP2: bounded HTTP/3 profile | 0.16.4 | Pending |
+| WP1: transport and resumable state | 0.16.3 | Commit pushed; release failed before publication: uv environment lacked pip |
+| WP2: bounded HTTP/3 profile | 0.16.4 | 103 companion tests PASS; independent aioquic gate PASS; release attempt pending |
 | WP3: runtime and pooling | 0.16.5 | Pending |
 | WP4: explicit Fetch integration | 0.16.6 | Pending |
 | WP5: independent acceptance | 0.16.7 | Pending |
@@ -71,3 +71,31 @@ regressions are recorded in `http3-wp1-transport-session.md` before commit.
 WP1 fresh root verification: `MIX_ENV=test mix test` with the four WP1 test
 files and `--seed 0`: **41 tests, zero failures**. Spec and quality re-review:
 **PASS**. Full native query/DNS wall-clock bounds remain a WP3 owner obligation.
+
+WP1 commit: `ddcc053`. Release attempt:
+[37272275808](https://github.com/gsmlg-dev/http_fetch/actions/runs/37272275808),
+target `0.16.3`. Source validation, nine-app tests, TLS integration, Dialyzer,
+transport impairment, Caddy fingerprint, aioquic, documentation, and independent
+nine-archive consumers passed remotely. The next HTTP/2 package-traffic step
+failed because setup-uv supplied a Python environment without `pip`. It reached
+no tag or publication. The next audit uses `uv pip install` and the branch's
+workflow definition; every traffic and publication gate remains required.
+
+## WP2
+
+Binary and demand-driven streamed uploads now emit DATA frames. Incremental
+response parsing validates informational/final/trailer ordering and content
+length, with independent field-count, encoded/decoded header, and session
+retention limits. All 99 static QPACK entries follow RFC 9204, mixed encodings
+preserve order, and malformed complete fields fail with explicit error scope.
+Control/QPACK critical streams, unknown extensions, GOAWAY admission, retained
+blocked continuations, and exactly-once completion are covered by regressions.
+
+Root rerun: **103 companion tests, zero failures**, seed 0; compile with
+warnings-as-errors **PASS**. Codec spec/quality re-review **PASS**. Native UDP
+binary and streamed upload regressions **PASS**. Pinned independent aioquic
+1.2.0 authenticated UDP POST echoed all 61,725 arbitrary bytes and retained
+zero terminal requests: **PASS**. Reproduce with `uv run --python 3.12 --with
+aioquic==1.2.0 python scripts/http3/session_gate.py`. This is companion evidence;
+public Fetch acceptance remains a later gate. The uv release dependency install
+was also verified in a fresh Python 3.12 virtual environment.

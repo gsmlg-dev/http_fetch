@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.4] - 2026-10-05
+
+### Fixed
+- Frame binary and demand-driven uploads as HTTP/3 DATA, retain blocked work
+  without freezing sibling reads, and retire completed requests exactly once.
+- Decode responses incrementally with separate header and retained-byte limits,
+  informational/final/trailer validation, critical streams, and GOAWAY admission.
+- Correct all 99 QPACK static indexes and preserve indexed/literal field order.
+- Use uv to install the release peer dependencies in its Python environment.
+
+### Validation
+- Native adapter regressions and a pinned independent aioquic binary echo gate.
+  Public Fetch HTTP/3 remains unsupported pending runtime integration.
+
 ## [0.16.3] - 2026-10-05
 
 ### Fixed

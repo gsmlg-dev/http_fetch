@@ -10,6 +10,7 @@ defmodule QuicHttp3.Transport.Quic do
   @behaviour QuicHttp3.Transport
 
   alias Quic.Profile
+  alias SSL.ClientHello.Profile, as: TLSProfile
 
   defstruct [:endpoint, :handle, :ops, :consumer, :connect_ref, endpoint_owned?: false]
 
@@ -257,22 +258,72 @@ defmodule QuicHttp3.Transport.Quic do
 
   defp profile(options) do
     name = Keyword.get(options, :profile, :ordered)
-    alpn = Keyword.get(options, :alpn, ["h3"])
+    tls = Keyword.get(options, :tls, [])
 
-    if name in [:ordered, :compact] and is_list(alpn) do
-      with {:ok, compiled} <- Profile.compile(name, alpn: alpn) do
-        if options[:tls][:server_name] do
-          {:ok,
-           put_in(compiled.tls.extensions, [
-             {:server_name, :from_connection} | compiled.tls.extensions
-           ])}
-        else
-          {:ok, compiled}
-        end
-      end
-    else
-      {:error, {:invalid_profile, name}}
+    with {:ok, compiled} <- Profile.compile(name, alpn: ["h3"]),
+         wire = Keyword.get(tls, :profile, compiled.tls),
+         {:ok, wire} <- TLSProfile.validate(wire, Profile.capabilities()),
+         :ok <- h3_wire_policy(wire),
+         :ok <- matching_tls_options(tls, wire),
+         wire = add_sni(wire, tls[:server_name]),
+         {:ok, validated} <- TLSProfile.validate(wire, Profile.capabilities()) do
+      {:ok, %{compiled | tls: validated}}
     end
+  end
+
+  defp h3_wire_policy(wire) do
+    allowed =
+      List.keyfind(wire.extensions, :alpn, 0) == {:alpn, ["h3"]} and
+        List.keyfind(wire.extensions, :supported_versions, 0) == {:supported_versions, [0x0304]} and
+        Enum.count(wire.extensions, &match?({:raw, 57, <<>>}, &1)) == 1 and
+        not Enum.any?(wire.extensions, fn
+          {:raw, 57, bytes} when bytes != <<>> ->
+            true
+
+          {tag, _}
+          when tag in [
+                 :pre_shared_key,
+                 :psk_key_exchange_modes,
+                 :extended_master_secret,
+                 :renegotiation_info
+               ] ->
+            true
+
+          _ ->
+            false
+        end)
+
+    if allowed, do: :ok, else: {:error, :invalid_h3_wire_profile}
+  end
+
+  defp matching_tls_options(tls, wire) do
+    expected = [
+      ciphers: wire.cipher_suites,
+      groups: extension_value(wire, :supported_groups),
+      signature_algorithms: extension_value(wire, :signature_algorithms)
+    ]
+
+    case Enum.find(expected, fn {key, value} ->
+           Keyword.has_key?(tls, key) and tls[key] != value
+         end) do
+      nil -> :ok
+      {key, _} -> {:error, {:profile_option_mismatch, key}}
+    end
+  end
+
+  defp extension_value(wire, name) do
+    case List.keyfind(wire.extensions, name, 0) do
+      {^name, value} -> value
+      nil -> nil
+    end
+  end
+
+  defp add_sni(wire, nil), do: wire
+
+  defp add_sni(wire, _server_name) do
+    if List.keymember?(wire.extensions, :server_name, 0),
+      do: wire,
+      else: %{wire | extensions: [{:server_name, :from_connection} | wire.extensions]}
   end
 
   defp datagram_options(value) when is_list(value) do

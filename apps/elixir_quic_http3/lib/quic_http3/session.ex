@@ -9,7 +9,7 @@ defmodule QuicHttp3.Session do
   deadline is an admission/reconciliation budget, not a shorter wall-clock bound.
   """
 
-  alias QuicHttp3.{Control, Frame, Qpack, Stream}
+  alias QuicHttp3.{Control, Frame, Qpack, Response, Stream}
   alias QuicHttp3.Transport.Quic.Stream, as: TransportStream
 
   defstruct transport: QuicHttp3.Transport.Quic,
@@ -19,6 +19,13 @@ defmodule QuicHttp3.Session do
             peer_streams: %{},
             requests: %{},
             next_request: 1,
+            next_stream_id: 0,
+            max_fields: 128,
+            max_encoded_headers: 65_536,
+            max_header_bytes: 65_536,
+            max_retained_bytes: 262_144,
+            qpack_streams: %{},
+            continuations: %{},
             max_frame: 16_384,
             timeout: 5_000,
             pending: nil,
@@ -27,6 +34,12 @@ defmodule QuicHttp3.Session do
             retired: MapSet.new(),
             aborted_operation: nil,
             open?: false
+
+  defmodule Continuation do
+    @moduledoc false
+    @enforce_keys [:id, :connection, :work, :pending, :request_ref]
+    defstruct [:id, :connection, :work, :pending, :request_ref]
+  end
 
   @type t :: %__MODULE__{}
   @type failure :: {:error, t(), term()} | {:blocked, t(), term()} | {:unknown, t(), reference()}
@@ -40,7 +53,21 @@ defmodule QuicHttp3.Session do
 
     if is_atom(transport) and is_integer(max_frame) and max_frame in 1..16_384 and
          is_integer(timeout) and timeout > 0 do
-      {:ok, %__MODULE__{transport: transport, max_frame: max_frame, timeout: timeout}}
+      limits =
+        Keyword.take(opts, [
+          :max_fields,
+          :max_encoded_headers,
+          :max_header_bytes,
+          :max_retained_bytes
+        ])
+
+      session =
+        struct!(
+          __MODULE__,
+          [transport: transport, max_frame: max_frame, timeout: timeout] ++ limits
+        )
+
+      if valid_limits?(session), do: {:ok, session}, else: {:error, :invalid_session_options}
     else
       {:error, :invalid_session_options}
     end
@@ -68,7 +95,7 @@ defmodule QuicHttp3.Session do
     else
       case ready(session) do
         :ready ->
-          {:ok, control} = Control.new(:client)
+          {:ok, control} = Control.new(:client, [{1, 0}, {6, session.max_header_bytes}, {7, 0}])
           begin(%{session | control: control}, :open, [:open_control], [])
 
         :pending ->
@@ -83,14 +110,114 @@ defmodule QuicHttp3.Session do
   def request(%__MODULE__{open?: false} = session, _fields, _body, _opts),
     do: {:error, session, :not_open}
 
-  def request(session, fields, body, opts) when is_list(fields) and is_binary(body) do
-    with {:ok, headers} <- Qpack.encode_header_block(fields, opts),
+  def request(session, fields, body, opts)
+      when is_list(fields) and (is_binary(body) or body == :stream) do
+    with :ok <- request_admission(session),
+         :ok <- outgoing_fields(session, fields),
+         {:ok, headers} <- Qpack.encode_header_block(fields, opts),
+         :ok <- encoded_headers(session, headers),
          {:ok, header_frame} <- Frame.encode(:headers, headers) do
       ref = make_ref()
-      begin(session, {:request, ref}, [{:open_request, ref, header_frame, body}], opts)
+
+      method =
+        Enum.find_value(fields, "GET", fn {name, value} -> if name == ":method", do: value end)
+
+      begin(session, {:request, ref}, [{:open_request, ref, header_frame, body, method}], opts)
     else
       {:error, reason} -> {:error, session, reason}
     end
+  end
+
+  def send_data(session, ref, bytes, fin, opts)
+      when is_binary(bytes) and byte_size(bytes) <= 16_384 and is_boolean(fin) do
+    case Map.fetch(session.requests, ref) do
+      {:ok, %{upload: :open, stream: stream}} ->
+        begin(session, :send_data, data_steps(stream, bytes, fin, session.max_frame), opts)
+
+      {:ok, _request} ->
+        {:error, session, :upload_closed}
+
+      :error ->
+        {:error, session, :unknown_request}
+    end
+  end
+
+  def send_data(session, _ref, _bytes, _fin, _opts), do: {:error, session, :invalid_upload_chunk}
+
+  def suspend_blocked(%{pending: %{status: :blocked}} = session) do
+    if map_size(session.continuations) < 128 do
+      id = make_ref()
+      ref = work_request_ref(session)
+
+      token = %Continuation{
+        id: id,
+        connection: session.connection,
+        work: session.work,
+        pending: session.pending,
+        request_ref: ref
+      }
+
+      {:ok,
+       %{
+         session
+         | work: nil,
+           pending: nil,
+           continuations: Map.put(session.continuations, id, ref)
+       }, token}
+    else
+      {:error, session, :continuation_limit}
+    end
+  end
+
+  def suspend_blocked(session), do: {:error, session, :operation_not_definitely_blocked}
+
+  def resume(%{pending: pending} = session, _continuation) when not is_nil(pending),
+    do: {:error, session, :operation_pending}
+
+  def resume(session, %Continuation{} = continuation) do
+    if Map.has_key?(session.continuations, continuation.id) and
+         continuation.connection == session.connection and continuation.pending.status == :blocked do
+      next = %{session | continuations: Map.delete(session.continuations, continuation.id)}
+
+      if continuation_live?(next, continuation) do
+        resume(%{next | work: continuation.work, pending: continuation.pending})
+      else
+        {:error, next, :stale_continuation}
+      end
+    else
+      {:error, session, :stale_continuation}
+    end
+  end
+
+  def reset_send(session, ref) do
+    case Map.fetch(session.requests, ref) do
+      :error ->
+        {:error, session, :unknown_request}
+
+      {:ok, %{upload: upload}} when upload != :open ->
+        {:ok, session}
+
+      {:ok, _request} ->
+        cond do
+          session.pending == nil ->
+            reset_send_work(session, ref)
+
+          session.pending.status == :blocked and work_request_ref(session) == ref ->
+            reset_send_work(%{session | pending: nil, work: nil}, ref)
+
+          true ->
+            {:error, session, :operation_pending}
+        end
+    end
+  end
+
+  defp reset_send_work(session, ref) do
+    begin(
+      drop_continuations(session, ref),
+      :reset_send,
+      [{:reset, ref}, {:upload_reset, ref}],
+      []
+    )
   end
 
   def poll(session, max, opts \\ [])
@@ -206,19 +333,31 @@ defmodule QuicHttp3.Session do
         drain(session, rest)
 
       {:remove_request, ref} ->
+        case retire_request(session, ref) do
+          {:ok, next} -> drive(put_in(next.work.steps, rest))
+          {:error, reason} -> {:error, session, reason}
+        end
+
+      {:upload_reset, ref} ->
+        drive(
+          session
+          |> put_in([Access.key(:requests), ref, :upload], :reset)
+          |> put_in([Access.key(:work), :steps], rest)
+        )
+
+      {:body, _ref, <<>>} ->
+        drive(put_in(session.work.steps, rest))
+
+      {:body, ref, bytes} ->
+        size = min(byte_size(bytes), 16_384)
+        <<chunk::binary-size(^size), remaining::binary>> = bytes
         stream = session.requests[ref].stream
 
-        if MapSet.size(session.retired) < 1024 do
-          drive(%{
-            session
-            | requests: Map.delete(session.requests, ref),
-              runnable: List.delete(session.runnable, stream),
-              retired: MapSet.put(session.retired, stream),
-              work: %{session.work | steps: rest}
-          })
-        else
-          {:error, session, :terminal_stream_limit}
-        end
+        steps =
+          data_steps(stream, chunk, remaining == <<>>, session.max_frame) ++
+            [{:body, ref, remaining} | rest]
+
+        drive(put_in(session.work.steps, steps))
 
       :cleanup ->
         case session.transport.cleanup(session.connection) do
@@ -265,7 +404,17 @@ defmodule QuicHttp3.Session do
       }
 
       opts = [ref: ref, timeout: remaining, deadline: remaining]
-      result = operation(session, action, opts)
+
+      result =
+        if operation_kind(action) == :open_stream and match?({:open_request, _, _, _, _}, action) do
+          case request_admission(session) do
+            :ok -> operation(session, action, opts)
+            error -> error
+          end
+        else
+          operation(session, action, opts)
+        end
+
       complete(%{session | pending: pending}, action, result)
     end
   end
@@ -276,7 +425,7 @@ defmodule QuicHttp3.Session do
   defp operation(session, :open_control, opts),
     do: session.transport.open_stream(session.connection, :uni, opts)
 
-  defp operation(session, {:open_request, _, _, _}, opts),
+  defp operation(session, {:open_request, _, _, _, _}, opts),
     do: session.transport.open_stream(session.connection, :bidi, opts)
 
   defp operation(session, {:send, stream, bytes, fin}, opts),
@@ -287,6 +436,12 @@ defmodule QuicHttp3.Session do
 
   defp operation(session, {:read, stream}, opts),
     do: session.transport.read(stream, min(session.max_frame, session.work.bytes), opts)
+
+  defp operation(session, {:reset_code, stream, code}, opts),
+    do: session.transport.reset_stream(stream, code, opts)
+
+  defp operation(session, {:stop_code, stream, code}, opts),
+    do: session.transport.stop_stream(stream, code, opts)
 
   defp operation(session, {:reset, ref}, opts),
     do: session.transport.reset_stream(session.requests[ref].stream, 0x10C, opts)
@@ -301,11 +456,13 @@ defmodule QuicHttp3.Session do
 
   defp operation_kind({:connect, _, _, _}), do: :connect
   defp operation_kind(:open_control), do: :open_stream
-  defp operation_kind({:open_request, _, _, _}), do: :open_stream
+  defp operation_kind({:open_request, _, _, _, _}), do: :open_stream
   defp operation_kind({:send, _, _, _}), do: :send_stream
   defp operation_kind({:events, _}), do: :events
   defp operation_kind({:read, _}), do: :read
   defp operation_kind({:reset, _}), do: :reset_stream
+  defp operation_kind({:reset_code, _, _}), do: :reset_stream
+  defp operation_kind({:stop_code, _, _}), do: :stop_stream
   defp operation_kind({:stop, _}), do: :stop_stream
   defp operation_kind(:close), do: :close
   defp operation_kind(:abort), do: :close
@@ -335,6 +492,7 @@ defmodule QuicHttp3.Session do
     case accepted(session, action, success) do
       {:ok, next} -> drive(next)
       {:error, reason} -> {:error, session, reason}
+      {:error, next, reason} -> {:error, next, reason}
     end
   end
 
@@ -352,20 +510,40 @@ defmodule QuicHttp3.Session do
      }}
   end
 
-  defp accepted(session, {:open_request, ref, headers, body}, {:ok, stream}) do
-    request = %{stream: stream, ref: ref, buffer: <<>>, headers_received?: false}
+  defp accepted(session, {:open_request, ref, headers, body, method}, {:ok, stream}) do
+    decoder =
+      Response.new(
+        method: method,
+        max_fields: session.max_fields,
+        max_encoded_headers: session.max_encoded_headers,
+        max_header_bytes: session.max_header_bytes
+      )
 
-    steps =
-      chunks(stream, headers, body == <<>>, session.max_frame) ++
-        chunks(stream, body, true, session.max_frame)
+    request = %{stream: stream, ref: ref, decoder: decoder, upload: :open}
+    id = stream_id(stream, session.next_stream_id)
 
-    {:ok,
-     %{
-       session
-       | requests: Map.put(session.requests, ref, request),
-         next_request: session.next_request + 1,
-         work: %{session.work | steps: steps ++ session.work.steps}
-     }}
+    next = %{
+      session
+      | requests: Map.put(session.requests, ref, request),
+        next_request: session.next_request + 1,
+        next_stream_id: id + 4
+    }
+
+    if session.control.goaway_id != nil and id >= session.control.goaway_id do
+      steps = [{:reset_code, stream, 0x10B}, {:stop_code, stream, 0x10B}, {:remove_request, ref}]
+      {:ok, %{next | work: %{next.work | kind: {:rejected, ref, :goaway}, steps: steps}}}
+    else
+      tail = if body in [:stream, <<>>], do: [], else: [{:body, ref, body}]
+      steps = chunks(stream, headers, body == <<>>, session.max_frame) ++ tail
+      {:ok, put_in(next.work.steps, steps ++ next.work.steps)}
+    end
+  end
+
+  defp accepted(session, {:send, stream, _bytes, true}, _success) do
+    case request_for_stream(session.requests, stream) do
+      {ref, _request} -> {:ok, put_in(session.requests[ref].upload, :closed)}
+      nil -> {:ok, session}
+    end
   end
 
   defp accepted(_session, {:events, _}, {:ok, events}) when not is_list(events),
@@ -381,27 +559,40 @@ defmodule QuicHttp3.Session do
   defp accepted(session, {:read, stream}, {:ok, items}) do
     with :ok <- valid_read_batch(stream, items),
          {:ok, next, events} <- consume_items(session, stream, items) do
-      terminal? = Enum.any?(items, &(elem(&1, 0) in [:fin, :reset]))
+      terminal? =
+        Enum.any?(items, &(elem(&1, 0) in [:fin, :reset])) or MapSet.member?(next.retired, stream)
+
       runnable = List.delete(next.runnable, stream)
       runnable = if items != [] and not terminal?, do: runnable ++ [stream], else: runnable
 
-      {:ok,
-       record_events(
-         %{
-           next
-           | runnable: runnable,
-             work: %{
-               next.work
-               | reads: next.work.reads - 1,
-                 bytes: max(0, next.work.bytes - read_bytes(items))
-             }
-         },
-         events
-       )}
+      result =
+        record_events(
+          %{
+            next
+            | runnable: runnable,
+              work: %{
+                next.work
+                | reads: next.work.reads - 1,
+                  bytes: max(0, next.work.bytes - read_bytes(items))
+              }
+          },
+          events
+        )
+
+      case retained_budget(result) do
+        :ok -> {:ok, result}
+        {:error, reason} -> {:error, result, reason}
+      end
     end
   end
 
   defp accepted(session, _action, _success), do: {:ok, session}
+
+  defp data_steps(stream, <<>>, true, _max), do: [{:send, stream, <<>>, true}]
+  defp data_steps(_stream, <<>>, false, _max), do: []
+
+  defp data_steps(stream, bytes, fin, max),
+    do: chunks(stream, Frame.encode!(:data, bytes), fin, max)
 
   defp chunks(_stream, <<>>, _fin, _max), do: []
 
@@ -421,6 +612,9 @@ defmodule QuicHttp3.Session do
       {:request, ref} ->
         {:ok, next, ref}
 
+      {:rejected, ref, reason} ->
+        {:error, next, {:request_rejected, ref, reason}}
+
       :open ->
         {:ok, %{next | open?: true}}
 
@@ -438,6 +632,8 @@ defmodule QuicHttp3.Session do
              peer_streams: %{},
              runnable: [],
              retired: MapSet.new(),
+             continuations: %{},
+             qpack_streams: %{},
              open?: false
          }}
 
@@ -449,13 +645,22 @@ defmodule QuicHttp3.Session do
   defp record_events(session, events),
     do: put_in(session.work.acc, Enum.reverse(events) ++ session.work.acc)
 
-  defp consume_event(session, {:stream_open, stream, :uni}),
-    do:
-      {:ok,
-       %{
-         session
-         | peer_streams: Map.put_new(session.peer_streams, stream, %{type: nil, buffer: <<>>})
-       }}
+  defp consume_event(session, {:stream_open, stream, :uni}) do
+    cond do
+      MapSet.member?(session.retired, stream) ->
+        {:ok, session}
+
+      map_size(session.peer_streams) >= 128 ->
+        protocol_error(0x107, :peer_stream_limit)
+
+      true ->
+        {:ok,
+         %{
+           session
+           | peer_streams: Map.put_new(session.peer_streams, stream, %{type: nil, buffer: <<>>})
+         }}
+    end
+  end
 
   defp consume_event(session, {:stream_open, stream, :bidi}) do
     if request_for_stream(session.requests, stream) || MapSet.member?(session.retired, stream),
@@ -500,10 +705,21 @@ defmodule QuicHttp3.Session do
   defp consume_items(session, stream, items) do
     case request_for_stream(session.requests, stream) do
       {ref, request} ->
-        case parse_items(request, items, []) do
-          {:ok, request, events} ->
-            {:ok, %{session | requests: Map.put(session.requests, ref, request)},
-             Enum.reverse(events)}
+        case response_items(request, items, []) do
+          {:ok, request, events, terminal?} ->
+            next = put_in(session.requests[ref], request)
+
+            if terminal?,
+              do: finish_response(next, ref, request, events),
+              else: {:ok, next, events}
+
+          {:error, {:http3_error, :stream, code, reason}} ->
+            steps = [{:reset_code, stream, code}, {:stop_code, stream, code}]
+
+            with {:ok, next} <- retire_request(session, ref) do
+              {:ok, put_in(next.work.steps, steps ++ next.work.steps),
+               [{:stream_error, ref, code, reason}]}
+            end
 
           error ->
             error
@@ -513,6 +729,52 @@ defmodule QuicHttp3.Session do
         consume_peer_items(session, stream, items)
     end
   end
+
+  defp finish_response(session, ref, request, events) do
+    with {:ok, next} <- retire_request(session, ref) do
+      steps = if request.upload == :open, do: [{:reset_code, request.stream, 0x10C}], else: []
+      {:ok, put_in(next.work.steps, steps ++ next.work.steps), events}
+    end
+  end
+
+  defp response_items(request, [], events), do: {:ok, request, Enum.reverse(events), false}
+
+  defp response_items(request, [{:data, _id, bytes} | rest], events),
+    do: response_items(request, [{:data, bytes} | rest], events)
+
+  defp response_items(request, [{:data, bytes} | rest], events) when is_binary(bytes) do
+    with {:ok, decoder, emitted} <- Response.feed(request.decoder, bytes) do
+      mapped = Enum.map(emitted, &response_event(request.ref, &1))
+      response_items(%{request | decoder: decoder}, rest, Enum.reverse(mapped, events))
+    end
+  end
+
+  defp response_items(request, [{:fin, _id} | rest], events),
+    do: response_items(request, [{:fin} | rest], events)
+
+  defp response_items(request, [{:fin}], events) do
+    with {:ok, decoder, emitted} <- Response.finish(request.decoder) do
+      mapped = Enum.map(emitted, &response_event(request.ref, &1))
+      {:ok, %{request | decoder: decoder}, Enum.reverse(Enum.reverse(mapped, events)), true}
+    end
+  end
+
+  defp response_items(request, [{:reset, _id, code, final_size}], events),
+    do:
+      {:ok, request, Enum.reverse([{:stream_reset, request.ref, code, final_size} | events]),
+       true}
+
+  defp response_items(_request, _items, _events), do: protocol_error(0x101, :invalid_stream_event)
+
+  defp response_event(ref, {:headers, status, fields}),
+    do: {:headers, ref, [{":status", Integer.to_string(status)} | fields]}
+
+  defp response_event(ref, {:informational, status, fields}),
+    do: {:informational, ref, status, fields}
+
+  defp response_event(ref, {:data, bytes}), do: {:data, ref, bytes}
+  defp response_event(ref, {:trailers, fields}), do: {:trailers, ref, fields}
+  defp response_event(ref, :done), do: {:done, ref}
 
   defp valid_read_batch(_stream, items) when not is_list(items), do: {:error, :invalid_read_batch}
 
@@ -551,130 +813,243 @@ defmodule QuicHttp3.Session do
   end
 
   defp now, do: System.monotonic_time(:millisecond)
-  defp consume_peer_items(session, _stream, []), do: {:ok, session, []}
 
-  defp consume_peer_items(session, stream, [{:data, bytes} | rest]) when is_binary(bytes),
-    do: consume_peer_bytes(session, stream, bytes, rest)
+  defp valid_limits?(session) do
+    session.max_fields in 1..128 and session.max_encoded_headers in 1..65_536 and
+      session.max_header_bytes in 1..65_536 and session.max_retained_bytes in 1..1_048_576
+  end
 
-  defp consume_peer_items(session, stream, [{:data, _id, bytes} | rest]) when is_binary(bytes),
-    do: consume_peer_bytes(session, stream, bytes, rest)
+  defp request_admission(%{pending: pending}) when not is_nil(pending),
+    do: {:error, :operation_pending}
 
-  defp consume_peer_items(_session, _stream, [{:reset, _id, _code, _final_size} | _rest]),
-    do: {:error, :peer_control_stream_reset}
+  defp request_admission(%{control: %{goaway_id: id}, next_stream_id: next})
+       when is_integer(id) and next >= id,
+       do: {:error, :goaway}
 
-  defp consume_peer_items(_session, _stream, [{:fin} | _rest]),
-    do: {:error, :peer_control_stream_closed}
+  defp request_admission(session) do
+    if MapSet.size(session.retired) >= 1024, do: {:error, :terminal_stream_limit}, else: :ok
+  end
 
-  defp consume_peer_items(_session, _stream, [{:fin, _id} | _rest]),
-    do: {:error, :peer_control_stream_closed}
+  defp outgoing_fields(session, fields) do
+    cond do
+      length(fields) > session.max_fields ->
+        {:error, :request_field_limit}
 
-  defp consume_peer_items(_session, _stream, _items), do: {:error, :invalid_stream_event}
+      not Enum.all?(fields, fn
+        {name, value} when is_binary(name) and is_binary(value) -> true
+        _ -> false
+      end) ->
+        {:error, :invalid_fields}
 
-  defp consume_peer_bytes(session, stream, bytes, rest) do
-    state = Map.fetch!(session.peer_streams, stream)
-    data = state.buffer <> bytes
+      true ->
+        size =
+          Enum.reduce(fields, 0, fn {name, value}, acc ->
+            acc + byte_size(name) + byte_size(value) + 32
+          end)
 
-    case state.type do
-      :control ->
-        with {:ok, control, events} <- Control.receive_peer(session.control, stream, bytes),
-             {:ok, next, more} <- consume_peer_items(%{session | control: control}, stream, rest) do
-          {:ok, next, events ++ more}
+        peer =
+          if session.control.peer_settings,
+            do: List.keyfind(session.control.peer_settings, 6, 0),
+            else: nil
+
+        cond do
+          size > session.max_header_bytes -> {:error, :request_header_bytes_limit}
+          peer != nil and size > elem(peer, 1) -> {:error, :peer_field_section_limit}
+          true -> :ok
         end
-
-      nil ->
-        case Stream.decode_type(data) do
-          {:ok, :control, _rest} ->
-            next = put_in(session.peer_streams[stream], %{type: :control, buffer: <<>>})
-
-            with {:ok, control, events} <- Control.receive_peer(next.control, stream, data),
-                 {:ok, next, more} <- consume_peer_items(%{next | control: control}, stream, rest) do
-              {:ok, next, events ++ more}
-            end
-
-          {:ok, type, _rest} when type in [:qpack_encoder, :qpack_decoder] ->
-            next = put_in(session.peer_streams[stream], %{type: type, buffer: <<>>})
-            consume_peer_items(next, stream, rest)
-
-          {:ok, {:unknown, type}, _rest} ->
-            {:error, {:unsupported_peer_stream, type}}
-
-          :more ->
-            next = put_in(session.peer_streams[stream], %{type: nil, buffer: data})
-            consume_peer_items(next, stream, rest)
-        end
-
-      type when type in [:qpack_encoder, :qpack_decoder] ->
-        consume_peer_items(session, stream, rest)
     end
   end
+
+  defp encoded_headers(session, bytes) do
+    if byte_size(bytes) > session.max_encoded_headers,
+      do: {:error, :request_encoded_headers_limit},
+      else: :ok
+  end
+
+  defp stream_id(%TransportStream{handle: %{id: id}}, _fallback), do: id
+  defp stream_id(_stream, fallback), do: fallback
+
+  defp retire_request(session, ref) do
+    request = session.requests[ref]
+
+    with {:ok, next} <- retire_stream(session, request.stream) do
+      {:ok, %{drop_continuations(next, ref) | requests: Map.delete(next.requests, ref)}}
+    end
+  end
+
+  defp retire_stream(session, stream) do
+    if MapSet.size(session.retired) < 1024 or MapSet.member?(session.retired, stream) do
+      {:ok,
+       %{
+         session
+         | retired: MapSet.put(session.retired, stream),
+           runnable: List.delete(session.runnable, stream),
+           peer_streams: Map.delete(session.peer_streams, stream)
+       }}
+    else
+      {:error, :terminal_stream_limit}
+    end
+  end
+
+  defp drop_continuations(session, ref) do
+    %{
+      session
+      | continuations:
+          Map.reject(session.continuations, fn {_id, request_ref} -> request_ref == ref end)
+    }
+  end
+
+  defp work_request_ref(%{work: %{kind: {:request, ref}}}), do: ref
+
+  defp work_request_ref(%{pending: %{action: {:send, stream, _, _}}} = session) do
+    case request_for_stream(session.requests, stream) do
+      {ref, _} -> ref
+      nil -> nil
+    end
+  end
+
+  defp work_request_ref(_), do: nil
+  defp continuation_live?(_session, %{request_ref: nil}), do: true
+  defp continuation_live?(_session, %{pending: %{action: {:open_request, _, _, _, _}}}), do: true
+
+  defp continuation_live?(session, %{request_ref: ref}),
+    do: match?(%{upload: :open}, session.requests[ref])
+
+  defp retained_budget(session) do
+    requests =
+      Enum.reduce(session.requests, 0, fn {_, request}, acc ->
+        acc + Response.retained_bytes(request.decoder)
+      end)
+
+    peers =
+      Enum.reduce(session.peer_streams, 0, fn {_, peer}, acc -> acc + byte_size(peer.buffer) end)
+
+    control =
+      if session.control,
+        do: byte_size(session.control.buffer) + byte_size(session.control.peer_type_buffer),
+        else: 0
+
+    if requests + peers + control <= session.max_retained_bytes,
+      do: :ok,
+      else: protocol_error(0x107, :session_retained_bytes_limit)
+  end
+
+  defp consume_peer_items(session, _stream, []), do: {:ok, session, []}
+
+  defp consume_peer_items(session, stream, [{:data, _id, bytes} | rest]),
+    do: consume_peer_items(session, stream, [{:data, bytes} | rest])
+
+  defp consume_peer_items(session, stream, [{:data, bytes} | rest]) when is_binary(bytes) do
+    with {:ok, next, events} <- consume_peer_bytes(session, stream, bytes),
+         {:ok, next, more} <- consume_peer_items(next, stream, rest) do
+      {:ok, next, events ++ more}
+    end
+  end
+
+  defp consume_peer_items(session, stream, [{:fin, _id} | rest]),
+    do: consume_peer_items(session, stream, [{:fin} | rest])
+
+  defp consume_peer_items(session, stream, [terminal])
+       when terminal == {:fin} or elem(terminal, 0) == :reset do
+    case session.peer_streams[stream].type do
+      type when type in [:control, :qpack_encoder, :qpack_decoder] ->
+        protocol_error(0x104, :closed_critical_stream)
+
+      _ ->
+        with {:ok, next} <- retire_stream(session, stream), do: {:ok, next, []}
+    end
+  end
+
+  defp consume_peer_items(_session, _stream, _items),
+    do: protocol_error(0x101, :invalid_stream_event)
+
+  defp consume_peer_bytes(session, stream, bytes) do
+    peer = session.peer_streams[stream]
+
+    if peer.type == nil do
+      data = peer.buffer <> bytes
+
+      case Stream.decode_type(data) do
+        :more ->
+          {:ok, put_in(session.peer_streams[stream].buffer, :binary.copy(data)), []}
+
+        {:ok, type, rest} ->
+          with {:ok, next} <- identify_peer_stream(session, stream, type) do
+            payload = if type == :control, do: data, else: rest
+            receive_peer_payload(next, stream, type, payload)
+          end
+      end
+    else
+      receive_peer_payload(session, stream, peer.type, bytes)
+    end
+  end
+
+  defp identify_peer_stream(session, stream, type)
+       when type in [:qpack_encoder, :qpack_decoder] do
+    if Map.has_key?(session.qpack_streams, type) do
+      protocol_error(
+        0x103,
+        if(type == :qpack_encoder, do: :duplicate_qpack_encoder, else: :duplicate_qpack_decoder)
+      )
+    else
+      {:ok,
+       %{
+         put_in(session.peer_streams[stream], %{type: type, buffer: <<>>})
+         | qpack_streams: Map.put(session.qpack_streams, type, stream)
+       }}
+    end
+  end
+
+  defp identify_peer_stream(_session, _stream, :push),
+    do: protocol_error(0x108, :push_not_enabled)
+
+  defp identify_peer_stream(session, stream, type),
+    do: {:ok, put_in(session.peer_streams[stream], %{type: type, buffer: <<>>})}
+
+  defp receive_peer_payload(session, stream, :control, bytes) do
+    case Control.receive_peer(session.control, stream, bytes) do
+      {:ok, control, events} -> {:ok, %{session | control: control}, events}
+      {:error, {:http3_error, _, _, _}} = error -> error
+      {:error, reason} -> protocol_error(control_code(reason), reason)
+    end
+  end
+
+  defp receive_peer_payload(session, _stream, :qpack_encoder, bytes) do
+    if Enum.all?(:binary.bin_to_list(bytes), &(&1 == 0x20)),
+      do: {:ok, session, []},
+      else: protocol_error(0x201, :invalid_static_encoder_instruction)
+  end
+
+  defp receive_peer_payload(session, _stream, :qpack_decoder, <<>>), do: {:ok, session, []}
+
+  defp receive_peer_payload(_session, _stream, :qpack_decoder, _bytes),
+    do: protocol_error(0x202, :invalid_static_decoder_instruction)
+
+  defp receive_peer_payload(session, _stream, {:unknown, _type}, _bytes), do: {:ok, session, []}
+
+  defp control_code(reason)
+       when reason in [:duplicate_peer_control_stream, :invalid_peer_control_stream],
+       do: 0x103
+
+  defp control_code(reason) when reason in [:invalid_goaway, :increasing_goaway], do: 0x108
+  defp control_code(:settings_must_be_first), do: 0x10A
+  defp control_code(:duplicate_settings), do: 0x109
+  defp control_code({:duplicate_setting, _id}), do: 0x109
+  defp control_code({:reserved_setting, _id}), do: 0x109
+  defp control_code({:invalid_setting_value, _id, _value}), do: 0x109
+  defp control_code(:control_frame_too_large), do: 0x107
+
+  defp control_code(reason)
+       when reason in [:truncated_setting_identifier, :truncated_setting_value],
+       do: 0x106
+
+  defp control_code(_reason), do: 0x105
+  defp protocol_error(code, reason), do: {:error, {:http3_error, :connection, code, reason}}
 
   defp request_for_stream(requests, stream) do
     Enum.find_value(requests, fn
       {ref, %{stream: ^stream} = request} -> {ref, request}
       _ -> nil
     end)
-  end
-
-  defp parse_items(request, [], events), do: parse_buffer(request, events)
-
-  defp parse_items(request, [{:data, bytes} | rest], events) when is_binary(bytes) do
-    case parse_buffer(%{request | buffer: request.buffer <> bytes}, events) do
-      {:ok, next, emitted} -> parse_items(next, rest, emitted)
-      error -> error
-    end
-  end
-
-  defp parse_items(request, [{:data, _stream_id, bytes} | rest], events) when is_binary(bytes),
-    do: parse_items(request, [{:data, bytes} | rest], events)
-
-  defp parse_items(request, [{:fin} | rest], events) do
-    case parse_buffer(request, events) do
-      {:ok, %{buffer: <<>>} = next, emitted} ->
-        parse_items(next, rest, [{:done, request.ref} | emitted])
-
-      {:ok, _next, _emitted} ->
-        {:error, :truncated_http3_frame}
-
-      error ->
-        error
-    end
-  end
-
-  defp parse_items(request, [{:fin, _stream_id} | rest], events),
-    do: parse_items(request, [{:fin} | rest], events)
-
-  defp parse_items(request, [{:reset, _id, code, final_size} | _rest], events),
-    do: {:ok, request, [{:stream_reset, request.ref, code, final_size} | events]}
-
-  defp parse_items(_request, _items, _events), do: {:error, :invalid_stream_event}
-
-  defp parse_buffer({:ok, request, events}, extra), do: parse_buffer(request, extra ++ events)
-
-  defp parse_buffer(%{buffer: buffer} = request, events) do
-    case Frame.decode(buffer) do
-      :more ->
-        {:ok, request, events}
-
-      {:ok, %{type: 0, payload: _payload}, _rest} when not request.headers_received? ->
-        {:error, :data_before_headers}
-
-      {:ok, %{type: 0, payload: payload}, rest} ->
-        parse_buffer(%{request | buffer: rest}, [{:data, request.ref, payload} | events])
-
-      {:ok, %{type: 1, payload: payload}, rest} ->
-        case Qpack.decode_header_block(payload) do
-          {:ok, fields} ->
-            parse_buffer(
-              %{request | buffer: rest, headers_received?: true},
-              [{:headers, request.ref, fields} | events]
-            )
-
-          error ->
-            error
-        end
-
-      {:ok, _frame, _rest} ->
-        {:error, :forbidden_response_frame}
-    end
   end
 end

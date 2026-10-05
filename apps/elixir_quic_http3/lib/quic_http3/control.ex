@@ -10,7 +10,7 @@ defmodule QuicHttp3.Control do
 
   @default_settings [
     {1, 0},
-    {6, 0},
+    {6, 65_536},
     {7, 0}
   ]
 
@@ -200,7 +200,7 @@ defmodule QuicHttp3.Control do
   end
 
   defp parse_frames(%__MODULE__{buffer: buffer} = state, events) do
-    case Frame.decode(buffer) do
+    case bounded_frame(buffer) do
       :more ->
         {:ok, state, Enum.reverse(events)}
 
@@ -209,6 +209,16 @@ defmodule QuicHttp3.Control do
           {:ok, next, event} -> parse_frames(%{next | buffer: rest}, add_event(events, event))
           {:error, _reason} = error -> error
         end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp bounded_frame(buffer) do
+    with {:ok, _type, rest} <- QuicHttp3.Varint.decode(buffer),
+         {:ok, length, _payload} <- QuicHttp3.Varint.decode(rest) do
+      if length > 65_536, do: {:error, :control_frame_too_large}, else: Frame.decode(buffer)
     end
   end
 
@@ -228,13 +238,26 @@ defmodule QuicHttp3.Control do
 
   defp handle_frame(%__MODULE__{} = state, %{type: 7, payload: payload}) do
     case QuicHttp3.Varint.decode(payload) do
-      {:ok, id, <<>>} -> {:ok, %{state | goaway_id: id}, {:goaway, id}}
-      _ -> {:error, :invalid_goaway}
+      {:ok, id, <<>>} ->
+        cond do
+          state.role == :client and rem(id, 4) != 0 -> {:error, :invalid_goaway}
+          state.goaway_id != nil and id > state.goaway_id -> {:error, :increasing_goaway}
+          true -> {:ok, %{state | goaway_id: id}, {:goaway, id}}
+        end
+
+      _ ->
+        {:error, :invalid_goaway}
     end
   end
 
-  defp handle_frame(%__MODULE__{}, %{type: type}) when type in [0, 1, 5],
+  defp handle_frame(%__MODULE__{}, %{type: type}) when type in [0, 1, 2, 5, 6, 8, 9],
     do: {:error, :forbidden_control_frame}
+
+  defp handle_frame(%__MODULE__{role: :client}, %{type: 13}),
+    do: {:error, {:http3_error, :connection, 0x105, :forbidden_control_frame}}
+
+  defp handle_frame(%__MODULE__{role: :client}, %{type: 3}),
+    do: {:error, {:http3_error, :connection, 0x108, :push_not_permitted}}
 
   defp handle_frame(state, _frame), do: {:ok, state, nil}
 
