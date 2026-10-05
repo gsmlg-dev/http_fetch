@@ -24,6 +24,27 @@ defmodule Quic.Phase1PublicTest do
      ]}
   end
 
+  test "endpoint cleanup tolerates acceptor shutdown after a liveness check" do
+    {server_tls, _client_tls} = credentials()
+    test = self()
+
+    acceptor =
+      spawn(fn ->
+        {:ok, endpoint} = Quic.listen(tls: server_tls)
+        send(test, {:endpoint, endpoint})
+        receive do: (:stop -> :ok)
+      end)
+
+    on_exit(fn -> send(acceptor, :stop) end)
+    assert_receive {:endpoint, endpoint}
+    monitor = Process.monitor(endpoint)
+    assert Process.alive?(endpoint)
+    send(acceptor, :stop)
+    assert_receive {:DOWN, ^monitor, :process, ^endpoint, :normal}, 1_000
+    assert :ok = stop_endpoint(endpoint)
+    assert :ok = stop_endpoint(endpoint)
+  end
+
   test "public accept and attach order readiness before bounded pull stream data" do
     {server_tls, client_tls} = credentials()
 
@@ -31,7 +52,7 @@ defmodule Quic.Phase1PublicTest do
       Quic.listen(tls: server_tls, streams: [max_data: 32_768, max_stream_data: 16_384])
 
     {:ok, client} = Quic.client(tls: client_tls)
-    on_exit(fn -> for pid <- [server, client], Process.alive?(pid), do: GenServer.stop(pid) end)
+    on_exit(fn -> Enum.each([server, client], &stop_endpoint/1) end)
     {:ok, connection} = Quic.connect(client, Endpoint.local(server))
     :ok = Quic.attach(connection, self())
     assert_receive {:quic_ready, ^connection, metadata}, 2000
@@ -70,7 +91,7 @@ defmodule Quic.Phase1PublicTest do
     {server_tls, client_tls} = credentials()
     {:ok, server} = Quic.listen(tls: server_tls)
     {:ok, client} = Quic.client(tls: client_tls)
-    on_exit(fn -> for pid <- [server, client], Process.alive?(pid), do: GenServer.stop(pid) end)
+    on_exit(fn -> Enum.each([server, client], &stop_endpoint/1) end)
     {:ok, connection} = Quic.connect(client, Endpoint.local(server))
     :ok = Quic.attach(connection, self())
     assert_receive {:quic_ready, ^connection, _}, 2000
@@ -100,7 +121,7 @@ defmodule Quic.Phase1PublicTest do
     {server_tls, client_tls} = credentials()
     {:ok, server} = Quic.listen(tls: server_tls)
     {:ok, client} = Quic.client(tls: client_tls)
-    on_exit(fn -> for pid <- [server, client], Process.alive?(pid), do: GenServer.stop(pid) end)
+    on_exit(fn -> Enum.each([server, client], &stop_endpoint/1) end)
     {:ok, connection} = Quic.connect(client, Endpoint.local(server))
     :ok = Quic.attach(connection, self())
     assert_receive {:quic_ready, ^connection, _}, 2000
@@ -146,7 +167,7 @@ defmodule Quic.Phase1PublicTest do
     {server_tls, client_tls} = credentials()
     {:ok, server} = Quic.listen(tls: server_tls)
     {:ok, client} = Quic.client(tls: client_tls)
-    on_exit(fn -> for pid <- [server, client], Process.alive?(pid), do: GenServer.stop(pid) end)
+    on_exit(fn -> Enum.each([server, client], &stop_endpoint/1) end)
     {:ok, connection} = Quic.connect(client, Endpoint.local(server))
     :ok = Quic.attach(connection, self())
     assert_receive {:quic_ready, ^connection, _}, 2000
@@ -179,7 +200,7 @@ defmodule Quic.Phase1PublicTest do
     {server_tls, client_tls} = credentials()
     {:ok, server} = Quic.listen(tls: server_tls)
     {:ok, client} = Quic.client(tls: client_tls)
-    on_exit(fn -> for pid <- [server, client], Process.alive?(pid), do: GenServer.stop(pid) end)
+    on_exit(fn -> Enum.each([server, client], &stop_endpoint/1) end)
     {:ok, connection} = Quic.connect(client, Endpoint.local(server))
     :ok = Quic.attach(connection, self())
     assert_receive {:quic_ready, ^connection, _}, 2000
@@ -191,6 +212,20 @@ defmodule Quic.Phase1PublicTest do
              {:ok, events} = Quic.events(connection)
              :writable in events
            end)
+  end
+
+  defp stop_endpoint(pid) do
+    monitor = Process.monitor(pid)
+
+    try do
+      GenServer.stop(pid)
+    catch
+      :exit, {:noproc, {GenServer, :stop, [^pid, :normal, :infinity]}} -> :ok
+    end
+
+    assert_receive {:DOWN, ^monitor, :process, ^pid, reason}, 1_000
+    assert reason in [:normal, :noproc]
+    :ok
   end
 
   defp eventually(fun, n \\ 200)

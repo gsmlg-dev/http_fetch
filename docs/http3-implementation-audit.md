@@ -373,3 +373,23 @@ passed both toolchains, including historical published and current nine-package
 candidate TLS feature consumers. The implementation is ready to merge to `main`
 and run the coordinated 0.16.7 release; publication and post-release canary remain
 separate pending operations.
+
+Implementation was fast-forwarded to remote `main` at `046ab8d`, preserving the
+original review plan byte for byte. The first final-main release attempt
+[37361094065](https://github.com/gsmlg-dev/http_fetch/actions/runs/37361094065)
+failed before tag/publication in the QUIC admitted-timeout/consumer-death test's
+`on_exit` callback: its process-alive check raced endpoint shutdown, then
+`GenServer.stop` exited with `:noproc`. All other eight app summaries passed;
+QUIC reported 235 tests / one cleanup failure. The protocol assertions were
+not the failing point. The retained log is
+`/tmp/http3-final-release-first-failure.log`. The cleanup repair retains original
+timeout/reconciliation and resource assertions; final release remains pending.
+
+The cleanup race now has a real-endpoint regression: its owning acceptor exits
+after observed liveness, the endpoint terminates normally, and cleanup succeeds
+twice. Cleanup monitors first and tolerates only the exact `GenServer.stop`
+`:noproc` envelope, still asserting normal/absent termination. Original protocol
+assertions are unchanged. The regression was reproduced red before repair, then
+passed all six file tests. Root QUIC rerun: **236 tests / zero failures**, seed
+28092026; root format, configured Credo and diff checks **PASS**. The final-main
+0.16.7 release will be retried with the same mandatory validation gates.
