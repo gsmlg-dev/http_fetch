@@ -101,9 +101,16 @@ For module-by-module details, see the table in `CLAUDE.md` and read
   `git log --oneline` for examples.
 - No release branch conventions are enforced beyond standard feature
   branches; PRs target `main` (see CI workflow files in `.github/workflows/`).
-- CI runs on every push: compile + warnings-as-errors, format check, Credo,
-  Dialyzer, and tests. A green local `mix test && mix format --check-formatted
-  && mix credo && mix dialyzer` should match CI.
+- CI, Test, and E2E use isolated app jobs. Automatic push/PR runs select only
+  apps whose own `apps/<app>/` directories changed; dependency preparation
+  does not select additional sibling test jobs. WebSocket and EventSource
+  test closures also prepare Fetch for their cross-client tests.
+- Shared configuration, tooling, and workflow changes require manual full
+  regression. `workflow_dispatch` on each workflow forces all nine apps;
+  manual CI also checks shared formatting, candidate consumers, and historical
+  TLS compatibility. Use `gh workflow run ci.yml --ref main` (or `test.yml`
+  or `e2e.yml`) after shared changes. Release validation still covers the full
+  umbrella regardless of app selection.
 
 ## Reference
 

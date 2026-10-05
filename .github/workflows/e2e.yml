@@ -3,20 +3,11 @@ name: E2E
 on:
   push:
     branches: [main]
+    paths: ['apps/**']
   pull_request:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      module:
-        description: Umbrella app to verify
-        required: true
-        type: choice
-        default: all
-        options: [all, ex_ssl, elixir_quic, http_core, http_runtime, elixir_quic_http3, http_fetch, http_web_socket, http_event_source, http_web_transport]
-      version:
-        description: Optional release version; empty tests the selected branch
-        required: false
-        type: string
+    paths: ['apps/**']
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -30,7 +21,6 @@ jobs:
     uses: ./.github/workflows/changes.yml
     with:
       workflow_file: e2e.yml
-      manual_module: ${{ inputs.module || 'all' }}
 
   e2e:
     name: E2E (${{ matrix.app }})
@@ -45,26 +35,10 @@ jobs:
       MIX_ENV: test
       HTTP_FETCH_CI_APP: ${{ matrix.app }}
     steps:
-      - name: Select source revision
-        id: source
-        env:
-          VERSION: ${{ inputs.version }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          if [[ "$EVENT_NAME" == workflow_dispatch && -n "$VERSION" ]]; then
-            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-              echo "Invalid release version: expected a version such as 0.3.0" >&2
-              exit 1
-            fi
-            echo "ref=v${VERSION}" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout selected source
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.source.outputs.ref }}
+          ref: ${{ github.sha }}
 
       - name: Validate selected module
         run: test -d "apps/${HTTP_FETCH_CI_APP}"
