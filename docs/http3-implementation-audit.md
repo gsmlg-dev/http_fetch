@@ -11,8 +11,8 @@ completion requires all required gates and the final release to succeed.
 
 | Package | Release target | State |
 | --- | --- | --- |
-| WP0: baseline | 0.16.2 | Local repair verified; release attempt pending |
-| WP1: transport and resumable state | 0.16.3 | Pending |
+| WP0: baseline | 0.16.2 | Commit pushed; release attempt failed at baseline Dialyzer |
+| WP1: transport and resumable state | 0.16.3 | 41 focused tests PASS; review PASS; release attempt pending |
 | WP2: bounded HTTP/3 profile | 0.16.4 | Pending |
 | WP3: runtime and pooling | 0.16.5 | Pending |
 | WP4: explicit Fetch integration | 0.16.6 | Pending |
@@ -38,3 +38,36 @@ This is a release-script defect, not a Hex defect. Rerun result recorded below.
 
 Release automation rerun: **PASS**, 11 tests, exit 0. Manifest/harness formatting
 and `git diff --check`: **PASS**.
+
+Exact release tooling command: `python3 -m unittest discover -s scripts/release
+-p 'test_*.py' -v` from the implementation worktree (default Mix environment).
+WP0 commit: `bc63a24a1c93447efedf402e14fdbc71b680641d`.
+Release attempt: [37269991020](https://github.com/gsmlg-dev/http_fetch/actions/runs/37269991020),
+target `0.16.2`, workflow `release.yml`, `git_ref=codex/http3-completion`.
+Remote nine-app unit tests and TLS integration tests passed; normal Credo passed.
+Release failed before publication at Dialyzer on the pre-existing compiled
+MapSet literal in `SSL.Protocol.ServerHello.grease?/1` (line 427).
+No tag or package publication was reached. The narrow baseline repair is being
+validated for the next audited step; the check is retained.
+
+WP0 follow-up: the exact Dialyzer warning was reproduced and repaired by
+representing the same fixed GREASE identifiers as a list (no ignore changes).
+ServerHello 1 property and 16 tests passed; scoped Dialyzer had zero warnings.
+Release tests reproduced two failures on a prepared 0.16.2 graph because their
+fixtures assumed 0.16.1. Version-independent fixtures now pass 11/11 on both
+graphs. Detailed commands and limits remain in the baseline evidence document.
+
+## WP1
+
+The adapter and Session now retain native generation identity, side-effect
+references, allocated streams, admitted offsets, FIN, and destructively pulled
+batches. Unknown admission is resolved from its original reference, never
+replayed. Read demand can pause individual requests before QUIC grants receive
+credit. Native attachment, authenticated H3 readiness, both cancellation halves,
+and owned/shared endpoint cleanup have deterministic and native UDP coverage.
+Review found four additional failure-transition defects; repairs and fresh
+regressions are recorded in `http3-wp1-transport-session.md` before commit.
+
+WP1 fresh root verification: `MIX_ENV=test mix test` with the four WP1 test
+files and `--seed 0`: **41 tests, zero failures**. Spec and quality re-review:
+**PASS**. Full native query/DNS wall-clock bounds remain a WP3 owner obligation.

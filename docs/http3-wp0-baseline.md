@@ -123,3 +123,63 @@ standalone TLS provenance
 the current manifests/namespaces and the existing provenance record; it did
 not repeat the full imported-blob comparison or verify published artifacts.
 Local identity checks do not establish an available nine-package Hex release.
+
+## Follow-up: release validation blockers
+
+The first WP0 release attempt, [run 37269991020](https://github.com/gsmlg-dev/http_fetch/actions/runs/37269991020),
+failed at Dialyzer before publication. The actual failed-step log reported six
+warnings, five skipped, and one emitted opaque `member?` warning. Reading
+`repos/gsmlg-dev/http_fetch/check-runs/111634756218/annotations` identified the
+exact callsite: `lib/ssl/protocol/server_hello.ex:427`.
+
+`SSL.Protocol.ServerHello` compiled its fixed 16 GREASE identifiers as a
+`MapSet` module attribute, then passed that literal to `MapSet.member?/2`.
+Scoped local Dialyzer reproduced the same opaque-argument warning, exit 2.
+The repair keeps the same generated identifiers as a list and checks
+membership with `in`; it changes no TLS selection/rejection rules and adds
+no Dialyzer ignore. The existing ServerHello parser suite covers fragmented
+inputs and negative GREASE selections for ciphers, groups, and extensions.
+
+The release unittest fixture also assumed repository version `0.16.1`.
+Against a complete temporary graph prepared at `0.16.2`, its unchanged suite
+reproduced **11 tests, 2 failures**: archive metadata identity mismatch and
+the missing-edge test failing to remove the version-specific dependency
+line. Version tests now prepare their private complete graph at a fixed test
+version before mutations, remove the edge regardless of requirement version,
+and assert exactly one removal. Archive tests read the root source version
+and use it consistently for archive filenames, metadata, rebuilds, audit,
+and documentation. All existing rejection assertions remain intact.
+
+Follow-up source baseline: `bc63a24a1c93447efedf402e14fdbc71b680641d`.
+Validation used Elixir 1.18.5/OTP 28 and these scoped commands:
+
+```sh
+python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
+MIX_ENV=test HTTP_FETCH_CI_APP=ex_ssl MIX_BUILD_PATH=/tmp/http3-wp0-exssl-repair-build mix compile --warnings-as-errors
+MIX_ENV=test HTTP_FETCH_CI_APP=ex_ssl MIX_BUILD_PATH=/tmp/http3-wp0-exssl-repair-build mix test apps/ex_ssl/test/ssl/protocol/server_hello_test.exs --seed 743209
+mix format --check-formatted apps/ex_ssl/lib/ssl/protocol/server_hello.ex
+git diff --check
+```
+
+Results: release unittest **11/11 PASS** at current source version and
+**11/11 PASS** against the temporary `0.16.2` graph; fresh compile **PASS**;
+ServerHello **1 property, 16 tests, 0 failures**; formatting/diff **PASS**.
+The temporary-graph run copied root manifests/lock and all nine app sources,
+ran `versions.exs prepare 0.16.2` there, then loaded the same unittest module
+with its source root and `stage.ROOT` pointed to that graph. Local green logs
+are `/tmp/http3-wp0-release-fixture-current-green.log` and
+`/tmp/http3-wp0-release-fixture-prepared-green.log`.
+
+Direct `:dialyzer.run/1` analyzed only the freshly compiled
+`/tmp/http3-wp0-exssl-repair-build/lib/ex_ssl/ebin/Elixir.SSL.Protocol.ServerHello.beam`,
+using the existing main-workspace PLT at
+`apps/http_fetch/priv/plts/dialyzer.plt`, `check_plt: false`, and the release
+warning flags `[:unmatched_returns, :error_handling, :underspecs, :unknown]`.
+Result: **zero warnings, exit 0**. An initial invocation used an incorrect
+extra `test/` path component and failed to locate the BEAM; the corrected
+invocation above completed successfully. This scoped analysis does not claim
+that a fresh full umbrella Dialyzer or repaired remote release passed.
+
+These follow-up edits constitute the second cumulative WP0 Sol repair round;
+both rounds passed their scoped validation. No Astra repair was used. All
+owned commands completed, and concurrent HTTP/3 work was preserved.

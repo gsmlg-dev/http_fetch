@@ -7,6 +7,7 @@ defmodule QuicHttp3.Transport.QuicTest do
     def client(opts), do: send_call(:client, [opts])
     def connect(endpoint, remote, opts), do: send_call(:connect, [endpoint, remote, opts])
     def stop_endpoint(endpoint), do: send_call(:stop_endpoint, [endpoint])
+    def attach(handle, consumer, opts), do: send_call(:attach, [handle, consumer, opts])
     def ready(handle), do: send_call(:ready, [handle])
     def open_stream(handle, kind, opts), do: send_call(:open_stream, [handle, kind, opts])
 
@@ -33,12 +34,15 @@ defmodule QuicHttp3.Transport.QuicTest do
     handle = make_ref()
     Process.put({:result, :client}, {:ok, endpoint})
     Process.put({:result, :connect}, {:ok, handle})
+    fixture = Path.expand("../../elixir_quic/test/fixtures/tls/root.pem", __DIR__)
+    [{:Certificate, ca, :not_encrypted}] = :public_key.pem_decode(File.read!(fixture))
+    Process.put(:tls, cacerts: [ca], reference_identity: {:dns_id, "example.test"})
     {:ok, endpoint: endpoint, handle: handle}
   end
 
   test "configures h3 ALPN and bounded datagrams", ctx do
     endpoint = ctx.endpoint
-    assert {:ok, connection} = Adapter.connect({127, 0, 0, 1}, 443, ops: Ops)
+    assert {:ok, connection} = connect({127, 0, 0, 1}, 443, ops: Ops)
     assert connection.endpoint == ctx.endpoint
     assert connection.handle == ctx.handle
     assert_received {:client, [opts]}
@@ -50,7 +54,7 @@ defmodule QuicHttp3.Transport.QuicTest do
              _ -> nil
            end) == ["h3"]
 
-    assert_received {:connect, [^endpoint, {{127, 0, 0, 1}, 443}, []]}
+    assert_received {:connect, [^endpoint, {{127, 0, 0, 1}, 443}, [ref: _ref]]}
   end
 
   test "delegates streams, datagrams and lifecycle without rewriting failures", _ctx do
@@ -62,7 +66,7 @@ defmodule QuicHttp3.Transport.QuicTest do
     Process.put({:result, :send_datagram}, {:error, :datagram_unsupported})
     Process.put({:result, :read_datagrams}, {:ok, ["d"]})
     Process.put({:result, :close}, {:error, :closed})
-    assert {:ok, connection} = Adapter.connect({127, 0, 0, 1}, 443, ops: Ops)
+    assert {:ok, connection} = connect({127, 0, 0, 1}, 443, ops: Ops)
     assert {:ok, stream} = Adapter.open_stream(connection, :uni, [])
     assert {:blocked, :credit} = Adapter.send_stream(stream, "x", false, [])
     assert {:unknown, ^ref} = Adapter.read(stream, 1, [])
@@ -81,25 +85,29 @@ defmodule QuicHttp3.Transport.QuicTest do
   end
 
   test "custom ALPN and invalid profile options" do
-    assert {:ok, _} = Adapter.connect({127, 0, 0, 1}, 443, alpn: ["my-h3"], ops: Ops)
+    assert {:error, :invalid_h3_alpn} = connect({127, 0, 0, 1}, 443, alpn: ["my-h3"], ops: Ops)
 
-    assert {:error, {:invalid_profile, :alpn}} =
-             Adapter.connect({127, 0, 0, 1}, 443, alpn: [], ops: Ops)
+    assert {:error, :invalid_h3_alpn} =
+             connect({127, 0, 0, 1}, 443, alpn: [], ops: Ops)
 
     assert {:error, :invalid_datagram_options} =
-             Adapter.connect({127, 0, 0, 1}, 443, datagram: :disabled, ops: Ops)
+             connect({127, 0, 0, 1}, 443, datagram: :disabled, ops: Ops)
   end
 
   test "stops an internally owned endpoint when connect fails" do
     Process.put({:result, :connect}, {:blocked, :handshake})
     Process.put({:result, :stop_endpoint}, :ok)
 
-    assert {:blocked, :handshake} = Adapter.connect({127, 0, 0, 1}, 443, ops: Ops)
+    assert {:blocked, :handshake} = connect({127, 0, 0, 1}, 443, ops: Ops)
     assert_received {:stop_endpoint, [_endpoint]}
   end
 
+  defp connect(remote, port, opts) do
+    Adapter.connect(remote, port, Keyword.put_new(opts, :tls, Process.get(:tls)))
+  end
+
   test "rejects malformed remote values without starting an endpoint" do
-    assert {:error, :invalid_remote} = Adapter.connect(:not_an_address, 443, ops: Ops)
+    assert {:error, :invalid_remote} = connect(:not_an_address, 443, ops: Ops)
     refute_received {:client, _}
   end
 end

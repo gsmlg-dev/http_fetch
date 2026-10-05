@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,10 @@ import hex_packages
 import stage
 
 
+def source_version(root):
+    return re.search(r'@version "([^"]+)"', (root / "mix.exs").read_text()).group(1)
+
+
 class VersionTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -30,6 +35,9 @@ class VersionTests(unittest.TestCase):
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, target)
+        self.fixture_version = "9.8.7"
+        result = self.command("prepare", self.fixture_version)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def command(self, mode, version):
         return subprocess.run(["elixir", str(SCRIPT_DIR / "versions.exs"), mode, version],
@@ -41,13 +49,15 @@ class VersionTests(unittest.TestCase):
         for app in stage.PACKAGES:
             text = (self.root / "apps" / app / "mix.exs").read_text()
             self.assertIn('1.0.0', text)
-            self.assertNotIn('0.16.1', text)
+            self.assertNotIn(self.fixture_version, text)
         self.assertEqual(self.command("validate", "1.0.0").returncode, 0)
         self.assertNotEqual(self.command("validate", "1.0.1").returncode, 0)
 
     def test_missing_graph_edge_and_incompatible_lock_reject_before_writes(self):
         core = self.root / "apps/http_core/mix.exs"
-        core.write_text(core.read_text().replace('      {:elixir_quic, "== 0.16.1", in_umbrella: true, hex: :elixir_quic},\n', ''))
+        source, removed = re.subn(r'^\s*\{:elixir_quic, "[^"]+", in_umbrella: true, hex: :elixir_quic\},\n', '', core.read_text(), flags=re.MULTILINE)
+        self.assertEqual(removed, 1)
+        core.write_text(source)
         before = (self.root / "mix.exs").read_bytes()
         result = self.command("prepare", "1.0.0")
         self.assertIn("internal dependency graph mismatch", result.stderr)
@@ -71,8 +81,9 @@ class ArchiveTests(unittest.TestCase):
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temp.name)
+        cls.version = source_version(ROOT)
         cls.stage = stage.stage_sources(cls.root / "stage")
-        cls.archives = stage.build(cls.stage, "0.16.1", cls.root / "archives")
+        cls.archives = stage.build(cls.stage, cls.version, cls.root / "archives")
 
     @classmethod
     def tearDownClass(cls):
@@ -84,30 +95,30 @@ class ArchiveTests(unittest.TestCase):
             self.assertNotIn("in_umbrella:", text)
             self.assertNotIn("build_path: \"../../", text)
             self.assertNotIn("lockfile: \"../../", text)
-        result = subprocess.run(["elixir", str(SCRIPT_DIR / "archives.exs"), "0.16.1", str(self.archives)],
+        result = subprocess.run(["elixir", str(SCRIPT_DIR / "archives.exs"), self.version, str(self.archives)],
                                 cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         for package in stage.PACKAGES:
-            archive_audit.audit_package(package, "0.16.1", self.stage, self.archives)
+            archive_audit.audit_package(package, self.version, self.stage, self.archives)
 
     def test_documentation_staging_adds_ex_doc_only_when_missing(self):
         with tempfile.TemporaryDirectory() as directory:
             for package in stage.PACKAGES:
                 target = Path(directory) / package
-                docs.prepare_docs_source(self.stage / package, target, "0.16.1")
+                docs.prepare_docs_source(self.stage / package, target, self.version)
                 text = (target / "mix.exs").read_text()
                 self.assertEqual(text.count("{:ex_doc,"), 1, package)
-                pattern = f'https://github.com/gsmlg-dev/http_fetch/blob/v0.16.1/apps/{package}/%{{path}}#L%{{line}}'
+                pattern = f'https://github.com/gsmlg-dev/http_fetch/blob/v{self.version}/apps/{package}/%{{path}}#L%{{line}}'
                 self.assertEqual(text.count(f'source_url_pattern: "{pattern}"'), 1, package)
 
     def test_rebuild_match_and_mismatch_rejection(self):
-        stage.verify_rebuild(self.stage, "0.16.1", self.archives)
+        stage.verify_rebuild(self.stage, self.version, self.archives)
         manifest = self.stage / "http_core/mix.exs"
         original = manifest.read_text()
         try:
             manifest.write_text(original + "\n# divergent staged source\n")
             with self.assertRaisesRegex(RuntimeError, "rebuild differs"):
-                stage.verify_rebuild(self.stage, "0.16.1", self.archives)
+                stage.verify_rebuild(self.stage, self.version, self.archives)
         finally:
             manifest.write_text(original)
 
@@ -117,11 +128,11 @@ class ArchiveTests(unittest.TestCase):
         try:
             source.write_bytes(b"corrupted")
             with self.assertRaisesRegex(RuntimeError, "differs from stage"):
-                archive_audit.audit_package("http_core", "0.16.1", self.stage, self.archives)
+                archive_audit.audit_package("http_core", self.version, self.stage, self.archives)
         finally:
             source.write_bytes(original)
         # Remove one file from the inner tar while retaining a syntactically valid outer tar.
-        archive = self.archives / "http_core-0.16.1.tar"
+        archive = self.archives / f"http_core-{self.version}.tar"
         outer_bytes = archive.read_bytes()
         try:
             with tarfile.open(fileobj=io.BytesIO(outer_bytes)) as outer:
@@ -141,7 +152,7 @@ class ArchiveTests(unittest.TestCase):
                     out.addfile(member, io.BytesIO(data))
             archive.write_bytes(rebuilt.getvalue())
             with self.assertRaisesRegex(RuntimeError, "omitted runtime source"):
-                archive_audit.audit_package("http_core", "0.16.1", self.stage, self.archives)
+                archive_audit.audit_package("http_core", self.version, self.stage, self.archives)
         finally:
             archive.write_bytes(outer_bytes)
 

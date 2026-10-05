@@ -8,8 +8,16 @@ defmodule QuicHttp3.SessionTest do
     def open_stream(_, kind, _), do: send_call({:open, kind}, {:ok, {:stream, kind}})
     def send_stream(stream, bytes, fin, _), do: send_call(:send, {:ok, {stream, bytes, fin}})
     def events(_, _, _), do: Process.get(:events, {:ok, []})
-    def read(_, _, _), do: Process.get(:read, {:ok, []})
+
+    def read(_, _, _) do
+      result = Process.get(:read, {:ok, []})
+      Process.put(:read, {:ok, []})
+      result
+    end
+
     def stop_stream(_, _, _), do: :ok
+    def reset_stream(_, _, _), do: {:ok, make_ref()}
+    def cleanup(_), do: :ok
     def close(_, _, _, _), do: :ok
 
     defp send_call(key, result) do
@@ -52,7 +60,7 @@ defmodule QuicHttp3.SessionTest do
 
   test "unknown transport events are explicit errors", %{session: session} do
     Process.put(:events, {:ok, [{:mystery}]})
-    assert {:error, :invalid_transport_event} = Session.poll(session, 8)
+    assert {:error, _session, :invalid_transport_event} = Session.poll(session, 8)
   end
 
   test "consumes opaque peer control streams and normal transport events", %{session: session} do

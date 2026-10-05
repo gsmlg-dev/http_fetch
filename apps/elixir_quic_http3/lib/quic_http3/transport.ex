@@ -11,10 +11,14 @@ defmodule QuicHttp3.Transport do
   @type options :: keyword()
   @type failure :: {:error, term()} | {:blocked, term()} | {:unknown, reference()}
 
-  @callback client(options()) :: {:ok, pid()} | failure()
+  @callback client(options()) :: {:ok, term()} | failure()
   @callback connect(binary() | :inet.ip_address(), :inet.port_number(), options()) ::
-              {:ok, connection()} | failure()
+              {:ok, connection()} | {:unknown, connection(), reference()} | failure()
   @callback ready(connection(), timeout()) :: :ready | :pending | failure()
+  @callback info(connection()) :: {:ok, map()} | failure()
+  @callback operation_status(connection(), reference(), atom()) :: map() | :unknown | failure()
+  @callback cleanup(connection()) :: :ok | {:error, term()}
+  @callback abort(connection(), options()) :: :ok | failure()
   @callback open_stream(connection(), :bidi | :uni, options()) ::
               {:ok, stream()} | failure()
   @callback send_stream(stream(), binary(), boolean(), options()) ::

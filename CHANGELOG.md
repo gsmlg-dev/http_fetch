@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.3] - 2026-10-05
+
+### Fixed
+- Compose HTTP/3 sessions with native QUIC generations, authenticated H3
+  readiness, consistent stream handles, retained operation references, and
+  explicit endpoint ownership and terminal teardown.
+- Preserve cancellation isolation and reconcile ambiguous admission without
+  replaying request bytes or destructive reads.
+- Repair the baseline ServerHello Dialyzer warning without changing GREASE
+  handling, and make release tests independent of the prepared patch version.
+
+### Validation
+- WP1 native-contract seams and local UDP session tests; public Fetch HTTP/3
+  remains unsupported until the runtime and independent acceptance gates.
+
 ## [0.16.2] - 2026-10-05
 
 ### Fixed

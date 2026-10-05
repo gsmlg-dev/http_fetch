@@ -9,7 +9,7 @@ defmodule SSL.Protocol.ServerHello do
   @hello_retry_request_random Base.decode16!(
                                 "CF21AD74E59A6111BE1D8C021E65B891C2A211167ABB8C5E079E09E2C8A8339C"
                               )
-  @grease_values MapSet.new(Enum.map(0..15, &(0x0A0A + &1 * 0x1010)))
+  @grease_values Enum.map(0..15, &(0x0A0A + &1 * 0x1010))
   @maximum_body_length 65_607
   @server_hello_type 2
 
@@ -424,7 +424,7 @@ defmodule SSL.Protocol.ServerHello do
 
   defp take(_bytes, _length, field), do: {:error, {:malformed_server_hello, field}}
 
-  defp grease?(value), do: MapSet.member?(@grease_values, value)
+  defp grease?(value), do: value in @grease_values
 
   defp validate_expectations(expectations) when is_map(expectations) do
     with :ok <- validate_session_expectation(expectations),
