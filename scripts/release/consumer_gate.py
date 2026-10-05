@@ -145,6 +145,13 @@ end
     command(["mix", "run", "smoke.exs"], cwd=project, env=project_env)
 
 
+def feature_group_passed(output):
+    old = re.search(r"(?m)^[1-9][0-9]* tests?, 0 failures$", output)
+    current = re.search(r"(?m)^Result: [1-9][0-9]* passed$", output)
+    skipped = re.search(r"(?m)[1-9][0-9]* (?:excluded|skipped)", output)
+    return bool(old or current) and not skipped
+
+
 def feature_project(directory, version, env):
     project = directory / "feature"
     (project / "test").mkdir(parents=True)
@@ -185,7 +192,7 @@ IO.puts("loaded_ssl_connection=" <> to_string(:code.which(SSL.Connection)))
         output = result.stdout + result.stderr
         (logs / f"{group.name}.log").write_text(output)
         print(f"{group.name}: {result.returncode}")
-        if result.returncode or not re.search(r"[1-9][0-9]* tests?, 0 failures", output) or re.search(r"[1-9][0-9]* (?:excluded|skipped)", output):
+        if result.returncode or not feature_group_passed(output):
             print(output[-6000:])
             raise RuntimeError(f"candidate TLS feature group failed: {group.name}")
 

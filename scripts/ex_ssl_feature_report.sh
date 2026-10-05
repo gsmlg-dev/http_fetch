@@ -17,7 +17,7 @@ report="$EX_SSL_RESULTS_DIR/ex_ssl_feature_gate-${EX_SSL_DEP_MODE}.txt"
   printf 'seed=%s\n' "${EX_SSL_TEST_SEED:-36}"
   printf 'exit_status=%s\n' "${EX_SSL_GATE_STATUS:-unknown}"
   if [[ -f "$EX_SSL_PROVENANCE_LOG" ]]; then
-    grep -E '^(runtime|resolved_scm|resolved_destination|resolved_build|resolved_from|hex_inner_checksum|hex_outer_checksum|loaded_ssl_connection|source_commit|source_dirty)=' \
+    grep -E '^(runtime|resolved_scm|resolved_destination|resolved_build|resolved_from|hex_inner_checksum|hex_outer_checksum|loaded_ssl_connection|package_source_commit|source_commit|source_dirty)=' \
       "$EX_SSL_PROVENANCE_LOG" | sed -E 's#/(tmp|var/folders)/[^ ]+#<temporary-path>#g'
   else
     printf 'provenance=not-produced\n'
@@ -26,7 +26,7 @@ report="$EX_SSL_RESULTS_DIR/ex_ssl_feature_gate-${EX_SSL_DEP_MODE}.txt"
     for group_log in "$EX_SSL_GROUP_LOG_DIR"/*.log; do
       [[ -f "$group_log" ]] || continue
       printf 'group=%s\n' "$(basename "$group_log" .log)"
-      grep -E 'Finished in|[0-9]+ tests?, [0-9]+ failures?|[0-9]+ (excluded|skipped)' "$group_log" || true
+      grep -E 'Finished in|Result:|[0-9]+ tests?, [0-9]+ failures?|[0-9]+ (excluded|skipped)' "$group_log" || true
     done
   else
     printf 'tests=not-produced\n'

@@ -25,6 +25,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0 # Includes historical v0.16.1 source e844ce03067fedac82c079f21c47810e671be0bb.
 
       - name: Set up Elixir
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124
@@ -36,6 +38,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes python3 openssl
 
       - name: Prepare root test dependencies
+        id: prepare
         env:
           MIX_ENV: test
         run: |
@@ -43,14 +46,48 @@ jobs:
           mix compile --warnings-as-errors
 
       - name: Run published feature consumer gate
+        id: published_feature
+        if: steps.prepare.outcome == 'success'
         env:
           EX_SSL_RESULTS_DIR: ${{ runner.temp }}/ex-ssl-feature-results
         run: bash scripts/ex_ssl_published_feature_gate.sh
 
+      - name: Build current nine-package Hex candidate
+        id: build_candidate
+        if: always() && steps.prepare.outcome == 'success'
+        run: |
+          version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' mix.exs)
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
+          elixir scripts/release/archives.exs "$version" "$RUNNER_TEMP/archives"
+
+      - name: Resolve all nine candidate Hex packages
+        id: candidate_consumers
+        if: always() && steps.build_candidate.outcome == 'success'
+        run: python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
+
+      - name: Run candidate TLS feature consumer gate
+        id: candidate_feature
+        if: always() && steps.candidate_consumers.outcome == 'success'
+        env:
+          EX_SSL_DEP_MODE: candidate
+          EX_SSL_CANDIDATE_ARCHIVE_DIR: ${{ runner.temp }}/archives
+          EX_SSL_RESULTS_DIR: ${{ runner.temp }}/ex-ssl-candidate-results
+          HTTP_FETCH_RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+        run: bash scripts/ex_ssl_source_smoke.sh
+
       - name: Upload sanitized feature-gate report
-        if: always()
+        if: always() && steps.published_feature.outcome != 'skipped'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: published-ex-ssl-feature-gate-${{ matrix.elixir }}-otp-${{ matrix.otp }}-report
           path: ${{ runner.temp }}/ex-ssl-feature-results/*.txt
+          if-no-files-found: error
+
+      - name: Upload candidate feature-gate report
+        if: always() && steps.candidate_feature.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: candidate-ex-ssl-feature-gate-${{ matrix.elixir }}-otp-${{ matrix.otp }}-report
+          path: ${{ runner.temp }}/ex-ssl-candidate-results/*.txt
           if-no-files-found: error

@@ -80,6 +80,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Automation regressions stage the pinned historical HTTP sources.
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.18'
