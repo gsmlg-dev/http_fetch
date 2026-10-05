@@ -14,8 +14,8 @@ completion requires all required gates and the final release to succeed.
 | WP0: baseline | 0.16.2 | Commit pushed; release attempt failed at baseline Dialyzer |
 | WP1: transport and resumable state | 0.16.3 | Commit pushed; release failed before publication: uv environment lacked pip |
 | WP2: bounded HTTP/3 profile | 0.16.4 | Commit pushed; protocol gates PASS; release failed after publishing ex_ssl 0.16.4 |
-| WP3: runtime and pooling | 0.16.5 | Independent review repaired three runtime gaps; audited commit ready |
-| WP4: explicit Fetch integration | 0.16.6 | Pending |
+| WP3: runtime and pooling | 0.16.5 | Commit c3fb8dd pushed; coordinated release 0.16.5 succeeded |
+| WP4: explicit Fetch integration | 0.16.6 | Public Fetch/SSE enabled; independent review repairs validated |
 | WP5: independent acceptance | 0.16.7 | Pending |
 
 Local validation, remote workflow results, wire interoperability, artifact
@@ -147,3 +147,61 @@ seed 0. Root full test-environment Dialyzer **PASS** (five existing intentional
 skips, zero new warnings). Native timeout releases requests/leases before the
 subscriber ACK; only the bounded delivery relay waits for consumer settlement.
 The supported Fetch facade is deliberately withheld from this checkpoint.
+
+WP3 commit: `c3fb8dd`. Audit release `0.16.5`:
+[37281072120](https://github.com/gsmlg-dev/http_fetch/actions/runs/37281072120),
+workflow definition and git_ref `codex/http3-completion`. Issues #17 and #18 were
+closed after their fixes, regressions and wire evidence were committed and pushed.
+
+WP3 audit release **PASS**:
+[37281072120](https://github.com/gsmlg-dev/http_fetch/actions/runs/37281072120)
+published all nine packages, verified all nine immutable GitHub archives, and
+published documentation. Source release commit/tag: `19dedb2` / `v0.16.5`.
+The implementation branch fast-forwarded to the workflow's version commit while
+preserving all uncommitted WP4/WP5 changes. This is an intermediate audit release;
+public HTTP/3 integration and final acceptance remain pending.
+
+## WP4
+
+Enabled the public Fetch facade over runtime's acknowledged relay. Binary and
+PID producer bodies emit DATA; stream consumption acknowledges only after the
+application handler accepts bytes. Public responses and request-stop telemetry
+report actual protocol. Informational retention is bounded by 128 sections/64KiB,
+with buffered trailers and streamed trailer envelopes. Secure flat H3 profile/
+reuse options are preserved, TCP-only routes fail explicitly, and consumed
+stream bodies/client identities cannot be replayed/leaked through redirects.
+EventSource explicitly opts into H3 and retains BOM/UTF8/parser/cursor/reconnect,
+backpressure, generation, idle and opening semantics.
+
+New native public regressions passed **9/0**, including actual protocol telemetry,
+streamed upload/response, trailers, TLS identity rejection, abort sibling safety,
+non-replayable redirects, incompatible routes and informational retention.
+Full Fetch checkpoint: **317 tests + 20 doctests, zero failures**, seed 0.
+An independent review reproduced queued-cancellation admission and established
+SSE native-TLS classification defects before repairing them. Reviewed runtime
+**86/0** plus adapter **6/0** and EventSource **75/0** pass; source quality gates pass.
+
+Working WP4 checkpoint independent public gate **PASS**,
+`/tmp/http3-wp4-public-gate-291-2.log`: aioquic 1.2.0 and digest-pinned Caddy 2.9.1
+verified GET, arbitrary binary POST/PUT, 2MiB streamed upload hashes, 8MiB streamed
+file integrity, 32 simultaneous requests, wrong CA/reference/expired certificate/
+wrong ALPN failures. Aioquic additionally verified 103, trailers, reset/abort,
+actual H3 EventSource and GOAWAY retirement. **10,000 sequential requests across
+11 distinct connections PASS**, with terminal session/pool cleanup. This precedes
+the final queued-cancellation/SSE review edits; the final-source public rerun and
+24-hour canary remain separate gates.
+
+The first Caddy 2.8.4 no-length streaming gate failed correctly. An independent
+aioquic client reproduced its server-side quic-go/Caddy empty-body behavior; the
+Caddy 2.9.1 peer contains the demonstrated fix and is pinned by immutable digest.
+No client length synthesis or fallback was added. The old fingerprint fixture is
+separate. See `http3-wp5-acceptance.md` for fixture source/negative-test evidence.
+
+Final WP4 source rerun after the review repairs: runtime **86/0**, Fetch
+**318 tests + 20 doctests/0**, EventSource **75/0**, seed 0. Strict compile,
+root format, configured Credo and full Dialyzer **PASS**, with the five existing
+intentional Dialyzer skips retained. An additional `credo --strict` reported
+low-priority repository style suggestions; CI's configured Credo reports no issues.
+The canary harness calibration passed **184 seconds / 1,792 requests**,
+peak VM memory 73,601,832 bytes and 178 processes. This short calibration is
+not the required 24-hour gate.

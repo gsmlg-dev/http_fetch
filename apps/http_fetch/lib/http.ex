@@ -325,7 +325,8 @@ defmodule HTTP do
           response.status,
           request.url,
           response_body_size(response),
-          duration
+          duration,
+          response.http_version
         )
 
         response

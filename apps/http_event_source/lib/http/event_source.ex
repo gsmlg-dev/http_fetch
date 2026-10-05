@@ -15,6 +15,14 @@ defmodule HTTP.EventSource do
   remains fixed. `http2_scope` and `http2_reuse` follow the shared runtime's
   connection policy; established sessions have no Fetch total-request deadline.
 
+  Select `http_version: :http3` for required HTTPS over QUIC, with no protocol
+  downgrade. Supply CA trust and optional reference identity through `ssl:`;
+  HTTP/3 uses its QUIC TLS engine and rejects `tls_backend:`. `http3_profile`
+  selects `:ordered` (default) or `:compact`, and `http3_reuse` controls pooling.
+  The same parser, reconnect cursor, idle timeout and delivery limits apply.
+  HTTP/3 requires a finite `connect_timeout`; established streams have no total
+  request deadline. UNIX sockets, proxies and TCP `socket_opts` are unsupported.
+
   Parser limits default to `max_line_size: 65_536`, `max_event_size: 1_048_576`
   and `max_event_parts: 16_384`. The event byte cap includes retained data,
   event type, cursor and unfinished input; invalid UTF-8 completed lines remain
@@ -27,8 +35,8 @@ defmodule HTTP.EventSource do
   The finite FIFO defaults to `max_queue_bytes: 2_097_152` and
   `max_queue_events: 64`, including the in-flight message. Acknowledged mode
   requires `max_queue_bytes >= max_event_size + 7` to reserve a complete event.
-  Parked transport input is capped at 1 MiB plus the profile's advertised stream
-  receive window, including unused in-flight allowance, and 128 chunks. Transport
+  Parked transport input is capped at 1 MiB plus the HTTP/2 profile's advertised
+  stream receive window, or one 16 KiB relay chunk for HTTP/3, and 128 chunks. Transport
   credit returns on safe bounded raw/parser admission; excessive retained chunk
   counts terminate explicitly. Accepted deliveries drain before a fatal parser
   error is reported. Idle timing
@@ -47,7 +55,7 @@ defmodule HTTP.EventSource do
   Custom server-sent event names are delivered through the message event's
   `type` field.
 
-  For `https` connections, pass `tls_backend: :ssl | :ex_ssl` (or the equivalent
+  For HTTP/1 and HTTP/2 `https` connections, pass `tls_backend: :ssl | :ex_ssl` (or the equivalent
   string in a map). When omitted, the shared `:http_core` TLS backend setting is
   captured when the source is created and retained across reconnects.
   """
@@ -113,10 +121,10 @@ defmodule HTTP.EventSource do
   def reconnect_time(source), do: connection_call(source, :reconnect_time, 0)
 
   @doc "Returns the negotiated HTTP version, or nil before establishment."
-  @spec http_version(t()) :: :http1 | :http2 | nil
+  @spec http_version(t()) :: :http1 | :http2 | :http3 | nil
   def http_version(source), do: connection_call(source, :http_version, nil)
 
-  @doc "Returns current delivery and parser usage and the logical HTTP/2 stream handle."
+  @doc "Returns current delivery and parser usage and the logical stream handle, when available."
   @spec status(t()) :: map()
   def status(source), do: connection_call(source, :status, %{ready_state: @closed})
 

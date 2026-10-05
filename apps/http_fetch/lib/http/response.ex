@@ -21,6 +21,11 @@ defmodule HTTP.Response do
   - `type` - Response type (:basic, :cors, :error, :opaque)
   - `stream` - Stream process PID for streaming responses (nil for buffered)
 
+  Network responses expose the actual `http_version` (`:http1`, `:http2`, or
+  `:http3`). HTTP/3 informational fields are retained in `informational`. Buffered
+  HTTP/3 trailers are in `trailers`; streamed trailers arrive as
+  `{:stream_trailers, stream_pid, headers}` before `:stream_end`.
+
   ## Response Methods
 
   - `json/1` - Parse response as JSON
@@ -118,7 +123,10 @@ defmodule HTTP.Response do
             url: nil,
             redirected: false,
             type: :basic,
-            stream: nil
+            stream: nil,
+            http_version: nil,
+            informational: [],
+            trailers: %HTTP.Headers{}
 
   @type response_type :: :basic | :cors | :error | :opaque
 
@@ -132,7 +140,10 @@ defmodule HTTP.Response do
           url: URI.t() | nil,
           redirected: boolean(),
           type: response_type(),
-          stream: pid() | nil
+          stream: pid() | nil,
+          http_version: :http1 | :http2 | :http3 | nil,
+          informational: [{integer(), HTTP.Headers.t()}],
+          trailers: HTTP.Headers.t()
         }
 
   @doc """
@@ -201,7 +212,10 @@ defmodule HTTP.Response do
       url: Keyword.get(opts, :url, nil),
       redirected: Keyword.get(opts, :redirected, false),
       type: Keyword.get(opts, :type, :basic),
-      stream: stream
+      stream: stream,
+      http_version: Keyword.get(opts, :http_version),
+      informational: Keyword.get(opts, :informational, []),
+      trailers: Keyword.get(opts, :trailers, %HTTP.Headers{})
     }
   end
 

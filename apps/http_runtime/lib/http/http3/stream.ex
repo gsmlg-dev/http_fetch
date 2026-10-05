@@ -26,15 +26,14 @@ defmodule HTTP.HTTP3.Stream do
 
     with {:ok, key, connect} <- PoolKey.build(request, opts),
          {:ok, fields, body} <- headers(request),
-         {:ok, owner, lease} <- acquire(pool, key, connect, opening_deadline) do
+         {:ok, owner, lease} <- acquire(pool, key, connect, opening_deadline, monitor) do
       try do
-        case ConnectionOwner.open(
+        case opening_call(
                owner,
-               fields,
-               if(body == "", do: "", else: :stream),
-               self(),
-               generation,
-               timeout: remaining(opening_deadline)
+               {:open, fields, if(body == "", do: "", else: :stream), self(), generation,
+                [timeout: remaining(opening_deadline), deadline_at: opening_deadline]},
+               opening_deadline,
+               monitor
              ) do
           {:ok, ref} ->
             state = %{
@@ -78,6 +77,7 @@ defmodule HTTP.HTTP3.Stream do
             end
 
           {:error, reason} ->
+            ConnectionOwner.cancel_open(owner, self(), generation)
             notify(subscriber, generation, {:error, reason})
         end
       after
@@ -98,8 +98,15 @@ defmodule HTTP.HTTP3.Stream do
       notify(subscriber, generation, {:error, failure})
   end
 
-  defp acquire(pool, key, connect, deadline) do
-    case Pool.reserve(pool, key, timeout: remaining(deadline)) do
+  defp acquire(pool, key, connect, deadline, monitor) do
+    token = make_ref()
+
+    case opening_call(
+           pool,
+           {:reserve, key, [timeout: remaining(deadline), token: token]},
+           deadline,
+           monitor
+         ) do
       {:ok, owner, lease} ->
         {:ok, owner, lease}
 
@@ -113,7 +120,7 @@ defmodule HTTP.HTTP3.Stream do
                ) do
             {:ok, owner} ->
               try do
-                with :ok <- ready(owner, remaining(deadline)),
+                with :ok <- ready(owner, deadline, monitor),
                      :ok <-
                        Pool.register(
                          pool,
@@ -148,17 +155,70 @@ defmodule HTTP.HTTP3.Stream do
         end
 
       error ->
+        safe(fn -> Pool.release(pool, token) end)
         error
     end
   end
 
-  defp ready(owner, timeout) do
-    case ConnectionOwner.await_ready(owner, timeout) do
-      :ok -> :ok
-      {:error, reason} -> {:error, {:http3_not_established, reason}}
+  defp ready(owner, deadline, monitor) do
+    case opening_call(owner, :await_ready, deadline, monitor) do
+      :ok ->
+        :ok
+
+      {:error, reason} when reason in [:aborted, :subscriber_down, :opening_timeout] ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, {:http3_not_established, reason}}
     end
   catch
     :exit, reason -> {:error, {:http3_not_established, reason}}
+  end
+
+  defp opening_call(server, message, deadline, monitor) do
+    with :ok <- opening_active(deadline, monitor) do
+      request_id = :gen_server.send_request(server, message)
+      await_opening(request_id, deadline, monitor)
+    end
+  end
+
+  defp opening_active(deadline, monitor) do
+    receive do
+      :abort -> {:error, :aborted}
+      {:DOWN, ^monitor, :process, _pid, _reason} -> {:error, :subscriber_down}
+    after
+      0 ->
+        if deadline != :infinity and now() >= deadline,
+          do: {:error, :opening_timeout},
+          else: :ok
+    end
+  end
+
+  defp await_opening(request_id, deadline, monitor) do
+    receive do
+      :abort ->
+        abandon_opening(request_id, :aborted)
+
+      {:DOWN, ^monitor, :process, _pid, _reason} ->
+        abandon_opening(request_id, :subscriber_down)
+
+      {:http3_indeterminate, operation} ->
+        {:error, {:indeterminate_operation, operation}}
+
+      message ->
+        case :gen_server.check_response(message, request_id) do
+          {:reply, result} -> result
+          {:error, {reason, _server}} -> {:error, {:runtime_down, reason}}
+          :no_reply -> await_opening(request_id, deadline, monitor)
+        end
+    after
+      remaining(deadline) -> abandon_opening(request_id, :opening_timeout)
+    end
+  end
+
+  defp abandon_opening(request_id, reason) do
+    _ = :gen_server.receive_response(request_id, 0)
+    {:error, reason}
   end
 
   defp headers(request) do

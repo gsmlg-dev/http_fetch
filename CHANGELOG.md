@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.6] - 2026-10-05
+
+### Added
+- Enable strict, verified HTTP/3 Fetch with binary and streamed uploads,
+  process-backed downloads, abort and total-deadline handling.
+- Expose actual network protocol in Response and request-stop telemetry;
+  retain bounded informational fields and expose buffered/streamed trailers.
+- Add explicit HTTP/3 EventSource with acknowledged deliveries, cursor-aware
+  reconnect, secure readiness, redirects and native error classification.
+
+### Fixed
+- Remove known-unsent queued requests promptly on abort or subscriber death;
+  preserve reconciliation for already-pending native operations.
+- Reject streamed-body redirect replay and cross-origin client-identity reuse.
+
+### Validation
+- Native public API regressions and pinned independent aioquic/Caddy public
+  integrity, TLS negatives, multiplexing, SSE and connection-rotation evidence.
+  Final required CI/artifact/canary acceptance is recorded separately in WP5.
+
 ## [0.16.5] - 2026-10-05
 
 ### Added

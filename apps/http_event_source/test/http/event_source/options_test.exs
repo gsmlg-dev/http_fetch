@@ -3,6 +3,79 @@ defmodule HTTP.EventSource.OptionsTest do
 
   alias HTTP.EventSource.Options
 
+  @h3_ca Path.expand("../../../../elixir_quic/test/fixtures/tls/root.pem", __DIR__)
+
+  test "HTTP3 is explicit, HTTPS-only and preserves QUIC profile and trust options" do
+    ssl = [cacertfile: @h3_ca, reference_identity: {:dns_id, "example.test"}]
+
+    assert {:ok, options} =
+             Options.new("https://example.test/events", %{
+               "httpVersion" => "h3",
+               "http3Profile" => :compact,
+               "http3Reuse" => false,
+               "ssl" => ssl
+             })
+
+    assert options.http_version == :http3
+    assert options.http3_profile == :compact
+    assert options.http3_reuse == false
+    assert options.tls_backend == nil
+    assert options.ssl == ssl
+    transport = HTTP.Runtime.Options.transport_options(options)
+    assert transport[:http3_profile] == :compact
+    assert transport[:http3_reuse] == false
+    refute Keyword.has_key?(transport, :tls_backend)
+
+    assert {:error, :invalid_http_version} =
+             HTTP.Runtime.Options.validate(URI.parse("https://example.test/events"),
+               http_version: :http3
+             )
+  end
+
+  test "HTTP3 rejects contradictory routes, TLS options and connection headers before networking" do
+    for {url, init, reason} <- [
+          {"http://example.test/events", [], :http3_requires_https},
+          {"https://example.test/events", [tls_backend: :ssl],
+           :tls_backend_not_supported_for_quic},
+          {"https://example.test/events", [unix_socket: "/tmp/h3-sse.sock"],
+           :unix_socket_not_supported_for_quic},
+          {"https://example.test/events", [proxy: "http://proxy.test:8080"],
+           :proxy_not_supported_for_quic},
+          {"https://example.test/events", [http2_profile: :native_v1],
+           :http2_options_require_http2},
+          {"https://example.test/events", [socket_opts: [nodelay: true]],
+           :socket_options_not_supported_for_quic},
+          {"https://example.test/events", [connect_timeout: :infinity], :invalid_connect_timeout},
+          {"https://example.test/events", [ssl: [verify: :verify_none]],
+           :verify_none_not_supported}
+        ] do
+      assert {:error, ^reason} = Options.new(url, [http_version: :http3] ++ init)
+    end
+
+    for header <- [{"Connection", "keep-alive"}, {"TE", "gzip"}, {":path", "/injected"}] do
+      assert {:error, :invalid_headers} =
+               Options.new("https://example.test/events",
+                 http_version: :http3,
+                 ssl: [cacertfile: @h3_ca],
+                 headers: [header]
+               )
+    end
+
+    assert {:error, :invalid_http3_reuse} =
+             Options.new("https://example.test/events",
+               http_version: :http3,
+               ssl: [cacertfile: @h3_ca],
+               http3_reuse: :sometimes
+             )
+
+    assert {:error, {:invalid_profile, :browser}} =
+             Options.new("https://example.test/events",
+               http_version: :http3,
+               ssl: [cacertfile: @h3_ca],
+               http3_profile: :browser
+             )
+  end
+
   test "normalizes supported URL schemes" do
     assert {:ok, %{uri: %{scheme: "http"}, url: "http://example.com/events"}} =
              Options.new("http://example.com/events")

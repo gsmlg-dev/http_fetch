@@ -14,9 +14,6 @@ defmodule HTTP.SocketClient do
       http_version(request) == :http3 and tls_backend(request) != nil ->
         {:error, :tls_backend_not_supported_for_quic}
 
-      http_version(request) == :http3 and Request.streaming_body?(request) ->
-        {:error, :streaming_request_body_unsupported_for_http3}
-
       http_version(request) == :http3 ->
         request_http3(request, abort_controller_pid, unix_socket_path)
 
@@ -93,6 +90,8 @@ defmodule HTTP.SocketClient do
           redirected?: redirected?,
           deadline_at: deadline_at,
           mode: nil,
+          informational: [],
+          informational_bytes: 0,
           response_sent?: false,
           action: nil
         }
@@ -110,14 +109,36 @@ defmodule HTTP.SocketClient do
     end
   end
 
+  defp handle_http3_event(state, {:informational, status, headers}) do
+    bytes =
+      Enum.reduce(headers, 0, fn {name, value}, sum ->
+        sum + byte_size(name) + byte_size(value) + 32
+      end)
+
+    if length(state.informational) < 128 and state.informational_bytes + bytes <= 65_536 do
+      {:cont,
+       %{
+         state
+         | informational: state.informational ++ [{status, Headers.new(headers)}],
+           informational_bytes: state.informational_bytes + bytes
+       }}
+    else
+      {:error, :http3_informational_limit, state}
+    end
+  end
+
   defp handle_http3_event(state, {:headers, status, headers}) do
+    headers = Headers.new(headers)
+
     response =
       Response.new(
         status: status,
         headers: headers,
         body: nil,
         url: state.request.url,
-        redirected: state.redirected?
+        redirected: state.redirected?,
+        http_version: :http3,
+        informational: state.informational
       )
 
     cond do
@@ -155,6 +176,15 @@ defmodule HTTP.SocketClient do
     {:cont, %{state | mode: {:buffer, response, [chunk | chunks]}}}
   end
 
+  defp handle_http3_event(%{mode: {:stream, stream_pid}} = state, {:trailers, fields}) do
+    HTTP.Stream.trailers(stream_pid, Headers.new(fields))
+    {:cont, state}
+  end
+
+  defp handle_http3_event(%{mode: {:buffer, response, chunks}} = state, {:trailers, fields}) do
+    {:cont, %{state | mode: {:buffer, %{response | trailers: Headers.new(fields)}, chunks}}}
+  end
+
   defp handle_http3_event(%{mode: {:stream, stream_pid}} = state, :done) do
     HTTP.Stream.finish(stream_pid)
     {:halt, state}
@@ -179,8 +209,8 @@ defmodule HTTP.SocketClient do
       {:ok, redirected_request} ->
         http3_owner(parent, ref, redirected_request, redirects + 1, true, deadline_at)
 
-      {:error, _reason} ->
-        send_response(parent, ref, response)
+      {:error, reason} ->
+        send_error(parent, ref, reason)
     end
   end
 
@@ -795,7 +825,8 @@ defmodule HTTP.SocketClient do
         headers: headers,
         body: nil,
         url: state.request.url,
-        redirected: state.redirected?
+        redirected: state.redirected?,
+        http_version: :http2
       )
 
     cond do
@@ -1085,7 +1116,8 @@ defmodule HTTP.SocketClient do
         headers: headers,
         body: nil,
         url: state.request.url,
-        redirected: state.redirected?
+        redirected: state.redirected?,
+        http_version: :http1
       )
 
     cond do
@@ -1547,7 +1579,8 @@ defmodule HTTP.SocketClient do
   defp redirect_request(request, response) do
     with location when is_binary(location) <- Headers.get(response.headers, "location"),
          %URI{} = uri <- URI.merge(request.url, location),
-         :ok <- validate_client_identity_redirect(request, uri) do
+         :ok <- validate_client_identity_redirect(request, uri),
+         :ok <- validate_redirect_body(request, response.status) do
       request =
         request
         |> rewrite_redirect_method(response.status)
@@ -1563,13 +1596,19 @@ defmodule HTTP.SocketClient do
   defp validate_client_identity_redirect(request, uri) do
     ssl_options = Keyword.get(request.transport_options, :ssl, [])
 
-    if tls_backend(request) == :ex_ssl and
+    if (tls_backend(request) == :ex_ssl or http_version(request) == :http3) and
          Enum.any?([:cert, :certfile, :key, :keyfile], &Keyword.has_key?(ssl_options, &1)) and
          client_identity_origin(request.url) != client_identity_origin(uri) do
       {:error, :client_identity_cross_origin_redirect}
     else
       :ok
     end
+  end
+
+  defp validate_redirect_body(request, status) do
+    if Request.streaming_body?(rewrite_redirect_method(request, status)),
+      do: {:error, :streaming_body_redirect_not_replayable},
+      else: :ok
   end
 
   defp client_identity_origin(uri) do

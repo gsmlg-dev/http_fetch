@@ -26,6 +26,8 @@ defmodule HTTP.FetchOptions do
   - `unix_socket` - Unix Domain Socket path
   - `http2_profile` - versioned HTTP/2 wire profile (only used by HTTP/2)
   - `http2_reuse` - whether an HTTP/2 connection may be reused; defaults to `true`
+  - `http3_profile` - QUIC wire profile; defaults to `:ordered`
+  - `http3_reuse` - whether an HTTP/3 connection may be reused; defaults to `true`
   - `http2_scope` - non-sensitive caller isolation scope
   - `http2_priority` - per-request HTTP/2 priority metadata
   """
@@ -44,10 +46,15 @@ defmodule HTTP.FetchOptions do
     "http2Profile" => :http2_profile,
     "http2_reuse" => :http2_reuse,
     "http2Reuse" => :http2_reuse,
+    "http3_profile" => :http3_profile,
+    "http3Profile" => :http3_profile,
+    "http3_reuse" => :http3_reuse,
+    "http3Reuse" => :http3_reuse,
     "http2_scope" => :http2_scope,
     "http2Scope" => :http2_scope,
     "http2_priority" => :http2_priority,
     "http2Priority" => :http2_priority,
+    "proxy" => :proxy,
     "method" => :method,
     "redirect" => :redirect,
     "signal" => :signal,
@@ -75,8 +82,11 @@ defmodule HTTP.FetchOptions do
             connect_timeout: nil,
             ssl: nil,
             socket_opts: nil,
+            proxy: nil,
             http2_profile: nil,
             http2_reuse: true,
+            http3_profile: nil,
+            http3_reuse: true,
             http2_scope: nil,
             http2_priority: nil
 
@@ -99,8 +109,11 @@ defmodule HTTP.FetchOptions do
           connect_timeout: integer() | nil,
           ssl: list() | nil,
           socket_opts: list() | nil,
+          proxy: term(),
           http2_profile: atom() | String.t() | map() | nil,
           http2_reuse: boolean(),
+          http3_profile: atom() | map() | nil,
+          http3_reuse: boolean(),
           http2_scope: atom() | String.t() | nil,
           http2_priority: map() | keyword() | nil
         }
@@ -134,11 +147,14 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:connect_timeout, options.connect_timeout)
     |> maybe_add(:ssl, options.ssl)
     |> maybe_add(:socket_opts, options.socket_opts)
+    |> maybe_add(:proxy, options.proxy)
     |> maybe_add(:redirect, options.redirect)
     |> maybe_add(:http_version, options.http_version)
     |> maybe_add(:tls_backend, options.tls_backend)
     |> maybe_add(:http2_profile, options.http2_profile)
     |> maybe_add(:http2_reuse, if(options.http2_reuse, do: nil, else: false))
+    |> maybe_add(:http3_profile, options.http3_profile)
+    |> maybe_add(:http3_reuse, if(options.http3_reuse, do: nil, else: false))
     |> maybe_add(:http2_scope, options.http2_scope)
     |> maybe_add(:http2_priority, options.http2_priority)
   end
@@ -214,6 +230,9 @@ defmodule HTTP.FetchOptions do
       {:ssl, ssl}, acc ->
         %{acc | ssl: ssl}
 
+      {:proxy, proxy}, acc ->
+        %{acc | proxy: proxy}
+
       {:socket_opts, socket_opts}, acc ->
         %{acc | socket_opts: socket_opts}
 
@@ -222,6 +241,12 @@ defmodule HTTP.FetchOptions do
 
       {:http2_reuse, reuse}, acc ->
         %{acc | http2_reuse: reuse}
+
+      {:http3_profile, profile}, acc ->
+        %{acc | http3_profile: profile}
+
+      {:http3_reuse, reuse}, acc ->
+        %{acc | http3_reuse: reuse}
 
       {:http2_scope, scope}, acc ->
         %{acc | http2_scope: scope}
@@ -258,6 +283,7 @@ defmodule HTTP.FetchOptions do
         tls_backend: normalize_tls_backend(options.tls_backend, http_version),
         http2_profile: normalize_http2_profile(options.http2_profile),
         http2_reuse: normalize_http2_reuse(options.http2_reuse),
+        http3_reuse: normalize_http3_reuse(options.http3_reuse),
         http2_scope: normalize_http2_scope(options.http2_scope),
         http2_priority: normalize_http2_priority(options.http2_priority)
     }
@@ -354,6 +380,12 @@ defmodule HTTP.FetchOptions do
 
   defp normalize_http2_profile(profile),
     do: raise(ArgumentError, "invalid http2_profile: #{inspect(profile)}")
+
+  defp normalize_http3_reuse(nil), do: true
+  defp normalize_http3_reuse(value) when is_boolean(value), do: value
+
+  defp normalize_http3_reuse(value),
+    do: raise(ArgumentError, "invalid http3_reuse: #{inspect(value)}; expected boolean")
 
   defp normalize_http2_reuse(nil), do: true
   defp normalize_http2_reuse(value) when is_boolean(value), do: value

@@ -178,14 +178,16 @@ defmodule HTTP.Telemetry do
   end
 
   @doc """
-  Emits a telemetry event for request completion.
+  Emits a telemetry event for request completion. Network requests include the
+  actual protocol as `metadata.http_version` when supplied.
 
   ## Examples
       iex> HTTP.Telemetry.request_stop(200, URI.parse("https://example.com"), 1024, 1500)
       :ok
   """
   @spec request_stop(integer(), URI.t(), integer(), integer()) :: :ok
-  def request_stop(status, url, response_size, duration_us) do
+  @spec request_stop(integer(), URI.t(), integer(), integer(), atom() | nil) :: :ok
+  def request_stop(status, url, response_size, duration_us, http_version \\ nil) do
     measurements = %{
       duration: duration_us,
       status: status,
@@ -193,6 +195,7 @@ defmodule HTTP.Telemetry do
     }
 
     metadata = %{url: url, status: status}
+    metadata = if http_version, do: Map.put(metadata, :http_version, http_version), else: metadata
 
     :telemetry.execute([:http_fetch, :request, :stop], measurements, metadata)
   end

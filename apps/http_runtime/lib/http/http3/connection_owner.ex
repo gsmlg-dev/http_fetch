@@ -18,6 +18,10 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     do: GenServer.cast(owner, {:write, ref, bytes, fin, recipient, write_ref})
 
   def acknowledge(owner, ref), do: GenServer.cast(owner, {:ack, ref})
+
+  def cancel_open(owner, subscriber, generation),
+    do: GenServer.cast(owner, {:cancel_open, subscriber, generation})
+
   def cancel(owner, ref), do: GenServer.call(owner, {:cancel, ref})
   def status(owner), do: GenServer.call(owner, :status)
 
@@ -126,6 +130,14 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   end
 
   @impl true
+  def handle_cast({:cancel_open, subscriber, generation}, state) do
+    {cancelled, retained} =
+      Enum.split_with(state.queue, &match?({:open, _, ^subscriber, ^generation, _, _, _}, &1))
+
+    next = Enum.reduce(cancelled, %{state | queue: retained}, &reject(&2, &1, :aborted))
+    {:noreply, next}
+  end
+
   def handle_cast({:write, ref, bytes, fin, recipient, write_ref}, state),
     do: {:noreply, enqueue(state, {:write, ref, bytes, fin, recipient, write_ref})}
 
@@ -273,15 +285,25 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     end
   end
 
-  defp perform(state, {:open, _from, _subscriber, _generation, fields, body, opts} = action),
-    do:
-      result(
-        state,
-        action,
-        guarded(state, min(state.timeout, Keyword.get(opts, :timeout, state.timeout)), fn ->
-          Session.request(state.session, fields, body, opts)
-        end)
-      )
+  defp perform(state, {:open, _from, subscriber, _generation, fields, body, opts} = action) do
+    cond do
+      not Process.alive?(subscriber) ->
+        reject(state, action, :subscriber_down)
+
+      opts[:deadline_at] != nil and opts[:deadline_at] != :infinity and
+          now() >= opts[:deadline_at] ->
+        reject(state, action, :opening_timeout)
+
+      true ->
+        result(
+          state,
+          action,
+          guarded(state, min(state.timeout, Keyword.get(opts, :timeout, state.timeout)), fn ->
+            Session.request(state.session, fields, body, opts)
+          end)
+        )
+    end
+  end
 
   defp perform(state, {:write, ref, bytes, fin, _recipient, _write_ref} = action),
     do:

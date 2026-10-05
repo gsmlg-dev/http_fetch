@@ -57,6 +57,8 @@ defmodule HTTP.EventSource.Options do
             http2_profile: nil,
             http2_scope: nil,
             http2_reuse: true,
+            http3_profile: :ordered,
+            http3_reuse: true,
             delivery: :legacy,
             max_queue_bytes: 2_097_152,
             max_queue_events: 64,
@@ -78,7 +80,7 @@ defmodule HTTP.EventSource.Options do
           idle_timeout: timeout(),
           ssl: keyword(),
           socket_opts: keyword(),
-          tls_backend: HTTP.TLSBackend.t(),
+          tls_backend: HTTP.TLSBackend.t() | nil,
           unix_socket: String.t() | nil,
           max_line_size: pos_integer(),
           ref: reference()
@@ -88,7 +90,7 @@ defmodule HTTP.EventSource.Options do
   def new(url, init \\ []) do
     with {:ok, uri} <- normalize_url(url),
          {:ok, init} <- normalize_init(init),
-         {:ok, init} <- HTTP.Runtime.Options.validate(uri, init),
+         {:ok, init} <- HTTP.Runtime.Options.validate(uri, init, allow_http3: true),
          :ok <- validate_limits(init),
          :ok <- validate_delivery_capacity(init) do
       {:ok,
@@ -112,6 +114,8 @@ defmodule HTTP.EventSource.Options do
          http2_profile: Keyword.get(init, :http2_profile),
          http2_scope: Keyword.get(init, :http2_scope),
          http2_reuse: Keyword.get(init, :http2_reuse, true),
+         http3_profile: Keyword.get(init, :http3_profile, :ordered),
+         http3_reuse: Keyword.get(init, :http3_reuse, true),
          delivery: Keyword.get(init, :delivery, :legacy),
          max_queue_bytes: Keyword.get(init, :max_queue_bytes, 2_097_152),
          max_queue_events: Keyword.get(init, :max_queue_events, 64),
@@ -182,7 +186,7 @@ defmodule HTTP.EventSource.Options do
          {:ok, ssl} <- normalize_keyword(Keyword.get(init, :ssl, []), :invalid_ssl_options),
          {:ok, socket_opts} <-
            normalize_keyword(Keyword.get(init, :socket_opts, []), :invalid_socket_options),
-         {:ok, tls_backend} <- HTTP.TLSBackend.resolve(Keyword.get(init, :tls_backend)),
+         {:ok, tls_backend} <- normalize_tls_backend(init),
          {:ok, unix_socket} <- normalize_unix_socket(Keyword.get(init, :unix_socket)),
          {:ok, max_line_size} <-
            normalize_pos_integer(
@@ -208,6 +212,16 @@ defmodule HTTP.EventSource.Options do
   end
 
   defp normalize_init(_init), do: {:error, :invalid_options}
+
+  defp normalize_tls_backend(init) do
+    if init[:http_version] in [:http3, "http3", "h3"] do
+      if init[:tls_backend] == nil,
+        do: {:ok, nil},
+        else: {:error, :tls_backend_not_supported_for_quic}
+    else
+      HTTP.TLSBackend.resolve(init[:tls_backend])
+    end
+  end
 
   defp normalize_key(key) when is_binary(key), do: Map.get(@string_keys, key, key)
   defp normalize_key(key), do: key

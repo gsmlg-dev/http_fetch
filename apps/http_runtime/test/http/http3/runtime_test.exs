@@ -255,6 +255,52 @@ defmodule HTTP.HTTP3.RuntimeTest do
     GenServer.stop(pool)
   end
 
+  for cancellation <- [:abort, :subscriber_down] do
+    @cancellation cancellation
+    test "#{cancellation} removes queued admission before a slot becomes available", ctx do
+      {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
+      on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+      {_, port} = Quic.local(server)
+      {:ok, pool} = Pool.start_link(max_connections: 1)
+      on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+
+      request = %HTTP.Request{
+        url: URI.parse("https://127.0.0.1:#{port}/queued"),
+        transport_options: [ssl: ctx.tls, timeout: 5_000]
+      }
+
+      assert {:ok, first, _} = Stream.start(request, self(), pool: pool, max_streams: 1)
+      assert_receive {:quic_accept, ^server}, 2_000
+      {:ok, accepted} = Quic.accept(server)
+      :ok = Quic.attach(accepted, self())
+      _ = incoming(accepted, 0)
+      subscriber = spawn(fn -> receive do: (:stop -> :ok) end)
+      on_exit(fn -> send(subscriber, :stop) end)
+      assert {:ok, queued, _} = Stream.start(request, subscriber, pool: pool, max_streams: 1)
+      assert %{pending: 1} = await_pending(pool, 1)
+      monitor = Process.monitor(queued)
+
+      case @cancellation do
+        :abort -> Stream.close(queued)
+        :subscriber_down -> send(subscriber, :stop)
+      end
+
+      assert_receive {:DOWN, ^monitor, :process, ^queued, :normal}, 500
+      assert %{pending: 0, leases: 1} = Pool.status(pool)
+      [owner] = Map.keys(:sys.get_state(pool).owners)
+      assert %{allocations: 2} = ConnectionOwner.status(owner)
+      Stream.close(first)
+      assert %{leases: 0} = await_released(pool)
+
+      assert {:ok, sibling, generation} =
+               Stream.start(request, self(), pool: pool, max_streams: 1)
+
+      send_response(incoming(accepted, 4), "sibling")
+      assert collect(sibling, generation, "") == "sibling"
+      assert %{allocations: 3} = ConnectionOwner.status(owner)
+    end
+  end
+
   test "native owner opens 32 requests on one connection and exposes cleanup accounting", ctx do
     {:ok, server} =
       Quic.listen(
@@ -291,6 +337,76 @@ defmodule HTTP.HTTP3.RuntimeTest do
     endpoint = ConnectionOwner.status(owner).endpoint
     assert :ok = GenServer.stop(owner)
     refute Process.alive?(endpoint)
+  end
+
+  test "abort while authenticated readiness is pending releases the connector without upload",
+       ctx do
+    {:ok, socket} = :gen_udp.open(0, [:binary, active: false])
+    on_exit(fn -> :gen_udp.close(socket) end)
+    {:ok, port} = :inet.port(socket)
+    {:ok, pool} = Pool.start_link(max_connections: 1)
+    on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+
+    request = %HTTP.Request{
+      method: :post,
+      body: self(),
+      duplex: :half,
+      url: URI.parse("https://127.0.0.1:#{port}/opening"),
+      transport_options: [ssl: ctx.tls, timeout: 5_000]
+    }
+
+    assert {:ok, stream, _} = Stream.start(request, self(), pool: pool)
+    assert {:ok, {_, _, _initial_packet}} = :gen_udp.recv(socket, 0, 2_000)
+    assert %{leases: 1, owners: 0} = Pool.status(pool)
+    monitor = Process.monitor(stream)
+    Stream.close(stream)
+    assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 500
+    assert %{leases: 0, pending: 0, owners: 0} = Pool.status(pool)
+    refute_receive {:read_chunk, _, :ack}, 0
+  end
+
+  test "known-unsent owner opens reject dead subscribers and expired deadlines", ctx do
+    {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
+    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    {ip, port} = Quic.local(server)
+    {:ok, owner} = ConnectionOwner.start_link(host: ip, port: port, tls: ctx.tls)
+    on_exit(fn -> if Process.alive?(owner), do: GenServer.stop(owner) end)
+    assert :ok = ConnectionOwner.await_ready(owner, 2_000)
+
+    fields = [
+      {":method", "GET"},
+      {":scheme", "https"},
+      {":authority", "example.test"},
+      {":path", "/cancelled"}
+    ]
+
+    :sys.replace_state(owner, &%{&1 | lifecycle: :initializing})
+    subscriber = spawn(fn -> receive do: (:stop -> :ok) end)
+    monitor = Process.monitor(subscriber)
+    request_id = :gen_server.send_request(owner, {:open, fields, "", subscriber, make_ref(), []})
+    assert %{queued: 1} = ConnectionOwner.status(owner)
+    send(subscriber, :stop)
+    assert_receive {:DOWN, ^monitor, :process, ^subscriber, _}
+    :sys.replace_state(owner, &%{&1 | lifecycle: :ready})
+    send(owner, :tick)
+
+    assert {:reply, {:error, :subscriber_down}} = :gen_server.receive_response(request_id, 500)
+
+    :sys.replace_state(owner, &%{&1 | lifecycle: :initializing})
+    generation = make_ref()
+    request_id = :gen_server.send_request(owner, {:open, fields, "", self(), generation, []})
+    assert %{queued: 1} = ConnectionOwner.status(owner)
+    ConnectionOwner.cancel_open(owner, self(), generation)
+    assert %{queued: 0} = ConnectionOwner.status(owner)
+    assert {:reply, {:error, :aborted}} = :gen_server.receive_response(request_id, 500)
+    :sys.replace_state(owner, &%{&1 | lifecycle: :ready})
+
+    assert {:error, :opening_timeout} =
+             ConnectionOwner.open(owner, fields, "", self(), make_ref(),
+               deadline_at: System.monotonic_time(:millisecond) - 1
+             )
+
+    assert %{requests: 0, allocations: 1} = ConnectionOwner.status(owner)
   end
 
   test "a paused native download allows a sibling and terminal delivery follows acknowledged bytes",

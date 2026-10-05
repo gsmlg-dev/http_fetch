@@ -13,6 +13,7 @@ defmodule HTTP.Stream do
             reader_ack?: false,
             chunks: [],
             pending_ack: nil,
+            trailers: nil,
             done?: false,
             error: nil,
             total_bytes: 0,
@@ -89,6 +90,9 @@ defmodule HTTP.Stream do
     :ok
   end
 
+  @doc "Sends response trailers to the reader before the terminal stream event."
+  def trailers(pid, headers) when is_pid(pid), do: send(pid, {:trailers, headers})
+
   @spec error(pid(), term()) :: :ok
   def error(pid, reason) when is_pid(pid) do
     send(pid, {:error, reason})
@@ -142,6 +146,9 @@ defmodule HTTP.Stream do
         |> Map.put(:total_bytes, total_bytes)
         |> push_chunk(chunk, {sender, ref})
         |> loop()
+
+      {:trailers, headers} ->
+        loop(%{state | trailers: headers})
 
       :finish ->
         duration = System.monotonic_time(:microsecond) - state.start_time
@@ -246,8 +253,9 @@ defmodule HTTP.Stream do
         %{state | chunks: [], pending_ack: nil}
 
       done? ->
+        if state.trailers, do: send(reader, {:stream_trailers, self(), state.trailers})
         send(reader, {:stream_end, self()})
-        %{state | chunks: [], pending_ack: nil}
+        %{state | chunks: [], pending_ack: nil, trailers: nil}
 
       true ->
         %{state | chunks: [], pending_ack: nil}

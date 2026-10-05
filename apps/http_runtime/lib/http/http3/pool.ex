@@ -82,20 +82,20 @@ defmodule HTTP.HTTP3.Pool do
   def handle_call({:reserve, key, opts}, from, state) do
     case available(state, key) do
       owner when is_pid(owner) ->
-        {token, next} = lease(state, key, owner, elem(from, 0))
+        {token, next} = lease(state, key, owner, elem(from, 0), opts[:token] || make_ref())
         {:reply, {:ok, owner, token}, next}
 
       nil ->
         cond do
           can_connect?(state, key) ->
-            {token, next} = lease(state, key, nil, elem(from, 0))
+            {token, next} = lease(state, key, nil, elem(from, 0), opts[:token] || make_ref())
             {:reply, {:connect, token}, next}
 
           length(state.waiters) >= state.max_pending ->
             {:reply, {:error, :pool_queue_full}, state}
 
           true ->
-            token = make_ref()
+            token = opts[:token] || make_ref()
             monitor = Process.monitor(elem(from, 0))
 
             timer =
@@ -113,8 +113,12 @@ defmodule HTTP.HTTP3.Pool do
     end
   end
 
-  def handle_call({:release, token}, _from, state),
-    do: {:reply, :ok, dispatch(forget_lease(state, token))}
+  def handle_call({:release, token}, _from, state) do
+    {removed, kept} = Enum.split_with(state.waiters, &(&1.token == token))
+    for waiter <- removed, do: GenServer.reply(waiter.from, {:error, :aborted})
+    next = Enum.reduce(removed, %{state | waiters: kept}, &forget_waiter(&2, &1))
+    {:reply, :ok, dispatch(forget_lease(next, token))}
+  end
 
   @impl true
   def handle_cast({:drain, owner}, state) do
@@ -180,8 +184,7 @@ defmodule HTTP.HTTP3.Pool do
     end
   end
 
-  defp lease(state, key, owner, caller) do
-    token = make_ref()
+  defp lease(state, key, owner, caller, token) do
     monitor = Process.monitor(caller)
 
     {token,
@@ -241,14 +244,14 @@ defmodule HTTP.HTTP3.Pool do
       case available(next, waiter.key) do
         owner when is_pid(owner) ->
           next = forget_waiter(next, waiter)
-          {token, next} = lease(next, waiter.key, owner, elem(waiter.from, 0))
+          {token, next} = lease(next, waiter.key, owner, elem(waiter.from, 0), waiter.token)
           GenServer.reply(waiter.from, {:ok, owner, token})
           next
 
         nil ->
           if can_connect?(next, waiter.key) do
             next = forget_waiter(next, waiter)
-            {token, next} = lease(next, waiter.key, nil, elem(waiter.from, 0))
+            {token, next} = lease(next, waiter.key, nil, elem(waiter.from, 0), waiter.token)
             GenServer.reply(waiter.from, {:connect, token})
             next
           else

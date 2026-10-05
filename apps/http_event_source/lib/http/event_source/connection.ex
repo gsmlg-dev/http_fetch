@@ -10,6 +10,7 @@ defmodule HTTP.EventSource.Connection do
   alias HTTP.EventSource.Options
   alias HTTP.EventSource.Parser
   alias HTTP.EventSource.Telemetry
+  alias HTTP.HTTP3.Stream, as: H3Stream
   alias HTTP.Runtime.Delivery
   alias HTTP.Runtime.Stream
 
@@ -205,7 +206,9 @@ defmodule HTTP.EventSource.Connection do
         {:http_runtime, generation, pid, event},
         %{generation: generation, stream: pid} = state
       ) do
-    handle_stream_event(state, event)
+    if state.options.http_version == :http3,
+      do: handle_h3_event(state, event),
+      else: handle_stream_event(state, event)
   end
 
   def handle_info(
@@ -259,19 +262,23 @@ defmodule HTTP.EventSource.Connection do
     state = %{state | generation: make_ref(), http_version: nil, stream_handle: nil}
     state = schedule_opening_timer(state)
 
-    if HTTP.Runtime.Options.h2?(state.options) do
-      case Stream.start(request(state), self(),
-             opening_timeout: state.connect_timeout,
-             generation: state.generation
-           ) do
-        {:ok, pid, _generation} ->
-          %{state | stream: pid, stream_monitor: Process.monitor(pid)}
+    cond do
+      state.options.http_version == :http3 -> connect_stream(state, H3Stream)
+      HTTP.Runtime.Options.h2?(state.options) -> connect_stream(state, Stream)
+      true -> connect_http1(state)
+    end
+  end
 
-        {:error, reason} ->
-          reconnect(state, reason)
-      end
-    else
-      connect_http1(state)
+  defp connect_stream(state, module) do
+    case module.start(request(state), self(),
+           opening_timeout: state.connect_timeout,
+           generation: state.generation
+         ) do
+      {:ok, pid, _generation} ->
+        %{state | stream: pid, stream_monitor: Process.monitor(pid)}
+
+      {:error, reason} ->
+        reconnect(state, reason)
     end
   end
 
@@ -359,11 +366,18 @@ defmodule HTTP.EventSource.Connection do
       |> HTTP.Headers.set_default("Cache-Control", "no-cache")
       |> maybe_set_last_event_id(state.last_event_id)
 
+    transport_options = HTTP.Runtime.Options.transport_options(state.options)
+
+    transport_options =
+      if state.options.http_version == :http3,
+        do: Keyword.put(transport_options, :timeout, :infinity),
+        else: transport_options
+
     %HTTP.Request{
       method: :get,
       url: state.uri,
       headers: headers,
-      transport_options: HTTP.Runtime.Options.transport_options(state.options)
+      transport_options: transport_options
     }
   end
 
@@ -607,7 +621,7 @@ defmodule HTTP.EventSource.Connection do
 
   defp detach_transport(state) do
     state = cancel_opening_timer(state)
-    if state.stream, do: Stream.close(state.stream)
+    if state.stream, do: stream_module(state).close(state.stream)
     if state.stream_monitor, do: _ = Process.demonitor(state.stream_monitor, [:flush])
     if state.worker, do: _ = Process.exit(state.worker, :kill)
     if state.worker_monitor, do: _ = Process.demonitor(state.worker_monitor, [:flush])
@@ -672,6 +686,33 @@ defmodule HTTP.EventSource.Connection do
     _ = close_transport(state)
     :ok
   end
+
+  defp handle_h3_event(state, {:headers, status, fields}) do
+    state = %{state | http_version: :http3}
+    handle_http_events(state, [{:headers, status, HTTP.Headers.new(fields)}])
+  end
+
+  defp handle_h3_event(state, {:informational, _status, _fields}), do: {:noreply, state}
+  defp handle_h3_event(state, {:trailers, _fields}), do: {:noreply, state}
+
+  defp handle_h3_event(%{ready_state: @open} = state, {:data, data, ref}) do
+    state = admit_raw(state, data, {state.stream, ref})
+
+    if state.ready_state == @closed,
+      do: {:stop, :normal, state},
+      else: {:noreply, reset_idle_timer(state)}
+  end
+
+  defp handle_h3_event(state, {:data, _data, _ref}),
+    do: {:stop, :normal, fatal(state, :body_before_response)}
+
+  defp handle_h3_event(state, :done),
+    do: finish_remote_end(%{state | remote_end?: true})
+
+  defp handle_h3_event(state, {:error, reason}), do: handle_stream_event(state, {:error, reason})
+
+  defp stream_module(%{options: %{http_version: :http3}}), do: H3Stream
+  defp stream_module(_state), do: Stream
 
   defp handle_stream_event(state, {:opened, handle}),
     do:
@@ -740,8 +781,17 @@ defmodule HTTP.EventSource.Connection do
 
   defp fatal_transport_error?({:http2_not_negotiated, _}), do: true
   defp fatal_transport_error?({:tls_alert, _}), do: true
+  defp fatal_transport_error?({:tls, _kind, _alert, _reason}), do: true
   defp fatal_transport_error?({:options, _}), do: true
   defp fatal_transport_error?({:http2, :stream_error, _}), do: true
+  defp fatal_transport_error?({:http3_error, _scope, _code, _reason}), do: true
+  defp fatal_transport_error?({:http3_not_established, _reason}), do: true
+  defp fatal_transport_error?(:h3_not_negotiated), do: true
+  defp fatal_transport_error?(:unauthenticated_peer), do: true
+  defp fatal_transport_error?({:runtime_down, reason}), do: fatal_transport_error?(reason)
+  defp fatal_transport_error?({:owner_down, reason}), do: fatal_transport_error?(reason)
+  defp fatal_transport_error?({:shutdown, reason}), do: fatal_transport_error?(reason)
+  defp fatal_transport_error?({reason, {GenServer, :call, _}}), do: fatal_transport_error?(reason)
   defp fatal_transport_error?(_), do: false
 
   defp fatal_result(state, reason) do
@@ -813,7 +863,7 @@ defmodule HTTP.EventSource.Connection do
 
   defp admit_credit(state, data, {stream, ref} = delivery) do
     if state.raw_bytes + byte_size(data) <= 1_048_576 do
-      Stream.acknowledge(stream, ref)
+      stream_module(state).acknowledge(stream, ref)
       nil
     else
       delivery
@@ -833,6 +883,8 @@ defmodule HTTP.EventSource.Connection do
   end
 
   defp pack_raw(queue, data, ref), do: :queue.in({data, ref}, queue)
+
+  defp raw_limit(%{options: %{http_version: :http3}}), do: 1_048_576 + 16_384
 
   defp raw_limit(state) do
     profile = state.options.http2_profile || HTTP.HTTP2.WireProfile.native_v1()
@@ -867,7 +919,7 @@ defmodule HTTP.EventSource.Connection do
   end
 
   defp settle_raw(state, <<>>, ref) do
-    if ref, do: Stream.acknowledge(elem(ref, 0), elem(ref, 1))
+    if ref, do: stream_module(state).acknowledge(elem(ref, 0), elem(ref, 1))
     state
   end
 
@@ -904,7 +956,8 @@ defmodule HTTP.EventSource.Connection do
            not (state.uri.scheme == "https" and uri.scheme == "http") or
              {:error, :insecure_redirect},
          :ok <- redirect_identity(state, uri),
-         {:ok, _} <- HTTP.Runtime.Options.validate(uri, Map.from_struct(state.options)) do
+         {:ok, _} <-
+           HTTP.Runtime.Options.validate(uri, Map.from_struct(state.options), allow_http3: true) do
       headers =
         if same_origin?(state.uri, uri),
           do: state.headers,
