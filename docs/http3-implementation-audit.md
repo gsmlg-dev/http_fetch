@@ -247,3 +247,21 @@ preserves ordering while siblings progress. Three deterministic regressions
 pass, including retained original unknown references. The checksum and 15-second
 traffic deadline remain unchanged; the original remote failure's precise cause
 is unconfirmed until new wire evidence.
+
+WP5 preparation commit `660638a` and merge `410e095` are pushed. Incoming
+`127aa86` CI isolation is preserved: automatic checks select direct app owners,
+manual checks retain full gates, and test-only Fetch closures include the new
+companion runtime dependency. CI closure regressions **4/0**, selection/workflow
+regressions **8/0**. Root committed-source nine-app unit rerun **PASS**:
+TLS 610 tests + 20 properties; QUIC 235; core 274 (three existing skips);
+companion 104; runtime 90; Fetch 318 + 20 doctests; WebSocket 82;
+WebTransport 24; EventSource 75. Seed 28092026. Compile, format, configured Credo
+and full Dialyzer **PASS**, five intentional skips unchanged. Both independent
+public peers and **10,000 requests / 11 connections PASS** on this source.
+
+The new standalone public workflow was rejected before execution because
+`runner.temp` is unavailable in job-level environment expressions. Actionlint
+1.7.7 reproduced this exact error. Moving the log directory to the public
+gate's step environment preserves the same paths and required diagnostics.
+Remote rerun is required; neither the initial invalid workflow nor a local YAML
+parse is counted as a successful acceptance run.

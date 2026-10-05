@@ -33,7 +33,6 @@ jobs:
     timeout-minutes: 30
     env:
       MIX_ENV: test
-      HTTP3_GATE_LOG_DIR: ${{ runner.temp }}/http3-peer-logs
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -55,6 +54,8 @@ jobs:
       - name: Verify real chunked upstream fixture traffic
         run: uv run --python 3.12 --with aioquic==1.2.0 python -m unittest discover -s scripts/http3 -p 'caddy_*_test.py' -v
       - name: Require two-peer public integrity and negative TLS acceptance
+        env:
+          HTTP3_GATE_LOG_DIR: ${{ runner.temp }}/http3-peer-logs
         run: uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/public_gate.py
       - name: Preserve independent peer diagnostics
         if: always()
