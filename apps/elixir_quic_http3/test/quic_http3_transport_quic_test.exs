@@ -107,7 +107,11 @@ defmodule QuicHttp3.Transport.QuicTest do
   end
 
   test "rejects malformed remote values without starting an endpoint" do
-    assert {:error, :invalid_remote} = connect(:not_an_address, 443, ops: Ops)
+    for remote <- [:not_an_address, nil, 123, %{}, [], ~c"localhost", {}, {256, 0, 0, 1}] do
+      assert {:error, :invalid_remote} = connect(remote, 443, ops: Ops)
+    end
+
     refute_received {:client, _}
+    refute_received {:connect, _}
   end
 end

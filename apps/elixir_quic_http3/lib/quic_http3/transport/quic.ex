@@ -479,6 +479,4 @@ defmodule QuicHttp3.Transport.Quic do
         end
     end
   end
-
-  defp normalize_remote(_, _), do: {:error, :invalid_remote}
 end
