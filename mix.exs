@@ -26,6 +26,10 @@ defmodule HttpFetch.Umbrella.MixProject do
           "docs/ex-ssl-consumer-contract.md",
           "docs/ex-quic-consumer-contract.md",
           "docs/quic_http3_design.md",
+          "docs/http3-fetch-contract.md",
+          "docs/http3-wp5-acceptance.md",
+          "docs/http3-implementation-audit.md",
+          "apps/http_event_source/docs/http3-validation.md",
           "docs/pr-14-validation.md"
         ],
         source_ref: "v#{@version}",

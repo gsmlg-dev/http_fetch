@@ -1,6 +1,6 @@
 # HTTP/3 implementation audit
 
-Plan: [2026-10-05 review](http_fetch_HTTP3_review_and_plan_2026-10-05.md).
+Plan: [2026-10-05 review](https://github.com/gsmlg-dev/http_fetch/blob/bc63a24a1c93447efedf402e14fdbc71b680641d/docs/http_fetch_HTTP3_review_and_plan_2026-10-05.md).
 Baseline: `6e33bcba7dae9acee1924af744c766b8e1d6147d`.
 Implementation branch: `codex/http3-completion`.
 
@@ -46,7 +46,7 @@ Release attempt: [37269991020](https://github.com/gsmlg-dev/http_fetch/actions/r
 target `0.16.2`, workflow `release.yml`, `git_ref=codex/http3-completion`.
 Remote nine-app unit tests and TLS integration tests passed; normal Credo passed.
 Release failed before publication at Dialyzer on the pre-existing compiled
-MapSet literal in `SSL.Protocol.ServerHello.grease?/1` (line 427).
+MapSet literal in [`SSL.Protocol.ServerHello.grease?/1`](https://github.com/gsmlg-dev/http_fetch/blob/bc63a24a1c93447efedf402e14fdbc71b680641d/apps/ex_ssl/lib/ssl/protocol/server_hello.ex#L427) (line 427).
 No tag or package publication was reached. The narrow baseline repair is being
 validated for the next audited step; the check is retained.
 
@@ -301,3 +301,19 @@ Fresh public acceptance after the watchdog repair **PASS** against both peers:
 `/tmp/http3-wp5-watchdog-public.log`, including **10,000 sequential requests over
 11 connections**, with cleanup. The 24-hour canary will run the committed source
 that contains this repair and the completed functional gates.
+
+Committed source `3c0ecdd50500bcc6f4f8da61ee3295e93b295b7a` passed remote
+[CI 37288637355](https://github.com/gsmlg-dev/http_fetch/actions/runs/37288637355)
+and [public acceptance 37288637060](https://github.com/gsmlg-dev/http_fetch/actions/runs/37288637060).
+The actual 86,400-second canary started around 2026-10-05 09:14 UTC on this
+source; log `/tmp/http3-canary-final.log`, peer diagnostics
+`/tmp/http3-canary-final-peers`, recorded SHA `/tmp/http3-canary-final.sha`.
+Its first 6,464 requests passed at 660,866ms; this is progress, not completion.
+Final publication remains gated on measured duration, explicit PASS and wrapper
+exit 0.
+
+Root ExDoc now registers the four new HTTP/3 contract/audit/acceptance pages.
+`ERL_FLAGS='+S 2:2' mix docs` passed (exit 0), and the generated README resolves
+all four links. Warnings decreased from 226 to 202 with no new warnings;
+historical QUIC/H2/TLS missing pages and hidden implementation references remain
+outside this documentation repair. Scoped format and diff checks passed.

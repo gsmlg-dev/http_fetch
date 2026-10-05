@@ -92,9 +92,10 @@ remote workflow results are separate from the presence of this workflow.
 | Bounded native runtime fixture against both final peers | PASS: exact two-MiB producer upload, eight-MiB download, wrong CA/name, expired leaf and wrong ALPN; zero remaining leases |
 | Complete public acceptance, WP4 working checkpoint | PASS: both peers, informational/trailers/reset/abort/SSE/GOAWAY, 10,000 sequential requests across 11 connections; final queued-cancellation/SSE review rerun also PASS; concurrent rotation repair remains pending |
 | Corrected remote public CI | PASS: run 37286353184 on c12bbf8; source public gate and peer artifacts |
+| Current remote source CI/public acceptance | PASS: runs 37288637355 and 37288637060 on 3c0ecdd; full final release gates remain separate |
 | Fresh isolated candidate after rotation repair/main merge | PASS: nine exact private Hex packages, both peers, 10,000 requests/11 connections on c12bbf8 |
 | Final release artifacts and isolated published consumer | NOT RUN: final publication remains gated |
-| 24-hour scoped canary | NOT RUN: required before final release |
+| 24-hour scoped canary | RUNNING: 86,400-second workload on 3c0ecdd, started 2026-10-05 around 09:14 UTC; completion and wrapper exit remain required |
 
 The fixture diagnosis used the `c3fb8dd` WP3 baseline plus the concurrent WP4
 worktree. It made no native QUIC or runtime implementation edits. Diagnostic
