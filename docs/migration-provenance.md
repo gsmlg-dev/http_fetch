@@ -30,7 +30,7 @@ the source manifest excludes them.
 ## Destination adaptation inventory
 
 All 390 tracked source-app files from the reviewed `ex_quic` revision are
-present in this destination. A blob comparison against that revision finds 58
+present in this destination. A blob comparison against that revision finds 59
 intentional differences in those imported files. Mix manifests carry the
 destination version, exact internal Hex identities, portable package file
 lists and build configuration; app READMEs describe the destination. The
@@ -39,7 +39,7 @@ regression repairs. The complete task diff remains the authority for exact
 code changes; these are source-provenance exceptions, not a claim that
 imported files are byte-identical.
 
-`apps/ex_ssl` (39):
+`apps/ex_ssl` (40):
 
 ```text
 README.md
@@ -78,6 +78,7 @@ lib/ssl/ticket_cache.ex
 mix.exs
 test/ssl/fingerprint_test.exs
 test/ssl/input_ordering_regression_test.exs
+test/ssl/protocol/server_hello_test.exs
 test/support/compatibility.ex
 test/support/local_tls_peer.ex
 test/support/openssl_peer.ex
@@ -116,8 +117,9 @@ Two destination-only files supplement the 390 tracked imports: the new
 `apps/ex_ssl/test/ssl/local_tls_peer_test.exs` regression test and
 `apps/elixir_quic_http3/README.md` destination package documentation.
 
-The round-four `Quic.Streams` change and round-five test-support contract
-changes are all included in the imported-source comparison: 58 changed files
+The round-four `Quic.Streams` change, round-five test-support contract changes,
+and round-six GREASE membership correction are included in the imported-source
+comparison: 59 changed files
 across all three apps, with no additional source files. The root
 `.dialyzer_ignore.exs` adds one narrowly anchored exception for
 `Quic.Streams.new/2` at `lib/quic/streams.ex:90`, where the declared
@@ -125,6 +127,12 @@ across all three apps, with no additional source files. The root
 ([elixir-lang/elixir#15673](https://github.com/elixir-lang/elixir/issues/15673)).
 Round four removed the separate unreachable private `valid_final_send/3`
 guard, without adding an ignore for it.
+
+Round six replaces the private ServerHello decoder's compiled `MapSet` literal
+with the same 16 RFC 8701 GREASE integers in a list and strict membership.
+This avoids an Elixir 1.18 opaque-type warning without adding a suppression.
+Public decoder regressions retain GREASE rejection for ServerHello and
+HelloRetryRequest, neighboring non-GREASE errors, and fragmented-input behavior.
 
 The Caddy harness README names both destination CI workflows and retains its
 explicit local Docker restriction.

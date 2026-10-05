@@ -264,6 +264,103 @@ defmodule SSL.Protocol.ServerHelloTest do
              ServerHello.decode(hello(compression_method: 1), @expectations)
   end
 
+  test "rejects all RFC 8701 GREASE selections in ServerHello and HelloRetryRequest" do
+    grease_values = [
+      0x0A0A,
+      0x1A1A,
+      0x2A2A,
+      0x3A3A,
+      0x4A4A,
+      0x5A5A,
+      0x6A6A,
+      0x7A7A,
+      0x8A8A,
+      0x9A9A,
+      0xAAAA,
+      0xBABA,
+      0xCACA,
+      0xDADA,
+      0xEAEA,
+      0xFAFA
+    ]
+
+    version = extension(43, <<0x0304::16>>)
+
+    for value <- grease_values do
+      expectations = %{
+        @expectations
+        | offered_ciphers: [value],
+          offered_groups: [value],
+          offered_key_share_groups: [value],
+          offered_extension_ids: [43, 51, value]
+      }
+
+      assert {:error, {:grease_selected, :cipher_suite, ^value}} =
+               ServerHello.decode(hello(cipher_suite: value), expectations)
+
+      expectations = %{expectations | offered_ciphers: [0x1301]}
+
+      for random <- [@server_random, @hrr_random] do
+        assert {:error, {:grease_selected, :extension, ^value}} =
+                 ServerHello.decode(
+                   hello(random: random, extensions: [version, extension(value, <<>>)]),
+                   expectations
+                 )
+      end
+
+      assert {:error, {:grease_selected, :group, ^value}} =
+               ServerHello.decode(
+                 hello(extensions: [version, extension(51, <<value::16, 1::16, 0>>)]),
+                 expectations
+               )
+
+      assert {:error, {:grease_selected, :group, ^value}} =
+               ServerHello.decode(
+                 hello(random: @hrr_random, extensions: [version, extension(51, <<value::16>>)]),
+                 %{expectations | offered_key_share_groups: []}
+               )
+    end
+  end
+
+  test "keeps neighboring non-GREASE errors and valid ServerHello decoding distinct" do
+    for value <- [0x0A09, 0x0A0B, 0xFAF9, 0xFAFB] do
+      assert {:error, {:unsupported_selected_cipher, ^value}} =
+               ServerHello.decode(
+                 hello(cipher_suite: value),
+                 %{@expectations | offered_ciphers: [value]}
+               )
+
+      assert {:error, {:forbidden_extension, :server_hello, ^value}} =
+               ServerHello.decode(hello(extensions: [extension(value, <<>>)]), @expectations)
+
+      assert {:error, {:unsupported_selected_group, ^value}} =
+               ServerHello.decode(
+                 hello(
+                   extensions: [
+                     extension(43, <<0x0304::16>>),
+                     extension(51, <<value::16, 1::16, 0>>)
+                   ]
+                 ),
+                 %{@expectations | offered_groups: [value], offered_key_share_groups: [value]}
+               )
+    end
+
+    assert {:ok, %ServerHello{encoded: @server_hello}, <<>>} =
+             ServerHello.decode(@server_hello, @expectations)
+  end
+
+  test "waits for complete fragmented GREASE input before rejecting the selection" do
+    encoded = hello(extensions: [extension(0xFAFA, <<>>)])
+
+    for split <- 0..(byte_size(encoded) - 1) do
+      assert {:more, _needed} =
+               ServerHello.decode(binary_part(encoded, 0, split), @expectations)
+    end
+
+    assert {:error, {:grease_selected, :extension, 0xFAFA}} =
+             ServerHello.decode(encoded, @expectations)
+  end
+
   test "requires offered key-share groups to be a subset of offered groups" do
     expectations = %{
       @expectations
