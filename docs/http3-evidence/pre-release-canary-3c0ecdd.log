@@ -1,0 +1,71 @@
+docker.io/library/caddy@sha256:748016f285ed8c43a9ce6e3aed6d92d3009d90ca41157950880f40beaf3ff62b: Pulling from library/caddy
+Digest: sha256:748016f285ed8c43a9ce6e3aed6d92d3009d90ca41157950880f40beaf3ff62b
+Status: Image is up to date for caddy@sha256:748016f285ed8c43a9ce6e3aed6d92d3009d90ca41157950880f40beaf3ff62b
+docker.io/library/caddy:2.9.1@sha256:748016f285ed8c43a9ce6e3aed6d92d3009d90ca41157950880f40beaf3ff62b
+98d459ea862bb8f7a9da288befa53bbee911bab236330f29db92e5d536e7ca49
+Independent Caddy 2MiB absent/explicit Content-Length integrity: PASS
+HTTP3 canary elapsed_ms=1321 requests=64 memory=63800744 processes=178
+HTTP3 canary elapsed_ms=660866 requests=6464 memory=66516272 processes=168
+HTTP3 canary elapsed_ms=1320089 requests=12864 memory=65228512 processes=168
+HTTP3 canary elapsed_ms=1979076 requests=19264 memory=62740088 processes=178
+HTTP3 canary elapsed_ms=2637318 requests=25664 memory=62818328 processes=168
+HTTP3 canary elapsed_ms=3296447 requests=32064 memory=65764752 processes=168
+HTTP3 canary elapsed_ms=3954066 requests=38464 memory=63061032 processes=178
+HTTP3 canary elapsed_ms=4611819 requests=44864 memory=64021544 processes=168
+HTTP3 canary elapsed_ms=5270192 requests=51264 memory=65388704 processes=168
+HTTP3 canary elapsed_ms=5927733 requests=57664 memory=62240296 processes=178
+HTTP3 canary elapsed_ms=6585844 requests=64064 memory=67244496 processes=168
+HTTP3 canary elapsed_ms=7244297 requests=70464 memory=66419768 processes=168
+HTTP3 canary elapsed_ms=7902719 requests=76864 memory=62752984 processes=178
+HTTP3 canary elapsed_ms=8560036 requests=83264 memory=62368080 processes=168
+HTTP3 canary elapsed_ms=9219968 requests=89664 memory=66660176 processes=168
+HTTP3 canary elapsed_ms=9877544 requests=96064 memory=64211968 processes=178
+HTTP3 canary elapsed_ms=10535067 requests=102464 memory=67608352 processes=168
+HTTP3 canary elapsed_ms=11194023 requests=108864 memory=66471200 processes=168
+HTTP3 canary elapsed_ms=11853138 requests=115264 memory=62924184 processes=178
+HTTP3 canary elapsed_ms=12511222 requests=121664 memory=66016712 processes=168
+HTTP3 canary elapsed_ms=13171164 requests=128064 memory=68223336 processes=168
+HTTP3 canary elapsed_ms=13828842 requests=134464 memory=62315008 processes=178
+HTTP3 canary elapsed_ms=14486377 requests=140864 memory=65995416 processes=168
+HTTP3 canary elapsed_ms=15144979 requests=147264 memory=65191512 processes=168
+HTTP3 canary elapsed_ms=15803273 requests=153664 memory=62308304 processes=178
+HTTP3 canary elapsed_ms=16460754 requests=160064 memory=65060912 processes=168
+HTTP3 canary elapsed_ms=17119048 requests=166464 memory=65869448 processes=168
+HTTP3 canary elapsed_ms=17776841 requests=172864 memory=62726968 processes=178
+HTTP3 canary elapsed_ms=18435164 requests=179264 memory=63689568 processes=168
+HTTP3 canary elapsed_ms=19093703 requests=185664 memory=67085304 processes=168
+HTTP3 canary elapsed_ms=19751612 requests=192064 memory=64062904 processes=173
+HTTP3 canary elapsed_ms=20408233 requests=198464 memory=64613744 processes=168
+HTTP3 canary elapsed_ms=21066414 requests=204864 memory=67271872 processes=168
+HTTP3 canary elapsed_ms=21724824 requests=211264 memory=62773504 processes=178
+HTTP3 canary elapsed_ms=22382874 requests=217664 memory=68279120 processes=168
+HTTP3 canary elapsed_ms=23048947 requests=224064 memory=65275960 processes=168
+HTTP3 canary elapsed_ms=23706366 requests=230464 memory=63632384 processes=178
+HTTP3 canary elapsed_ms=24363415 requests=236864 memory=63043432 processes=168
+HTTP3 canary elapsed_ms=25021237 requests=243264 memory=67140552 processes=168
+HTTP3 canary elapsed_ms=25678074 requests=249664 memory=63190088 processes=178
+HTTP3 canary elapsed_ms=26333578 requests=256064 memory=66745584 processes=168
+HTTP3 canary elapsed_ms=26991342 requests=262464 memory=66129952 processes=168
+HTTP3 canary elapsed_ms=27650916 requests=268864 memory=61877976 processes=178
+HTTP3 canary elapsed_ms=28305221 requests=275264 memory=64518080 processes=168
+HTTP3 canary elapsed_ms=29009127 requests=281664 memory=70950944 processes=168
+HTTP3 canary elapsed_ms=29683064 requests=288064 memory=63209152 processes=178
+HTTP3 canary elapsed_ms=30352023 requests=294464 memory=65227576 processes=168
+HTTP3 canary elapsed_ms=31020832 requests=300864 memory=66393568 processes=168
+HTTP3 canary elapsed_ms=31688909 requests=307264 memory=64186344 processes=178
+HTTP3 canary elapsed_ms=32357788 requests=313664 memory=66689592 processes=168
+HTTP3 canary elapsed_ms=33027227 requests=320064 memory=66579360 processes=168
+HTTP3 canary elapsed_ms=33729779 requests=326464 memory=63025224 processes=178
+
+02:43:38.994 [notice] SIGTERM received - shutting down
+
+** (EXIT from #PID<0.95.0>) exited in: GenServer.call(:http_fetch_task_supervisor, {:start_task, [{:nonode@nohost, #PID<0.1659644.0>, #PID<0.1659644.0>}, :monitor], :temporary, nil}, :infinity)
+    ** (EXIT) no process: the process is not alive or there's no process currently associated with the given name, possibly because its application isn't started
+
+{exit,{noproc,{gen_server,call,[elixir_config,{get_and_put,at_exit,[]},infinity]}},[{gen_server,call,3,[{file,"gen_server.erl"},{line,1301}]},{'Elixir.Kernel.CLI',at_exit,1,[{file,"lib/kernel/cli.ex"},{line,126}]},{'Elixir.Kernel.CLI',run,1,[{file,"lib/kernel/cli.ex"},{line,58}]},{init,start_it,1,[]},{init,start_em,1,[]},{init,do_boot,3,[]}]}
+Traceback (most recent call last):
+  File "/home/gao/Workspace/gsmlg-dev/http_fetch/.trees/http3-completion/scripts/http3/public_gate.py", line 178, in <module>
+    run(arguments.gate_script, arguments.timeout, arguments.project_dir)
+  File "/home/gao/Workspace/gsmlg-dev/http_fetch/.trees/http3-completion/scripts/http3/public_gate.py", line 165, in run
+    raise RuntimeError("peer cleanup failed: " + "; ".join(cleanup_errors))
+RuntimeError: peer cleanup failed: Command '['docker', 'logs', 'http3-public-5d91ef8667bb4f6790a49c053668430c']' timed out after 9.999990291893482 seconds

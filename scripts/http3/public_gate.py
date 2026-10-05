@@ -147,7 +147,7 @@ def run(gate_script, timeout, project_dir=ROOT):
             cleanup_errors = []
             if created:
                 with (logs / "caddy.log").open("w") as output:
-                    for command in [["docker", "logs", container], ["docker", "stop", "--time", "2", container], ["docker", "rm", container]]:
+                    for command in [["docker", "logs", "--tail", "2000", container], ["docker", "stop", "--time", "2", container], ["docker", "rm", container]]:
                         try:
                             subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, check=True, timeout=10)
                         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:

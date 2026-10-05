@@ -1,0 +1,17 @@
+{
+  "status": "STOPPED_EARLY_NOT_COMPLETED_24H",
+  "reason": "User revised release condition: post-release asynchronous stability test",
+  "stop_requested_at_utc": "2026-10-05T18:43:38.994177+00:00",
+  "native_process_elapsed_seconds_including_startup": 34197,
+  "last_confirmed_workload_elapsed_ms": 33729779,
+  "last_confirmed_requests": 326464,
+  "source_sha": "3c0ecdd50500bcc6f4f8da61ee3295e93b295b7a",
+  "required_full_duration_seconds": 86400,
+  "wrapper_exit_code": 1,
+  "full_canary_pass": false,
+  "cleanup_diagnostic": "docker logs export timed out after10s; owned container and native/peer processes subsequently removed",
+  "last_memory_bytes": 63025224,
+  "last_process_count": 178,
+  "sampled_peak_memory_bytes": 70950944,
+  "sampled_peak_processes": 178
+}

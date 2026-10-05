@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.16.7] - 2026-10-05
+## [0.16.7] - 2026-10-06
 
 ### Added
 - Report HTTP/3 beta and static/literal QPACK capabilities in the companion;
@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and published Hex traffic, negative TLS checks, and retained peer diagnostics
   in coordinated releases.
 - Add the scoped 24-hour canary with explicit cleanup, memory, mailbox, process,
-  endpoint and error thresholds; results are recorded in the acceptance audit.
+  endpoint and error thresholds, as separate asynchronous validation against
+  the release tag and published packages; interrupted pre-release evidence is
+  retained without claiming a completed 24-hour pass.
 
 ### Fixed
 - Transfer owner-proven unopened requests at concurrent lifetime rotation using

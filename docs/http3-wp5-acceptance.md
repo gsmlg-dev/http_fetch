@@ -95,7 +95,8 @@ remote workflow results are separate from the presence of this workflow.
 | Current remote source CI/public acceptance | PASS: runs 37288637355 and 37288637060 on 3c0ecdd; full final release gates remain separate |
 | Fresh isolated candidate after rotation repair/main merge | PASS: nine exact private Hex packages, both peers, 10,000 requests/11 connections on c12bbf8 |
 | Final release artifacts and isolated published consumer | NOT RUN: final publication remains gated |
-| 24-hour scoped canary | RUNNING: 86,400-second workload on 3c0ecdd, started 2026-10-05 around 09:14 UTC; completion and wrapper exit remain required |
+| Pre-release canary | STOPPED EARLY by user instruction: last confirmed 33,729.779 seconds / 326,464 requests on 3c0ecdd; 24h incomplete, no full PASS |
+| Post-release 24-hour canary | ASYNCHRONOUS: launch separately against the final main release tag and all nine published packages; result does not extend this goal |
 
 The fixture diagnosis used the `c3fb8dd` WP3 baseline plus the concurrent WP4
 worktree. It made no native QUIC or runtime implementation edits. Diagnostic
@@ -129,6 +130,13 @@ A local fixture pass or a negotiated ALPN does not substitute for those gates.
 
 ## Scoped canary contract
 
+The user's revised completion conditions on 2026-10-06 place the 24-hour canary
+**after publication**, as independent asynchronous stability validation. It is
+not a merge or release prerequisite. Functional, regression, security,
+interoperability, quality, candidate-artifact and published-consumer gates remain
+mandatory. Final release must come from `main`. Any asynchronous failure becomes
+a separate follow-up task rather than extending this implementation goal.
+
 `scripts/http3/canary.exs` defaults to 86,400 seconds and requires its measured
 elapsed duration to meet that value. Each cycle makes 32 simultaneous strict
 public PUTs against each independent peer, checks all 16KiB payloads byte for
@@ -161,7 +169,8 @@ Neither calibration is a substitute for 24 hours. An independent final review
 found a separate initial-admission watchdog classification gap. Deterministic
 initial-admission and known-ref reconciliation regressions now pass, with no
 replay, no producer demand and zero leases. Root runtime/Fetch/EventSource,
-compile, format, Credo and Dialyzer reruns pass; the full canary remains required.
+compile, format, Credo and Dialyzer reruns pass; the full canary is tracked
+separately after release.
 
 The fresh final candidate logs are `/tmp/http3-wp5-final-candidate-public.log`,
 with private loaded modules under `/tmp/http-fetch-hex-consumer-yp2jtkc_` and
@@ -169,3 +178,46 @@ archives under `/tmp/http3-final-candidate-KxWRlh`. Those are candidate archives
 of the current source with 0.16.5 development metadata, not a claim that immutable
 published 0.16.5 artifacts contain the public H3 implementation. Final release
 validation regenerates and verifies coordinated 0.16.7 artifacts separately.
+
+## Interrupted pre-release run
+
+The user-authorized stop was requested at 2026-10-05 18:43:38.994 UTC
+(2026-10-06 02:43:38.994 Shanghai). The native process had run 34,197 seconds
+including startup. The last confirmed workload sample measured **33,729.779
+seconds (9h22m9.779s), 326,464 requests**, VM memory 63,025,224 bytes and 178
+processes. Sampled peaks were 70,950,944 bytes and 178 processes.
+This run was **stopped early and did not complete 24 hours**. No full canary
+PASS was emitted or claimed.
+
+SIGTERM shutdown produced application-stop exceptions. The wrapper exited 1
+because exporting the accumulated Caddy debug log exceeded its ten-second bound;
+the owned container and peer processes were removed afterward. Subsequent
+launchers retain the last 2,000 Caddy log lines with the same finite timeout,
+so long runs have bounded diagnostic export. This does not alter workload,
+protocol assertions or resource limits.
+
+Tracked evidence: `docs/http3-evidence/pre-release-canary-3c0ecdd.log` and
+`docs/http3-evidence/pre-release-canary-3c0ecdd.json`. Full local logs are preserved
+at `/home/gao/.codex/artifacts/http3-pre-release-canary-2026-10-05/logs.tar.gz`,
+SHA256 `6737e0e7488077abd6c38afed283b75fe1a15863a55390f326e48121d00ee764`.
+
+## Independent asynchronous published-package run
+
+Tracking task: [#19](https://github.com/gsmlg-dev/http_fetch/issues/19).
+After final release validation, use a clean detached worktree at `v0.16.7`:
+
+```sh
+python3 scripts/http3/post_release_canary.py 0.16.7 FULL_TAG_SHA \
+  /home/gao/.codex/artifacts/http3-post-release-v0.16.7 \
+  --issue 19 --detach
+```
+
+The launcher verifies HEAD/tag identity, downloads GitHub release archives,
+checks all nine matching Hex checksums, and resolves all nine exact published
+packages into an isolated consumer without workspace dependencies or overrides.
+Loaded application provenance must pass before the unchanged 86,400-second
+driver starts. `launch.json` and `status.json` distinguish launch/running from
+PASS, FAIL and INTERRUPTED; incomplete results cannot pass. `consumer.log`,
+peer logs and `report.md` retain measured workload evidence separately from
+setup-inclusive runner duration. Completion updates task #19; failure creates a
+separate Bug task. This process runs independently of the completed release goal.

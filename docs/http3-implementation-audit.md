@@ -309,11 +309,42 @@ The actual 86,400-second canary started around 2026-10-05 09:14 UTC on this
 source; log `/tmp/http3-canary-final.log`, peer diagnostics
 `/tmp/http3-canary-final-peers`, recorded SHA `/tmp/http3-canary-final.sha`.
 Its first 6,464 requests passed at 660,866ms; this is progress, not completion.
-Final publication remains gated on measured duration, explicit PASS and wrapper
-exit 0.
+At that point, final publication was gated on measured duration, explicit PASS
+and wrapper exit 0; the user's revised conditions below supersede that ordering.
 
 Root ExDoc now registers the four new HTTP/3 contract/audit/acceptance pages.
 `ERL_FLAGS='+S 2:2' mix docs` passed (exit 0), and the generated README resolves
 all four links. Warnings decreased from 226 to 202 with no new warnings;
 historical QUIC/H2/TLS missing pages and hidden implementation references remain
 outside this documentation repair. Scoped format and diff checks passed.
+
+## Revised completion conditions and pre-release stop, 2026-10-06
+
+The user explicitly moved 24h stability validation after publication. All other
+necessary gates remain mandatory. Implementation must merge to `main`, final
+release must run from `main`, and release artifacts/independent consumers must
+pass before this goal stops. A separate asynchronous canary must use the exact
+release tag and actual nine published packages; a failure opens a follow-up task.
+
+The pre-release run was intentionally stopped at 2026-10-05 18:43:38.994 UTC.
+Last confirmed workload: **33,729.779 seconds / 326,464 requests**; native process
+wall duration including startup: 34,197 seconds. Sampled peak VM memory:
+70,950,944 bytes; processes: 178. **Stopped early, 24h incomplete, no full PASS.**
+SIGTERM shutdown exceptions and wrapper exit 1 are preserved. Diagnostic export
+of the accumulated Caddy log exceeded ten seconds; its owned container and peers
+were then removed. Future exports use a bounded 2,000-line tail without changing
+workload, assertions or thresholds.
+
+Tracked log/summary: `docs/http3-evidence/pre-release-canary-3c0ecdd.{log,json}`.
+Full preserved local archive:
+`/home/gao/.codex/artifacts/http3-pre-release-canary-2026-10-05/logs.tar.gz`,
+SHA256 `6737e0e7488077abd6c38afed283b75fe1a15863a55390f326e48121d00ee764`.
+The original checkout's user-owned review plan was backed up in that directory;
+its bytes are identical to the tracked plan.
+
+Post-release stability is tracked independently in
+[#19](https://github.com/gsmlg-dev/http_fetch/issues/19). The detached runner
+requires the exact clean release tag, checks nine GitHub/Hex archive identities,
+and runs loaded published-package provenance before the full-duration workload.
+Its terminal report updates that task and opens a separate Bug on failure.
+The pre-release interruption remains distinct from this future run.

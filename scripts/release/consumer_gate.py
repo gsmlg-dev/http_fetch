@@ -190,7 +190,7 @@ IO.puts("loaded_ssl_connection=" <> to_string(:code.which(SSL.Connection)))
             raise RuntimeError(f"candidate TLS feature group failed: {group.name}")
 
 
-def http3_project(directory, version, env):
+def http3_project(directory, version, env, *, canary_sha=None):
     project = directory / "http3"
     project.mkdir(parents=True)
     deps = ", ".join(f'{{:{app}, "== {version}"}}' for app in PACKAGES)
@@ -201,9 +201,10 @@ def http3_project(directory, version, env):
 end
 ''')
     shutil.copyfile(ROOT / "scripts/release/http3_consumer.exs", project / "provenance.exs")
-    shutil.copyfile(ROOT / "scripts/http3/public_gate.exs", project / "public_gate.exs")
+    driver = "canary.exs" if canary_sha else "public_gate.exs"
+    shutil.copyfile(ROOT / "scripts/http3" / driver, project / driver)
     (project / "gate.exs").write_text('Code.require_file("provenance.exs", __DIR__)\n'
-                                      'Code.require_file("public_gate.exs", __DIR__)\n')
+                                      f'Code.require_file("{driver}", __DIR__)\n')
     project_env = {**env, "MIX_ENV": "test", "MIX_BUILD_PATH": str(project / "build"),
                    "MIX_DEPS_PATH": str(project / "deps"), "HTTP3_CONSUMER_VERSION": version,
                    "HTTP3_CONSUMER_PROJECT": str(project),
@@ -211,15 +212,37 @@ end
                    "HTTP3_GATE_LOG_DIR": env.get("HTTP3_GATE_LOG_DIR", str(project / "peer-logs"))}
     command(["mix", "deps.get"], cwd=project, env=project_env)
     command(["mix", "compile", "--warnings-as-errors"], cwd=project, env=project_env)
-    command(["uv", "run", "--python", "3.12", "--with", "aioquic==1.2.0", "python",
+    if canary_sha:
+        project_env.update(HTTP3_CANARY_SECONDS="86400", HTTP3_CANARY_SHA=canary_sha)
+    launcher = ["uv", "run", "--python", "3.12", "--with", "aioquic==1.2.0", "python",
              str(ROOT / "scripts/http3/public_gate.py"), "--gate-script", str(project / "gate.exs"),
-             "--project-dir", str(project)], cwd=ROOT, env=project_env)
+             "--project-dir", str(project)]
+    if canary_sha:
+        launcher.extend(["--timeout", "87000"])
+    command(launcher, cwd=ROOT, env=project_env)
 
 
-def run(version, archive_dir=None, *, mode="all", keep=False, published=False):
+def verify_canary_source(version, source_sha):
+    if not source_sha or not re.fullmatch(r"[a-f0-9]{40}", source_sha):
+        raise ValueError("full release-tag source SHA required")
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
+    if git("rev-parse", "HEAD") != source_sha or git("rev-parse", f"v{version}^{{commit}}") != source_sha:
+        raise ValueError("canary checkout must match the exact release tag and expected SHA")
+    if git("diff", source_sha, "--name-only"):
+        raise ValueError("canary checkout has tracked changes")
+
+
+def run(version, archive_dir=None, *, mode="all", keep=False, published=False, source_sha=None):
     if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version):
         raise ValueError("stable release version required")
-    if published and mode != "http3":
+    if mode == "http3-canary":
+        if not published or archive_dir is None:
+            raise ValueError("canary requires published Hex packages and release archives")
+        verify_canary_source(version, source_sha)
+    elif source_sha is not None:
+        raise ValueError("source SHA is restricted to the post-release canary")
+    if published and mode not in ("http3", "http3-canary"):
         raise ValueError("published mode is restricted to the HTTP3 consumer")
     if not published and archive_dir is None:
         raise ValueError("candidate archive directory is required")
@@ -262,6 +285,8 @@ def run(version, archive_dir=None, *, mode="all", keep=False, published=False):
                 feature_project(directory, version, env)
             elif mode == "http3":
                 http3_project(directory, version, env)
+            elif mode == "http3-canary":
+                http3_project(directory, version, env, canary_sha=source_sha)
             else:
                 raise ValueError(f"unknown consumer mode: {mode}")
         if keep:
@@ -278,11 +303,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("version")
     parser.add_argument("archive_dir", type=Path, nargs="?")
-    parser.add_argument("--mode", choices=("all", "runtime", "external", "feature", "http3"), default="all")
+    parser.add_argument("--mode", choices=("all", "runtime", "external", "feature", "http3", "http3-canary"), default="all")
+    parser.add_argument("--source-sha")
     parser.add_argument("--published", action="store_true")
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
-    run(args.version, args.archive_dir, mode=args.mode, keep=args.keep, published=args.published)
+    run(args.version, args.archive_dir, mode=args.mode, keep=args.keep, published=args.published,
+        source_sha=args.source_sha)
 
 
 if __name__ == "__main__":
