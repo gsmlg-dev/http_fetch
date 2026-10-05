@@ -93,6 +93,7 @@ remote workflow results are separate from the presence of this workflow.
 | Complete public acceptance, WP4 working checkpoint | PASS: both peers, informational/trailers/reset/abort/SSE/GOAWAY, 10,000 sequential requests across 11 connections; final queued-cancellation/SSE review rerun also PASS; concurrent rotation repair remains pending |
 | Corrected remote public CI | PASS: run 37286353184 on c12bbf8; source public gate and peer artifacts |
 | Current remote source CI/public acceptance | PASS: runs 37288637355 and 37288637060 on 3c0ecdd; full final release gates remain separate |
+| Reconciled main source and supported toolchains | PASS: c938c9b full units/quality/TLS/public traffic; 816d8e0 transport repair, corrected compatibility matrix 37360094837 on Elixir 1.19/OTP28 and 1.20/OTP29 |
 | Fresh isolated candidate after rotation repair/main merge | PASS: nine exact private Hex packages, both peers, 10,000 requests/11 connections on c12bbf8 |
 | Final release artifacts and isolated published consumer | NOT RUN: final publication remains gated |
 | Pre-release canary | STOPPED EARLY by user instruction: last confirmed 33,729.779 seconds / 326,464 requests on 3c0ecdd; 24h incomplete, no full PASS |

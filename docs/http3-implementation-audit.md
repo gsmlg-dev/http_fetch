@@ -348,3 +348,28 @@ requires the exact clean release tag, checks nine GitHub/Hex archive identities,
 and runs loaded published-package provenance before the full-duration workload.
 Its terminal report updates that task and opens a separate Bug on failure.
 The pre-release interruption remains distinct from this future run.
+
+Incoming `main` compatibility fixes `4238952` and `02d851d` were preserved by
+merge `c938c9b`. Root nine-app unit tests passed with seed 28092026: TLS 610
+tests + 20 properties; QUIC 235; core 274 (three existing gated skips);
+companion 104; runtime 92; Fetch 318 + 20 doctests; WebSocket 82;
+WebTransport 24; EventSource 75. Full TLS integration with seed 743209 passed
+610 tests + 20 properties without the default integration exclusions.
+Compile, root format, configured Credo and full Dialyzer passed (the five
+intentional ignores remain). Automation passed 12 CI tests and 27 release tests;
+five real fixture regressions and three admission regressions passed. Refreshed
+two-peer public acceptance passed 10,000 requests over 11 connections; wrapper
+exit 0 and owned peer cleanup passed with bounded Caddy diagnostics.
+
+Compatibility run [37359313300](https://github.com/gsmlg-dev/http_fetch/actions/runs/37359313300)
+passed Elixir 1.19 / OTP 28 but failed strict compilation on Elixir 1.20 / OTP 29:
+the private `normalize_remote/2` fallback was statically unreachable after the
+public caller's address validation. Commit `816d8e0` removes that clause and
+expands malformed-address rejection coverage without warning suppression or
+weakening the public validation. Companion 104/0 and scoped transport/session
+61/0 passed locally. Corrected matrix
+[37360094837](https://github.com/gsmlg-dev/http_fetch/actions/runs/37360094837)
+passed both toolchains, including historical published and current nine-package
+candidate TLS feature consumers. The implementation is ready to merge to `main`
+and run the coordinated 0.16.7 release; publication and post-release canary remain
+separate pending operations.
