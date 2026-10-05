@@ -174,6 +174,39 @@ defmodule Quic.HandshakeSchedulerLevelsTest do
              HandshakeScheduler.receive_datagram(state, packet, 10)
   end
 
+  test "NEW_TOKEN is discarded only by clients at the application level" do
+    {:ok, client, []} = new()
+    plaintext = <<7, 3, "abc">>
+    packet = peer_application(client, plaintext)
+    assert {:ok, _next, []} = HandshakeScheduler.receive_datagram(client, packet, 10)
+
+    server = %{client | role: :server}
+
+    assert {:error, :unexpected_new_token, ^server} =
+             HandshakeScheduler.receive_datagram(server, packet, 10)
+
+    handshake = peer_handshake(client.keys.handshake.read, plaintext)
+
+    assert {:error, {:wrong_encryption_level, :new_token, :handshake}, ^client} =
+             HandshakeScheduler.receive_datagram(client, handshake, 10)
+  end
+
+  defp peer_application(state, plaintext) do
+    keys = state.keys.application.read
+    first = 0x40
+    prefix = <<first, state.scid::binary>>
+    aad = prefix <> <<0>>
+
+    {ciphertext, tag} =
+      :crypto.crypto_one_time_aead(:aes_128_gcm, keys.key, keys.iv, plaintext, aad, 16, true)
+
+    packet = aad <> ciphertext <> tag
+    sample = binary_part(packet, byte_size(prefix) + 4, 16)
+    <<mask, pn_mask, _::binary>> = :crypto.crypto_one_time(:aes_128_ecb, keys.hp, sample, true)
+    <<_first, cid::binary>> = prefix
+    <<bxor(first, band(mask, 0x1F)), cid::binary, pn_mask, ciphertext::binary, tag::binary>>
+  end
+
   test "authenticated ACK cannot acknowledge a packet from a different number space" do
     {:ok, state, []} = new()
     state = %{state | pending: [%{level: :application, offset: 0, bytes: <<1>>}]}

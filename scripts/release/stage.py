@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 PACKAGES = (
-    "ex_ssl", "elixir_quic", "http_core", "http_runtime", "elixir_quic_http3",
+    "ex_ssl", "elixir_quic", "http_core", "elixir_quic_http3", "http_runtime",
     "http_fetch", "http_web_socket", "http_event_source", "http_web_transport",
 )
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,14 +48,14 @@ def build(stage_dir, version, archive_dir, packages=PACKAGES):
     return archive_dir
 
 
-def verify_rebuild(stage_dir, version, archive_dir):
+def verify_rebuild(stage_dir, version, archive_dir, packages=PACKAGES, env=None):
     """Rebuild from unchanged staged sources immediately before publication."""
     archive_dir = Path(archive_dir).resolve()
-    for package in PACKAGES:
+    for package in packages:
         original = archive_dir / f"{package}-{version}.tar"
         rebuilt = archive_dir / f"{package}-{version}.rebuild.tar"
         subprocess.run(["mix", "hex.build", "--output", str(rebuilt)],
-                       cwd=Path(stage_dir) / package, check=True)
+                       cwd=Path(stage_dir) / package, check=True, env=env)
         try:
             if hashlib.sha256(original.read_bytes()).digest() != hashlib.sha256(rebuilt.read_bytes()).digest():
                 raise RuntimeError(f"staged package rebuild differs: {package} {version}")

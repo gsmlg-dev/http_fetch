@@ -123,7 +123,7 @@ class ArchiveTests(unittest.TestCase):
             manifest.write_text(original)
 
     def test_omitted_or_corrupted_runtime_file_rejected(self):
-        source = self.stage / "http_core/lib/http/http3.ex"
+        source = self.stage / "http_core/lib/http/headers.ex"
         original = source.read_bytes()
         try:
             source.write_bytes(b"corrupted")
@@ -141,7 +141,7 @@ class ArchiveTests(unittest.TestCase):
             inner_output = io.BytesIO()
             with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as inner, tarfile.open(fileobj=inner_output, mode="w:gz") as out:
                 for member in inner:
-                    if member.name != "lib/http/http3.ex":
+                    if member.name != "lib/http/headers.ex":
                         out.addfile(member, inner.extractfile(member) if member.isfile() else None)
             rebuilt = io.BytesIO()
             with tarfile.open(fileobj=rebuilt, mode="w") as out:
@@ -181,10 +181,39 @@ class RemotePreflightTests(unittest.TestCase):
             hex_packages, "verify_rebuild") as rebuild, patch.object(hex_packages.subprocess, "run") as publish, patch.dict(
             "os.environ", {"HEX_API_KEY": "test"}):
             hex_packages.run("publish", "1.0.0", self.archives, self.archives)
-        rebuild.assert_called_once()
-        self.assertEqual([str(call.kwargs["cwd"]) for call in publish.call_args_list],
-                         [str(self.archives / package) for package in stage.PACKAGES[1:]])
+        self.assertEqual(rebuild.call_count, len(stage.PACKAGES))
+        commands = publish.call_args_list
+        self.assertEqual([call.args[0] for call in commands],
+                         [["mix", "deps.get", "--only", "prod"],
+                          ["mix", "hex.publish", "package", "--yes"]] * (len(stage.PACKAGES) - 1))
+        self.assertEqual([str(call.kwargs["cwd"]) for call in commands],
+                         [str(self.archives / package) for package in stage.PACKAGES[1:] for _ in range(2)])
+        self.assertTrue(all(call.kwargs["env"]["MIX_ENV"] == "prod" for call in commands))
         self.assertEqual(calls[:len(stage.PACKAGES)], list(stage.PACKAGES))
+
+    def test_dependency_failure_blocks_package_publication(self):
+        with patch.object(hex_packages, "release_status", return_value="missing"), patch.object(
+            hex_packages, "verify_rebuild"), patch.object(hex_packages.subprocess, "run",
+            side_effect=subprocess.CalledProcessError(1, "mix deps.get")) as commands, patch.dict(
+            "os.environ", {"HEX_API_KEY": "test"}):
+            with self.assertRaises(subprocess.CalledProcessError):
+                hex_packages.run("publish", "1.0.0", self.archives, self.archives)
+        self.assertEqual(commands.call_count, 1)
+        self.assertEqual(commands.call_args.args[0], ["mix", "deps.get", "--only", "prod"])
+
+    def test_dependency_preparation_cannot_mutate_published_archive(self):
+        events = []
+        def rebuild(*_args, **kwargs):
+            events.append("verify")
+            if kwargs.get("packages"):
+                raise RuntimeError("staged package rebuild differs")
+        with patch.object(hex_packages, "release_status", return_value="missing"), patch.object(
+            hex_packages, "verify_rebuild", side_effect=rebuild), patch.object(
+            hex_packages.subprocess, "run", side_effect=lambda *_args, **_kwargs: events.append("deps")), patch.dict(
+            "os.environ", {"HEX_API_KEY": "test"}):
+            with self.assertRaisesRegex(RuntimeError, "rebuild differs"):
+                hex_packages.run("publish", "1.0.0", self.archives, self.archives)
+        self.assertEqual(events, ["verify", "deps", "verify"])
 
     def test_github_post_write_requires_all_matching_assets(self):
         with patch.object(github_assets, "existing_release", side_effect=[None, {"assets": []}]), patch.object(

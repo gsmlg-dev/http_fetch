@@ -1,9 +1,9 @@
 defmodule ReleaseArchives do
-  @order ~w(ex_ssl elixir_quic http_core http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport)
+  @order ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
   @deps %{
     "elixir_quic" => ~w(ex_ssl),
     "http_core" => ~w(ex_ssl elixir_quic),
-    "http_runtime" => ~w(http_core),
+    "http_runtime" => ~w(http_core elixir_quic_http3),
     "elixir_quic_http3" => ~w(http_core elixir_quic),
     "http_fetch" => ~w(http_core http_runtime),
     "http_web_socket" => ~w(http_core http_runtime),

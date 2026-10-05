@@ -17,14 +17,14 @@ DEPENDENCIES = {
     "ex_ssl": (),
     "elixir_quic": ("ex_ssl",),
     "http_core": ("ex_ssl", "elixir_quic"),
-    "http_runtime": ("http_core",),
+    "http_runtime": ("http_core", "elixir_quic_http3"),
     "elixir_quic_http3": ("http_core", "elixir_quic"),
     "http_fetch": ("http_core", "http_runtime"),
     "http_web_socket": ("http_core", "http_runtime"),
     "http_event_source": ("http_core", "http_runtime"),
     "http_web_transport": ("http_core",),
 }
-QUIC_SCRIPTS = ("scripts/interop/", "scripts/phase1/", "scripts/datagram/")
+QUIC_SCRIPTS = ("scripts/interop/", "scripts/phase1/", "scripts/datagram/", "scripts/http3/")
 SHARED = ("mix.exs", "mix.lock", ".formatter.exs", ".credo.exs", ".dialyzer_ignore.exs")
 PACKAGE_SCRIPTS = ("scripts/release/", "scripts/external_consumer_smoke", "scripts/http_runtime_", "scripts/http2_package_gate", "scripts/ex_ssl_")
 

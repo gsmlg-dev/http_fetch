@@ -115,8 +115,17 @@ defmodule ExternalConsumerSmoke do
       assert not Enum.any?(requirements, fn requirement ->
                Map.new(requirement)[<<"name">>] == "elixir_quic_http3"
              end),
-             "#{app} package must not require the removed elixir_quic_http3 package"
+             "#{app} must reach the companion through its explicit runtime boundary"
     end
+
+    assert requirement!(runtime, "elixir_quic_http3") == "== " <> core_version,
+           "runtime package must require the coordinated HTTP/3 companion"
+
+    assert :elixir_quic_http3 in Application.spec(:http_runtime, :applications),
+           "runtime must start its HTTP/3 companion dependency"
+
+    assert :elixir_quic_http3 not in Application.spec(:http_core, :applications),
+           "core must retain an acyclic dependency boundary"
   end
 
   defp metadata!(package_dir, app) do

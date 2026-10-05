@@ -25,7 +25,7 @@ defmodule QuicHttp3.Transport.Quic do
     configuration are immutable and checked before every borrowed connection.
     """
     @enforce_keys [:pid, :tls, :profile, :ops, :host]
-    defstruct [:pid, :tls, :profile, :ops, :host]
+    defstruct [:pid, :tls, :profile, :ops, :host, :streams]
   end
 
   @default_datagram [max_frame_size: 1200, max_items: 64, max_buffer_bytes: 65_536]
@@ -43,7 +43,15 @@ defmodule QuicHttp3.Transport.Quic do
          {:ok, profile} <- profile(options),
          {:ok, datagram} <- datagram_options(Keyword.get(options, :datagram, @default_datagram)),
          {:ok, endpoint} <- ops.client(endpoint_options(options, profile, datagram)) do
-      {:ok, %Endpoint{pid: endpoint, tls: tls, profile: profile, ops: ops, host: host}}
+      {:ok,
+       %Endpoint{
+         pid: endpoint,
+         tls: tls,
+         profile: profile,
+         ops: ops,
+         host: host,
+         streams: stream_budget(Keyword.get(options, :streams, []))
+       }}
     end
   end
 
@@ -256,6 +264,23 @@ defmodule QuicHttp3.Transport.Quic do
     |> Map.merge(%{alpn: "h3", datagram: true})
   end
 
+  @doc false
+  def stream_budget(options) when is_list(options) do
+    Quic.Streams.new(:client, Keyword.put(options, :delivery, :manual))
+    |> Map.take([
+      :delivery,
+      :max_data,
+      :max_buffer,
+      :max_ready_bytes,
+      :max_stream_data_bidi_local,
+      :max_stream_data_uni,
+      :max_streams_bidi,
+      :max_streams_uni,
+      :max_stream_records,
+      :max_local_stream_records
+    ])
+  end
+
   defp profile(options) do
     name = Keyword.get(options, :profile, :ordered)
     tls = Keyword.get(options, :tls, [])
@@ -353,7 +378,8 @@ defmodule QuicHttp3.Transport.Quic do
 
   defp start_endpoint(ops, %Endpoint{} = endpoint, options, profile, _datagram) do
     if endpoint.ops == ops and endpoint.tls == options[:tls] and endpoint.profile == profile and
-         endpoint.host == options[:host] do
+         endpoint.host == options[:host] and
+         (options[:streams] == nil or endpoint.streams == stream_budget(options[:streams])) do
       {:ok, endpoint.pid, false}
     else
       {:error, :endpoint_configuration_mismatch}

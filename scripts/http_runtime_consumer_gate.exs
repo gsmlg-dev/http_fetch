@@ -1,5 +1,5 @@
 defmodule HTTPRuntimeConsumerGate do
-  @apps ~w(http_core http_runtime http_fetch http_web_socket http_event_source http_web_transport)
+  @apps ~w(http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
   @clients ~w(http_fetch http_event_source http_web_socket)a
 
   def prepare do
@@ -43,13 +43,16 @@ defmodule HTTPRuntimeConsumerGate do
     for app <- ["http_fetch", "http_web_transport"] do
       assert!(
         not Map.has_key?(requirements(metadata[app]), "elixir_quic_http3"),
-        "#{app} must not require the removed elixir_quic_http3 package"
+        "#{app} must reach the HTTP/3 companion only through the runtime boundary"
       )
     end
 
+    assert_requirement!(metadata["http_runtime"], "elixir_quic_http3", version)
+    assert_requirement!(metadata["http_core"], "ex_ssl", version)
+
     assert!(
-      requirements(metadata["http_core"])["ex_ssl"]["requirement"] == "~> 0.7.2",
-      "core must retain published ex_ssl dependency"
+      not Map.has_key?(requirements(metadata["http_core"]), "elixir_quic_http3"),
+      "core must not depend on the HTTP/3 companion"
     )
 
     # Local unpublished packages are resolved transitively through these temporary paths.
@@ -106,7 +109,7 @@ defmodule HTTPRuntimeConsumerGate do
     resolved = Enum.map(Mix.Dep.cached(), & &1.app)
 
     if release = System.get_env("HTTP_RUNTIME_CONSUMER_RELEASE") do
-      for app <- [:http_core, :http_runtime | selected] do
+      for app <- [:http_core, :elixir_quic_http3, :http_runtime | selected] do
         dep = Enum.find(Mix.Dep.cached(), &(&1.app == app))
 
         assert!(
@@ -121,7 +124,7 @@ defmodule HTTPRuntimeConsumerGate do
       end
     end
 
-    for app <- [:http_core, :http_runtime, :ex_ssl] do
+    for app <- [:http_core, :elixir_quic_http3, :elixir_quic, :http_runtime, :ex_ssl] do
       assert!(app in resolved, "missing transitive dependency #{app}")
       assert!(List.keymember?(Application.started_applications(), app, 0), "#{app} did not start")
     end
@@ -155,7 +158,18 @@ defmodule HTTPRuntimeConsumerGate do
 
     runtime = runtime_processes!()
     children = Supervisor.which_children(HTTPRuntime.Application)
-    assert!(length(children) == 3, "runtime has unexpected supervision owners")
+
+    assert!(
+      Enum.sort(Enum.map(children, &elem(&1, 0))) ==
+        Enum.sort([
+          :http_runtime_task_supervisor,
+          HTTP.HTTP2.ConnectionSupervisor,
+          HTTP.HTTP2.Pool,
+          HTTP.HTTP3.ConnectionSupervisor,
+          HTTP.HTTP3.Pool
+        ]),
+      "runtime has unexpected supervision owners"
+    )
 
     assert!(
       apply(HTTP.HTTP2.Pool, :stats, [runtime[:http_fetch_http2_pool]]) == %{},
@@ -299,7 +313,9 @@ defmodule HTTPRuntimeConsumerGate do
         HTTPRuntime.Application,
         :http_runtime_task_supervisor,
         :http_fetch_http2_connection_supervisor,
-        :http_fetch_http2_pool
+        :http_fetch_http2_pool,
+        :http_fetch_http3_connection_supervisor,
+        :http_fetch_http3_pool
       ],
       fn name ->
         pid = Process.whereis(name)
@@ -327,7 +343,7 @@ defmodule HTTPRuntimeConsumerGate do
     requirement = requirements(metadata)[dependency]
 
     assert!(
-      requirement != nil and requirement["requirement"] == "~> " <> version and
+      requirement != nil and requirement["requirement"] == "== " <> version and
         requirement["optional"] == false,
       "invalid #{dependency} package requirement"
     )

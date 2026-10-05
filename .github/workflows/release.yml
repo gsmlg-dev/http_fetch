@@ -32,7 +32,7 @@ jobs:
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_BRANCH: ${{ inputs.git_ref }}
-      RELEASE_APPS: ex_ssl elixir_quic http_core http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport
+      RELEASE_APPS: ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport
     steps:
       - uses: actions/checkout@v4
         with:

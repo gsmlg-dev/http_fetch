@@ -13,8 +13,8 @@ completion requires all required gates and the final release to succeed.
 | --- | --- | --- |
 | WP0: baseline | 0.16.2 | Commit pushed; release attempt failed at baseline Dialyzer |
 | WP1: transport and resumable state | 0.16.3 | Commit pushed; release failed before publication: uv environment lacked pip |
-| WP2: bounded HTTP/3 profile | 0.16.4 | 103 companion tests PASS; independent aioquic gate PASS; release attempt pending |
-| WP3: runtime and pooling | 0.16.5 | Pending |
+| WP2: bounded HTTP/3 profile | 0.16.4 | Commit pushed; protocol gates PASS; release failed after publishing ex_ssl 0.16.4 |
+| WP3: runtime and pooling | 0.16.5 | Independent review repaired three runtime gaps; audited commit ready |
 | WP4: explicit Fetch integration | 0.16.6 | Pending |
 | WP5: independent acceptance | 0.16.7 | Pending |
 
@@ -99,3 +99,51 @@ zero terminal requests: **PASS**. Reproduce with `uv run --python 3.12 --with
 aioquic==1.2.0 python scripts/http3/session_gate.py`. This is companion evidence;
 public Fetch acceptance remains a later gate. The uv release dependency install
 was also verified in a fresh Python 3.12 virtual environment.
+
+WP2 commit: `5cf3a4776158cf0ecb8833b894b354209e73f95f`. Release attempt
+[37274530399](https://github.com/gsmlg-dev/http_fetch/actions/runs/37274530399)
+passed every validation gate, created `v0.16.4` / release commit `5f801df`, and
+published `ex_ssl 0.16.4`. Publication of `elixir_quic` then failed because the
+portable staged package had no installed production dependencies. Remaining
+packages were not published. Immutable artifacts are preserved; the next audit
+uses a later version. The release repair installs production dependencies in
+package order, rechecks byte-identical archives after preparation, and preserves
+registry verification. Release automation regressions: 13 tests PASS. Actual
+staged `elixir_quic` resolved published `ex_ssl == 0.16.4`; archive rebuild remained
+byte-identical. `hex.publish package --dry-run --yes` reached package publication
+checks with a dummy key (exit 0, no registry write); real auth is workflow-owned.
+
+## WP3
+
+Moved the still-unsupported HTTP/3 facade from core into runtime and added the
+acyclic companion dependency to runtime, portable release order, isolated
+consumers and CI closures. Added serialized owners, supervised request relays,
+bounded upload/read delivery, monitored pool leases, finite opening/operation
+watchdogs, no-replay unknown reconciliation, GOAWAY draining and rotation before
+960 native stream allocations. Receive budgets are derived from admitted
+concurrency; borrowed endpoint descriptors expose immutable budgets for validation.
+
+Root independent rerun (Elixir 1.18.5/OTP 28, root MIX_ENV=test, seed 0): native
+QUIC **235/0**, HTTP/3 companion **103/0**, runtime **78/0**. Owned compile,
+format, normal Credo and Dialyzer **PASS** (existing intentional ignores retained).
+Pinned aioquic **32 concurrent streamed uploads/downloads**, 61,725 bytes each,
+single connection identity, zero leases after completion: **PASS**. A serial
+consumer with 31 paused siblings also completed every response within the finite
+2,293,760-byte native budget: **PASS**.
+
+Stock pinned Caddy 2.8.4 exposed two native prerequisites: missing NEW_TOKEN
+([#17](https://github.com/gsmlg-dev/http_fetch/issues/17)) and missing authenticated
+peer key updates ([#18](https://github.com/gsmlg-dev/http_fetch/issues/18)). Both
+now have deterministic regressions. Caddy's key-phase transition was independently
+authenticated with the RFC 9001 next traffic secret before repair. The actual
+61,725-byte POST now passes with complete byte integrity and no retained session
+requests. See `apps/elixir_quic/docs/key-update-validation.md` and
+`http3-wp3-runtime.md`. These gates do not claim public Fetch support or canary.
+
+WP3 independent review reproduced and repaired deadline cleanup behind unacked
+DATA, per-owner pool capacity, and custom native record-limit rotation. Root
+fresh rerun after review: native **235/0**, companion **103/0**, runtime **82/0**,
+seed 0. Root full test-environment Dialyzer **PASS** (five existing intentional
+skips, zero new warnings). Native timeout releases requests/leases before the
+subscriber ACK; only the bounded delivery relay waits for consumer settlement.
+The supported Fetch facade is deliberately withheld from this checkpoint.

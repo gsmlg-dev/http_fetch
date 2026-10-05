@@ -708,21 +708,32 @@ defmodule Quic.Connection do
           end
         end
 
+      {:error, :bad_tag, _scheduler} ->
+        # RFC9001 section5.5: unauthenticated packets do not affect the connection.
+        reply(from, :ok)
+
+      {:error, {:key_update_error, _} = reason, scheduler} ->
+        close_transport_error(%{data | scheduler: scheduler}, from, reason, 0x0E, 0)
+
       {:error, %SSL.QUIC.Error{} = error, _scheduler} ->
         reason = {:tls, error.kind, error.alert, error.reason}
         {:stop_and_reply, :normal, [{:reply, from, {:error, reason}}], %{data | reason: reason}}
 
       {:error, {:protocol_violation, 0x0A, frame_type} = reason, scheduler} ->
-        case begin_closing(%{data | scheduler: scheduler}, {:transport, 0x0A, frame_type}) do
-          {:ok, next, actions} ->
-            {:next_state, :closing, next, [{:reply, from, {:error, reason}} | actions]}
-
-          {:error, close_reason, next} ->
-            stop_with_replies(next, close_reason, [{:reply, from, {:error, reason}}])
-        end
+        close_transport_error(%{data | scheduler: scheduler}, from, reason, 0x0A, frame_type)
 
       {:error, reason, _scheduler} ->
         stop_with_replies(data, reason, [{:reply, from, {:error, reason}}])
+    end
+  end
+
+  defp close_transport_error(data, from, reason, code, frame_type) do
+    case begin_closing(data, {:transport, code, frame_type}) do
+      {:ok, next, actions} ->
+        {:next_state, :closing, next, [{:reply, from, {:error, reason}} | actions]}
+
+      {:error, close_reason, next} ->
+        stop_with_replies(next, close_reason, [{:reply, from, {:error, reason}}])
     end
   end
 

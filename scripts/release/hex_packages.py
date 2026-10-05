@@ -57,11 +57,22 @@ def run(mode, version, archive_dir, stage_dir=None):
     verify_rebuild(stage_dir, version, archive_dir)
     if not os.environ.get("HEX_API_KEY"):
         raise RuntimeError("HEX_API_KEY must publish all nine packages")
+    publication_env = {**os.environ, "MIX_ENV": "prod"}
     for package in PACKAGES:
         if statuses[package] == "missing":
             subprocess.run(
+                ["mix", "deps.get", "--only", "prod"],
+                cwd=Path(stage_dir) / package,
+                env=publication_env,
+                check=True,
+            )
+            # Dependency installation must not change the immutable package bytes.
+            verify_rebuild(stage_dir, version, archive_dir,
+                           packages=(package,), env=publication_env)
+            subprocess.run(
                 ["mix", "hex.publish", "package", "--yes"],
                 cwd=Path(stage_dir) / package,
+                env=publication_env,
                 check=True,
             )
         # A successful CLI exit alone does not establish registry publication.

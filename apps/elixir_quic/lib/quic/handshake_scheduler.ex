@@ -10,6 +10,7 @@ defmodule Quic.HandshakeScheduler do
   import Bitwise
 
   alias Quic.{Codec, Protection, Recovery, TLSDriver, PeerCIDs, Streams, TransportParameters}
+  alias SSL.Crypto.HKDF
 
   @levels [:initial, :handshake, :application]
   @spaces [:initial, :handshake, :application]
@@ -27,6 +28,15 @@ defmodule Quic.HandshakeScheduler do
             recovery: nil,
             keys: %{},
             read_keys: %{},
+            key_update: %{
+              phase: 0,
+              generation: 0,
+              first_received: nil,
+              previous_largest: -1,
+              previous_read: nil,
+              previous_until: nil,
+              ack_sent: true
+            },
             pending: [],
             pending_acks: %{},
             pending_control: %{},
@@ -353,6 +363,8 @@ defmodule Quic.HandshakeScheduler do
               do: retire_level(next, :initial),
               else: next
 
+          next = note_key_update_ack(next, space, number, result, statuses)
+
           next =
             if statuses == [:acked] do
               frames = Map.get(state.recovery.spaces[space].sent[number].metadata, :control, [])
@@ -596,11 +608,16 @@ defmodule Quic.HandshakeScheduler do
 
   defp receive_coalesced(state, bytes, at, events, count) do
     result =
-      with {:ok, packet} <- decode_protected_packet(state, bytes),
+      with {:ok, packet, authenticated} <- decode_protected_packet(state, bytes, at),
            :ok <- validate_packet_frames(packet.plaintext, packet.level),
-           {:ok, recovery} <- Recovery.note_received(state.recovery, packet.space, packet.number),
+           {:ok, recovery} <-
+             Recovery.note_received(authenticated.recovery, packet.space, packet.number),
            {:ok, next, generated} <-
-             dispatch_inbound(learn_peer_cid(%{state | recovery: recovery}, packet), packet, at) do
+             dispatch_inbound(
+               learn_peer_cid(%{authenticated | recovery: recovery}, packet),
+               packet,
+               at
+             ) do
         next =
           if next.role == :server and packet.level == :handshake do
             next = %{next | tls: TLSDriver.mark_address_validated(next.tls)}
@@ -903,6 +920,8 @@ defmodule Quic.HandshakeScheduler do
                crypto: {offset, byte_size(bytes)},
                bytes: packet,
                control: control,
+               acks: Map.get(state.pending_acks, level, []),
+               key_phase: if(level == :application, do: state.key_update.phase, else: nil),
                ack_eliciting: ack_eliciting
              },
              if(ack_eliciting or level == :initial, do: byte_size(packet), else: 0)
@@ -1166,7 +1185,7 @@ defmodule Quic.HandshakeScheduler do
   defp encrypt_short(state, keys, pn, pn_len, plaintext) do
     plaintext = sample_padding(plaintext, pn_len)
 
-    with header <- <<0x40 ||| pn_len - 1, state.dcid::binary>>,
+    with header <- <<0x40 ||| state.key_update.phase <<< 2 ||| pn_len - 1, state.dcid::binary>>,
          aad <- header <> <<pn::unsigned-big-integer-size(pn_len * 8)>>,
          {:ok, ciphertext} <-
            Protection.aead_encrypt(
@@ -1272,6 +1291,7 @@ defmodule Quic.HandshakeScheduler do
     with false <- retired?(state, level),
          {:ok, derived} <- Protection.packet_keys(level, cipher_suite, aead, hkdf, secret) do
       context = Map.put(derived, :direction, direction)
+      context = if level == :application, do: Map.put(context, :secret, secret), else: context
       existing = get_in(state.keys, [level, direction])
 
       cond do
@@ -1662,6 +1682,35 @@ defmodule Quic.HandshakeScheduler do
   end
 
   defp dispatch_frame(
+         %{role: :client} = state,
+         :application,
+         space,
+         number,
+         %{type: :new_token},
+         rest,
+         at,
+         events
+       ) do
+    # RFC 9000 permits discarding NEW_TOKEN when future token reuse is unsupported.
+    dispatch_frames(state, :application, space, number, rest, at, events)
+  end
+
+  defp dispatch_frame(
+         _state,
+         :application,
+         _space,
+         _number,
+         %{type: :new_token},
+         _rest,
+         _at,
+         _events
+       ),
+       do: {:error, :unexpected_new_token}
+
+  defp dispatch_frame(_state, level, _space, _number, %{type: :new_token}, _rest, _at, _events),
+    do: {:error, {:wrong_encryption_level, :new_token, level}}
+
+  defp dispatch_frame(
          _state,
          level,
          _space,
@@ -1683,7 +1732,7 @@ defmodule Quic.HandshakeScheduler do
     dispatch_frames(state, level, space, number, rest, at, [frame | events])
   end
 
-  defp decode_protected_packet(state, datagram) do
+  defp decode_protected_packet(state, datagram, at) do
     with {:ok, parsed} <- parse_protected_header(state, datagram),
          false <- retired?(state, parsed.level) && {:retired, parsed.packet_length},
          keys when is_map(keys) <- read_key(state, parsed.level),
@@ -1703,17 +1752,10 @@ defmodule Quic.HandshakeScheduler do
          {:ok, number} <- reconstruct_inbound(truncated, largest, pn_len),
          aad_size <- parsed.pn_offset + pn_len,
          aad <- binary_part(unprotected, 0, aad_size),
-         {:ok, plaintext} <-
-           Protection.aead_decrypt(
-             keys.key,
-             keys.iv,
-             number,
-             aad,
-             ciphertext,
-             Map.get(keys, :aead, :aes_128_gcm)
-           ),
+         {:ok, plaintext, authenticated} <-
+           decrypt_packet(state, parsed.level, keys, number, aad, ciphertext, at),
          :ok <- validate_unprotected_header(unprotected, parsed.level) do
-      {:ok, Map.merge(parsed, %{number: number, plaintext: plaintext})}
+      {:ok, Map.merge(parsed, %{number: number, plaintext: plaintext}), authenticated}
     else
       {:retired, length} -> {:retired, length}
       nil -> {:error, :missing_read_key}
@@ -1721,6 +1763,137 @@ defmodule Quic.HandshakeScheduler do
       _ -> {:error, :malformed_protected_packet}
     end
   end
+
+  defp decrypt_packet(state, :application, keys, number, <<first, _::binary>> = aad, bytes, at) do
+    update = state.key_update
+    phase = first >>> 2 &&& 1
+
+    cond do
+      phase == update.phase ->
+        with {:ok, plaintext} <- decrypt_with(keys, number, aad, bytes),
+             true <- number > update.previous_largest do
+          update = expire_previous_read(update, at)
+          first_received = min(update.first_received || number, number)
+          {:ok, plaintext, %{state | key_update: %{update | first_received: first_received}}}
+        else
+          false -> {:error, {:key_update_error, :packet_number}}
+          error -> error
+        end
+
+      update.generation > 0 and is_integer(update.first_received) and
+          number < update.first_received ->
+        with previous when is_map(previous) <- previous_read(update, at),
+             {:ok, plaintext} <- decrypt_with(previous, number, aad, bytes) do
+          {:ok, plaintext, state}
+        else
+          nil -> {:error, :bad_tag}
+          error -> error
+        end
+
+      true ->
+        decrypt_next_phase(state, keys, number, aad, bytes, at)
+    end
+  end
+
+  defp decrypt_packet(state, _level, keys, number, aad, bytes, _at) do
+    with {:ok, plaintext} <- decrypt_with(keys, number, aad, bytes),
+         do: {:ok, plaintext, state}
+  end
+
+  defp decrypt_with(keys, number, aad, bytes) do
+    Protection.aead_decrypt(
+      keys.key,
+      keys.iv,
+      number,
+      aad,
+      bytes,
+      Map.get(keys, :aead, :aes_128_gcm)
+    )
+  end
+
+  defp decrypt_next_phase(state, keys, number, aad, bytes, at) do
+    with {:ok, read} <- next_application_key(keys),
+         {:ok, plaintext} <- decrypt_with(read, number, aad, bytes),
+         :ok <- validate_key_update(state, number),
+         {:ok, write} <- next_application_key(state.keys.application.write) do
+      update = %{
+        state.key_update
+        | phase: bxor(state.key_update.phase, 1),
+          generation: state.key_update.generation + 1,
+          previous_largest: state.recovery.spaces.application.largest_received,
+          first_received: number,
+          previous_read: keys,
+          previous_until: at + 3 * Recovery.pto_duration(state.recovery),
+          ack_sent: false
+      }
+
+      application = %{state.keys.application | read: read, write: write}
+
+      {:ok, plaintext,
+       %{state | keys: Map.put(state.keys, :application, application), key_update: update}}
+    end
+  end
+
+  defp validate_key_update(state, number) do
+    cond do
+      not state.tls.facts.quic_confirmed ->
+        {:error, {:key_update_error, :handshake_unconfirmed}}
+
+      not state.key_update.ack_sent ->
+        {:error, {:key_update_error, :update_unacknowledged}}
+
+      number <= state.recovery.spaces.application.largest_received ->
+        {:error, {:key_update_error, :packet_number}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp next_application_key(%{secret: secret} = keys) do
+    next = HKDF.expand_label(keys.hkdf, secret, "quic ku", <<>>, byte_size(secret))
+
+    with true <- is_binary(next),
+         {:ok, derived} <-
+           Protection.packet_keys(:application, keys.cipher_suite, keys.aead, keys.hkdf, next) do
+      # RFC9001 section6: header protection never changes during a key update.
+      {:ok, %{derived | hp: keys.hp} |> Map.merge(%{secret: next, direction: keys.direction})}
+    else
+      false -> {:error, :invalid_key_update_secret}
+      error -> error
+    end
+  end
+
+  defp next_application_key(_), do: {:error, :bad_tag}
+
+  defp previous_read(update, at) do
+    if is_integer(update.previous_until) and at < update.previous_until,
+      do: update.previous_read
+  end
+
+  defp expire_previous_read(update, at) do
+    if is_integer(update.previous_until) and at >= update.previous_until,
+      do: %{update | previous_read: nil, previous_until: nil},
+      else: update
+  end
+
+  defp note_key_update_ack(state, :application, number, :ok, statuses)
+       when statuses in [[:sent], [:acked]] do
+    metadata = state.recovery.spaces.application.sent[number].metadata
+    first = state.key_update.first_received
+
+    acknowledged =
+      metadata[:key_phase] == state.key_update.phase and is_integer(first) and
+        Enum.any?(Map.get(metadata, :acks, []), fn ack ->
+          Enum.any?(ack.ranges, fn {_lo, hi} -> hi >= first end)
+        end)
+
+    if acknowledged,
+      do: %{state | key_update: %{state.key_update | ack_sent: true}},
+      else: state
+  end
+
+  defp note_key_update_ack(state, _space, _number, _result, _statuses), do: state
 
   defp reconstruct_inbound(truncated, -1, _pn_len), do: {:ok, truncated}
 

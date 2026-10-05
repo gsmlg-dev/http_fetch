@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.5] - 2026-10-05
+
+### Added
+- Supervised HTTP/3 owners, bounded leases and request relays, demand-driven
+  body bridges, safe connection identity, GOAWAY draining and lifetime rotation.
+- Bounded receive credit for 32 concurrent streams, with explicit validation of
+  owned and borrowed endpoints and isolation for paused consumers.
+
+### Fixed
+- Accept valid QUIC NEW_TOKEN frames and authenticated RFC 9001 peer key updates,
+  preserving reordered previous-phase packets and rejecting invalid transitions.
+- Install production dependencies before each staged Hex publication and verify
+  the prepared package still rebuilds to the audited archive bytes.
+- Move the HTTP/3 facade into runtime and declare its companion dependency in
+  source, CI closures, portable packages and isolated consumers.
+
+### Validation
+- Native and pinned aioquic runtime integrity, concurrency, backpressure and
+  cleanup gates; authenticated stock Caddy binary POST interoperability.
+  Public Fetch HTTP/3 remains unsupported until WP4.
+
 ## [0.16.4] - 2026-10-05
 
 ### Fixed

@@ -68,16 +68,32 @@ defmodule HttpFetch.Umbrella.MixProject do
         [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3]
 
       "http_runtime" ->
-        [:ex_ssl, :elixir_quic, :http_core, :http_runtime]
+        [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime]
 
       "http_fetch" ->
-        [:ex_ssl, :elixir_quic, :http_core, :http_runtime, :http_fetch]
+        [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime, :http_fetch]
 
       "http_event_source" ->
-        [:ex_ssl, :elixir_quic, :http_core, :http_runtime, :http_fetch, :http_event_source]
+        [
+          :ex_ssl,
+          :elixir_quic,
+          :http_core,
+          :elixir_quic_http3,
+          :http_runtime,
+          :http_fetch,
+          :http_event_source
+        ]
 
       "http_web_socket" ->
-        [:ex_ssl, :elixir_quic, :http_core, :http_runtime, :http_fetch, :http_web_socket]
+        [
+          :ex_ssl,
+          :elixir_quic,
+          :http_core,
+          :elixir_quic_http3,
+          :http_runtime,
+          :http_fetch,
+          :http_web_socket
+        ]
 
       "http_web_transport" ->
         [:ex_ssl, :elixir_quic, :http_core, :http_web_transport]

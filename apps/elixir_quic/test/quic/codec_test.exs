@@ -1,6 +1,17 @@
 defmodule Quic.CodecTest do
   use ExUnit.Case, async: true
 
+  test "NEW_TOKEN decodes bounded nonempty tokens including nonminimal type varints" do
+    for type <- [<<7>>, <<0x40, 7>>, <<0x80, 0, 0, 7>>] do
+      assert {:ok, [%{type: :new_token, token: "abc"}, %{type: :ping}], <<>>} =
+               Quic.Codec.decode_frames(type <> <<3, "abc", 1>>)
+    end
+
+    for bytes <- [<<7>>, <<7, 0>>, <<7, 4, "abc">>, <<7, 0x40>>] do
+      assert {:error, :malformed_new_token} = Quic.Codec.decode_frames(bytes)
+    end
+  end
+
   test "NEW_CONNECTION_ID and RETIRE_CONNECTION_ID preserve their bounded wire fields" do
     frame = %{
       type: :new_connection_id,

@@ -373,6 +373,9 @@ defmodule Quic.Codec do
     end
   end
 
+  defp decode_frames(<<7, rest::binary>>, acc, limit),
+    do: decode_new_token(rest, acc, limit)
+
   defp decode_frames(<<0x18, rest::binary>>, acc, limit) do
     with {:ok, sequence, rest} <- decode_varint(rest),
          {:ok, prior, <<length, rest::binary>>} <- decode_varint(rest),
@@ -507,6 +510,9 @@ defmodule Quic.Codec do
   defp decode_frames(<<type, _::binary>> = wire, acc, limit)
        when (type &&& 0xC0) != 0 do
     case decode_varint(wire) do
+      {:ok, 7, rest} ->
+        decode_new_token(rest, acc, limit)
+
       {:ok, kind, rest} when kind in [0x30, 0x31] ->
         decode_datagram(kind, rest, acc, limit, byte_size(wire) - byte_size(rest))
 
@@ -520,6 +526,17 @@ defmodule Quic.Codec do
 
   defp decode_frames(<<type, _::binary>>, _acc, _limit), do: {:error, {:unknown_frame, type}}
   defp decode_frames(_, _, _), do: {:error, :malformed_frame}
+
+  defp decode_new_token(bytes, acc, limit) do
+    with {:ok, length, rest} <- decode_varint(bytes),
+         true <- length > 0,
+         :ok <- bound_length(length, byte_size(rest)),
+         <<token::binary-size(^length), tail::binary>> <- rest do
+      decode_frames(tail, [%{type: :new_token, token: token} | acc], limit - 1)
+    else
+      _ -> {:error, :malformed_new_token}
+    end
+  end
 
   defp decode_datagram(0x30, rest, acc, limit, type_size) do
     frame = %{

@@ -1,11 +1,11 @@
 defmodule ReleaseVersions do
-  @apps ~w(ex_ssl elixir_quic http_core http_runtime elixir_quic_http3 http_fetch http_web_socket http_event_source http_web_transport)
+  @apps ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
   @internal MapSet.new(@apps)
   @graph %{
     "ex_ssl" => [],
     "elixir_quic" => ~w(ex_ssl),
     "http_core" => ~w(ex_ssl elixir_quic),
-    "http_runtime" => ~w(http_core),
+    "http_runtime" => ~w(http_core elixir_quic_http3),
     "elixir_quic_http3" => ~w(http_core elixir_quic),
     "http_fetch" => ~w(http_core http_runtime),
     "http_web_socket" => ~w(http_core http_runtime),
@@ -33,7 +33,7 @@ defmodule ReleaseVersions do
         if path != "mix.exs" do
           declared =
             Regex.scan(
-              ~r/\{:([a-z_]+), "[^"]+", in_umbrella: true, hex: :([a-z_]+)\}/,
+              ~r/\{:([a-z0-9_]+), "[^"]+", in_umbrella: true, hex: :([a-z0-9_]+)\}/,
               updated,
               capture: :all_but_first
             )
@@ -50,7 +50,7 @@ defmodule ReleaseVersions do
 
         updated =
           Regex.replace(
-            ~r/\{:([a-z_]+), "[^"]+", in_umbrella: true, hex: :([a-z_]+)\}/,
+            ~r/\{:([a-z0-9_]+), "[^"]+", in_umbrella: true, hex: :([a-z0-9_]+)\}/,
             updated,
             fn full, app, hex ->
               unless app == hex and MapSet.member?(@internal, app),

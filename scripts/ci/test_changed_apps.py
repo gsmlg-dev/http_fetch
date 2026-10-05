@@ -30,7 +30,8 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(select_apps(["apps/elixir_quic/lib/quic.ex"], "ci.yml"),
                          [app for app in ALL if app != "ex_ssl"])
         self.assertEqual(select_apps(["apps/ex_ssl/lib/ssl.ex"], "ci.yml"), ALL)
-        self.assertEqual(select_apps(["apps/elixir_quic_http3/lib/http3.ex"], "ci.yml"), ["elixir_quic_http3"])
+        self.assertEqual(select_apps(["apps/elixir_quic_http3/lib/http3.ex"], "ci.yml"),
+                         ["http_runtime", "elixir_quic_http3", "http_fetch", "http_web_socket", "http_event_source"])
 
     def test_docs_select_only_owner_and_shared_selects_all(self):
         self.assertEqual(select_apps(["apps/http_core/README.md"], "ci.yml"), ["http_core"])
