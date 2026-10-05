@@ -112,13 +112,20 @@ fi
 export HTTP_FETCH_PACKAGE_DIR="$work_dir/packages"
 mkdir -p "$HTTP_FETCH_PACKAGE_DIR" "$consumer_dir/test" "$EX_SSL_RESULTS_DIR" "$group_log_dir"
 
+package_root="$repo_root"
+if [[ "$EX_SSL_DEP_MODE" == published ]]; then
+  package_root="$work_dir/historical-source"
+  python3 "$repo_root/scripts/ci/stage_ex_ssl_history.py" "$repo_root" \
+    e844ce03067fedac82c079f21c47810e671be0bb "$package_root"
+fi
+
 for group in "${required_groups[@]}"; do
   [[ -f "$repo_root/scripts/$group" ]] || { echo "required feature group missing: $group" >&2; exit 2; }
 done
 
 for app in http_core http_runtime http_fetch http_web_socket http_event_source http_web_transport; do
   (
-    cd "$repo_root/apps/$app"
+    cd "$package_root/apps/$app"
     MIX_ENV=prod MIX_BUILD_PATH="$work_dir/package-build/$app" \
       MIX_DEPS_PATH="$work_dir/package-deps" \
       mix hex.build --unpack -o "$HTTP_FETCH_PACKAGE_DIR/$app"
@@ -126,7 +133,7 @@ for app in http_core http_runtime http_fetch http_web_socket http_event_source h
 done
 
 cp "$repo_root/scripts/ex_ssl_feature_consumer_mix.exs" "$consumer_dir/mix.exs"
-cp "$repo_root/mix.lock" "$consumer_dir/mix.lock"
+cp "$package_root/mix.lock" "$consumer_dir/mix.lock"
 shopt -s nullglob
 discovered_groups=()
 for group in "$repo_root"/scripts/ex_ssl_*_test.exs; do
@@ -144,6 +151,7 @@ printf 'ExUnit.start()\n' >"$consumer_dir/test/test_helper.exs"
   MIX_ENV=test mix compile --warnings-as-errors
   if [[ "$EX_SSL_DEP_MODE" == published ]]; then
     MIX_ENV=test mix run provenance.exs | tee "$provenance_log"
+    printf 'package_source_commit=%s\n' e844ce03067fedac82c079f21c47810e671be0bb >>"$provenance_log"
   else
     MIX_ENV=test mix run -e \
       'IO.puts("runtime=source-candidate/" <> to_string(Application.spec(:ex_ssl, :vsn))); IO.puts("loaded_ssl_connection=" <> to_string(:code.which(SSL.Connection)))' \
@@ -163,7 +171,7 @@ for group in "${discovered_groups[@]}"; do
     cd "$consumer_dir"
     env MIX_ENV=test mix test "test/$group" --seed "$EX_SSL_TEST_SEED" | tee "$group_log"
   )
-  grep -Eq '[1-9][0-9]* tests?, 0 failures' "$group_log" || {
+  grep -Eq '^([1-9][0-9]* tests?, 0 failures|Result: [1-9][0-9]* passed)$' "$group_log" || {
     echo "feature group did not execute successfully: $group" >&2; exit 1;
   }
   if grep -Eq '[1-9][0-9]* (excluded|skipped)' "$group_log"; then

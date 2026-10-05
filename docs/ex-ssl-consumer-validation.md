@@ -237,10 +237,17 @@ limit. Its external actions are pinned to immutable commits and it has only
 Only sanitized `.txt` reports are uploaded, including on failure.
 
 The separate `ex_ssl compatibility` workflow provides bounded scheduled/manual
-consumer coverage for Elixir 1.19/OTP 28 and 1.20/OTP 29. Those environments were
-**not executed locally or remotely in this task**. No remote workflow was
-dispatched, branch protection changed, PR merged, version bumped, tag created
-or package released. The existing 0.13.0 release metadata is unchanged.
+consumer coverage for Elixir 1.19/OTP 28 and 1.20/OTP 29. Its published gate
+builds the six HTTP package sources from the immutable pre-migration
+`http_fetch@e844ce03067fedac82c079f21c47810e671be0bb` revision. The temporary
+source stage materializes Fetch's three package-file symlinks so current Hex
+can build those historical packages. The historical lock and dependency
+requirements retain published `ex_ssl 0.7.2` and `elixir_quic 0.3.0` provenance.
+The same matrix builds all nine current candidate archives and verifies their
+standalone Hex resolution and TLS feature groups. These candidate checks do not
+claim that the nine-package graph is available from published Hex; see
+`migration-provenance.md` and issue #16. Each executed feature gate uploads its
+own sanitized report, including on test failure.
 
 OTP `:ssl` remains the default; ex_ssl remains opt-in through per-call options
 or the captured `:http_core` setting. Its default is still verified TLS 1.3

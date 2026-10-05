@@ -206,8 +206,6 @@ defmodule HTTP.HTTP2.BodyBridge do
 
   defp advance(state), do: maybe_read(state)
 
-  defp maybe_read(%{stopped?: true} = state), do: state
-
   defp maybe_read(%{credit: credit, inflight: nil, source_ref: nil, read_pending?: false} = state)
        when credit > 0 do
     send(state.stream, {:read_chunk, self(), :ack})

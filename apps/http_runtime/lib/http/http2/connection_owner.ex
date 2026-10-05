@@ -778,8 +778,22 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     continuation = if state.connection.header_block, do: state.connection.header_block.stream_id
 
     case Boundary.validate(frame, state.peer_settings?, continuation) do
-      :ok -> dispatch_frame(state, frame)
-      {:error, reason} -> {:error, reason, state}
+      :ok ->
+        case {frame, state.streams[frame.stream_id]} do
+          {%{type: :window_update, stream_id: id, payload: <<_::1, increment::31>>},
+           %{terminal?: true}}
+          when id > 0 and increment > 0 ->
+            {:ok, state}
+
+          {%{type: :data, payload: payload}, %{terminal?: true}} ->
+            discard_closed_data(state, payload)
+
+          _ ->
+            dispatch_frame(state, frame)
+        end
+
+      {:error, reason} ->
+        {:error, reason, state}
     end
   end
 
@@ -930,15 +944,6 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     do: {:error, :invalid_priority_update, state}
 
   defp dispatch_frame(
-         %{streams: streams} = state,
-         %{type: :window_update, stream_id: id, payload: <<_::1, increment::31>>}
-       )
-       when id > 0 and increment > 0 and is_map_key(streams, id) and
-              :erlang.map_get(:terminal?, :erlang.map_get(id, streams)) do
-    {:ok, state}
-  end
-
-  defp dispatch_frame(
          %{connection: connection} = state,
          %{type: :window_update, stream_id: id, payload: <<_reserved::1, increment::31>>}
        )
@@ -1012,11 +1017,6 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   defp dispatch_frame(state, %{type: :continuation}),
     do: {:error, :unexpected_continuation, state}
-
-  defp dispatch_frame(%{streams: streams} = state, %{type: :data, stream_id: id, payload: payload})
-       when is_map_key(streams, id) and :erlang.map_get(:terminal?, :erlang.map_get(id, streams)) do
-    discard_closed_data(state, payload)
-  end
 
   defp dispatch_frame(
          %{connection: connection} = state,
