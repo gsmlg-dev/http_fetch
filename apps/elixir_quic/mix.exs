@@ -4,7 +4,7 @@ defmodule Quic.MixProject do
   def project do
     [
       app: :elixir_quic,
-      version: "0.16.1",
+      version: "0.16.4",
       description:
         "Experimental QUIC v1 transport, Initial fingerprint observation and client profiles",
       package: package(),
@@ -36,6 +36,6 @@ defmodule Quic.MixProject do
   end
 
   defp deps do
-    [{:ex_ssl, "== 0.16.1", in_umbrella: true, hex: :ex_ssl}]
+    [{:ex_ssl, "== 0.16.4", in_umbrella: true, hex: :ex_ssl}]
   end
 end
