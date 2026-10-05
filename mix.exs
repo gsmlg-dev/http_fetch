@@ -48,7 +48,7 @@ defmodule HttpFetch.Umbrella.MixProject do
     ]
   end
 
-  # CI compiles the selected package and the siblings required by that package.
+  # CI compiles the selected package and the siblings required by its tests.
   # A normal invocation leaves app selection to Mix and includes the full umbrella.
   defp ci_apps do
     case System.get_env("HTTP_FETCH_CI_APP") do
@@ -74,10 +74,10 @@ defmodule HttpFetch.Umbrella.MixProject do
         [:ex_ssl, :elixir_quic, :http_core, :http_runtime, :http_fetch]
 
       "http_event_source" ->
-        [:ex_ssl, :elixir_quic, :http_core, :http_runtime, :http_event_source]
+        [:ex_ssl, :elixir_quic, :http_core, :http_runtime, :http_fetch, :http_event_source]
 
       "http_web_socket" ->
-        [:ex_ssl, :elixir_quic, :http_core, :http_runtime, :http_web_socket]
+        [:ex_ssl, :elixir_quic, :http_core, :http_runtime, :http_fetch, :http_web_socket]
 
       "http_web_transport" ->
         [:ex_ssl, :elixir_quic, :http_core, :http_web_transport]

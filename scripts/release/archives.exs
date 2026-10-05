@@ -17,7 +17,7 @@ defmodule ReleaseArchives do
 
     for package <- @order do
       archive = Path.join(directory, "#{package}-#{version}.tar")
-      {:ok, result} = :mix_hex_tarball.unpack(File.read!(archive), :none)
+      {:ok, result} = :mix_hex_tarball.unpack(File.read!(archive), :memory)
       metadata = result.metadata
 
       unless metadata["name"] == package and metadata["version"] == version,

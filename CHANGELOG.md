@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-10-05
+
+### Fixed
+- Restore Fetch's test dependency in isolated WebSocket and EventSource CI jobs.
+- Inspect candidate Hex archives in memory using Hex's supported unpack mode.
+
+### Validation
+- WP0 baseline restoration; see `docs/http3-wp0-baseline.md` and
+  `docs/http3-implementation-audit.md`. HTTP/3 remains unsupported at this step.
+
 ## [0.16.1] - 2026-10-01
 
 ### Changed
