@@ -2,6 +2,7 @@ defmodule HTTP.HTTP3.Stream do
   @moduledoc "Supervised per-request H3 relay; application acknowledgements gate native reads."
   alias HTTP.HTTP3.{BodyBridge, ConnectionOwner, ConnectionSupervisor, Pool, PoolKey}
   alias HTTP.Runtime.Delivery
+  @max_open_attempts 3
 
   def start(%HTTP.Request{} = request, subscriber, opts \\ []) when is_pid(subscriber) do
     generation = Keyword.get(opts, :generation, make_ref())
@@ -26,59 +27,53 @@ defmodule HTTP.HTTP3.Stream do
 
     with {:ok, key, connect} <- PoolKey.build(request, opts),
          {:ok, fields, body} <- headers(request),
-         {:ok, owner, lease} <- acquire(pool, key, connect, opening_deadline, monitor) do
+         {:ok, owner, lease, ref} <-
+           open_request(
+             pool,
+             key,
+             connect,
+             {fields, body, generation},
+             {opening_deadline, monitor, @max_open_attempts}
+           ) do
       try do
-        case opening_call(
-               owner,
-               {:open, fields, if(body == "", do: "", else: :stream), self(), generation,
-                [timeout: remaining(opening_deadline), deadline_at: opening_deadline]},
-               opening_deadline,
-               monitor
-             ) do
-          {:ok, ref} ->
-            state = %{
-              subscriber: subscriber,
-              generation: generation,
-              monitor: monitor,
-              owner: owner,
-              owner_monitor: Process.monitor(owner),
-              lease: lease,
-              pool: pool,
-              ref: ref,
-              bridge: nil,
-              upload: body,
-              write: nil,
-              terminal?: false,
-              terminal_event: nil,
-              native_settled?: false,
-              indeterminate: nil,
-              delivery:
-                Delivery.new(
-                  delivery: :ack,
-                  max_queue_bytes: Keyword.get(opts, :max_queue_bytes, 65_536),
-                  max_queue_events: Keyword.get(opts, :max_queue_events, 128)
-                ),
-              deadline: deadline
-            }
+        state = %{
+          subscriber: subscriber,
+          generation: generation,
+          monitor: monitor,
+          owner: owner,
+          owner_monitor: Process.monitor(owner),
+          lease: lease,
+          pool: pool,
+          ref: ref,
+          bridge: nil,
+          upload: body,
+          write: nil,
+          terminal?: false,
+          terminal_event: nil,
+          native_settled?: false,
+          indeterminate: nil,
+          delivery:
+            Delivery.new(
+              delivery: :ack,
+              max_queue_bytes: Keyword.get(opts, :max_queue_bytes, 65_536),
+              max_queue_events: Keyword.get(opts, :max_queue_events, 128)
+            ),
+          deadline: deadline
+        }
 
-            try do
-              uploaded = start_upload(state)
+        try do
+          uploaded = start_upload(state)
 
-              try do
-                relay(uploaded)
-              after
-                if uploaded.bridge && Process.alive?(uploaded.bridge) do
-                  safe(fn -> BodyBridge.cancel(uploaded.bridge) end)
-                  safe(fn -> GenServer.stop(uploaded.bridge) end)
-                end
-              end
-            after
-              if Process.alive?(owner), do: safe(fn -> ConnectionOwner.cancel(owner, ref) end)
+          try do
+            relay(uploaded)
+          after
+            if uploaded.bridge && Process.alive?(uploaded.bridge) do
+              safe(fn -> BodyBridge.cancel(uploaded.bridge) end)
+              safe(fn -> GenServer.stop(uploaded.bridge) end)
             end
-
-          {:error, reason} ->
-            ConnectionOwner.cancel_open(owner, self(), generation)
-            notify(subscriber, generation, {:error, reason})
+          end
+        after
+          if Process.alive?(owner), do: safe(fn -> ConnectionOwner.cancel(owner, ref) end)
         end
       after
         safe(fn -> Pool.release(pool, lease) end)
@@ -96,6 +91,44 @@ defmodule HTTP.HTTP3.Stream do
         end
 
       notify(subscriber, generation, {:error, failure})
+  end
+
+  defp open_request(pool, key, connect, request, {deadline, monitor, attempts} = context) do
+    with {:ok, owner, lease} <- acquire(pool, key, connect, deadline, monitor) do
+      result = open_leased(pool, owner, lease, request, context)
+
+      case result do
+        {:ok, ref} ->
+          {:ok, owner, lease, ref}
+
+        {:error, {:not_sent, :goaway}} ->
+          Pool.drain(pool, owner)
+          Pool.release(pool, lease)
+
+          if attempts > 1,
+            do: open_request(pool, key, connect, request, {deadline, monitor, attempts - 1}),
+            else: {:error, :goaway}
+
+        {:error, reason} ->
+          ConnectionOwner.cancel_open(owner, self(), elem(request, 2))
+          Pool.release(pool, lease)
+          {:error, reason}
+      end
+    end
+  end
+
+  defp open_leased(pool, owner, lease, {fields, body, generation}, {deadline, monitor, _attempts}) do
+    opening_call(
+      owner,
+      {:open, fields, if(body == "", do: "", else: :stream), self(), generation,
+       [timeout: remaining(deadline), deadline_at: deadline]},
+      deadline,
+      monitor
+    )
+  catch
+    kind, reason ->
+      safe(fn -> Pool.release(pool, lease) end)
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   defp acquire(pool, key, connect, deadline, monitor) do

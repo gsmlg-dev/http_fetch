@@ -1,0 +1,15 @@
+{
+	debug
+	admin off
+	auto_https off
+	servers {
+		protocols h1 h2 h3
+	}
+}
+https://:{$HTTP3_CADDY_PORT} {
+	log
+	tls /certs/server.pem /certs/server-key.pem
+	header X-Peer caddy-2.9.1
+	header X-Peer-Protocol {http.request.proto}
+	reverse_proxy 127.0.0.1:{$HTTP3_UPSTREAM_PORT}
+}

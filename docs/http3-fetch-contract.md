@@ -22,6 +22,10 @@ TCP socket options and HTTP/2 wire profiles are rejected for this route.
 `http3_reuse: false` requests a separate connection; reuse otherwise incorporates
 origin, trust, reference identity, client identity, wire profile and endpoint
 ownership. Connections drain on GOAWAY and rotate before native lifetime limits.
+If a reserved owner refuses an open before it enters the session, the untouched
+request can move to a fresh owner under the same absolute deadline (at most three
+owner attempts). Producer demand starts only after successful stream opening.
+Allocated, sent and unknown native outcomes never use that transfer path.
 
 Binary POST/PUT bodies and PID bodies with `duplex: :half` use HTTP/3 DATA frames.
 Upload producers receive acknowledgement only after all slices are definitively

@@ -7,7 +7,7 @@
 [![Release](https://github.com/gsmlg-dev/http_fetch/actions/workflows/release.yml/badge.svg)](https://github.com/gsmlg-dev/http_fetch/actions/workflows/release.yml)
 [![E2E](https://github.com/gsmlg-dev/http_fetch/actions/workflows/e2e.yml/badge.svg)](https://github.com/gsmlg-dev/http_fetch/actions/workflows/e2e.yml)
 
-This app is imported into the `http_fetch` umbrella from `gsmlg-dev/ex_quic@14974913390e12d03a78a2903d18e55a04fa89d6`. Its current shared version is `0.16.1`, and the package requires the sibling `ex_ssl == 0.16.1`. The imported TLS source came from `gsmlg-dev/ex_ssl@fb47051355c9d0a29caee046fa060a745ad0ce5b`; historical package comparison remains recorded in the [TLS contract](../../docs/quic/ex-ssl-quic-contract.md). Independent certificate handshakes, Retry, single-fault packet impairment and certificate/ALPN rejection passed in the source repository against aioquic 1.2.0. Full protocol lifecycle and product acceptance remain incomplete. See the [Phase 1 acceptance record](../../docs/quic/phase1-acceptance.md) for source evidence and limitations.
+This app is imported into the `http_fetch` umbrella from `gsmlg-dev/ex_quic@14974913390e12d03a78a2903d18e55a04fa89d6`. It shares the coordinated umbrella version and requires the matching sibling `ex_ssl` version. The imported TLS source came from `gsmlg-dev/ex_ssl@fb47051355c9d0a29caee046fa060a745ad0ce5b`; historical package comparison remains recorded in the [TLS contract](../../docs/quic/ex-ssl-quic-contract.md). Independent certificate handshakes, Retry, single-fault packet impairment and certificate/ALPN rejection passed in the source repository against aioquic 1.2.0. Full protocol lifecycle and product acceptance remain incomplete. See the [Phase 1 acceptance record](../../docs/quic/phase1-acceptance.md) for source evidence and limitations.
 
 The project has three mandatory goals: JA3/JA4 observation of visible QUIC ClientHello data, measured profile-controlled client behavior, and opt-in integration with the Abyss UDP server. It is not a client-only plan.
 
@@ -57,6 +57,10 @@ Local tests cover codecs, packet protection, inspection, recovery, and both-role
 Profiles accept application ALPN, for example
 `Quic.Profile.compile(:ordered, alpn: ["h3"])`; the default remains `ex-quic`.
 Negotiating `h3` does not implement HTTP/3 or QPACK. Consumers own those protocols.
+`Quic.capabilities().http3` remains `false`; the separate
+[`elixir_quic_http3` companion](../elixir_quic_http3/README.md) implements the
+HTTP/3 beta client profile with static/literal QPACK. Its application support
+does not expand raw QUIC's protocol ownership.
 
 RFC 9221 DATAGRAM support is opt-in per endpoint with
 `datagram: [max_frame_size: 1200, max_items: 64, max_buffer_bytes: 65_536]`.

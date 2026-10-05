@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.7] - 2026-10-05
+
+### Added
+- Report HTTP/3 beta and static/literal QPACK capabilities in the companion;
+  keep raw QUIC HTTP/3 and deferred application features unsupported.
+- Require digest-pinned Caddy and aioquic public acceptance, isolated candidate
+  and published Hex traffic, negative TLS checks, and retained peer diagnostics
+  in coordinated releases.
+- Add the scoped 24-hour canary with explicit cleanup, memory, mailbox, process,
+  endpoint and error thresholds; results are recorded in the acceptance audit.
+
+### Fixed
+- Transfer owner-proven unopened requests at concurrent lifetime rotation using
+  their original deadlines and untouched bodies; sent or unknown admissions
+  retain their original reconciliation path.
+
 ## [0.16.6] - 2026-10-05
 
 ### Added

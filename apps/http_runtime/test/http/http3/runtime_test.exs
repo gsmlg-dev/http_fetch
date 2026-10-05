@@ -255,6 +255,120 @@ defmodule HTTP.HTTP3.RuntimeTest do
     GenServer.stop(pool)
   end
 
+  test "concurrent leases beyond remaining rotation capacity transfer only unsent opens", ctx do
+    {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
+    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    {_, port} = Quic.local(server)
+    {:ok, pool} = Pool.start_link(max_connections: 1)
+    on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+
+    request = %HTTP.Request{
+      url: URI.parse("https://127.0.0.1:#{port}/rotation"),
+      transport_options: [ssl: ctx.tls, timeout: 5_000]
+    }
+
+    options = [pool: pool, rotation_after: 3]
+    assert {:ok, warm, warm_generation} = Stream.start(request, self(), options)
+    assert_receive {:quic_accept, ^server}, 2_000
+    {:ok, accepted} = Quic.accept(server)
+    :ok = Quic.attach(accepted, self())
+    send_response(incoming(accepted, 0), "warm")
+    assert collect(warm, warm_generation, "") == "warm"
+    assert %{leases: 0} = await_released(pool)
+    [owner] = Map.keys(:sys.get_state(pool).owners)
+    assert %{allocations: 2, lifecycle: :ready} = ConnectionOwner.status(owner)
+    :sys.suspend(owner)
+    upload = %{request | method: :post, body: self(), duplex: :half}
+
+    {first, first_generation, second, second_generation} =
+      try do
+        {:ok, first, first_generation} = Stream.start(upload, self(), options)
+        {:ok, second, second_generation} = Stream.start(upload, self(), options)
+        assert %{leases: 2} = await_leases(pool, 2)
+        refute_receive {:read_chunk, _, :ack}, 0
+        {first, first_generation, second, second_generation}
+      after
+        :sys.resume(owner)
+      end
+
+    first_native = incoming(accepted, 4)
+    assert_receive {:read_chunk, first_bridge, :ack}, 1_000
+    send(first_bridge, {:stream_end, self()})
+    send_response(first_native, "rotated")
+    assert_receive {:quic_accept, ^server}, 2_000
+    {:ok, replacement} = Quic.accept(server)
+    :ok = Quic.attach(replacement, self())
+    second_native = incoming(replacement, 0)
+    assert_receive {:read_chunk, second_bridge, :ack}, 1_000
+    refute first_bridge == second_bridge
+    send(second_bridge, {:stream_end, self()})
+    send_response(second_native, "rotated")
+    assert collect(first, first_generation, "") == "rotated"
+    assert collect(second, second_generation, "") == "rotated"
+    assert %{leases: 0, pending: 0} = await_released(pool)
+    refute_receive {:read_chunk, _, :ack}, 0
+  end
+
+  test "raw native Session GOAWAY is returned without transfer or producer demand", ctx do
+    {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
+    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    {_, port} = Quic.local(server)
+
+    request = %HTTP.Request{
+      url: URI.parse("https://127.0.0.1:#{port}/native-goaway"),
+      transport_options: [ssl: ctx.tls, timeout: 5_000]
+    }
+
+    {:ok, key, connect} = PoolKey.build(request)
+    {:ok, owner} = ConnectionOwner.start_link(connect)
+    on_exit(fn -> if Process.alive?(owner), do: GenServer.stop(owner) end)
+    assert :ok = ConnectionOwner.await_ready(owner, 2_000)
+    {:ok, pool} = Pool.start_link(max_connections: 1)
+    on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+    assert :ok = Pool.register(pool, key, owner)
+    :sys.replace_state(owner, &put_in(&1.session.control.goaway_id, 0))
+    request = %{request | method: :post, body: self(), duplex: :half}
+    assert {:ok, stream, generation} = Stream.start(request, self(), pool: pool)
+    assert_receive {:http_runtime, ^generation, ^stream, {:error, :goaway}}, 1_000
+    assert %{leases: 0, owners: 1, pending: 0} = await_released(pool)
+    assert %{allocations: 1, requests: 0} = ConnectionOwner.status(owner)
+    refute_receive {:read_chunk, _, :ack}, 0
+  end
+
+  for admission <- [:sent, :indeterminate] do
+    @admission admission
+    test "#{admission} request GOAWAY remains terminal without another native allocation", ctx do
+      {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
+      on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+      {_, port} = Quic.local(server)
+      {:ok, pool} = Pool.start_link(max_connections: 1)
+      on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+
+      request = %HTTP.Request{
+        method: :post,
+        body: self(),
+        duplex: :half,
+        url: URI.parse("https://127.0.0.1:#{port}/admitted"),
+        transport_options: [ssl: ctx.tls, timeout: 5_000]
+      }
+
+      assert {:ok, stream, generation} = Stream.start(request, self(), pool: pool)
+      assert_receive {:quic_accept, ^server}, 2_000
+      {:ok, accepted} = Quic.accept(server)
+      :ok = Quic.attach(accepted, self())
+      _ = incoming(accepted, 0)
+      assert_receive {:read_chunk, _bridge, :ack}, 1_000
+      [owner] = Map.keys(:sys.get_state(pool).owners)
+      [request_ref] = Map.keys(:sys.get_state(owner).requests)
+      if @admission == :indeterminate, do: send(stream, {:http3_indeterminate, make_ref()})
+      send(stream, {:http3, generation, request_ref, {:error, :goaway}})
+      assert_receive {:http_runtime, ^generation, ^stream, {:error, :goaway}}, 1_000
+      assert %{leases: 0, owners: 1, pending: 0} = await_released(pool)
+      assert %{allocations: 2, requests: 0} = ConnectionOwner.status(owner)
+      refute_receive {:read_chunk, _, :ack}, 0
+    end
+  end
+
   for cancellation <- [:abort, :subscriber_down] do
     @cancellation cancellation
     test "#{cancellation} removes queued admission before a slot becomes available", ctx do
@@ -582,6 +696,21 @@ defmodule HTTP.HTTP3.RuntimeTest do
     case Pool.status(pool) do
       %{leases: 0} = status -> status
       _ -> await_released(pool, attempts - 1)
+    end
+  end
+
+  defp await_leases(pool, count),
+    do: await_leases(pool, count, System.monotonic_time(:millisecond) + 2_000)
+
+  defp await_leases(pool, count, deadline) do
+    case Pool.status(pool) do
+      %{leases: ^count} = status ->
+        status
+
+      status ->
+        assert System.monotonic_time(:millisecond) < deadline, inspect(status)
+        :erlang.yield()
+        await_leases(pool, count, deadline)
     end
   end
 end

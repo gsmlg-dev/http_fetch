@@ -273,6 +273,17 @@ class Peer(QuicConnectionProtocol):
             emit("summary", role="peer", passed=True, bidi=8, uni=3, checksum=digest.hexdigest(),
                  highwater=self.max_received, cancelled=self.cancelled, resets=len(self.resets),
                  impairment=(self.impairment.counters if self.impairment is not None else None))
+        elif not getattr(self, "summary_diagnosed", False):
+            self.summary_diagnosed = True
+            emit("summary_pending", local_bidi=normal_bidi, local_uni=local_uni,
+                 remote_bidi=remote_bidi, remote_uni=remote_uni, finals=sorted(self.finals),
+                 resets=sorted(self.resets), echoed=echoed, remote_valid=remote_valid,
+                 complete_impairment=complete_impairment,
+                 mismatched=[stream_id for stream_id in normal_bidi + remote_bidi + remote_uni
+                             if self.digests[stream_id].digest() != hashlib.sha256(
+                                 self.expected[stream_id] if stream_id in normal_bidi else
+                                 payload(stream_id) if stream_id in remote_bidi else
+                                 ("uni:%d" % stream_id).encode()).digest()])
 
 
 async def client(args):

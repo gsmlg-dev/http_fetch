@@ -1,8 +1,10 @@
 # TLS and QUIC source migration provenance
 
-This record identifies the TLS, QUIC, and HTTP/3 sources integrated into this
-umbrella and the boundary they preserve. It does not claim that the imported
-packages have been published or that HTTP/3/WebTransport are enabled.
+This record preserves the original TLS, QUIC, and HTTP/3 source migration
+inventory at `0.16.1`. Its file counts, dependency graph and publication state
+below describe that 2026-10-04 snapshot. Subsequent protocol and package changes
+are recorded in the [implementation audit](http3-implementation-audit.md).
+The current capability boundary is described under Preserved boundaries below.
 
 ## Source inventory
 
@@ -170,10 +172,12 @@ the local umbrella metadata as an available nine-package Hex release.
 - `elixir_quic` owns QUIC transport state and public `Quic` APIs. It does not
   imply HTTP/3 from negotiated ALPN, use a fake/native fallback, or own HTTP/3
   framing.
-- `elixir_quic_http3` owns the separate HTTP/3 application boundary. Its
-  current capabilities report `http3: false`, `qpack: false`, and
-  `webtransport: false`. Fetch HTTP/3 and WebTransport production selectors
-  remain explicitly unsupported.
+- `elixir_quic_http3` owns the separate HTTP/3 beta application boundary. Its
+  current capabilities report `http3: true`, `qpack: true`,
+  `qpack_profile: :static_literal` and Huffman support. Fetch and EventSource
+  support explicit verified HTTPS HTTP/3 without protocol fallback. Dynamic
+  QPACK, 0-RTT, migration, WebSocket over HTTP/3 and WebTransport remain
+  unsupported. Beta acceptance and publication are separate evidence gates.
 
 See [the consumer contracts](ex-ssl-consumer-contract.md) for TLS call
 constraints, [the QUIC consumer contract](ex-quic-consumer-contract.md) for

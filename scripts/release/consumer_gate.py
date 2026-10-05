@@ -1,7 +1,7 @@
-"""Resolve and compile every candidate package through a signed local Hex registry."""
+"""Resolve isolated candidate/published Hex packages and verify consumer traffic."""
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import hashlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import os
@@ -190,20 +190,65 @@ IO.puts("loaded_ssl_connection=" <> to_string(:code.which(SSL.Connection)))
             raise RuntimeError(f"candidate TLS feature group failed: {group.name}")
 
 
-def run(version, archive_dir, *, mode="all", keep=False):
+def http3_project(directory, version, env):
+    project = directory / "http3"
+    project.mkdir(parents=True)
+    deps = ", ".join(f'{{:{app}, "== {version}"}}' for app in PACKAGES)
+    (project / "mix.exs").write_text(f'''defmodule HTTP3Consumer.MixProject do
+  use Mix.Project
+  def project, do: [app: :http3_consumer, version: "0.0.0", deps: [{deps}]]
+  def application, do: [extra_applications: [:logger, :public_key, :ssl]]
+end
+''')
+    shutil.copyfile(ROOT / "scripts/release/http3_consumer.exs", project / "provenance.exs")
+    shutil.copyfile(ROOT / "scripts/http3/public_gate.exs", project / "public_gate.exs")
+    (project / "gate.exs").write_text('Code.require_file("provenance.exs", __DIR__)\n'
+                                      'Code.require_file("public_gate.exs", __DIR__)\n')
+    project_env = {**env, "MIX_ENV": "test", "MIX_BUILD_PATH": str(project / "build"),
+                   "MIX_DEPS_PATH": str(project / "deps"), "HTTP3_CONSUMER_VERSION": version,
+                   "HTTP3_CONSUMER_PROJECT": str(project),
+                   "HTTP3_CONSUMER_SOURCE": env.get("HTTP3_CONSUMER_SOURCE", "candidate"),
+                   "HTTP3_GATE_LOG_DIR": env.get("HTTP3_GATE_LOG_DIR", str(project / "peer-logs"))}
+    command(["mix", "deps.get"], cwd=project, env=project_env)
+    command(["mix", "compile", "--warnings-as-errors"], cwd=project, env=project_env)
+    command(["uv", "run", "--python", "3.12", "--with", "aioquic==1.2.0", "python",
+             str(ROOT / "scripts/http3/public_gate.py"), "--gate-script", str(project / "gate.exs"),
+             "--project-dir", str(project)], cwd=ROOT, env=project_env)
+
+
+def run(version, archive_dir=None, *, mode="all", keep=False, published=False):
     if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version):
         raise ValueError("stable release version required")
-    archive_dir = Path(archive_dir).resolve()
+    if published and mode != "http3":
+        raise ValueError("published mode is restricted to the HTTP3 consumer")
+    if not published and archive_dir is None:
+        raise ValueError("candidate archive directory is required")
+    archive_dir = Path(archive_dir).resolve() if archive_dir is not None else None
     directory = Path(tempfile.mkdtemp(prefix="http-fetch-hex-consumer-"))
     env = {**os.environ, "HEX_HOME": str(directory / "hex"), "MIX_ENV": "prod"}
     env.pop("HTTP_FETCH_CI_APP", None)
     env.pop("MIX_BUILD_PATH", None)
     env.pop("MIX_DEPS_PATH", None)
+    env["HTTP3_CONSUMER_SOURCE"] = "published" if published else "candidate"
+    if published:
+        env.pop("HEX_MIRROR", None)
+        env.pop("HEX_TRUSTED_MIRROR", None)
     try:
-        public = setup_registry(archive_dir, version, directory, env)
-        with local_registry(public) as url:
-            command(["mix", "hex.repo", "set", "hexpm", "--url", url,
-                     "--public-key", str(public / "public_key")], env=env)
+        if published:
+            if archive_dir is not None:
+                from hex_packages import release_status
+                for package in PACKAGES:
+                    archive = archive_dir / f"{package}-{version}.tar"
+                    if release_status(package, version, archive) != "matching":
+                        raise RuntimeError(f"published package is missing: {package} {version}")
+            registry = nullcontext(None)
+        else:
+            public = setup_registry(archive_dir, version, directory, env)
+            registry = local_registry(public)
+        with registry as url:
+            if url is not None:
+                command(["mix", "hex.repo", "set", "hexpm", "--url", url,
+                         "--public-key", str(public / "public_key")], env=env)
             if mode == "all":
                 for package in PACKAGES:
                     project = directory / "consumers" / package
@@ -215,6 +260,8 @@ def run(version, archive_dir, *, mode="all", keep=False):
                 external_project(directory, version, env)
             elif mode == "feature":
                 feature_project(directory, version, env)
+            elif mode == "http3":
+                http3_project(directory, version, env)
             else:
                 raise ValueError(f"unknown consumer mode: {mode}")
         if keep:
@@ -230,11 +277,12 @@ def run(version, archive_dir, *, mode="all", keep=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("version")
-    parser.add_argument("archive_dir", type=Path)
-    parser.add_argument("--mode", choices=("all", "runtime", "external", "feature"), default="all")
+    parser.add_argument("archive_dir", type=Path, nargs="?")
+    parser.add_argument("--mode", choices=("all", "runtime", "external", "feature", "http3"), default="all")
+    parser.add_argument("--published", action="store_true")
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
-    run(args.version, args.archive_dir, mode=args.mode, keep=args.keep)
+    run(args.version, args.archive_dir, mode=args.mode, keep=args.keep, published=args.published)
 
 
 if __name__ == "__main__":

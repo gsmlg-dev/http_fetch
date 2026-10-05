@@ -2,8 +2,9 @@ defmodule QuicHttp3.Qpack do
   @moduledoc """
   QPACK wire primitives for static and literal header fields.
 
-  Dynamic table state is bounded and opt-in. Encoder/decoder stream
-  synchronization remains the responsibility of the HTTP/3 session layer.
+  The initial profile supports static indexes, literal fields and Huffman
+  strings. Dynamic references are rejected; the HTTP/3 session advertises
+  zero dynamic-table capacity and zero blocked streams.
   """
 
   import Bitwise, only: [&&&: 2, <<<: 2, |||: 2, >>>: 2]

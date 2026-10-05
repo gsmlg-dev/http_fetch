@@ -1,3 +1,5 @@
+Code.require_file("admission.exs", __DIR__)
+
 # Run after Q5: PHASE1_INTEROP_RUN=1 mix run scripts/phase1/interop.exs client|server
 defmodule Quic.Phase1.Interop do
   @alpn "phase1-streams"
@@ -154,45 +156,7 @@ defmodule Quic.Phase1.Interop do
   # A blocked admission remains queued; an unknown result stops this run because retrying it could duplicate bytes.
   defp admit(state, field) do
     {items, error, started} =
-      Enum.reduce(Map.fetch!(state, field), {[], nil, state.bidi_started}, fn {stream, bytes,
-                                                                               final},
-                                                                              {acc, error,
-                                                                               started} ->
-        if not is_nil(error) or (bytes == <<>> and not final) do
-          {acc, error, started}
-        else
-          n = min(@chunk, byte_size(bytes))
-          <<part::binary-size(^n), rest::binary>> = bytes
-
-          fin =
-            final and rest == <<>> and
-              (field != :sends or not bidi?(stream.id) or MapSet.size(started) == 4)
-
-          case Quic.send_stream(stream, part, fin, deadline: @deadline) do
-            {:ok, _} ->
-              started =
-                if field == :sends and bidi?(stream.id) and part != <<>>,
-                  do: MapSet.put(started, stream.id),
-                  else: started
-
-              remaining =
-                if rest == <<>> and (not final or fin),
-                  do: acc,
-                  else: acc ++ [{stream, rest, final}]
-
-              {remaining, nil, started}
-
-            {:blocked, _} ->
-              {acc ++ [{stream, bytes, final}], nil, started}
-
-            {:unknown, ref} ->
-              {acc ++ [{stream, bytes, final}], {:unknown, ref}, started}
-
-            {:error, reason} ->
-              {acc ++ [{stream, bytes, final}], reason, started}
-          end
-        end
-      end)
+      Quic.Phase1.Admission.run(Map.fetch!(state, field), field, state.bidi_started)
 
     if error,
       do: throw({:harness_failure, error}),

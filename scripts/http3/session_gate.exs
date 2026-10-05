@@ -30,7 +30,8 @@ defmodule HTTP3SessionGate do
         {":method", "POST"},
         {":scheme", "https"},
         {":authority", "example.test"},
-        {":path", "/"}
+        {":path", "/"},
+        {"content-length", Integer.to_string(byte_size(body))}
       ]
 
       {:ok, session, ref} = Session.request(session, fields, body, [])

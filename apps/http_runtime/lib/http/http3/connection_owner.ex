@@ -6,13 +6,16 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
   def await_ready(owner, timeout \\ 5_000), do: GenServer.call(owner, :await_ready, timeout)
 
-  def open(owner, fields, body, subscriber, generation, opts \\ []),
-    do:
-      GenServer.call(
-        owner,
-        {:open, fields, body, subscriber, generation, opts},
-        Keyword.get(opts, :timeout, 5_000) + 1_000
-      )
+  def open(owner, fields, body, subscriber, generation, opts \\ []) do
+    case GenServer.call(
+           owner,
+           {:open, fields, body, subscriber, generation, opts},
+           Keyword.get(opts, :timeout, 5_000) + 1_000
+         ) do
+      {:error, {:not_sent, reason}} -> {:error, reason}
+      result -> result
+    end
+  end
 
   def send_data(owner, ref, bytes, fin, recipient, write_ref),
     do: GenServer.cast(owner, {:write, ref, bytes, fin, recipient, write_ref})
@@ -112,7 +115,7 @@ defmodule HTTP.HTTP3.ConnectionOwner do
         _from,
         %{lifecycle: :draining} = state
       ),
-      do: {:reply, {:error, :goaway}, state}
+      do: {:reply, {:error, {:not_sent, :goaway}}, state}
 
   def handle_call({:open, fields, body, subscriber, generation, opts}, from, state) do
     if map_size(state.requests) + open_count(state) >= state.max_streams do
@@ -572,7 +575,9 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   defp draining(state) do
     if state.pool, do: HTTP.HTTP3.Pool.drain(state.pool, self())
     {opens, retained} = Enum.split_with(state.queue, &match?({:open, _, _, _, _, _, _}, &1))
-    next = Enum.reduce(opens, state, &reject(&2, &1, :goaway))
+    # Only queued actions have not entered Session.request/4. Pending and
+    # suspended native operations retain their original reconciliation path.
+    next = Enum.reduce(opens, state, &reject(&2, &1, {:not_sent, :goaway}))
     %{next | lifecycle: :draining, queue: retained}
   end
 

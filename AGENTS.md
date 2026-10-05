@@ -45,7 +45,7 @@ runtime dependency closure of umbrella apps.
 
 This is a Mix umbrella with nine independently packaged apps under `apps/`.
 `apps/http_core` owns shared HTTP primitives and the TLS/QUIC integration
-boundary; `apps/http_runtime` owns pooled HTTP/2 connections. Fetch,
+boundary; `apps/http_runtime` owns pooled HTTP/2 and HTTP/3 connections. Fetch,
 EventSource, and WebSocket depend on both `:http_core` and `:http_runtime`.
 WebTransport and the HTTP/3 companion depend on `:http_core`; HTTP/3 also
 depends on `:elixir_quic`. `:elixir_quic` depends on `:ex_ssl`.
@@ -53,9 +53,11 @@ depends on `:elixir_quic`. `:elixir_quic` depends on `:ex_ssl`.
 The imported applications are `apps/ex_ssl` (`SSL`), `apps/elixir_quic`
 (`Quic`), and `apps/elixir_quic_http3` (`QuicHttp3`). Their source provenance,
 licenses, constraints, and current release status are recorded in
-[`docs/migration-provenance.md`](docs/migration-provenance.md). The HTTP/3 and
-WebTransport selectors remain unsupported; app presence and negotiated ALPN do
-not establish protocol support.
+[`docs/migration-provenance.md`](docs/migration-provenance.md). Fetch and
+EventSource support explicit HTTPS HTTP/3 beta with static/literal QPACK.
+Dynamic QPACK, 0-RTT, migration, WebSocket over HTTP/3 and WebTransport remain
+unsupported; raw `Quic.capabilities().http3` remains false. App presence and
+negotiated ALPN alone do not establish application readiness or acceptance.
 
 Entry point is `HTTP.fetch/2` in `apps/http_fetch/lib/http.ex`. It is async by default
 (`Task.Supervisor` + the internal socket transport) and returns an `HTTP.Promise`.

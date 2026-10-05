@@ -28,7 +28,7 @@ stack uses the independent `ex_ssl` TLS engine.
 
 ### Application Structure
 - This is a Mix umbrella with independent protocol apps under `apps/`.
-- Shared HTTP primitives live in `apps/http_core`; pooled HTTP/2 connection
+- Shared HTTP primitives live in `apps/http_core`; pooled HTTP/2 and HTTP/3 connection
   ownership and stream I/O live in `apps/http_runtime`. Fetch, EventSource and
   WebSocket depend on both shared applications instead of each other.
 - The umbrella contains nine packages: `ex_ssl`, `elixir_quic`, `http_core`,
@@ -36,15 +36,15 @@ stack uses the independent `ex_ssl` TLS engine.
   `http_event_source`, and `http_web_transport`. The three TLS/QUIC sources were
   imported from `gsmlg-dev/ex_quic@14974913390e12d03a78a2903d18e55a04fa89d6`;
   see [migration provenance](docs/migration-provenance.md).
-- Package dependencies retain exact `== 0.16.1` requirements with
-  `in_umbrella: true` and their Hex identities. The original six packages at
-  `0.16.1` are already published; the imported package versions are local
-  candidate metadata and have not been published. A later coordinated release
-  is required to publish the complete graph.
+- Package dependencies retain exact coordinated version requirements with
+  `in_umbrella: true` and their Hex identities. The original `0.16.1` inventory
+  is a historical migration snapshot; current candidate and publication
+  evidence is recorded in [the implementation audit](docs/http3-implementation-audit.md).
 - `ex_ssl` owns `SSL` and the TLS handshake APIs. `elixir_quic` owns `Quic` and
   consumes only public `SSL.QUIC` APIs. `elixir_quic_http3` owns `QuicHttp3`.
-  The HTTP/3 and WebTransport selectors remain explicitly unsupported;
-  `QuicHttp3.capabilities/0` reports them unavailable.
+  Fetch and EventSource support explicit HTTPS HTTP/3 beta with static/literal
+  QPACK. Dynamic QPACK, 0-RTT, migration, WebSocket over HTTP/3 and WebTransport
+  remain unsupported; raw `Quic.capabilities().http3` remains false.
 - **HTTPFetch.Application** (`apps/http_fetch/lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
 
 ### Key Design Patterns

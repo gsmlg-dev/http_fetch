@@ -15,7 +15,7 @@ completion requires all required gates and the final release to succeed.
 | WP1: transport and resumable state | 0.16.3 | Commit pushed; release failed before publication: uv environment lacked pip |
 | WP2: bounded HTTP/3 profile | 0.16.4 | Commit pushed; protocol gates PASS; release failed after publishing ex_ssl 0.16.4 |
 | WP3: runtime and pooling | 0.16.5 | Commit c3fb8dd pushed; coordinated release 0.16.5 succeeded |
-| WP4: explicit Fetch integration | 0.16.6 | Public Fetch/SSE enabled; independent review repairs validated |
+| WP4: explicit Fetch integration | 0.16.6 | Commit 94cf51a pushed; release failed before publication in external impairment gate |
 | WP5: independent acceptance | 0.16.7 | Pending |
 
 Local validation, remote workflow results, wire interoperability, artifact
@@ -205,3 +205,45 @@ low-priority repository style suggestions; CI's configured Credo reports no issu
 The canary harness calibration passed **184 seconds / 1,792 requests**,
 peak VM memory 73,601,832 bytes and 178 processes. This short calibration is
 not the required 24-hour gate.
+
+WP4 commit: `94cf51aab8086fb1ac352a6c43bdae3dcfa483ef`. Audit release
+`0.16.6`: [37283383484](https://github.com/gsmlg-dev/http_fetch/actions/runs/37283383484),
+failed before publication: external UDP impairment transfer deadline.
+Local client/server/external impairment runs all passed; the remote failure is
+retained as audit evidence and is under investigation. Final WP4 public rerun **PASS** against both independent peers,
+including **10,000 requests / 11 connections** and zero terminal reservations.
+Log: `/tmp/http3-wp4-final-public.log`. Root nine-app unit checkpoint and TLS
+integration **PASS**; local public E2E **51 tests, zero failures**. Native
+transport smoke, aioquic client/server/stream and DATAGRAM client/server **PASS**.
+
+## WP5
+
+The longer concurrent canary calibration failed at the lifetime rotation boundary:
+strict public PUT returned `{:error, :goaway}` (`/tmp/http3-canary-rotation.log`).
+The short calibration did not cross this boundary. This is a runtime admission
+defect and blocks final acceptance until a deterministic regression, repair,
+and fresh rotation/canary runs pass. No request replay or gate exception is used.
+
+Remote main advanced independently to `127aa86` with CI-isolation and GREASE
+repairs. Those changes will be reconciled before final-source acceptance.
+
+WP5 source preparation adds the two-peer public gate, private nine-package
+Hex consumer and mandatory source/candidate/published release checks. The fresh
+candidate working snapshot passed all public gates and 10,000 requests over
+11 connections; log `/tmp/http3-coordinated-artifact-consumer.log`. It preceded
+the rotation repair and incoming-main reconciliation and is not a publication
+claim for immutable 0.16.5 packages. Root release regressions **20/0**, real peer
+fixture regressions **5/0**, companion capability regression **4/0**.
+
+The rotation defect was reproduced deterministically before repair. Only
+owner-proven unopened requests can transfer, before producer demand, with
+three owner attempts and the original absolute deadline. Native Session errors,
+sent and indeterminate requests do not transfer. Reviewed runtime **90/0**;
+fresh wire calibration and final-source acceptance remain required.
+
+The impairment fixture also reproduced a same-stream admission-order defect:
+a smaller item could overtake an earlier blocked write. A per-stream barrier
+preserves ordering while siblings progress. Three deterministic regressions
+pass, including retained original unknown references. The checksum and 15-second
+traffic deadline remain unchanged; the original remote failure's precise cause
+is unconfirmed until new wire evidence.

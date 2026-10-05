@@ -1,0 +1,65 @@
+name: Public HTTP3 acceptance
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - 'apps/**'
+      - 'scripts/http3/**'
+      - 'mix.exs'
+      - 'mix.lock'
+      - '.github/workflows/http3-public.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - 'scripts/http3/**'
+      - 'mix.exs'
+      - 'mix.lock'
+      - '.github/workflows/http3-public.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-http3:
+    name: Pinned aioquic and Caddy public HTTP3
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MIX_ENV: test
+      HTTP3_GATE_LOG_DIR: ${{ runner.temp }}/http3-peer-logs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: public-http3-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs') }}
+      - name: Prepare complete runtime closure
+        run: |
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+          mix format --check-formatted scripts/http3/session_gate.exs scripts/http3/public_gate.exs scripts/http3/canary.exs
+      - name: Verify real chunked upstream fixture traffic
+        run: uv run --python 3.12 --with aioquic==1.2.0 python -m unittest discover -s scripts/http3 -p 'caddy_*_test.py' -v
+      - name: Require two-peer public integrity and negative TLS acceptance
+        run: uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/public_gate.py
+      - name: Preserve independent peer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-http3-peer-logs
+          path: ${{ runner.temp }}/http3-peer-logs
+          if-no-files-found: error

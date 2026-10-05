@@ -5,9 +5,11 @@ from `gsmlg-dev/ex_quic@14974913390e12d03a78a2903d18e55a04fa89d6`. Its
 historical upstream TLS source identity is
 `gsmlg-dev/ex_ssl@fb47051355c9d0a29caee046fa060a745ad0ce5b` (`v0.7.2`); see
 [migration provenance](migration-provenance.md) and the imported
-[QUIC/TLS contract](quic/ex-ssl-quic-contract.md). In the local candidate,
-`elixir_quic` depends on `ex_ssl`, and `http_core` depends on both with exact
-`== 0.16.1` umbrella/Hex metadata. Those new package versions are not published.
+[QUIC/TLS contract](quic/ex-ssl-quic-contract.md). `elixir_quic` depends on
+`ex_ssl`, and `http_core` depends on both with exact coordinated umbrella/Hex
+versions. The original `0.16.1` package inventory is a historical snapshot;
+current candidate and publication evidence is recorded in the
+[implementation audit](http3-implementation-audit.md).
 
 OTP `:ssl` remains the default for TCP. ex_ssl is explicitly selected for the
 existing TCP clients; QUIC consumes public `SSL.QUIC` APIs independently of
@@ -38,8 +40,8 @@ full OTP compatibility or completed independent human security review.
 Only `HTTP.Transport.SSL` calls OTP `:ssl` in production. TLS listen, accept,
 handshake, and peer traffic in test support are reference-server operations.
 QUIC calls in HTTP/3/WebTransport are outside this TCP adapter contract. The
-imported QUIC stack uses ex_ssl's separate TLS API; its current HTTP/3 and
-WebTransport selectors remain unsupported. See the
+imported QUIC stack uses ex_ssl's separate TLS API. Fetch and EventSource support
+explicit HTTPS HTTP/3 beta; WebTransport remains unsupported. See the
 [QUIC consumer contract](ex-quic-consumer-contract.md).
 
 Public `ssl:` and `socket_opts:` containers remain backend-specific. The OTP
@@ -111,8 +113,9 @@ port returns `{:error, :client_identity_cross_origin_redirect}` before opening
 the next connection. Same-origin redirects retain the identity. Use
 `redirect: :manual` and issue a separate, deliberate request if another origin
 is authorized to receive those credentials. OTP backend behavior is unchanged.
-This policy also rejects a downgrade to plain HTTP. HTTP/3/WebTransport remain
-on QUIC and do not use these credentials.
+This policy also rejects a downgrade to plain HTTP. Explicit HTTP/3 uses
+`SSL.QUIC` identity options and applies the same cross-origin client-identity
+redirect prohibition. WebTransport remains unsupported.
 
 The source smoke includes required RSA/EC/large-chain HTTP/1.1 and HTTP/2
 requests, exact server-observed client DER, optional auth, missing/wrong-CA/
@@ -201,16 +204,19 @@ The final source-mode and published-mode 47-test runs each had zero failures.
 ## Current boundaries
 
 HTTP and TLS versions are separate choices: `http_version: :http2` requires h2,
-while `ssl: [versions: [:"tlsv1.3"]]` constrains TLS. Large HTTP/2 **responses**
-use the existing stream API; streaming HTTP/2 **request bodies** are unsupported.
+while `ssl: [versions: [:"tlsv1.3"]]` constrains TLS. Large HTTP/2 and explicit
+HTTP/3 responses use the stream API; both runtimes support demand-driven
+request-body producers. HTTP/3 consumes the independent `SSL.QUIC` path.
 TLS 1.2 interoperability evidence remains bounded to the tested OpenSSL ECDHE-RSA
 AES-GCM and OTP scenarios. It is not general server/platform compatibility.
 
 Peer verification remains mandatory. Resumption is disabled unless requested;
 TLS 1.2/mixed-version and mTLS resumption combinations fail explicitly. There is
-no 0-RTT, persistent-ticket storage, connection pool, backend fallback, uncertain
-byte replay or automatic WebSocket reconnect. HTTP/3 and WebTransport retain
+no 0-RTT, persistent-ticket storage, TLS-engine connection pool, backend fallback,
+uncertain byte replay or automatic WebSocket reconnect. HTTP runtime pooling is
+owned separately by `http_runtime`. HTTP/3 and WebTransport retain
 the separate QUIC TLS path through `SSL.QUIC`; a TCP backend selection does not
-replace it. The imported `QuicHttp3` capabilities remain false for HTTP/3,
-QPACK, and WebTransport. Independent human security review remains incomplete,
+replace it. `QuicHttp3` reports the HTTP/3 beta static/literal QPACK profile;
+dynamic QPACK, 0-RTT, migration, WebSocket over HTTP/3 and WebTransport remain
+unsupported. Independent human security review remains incomplete,
 and no performance or broad production-readiness claim follows from these checks.

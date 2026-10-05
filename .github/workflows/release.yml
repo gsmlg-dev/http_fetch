@@ -101,8 +101,11 @@ jobs:
           unset HTTP_FETCH_CI_APP
           mix format --check-formatted
           mix format --check-formatted scripts/phase1/interop.exs scripts/phase1/release_check.exs scripts/datagram/interop.exs
-          mix format --check-formatted scripts/release/versions.exs scripts/release/archives.exs
+          mix format --check-formatted scripts/phase1/admission.exs scripts/phase1/admission_test.exs
+          mix format --check-formatted scripts/release/versions.exs scripts/release/archives.exs scripts/release/http3_consumer.exs
+          mix format --check-formatted scripts/http3/session_gate.exs scripts/http3/public_gate.exs scripts/http3/canary.exs
           mix compile --warnings-as-errors
+          mix run scripts/phase1/admission_test.exs
           mix test --seed 28092026
           mix test apps/ex_ssl/test --include integration --seed 743209
           mix credo
@@ -182,6 +185,14 @@ jobs:
       - name: Verify HTTP/3 companion with pinned independent aioquic
         run: uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/session_gate.py
 
+      - name: Require independent public HTTP3 before publication
+        env:
+          MIX_ENV: test
+          HTTP3_GATE_LOG_DIR: ${{ runner.temp }}/http3-release-logs/source
+        run: |
+          uv run --python 3.12 --with aioquic==1.2.0 python -m unittest discover -s scripts/http3 -p 'caddy_*_test.py' -v
+          uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/public_gate.py
+
       - name: Build, inspect, and independently consume all nine archives
         run: |
           python3 scripts/release/stage.py build "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
@@ -190,6 +201,11 @@ jobs:
           python3 scripts/release/stage.py verify "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
           python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
           python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode external
+
+      - name: Require isolated candidate HTTP3 traffic
+        env:
+          HTTP3_GATE_LOG_DIR: ${{ runner.temp }}/http3-release-logs/candidate
+        run: python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode http3
 
       - name: Verify real HTTP/2 package traffic and TLS feature groups
         env:
@@ -230,6 +246,11 @@ jobs:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
         run: python3 scripts/release/hex_packages.py publish "$RELEASE_VERSION" "$RUNNER_TEMP/archives" "$RUNNER_TEMP/stage"
 
+      - name: Verify published isolated HTTP3 traffic
+        env:
+          HTTP3_GATE_LOG_DIR: ${{ runner.temp }}/http3-release-logs/published
+        run: python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode http3 --published
+
       - name: Attach and verify all immutable GitHub release archives
         env:
           GH_TOKEN: ${{ github.token }}
@@ -240,3 +261,11 @@ jobs:
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
         run: python3 scripts/release/docs.py "$RELEASE_VERSION" "$RUNNER_TEMP/stage" --publish
+
+      - name: Preserve HTTP3 release peer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: http3-release-peer-logs
+          path: ${{ runner.temp }}/http3-release-logs
+          if-no-files-found: warn

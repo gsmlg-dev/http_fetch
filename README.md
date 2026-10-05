@@ -15,22 +15,22 @@ followed by `MIX_ENV=test mix test apps/http_fetch/test`. Running the test from
 the root keeps runtime applications of `in_umbrella` dependencies, including
 `ex_ssl`, on the code path without adding duplicate child dependencies.
 
-The umbrella contains nine packages. Six were published as `0.16.1` before the
-TLS/QUIC source migration; the imported `ex_ssl`, `elixir_quic`, and
-`elixir_quic_http3` `0.16.1` sources are an unpublished local integration
-candidate. That already-published version of the original six packages is
-immutable, so the combined nine-package graph requires a later coordinated
-release. See the [migration provenance](docs/migration-provenance.md) and
-[validation record](docs/migration-validation.md).
+The umbrella contains nine independently packaged applications with coordinated
+versions and exact internal dependencies. The imported TLS/QUIC source inventory
+is recorded in [migration provenance](docs/migration-provenance.md); its original
+validation snapshot is [preserved separately](docs/migration-validation.md).
+Current HTTP/3 beta acceptance and publication evidence are tracked in the
+[implementation audit](docs/http3-implementation-audit.md).
 
 ## Features
 
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
 - **Full HTTP support**: GET, POST, PUT, DELETE, PATCH, HEAD methods
 - **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, selectable TLS for HTTPS, and Unix domain sockets
+- **Explicit HTTP/3 beta**: HTTPS Fetch and EventSource with bounded streams and static/literal QPACK
 - **Unix Domain Sockets**: HTTP over Unix sockets for Docker daemon, systemd, and other local services
 - **Form data support**: HTTP.FormData for multipart/form-data and file uploads
-- **Streaming request bodies**: Fetch-style `duplex: "half"` uploads over HTTP/1.1 and HTTP/2
+- **Streaming request bodies**: Fetch-style `duplex: "half"` uploads over HTTP/1.1, HTTP/2 and explicit HTTP/3
 - **Type-safe configuration**: HTTP.FetchOptions for structured request configuration
 - **Promise-based**: Async operations with chaining support
 - **Request cancellation**: AbortController support for cancelling requests
@@ -180,10 +180,10 @@ configuration. The backend is captured when the request/client is created and
 retained through redirects and EventSource reconnects; runtime configuration
 changes affect new operations. Invalid selections fail explicitly.
 
-The local candidate `http_core` declares `ex_ssl == 0.16.1` and
-`elixir_quic == 0.16.1` as transitive runtime dependencies. This nine-package
-version graph has not been published.
-Consumers do not need to add it separately. `ssl: [...]` supplies TLS settings
+`http_core` declares `ex_ssl` and `elixir_quic` as transitive runtime dependencies
+at the exact coordinated package version. Current artifact and publication
+evidence is recorded in the implementation audit. Consumers do not need to add
+those dependencies separately. `ssl: [...]` supplies TLS settings
 to the selected backend. The `ex_ssl` backend uses its own `SSL` protocol engine
 and requires peer verification. TLS 1.3 is the default; verified TLS 1.2 is
 explicitly selectable. It uses system CA certificates unless `cacerts` or
@@ -247,8 +247,8 @@ HTTP/2, WSS and EventSource connections against an independent OpenSSL peer;
 the peer must report a full handshake followed by a resumed handshake.
 HTTP version selection (`http_version: :http2`) and TLS version selection
 (`ssl: [versions: [:"tlsv1.3"]]`) are independent. Fetch supports streaming request
-bodies over HTTP/1.1 and HTTP/2; HTTP/2 uses the bounded upload bridge and preserves
-early-response upload cleanup.
+bodies over HTTP/1.1, HTTP/2 and explicit HTTP/3; the multiplexed runtimes use
+bounded upload bridges and preserve early-response upload cleanup.
 This is a bounded subset, not full OTP `:ssl` parity.
 
 See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.5.0/docs/COMPATIBILITY.md).
@@ -259,11 +259,40 @@ Plain HTTP, WS, and Unix sockets retain their existing transports. HTTP/3 and
 WebTransport use QUIC's separate TLS implementation and ignore the shared
 setting. An explicit non-`nil` `tls_backend` on either QUIC API returns
 `{:error, :tls_backend_not_supported_for_quic}` (through the promise for fetch).
-The umbrella now contains experimental `ex_ssl`, `elixir_quic`, and
-`elixir_quic_http3` applications. `QuicHttp3.capabilities/0` currently reports
-`http3: false`, `qpack: false`, and `webtransport: false`; the HTTP/3 and
-WebTransport production selectors remain explicitly unsupported. The raw QUIC
-transport does not select an application protocol merely from ALPN.
+The raw QUIC transport does not select an application protocol merely from ALPN;
+`Quic.capabilities().http3` remains `false`.
+
+## HTTP/3 Beta
+
+Fetch and EventSource support explicit `http_version: :http3` over HTTPS with
+verified peer identity. Opening, TLS, ALPN and protocol failures return errors;
+there is no automatic protocol fallback.
+
+```elixir
+response =
+  HTTP.fetch("https://example.test/", http_version: :http3,
+    ssl: [cacertfile: "/path/to/ca.pem"])
+  |> HTTP.Promise.await()
+
+:http3 = response.http_version
+body = HTTP.Response.text(response)
+```
+
+`QuicHttp3.capabilities/0` reports `status: :beta`, `http3: true`, `qpack: true`,
+`qpack_profile: :static_literal` and `qpack_huffman: true`. The session advertises
+zero dynamic-table capacity and zero blocked streams. Dynamic QPACK, 0-RTT,
+connection migration, Alt-Svc/racing, WebSocket over HTTP/3 and WebTransport
+remain unsupported.
+
+Binary and streamed uploads, pooled siblings, informational responses, trailers,
+total request deadlines and cancellation use the shared HTTP/3 runtime.
+EventSource retains its established idle/reconnect policy. See the
+[Fetch contract](docs/http3-fetch-contract.md) and
+[EventSource contract](apps/http_event_source/docs/http3-validation.md) for
+options and delivery semantics. Beta support does not imply full conformance
+or completed production acceptance; independent peer, artifact, load and canary
+results are recorded separately in the
+[acceptance record](docs/http3-wp5-acceptance.md).
 
 ## Form Data With File Upload
 
@@ -743,13 +772,16 @@ from a signed local Hex registry with the locked `telemetry` tarball, and
 resolves a temporary consumer through Hex without repository paths or overrides.
 The smoke
 checks runtime application startup, verified local TLS 1.3 requests with both
-TCP TLS backends, exact dependency metadata, and the unsupported HTTP/3 and
-WebTransport boundary. `python3 scripts/release/consumer_gate.py 0.16.1 /absolute/path/to/archives`
+TCP TLS backends, exact dependency metadata, shared runtime startup, and the
+unsupported WebTransport boundary. The public HTTP/3 artifact gate is tracked
+separately in the acceptance record.
+`python3 scripts/release/consumer_gate.py VERSION /absolute/path/to/archives`
 checks each package independently; set
 `EX_SSL_DEP_MODE=candidate EX_SSL_CANDIDATE_ARCHIVE_DIR=/absolute/path/to/archives`
 and run `bash scripts/ex_ssl_source_smoke.sh` for the full candidate TLS feature
 suite. The published `ex_ssl` 0.7.2 feature gate is historical compatibility
-coverage. No nine-package release at 0.16.1 is available from Hex.pm.
+coverage. Replace `VERSION` with the coordinated version of the candidate
+archives; candidate registry checks and published Hex checks are separate gates.
 
 ### Code Formatting
 
@@ -777,7 +809,7 @@ local Hex registry. It requires the pinned fixture checkout specified by
 
 ```bash
 # From the umbrella root; this builds nine portable archives without publishing.
-python3 scripts/release/stage.py build 0.16.1 /tmp/http-fetch-stage /tmp/http-fetch-archives
+python3 scripts/release/stage.py build VERSION /tmp/http-fetch-stage /tmp/http-fetch-archives
 EX_SSL_DEP_MODE=candidate EX_SSL_CANDIDATE_ARCHIVE_DIR=/tmp/http-fetch-archives \
   EX_SSL_RESULTS_DIR=/tmp/http-fetch-candidate bash scripts/ex_ssl_source_smoke.sh
 ```
