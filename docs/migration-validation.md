@@ -71,3 +71,40 @@ publishes optional documentation only after all packages are verified. As of
 this snapshot, no release publication or tag operation was part of the
 migration validation. The authorized migration commit and push had not
 occurred; they were conditional on final review.
+
+## 2026-10-05 isolation and TLS recovery snapshot
+
+This section records the next candidate before its final merge and push. The
+`6e33bcba7dae9acee1924af744c766b8e1d6147d` migration was merged and pushed after
+the earlier snapshot. Its E2E run `37199061252` passed, including Caddy and
+TLS/QUIC interoperability. Test run `37199061203` failed five WebSocket and
+EventSource cross-client tests because isolated closures omitted Fetch. CI run
+`37199061217` passed candidate consumers and historical TLS checks, but each
+static job reported the ServerHello opaque-type warning under Elixir 1.18.
+These failures remain historical evidence.
+
+Automatic CI, Test and E2E matrices now select only changed `apps/<app>/`
+directory owners. Dependency preparation does not select sibling test jobs.
+Shared configuration, scripts and workflows require manual verification;
+dispatching each workflow forces all nine app jobs. Manual CI retains shared
+formatting, candidate consumers and historical TLS gates. Selected Dialyzer
+analyzes the owner with its dependency PLT; unset selection retains full
+umbrella analysis. WebSocket and EventSource test closures prepare Fetch
+without changing production dependencies.
+
+| Check | Result and evidence |
+| --- | --- |
+| Isolated test reproduction and correction | Clean WebSocket: 82 tests, 3 failures; EventSource: 64 tests, 2 failures, all missing `HTTP.fetch/2`. On Elixir 1.18.4 / OTP 28, corrected strict compile passed (8.7/7.8s), both suites passed, and scoped Credo/Dialyzer passed. Dialyzer took 44.5/28.3s with zero errors/skips (`/tmp/http_fetch_isolation_red_*` and `/tmp/http_fetch_isolation_green_*` logs). |
+| Selection and workflow regression checks | Eight tests passed for direct owners, shared-only changes, rename/deletion, manual all-app selection and zero-SHA pushes. The deleted-push assertion failed before `github.event.after || github.sha`, then passed (1.89s; `/tmp/http_fetch_isolation_round4_*`). Four closure/configuration tests passed on Elixir 1.18.4 and 1.19.5. Actionlint 1.7.11 passed all four workflows; targeted formatting and diff checks passed; all 11 release-helper tests passed (11.5s). |
+| TLS warning reproduction and correction | Selected ex_ssl Dialyzer on Elixir 1.18.4 exited 2 with only `server_hello.ex:427 call_without_opaque` before editing (`/tmp/http_fetch_tls_round6_dialyzer_red.log`). The private predicate now uses the same 16 GREASE integers in a list with strict membership. Three added public-decoder tests passed before this source change, covering GREASE rejection, adjacent non-GREASE controls and fragmented input. Afterwards strict compile, format, Credo and selected Dialyzer passed without new exclusions. |
+| Full source verification | TLS integration at seed 743209 passed 610 tests and 20 properties, zero failures/exclusions (28.8s). Fresh full-umbrella strict compilation passed (9.16s). Nine-app units at seed 28092026 passed (23.97s): output totals 1677 tests, including 177 default integration exclusions and three existing skips, plus 20 properties and 20 doctests. Full test-environment Dialyzer with selection unset passed (30.28s), with five warnings matched by unchanged existing filters (`/tmp/http_fetch_tls_round6_all_*` and other round-six logs). |
+| Fresh nine-package candidates | On Elixir 1.18.4 / OTP 28, build, identity check, content audit and deterministic rebuild all exited 0 (3.96/0.41/0.10/3.72s). All nine independent production Hex consumers passed (34.27s); external consumers (6.95s), real HTTP/2 package traffic (21.93s), and all nine TLS feature groups (26.24s) passed. Commands, environments, runtimes and statuses: `/tmp/http_fetch_tls_round6_packages.json`. |
+| Archive/source correspondence | `/tmp/http_fetch_tls_round6_archive_checksums.json` records nine SHA-256 values and exact differences from round five: only ex_ssl's ServerHello source and Fetch's README changed. The initial comparison wrongly expected only ex_ssl to differ; Fetch's README links to the changed root README. Packed-file comparison verified those two intended changes and seven byte-identical archives. |
+| Import provenance | All 390 reviewed files remain present. Current adaptations: 59 (40 ex_ssl, 18 QUIC, one HTTP/3), with the same two destination additions. Lists match source blobs (`/tmp/http_fetch_tls_round6_source_inventory.json`). |
+
+New remote workflow results have not yet been verified at this snapshot. Local
+Caddy execution remains prohibited by its harness guidance; the retained
+remote E2E gate supplies that check after push. No tag, release dispatch,
+publication or repository retirement was performed. The immutable published
+0.16.1 graph still needs a later authorized shared release; candidate registry
+checks do not establish public Hex availability.

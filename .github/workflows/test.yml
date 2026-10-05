@@ -3,8 +3,12 @@ name: Test
 on:
   push:
     branches: [main, develop]
+    paths: ['apps/**']
   pull_request:
     branches: [main]
+    paths: ['apps/**']
+
+  workflow_dispatch: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -52,16 +56,14 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-mix-
+          key: test-${{ matrix.app }}-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs', format('apps/{0}/mix.exs', matrix.app)) }}
 
       - name: Install dependencies
         env:
           MIX_ENV: test
         run: mix deps.get
 
-      - name: Compile umbrella dependencies
+      - name: Compile selected closure
         env:
           MIX_ENV: test
         run: mix compile --warnings-as-errors

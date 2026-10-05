@@ -6,10 +6,6 @@ on:
       workflow_file:
         required: true
         type: string
-      manual_module:
-        required: false
-        type: string
-        default: ''
     outputs:
       apps:
         description: JSON array of directly affected apps
@@ -18,10 +14,10 @@ on:
         description: Whether the array is nonempty
         value: ${{ jobs.detect.outputs.has_changes }}
       full_gate:
-        description: Whether shared automation or graph inputs require all candidate consumers
+        description: Whether manual verification requires all candidate consumers
         value: ${{ jobs.detect.outputs.full_gate }}
       historical_tls:
-        description: Whether TLS or shared inputs require historical compatibility coverage
+        description: Whether manual verification requires historical compatibility coverage
         value: ${{ jobs.detect.outputs.historical_tls }}
 
 permissions:
@@ -43,11 +39,10 @@ jobs:
       - id: paths
         env:
           WORKFLOW_FILE: ${{ inputs.workflow_file }}
-          MANUAL_MODULE: ${{ inputs.manual_module }}
           EVENT_NAME: ${{ github.event_name }}
           PUSH_BASE: ${{ github.event.before }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.sha }}
+          HEAD_SHA: ${{ github.event.after || github.sha }}
         run: |
           if [[ "$EVENT_NAME" == pull_request ]]; then
             base="$PR_BASE"
@@ -58,5 +53,4 @@ jobs:
             --workflow "$WORKFLOW_FILE" \
             --event "$EVENT_NAME" \
             --base "$base" \
-            --head "$HEAD_SHA" \
-            --manual-module "$MANUAL_MODULE"
+            --head "$HEAD_SHA"

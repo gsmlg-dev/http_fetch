@@ -735,6 +735,28 @@ mix test apps/http_fetch/test/http/response_test.exs
 mix test --cover
 ```
 
+### App-scoped GitHub Actions
+
+CI, Test, and E2E run separate jobs for each app under `apps/`. Automatic
+push and pull-request runs select only the apps whose own directories changed.
+Each job prepares its dependency closure, then checks or tests the selected
+app. WebSocket and EventSource test closures also include Fetch for their
+existing cross-client tests; production dependencies remain unchanged.
+
+Changes outside `apps/`, including shared configuration and workflow scripts,
+require a manual full run. Dispatching any of these workflows forces all nine
+app jobs on the selected branch. Manual CI also runs shared formatting,
+candidate package consumers, and historical TLS compatibility checks:
+
+```bash
+gh workflow run ci.yml --ref main
+gh workflow run test.yml --ref main
+gh workflow run e2e.yml --ref main
+```
+
+The same full runs are available through **Actions → Run workflow**. E2E uses
+the selected branch's commit and runs all apps.
+
 ### Running E2E Tests
 
 The e2e suite exercises real HTTP behavior against a vendored Go test

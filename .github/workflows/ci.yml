@@ -3,8 +3,12 @@ name: CI
 on:
   push:
     branches: ["**"]
+    paths: ['apps/**']
   pull_request:
     branches: [main]
+    paths: ['apps/**']
+
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -46,10 +50,8 @@ jobs:
           key: ci-${{ matrix.app }}-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs', format('apps/{0}/mix.exs', matrix.app)) }}
       - name: Install dependencies
         run: mix deps.get --check-locked
-      - name: Check root and app formatting
-        run: |
-          mix format --check-formatted mix.exs .formatter.exs config/config.exs
-          (cd "apps/${HTTP_FETCH_CI_APP}" && mix format --check-formatted)
+      - name: Check selected app formatting
+        run: (cd "apps/${HTTP_FETCH_CI_APP}" && mix format --check-formatted)
       - name: Check imported harness formatting
         if: matrix.app == 'ex_ssl' || matrix.app == 'elixir_quic' || matrix.app == 'elixir_quic_http3'
         run: |
@@ -62,17 +64,12 @@ jobs:
         run: mix compile --warnings-as-errors
       - name: Check selected app with Credo
         run: mix credo --files-included "apps/${HTTP_FETCH_CI_APP}/**/*.{ex,exs}"
-      - name: Check selected closure with Dialyzer
+      - name: Check selected app with Dialyzer
         run: mix dialyzer --format github
       - name: Build selected portable Hex package
         run: |
           version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' mix.exs)
           python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives" --package "$HTTP_FETCH_CI_APP"
-      - name: Check automation regressions
-        if: matrix.app == 'ex_ssl'
-        run: |
-          python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
-          python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
       - name: Check git diff
         run: git diff --check
 
@@ -87,6 +84,12 @@ jobs:
         with:
           elixir-version: '1.18'
           otp-version: '28'
+      - name: Check root formatting and automation regressions
+        run: |
+          mix format --check-formatted mix.exs .formatter.exs config/config.exs scripts/ci/test_app_closures.exs
+          elixir scripts/ci/test_app_closures.exs
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+          python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
       - name: Build and validate all candidate archives
         run: |
           version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' mix.exs)

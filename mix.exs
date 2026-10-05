@@ -48,7 +48,7 @@ defmodule HttpFetch.Umbrella.MixProject do
     ]
   end
 
-  # CI compiles the selected package and the siblings required by its tests.
+  # CI compiles the selected package and the siblings required by that package.
   # A normal invocation leaves app selection to Mix and includes the full umbrella.
   defp ci_apps do
     case System.get_env("HTTP_FETCH_CI_APP") do
@@ -74,26 +74,10 @@ defmodule HttpFetch.Umbrella.MixProject do
         [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime, :http_fetch]
 
       "http_event_source" ->
-        [
-          :ex_ssl,
-          :elixir_quic,
-          :http_core,
-          :elixir_quic_http3,
-          :http_runtime,
-          :http_fetch,
-          :http_event_source
-        ]
+        test_consumer_apps(:http_event_source)
 
       "http_web_socket" ->
-        [
-          :ex_ssl,
-          :elixir_quic,
-          :http_core,
-          :elixir_quic_http3,
-          :http_runtime,
-          :http_fetch,
-          :http_web_socket
-        ]
+        test_consumer_apps(:http_web_socket)
 
       "http_web_transport" ->
         [:ex_ssl, :elixir_quic, :http_core, :http_web_transport]
@@ -103,13 +87,31 @@ defmodule HttpFetch.Umbrella.MixProject do
     end
   end
 
+  # Shared-connection tests call HTTP.fetch/2; this is not a production dependency.
+  defp test_consumer_apps(app) do
+    runtime = [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime]
+    runtime ++ if(Mix.env() == :test, do: [:http_fetch, app], else: [app])
+  end
+
   defp dialyzer do
     [
+      paths: ci_dialyzer_paths(),
       plt_file: {:no_warn, "apps/http_fetch/priv/plts/dialyzer.plt"},
       plt_add_apps: [:ex_unit, :mix],
       flags: [:unmatched_returns, :error_handling, :underspecs],
       ignore_warnings: ".dialyzer_ignore.exs"
     ]
+  end
+
+  defp ci_dialyzer_paths do
+    case System.get_env("HTTP_FETCH_CI_APP") do
+      nil ->
+        nil
+
+      app ->
+        build = Mix.Project.build_path(build_path: "_build", build_per_environment: true)
+        [Path.join([build, "lib", app, "ebin"])]
+    end
   end
 
   defp aliases do
