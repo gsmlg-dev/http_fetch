@@ -1,6 +1,6 @@
 defmodule HTTP.HTTP3.LifecycleTest do
   use ExUnit.Case, async: true
-  alias HTTP.HTTP3.{BodyBridge, ConnectionOwner, Pool}
+  alias HTTP.HTTP3.{BodyBridge, ConnectionOwner, Pool, PoolKey, Stream}
 
   defmodule Transport do
     def connect(_, _, opts) do
@@ -34,6 +34,10 @@ defmodule HTTP.HTTP3.LifecycleTest do
         end)
 
       case outcome do
+        :stall ->
+          send(Agent.get(stream.controller, & &1.test), {:native_admitted, opts[:ref]})
+          receive do: (:never -> :ok)
+
         :unknown ->
           send(Agent.get(stream.controller, & &1.test), {:native_unknown, opts[:ref]})
           {:unknown, opts[:ref]}
@@ -47,7 +51,18 @@ defmodule HTTP.HTTP3.LifecycleTest do
     end
 
     def operation_status(connection, ref, _) do
-      Agent.get(connection.controller, fn state -> Map.get(state.statuses, ref, :unknown) end)
+      {test, stall, status} =
+        Agent.get(connection.controller, fn state ->
+          {state.test, Map.get(state, :stall_status, false),
+           Map.get(state.statuses, ref, :unknown)}
+        end)
+
+      if stall do
+        send(test, {:native_status_stalled, ref})
+        receive do: (:never -> :ok)
+      else
+        status
+      end
     end
 
     def events(connection, _, _) do
@@ -186,6 +201,73 @@ defmodule HTTP.HTTP3.LifecycleTest do
     monitor = Process.monitor(owner)
     assert_receive {:native_connect, ^owner}
     assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}, 1_000
+  end
+
+  for stage <- [:initial, :reconciliation] do
+    @stage stage
+    test "watchdog reports indeterminate #{@stage} HEADERS admission without replay", %{
+      controller: controller
+    } do
+      owner = owner(controller, operation_timeout: 100)
+      Process.unlink(owner)
+      owner_monitor = Process.monitor(owner)
+      {:ok, pool} = Pool.start_link(max_connections: 1)
+      on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+
+      request = %HTTP.Request{
+        method: :post,
+        body: self(),
+        duplex: :half,
+        url: URI.parse("https://test/admitted"),
+        transport_options: [
+          timeout: 5_000,
+          ssl: [
+            cacertfile: Path.expand("../../../../elixir_quic/test/fixtures/tls/root.pem", __DIR__)
+          ]
+        ]
+      }
+
+      {:ok, key, _connect} = PoolKey.build(request)
+      :ok = Pool.register(pool, key, owner)
+
+      Agent.update(controller, fn state ->
+        if @stage == :initial,
+          do: %{state | sends: [:stall]},
+          else: Map.merge(state, %{sends: [:unknown], stall_status: true})
+      end)
+
+      assert_receive {:native_connect, ^owner}
+      assert_receive {:native_send, 2, _, false}
+      assert {:ok, stream, generation} = Stream.start(request, self(), pool: pool)
+      stream_monitor = Process.monitor(stream)
+      assert_receive {:native_send, 0, headers, false}
+      assert {:ok, %HTTP.H3.Frame{type: 1}, <<>>} = QuicHttp3.Frame.decode(headers)
+
+      native_ref =
+        if @stage == :initial do
+          assert_receive {:native_admitted, native_ref}
+          native_ref
+        else
+          assert_receive {:native_unknown, native_ref}
+          assert_receive {:native_status_stalled, ^native_ref}
+          native_ref
+        end
+
+      assert is_reference(native_ref)
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, 1_000
+      operation = if @stage == :initial, do: :unknown, else: native_ref
+
+      assert_receive {:http_runtime, ^generation, ^stream,
+                      {:error, {:indeterminate_operation, ^operation}}},
+                     1_000
+
+      assert_receive {:DOWN, ^stream_monitor, :process, ^stream, :normal}, 1_000
+      assert %{leases: 0, pending: 0, owners: 0} = Pool.status(pool)
+      assert Agent.get(controller, & &1.id) == 4
+      refute_receive {:native_connect, _}, 0
+      refute_receive {:native_send, _, _, _}, 0
+      refute_receive {:read_chunk, _, :ack}, 0
+    end
   end
 
   test "rotation counts critical allocation and drains before further admission", %{

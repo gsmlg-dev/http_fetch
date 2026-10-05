@@ -91,8 +91,10 @@ remote workflow results are separate from the presence of this workflow.
 | Standalone CI workflow YAML and mandatory gate step | PASS locally; remote execution remains separate |
 | Bounded native runtime fixture against both final peers | PASS: exact two-MiB producer upload, eight-MiB download, wrong CA/name, expired leaf and wrong ALPN; zero remaining leases |
 | Complete public acceptance, WP4 working checkpoint | PASS: both peers, informational/trailers/reset/abort/SSE/GOAWAY, 10,000 sequential requests across 11 connections; final queued-cancellation/SSE review rerun also PASS; concurrent rotation repair remains pending |
-| Remote CI, release artifacts and isolated published consumer | NOT RUN by this fixture assignment |
-| Proposed 24-hour scoped canary | NOT RUN by this fixture assignment |
+| Corrected remote public CI | PASS: run 37286353184 on c12bbf8; source public gate and peer artifacts |
+| Fresh isolated candidate after rotation repair/main merge | PASS: nine exact private Hex packages, both peers, 10,000 requests/11 connections on c12bbf8 |
+| Final release artifacts and isolated published consumer | NOT RUN: final publication remains gated |
+| 24-hour scoped canary | NOT RUN: required before final release |
 
 The fixture diagnosis used the `c3fb8dd` WP3 baseline plus the concurrent WP4
 worktree. It made no native QUIC or runtime implementation edits. Diagnostic
@@ -150,6 +152,19 @@ HTTP3_GATE_LOG_DIR=/tmp/http3-canary-peers \
 
 The initial 184-second calibration passed 1,792 requests but had not reached
 the stream-allocation rotation boundary. A subsequent 600-second calibration
-failed with `{:error, :goaway}` at concurrent rotation. That result blocks the
-24-hour acceptance until the known-unsent admission defect is repaired and
-fresh gates pass. Neither calibration is a substitute for 24 hours.
+failed with `{:error, :goaway}` at concurrent rotation. The known-unsent admission repair subsequently passed a fresh **603-second**
+calibration on `410e095`: **5,696 requests, zero errors**, peak VM memory
+73,744,680 bytes, 178 processes, four owners/endpoints/native connections, and
+mailbox depth one. Wrapper exit and owned fixture cleanup passed.
+Neither calibration is a substitute for 24 hours. An independent final review
+found a separate initial-admission watchdog classification gap. Deterministic
+initial-admission and known-ref reconciliation regressions now pass, with no
+replay, no producer demand and zero leases. Root runtime/Fetch/EventSource,
+compile, format, Credo and Dialyzer reruns pass; the full canary remains required.
+
+The fresh final candidate logs are `/tmp/http3-wp5-final-candidate-public.log`,
+with private loaded modules under `/tmp/http-fetch-hex-consumer-yp2jtkc_` and
+archives under `/tmp/http3-final-candidate-KxWRlh`. Those are candidate archives
+of the current source with 0.16.5 development metadata, not a claim that immutable
+published 0.16.5 artifacts contain the public H3 implementation. Final release
+validation regenerates and verifies coordinated 0.16.7 artifacts separately.

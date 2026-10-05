@@ -31,7 +31,10 @@ Binary POST/PUT bodies and PID bodies with `duplex: :half` use HTTP/3 DATA frame
 Upload producers receive acknowledgement only after all slices are definitively
 admitted. Source chunks are limited to 64 KiB, native slices to 16 KiB. Early final
 responses stop the upload; errors, cancellation and unknown admission never
-manufacture an acknowledgement or replay the request. Redirects that preserve a
+manufacture an acknowledgement or replay the request. A native-call watchdog
+returns `{:indeterminate_operation, operation_ref}` when admission cannot be
+resolved; the identity is `:unknown` if the synchronous call never exposed its
+native reference. Redirects that preserve a
 streamed body return `:streaming_body_redirect_not_replayable`. Cross-origin
 redirects with client certificate/key identity return an explicit error.
 

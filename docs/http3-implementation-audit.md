@@ -265,3 +265,39 @@ The new standalone public workflow was rejected before execution because
 gate's step environment preserves the same paths and required diagnostics.
 Remote rerun is required; neither the initial invalid workflow nor a local YAML
 parse is counted as a successful acceptance run.
+
+Corrected remote public workflow **PASS** on `c12bbf8`:
+[37286353184](https://github.com/gsmlg-dev/http_fetch/actions/runs/37286353184).
+The prior `410e095` static CI also **PASS**; its automatic app-owner selection
+does not substitute for final release's nine-app/full acceptance gates.
+Final source candidate archive identity/audit and private nine-Hex-package public
+consumer **PASS**, including both peers and 10,000 requests/11 connections;
+log `/tmp/http3-wp5-final-candidate-public.log`. Serialized impairment reruns
+**PASS**: client 8,328ms, server 8,871ms, external server 8,521ms, original
+15-second deadline, checksums/cleanup/zero routes retained. A concurrent test
+run timed out under simultaneous automation load; that log is retained separately.
+
+Exact-source `410e095` rotation calibration **PASS**: 603 seconds, 5,696 requests,
+zero errors, peaks 73,744,680 bytes, 178 processes, four owners/endpoints/native
+connections and mailbox depth one; wrapper exit 0 and owned fixture cleanup PASS.
+Final independent review found an initial native-admission watchdog timeout can
+return `runtime_down` without explicit indeterminate classification. This cannot
+trigger replay, but violates the plan's explicit-outcome requirement. The bounded
+repair/regression precedes the required 24-hour run; no full canary PASS is claimed.
+
+The initial-admission watchdog gap was reproduced deterministically in the
+transport seam: encoded HEADERS and the operation ref were recorded, then the
+call stalled before returning. Before repair the caller received `runtime_down`;
+after repair it receives explicit `{:indeterminate_operation, :unknown}`. A
+separate stalled reconciliation test retains the exact original operation ref.
+Both tests assert no replay, no producer demand and zero reservations after
+termination. This is controlled transport-contract evidence, not an independent
+UDP fault-injection claim. Root refreshed runtime **92/0**, Fetch **318 + 20
+doctests/0**, EventSource **75/0**, seed 28092026. Compile, root format, configured
+Credo and full Dialyzer **PASS**, five existing intentional skips retained.
+The final source public rerun and 24-hour canary remain independent gates.
+
+Fresh public acceptance after the watchdog repair **PASS** against both peers:
+`/tmp/http3-wp5-watchdog-public.log`, including **10,000 sequential requests over
+11 connections**, with cleanup. The 24-hour canary will run the committed source
+that contains this repair and the completed functional gates.

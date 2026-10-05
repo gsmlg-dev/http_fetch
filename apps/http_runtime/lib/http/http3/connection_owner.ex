@@ -261,9 +261,14 @@ defmodule HTTP.HTTP3.ConnectionOwner do
           result(
             next,
             context,
-            guarded(next, min(next.timeout, max(continuation.pending.deadline - now(), 1)), fn ->
-              Session.resume(next.session, continuation)
-            end)
+            guarded(
+              next,
+              min(next.timeout, max(continuation.pending.deadline - now(), 1)),
+              fn ->
+                Session.resume(next.session, continuation)
+              end,
+              context
+            )
           )
 
         polled.queue != [] ->
@@ -301,9 +306,14 @@ defmodule HTTP.HTTP3.ConnectionOwner do
         result(
           state,
           action,
-          guarded(state, min(state.timeout, Keyword.get(opts, :timeout, state.timeout)), fn ->
-            Session.request(state.session, fields, body, opts)
-          end)
+          guarded(
+            state,
+            min(state.timeout, Keyword.get(opts, :timeout, state.timeout)),
+            fn ->
+              Session.request(state.session, fields, body, opts)
+            end,
+            action
+          )
         )
     end
   end
@@ -625,13 +635,15 @@ defmodule HTTP.HTTP3.ConnectionOwner do
 
   defp touch(state), do: %{state | last_activity: now()}
 
-  defp guarded(state, timeout, fun) do
+  defp guarded(state, timeout, fun, context \\ nil) do
     token = make_ref()
-    operation = if state.session.pending, do: state.session.pending.ref
+    # Session creates native refs inside its synchronous calls. Until a call
+    # returns, admission may have happened without exposing that identity.
+    operation = if state.session.pending, do: state.session.pending.ref, else: :unknown
 
     recipients =
       Enum.map(state.requests, fn {_, request} -> request.subscriber end) ++
-        case state.pending do
+        case context || state.pending do
           {:open, _from, subscriber, _, _, _, _} -> [subscriber]
           _ -> []
         end
