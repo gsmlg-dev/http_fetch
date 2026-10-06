@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-06
+
+### Added
+- Preserve bounded, ordered HTTP/2 informational responses and separate buffered
+  and streamed trailers through the existing response and stream APIs.
+- Gate shared transport and tooling changes against affected Fetch, EventSource
+  and WebSocket consumers, with independent peer traffic and package evidence.
+- Document the scoped HTTP/2 beta support contract and rollout/rollback runbook.
+
+### Fixed
+- Bound reusable automatic HTTPS negotiation before dialing, settle HTTP/1.1
+  fallback claims, and clean up admission on cancellation, deadlines and exit.
+- Honor peer stream capacity after the single initial automatic H2 reservation,
+  including zero capacity and saturated admission queues.
+
+### Validation
+- Frozen HTTP/2 candidate passed all 78 acceptance gates, both genuine
+  30-minute soaks, automatic CI and full CI/Test/E2E. Retain measured resources,
+  package checksums, rejected attempts and limits in `docs/http2-beta-validation.md`.
+
 ## [0.16.7] - 2026-10-06
 
 ### Added
