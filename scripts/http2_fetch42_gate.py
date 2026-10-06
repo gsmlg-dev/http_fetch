@@ -142,7 +142,7 @@ def main():
                MIX_DEPS_PATH=str(repository / 'deps'),
                GIT_DIR=subprocess.check_output(['git', '-C', str(repository), 'rev-parse',
                     '--absolute-git-dir'], text=True).strip(), GIT_WORK_TREE=str(source),
-               HTTP2_PEER_PYTHON=sys.executable)
+               HTTP2_PEER_PYTHON=sys.executable, EX_SSL_HISTORY_REPOSITORY=str(repository))
     env.setdefault('ERL_FLAGS', '+S 4:4')
     lock, stopped = threading.Lock(), threading.Event()
     active, active_lock = set(), threading.RLock()

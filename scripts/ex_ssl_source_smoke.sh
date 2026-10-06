@@ -115,7 +115,7 @@ mkdir -p "$HTTP_FETCH_PACKAGE_DIR" "$consumer_dir/test" "$EX_SSL_RESULTS_DIR" "$
 package_root="$repo_root"
 if [[ "$EX_SSL_DEP_MODE" == published ]]; then
   package_root="$work_dir/historical-source"
-  python3 "$repo_root/scripts/ci/stage_ex_ssl_history.py" "$repo_root" \
+  python3 "$repo_root/scripts/ci/stage_ex_ssl_history.py" "${EX_SSL_HISTORY_REPOSITORY:-$repo_root}" \
     e844ce03067fedac82c079f21c47810e671be0bb "$package_root"
 fi
 
