@@ -254,6 +254,7 @@ defmodule HTTP.HTTP3.LifecycleTest do
         end
 
       assert is_reference(native_ref)
+      cleanup_deadline = System.monotonic_time(:millisecond) + 1_000
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, 1_000
       operation = if @stage == :initial, do: :unknown, else: native_ref
 
@@ -262,6 +263,7 @@ defmodule HTTP.HTTP3.LifecycleTest do
                      1_000
 
       assert_receive {:DOWN, ^stream_monitor, :process, ^stream, :normal}, 1_000
+      await_pool_cleanup(pool, cleanup_deadline)
       assert %{leases: 0, pending: 0, owners: 0} = Pool.status(pool)
       assert Agent.get(controller, & &1.id) == 4
       refute_receive {:native_connect, _}, 0
@@ -384,5 +386,17 @@ defmodule HTTP.HTTP3.LifecycleTest do
     Pool.release(pool, lease)
     GenServer.stop(pool)
     assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}
+  end
+
+  defp await_pool_cleanup(pool, deadline) do
+    case Pool.status(pool) do
+      %{leases: 0, pending: 0, owners: 0} ->
+        :ok
+
+      status ->
+        assert System.monotonic_time(:millisecond) < deadline, inspect(status)
+        :erlang.yield()
+        await_pool_cleanup(pool, deadline)
+    end
   end
 end
