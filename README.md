@@ -215,6 +215,15 @@ Truncation, required writes before completion, abnormal closure, cancellation
 and timeout remain errors. The original deadline and streaming backpressure
 are preserved.
 
+HTTP/2 retains ordered informational blocks in `response.informational` and
+buffered trailers in `response.trailers`, separate from initial headers.
+Streamed trailers arrive as `{:stream_trailers, stream_pid, headers}` after
+acknowledged DATA and before `:stream_end`; the immutable response field stays
+empty. Metadata retention is bounded and malformed or oversized metadata fails
+the response. See `HTTP.Response` for the limits and
+[the HTTP/2 beta support contract](docs/http2-beta-support.md) for protocol
+availability, workload limits, rollout and rollback.
+
 For `:ex_ssl`, `socket_opts` accepts `send_timeout`,
 `send_timeout_close: true`, `nodelay`, `keepalive`, `sndbuf`, `recbuf`, and local
 `ip`/`port`. The adapter forwards only this allowlist and ex_ssl validates values.
@@ -738,15 +747,22 @@ mix test --cover
 ### App-scoped GitHub Actions
 
 CI, Test, and E2E run separate jobs for each app under `apps/`. Automatic
-push and pull-request runs select only the apps whose own directories changed.
-Each job prepares its dependency closure, then checks or tests the selected
-app. WebSocket and EventSource test closures also include Fetch for their
-existing cross-client tests; production dependencies remain unchanged.
+push and pull-request runs select changed app owners plus affected H2
+Fetch/EventSource/WebSocket consumers, using the actual umbrella dependency
+graph. Changes to root manifests/lockfile, configuration, H2 peers/harnesses,
+CI selectors, release tooling and workflows also select these consumers.
+Unrelated root documentation does not trigger these jobs.
 
-Changes outside `apps/`, including shared configuration and workflow scripts,
-require a manual full run. Dispatching any of these workflows forces all nine
-app jobs on the selected branch. Manual CI also runs shared formatting,
-candidate package consumers, and historical TLS compatibility checks:
+The CI H2 compatibility job checks consumer suites, both independent peers over
+h2c and verified TLS with `:ssl` and `:ex_ssl`, and mixed candidate-package
+traffic. Its artifact records candidate SHA, archive checksums, commands,
+backend/peer, test summaries, and exclusions. Long soaks run separately.
+Each app job prepares its dependency closure; WebSocket and EventSource test
+closures include Fetch for their existing cross-client tests.
+
+Shared changes still require manual full regression. Dispatching any of these
+workflows forces all nine app jobs on the selected branch. Manual CI also runs
+candidate package consumers and historical TLS compatibility checks:
 
 ```bash
 gh workflow run ci.yml --ref main
