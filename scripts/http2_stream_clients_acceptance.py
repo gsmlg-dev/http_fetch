@@ -157,7 +157,28 @@ def main():
     results = []
     # Fetch42 and docs use separate builds; prepared new-client gates share a read-only build.
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = [pool.submit(run, name, gates[name], 3600) for name in ('fetch42', 'mixed-soak')]
+        fetch = pool.submit(run, 'fetch42', gates['fetch42'], 3600)
+        # Wait for actual prerequisite completion, not an arbitrary warm-up delay.
+        # Both 30-minute soaks still run together after the unit/consumer baseline.
+        readiness = evidence / 'fetch42/prerequisites.result.json'
+        deadline = time.monotonic() + 1200
+        try:
+            while not readiness.exists():
+                if fetch.done():
+                    raise RuntimeError(f'Fetch prerequisites failed: {fetch.result()}')
+                if time.monotonic() >= deadline:
+                    raise TimeoutError('Fetch prerequisite readiness deadline')
+                stopped.wait(0.1)
+            record = json.loads(readiness.read_text())
+            assert record == dict(result='PASS', candidate_tree=args.tree, gates=10), record
+        except BaseException:
+            stopped.set()
+            with active_lock:
+                running = list(active)
+            for process in running:
+                stop_group(process)
+            raise
+        futures = [fetch, pool.submit(run, 'mixed-soak', gates['mixed-soak'], 3600)]
         for name, command in gates.items():
             if name not in ('fetch42', 'mixed-soak'):
                 futures.append(pool.submit(run, name, command, 1800))

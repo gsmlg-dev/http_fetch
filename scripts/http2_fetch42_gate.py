@@ -219,8 +219,15 @@ def main():
     preparation = ('final-deps', 'final-compile', 'final-format')
     tests = ('final-full-tests', *[f'final-cold-fetch-repeat-{i}' for i in range(1, 4)])
     packages = ('final-package-tls-ssl', 'final-package-tls-ex_ssl', 'final-tls-lifecycle-ci')
-    if not all(run(gate) == 0 for gate in preparation) or not batch(tests, 4) or not batch(packages, 3):
+    if not all(run(gate) == 0 for gate in preparation) or not batch(tests, 1) or not batch(packages, 1):
         raise SystemExit('FAIL: prerequisite gate; remaining workloads NOT RUN')
+    # Lifecycle fixtures deliberately have small event deadlines. Establish their
+    # prerequisites with one test VM before independent load gates compete for CPU.
+    ready = evidence / 'prerequisites.result.json'
+    pending = evidence / 'prerequisites.result.tmp'
+    pending.write_text(json.dumps(dict(result='PASS', candidate_tree=args.tree,
+                                      gates=len(preparation) + len(tests) + len(packages))) + '\n')
+    pending.replace(ready)
     remaining = [gate for gate in gates if gate not in (*preparation, *tests, *packages)]
     # Start the genuine 30-minute workload alongside independent finite gates.
     remaining.remove('final-soak')
