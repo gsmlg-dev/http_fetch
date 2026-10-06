@@ -63,6 +63,16 @@ def serve(sock):
                     elif isinstance(event, StreamEnded):
                         headers, digest, size = requests.pop(event.stream_id)
                         path = headers[':path']
+                        if path in ('/metadata/buffer', '/metadata/stream'):
+                            connection.send_headers(event.stream_id, [(':status', '103'), ('link', 'first')])
+                            connection.send_headers(event.stream_id, [(':status', '103'), ('link', 'second')])
+                            final = [(':status', '200'), ('x-peer', 'hyper-h2-' + h2.__version__)]
+                            if path.endswith('/buffer'):
+                                final.append(('content-length', '4'))
+                            connection.send_headers(event.stream_id, final)
+                            connection.send_data(event.stream_id, b'body')
+                            connection.send_headers(event.stream_id, [('x-checksum', 'verified')], end_stream=True)
+                            continue
                         if path.startswith('/concurrent/'):
                             _, _, number, length = path.split('/')
                             number, length = int(number), int(length)

@@ -1,3 +1,4 @@
+Code.require_file("http2_metrics.exs", __DIR__)
 # Public RFC 8441 acceptance; launched and independently audited by the Python runner.
 defmodule HTTPWebSocketGate do
   alias HTTP.WebSocket, as: WS
@@ -24,6 +25,7 @@ defmodule HTTPWebSocketGate do
   }
 
   def run do
+    metrics = HTTP2GateMetrics.start()
     url = System.fetch_env!("HTTP_WS_GATE_URL")
     mode = System.fetch_env!("HTTP_WS_GATE_MODE")
     count = System.fetch_env!("HTTP_WS_GATE_COUNT") |> String.to_integer()
@@ -74,6 +76,8 @@ defmodule HTTPWebSocketGate do
 
     settle()
     sample([], [], true)
+
+    IO.puts(JSON.encode!(HTTP2GateMetrics.snapshot(metrics)))
 
     IO.puts(
       JSON.encode!(

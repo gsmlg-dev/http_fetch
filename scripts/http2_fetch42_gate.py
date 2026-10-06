@@ -136,10 +136,12 @@ def main():
     evidence.mkdir(parents=True, exist_ok=False)
     gates = commands(evidence)
     env = os.environ.copy()
+    env['PATH'] = str(Path(sys.executable).parent) + os.pathsep + env.get('PATH', '')
     env.update(HTTP_FETCH_CANDIDATE_TREE=args.tree, MIX_ENV='test',
                MIX_BUILD_PATH=str(evidence / 'build'),
                MIX_DEPS_PATH=str(repository / 'deps'),
-               GIT_DIR=str(repository / '.git'), GIT_WORK_TREE=str(source),
+               GIT_DIR=subprocess.check_output(['git', '-C', str(repository), 'rev-parse',
+                    '--absolute-git-dir'], text=True).strip(), GIT_WORK_TREE=str(source),
                HTTP2_PEER_PYTHON=sys.executable)
     env.setdefault('ERL_FLAGS', '+S 4:4')
     lock, stopped = threading.Lock(), threading.Event()

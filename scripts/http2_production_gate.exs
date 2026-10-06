@@ -1,3 +1,4 @@
+Code.require_file("http2_metrics.exs", __DIR__)
 # Run through the umbrella or a clean consumer with HTTP_FETCH_GATE_URL set.
 url = System.fetch_env!("HTTP_FETCH_GATE_URL")
 
@@ -91,11 +92,47 @@ snapshot = fn ->
   }
 end
 
+metrics = HTTP2GateMetrics.start()
 started = System.monotonic_time(:millisecond)
 
 case mode do
   "smoke" ->
     for n <- 1..3, do: ^n = String.to_integer(fetch.("/#{n}", []) |> String.trim_leading("/"))
+
+    for mode <- ["buffer", "stream"] do
+      response = HTTP.fetch(url <> "/metadata/" <> mode, opts) |> HTTP.Promise.await(65_000)
+      [{103, first}, {103, second}] = response.informational
+      "first" = HTTP.Headers.get(first, "link")
+      "second" = HTTP.Headers.get(second, "link")
+      nil = HTTP.Headers.get(response.headers, "x-checksum")
+
+      if mode == "buffer" do
+        "body" = response.body
+        "verified" = HTTP.Headers.get(response.trailers, "x-checksum")
+      else
+        stream = response.stream
+        send(stream, {:read_chunk, self(), :ack})
+
+        receive do
+          {:stream_chunk, ^stream, "body", ack} -> send(stream, {:stream_chunk_ack, ack})
+        after
+          5_000 -> raise "metadata body deadline"
+        end
+
+        receive do
+          {:stream_trailers, ^stream, trailers} ->
+            "verified" = HTTP.Headers.get(trailers, "x-checksum")
+        after
+          5_000 -> raise "metadata trailers deadline"
+        end
+
+        receive do
+          {:stream_end, ^stream} -> :ok
+        after
+          5_000 -> raise "metadata completion deadline"
+        end
+      end
+    end
 
   "reuse" ->
     count = String.to_integer(System.get_env("HTTP_FETCH_GATE_COUNT", "10000"))
@@ -278,6 +315,7 @@ case mode do
 end
 
 stats = settle.()
+IO.puts(JSON.encode!(HTTP2GateMetrics.snapshot(metrics)))
 IO.puts(JSON.encode!(Map.put(snapshot.(), :gate, "resource_snapshot")))
 
 IO.puts(

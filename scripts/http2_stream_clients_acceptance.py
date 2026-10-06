@@ -55,8 +55,10 @@ def main():
     before = snapshot()
     (evidence / 'source-manifest.json').write_text(json.dumps(before, indent=2) + '\n')
     env = os.environ.copy()
+    env['PATH'] = str(Path(sys.executable).parent) + os.pathsep + env.get('PATH', '')
     env.update(MIX_ENV='test', MIX_BUILD_PATH=str(evidence / 'clients-build'),
-               MIX_DEPS_PATH=str(repository / 'deps'), GIT_DIR=str(repository / '.git'),
+               MIX_DEPS_PATH=str(repository / 'deps'), GIT_DIR=subprocess.check_output(['git', '-C', str(repository), 'rev-parse',
+                    '--absolute-git-dir'], text=True).strip(),
                GIT_WORK_TREE=str(source), HTTP_FETCH_CANDIDATE_TREE=args.tree,
                HTTP2_PEER_PYTHON=sys.executable)
     env.setdefault('ERL_FLAGS', '+S 4:4')

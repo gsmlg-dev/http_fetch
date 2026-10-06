@@ -29,6 +29,7 @@ else:
 root = Path(__file__).resolve().parent.parent
 fixtures = root / 'apps/http_fetch/test/support/fixtures'
 env = os.environ.copy()
+env['PATH'] = str(Path(sys.executable).parent) + os.pathsep + env.get('PATH', '')
 env.update(H2_PEER_LIMIT=str(args.limit), H2_PEER_TLS='1' if args.tls else '0',
            H2_PEER_CERT=str(fixtures / 'localhost.pem'), H2_PEER_KEY=str(fixtures / 'localhost.key'))
 if args.peer == 'hyper-h2':

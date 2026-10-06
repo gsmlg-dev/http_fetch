@@ -30,6 +30,16 @@ server.on('stream', (stream, headers) => {
   stream.on('data', chunk => { size += chunk.length; hash.update(chunk); });
   stream.on('end', () => {
     const path = headers[':path'];
+    if (path === '/metadata/buffer' || path === '/metadata/stream') {
+      stream.additionalHeaders({ ':status': 103, link: 'first' });
+      stream.additionalHeaders({ ':status': 103, link: 'second' });
+      const final = { ':status': 200, 'x-peer': `node-${process.versions.node}` };
+      if (path.endsWith('/buffer')) final['content-length'] = '4';
+      stream.respond(final, { waitForTrailers: true });
+      stream.on('wantTrailers', () => stream.sendTrailers({ 'x-checksum': 'verified' }));
+      stream.end('body');
+      return;
+    }
     if (path.startsWith('/concurrent/')) {
       const match = /^\/concurrent\/(\d+)\/(\d+)$/.exec(path);
       const number = match && Number(match[1]);

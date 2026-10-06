@@ -12,5 +12,4 @@ else
   python3 "$repo_root/scripts/release/stage.py" build "$version" "$work_dir/stage" "$archive_dir"
 fi
 elixir "$repo_root/scripts/release/archives.exs" "$version" "$archive_dir"
-HTTP_FETCH_RELEASE_VERSION="$version" HTTP_FETCH_ARCHIVE_DIR="$archive_dir" \
-  python3 "$repo_root/scripts/http_runtime_package_traffic_gate.py"
+python3 "$repo_root/scripts/release/consumer_gate.py" "$version" "$archive_dir" --mode h2

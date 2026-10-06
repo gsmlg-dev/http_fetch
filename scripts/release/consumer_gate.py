@@ -145,6 +145,58 @@ end
     command(["mix", "run", "smoke.exs"], cwd=project, env=project_env)
 
 
+def http2_project(directory, version, env):
+    project = directory / "h2"
+    project.mkdir(parents=True)
+    deps = ", ".join(f'{{:{app}, "== {version}"}}' for app in PACKAGES)
+    (project / "mix.exs").write_text(f'''defmodule HTTP2Consumer.MixProject do
+  use Mix.Project
+  def project, do: [app: :http2_consumer, version: "0.0.0", deps: [{deps}]]
+  def application, do: [extra_applications: [:logger, :public_key, :ssl]]
+end
+''')
+    for script in ("http2_production_gate.exs", "http2_metrics.exs"):
+        shutil.copyfile(ROOT / "scripts" / script, project / script)
+    (project / "provenance.exs").write_text(f'''expected = "{version}"
+project = __DIR__ |> Path.expand()
+packages = ~w({" ".join(PACKAGES)})a
+dependencies = Mix.Dep.cached()
+
+for app <- packages do
+  dep = Enum.find(dependencies, &(&1.app == app)) || raise("missing coordinated package #{{app}}")
+  unless dep.scm == Hex.SCM and dep.opts[:hex] == Atom.to_string(app) and
+           dep.status == {{:ok, expected}},
+         do: raise("invalid Hex resolution for #{{app}}: #{{inspect(dep.status)}}")
+  unless Path.expand(dep.opts[:dest]) == Path.join([project, "deps", Atom.to_string(app)]),
+         do: raise("dependency #{{app}} escaped isolated consumer")
+  {{:ok, _}} = Application.ensure_all_started(app)
+  unless to_string(Application.spec(app, :vsn)) == expected,
+         do: raise("loaded #{{app}} version differs from coordinated release")
+end
+
+loaded = for module <- [HTTP, HTTP.HTTP2.ConnectionOwner, HTTP.HTTP2.Pool, SSL.Connection] do
+  Code.ensure_loaded!(module)
+  beam = :code.which(module) |> to_string() |> Path.expand()
+  unless String.starts_with?(beam, Path.join(project, "build") <> "/"),
+         do: raise("#{{inspect(module)}} did not load from isolated Hex build: #{{beam}}")
+  {{inspect(module), beam}}
+end
+
+IO.puts(JSON.encode!(%{{gate: "h2_package_provenance", packages: packages,
+  version: expected, scm: "Hex.SCM", loaded_modules: Map.new(loaded),
+  backend: System.get_env("HTTP_FETCH_GATE_BACKEND", "ssl"),
+  route: if(String.starts_with?(System.fetch_env!("HTTP_FETCH_GATE_URL"), "https://"),
+            do: "h2_tls", else: "h2c")}}))
+''')
+    (project / "gate.exs").write_text('Code.require_file("provenance.exs", __DIR__)\n'
+                                      'Code.require_file("http2_production_gate.exs", __DIR__)\n')
+    project_env = {**env, "MIX_BUILD_PATH": str(project / "build"),
+                   "MIX_DEPS_PATH": str(project / "deps")}
+    command(["mix", "deps.get"], cwd=project, env=project_env)
+    command(["mix", "compile", "--warnings-as-errors"], cwd=project, env=project_env)
+    command(["mix", "run", "gate.exs"], cwd=project, env=project_env)
+
+
 def feature_group_passed(output):
     old = re.search(r"(?m)^[1-9][0-9]* tests?, 0 failures$", output)
     current = re.search(r"(?m)^Result: [1-9][0-9]* passed$", output)
@@ -288,6 +340,8 @@ def run(version, archive_dir=None, *, mode="all", keep=False, published=False, s
                 runtime_projects(directory, version, env)
             elif mode == "external":
                 external_project(directory, version, env)
+            elif mode == "h2":
+                http2_project(directory, version, env)
             elif mode == "feature":
                 feature_project(directory, version, env)
             elif mode == "http3":
@@ -310,7 +364,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("version")
     parser.add_argument("archive_dir", type=Path, nargs="?")
-    parser.add_argument("--mode", choices=("all", "runtime", "external", "feature", "http3", "http3-canary"), default="all")
+    parser.add_argument("--mode", choices=("all", "runtime", "external", "h2", "feature", "http3", "http3-canary"), default="all")
     parser.add_argument("--source-sha")
     parser.add_argument("--published", action="store_true")
     parser.add_argument("--keep", action="store_true")

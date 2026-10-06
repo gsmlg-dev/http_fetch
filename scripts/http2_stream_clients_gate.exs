@@ -1,3 +1,4 @@
+Code.require_file("http2_metrics.exs", __DIR__)
 # Public EventSource/Fetch acceptance. Run with the independent Python runner.
 defmodule HTTPStreamClientsGate do
   alias HTTP.EventSource
@@ -24,6 +25,7 @@ defmodule HTTPStreamClientsGate do
   }
 
   def run do
+    metrics = HTTP2GateMetrics.start()
     url = System.fetch_env!("HTTP_STREAM_GATE_URL")
     backend = String.to_existing_atom(System.get_env("HTTP_STREAM_GATE_BACKEND", "ssl"))
     mode = System.get_env("HTTP_STREAM_GATE_MODE", "sse")
@@ -67,6 +69,7 @@ defmodule HTTPStreamClientsGate do
 
     settle()
     sample([], true)
+    IO.puts(JSON.encode!(HTTP2GateMetrics.snapshot(metrics)))
     samples = Process.get(:samples)
 
     IO.puts(
