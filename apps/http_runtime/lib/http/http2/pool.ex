@@ -31,6 +31,10 @@ defmodule HTTP.HTTP2.Pool do
   @spec claim_connect(pid(), key()) :: :start | :wait
   def claim_connect(pool, key), do: GenServer.call(pool, {:claim_connect, key})
 
+  @doc "Settles a successful non-H2 negotiation and lets queued requests negotiate in turn."
+  @spec complete_connect(pid(), key()) :: :ok
+  def complete_connect(pool, key), do: GenServer.call(pool, {:complete_connect, key})
+
   @doc "Fails an out-of-band connection attempt and wakes queued reservations."
   @spec fail_connect(pid(), key(), term()) :: :ok
   def fail_connect(pool, key, reason),
@@ -122,7 +126,13 @@ defmodule HTTP.HTTP2.Pool do
           register_internal(state, key, owner, Keyword.get(opts, :max_streams, state.max_streams))
 
         state =
-          if Keyword.get(opts, :connecting?, false), do: finish_connect(state, key), else: state
+          if Keyword.get(opts, :connecting?, false) do
+            state
+            |> put_in([:entries, key, :connections, owner, :admission_caller], elem(from, 0))
+            |> finish_connect(key)
+          else
+            state
+          end
 
         {:reply, :ok, state |> dispatch_waiters(key) |> emit_pool(:connection, :registered)}
     end
@@ -183,6 +193,7 @@ defmodule HTTP.HTTP2.Pool do
         {:reply, {:error, :key_capacity}, state}
 
       true ->
+        {state, opts} = take_admission(state, key, opts, elem(from, 0))
         reserve_available(state, key, opts, from, token, deadline)
     end
   end
@@ -225,6 +236,19 @@ defmodule HTTP.HTTP2.Pool do
 
       true ->
         {:reply, :wait, state}
+    end
+  end
+
+  def handle_call({:complete_connect, key}, from, state) do
+    if connector_caller?(state, key, elem(from, 0)) do
+      {:reply, :ok,
+       state
+       |> finish_connect(key)
+       |> prune_key(key)
+       |> dispatch_all()
+       |> emit_pool(:connection, :negotiated_http1)}
+    else
+      {:reply, :ok, state}
     end
   end
 
@@ -432,6 +456,20 @@ defmodule HTTP.HTTP2.Pool do
     end
   end
 
+  defp take_admission(state, key, opts, caller) do
+    owner = Keyword.get(opts, :registered_owner)
+
+    if is_pid(owner) and
+         get_in(state.entries, [key, :connections, owner, :admission_caller]) == caller do
+      # The connector already holds an admitted connection. Its first stream wait
+      # is separate from the bounded queue of requests awaiting admission.
+      state = put_in(state.entries[key].connections[owner].admission_caller, nil)
+      {state, Keyword.put(opts, :admitted?, true)}
+    else
+      {state, Keyword.put(opts, :admitted?, false)}
+    end
+  end
+
   defp reserve_available(state, key, opts, from, token, deadline) do
     case available_owner(Map.get(state.entries, key), opts) do
       {:error, reason} ->
@@ -446,7 +484,7 @@ defmodule HTTP.HTTP2.Pool do
         queued_opts = Keyword.put(opts, :queued_at_us, System.monotonic_time(:microsecond))
 
         cond do
-          length(entry.pending) >= state.max_pending ->
+          length(entry.pending) >= state.max_pending and not Keyword.get(opts, :admitted?, false) ->
             {:reply, {:error, :pending_capacity}, state}
 
           can_connect?(state, key) and capability_connect_eligible?(entry, opts) and
@@ -616,6 +654,7 @@ defmodule HTTP.HTTP2.Pool do
 
     connection = %{
       pid: owner,
+      admission_caller: nil,
       streams: 0,
       extended_connect: :unknown,
       max_streams: max_streams || state.max_streams,

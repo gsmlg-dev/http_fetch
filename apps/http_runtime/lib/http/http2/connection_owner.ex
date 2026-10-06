@@ -100,6 +100,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         response_events: [],
         init_settings: [],
         peer_settings?: false,
+        limit_initial_capacity?: Keyword.get(opts, :limit_initial_capacity?, false),
         capability_waiters: %{},
         bytes: 0,
         queue_peak_bytes: 0,
@@ -1663,6 +1664,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
          %{extended_connect: state.connection.peer.values.enable_connect_protocol == 1}, limit}
       )
     else
+      # Let automatic negotiation make progress before peer SETTINGS, while
+      # preventing a burst from reserving the entire speculative capacity.
+      limit = if state.limit_initial_capacity?, do: min(limit, 1), else: limit
       GenServer.cast(pool, {:owner_capacity, state.pool_key, self(), limit})
     end
   end

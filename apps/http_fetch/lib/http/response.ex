@@ -22,9 +22,20 @@ defmodule HTTP.Response do
   - `stream` - Stream process PID for streaming responses (nil for buffered)
 
   Network responses expose the actual `http_version` (`:http1`, `:http2`, or
-  `:http3`). HTTP/3 informational fields are retained in `informational`. Buffered
-  HTTP/3 trailers are in `trailers`; streamed trailers arrive as
-  `{:stream_trailers, stream_pid, headers}` before `:stream_end`.
+  `:http3`). HTTP/2 and HTTP/3 retain ordered `{status, headers}` informational
+  blocks in `informational` when the final response arrives. Buffered trailers
+  are available in `trailers` when the promise completes, separate from initial
+  `headers`. Streamed trailers arrive as `{:stream_trailers, stream_pid, headers}`
+  after body delivery acknowledgements and immediately before `{:stream_end,
+  stream_pid}`; the immutable response's `trailers` field remains empty.
+
+  HTTP/2 retains at most 128 informational blocks and 65,536 bytes of
+  informational fields in total. Trailers have at most 256 fields and 65,536
+  bytes. These byte budgets include 32 bytes of overhead per field, and the
+  protocol's HPACK limits also apply. Exceeding a retention budget fails with
+  `:http2_informational_limit` or `:http2_trailers_limit` rather than dropping
+  fields. HTTP/1 informational fields and trailers are currently not exposed.
+  Exposing metadata does not establish gRPC support.
 
   ## Response Methods
 
