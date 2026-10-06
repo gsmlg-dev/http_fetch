@@ -279,7 +279,15 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
         ]
       ])
 
-    on_exit(fn -> if Port.info(port), do: Port.close(port) end)
+    on_exit(fn ->
+      # The test process owns the port and can close it before this callback runs.
+      try do
+        Port.close(port)
+      rescue
+        ArgumentError -> :ok
+      end
+    end)
+
     assert_receive {^port, {:data, {:eol, line}}}, 5_000
     ready = JSON.decode!(line)
     assert ready["event"] == "ready"
