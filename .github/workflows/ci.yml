@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches: ["**"]
-    paths: ['apps/**']
+    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
   pull_request:
     branches: [main]
-    paths: ['apps/**']
+    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
 
   workflow_dispatch: {}
 
@@ -86,6 +86,9 @@ jobs:
         with:
           elixir-version: '1.18'
           otp-version: '28'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Check root formatting and automation regressions
         run: |
           mix format --check-formatted mix.exs .formatter.exs config/config.exs scripts/ci/test_app_closures.exs
@@ -160,4 +163,36 @@ jobs:
         with:
           name: published-ex-ssl-feature-gate-report
           path: ${{ runner.temp }}/ex-ssl-feature-results/*.txt
+          if-no-files-found: error
+
+  h2-compatibility:
+    name: Shared H2 Fetch/SSE/WebSocket compatibility
+    needs: changes
+    if: needs.changes.outputs.h2_compat == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned independent peers
+        run: python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt
+      - name: Run candidate H2 consumer and package gates
+        run: python3 scripts/ci/http2_compat.py --evidence "$RUNNER_TEMP/h2-compat"
+      - name: Retain candidate, peer, backend and exclusion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h2-compat-${{ github.sha }}
+          path: ${{ runner.temp }}/h2-compat/
           if-no-files-found: error

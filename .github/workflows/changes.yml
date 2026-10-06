@@ -8,11 +8,14 @@ on:
         type: string
     outputs:
       apps:
-        description: JSON array of directly affected apps
+        description: JSON array of app owners and affected H2 consumers
         value: ${{ jobs.detect.outputs.apps }}
       has_changes:
         description: Whether the array is nonempty
         value: ${{ jobs.detect.outputs.has_changes }}
+      h2_compat:
+        description: Whether shared H2 compatibility must run
+        value: ${{ jobs.detect.outputs.h2_compat }}
       full_gate:
         description: Whether manual verification requires all candidate consumers
         value: ${{ jobs.detect.outputs.full_gate }}
@@ -29,6 +32,7 @@ jobs:
     outputs:
       apps: ${{ steps.paths.outputs.apps }}
       has_changes: ${{ steps.paths.outputs.has_changes }}
+      h2_compat: ${{ steps.paths.outputs.h2_compat }}
       full_gate: ${{ steps.paths.outputs.full_gate }}
       historical_tls: ${{ steps.paths.outputs.historical_tls }}
     steps:

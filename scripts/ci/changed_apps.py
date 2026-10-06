@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Select directly changed umbrella apps, or all apps for manual verification."""
+"""Select app owners and affected H2 consumers from umbrella dependencies."""
 
 import argparse
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -15,12 +16,54 @@ APPS = (
 ALL = list(APPS)
 
 
+H2_CONSUMERS = ("http_fetch", "http_web_socket", "http_event_source")
+ROOT = Path(__file__).resolve().parents[2]
+SHARED_FILES = {"mix.exs", "mix.lock", ".formatter.exs", ".credo.exs",
+                ".dialyzer_ignore.exs"}
+
+
+def dependency_graph(root=ROOT):
+    # Read the real in_umbrella declarations, including imported TLS/QUIC apps.
+    graph = {}
+    for app in APPS:
+        source = (root / "apps" / app / "mix.exs").read_text()
+        graph[app] = set(re.findall(
+            r"\{:(\w+),[^{}]*\bin_umbrella:\s*true", source))
+    return graph
+
+
+def dependency_closure(app, graph):
+    closure, pending = set(), [app]
+    while pending:
+        dependency = pending.pop()
+        if dependency not in closure:
+            closure.add(dependency)
+            pending.extend(graph.get(dependency, ()))
+    return closure
+
+
+def shared_h2_path(path):
+    return (path in SHARED_FILES or path.startswith(("config/", "scripts/ci/",
+            ".github/workflows/", "scripts/http2_", "scripts/http_runtime_",
+            "scripts/requirements-http2", "scripts/release/", "scripts/ex_ssl_")))
+
+
+def affected_h2_consumers(paths, graph=None):
+    graph = dependency_graph() if graph is None else graph
+    if any(shared_h2_path(path) for path in paths):
+        return list(H2_CONSUMERS)
+    owners = {parts[1] for path in paths
+              if len(parts := path.split("/")) >= 3 and parts[0] == "apps"
+              and not (parts[2] == "docs" or path.endswith(".md"))}
+    return [app for app in H2_CONSUMERS
+            if owners & dependency_closure(app, graph)]
+
+
 def select_apps(paths, workflow):
-    # Every path under an app belongs to that app, including docs and manifests.
-    # Shared files and dependency relationships never expand automatic matrices.
     owners = {parts[1] for path in paths
               if len(parts := path.split("/")) >= 3 and parts[0] == "apps"}
-    return [app for app in APPS if app in owners]
+    selected = owners | set(affected_h2_consumers(paths))
+    return [app for app in APPS if app in selected]
 
 
 def changed_paths(base, head):
@@ -55,15 +98,19 @@ def main():
     manual = args.event == "workflow_dispatch"
     if manual:
         apps = ALL
+        h2_compat = True
     else:
         try:
-            apps = select_apps(changed_paths(args.base, args.head), args.workflow)
+            paths = changed_paths(args.base, args.head)
+            apps = select_apps(paths, args.workflow)
+            h2_compat = bool(affected_h2_consumers(paths))
         except ValueError as error:
             parser.error(str(error))
 
     output = (f"apps={json.dumps(apps, separators=(',', ':'))}\n"
               f"has_changes={'true' if apps else 'false'}\n"
               f"full_gate={'true' if manual else 'false'}\n"
+              f"h2_compat={'true' if h2_compat else 'false'}\n"
               f"historical_tls={'true' if manual else 'false'}\n")
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:

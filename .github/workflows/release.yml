@@ -94,6 +94,9 @@ jobs:
       - name: Compile all applications in default environment
         run: mix compile --warnings-as-errors
 
+      - name: Prepare independent admission peer before source tests
+        run: uv pip install --python "$(command -v python3)" --requirement scripts/requirements-http2-stream-clients.txt
+
       - name: Validate all source and automation
         env:
           MIX_ENV: test

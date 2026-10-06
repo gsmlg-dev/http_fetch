@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from changed_apps import ALL, select_apps
+from changed_apps import ALL, H2_CONSUMERS, affected_h2_consumers, dependency_graph, select_apps
 
 SCRIPT = Path(__file__).with_name("changed_apps.py").resolve()
 WORKFLOWS = ("ci.yml", "test.yml", "e2e.yml")
@@ -28,35 +28,51 @@ def expected_output(apps, manual=False):
     return ("apps=" + json.dumps(apps, separators=(",", ":"))
             + f"\nhas_changes={'true' if apps else 'false'}"
             + f"\nfull_gate={'true' if manual else 'false'}"
+            + f"\nh2_compat={'true' if manual or any(app in H2_CONSUMERS for app in apps) else 'false'}"
             + f"\nhistorical_tls={'true' if manual else 'false'}\n")
 
 
 class SelectionTest(unittest.TestCase):
-    def test_every_app_path_selects_only_its_owner(self):
-        for workflow in WORKFLOWS:
-            for app in ALL:
-                for suffix in ("lib/module.ex", "test/module_test.exs", "e2e/check.exs",
-                               "docs/guide.md", "README.md", "mix.exs", "priv/data.bin"):
-                    with self.subTest(workflow=workflow, app=app, suffix=suffix):
-                        self.assertEqual(select_apps([f"apps/{app}/{suffix}"], workflow), [app])
+    def test_actual_graph_selects_shared_h2_consumers(self):
+        graph = dependency_graph()
+        self.assertEqual(graph["http_fetch"], {"http_core", "http_runtime"})
+        for owner in ("http_core", "http_runtime", "ex_ssl", "elixir_quic",
+                      "elixir_quic_http3"):
+            paths = [f"apps/{owner}/lib/module.ex"]
+            for workflow in WORKFLOWS:
+                expected = [app for app in ALL if app == owner or app in H2_CONSUMERS]
+                self.assertEqual(select_apps(paths, workflow), expected)
+                self.assertEqual(affected_h2_consumers(paths), list(H2_CONSUMERS))
 
-    def test_root_shared_scripts_and_unknown_apps_select_nothing(self):
-        paths = ["mix.exs", "mix.lock", "config/config.exs", ".credo.exs", ".formatter.exs",
-                 ".dialyzer_ignore.exs", "scripts/ci/changed_apps.py", "scripts/release/stage.py",
-                 "scripts/interop/run.exs", "scripts/ex_ssl_source_smoke.sh", "README.md",
-                 "docs/overview.md", "apps/unknown/lib/foo.ex", "apps/http_core_other/test.exs",
-                 "other/apps/http_core/lib/foo.ex", ".github/workflows/changes.yml"]
-        paths += [f".github/workflows/{workflow}" for workflow in WORKFLOWS]
+    def test_shared_manifests_harnesses_and_workflows_select_h2_consumers(self):
+        for path in ("mix.exs", "mix.lock", "config/config.exs", ".credo.exs",
+                     ".formatter.exs", ".dialyzer_ignore.exs", "scripts/ci/changed_apps.py",
+                     "scripts/release/stage.py", "scripts/http2_stream_peer.py",
+                     "scripts/http_runtime_package_traffic_gate.py",
+                     "scripts/requirements-http2-stream-clients.txt",
+                     "scripts/ex_ssl_source_smoke.sh", ".github/workflows/changes.yml"):
+            for workflow in WORKFLOWS:
+                self.assertEqual(select_apps([path], workflow), list(H2_CONSUMERS))
         for workflow in WORKFLOWS:
-            self.assertEqual(select_apps(paths, workflow), [])
-            self.assertEqual(select_apps(paths + ["apps/http_runtime/mix.exs"], workflow),
-                             ["http_runtime"])
+            self.assertEqual(select_apps([f".github/workflows/{workflow}"], workflow),
+                             list(H2_CONSUMERS))
 
-    def test_multiple_owners_are_unique_and_in_inventory_order(self):
-        paths = ["apps/http_fetch/new.ex", "apps/elixir_quic/old.ex",
-                 "apps/http_fetch/mix.exs", "apps/ex_ssl/test/deleted_test.exs"]
-        for workflow in WORKFLOWS:
-            self.assertEqual(select_apps(paths, workflow), ["ex_ssl", "elixir_quic", "http_fetch"])
+    def test_irrelevant_docs_and_unrelated_apps_remain_cheap(self):
+        for path in ("README.md", "docs/overview.md", "scripts/unrelated.py",
+                     "apps/unknown/lib/foo.ex", "other/apps/http_core/lib/foo.ex"):
+            self.assertEqual(select_apps([path], "ci.yml"), [])
+            self.assertEqual(affected_h2_consumers([path]), [])
+        self.assertEqual(select_apps(["apps/http_core/README.md"], "ci.yml"), ["http_core"])
+        self.assertEqual(affected_h2_consumers(["apps/http_core/README.md"]), [])
+        self.assertEqual(select_apps(["apps/http_web_transport/lib/foo.ex"], "ci.yml"),
+                         ["http_web_transport"])
+        self.assertEqual(affected_h2_consumers(["apps/http_web_transport/lib/foo.ex"]), [])
+
+    def test_graph_changes_affect_selection_without_hardcoded_ancestry(self):
+        graph = {app: set() for app in ALL}
+        graph["http_fetch"] = {"http_core"}
+        self.assertEqual(affected_h2_consumers(["apps/http_core/lib/foo.ex"], graph),
+                         ["http_fetch"])
 
     def test_manual_always_selects_all_for_every_workflow_without_git(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -111,12 +127,12 @@ class SelectionTest(unittest.TestCase):
             (root / "apps/http_core").mkdir()
             git("mv", "apps/http_event_source/old.ex", "apps/http_core/new.ex")
             git("commit", "-qm", "rename")
-            check(base, "HEAD", ["http_core", "http_event_source"])
+            check(base, "HEAD", ["http_core", *H2_CONSUMERS])
             base = git("rev-parse", "HEAD")
             git("rm", "apps/http_core/new.ex")
             git("commit", "-qm", "delete")
-            check(base, "HEAD", ["http_core"])
-            check(base, "0" * 40, ["http_core"])
+            check(base, "HEAD", ["http_core", *H2_CONSUMERS])
+            check(base, "0" * 40, ["http_core", *H2_CONSUMERS])
             check("0" * 40, "HEAD", [])
             result, output = run_cli(directory, "--workflow", "ci.yml", "--event", "push",
                                      "--base", "", "--head", "HEAD")
@@ -133,7 +149,10 @@ class WorkflowContractTest(unittest.TestCase):
                 self.assertRegex(text, r"(?m)^  workflow_dispatch: \{\}$")
                 for event in ("push", "pull_request"):
                     block = re.search(rf"(?m)^  {event}:\n((?:    .*\n)+)", text).group(1)
-                    self.assertIn("paths: ['apps/**']", block)
+                    self.assertIn("'apps/**'", block)
+                    self.assertIn("'mix.lock'", block)
+                    self.assertIn("'scripts/http2_*'", block)
+                    self.assertIn("'.github/workflows/**'", block)
                 self.assertIn("app: ${{ fromJSON(needs.changes.outputs.apps) }}", text)
                 self.assertNotIn("manual_module", text)
                 self.assertNotIn("inputs.version", text)
@@ -141,6 +160,14 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertNotIn("manual_module", changes)
         self.assertIn("HEAD_SHA: ${{ github.event.after || github.sha }}", changes)
         self.assertIn('--head "$HEAD_SHA"', changes)
+
+    def test_h2_gate_is_required_and_retains_evidence(self):
+        root = SCRIPT.parents[2]
+        ci = (root / ".github/workflows/ci.yml").read_text()
+        self.assertIn("if: needs.changes.outputs.h2_compat == 'true'", ci)
+        self.assertIn("python3 scripts/ci/http2_compat.py", ci)
+        self.assertIn("h2-compat-${{ github.sha }}", ci)
+        self.assertIn("if-no-files-found: error", ci)
 
     def test_scoped_checks_and_manual_full_gates_are_preserved(self):
         root = SCRIPT.parents[2]
@@ -162,7 +189,11 @@ class WorkflowContractTest(unittest.TestCase):
         test = (root / ".github/workflows/test.yml").read_text()
         self.assertIn("mix test apps/${{ matrix.app }}/test", test)
         self.assertIn("test-${{ matrix.app }}-", test)
+        self.assertIn("python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt", test)
         self.assertNotIn("restore-keys:", test)
+        release = (root / ".github/workflows/release.yml").read_text()
+        self.assertLess(release.index("--requirement scripts/requirements-http2-stream-clients.txt"),
+                        release.index("mix test --seed"))
 
 
 if __name__ == "__main__":

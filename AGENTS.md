@@ -103,9 +103,11 @@ For module-by-module details, see the table in `CLAUDE.md` and read
   `git log --oneline` for examples.
 - No release branch conventions are enforced beyond standard feature
   branches; PRs target `main` (see CI workflow files in `.github/workflows/`).
-- CI, Test, and E2E use isolated app jobs. Automatic push/PR runs select only
-  apps whose own `apps/<app>/` directories changed; dependency preparation
-  does not select additional sibling test jobs. WebSocket and EventSource
+- CI, Test, and E2E use isolated app jobs. Automatic push/PR runs select changed
+  app owners and affected H2 Fetch/SSE/WebSocket consumers from the umbrella dependency graph. Relevant root manifests, configuration,
+  H2 harnesses, CI tooling and workflows also trigger these consumers. CI retains
+  independent h2c/TLS and candidate-package compatibility evidence. WebSocket
+  and EventSource
   test closures also prepare Fetch for their cross-client tests.
 - Shared configuration, tooling, and workflow changes require manual full
   regression. `workflow_dispatch` on each workflow forces all nine apps;
