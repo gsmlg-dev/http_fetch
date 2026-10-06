@@ -233,8 +233,29 @@ defmodule HTTP.HTTP2ProductionPoolTest do
     send(connector, :continue)
     assert_receive {:factory_owner, owner}
     owner_ref = Process.monitor(owner)
+    deadline = System.monotonic_time(:millisecond) + 1_000
     assert_receive {:DOWN, ^owner_ref, :process, ^owner, _}, 1_000
+    # This monitor belongs to the test; the pool reconciles its own DOWN separately.
+    await_empty_pool(pool, deadline)
     assert Pool.stats(pool) == %{}
+  end
+
+  defp await_empty_pool(pool, deadline) do
+    case Pool.stats(pool) do
+      empty when empty == %{} ->
+        :ok
+
+      stats ->
+        assert System.monotonic_time(:millisecond) < deadline,
+               "pool did not reconcile owner death: #{inspect(stats)}"
+
+        receive do
+        after
+          1 -> :ok
+        end
+
+        await_empty_pool(pool, deadline)
+    end
   end
 
   defp await_reservation(_pool, _key, _owner, 0), do: flunk("reservation was not released")
