@@ -173,8 +173,7 @@ defmodule HTTP.Request do
       {{:stream, stream}, content_type} ->
         headers =
           headers
-          |> Headers.delete("Content-Length")
-          |> Headers.set("Transfer-Encoding", "chunked")
+          |> put_stream_framing()
           |> maybe_set_content_type(content_type)
 
         {headers, {:stream, stream}}
@@ -189,6 +188,27 @@ defmodule HTTP.Request do
           |> maybe_set_content_type(content_type)
 
         {headers, body}
+    end
+  end
+
+  defp put_stream_framing(headers) do
+    case headers |> Headers.get_all("Content-Length") |> Enum.uniq() do
+      [] ->
+        Headers.set(headers, "Transfer-Encoding", "chunked")
+
+      [length] ->
+        if length != "" and byte_size(length) <= 20 and
+             (byte_size(length) < 20 or length <= "18446744073709551615") and
+             String.match?(length, ~r/\A[0-9]+\z/) do
+          headers
+          |> Headers.set("Content-Length", length)
+          |> Headers.delete("Transfer-Encoding")
+        else
+          raise ArgumentError, "invalid streaming Content-Length"
+        end
+
+      _ ->
+        raise ArgumentError, "conflicting streaming Content-Length headers"
     end
   end
 

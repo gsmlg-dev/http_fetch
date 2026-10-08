@@ -136,6 +136,36 @@ defmodule HTTP.RequestTest do
       end
     end
 
+    test "preserves a streaming Content-Length without transfer encoding" do
+      stream = self()
+      headers = HTTP.Headers.new([{"content-length", "6"}])
+      request = %HTTP.Request{method: :put, body: stream, duplex: :half, headers: headers}
+
+      assert {headers, {:stream, ^stream}} = HTTP.Request.put_body_headers(headers, request)
+      assert HTTP.Headers.get(headers, "content-length") == "6"
+      refute HTTP.Headers.has?(headers, "transfer-encoding")
+    end
+
+    for length <- ["", "-1", "+1", "1x", "1, 1", "18446744073709551616"] do
+      test "rejects invalid streaming Content-Length #{inspect(length)}" do
+        request = %HTTP.Request{method: :put, body: self(), duplex: :half}
+        headers = HTTP.Headers.new([{"content-length", unquote(length)}])
+
+        assert_raise ArgumentError, ~r/invalid streaming Content-Length/, fn ->
+          HTTP.Request.put_body_headers(headers, request)
+        end
+      end
+    end
+
+    test "rejects conflicting streaming Content-Length headers" do
+      request = %HTTP.Request{method: :put, body: self(), duplex: :half}
+      headers = HTTP.Headers.new([{"content-length", "6"}, {"Content-Length", "7"}])
+
+      assert_raise ArgumentError, ~r/conflicting streaming Content-Length/, fn ->
+        HTTP.Request.put_body_headers(headers, request)
+      end
+    end
+
     test "prepares HTTP/1 stream body headers separately from body stream" do
       stream = self()
 

@@ -12,6 +12,9 @@ defmodule HTTP do
   - **Async by default**: All requests use Task.Supervisor with `async_nolink/4`
   - **Automatic streaming**: Responses >5MB or with unknown Content-Length automatically stream
   - **Request streaming**: Pass an `HTTP.Stream` PID as `body` with `duplex: "half"` for HTTP/1.1 or HTTP/2 uploads
+    Supply a `Content-Length` header for a known-length stream; HTTP/1.1 sends raw
+    body bytes, and both protocols reject a stream whose size differs from the header.
+    HTTP/1.1 streams without a declared length use chunked transfer encoding.
   - **Request cancellation**: Via `HTTP.AbortController` for aborting in-flight requests
   - **Promise chaining**: JavaScript-like promise interface with `then/3` support
   - **Unix Domain Sockets**: Support for HTTP over Unix sockets (Docker daemon, systemd, etc.)

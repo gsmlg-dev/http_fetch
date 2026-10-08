@@ -47,6 +47,37 @@ defmodule HTTP.HTTP2BodyBridgeTest do
     assert_receive {:read, ^bridge}
   end
 
+  test "fixed-length credit withholds producer acknowledgement until every slice is sent" do
+    {:ok, stream} = HTTP.Stream.start_link(6)
+
+    {:ok, bridge} =
+      BodyBridge.start_link(stream, self(), content_length: 6, max_chunk_bytes: 3)
+
+    producer = Task.async(fn -> HTTP.Stream.chunk(stream, "abcdef") end)
+    :ok = BodyBridge.credit(bridge, 3)
+    assert_receive {:body_chunk, ^bridge, "abc", first}
+    assert Task.yield(producer, 0) == nil
+    :ok = BodyBridge.ack(bridge, first)
+    assert_receive {:body_chunk, ^bridge, "def", second}
+    assert Task.yield(producer, 0) == nil
+    :ok = BodyBridge.ack(bridge, second)
+    assert Task.await(producer) == :ok
+    HTTP.Stream.finish(stream)
+    assert_receive {:body_eof, ^bridge}
+  end
+
+  test "fixed-length cancellation fails the waiting producer" do
+    {:ok, stream} = HTTP.Stream.start_link(6)
+    {:ok, bridge} = BodyBridge.start_link(stream, self(), content_length: 6)
+    producer = Task.async(fn -> HTTP.Stream.chunk(stream, "abcdef") end)
+    :ok = BodyBridge.credit(bridge, 3)
+    assert_receive {:body_chunk, ^bridge, "abc", _ref}
+    :ok = BodyBridge.cancel(bridge)
+    assert Task.await(producer) == {:error, :cancelled}
+    assert_receive {:body_error, ^bridge, :cancelled}
+    refute_receive {:body_eof, ^bridge}
+  end
+
   test "credit pauses after one chunk and EOF is delivered once" do
     stream = fake_stream(self())
     {:ok, bridge} = BodyBridge.start_link(stream, self(), max_chunk_bytes: 8)
