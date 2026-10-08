@@ -28,7 +28,22 @@ defmodule HTTP.WebSocket.ConnectionHTTP2Test do
         send(parent, {:close_wire, self()})
       end)
 
-    ws = websocket(url, delivery: :ack)
+    telemetry_events =
+      for {group, names} <- [
+            connect: [:start, :stop],
+            message: [:received, :sent],
+            close: [:start, :stop]
+          ],
+          name <- names,
+          do: [:http_web_socket, group, name]
+
+    handler_id = "h2-telemetry-#{System.unique_integer()}"
+
+    :ok =
+      :telemetry.attach_many(handler_id, telemetry_events, &__MODULE__.handle_telemetry/4, self())
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+    ws = websocket(url, delivery: :ack, telemetry_url: nil)
     assert_receive {WebSocket, ^ws, %Open{}}, 5_000
     assert WebSocket.http_version(ws) == :http2
     assert WebSocket.protocol(ws) == ""
@@ -44,7 +59,18 @@ defmodule HTTP.WebSocket.ConnectionHTTP2Test do
     send(peer, :peer_close)
     assert_receive {WebSocket, ^ws, %Close{code: 1000, was_clean: true}}, 5_000
     assert_receive {:close_wire, ^peer}, 5_000
+
+    emitter = ws.pid
+
+    for event <- telemetry_events -- [[:http_web_socket, :close, :start]] do
+      assert_receive {:h2_telemetry, ^emitter, ^event, metadata}, 5_000
+      refute Map.has_key?(metadata, :url)
+      refute Map.has_key?(metadata, :host)
+    end
   end
+
+  def handle_telemetry(event, _measurements, metadata, owner),
+    do: send(owner, {:h2_telemetry, self(), event, metadata})
 
   test "zero send credit keeps send/status/cancel responsive and leaves ordinary siblings usable" do
     parent = self()

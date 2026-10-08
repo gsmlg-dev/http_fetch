@@ -89,6 +89,21 @@ defmodule HTTP.WebSocket.OptionsTest do
              Options.new("wss://example.com/socket", [], tls_backend: :unknown)
   end
 
+  test "validates telemetry URL omission and explicit replacement without changing transport" do
+    actual = "ws://example.com/private-target?signature=secret"
+
+    assert {:ok, %{telemetry_url: nil, url: ^actual}} =
+             Options.new(actual, [], telemetry_url: nil)
+
+    safe = URI.parse("ws://example.com")
+
+    assert {:ok, %{telemetry_url: ^safe, url: ^actual}} =
+             Options.new(actual, [], %{"telemetry_url" => "ws://example.com"})
+
+    assert {:error, :invalid_telemetry_url} =
+             Options.new(actual, [], telemetry_url: false)
+  end
+
   defp restore_tls_backend(nil), do: Application.delete_env(:http_core, :tls_backend)
   defp restore_tls_backend(value), do: Application.put_env(:http_core, :tls_backend, value)
 end

@@ -22,6 +22,14 @@ defmodule HTTP.WebSocket do
   and fragmented messages have finite configurable limits. Established sessions
   default to `idle_timeout: :infinity`; opening and close deadlines are separate.
 
+  Telemetry URLs omit query, userinfo, authority, and fragment by default.
+  Pass `telemetry_url: nil` to omit all URL-derived telemetry metadata, or a
+  URI/string containing only caller-approved fields to replace the telemetry
+  URL (for example, `telemetry_url: "ws://127.0.0.1:8080"` omits a private
+  path). Invalid replacements reject construction; replacement credentials
+  are always stripped. This option applies to every lifecycle/message event
+  and never changes the transport URL or handshake.
+
   Plain Elixir binaries are sent as text frames. Use `array_buffer/1` or
   `HTTP.Blob` for binary frames.
 

@@ -9,6 +9,7 @@ defmodule HTTP.WebSocket.Options do
   @string_keys %{
     "owner" => :owner,
     "headers" => :headers,
+    "telemetry_url" => :telemetry_url,
     "timeout" => :timeout,
     "connect_timeout" => :connect_timeout,
     "opening_timeout" => :opening_timeout,
@@ -37,6 +38,7 @@ defmodule HTTP.WebSocket.Options do
 
   defstruct uri: nil,
             url: nil,
+            telemetry_url: :default,
             protocols: [],
             owner: nil,
             binary_type: :blob,
@@ -67,6 +69,7 @@ defmodule HTTP.WebSocket.Options do
   @type t :: %__MODULE__{
           uri: URI.t(),
           url: String.t(),
+          telemetry_url: :default | URI.t() | nil,
           protocols: [String.t()],
           owner: pid(),
           binary_type: :blob | :array_buffer,
@@ -108,6 +111,7 @@ defmodule HTTP.WebSocket.Options do
        %__MODULE__{
          uri: uri,
          url: URI.to_string(uri),
+         telemetry_url: Keyword.fetch!(init, :telemetry_url),
          protocols: protocols,
          owner: Keyword.get(init, :owner, self()),
          binary_type: Keyword.get(init, :binary_type, :blob),
@@ -247,7 +251,9 @@ defmodule HTTP.WebSocket.Options do
          {:ok, ssl} <- normalize_keyword(Keyword.get(init, :ssl, []), :invalid_ssl_options),
          {:ok, socket_opts} <-
            normalize_keyword(Keyword.get(init, :socket_opts, []), :invalid_socket_options),
-         {:ok, tls_backend} <- HTTP.TLSBackend.resolve(Keyword.get(init, :tls_backend)) do
+         {:ok, tls_backend} <- HTTP.TLSBackend.resolve(Keyword.get(init, :tls_backend)),
+         {:ok, telemetry_url} <-
+           normalize_telemetry_url(Keyword.get(init, :telemetry_url, :default)) do
       {:ok,
        init
        |> Keyword.put(:headers, headers)
@@ -256,9 +262,21 @@ defmodule HTTP.WebSocket.Options do
        |> Keyword.put(:ssl, ssl)
        |> Keyword.put(:socket_opts, socket_opts)
        |> Keyword.put(:tls_backend, tls_backend)
+       |> Keyword.put(:telemetry_url, telemetry_url)
        |> Keyword.put_new(:max_queue_bytes, 2 * valid_message_limit(init) + 7)}
     end
   end
+
+  defp normalize_telemetry_url(value) when value in [:default, nil], do: {:ok, value}
+
+  defp normalize_telemetry_url(%URI{scheme: scheme, host: host} = uri)
+       when scheme in ["ws", "wss", "http", "https"] and is_binary(host) and host != "",
+       do: {:ok, uri}
+
+  defp normalize_telemetry_url(value) when is_binary(value),
+    do: value |> URI.parse() |> normalize_telemetry_url()
+
+  defp normalize_telemetry_url(_value), do: {:error, :invalid_telemetry_url}
 
   defp normalize_key(key) when is_binary(key), do: Map.get(@string_keys, key, key)
   defp normalize_key(key), do: key

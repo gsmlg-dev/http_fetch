@@ -25,6 +25,7 @@ defmodule HTTP.WebSocket.Connection do
             owner: nil,
             target: nil,
             uri: nil,
+            telemetry_uri: nil,
             generation: nil,
             stream: nil,
             stream_monitor: nil,
@@ -82,6 +83,8 @@ defmodule HTTP.WebSocket.Connection do
       options: options,
       owner: options.owner,
       uri: options.uri,
+      telemetry_uri:
+        if(options.telemetry_url == :default, do: options.uri, else: options.telemetry_url),
       target: %WebSocket{pid: self(), ref: options.ref, url: options.url},
       binary_type: options.binary_type,
       delivery: Delivery.new(options),
@@ -97,7 +100,7 @@ defmodule HTTP.WebSocket.Connection do
 
   @impl true
   def handle_continue(:connect, state) do
-    Telemetry.connect_start(state.uri)
+    Telemetry.connect_start(state.telemetry_uri)
 
     state = %{
       state
@@ -185,7 +188,7 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   def handle_call({:close, code, reason, _payload}, _from, %{ready_state: @connecting} = state) do
-    Telemetry.close_start(state.uri, code)
+    Telemetry.close_start(state.telemetry_uri, code)
     {:stop, :normal, :ok, finish(state, code || 1006, reason, false)}
   end
 
@@ -193,7 +196,7 @@ defmodule HTTP.WebSocket.Connection do
     do: {:reply, :ok, state}
 
   def handle_call({:close, code, reason, payload}, _from, state) do
-    Telemetry.close_start(state.uri, code)
+    Telemetry.close_start(state.telemetry_uri, code)
     state = begin_close(state, code, reason, payload)
     call_result(:ok, advance(state))
   end
@@ -462,7 +465,7 @@ defmodule HTTP.WebSocket.Connection do
     state = state |> cancel_timer(:opening_timer)
 
     Telemetry.connect_stop(
-      state.uri,
+      state.telemetry_uri,
       negotiated.protocol,
       now() - state.connect_started_at,
       version,
@@ -575,7 +578,7 @@ defmodule HTTP.WebSocket.Connection do
 
   defp complete_item(state, %{kind: :app} = item) do
     Telemetry.message_sent(
-      state.uri,
+      state.telemetry_uri,
       Atom.to_string(item.opcode),
       item.bytes,
       max(state.buffered_amount - item.bytes, 0)
@@ -801,7 +804,7 @@ defmodule HTTP.WebSocket.Connection do
 
     case Delivery.push(state.delivery, message, byte_size(data) + 7, state.owner) do
       {:ok, delivery, events} ->
-        Telemetry.message_received(state.uri, Atom.to_string(opcode), byte_size(data))
+        Telemetry.message_received(state.telemetry_uri, Atom.to_string(opcode), byte_size(data))
         emit_deliveries(state, events)
         state = %{state | delivery: delivery}
         stream_telemetry(state, :queue, :receive_admitted)
@@ -911,7 +914,7 @@ defmodule HTTP.WebSocket.Connection do
 
   defp fail(state, reason) do
     stream_telemetry(state, :error, :rejected)
-    Telemetry.connect_exception(state.uri, reason, now() - state.connect_started_at)
+    Telemetry.connect_exception(state.telemetry_uri, reason, now() - state.connect_started_at)
     emit(state, %Error{target: state.target, reason: reason})
     {:stop, :normal, finish(state, 1006, "", false)}
   end
@@ -933,7 +936,7 @@ defmodule HTTP.WebSocket.Connection do
     }
 
     stream_telemetry(state, :close, if(clean?, do: :clean, else: :abnormal))
-    Telemetry.close_stop(state.uri, code, clean?)
+    Telemetry.close_stop(state.telemetry_uri, code, clean?)
     emit(state, %Close{target: state.target, code: code, reason: reason, was_clean: clean?})
     %{state | ready_state: @closed}
   end
