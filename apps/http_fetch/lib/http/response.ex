@@ -37,6 +37,39 @@ defmodule HTTP.Response do
   fields. HTTP/1 informational fields and trailers are currently not exposed.
   Exposing metadata does not establish gRPC support.
 
+  ## HTTP Content-Encoding
+
+  Network responses transparently decode `gzip` (including concatenated members)
+  and zlib-wrapped `deflate` on HTTP/1.1, HTTP/2 and HTTP/3. Supported coding
+  chains and repeated header fields decode in reverse order; `identity` is a
+  no-op. If any coding is unsupported (for example `br`), the entire body passes
+  through unchanged. No `Accept-Encoding` header is added automatically; callers
+  may explicitly request `gzip, deflate`.
+
+  Decoding applies only to `Content-Encoding`. A `.tgz` download without that
+  header keeps its original archive bytes, regardless of URL or Content-Type.
+  Manually constructed responses are also unchanged. HEAD and body-forbidden
+  statuses expose their empty body without decoding.
+
+  All network body consumers (`text/1`, `json/1`, `read_all/1`, `array_buffer/1`,
+  `blob/1`, `clone/1` and `write_to/2`) see decoded bytes, as do direct stream
+  readers. Stream decoding is incremental and retains delivery acknowledgements
+  and trailer ordering. A response stream is consumed once; buffered bodies can
+  be read repeatedly. Chunk boundaries may change during decoding.
+
+  Initial headers retain the server's values, including `Content-Encoding` and
+  the encoded `Content-Length`. That length also determines whether a response
+  is buffered or streamed; it is not the decoded byte count. Streaming telemetry
+  chunk/stop byte counts describe the decoded bytes, while streaming start
+  retains the encoded length. Decoded bodies can be larger than encoded bodies.
+
+  Malformed or truncated supported encodings fail buffered fetches with
+  `{:error, {:invalid_content_encoding, coding}}`. Streams deliver
+  `{:stream_error, stream_pid, {:invalid_content_encoding, coding}}`;
+  `write_to/2` returns that error, while read methods raise the usual stream-read
+  `RuntimeError`. A failed file write may leave partial decoded bytes. Raw
+  (non-zlib-wrapped) deflate is rejected as malformed.
+
   ## Response Methods
 
   - `json/1` - Parse response as JSON

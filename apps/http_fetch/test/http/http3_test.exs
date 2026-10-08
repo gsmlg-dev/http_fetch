@@ -86,6 +86,41 @@ defmodule HTTP.FetchHTTP3Test do
     assert_receive {:stream_end, ^reader}, 5_000
   end
 
+  for encoding <- ["gzip", "deflate"], streaming? <- [false, true] do
+    test "H3 #{encoding} streaming=#{streaming?} decodes DATA and preserves trailers", context do
+      body = ~s({"protocol":"h3"})
+
+      encoded =
+        if unquote(encoding) == "gzip", do: :zlib.gzip(body), else: :zlib.compress(body)
+
+      fields = [{"content-encoding", unquote(encoding)}]
+
+      fields =
+        if unquote(streaming?),
+          do: fields,
+          else: [{"content-length", to_string(byte_size(encoded))} | fields]
+
+      promise = fetch(context)
+      connection = accept(context.server)
+      stream = await_stream(connection, 0, deadline())
+      await_fin(stream, deadline(), [])
+      data = for <<byte <- encoded>>, into: <<>>, do: Frame.encode!(:data, <<byte>>)
+      write(stream, headers(200, fields) <> data <> trailers([{"x-decoded", "yes"}]), true)
+      response = HTTP.Promise.await(promise)
+      assert response.http_version == :http3
+      assert HTTP.Headers.get(response.headers, "content-encoding") == unquote(encoding)
+      assert HTTP.Response.json(response) == {:ok, %{"protocol" => "h3"}}
+
+      if unquote(streaming?) do
+        reader = response.stream
+        assert_receive {:stream_trailers, ^reader, trailers}, 5_000
+        assert HTTP.Headers.get(trailers, "x-decoded") == "yes"
+      else
+        assert HTTP.Headers.get(response.trailers, "x-decoded") == "yes"
+      end
+    end
+  end
+
   test "Fetch rejects wrong reference identity without fallback", context do
     result =
       fetch(context, ssl: Keyword.put(context.ssl, :reference_identity, {:dns_id, "wrong.test"}))
