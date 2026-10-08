@@ -27,7 +27,7 @@ defmodule HTTP.WebSocket.TelemetryTest do
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
 
-    uri = URI.parse("ws://example.com/socket")
+    uri = URI.parse("ws://user:secret@example.com/socket?signature=hmac-value#token")
 
     Telemetry.connect_start(uri)
     Telemetry.connect_stop(uri, "chat", 10)
@@ -38,7 +38,12 @@ defmodule HTTP.WebSocket.TelemetryTest do
     Telemetry.close_stop(uri, 1000, true)
 
     for event <- events do
-      assert_receive {:telemetry_event, ^event, _measurements, _metadata}
+      assert_receive {:telemetry_event, ^event, _measurements, metadata}
+      assert URI.to_string(metadata.url) == "ws://example.com/socket"
+      assert metadata.url.userinfo == nil
+      assert metadata.url.authority == nil
+      assert metadata.url.query == nil
+      assert metadata.url.fragment == nil
     end
   end
 
