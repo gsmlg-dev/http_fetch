@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-09
+
+### Fixed
+- Preserve declared Content-Length for streaming HTTP/1 and HTTP/2 uploads,
+  reject length mismatches, and retain producer backpressure and cancellation.
+- Transparently decode gzip and zlib-wrapped deflate response Content-Encoding
+  for buffered and streamed Fetch consumers across HTTP/1, HTTP/2, and HTTP/3;
+  preserve archive bytes when Content-Encoding is absent.
+- Strip URL credentials from every WebSocket telemetry event and support
+  omitting or explicitly replacing telemetry URLs without changing handshakes.
+- Correct migration provenance to describe the available synchronized Hex graph.
+
 ## [0.17.0] - 2026-10-06
 
 ### Added
