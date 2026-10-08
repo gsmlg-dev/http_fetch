@@ -9,6 +9,7 @@ defmodule HTTP.Stream do
   """
 
   defstruct reader: nil,
+            decoders: [],
             reader_monitor: nil,
             reader_ack?: false,
             chunks: [],
@@ -20,12 +21,21 @@ defmodule HTTP.Stream do
             start_time: nil
 
   @spec start_link(non_neg_integer()) :: {:ok, pid()}
-  def start_link(content_length) do
+  def start_link(content_length), do: start_link(content_length, [])
+
+  @doc false
+  def start_link(content_length, encodings) do
     start_time = System.monotonic_time(:microsecond)
     HTTP.Telemetry.streaming_start(content_length)
 
     Task.start_link(fn ->
-      loop(%__MODULE__{start_time: start_time})
+      decoders = HTTP.ContentDecoder.open(encodings)
+
+      try do
+        loop(%__MODULE__{start_time: start_time, decoders: decoders})
+      after
+        HTTP.ContentDecoder.close(decoders)
+      end
     end)
   end
 
@@ -138,14 +148,25 @@ defmodule HTTP.Stream do
         |> maybe_continue()
 
       {:chunk, sender, ref, chunk} ->
-        chunk_size = byte_size(chunk)
-        total_bytes = state.total_bytes + chunk_size
-        HTTP.Telemetry.streaming_chunk(chunk_size, total_bytes)
+        case HTTP.ContentDecoder.decode(state.decoders, chunk) do
+          {:ok, ""} when state.decoders != [] ->
+            send(sender, {:chunk_ack, ref})
+            loop(state)
 
-        state
-        |> Map.put(:total_bytes, total_bytes)
-        |> push_chunk(chunk, {sender, ref})
-        |> loop()
+          {:ok, decoded} ->
+            chunk_size = byte_size(decoded)
+            total_bytes = state.total_bytes + chunk_size
+            HTTP.Telemetry.streaming_chunk(chunk_size, total_bytes)
+
+            state
+            |> Map.put(:total_bytes, total_bytes)
+            |> push_chunk(decoded, {sender, ref})
+            |> loop()
+
+          {:error, reason} ->
+            send(sender, {:chunk_error, ref, reason})
+            fail(state, reason)
+        end
 
       {:trailers, headers} ->
         loop(%{state | trailers: headers})
@@ -154,17 +175,19 @@ defmodule HTTP.Stream do
         duration = System.monotonic_time(:microsecond) - state.start_time
         HTTP.Telemetry.streaming_stop(state.total_bytes, duration)
 
-        state
-        |> Map.put(:done?, true)
-        |> flush()
-        |> maybe_continue()
+        case HTTP.ContentDecoder.finish(state.decoders) do
+          :ok ->
+            state
+            |> Map.put(:done?, true)
+            |> flush()
+            |> maybe_continue()
+
+          {:error, reason} ->
+            fail(state, reason)
+        end
 
       {:error, reason} ->
-        state
-        |> reply_pending({:error, reason})
-        |> Map.merge(%{error: reason, chunks: []})
-        |> flush()
-        |> maybe_continue()
+        fail(state, reason)
 
       {:DOWN, monitor, :process, _reader, reason} when monitor == state.reader_monitor ->
         _ = reply_pending(state, {:error, {:reader_down, reason}})
@@ -173,6 +196,14 @@ defmodule HTTP.Stream do
       HTTP.Config.streaming_timeout() ->
         timeout(state)
     end
+  end
+
+  defp fail(state, reason) do
+    state
+    |> reply_pending({:error, reason})
+    |> Map.merge(%{error: reason, chunks: []})
+    |> flush()
+    |> maybe_continue()
   end
 
   defp monitor_reader(%{reader: reader} = state, reader), do: state

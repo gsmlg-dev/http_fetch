@@ -862,3 +862,34 @@ commands, results, provenance, and limits. Independent human security review is
 incomplete; green tests do not establish broad production readiness or improved
 performance. No connection pooling, automatic WebSocket reconnect, TLS 1.2/mTLS
 resumption, persistent tickets, or 0-RTT support is implied.
+
+## Response Content-Encoding
+
+Network responses decode `gzip` and zlib-wrapped `deflate` automatically on
+HTTP/1.1, HTTP/2 and HTTP/3, including streaming, JSON/text consumption and
+`HTTP.Response.write_to/2`. To request compression explicitly:
+
+```elixir
+response =
+  HTTP.fetch(url, headers: [{"accept-encoding", "gzip, deflate"}])
+  |> HTTP.Promise.await()
+
+{:ok, data} = HTTP.Response.json(response)
+```
+
+Decoding uses only `Content-Encoding`: npm `.tgz` archives without that header
+retain their gzip bytes for integrity checks and extraction. Supported encoding
+chains decode in reverse order; a chain containing any unsupported encoding
+passes through entirely unchanged. The client does not add `Accept-Encoding`.
+
+Server headers remain unchanged, so `Content-Length` describes encoded bytes,
+not the decoded body size. Streaming selection also uses the encoded length.
+Streams are consumed once and preserve backpressure and trailer ordering;
+all response consumers see the same decoded bytes. Manually constructed
+responses are not decoded.
+
+Malformed or truncated gzip/deflate produces
+`{:error, {:invalid_content_encoding, coding}}` for buffered fetches and a
+`:stream_error` for streamed bodies. Stream reading methods raise on that error;
+`write_to/2` returns it and may leave a partial file. Raw deflate is rejected.
+See `HTTP.Response` for the complete header and consumption contract.
