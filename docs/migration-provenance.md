@@ -145,7 +145,7 @@ The canonical umbrella contains nine packages. Internal dependency declarations
 preserve the Hex package identities while Mix resolves the local sibling:
 
 ```elixir
-{:dependency, "== 0.16.1", in_umbrella: true, hex: :dependency}
+{:dependency, "== 0.17.0", in_umbrella: true, hex: :dependency}
 ```
 
 The graph is:
@@ -160,14 +160,21 @@ The graph is:
 | `http_fetch`, `http_event_source`, `http_web_socket` | `http_core`, `http_runtime` |
 | `http_web_transport` | `http_core` |
 
-These `0.16.1` constraints describe the local candidate graph. Six packages
-(`http_core`, `http_runtime`, Fetch, WebSocket, EventSource, and WebTransport)
-were already published at 0.16.1 before this migration and cannot be republished
-with new dependency metadata. The new TLS, QUIC, and HTTP/3 packages at this
-version have not been published. Issue [#16](https://github.com/gsmlg-dev/http_fetch/issues/16)
-remains open for the coordinated release work; a later authorized version is
-required before the complete graph can be consumed from Hex. Do not describe
-the local umbrella metadata as an available nine-package Hex release.
+The synchronized [v0.17.0 release](https://github.com/gsmlg-dev/http_fetch/releases/tag/v0.17.0)
+published all nine packages with exact `== 0.17.0` internal requirements.
+In particular, published [`http_core 0.17.0`](https://hex.pm/packages/http_core/0.17.0)
+requires both `ex_ssl == 0.17.0` and `elixir_quic == 0.17.0`;
+`elixir_quic_http3 0.17.0` requires `http_core == 0.17.0` and
+`elixir_quic == 0.17.0`. This resolves the incompatible TLS/QUIC ranges
+reported in issue [#16](https://github.com/gsmlg-dev/http_fetch/issues/16).
+Standalone consumers can resolve these packages together from Hex without
+umbrella overrides. Downstream repositories must update their requirements
+and lockfiles and validate their own compatibility before releasing.
+
+The earlier `0.16.1` candidate graph was local only: six HTTP packages had
+already been published with metadata that could not be replaced, while the
+imported TLS, QUIC, and HTTP/3 packages at that version were unpublished.
+That historical limitation does not describe the synchronized `0.17.0` graph.
 
 ## Preserved boundaries
 
