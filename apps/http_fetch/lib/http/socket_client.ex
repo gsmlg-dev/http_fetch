@@ -642,10 +642,16 @@ defmodule HTTP.SocketClient do
   defp transfer_http2_socket(transport, socket, owner) when is_atom(transport),
     do: transport.controlling_process(socket, owner)
 
-  defp maybe_start_http2_bridge({:stream, stream}, owner),
-    do: with({:ok, bridge} <- BodyBridge.start_link(stream, owner), do: {:ok, bridge, nil})
+  defp maybe_start_http2_bridge({:stream, stream}, owner, headers) do
+    length =
+      headers |> Enum.find_value(fn {name, value} -> if name == "content-length", do: value end)
 
-  defp maybe_start_http2_bridge(body, owner) when is_binary(body) and byte_size(body) > 0 do
+    opts = [content_length: if(length, do: String.to_integer(length))]
+    with {:ok, bridge} <- BodyBridge.start_link(stream, owner, opts), do: {:ok, bridge, nil}
+  end
+
+  defp maybe_start_http2_bridge(body, owner, _headers)
+       when is_binary(body) and byte_size(body) > 0 do
     chunks =
       Stream.unfold(body, fn
         "" ->
@@ -669,10 +675,10 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp maybe_start_http2_bridge(_body, _owner), do: {:ok, nil, nil}
+  defp maybe_start_http2_bridge(_body, _owner, _headers), do: {:ok, nil, nil}
 
   defp start_http2_stream(owner, headers, body) do
-    with {:ok, bridge, internal_stream} <- maybe_start_http2_bridge(body, owner) do
+    with {:ok, bridge, internal_stream} <- maybe_start_http2_bridge(body, owner, headers) do
       opened =
         try do
           ConnectionOwner.open_stream(owner, headers,
@@ -1399,8 +1405,12 @@ defmodule HTTP.SocketClient do
 
     prepared_request =
       case body do
-        {:stream, stream} -> {:http1_stream, head, stream}
-        body -> {:buffer, [head, body]}
+        {:stream, stream} ->
+          length = Headers.get(request.headers, "content-length")
+          {:http1_stream, head, stream, if(length, do: String.to_integer(length))}
+
+        body ->
+          {:buffer, [head, body]}
       end
 
     {:ok, HTTP.HTTP1, HTTP.HTTP1.new(request.method), prepared_request}
@@ -1477,64 +1487,78 @@ defmodule HTTP.SocketClient do
     send_request(transport, socket, iodata, remaining_timeout(deadline_at))
   end
 
-  defp send_prepared_request(transport, socket, {:http1_stream, head, stream}, deadline_at) do
+  defp send_prepared_request(
+         transport,
+         socket,
+         {:http1_stream, head, stream, length},
+         deadline_at
+       ) do
     with :ok <- send_request(transport, socket, head, remaining_timeout(deadline_at)) do
-      send_http1_stream_body(transport, socket, stream, deadline_at)
+      send_http1_stream_body(transport, socket, stream, deadline_at, length)
     end
   end
 
-  defp send_http1_stream_body(transport, socket, stream, deadline_at) do
+  defp send_http1_stream_body(transport, socket, stream, deadline_at, remaining) do
     send(stream, {:read_chunk, self(), :ack})
-    read_http1_stream_body(transport, socket, stream, deadline_at)
+    read_http1_stream_body(transport, socket, stream, deadline_at, remaining)
   end
 
-  defp read_http1_stream_body(transport, socket, stream, deadline_at) do
+  defp read_http1_stream_body(transport, socket, stream, deadline_at, remaining) do
     receive do
       {:stream_chunk, ^stream, chunk, ack_ref} ->
-        send_http1_stream_chunk(transport, socket, stream, chunk, ack_ref, deadline_at)
+        send_http1_stream_chunk(transport, socket, stream, chunk, ack_ref, deadline_at, remaining)
 
       {:stream_chunk, ^stream, chunk} ->
-        send_http1_stream_chunk(transport, socket, stream, chunk, nil, deadline_at)
+        send_http1_stream_chunk(transport, socket, stream, chunk, nil, deadline_at, remaining)
 
       {:stream_end, ^stream} ->
-        send_request(transport, socket, "0\r\n\r\n", remaining_timeout(deadline_at))
+        case remaining do
+          nil -> send_request(transport, socket, "0\r\n\r\n", remaining_timeout(deadline_at))
+          0 -> :ok
+          _ -> fail_http1_upload(transport, socket, stream, :content_length_mismatch)
+        end
 
       {:stream_error, ^stream, reason} ->
         transport.close(socket)
         {:error, reason}
 
       :abort ->
-        transport.close(socket)
-        {:error, :aborted}
+        fail_http1_upload(transport, socket, stream, :aborted)
 
       :deadline ->
-        transport.close(socket)
-        {:error, :request_timeout}
+        fail_http1_upload(transport, socket, stream, :request_timeout)
     after
       remaining_timeout(deadline_at) ->
-        transport.close(socket)
-        {:error, :request_timeout}
+        fail_http1_upload(transport, socket, stream, :request_timeout)
     end
   end
 
-  defp send_http1_stream_chunk(transport, socket, stream, chunk, ack_ref, deadline_at) do
-    request_chunk = [
-      Integer.to_string(byte_size(chunk), 16),
-      "\r\n",
-      chunk,
-      "\r\n"
-    ]
+  defp send_http1_stream_chunk(transport, socket, stream, chunk, ack_ref, deadline_at, remaining) do
+    if remaining != nil and byte_size(chunk) > remaining do
+      fail_http1_upload(transport, socket, stream, :content_length_mismatch)
+    else
+      request_chunk =
+        if remaining == nil and chunk != "",
+          do: [Integer.to_string(byte_size(chunk), 16), "\r\n", chunk, "\r\n"],
+          else: chunk
 
-    case send_request(transport, socket, request_chunk, remaining_timeout(deadline_at)) do
-      :ok ->
-        ack_stream_chunk(stream, ack_ref)
-        read_http1_stream_body(transport, socket, stream, deadline_at)
+      case send_request(transport, socket, request_chunk, remaining_timeout(deadline_at)) do
+        :ok ->
+          ack_stream_chunk(stream, ack_ref)
+          remaining = if remaining != nil, do: remaining - byte_size(chunk)
+          read_http1_stream_body(transport, socket, stream, deadline_at, remaining)
 
-      {:error, reason} ->
-        ack_stream_chunk(stream, ack_ref)
-        HTTP.Stream.error(stream, reason)
-        {:error, reason}
+        {:error, reason} ->
+          HTTP.Stream.error(stream, reason)
+          {:error, reason}
+      end
     end
+  end
+
+  defp fail_http1_upload(transport, socket, stream, reason) do
+    HTTP.Stream.error(stream, reason)
+    transport.close(socket)
+    {:error, reason}
   end
 
   defp ack_stream_chunk(_stream, nil), do: :ok

@@ -1,6 +1,133 @@
 defmodule HTTP.RequestStreamTest do
   use ExUnit.Case, async: true
 
+  for chunks <- [["abc", "", "def"], []] do
+    test "uploads exactly the declared HTTP/1 length for #{inspect(chunks)}" do
+      chunks = unquote(chunks)
+      bytes = Enum.join(chunks)
+      test_pid = self()
+
+      url =
+        start_raw_http_server!(fn listener ->
+          {:ok, socket} = :gen_tcp.accept(listener)
+          request = recv_request(socket)
+          send(test_pid, {:fixed_request, request})
+          :ok = :gen_tcp.send(socket, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+          assert {:error, :closed} = :gen_tcp.recv(socket, 0, 5_000)
+          send(test_pid, :no_extra_upload_bytes)
+        end)
+
+      {:ok, stream} = HTTP.Stream.from_enumerable(chunks)
+
+      response =
+        HTTP.fetch(url,
+          method: :put,
+          headers: [{"content-length", to_string(byte_size(bytes))}],
+          body: stream,
+          duplex: "half"
+        )
+        |> HTTP.Promise.await()
+
+      assert HTTP.Response.read_all(response) == "ok"
+      assert_receive {:fixed_request, %{body: ^bytes, headers: headers}}, 5_000
+      assert headers["content-length"] == to_string(byte_size(bytes))
+      refute Map.has_key?(headers, "transfer-encoding")
+      assert_receive :no_extra_upload_bytes, 5_000
+    end
+  end
+
+  for chunks <- [["abc"], ["abc", "def"], ["abcdef"]] do
+    test "rejects HTTP/1 length mismatch for #{inspect(chunks)} before extra bytes are sent" do
+      test_pid = self()
+
+      url =
+        start_raw_http_server!(fn listener ->
+          {:ok, socket} = :gen_tcp.accept(listener)
+          {headers, body} = recv_header_block(socket, "")
+          assert "Content-Length: 4" in String.split(headers, "\r\n")
+          refute headers =~ "Transfer-Encoding"
+          send(test_pid, {:partial_upload, recv_closed_body(socket, body)})
+        end)
+
+      {:ok, stream} = HTTP.Stream.from_enumerable(unquote(chunks))
+
+      assert {:error, :content_length_mismatch} =
+               HTTP.fetch(url,
+                 method: :put,
+                 headers: [{"content-length", "4"}],
+                 body: stream,
+                 duplex: :half
+               )
+               |> HTTP.Promise.await()
+
+      expected = if unquote(chunks) == ["abcdef"], do: "", else: "abc"
+      assert_receive {:partial_upload, ^expected}, 5_000
+    end
+  end
+
+  test "fixed-length uploads retain lazy producer backpressure" do
+    test_pid = self()
+
+    chunks =
+      Stream.map(["abc", "def"], fn chunk ->
+        send(test_pid, {:produced, chunk})
+        chunk
+      end)
+
+    {:ok, stream} = HTTP.Stream.from_enumerable(chunks)
+    assert_receive {:produced, "abc"}
+    refute_receive {:produced, "def"}
+
+    url =
+      start_raw_http_server!(fn listener ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        assert %{body: "abcdef"} = recv_request(socket)
+        :gen_tcp.send(socket, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+        :gen_tcp.close(socket)
+      end)
+
+    assert %HTTP.Response{status: 200} =
+             HTTP.fetch(url,
+               method: :put,
+               headers: [{"content-length", "6"}],
+               body: stream,
+               duplex: "half"
+             )
+             |> HTTP.Promise.await()
+
+    assert_receive {:produced, "def"}
+  end
+
+  test "abort stops a fixed-length upload and its source" do
+    test_pid = self()
+
+    url =
+      start_raw_http_server!(fn listener ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        {_headers, body} = recv_header_block(socket, "")
+        send(test_pid, {:aborted_body, recv_closed_body(socket, body)})
+      end)
+
+    {:ok, stream} = HTTP.Stream.start_link(6)
+    monitor = Process.monitor(stream)
+    {:ok, controller} = HTTP.AbortController.start_link()
+
+    promise =
+      HTTP.fetch(url,
+        method: :put,
+        headers: [{"content-length", "6"}],
+        body: stream,
+        duplex: "half",
+        signal: controller
+      )
+
+    assert :ok = HTTP.Stream.chunk(stream, "abc")
+    HTTP.AbortController.abort(controller)
+    assert {:error, :aborted} = HTTP.Promise.await(promise)
+    assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 5_000
+    assert_receive {:aborted_body, "abc"}, 5_000
+  end
+
   test "uploads a duplex half stream as an HTTP/1.1 chunked request body" do
     test_pid = self()
 
@@ -22,7 +149,7 @@ defmodule HTTP.RequestStreamTest do
         :gen_tcp.close(socket)
       end)
 
-    {:ok, stream} = HTTP.Stream.from_enumerable(["hello", " ", "stream"])
+    {:ok, stream} = HTTP.Stream.from_enumerable(["hello", "", " ", "stream"])
 
     response =
       url
@@ -155,5 +282,12 @@ defmodule HTTP.RequestStreamTest do
   defp recv_body(socket, data, content_length) do
     {:ok, more} = :gen_tcp.recv(socket, content_length - byte_size(data), 5_000)
     recv_body(socket, data <> more, content_length)
+  end
+
+  defp recv_closed_body(socket, body) do
+    case :gen_tcp.recv(socket, 0, 5_000) do
+      {:ok, bytes} -> recv_closed_body(socket, body <> bytes)
+      {:error, :closed} -> body
+    end
   end
 end

@@ -49,6 +49,7 @@ defmodule HTTP.HTTP2.BodyBridge do
        stopped?: false,
        started_at: System.monotonic_time(),
        bytes: 0,
+       content_length: Keyword.get(opts, :content_length),
        peak_buffered_bytes: 0
      }}
   end
@@ -114,6 +115,9 @@ defmodule HTTP.HTTP2.BodyBridge do
       byte_size(chunk) > state.max_buffer_bytes ->
         {:noreply, stop_stream(state, :buffer_limit)}
 
+      state.content_length != nil and state.bytes + byte_size(chunk) > state.content_length ->
+        {:noreply, stop_stream(state, :content_length_mismatch)}
+
       chunk == <<>> ->
         send(stream, {:stream_chunk_ack, ack_ref})
         {:noreply, advance(%{state | read_pending?: false})}
@@ -136,11 +140,16 @@ defmodule HTTP.HTTP2.BodyBridge do
   end
 
   def handle_info({:stream_end, stream}, %{stream: stream} = state) do
-    if state.stopped? do
-      {:noreply, state}
-    else
-      send(state.owner, {:body_eof, self()})
-      {:noreply, finish(%{state | eof?: true, read_pending?: false}, :eof)}
+    cond do
+      state.stopped? ->
+        {:noreply, state}
+
+      state.content_length != nil and state.bytes != state.content_length ->
+        {:noreply, stop_stream(state, :content_length_mismatch)}
+
+      true ->
+        send(state.owner, {:body_eof, self()})
+        {:noreply, finish(%{state | eof?: true, read_pending?: false}, :eof)}
     end
   end
 
@@ -254,4 +263,5 @@ defmodule HTTP.HTTP2.BodyBridge do
   defp bridge_outcome(:early_response), do: :early_response
   defp bridge_outcome(:owner_down), do: :owner_down
   defp bridge_outcome(:buffer_limit), do: :buffer_limit
+  defp bridge_outcome(:content_length_mismatch), do: :content_length_mismatch
 end
