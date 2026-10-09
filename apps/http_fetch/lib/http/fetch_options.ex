@@ -14,6 +14,9 @@ defmodule HTTP.FetchOptions do
 
   The socket transport also accepts Elixir-specific extensions:
 
+  - `decode_body` - decode response Content-Encoding; defaults to `true`. Set
+    `false` to preserve stored entity bytes for buffered and streamed HTTP/1,
+    HTTP/2, and HTTP/3 responses without changing headers.
   - `content_type` - convenience Content-Type value for request bodies
   - `timeout` - request timeout in milliseconds
   - `connect_timeout` - connection timeout in milliseconds
@@ -39,6 +42,8 @@ defmodule HTTP.FetchOptions do
     "content_type" => :content_type,
     "contentType" => :content_type,
     "duplex" => :duplex,
+    "decode_body" => :decode_body,
+    "decodeBody" => :decode_body,
     "headers" => :headers,
     "http_version" => :http_version,
     "httpVersion" => :http_version,
@@ -73,6 +78,7 @@ defmodule HTTP.FetchOptions do
             content_type: nil,
             body: nil,
             duplex: nil,
+            decode_body: true,
             signal: nil,
             unix_socket: nil,
             redirect: :follow,
@@ -100,6 +106,7 @@ defmodule HTTP.FetchOptions do
           content_type: String.t() | nil,
           body: any(),
           duplex: :half | nil,
+          decode_body: boolean(),
           signal: any() | nil,
           unix_socket: String.t() | nil,
           redirect: redirect(),
@@ -143,6 +150,7 @@ defmodule HTTP.FetchOptions do
   @spec to_transport_options(t()) :: keyword()
   def to_transport_options(%__MODULE__{} = options) do
     []
+    |> maybe_add(:decode_body, options.decode_body)
     |> maybe_add(:timeout, options.timeout)
     |> maybe_add(:connect_timeout, options.connect_timeout)
     |> maybe_add(:ssl, options.ssl)
@@ -205,6 +213,9 @@ defmodule HTTP.FetchOptions do
 
       {:duplex, duplex}, acc ->
         %{acc | duplex: normalize_duplex(duplex)}
+
+      {:decode_body, decode_body}, acc ->
+        %{acc | decode_body: decode_body}
 
       {:signal, signal}, acc ->
         %{acc | signal: signal}
@@ -279,6 +290,7 @@ defmodule HTTP.FetchOptions do
       | method: normalize_method(options.method),
         redirect: normalize_redirect(options.redirect),
         duplex: normalize_duplex(options.duplex),
+        decode_body: normalize_decode_body(options.decode_body),
         http_version: http_version,
         tls_backend: normalize_tls_backend(options.tls_backend, http_version),
         http2_profile: normalize_http2_profile(options.http2_profile),
@@ -288,6 +300,11 @@ defmodule HTTP.FetchOptions do
         http2_priority: normalize_http2_priority(options.http2_priority)
     }
   end
+
+  defp normalize_decode_body(value) when is_boolean(value), do: value
+
+  defp normalize_decode_body(value),
+    do: raise(ArgumentError, "invalid decode_body: #{inspect(value)}; expected boolean")
 
   defp normalize_method(method) when is_binary(method) do
     method |> String.downcase() |> String.to_atom()

@@ -156,10 +156,10 @@ defmodule HTTP.SocketClient do
         content_length = stream_content_length(headers)
 
         {:ok, stream_pid} =
-          HTTP.Stream.start_link(content_length, HTTP.ContentDecoder.encodings(headers))
+          HTTP.Stream.start_link(content_length, response_encodings(state.request, headers))
 
         response = Response.with_stream_body(response, stream_pid)
-        send_response(state.parent, state.ref, response, state.request.method)
+        send_response(state.parent, state.ref, response, state.request)
 
         {:cont, %{state | mode: {:stream, stream_pid}, response_sent?: true}}
 
@@ -200,7 +200,7 @@ defmodule HTTP.SocketClient do
       |> IO.iodata_to_binary()
 
     response = Response.with_buffered_body(response, body)
-    send_response(state.parent, state.ref, response, state.request.method)
+    send_response(state.parent, state.ref, response, state.request)
 
     {:halt, state}
   end
@@ -903,7 +903,7 @@ defmodule HTTP.SocketClient do
       state.parent,
       state.ref,
       Response.with_buffered_body(response, chunks |> Enum.reverse() |> IO.iodata_to_binary()),
-      state.request.method
+      state.request
     )
 
     finish_http2(state, :ok)
@@ -941,7 +941,7 @@ defmodule HTTP.SocketClient do
           state.parent,
           state.ref,
           Response.with_buffered_body(response, ""),
-          state.request.method
+          state.request
         )
 
         finish_http2(state, :ok)
@@ -950,14 +950,14 @@ defmodule HTTP.SocketClient do
         {:ok, stream_pid} =
           HTTP.Stream.start_link(
             stream_content_length(headers),
-            HTTP.ContentDecoder.encodings(headers)
+            response_encodings(state.request, headers)
           )
 
         send_response(
           state.parent,
           state.ref,
           Response.with_stream_body(response, stream_pid),
-          state.request.method
+          state.request
         )
 
         await_http2_response(%{state | mode: {:stream, stream_pid}, response_sent?: true})
@@ -1026,7 +1026,7 @@ defmodule HTTP.SocketClient do
               response,
               chunks |> Enum.reverse() |> IO.iodata_to_binary()
             ),
-            state.request.method
+            state.request
           )
 
           finish_http2(state, :ok)
@@ -1243,10 +1243,10 @@ defmodule HTTP.SocketClient do
         content_length = stream_content_length(headers)
 
         {:ok, stream_pid} =
-          HTTP.Stream.start_link(content_length, HTTP.ContentDecoder.encodings(headers))
+          HTTP.Stream.start_link(content_length, response_encodings(state.request, headers))
 
         response = Response.with_stream_body(response, stream_pid)
-        send_response(state.parent, state.ref, response, state.request.method)
+        send_response(state.parent, state.ref, response, state.request)
 
         {:continue, %{state | mode: {:stream, stream_pid}, response_sent?: true}}
 
@@ -1282,7 +1282,7 @@ defmodule HTTP.SocketClient do
     if follow_redirect?(state, response) do
       redirect(state, response)
     else
-      send_response(state.parent, state.ref, response, state.request.method)
+      send_response(state.parent, state.ref, response, state.request)
       finish(state)
     end
   end
@@ -1321,7 +1321,7 @@ defmodule HTTP.SocketClient do
         fail(state, reason)
 
       {:error, _reason} ->
-        send_response(state.parent, state.ref, response, state.request.method)
+        send_response(state.parent, state.ref, response, state.request)
         finish(state)
     end
   end
@@ -1371,8 +1371,16 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp send_response(parent, ref, response, method) do
-    if Response.stream_body?(response) or HTTP.HTTP1.body_forbidden?(method, response.status) do
+  defp response_encodings(request, headers) do
+    if Keyword.get(request.transport_options, :decode_body, true),
+      do: HTTP.ContentDecoder.encodings(headers),
+      else: []
+  end
+
+  defp send_response(parent, ref, response, request) do
+    if Response.stream_body?(response) or
+         HTTP.HTTP1.body_forbidden?(request.method, response.status) or
+         not Keyword.get(request.transport_options, :decode_body, true) do
       send(parent, {:http_fetch_response, ref, response})
     else
       case HTTP.ContentDecoder.buffered(response.headers, response.body || "") do

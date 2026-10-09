@@ -888,6 +888,19 @@ Streams are consumed once and preserve backpressure and trailer ordering;
 all response consumers see the same decoded bytes. Manually constructed
 responses are not decoded.
 
+For object storage and other byte-preserving consumers, disable decoding per
+request with `decode_body: false`:
+
+```elixir
+response = HTTP.fetch(object_url, decode_body: false) |> HTTP.Promise.await()
+stored_bytes = HTTP.Response.read_all(response)
+```
+
+This preserves the original entity bytes for buffered and streamed HTTP/1.1,
+HTTP/2, and HTTP/3 responses, including gzip/deflate marked by `Content-Encoding`.
+Headers, stream acknowledgements, cancellation, and request uploads retain their
+usual behavior. HTTP framing (such as chunk boundaries) is still removed.
+
 Malformed or truncated gzip/deflate produces
 `{:error, {:invalid_content_encoding, coding}}` for buffered fetches and a
 `:stream_error` for streamed bodies. Stream reading methods raise on that error;
