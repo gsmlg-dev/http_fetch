@@ -25,20 +25,21 @@ def command(args, *, cwd=None, env=None):
     subprocess.run(args, cwd=cwd, env=env, check=True)
 
 
-def telemetry_archive(destination):
-    source = Path.home() / ".hex/packages/hexpm/telemetry-1.3.0.tar"
+def telemetry_archive(directory):
     lock = (ROOT / "mix.lock").read_text()
-    match = re.search(r'"telemetry": \{:hex, :telemetry, "1\.3\.0", "[a-f0-9]+", \[:rebar3\], \[\], "hexpm", "([a-f0-9]+)"\}', lock)
+    match = re.search(r'"telemetry": \{:hex, :telemetry, "([0-9]+\.[0-9]+\.[0-9]+)", "[a-f0-9]+", \[:rebar3\], \[\], "hexpm", "([a-f0-9]+)"\}', lock)
     if not match:
-        raise RuntimeError("expected locked telemetry 1.3.0 package")
+        raise RuntimeError("expected locked telemetry package")
+    name = f"telemetry-{match.group(1)}.tar"
+    source = Path.home() / ".hex/packages/hexpm" / name
     if source.is_file():
         data = source.read_bytes()
     else:
-        with urlopen("https://repo.hex.pm/tarballs/telemetry-1.3.0.tar", timeout=30) as response:
+        with urlopen(f"https://repo.hex.pm/tarballs/{name}", timeout=30) as response:
             data = response.read()
-    if hashlib.sha256(data).hexdigest() != match.group(1):
+    if hashlib.sha256(data).hexdigest() != match.group(2):
         raise RuntimeError("telemetry tarball differs from locked outer checksum")
-    destination.write_bytes(data)
+    (directory / name).write_bytes(data)
 
 
 def setup_registry(archive_dir, version, directory, env):
@@ -50,7 +51,7 @@ def setup_registry(archive_dir, version, directory, env):
         if not archive.is_file():
             raise RuntimeError(f"missing candidate archive: {archive}")
         shutil.copyfile(archive, tarballs / archive.name)
-    telemetry_archive(tarballs / "telemetry-1.3.0.tar")
+    telemetry_archive(tarballs)
     private_key = directory / "registry.pem"
     command(["openssl", "genrsa", "-out", str(private_key), "2048"])
     command(["mix", "hex.registry", "build", str(public), "--name=hexpm", f"--private-key={private_key}"], env=env)
