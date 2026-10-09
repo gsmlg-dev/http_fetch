@@ -17,8 +17,13 @@ defmodule HTTP.FetchHTTP3Test do
       :public_key.pem_decode(File.read!(Path.join(fixture, "leaf-key.pem")))
 
     {:ok, server} = Quic.listen(tls: [cert: [cert.("leaf.pem")], key: {type, key}, alpn: ["h3"]])
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
     {_, port} = Quic.local(server)
+
+    on_exit(fn ->
+      stop_fixture_clients(port)
+      if Process.alive?(server), do: GenServer.stop(server)
+    end)
+
     ssl = [cacerts: [cert.("root.pem")], reference_identity: {:dns_id, "example.test"}]
     %{server: server, url: "https://127.0.0.1:#{port}/events", ssl: ssl}
   end
@@ -319,6 +324,24 @@ defmodule HTTP.FetchHTTP3Test do
   defp decode_data(bytes, chunks) do
     {:ok, %{type: 0, payload: chunk}, rest} = Frame.decode(bytes)
     decode_data(rest, [chunk | chunks])
+  end
+
+  # UDP listener teardown alone cannot promptly notify reused client owners.
+  # Reconcile this fixture's owners before the next test can consume pool credit.
+  defp stop_fixture_clients(port) do
+    for {_, owner, _, _} <-
+          DynamicSupervisor.which_children(:http_fetch_http3_connection_supervisor),
+        is_pid(owner),
+        fixture_owner?(owner, port) do
+      GenServer.stop(owner, :normal, 5_000)
+    end
+  end
+
+  defp fixture_owner?(owner, port) do
+    state = :sys.get_state(owner, 1_000)
+    state.opts[:host] == "127.0.0.1" and state.opts[:port] == port
+  catch
+    :exit, {:noproc, _} -> false
   end
 
   defp fetch(context, opts \\ []) do
