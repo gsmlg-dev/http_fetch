@@ -102,6 +102,8 @@ defmodule QuicHttp3.Transport.Quic do
   def ready(%__MODULE__{handle: nil}, _timeout), do: :pending
 
   def ready(%__MODULE__{handle: handle, ops: ops} = connection, _timeout) do
+    # credo:disable-for-next-line Credo.Check.Design.TagTODO
+    # TODO(upstream): gsmlg-dev/http_fetch#54 (fixed in the coordinated QUIC dependency)
     case ops.ready(handle) do
       :ready ->
         with {:ok, metadata} <- info(connection), do: authenticated_h3(metadata)

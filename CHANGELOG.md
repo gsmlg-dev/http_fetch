@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ExSSL cannot yet verify a distinct original literal IP against a pinned
   address; this case rejects explicitly pending upstream issue #49.
 
+### Fixed
+- Return consistent closed readiness errors when a QUIC connection exits
+  normally during a call; retain timeouts and unexpected exit reasons.
+
 ### Changed
 - Update Dialyxir, Earmark Parser, Erlex, ExDoc, Jason, Makeup, Makeup Erlang
   and Telemetry to current compatible releases. Retain Credo 1.7.13 because
