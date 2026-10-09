@@ -235,6 +235,78 @@ defmodule HTTP.WebSocket.ProxyBoundaryTest do
     end
   end
 
+  for backend <- [:ssl, :ex_ssl] do
+    test "WSS owner loss aborts a blocked transport with #{backend}" do
+      fixtures = Path.expand("../../support/fixtures", __DIR__)
+
+      {:ok, listener} =
+        :ssl.listen(0, [
+          :binary,
+          active: false,
+          reuseaddr: true,
+          recbuf: 1_024,
+          certfile: Path.join(fixtures, "localhost.pem"),
+          keyfile: Path.join(fixtures, "localhost.key")
+        ])
+
+      {:ok, {_, port}} = :ssl.sockname(listener)
+      parent = self()
+
+      peer =
+        spawn_link(fn ->
+          {:ok, tcp} = :ssl.transport_accept(listener, @timeout)
+          {:ok, socket} = :ssl.handshake(tcp, @timeout)
+          {:ok, request} = :ssl.recv(socket, 0, @timeout)
+          :ok = :ssl.send(socket, head(request_key(request)))
+          receive do: (:drain -> ssl_drain(socket))
+          send(parent, {:lost_owner_closed, self()})
+        end)
+
+      owner = spawn(fn -> relay(parent) end)
+
+      on_exit(fn ->
+        Process.exit(owner, :kill)
+        Process.exit(peer, :kill)
+        :ssl.close(listener)
+      end)
+
+      ws =
+        WebSocket.new("wss://localhost:#{port}/proxy", [],
+          owner: owner,
+          tls_backend: unquote(backend),
+          socket_opts: [sndbuf: 1_024],
+          ssl: [cacertfile: Path.join(fixtures, "localhost-ca.pem")]
+        )
+
+      assert_receive {WebSocket, ^ws, %Open{}}, @timeout
+
+      for byte <- [0, 1] do
+        assert {:ok, _} =
+                 WebSocket.send_ack(
+                   ws,
+                   WebSocket.array_buffer(:binary.copy(<<byte>>, 8 * 1024 * 1024))
+                 )
+      end
+
+      monitor = Process.monitor(ws.pid)
+      send(owner, :stop)
+      assert_receive {:DOWN, ^monitor, :process, _, _}, 1_000
+      send(peer, :drain)
+      assert_receive {:lost_owner_closed, ^peer}, 1_000
+    end
+  end
+
+  defp relay(parent) do
+    receive do
+      :stop ->
+        :ok
+
+      message ->
+        send(parent, message)
+        relay(parent)
+    end
+  end
+
   defp ssl_drain(socket) do
     case :ssl.recv(socket, 0, @timeout) do
       {:ok, _} -> ssl_drain(socket)
