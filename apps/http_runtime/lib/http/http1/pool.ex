@@ -68,6 +68,7 @@ defmodule HTTP.HTTP1.Pool do
         status: :pending,
         monitor: Process.monitor(owner),
         idle_timeout: idle_timeout,
+        expires_at: now() + 1_000,
         timer: Process.send_after(self(), {:expire, token}, 1_000)
       }
 
@@ -78,7 +79,12 @@ defmodule HTTP.HTTP1.Pool do
   end
 
   def handle_call({:activate, token}, _from, state) do
+    current_time = now()
+
     case Map.fetch(state.entries, token) do
+      {:ok, entry} when entry.expires_at <= current_time ->
+        {:reply, :expired, discard(state, token)}
+
       {:ok, entry} ->
         Process.demonitor(entry.monitor, [:flush])
         _ = Process.cancel_timer(entry.timer)
@@ -89,6 +95,7 @@ defmodule HTTP.HTTP1.Pool do
               entry
               | status: :idle,
                 monitor: nil,
+                expires_at: now() + entry.idle_timeout,
                 timer: Process.send_after(self(), {:expire, token}, entry.idle_timeout)
             }
 
@@ -117,14 +124,23 @@ defmodule HTTP.HTTP1.Pool do
   end
 
   defp lease(entry, owner) do
-    with :ok <- entry.transport.setopts(entry.socket, active: false),
-         {:error, :timeout} <- entry.transport.recv(entry.socket, 0, 0) do
+    with false <- entry.expires_at <= now(),
+         :ok <- entry.transport.setopts(entry.socket, active: false),
+         {:error, :timeout} <- entry.transport.recv(entry.socket, 0, 0),
+         false <- queued_socket_event?(entry) do
       entry.transport.controlling_process(entry.socket, owner)
     end
   end
 
   @impl true
-  def handle_info({:expire, token}, state), do: {:noreply, discard(state, token)}
+  def handle_info({:expire, token}, state) do
+    current_time = now()
+
+    case Map.fetch(state.entries, token) do
+      {:ok, entry} when entry.expires_at <= current_time -> {:noreply, discard(state, token)}
+      _ -> {:noreply, state}
+    end
+  end
 
   def handle_info({:DOWN, monitor, :process, _, _}, state) do
     tokens = for {token, entry} <- state.entries, entry.monitor == monitor, do: token
@@ -139,6 +155,13 @@ defmodule HTTP.HTTP1.Pool do
 
     {:noreply, Enum.reduce(tokens, state, &discard(&2, &1))}
   end
+
+  defp queued_socket_event?(entry) do
+    {:messages, messages} = Process.info(self(), :messages)
+    Enum.any?(messages, &(entry.transport.normalize_message(&1, entry.socket) != :unknown))
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
 
   defp discard(state, token) do
     case Map.fetch(state.entries, token) do
