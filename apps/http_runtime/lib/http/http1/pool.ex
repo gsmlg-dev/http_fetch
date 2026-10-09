@@ -81,7 +81,7 @@ defmodule HTTP.HTTP1.Pool do
     case Map.fetch(state.entries, token) do
       {:ok, entry} ->
         Process.demonitor(entry.monitor, [:flush])
-        Process.cancel_timer(entry.timer)
+        _ = Process.cancel_timer(entry.timer)
 
         case entry.transport.setopts(entry.socket, active: :once) do
           :ok ->
@@ -152,7 +152,7 @@ defmodule HTTP.HTTP1.Pool do
   defp remove(state, token) do
     case Map.fetch(state.entries, token) do
       {:ok, entry} ->
-        Process.cancel_timer(entry.timer)
+        _ = Process.cancel_timer(entry.timer)
         if entry.monitor, do: Process.demonitor(entry.monitor, [:flush])
 
       :error ->

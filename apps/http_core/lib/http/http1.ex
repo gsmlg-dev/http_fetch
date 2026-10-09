@@ -442,8 +442,7 @@ defmodule HTTP.HTTP1 do
   end
 
   defp request_headers(%Request{} = request) do
-    request
-    |> HTTP.Proxy.request_headers()
+    %{request | headers: HTTP.Proxy.request_headers(request)}
     |> validate_request_framing!()
     |> ensure_user_agent()
     |> Headers.set_default("Host", Request.authority(request.url))
