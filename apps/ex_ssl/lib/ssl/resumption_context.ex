@@ -27,7 +27,8 @@ defmodule SSL.ResumptionContext do
       :sha256,
       :erlang.term_to_binary(
         {:ex_ssl_ticket_policy, 1, options.endpoint, endpoint, options.identity,
-         options.trust_source, options.profile, options.depth, options.hostname_check}
+         Map.get(options.context, :server_name), options.trust_source, options.profile,
+         options.depth, options.hostname_check}
       )
     )
   end

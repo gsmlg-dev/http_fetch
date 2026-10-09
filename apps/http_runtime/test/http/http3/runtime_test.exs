@@ -167,11 +167,17 @@ defmodule HTTP.HTTP3.RuntimeTest do
   end
 
   test "request deadline releases native admission while DATA awaits settlement", ctx do
-    {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    server =
+      start_supervised!(%{
+        id: :deadline_peer,
+        start:
+          {Quic, :listen,
+           [[acceptor: self(), tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]]]]},
+        restart: :temporary
+      })
+
     {_, port} = Quic.local(server)
-    {:ok, pool} = Pool.start_link()
-    on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+    pool = start_supervised!({Pool, []}, restart: :temporary)
 
     request = %HTTP.Request{
       url: URI.parse("https://127.0.0.1:#{port}/deadline"),

@@ -47,6 +47,44 @@ defmodule SSL.ResumptionContextTest do
              ResumptionContext.partition(after_change, {@host, 443})
   end
 
+  test "explicit reference identity and independent SNI both partition tickets", %{fixtures: f} do
+    options =
+      normalized(f,
+        server_name_indication: ~c"routing.test",
+        ex_ssl: [reference_identity: {:ip, "127.0.0.1"}]
+      )
+
+    partition = ResumptionContext.partition(options, {@host, 443})
+    assert :ok = TicketCache.put(partition, ticket([f.server.der]))
+
+    for changed <- [
+          normalized(f,
+            server_name_indication: ~c"other-routing.test",
+            ex_ssl: [reference_identity: {:ip, "127.0.0.1"}]
+          ),
+          normalized(f,
+            server_name_indication: :disable,
+            ex_ssl: [reference_identity: {:ip, "127.0.0.1"}]
+          ),
+          normalized(f,
+            server_name_indication: ~c"routing.test",
+            ex_ssl: [reference_identity: {:ip, "::1"}]
+          )
+        ] do
+      changed_partition = ResumptionContext.partition(changed, {@host, 443})
+      refute changed_partition == partition
+      assert {:ok, _, nil, ^changed_partition} = ResumptionContext.prepare(changed, {@host, 443})
+    end
+
+    assert {:ok, _, selected, ^partition} = ResumptionContext.prepare(options, {@host, 443})
+    assert selected.peer.leaf_der == f.server.der
+
+    wrong = normalized(f, ex_ssl: [reference_identity: {:ip, "127.0.0.2"}])
+    wrong_partition = ResumptionContext.partition(wrong, {@host, 443})
+    assert :ok = TicketCache.put(wrong_partition, ticket([f.server.der]))
+    assert {:ok, _, nil, ^wrong_partition} = ResumptionContext.prepare(wrong, {@host, 443})
+  end
+
   test "cached chain is reverified and invalid or expired chains cannot supply PSK", %{
     fixtures: f
   } do

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-10
+
+### Fixed
+- Preserve the original IPv4/IPv6 certificate identity with ExSSL when
+  upgrading HTTP proxy CONNECT tunnels or dialing a different pinned address.
+- Allow an explicit ExSSL certificate reference identity independently of
+  SNI while retaining mandatory peer verification and socket upgrade checks.
+- Isolate TLS session tickets by both certificate reference identity and SNI.
+
 ## [0.18.0] - 2026-10-10
 
 ### Added

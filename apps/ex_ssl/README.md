@@ -84,6 +84,22 @@ SSL.connect(host, port,
 )
 ```
 
+To verify an IP certificate after connecting a TCP socket to a different address,
+supply the original reference separately from SNI:
+
+```elixir
+SSL.connect(tcp_socket,
+  verify: :verify_peer,
+  server_name_indication: :disable,
+  ex_ssl: [reference_identity: {:ip, "127.0.0.1"}]
+)
+```
+
+The custom reference accepts IPv4/IPv6 tuples or strings, or
+`{:dns_id, "service.example"}`. It selects certificate verification only;
+SNI follows `server_name_indication` and the usual direct-dial defaults.
+Trust, peer identity and handshake verification remain mandatory.
+
 ## Runtime baseline
 
 The supported runtime baselines are Elixir 1.18 on Erlang/OTP 28, Elixir 1.19 on

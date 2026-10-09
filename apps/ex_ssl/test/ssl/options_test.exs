@@ -261,6 +261,99 @@ defmodule SSL.OptionsTest do
              SSL.Options.normalize(:upgrade, server_name_indication: ~c"mail.example")
   end
 
+  test "explicit IP identities permit upgrade without fabricating SNI" do
+    for {reference, expected} <- [
+          {"127.0.0.1", {127, 0, 0, 1}},
+          {{127, 0, 0, 1}, {127, 0, 0, 1}},
+          {"::1", {0, 0, 0, 0, 0, 0, 0, 1}},
+          {{0, 0, 0, 0, 0, 0, 0, 1}, {0, 0, 0, 0, 0, 0, 0, 1}}
+        ] do
+      assert {:ok, options} =
+               SSL.Options.normalize(:upgrade, ex_ssl: [reference_identity: {:ip, reference}])
+
+      assert options.identity == {:ip, expected}
+      assert options.context == %{}
+      refute List.keymember?(options.profile.extensions, :server_name, 0)
+    end
+  end
+
+  test "explicit reference identity is independent of routing and SNI" do
+    assert {:ok, options} =
+             SSL.Options.normalize({127, 0, 0, 2},
+               server_name_indication: ~c"routing.example",
+               ex_ssl: [reference_identity: {:ip, "127.0.0.1"}, profile: :default]
+             )
+
+    assert options.identity == {:ip, {127, 0, 0, 1}}
+    assert options.context == %{server_name: "routing.example"}
+
+    assert {:ok, options} =
+             SSL.Options.normalize(:upgrade,
+               server_name_indication: :disable,
+               ex_ssl: [reference_identity: {:dns_id, "certificate.example"}]
+             )
+
+    assert options.identity == {:dns_id, "certificate.example"}
+    assert options.context == %{}
+
+    assert {:ok, options} =
+             SSL.Options.normalize("routing.example",
+               ex_ssl: [reference_identity: {:dns_id, "certificate.example"}]
+             )
+
+    assert options.identity == {:dns_id, "certificate.example"}
+    assert options.context == %{server_name: "routing.example"}
+  end
+
+  test "explicit identity rejects malformed references and custom options before connecting" do
+    for reference <- [
+          nil,
+          {:ip, ""},
+          {:ip, "not-an-ip"},
+          {:ip, <<255>>},
+          {:ip, "127.0.0.1%scope"},
+          {:ip, ~c"127.0.0.1"},
+          {:ip, {127, 0, 0, 256}},
+          {:ip, {127, 0, 0, -1}},
+          {:ip, {127, 0, 0, 1.0}},
+          {:ip, {0, 0, 0, 0, 0, 0, 0, 65_536}},
+          {:ip, {0, 0, 0, 0, 0, 0, 0, "1"}},
+          {:dns_id, ""},
+          {:dns_id, ~c"mail.example"},
+          {:dns_id, <<255>>},
+          {:dns_id, "bad..example"},
+          {:dns_id, "-bad.example"},
+          {:dns_id, String.duplicate("a", 64) <> ".example"},
+          {:dns_id, String.duplicate("a", 254)},
+          {:dns_id, "*.example"}
+        ] do
+      assert {:error, {:options, {:ex_ssl, :unsupported_or_invalid}}} =
+               SSL.connect({127, 0, 0, 1}, 0, [ex_ssl: [reference_identity: reference]], 1_000)
+    end
+
+    for custom <- [
+          [],
+          [reference_identity: {:ip, "127.0.0.1"}, unknown: true],
+          [reference_identity: {:ip, "127.0.0.1"}, reference_identity: {:ip, "127.0.0.2"}],
+          [profile: :default, profile: :default],
+          [{:reference_identity, {:ip, "127.0.0.1"}} | :bad]
+        ] do
+      assert {:error, {:options, {:ex_ssl, :unsupported_or_invalid}}} =
+               SSL.Options.normalize(:upgrade, ex_ssl: custom)
+    end
+  end
+
+  test "explicit identity cannot weaken verification or bypass endpoint validation" do
+    assert {:error, {:options, {:verify, :unsupported_or_invalid}}} =
+             SSL.Options.normalize(:upgrade,
+               verify: :verify_none,
+               ex_ssl: [reference_identity: {:ip, "127.0.0.1"}]
+             )
+
+    assert {:error, {:options, {:host, :invalid}}} =
+             SSL.Options.normalize(nil, ex_ssl: [reference_identity: {:ip, "127.0.0.1"}])
+  end
+
   test "IP connection never fabricates SNI" do
     assert {:ok, options} = SSL.Options.normalize({127, 0, 0, 1}, [])
     assert options.identity == {:ip, {127, 0, 0, 1}}

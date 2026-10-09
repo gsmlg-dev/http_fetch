@@ -56,7 +56,12 @@ defmodule HTTP.ProxyWireTest do
     assert {:error, :timeout} = :gen_tcp.accept(origin, 100)
   end
 
-  for {backend, origin_host} <- [{:ssl, "localhost"}, {:ex_ssl, "localhost"}, {:ssl, "127.0.0.1"}],
+  for {backend, origin_host} <- [
+        {:ssl, "localhost"},
+        {:ex_ssl, "localhost"},
+        {:ssl, "127.0.0.1"},
+        {:ex_ssl, "127.0.0.1"}
+      ],
       protocol <- [:http1, :http2, :auto] do
     test "HTTPS #{protocol} #{origin_host} tunnels with #{backend} and keeps proxy auth outside TLS" do
       parent = self()
@@ -121,6 +126,79 @@ defmodule HTTP.ProxyWireTest do
       assert {:error, :timeout} = :gen_tcp.accept(origin, 100)
       assert_receive {:peer_done, ^peer}, 2_000
       send(peer, :close)
+    end
+  end
+
+  for {host, expected} <- [{"127.0.0.1", :ok}, {"127.0.0.2", :error}, {"[::1]", :error}] do
+    test "ExSSL proxy origin #{host} preserves IP verification independently of DNS SNI" do
+      parent = self()
+      {origin, origin_port} = listener()
+      {proxy, proxy_port} = listener()
+
+      peer =
+        spawn_link(fn ->
+          {:ok, tcp} = :gen_tcp.accept(proxy, 5_000)
+          send(parent, {:connect_head, recv_head(tcp, :gen_tcp)})
+          :ok = :gen_tcp.send(tcp, "HTTP/1.1 200 Connection Established\r\n\r\n")
+
+          result =
+            :ssl.handshake(
+              tcp,
+              [
+                certfile: String.to_charlist(Path.join(@fixtures, "localhost.pem")),
+                keyfile: String.to_charlist(Path.join(@fixtures, "localhost.key")),
+                active: false,
+                mode: :binary
+              ],
+              5_000
+            )
+
+          case result do
+            {:ok, socket} ->
+              assert {:ok, info} = :ssl.connection_information(socket, [:sni_hostname])
+              send(parent, {:origin_sni, info[:sni_hostname]})
+              send(parent, {:verified_request, recv_head(socket, :ssl)})
+              :ok = :ssl.send(socket, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+              receive do: (:close -> :ssl.close(socket))
+
+            {:error, reason} ->
+              send(parent, {:rejected_identity, reason})
+          end
+        end)
+
+      on_exit(fn -> if Process.alive?(peer), do: Process.exit(peer, :kill) end)
+
+      result =
+        HTTP.fetch("https://#{unquote(host)}:#{origin_port}/identity",
+          tls_backend: :ex_ssl,
+          ssl: [
+            cacertfile: Path.join(@fixtures, "localhost-ca.pem"),
+            server_name_indication: ~c"localhost"
+          ],
+          proxy: {:http, "127.0.0.1", proxy_port, []},
+          timeout: 5_000
+        )
+        |> HTTP.Promise.await(7_000)
+
+      assert_receive {:connect_head, head}, 2_000
+      assert head =~ "CONNECT #{unquote(host)}:#{origin_port} HTTP/1.1\r\n"
+
+      case unquote(expected) do
+        :ok ->
+          assert %HTTP.Response{status: 200} = result
+          assert HTTP.Response.read_all(result) == "ok"
+          assert_receive {:origin_sni, ~c"localhost"}, 2_000
+          assert_receive {:verified_request, request}, 2_000
+          assert request =~ "Host: #{unquote(host)}:#{origin_port}\r\n"
+          send(peer, :close)
+
+        :error ->
+          assert {:error, _} = result
+          assert_receive {:rejected_identity, _}, 2_000
+          refute_receive {:verified_request, _}, 0
+      end
+
+      assert {:error, :timeout} = :gen_tcp.accept(origin, 100)
     end
   end
 
@@ -218,18 +296,10 @@ defmodule HTTP.ProxyWireTest do
     assert {:error, :timeout} = :gen_tcp.accept(origin, 100)
   end
 
-  test "ExSSL IP certificate identity and Unix proxy routes are rejected before I/O" do
+  test "Unix proxy routes are rejected before I/O" do
     {origin, origin_port} = listener()
     {proxy, proxy_port} = listener()
     route = {:http, "127.0.0.1", proxy_port, []}
-
-    assert {:error, :ex_ssl_proxy_ip_identity_unsupported} =
-             HTTP.fetch("https://127.0.0.1:#{origin_port}/",
-               proxy: route,
-               tls_backend: :ex_ssl,
-               timeout: 500
-             )
-             |> HTTP.Promise.await()
 
     assert {:error, :proxy_not_supported_for_unix_socket} =
              HTTP.fetch("http://localhost:#{origin_port}/",
