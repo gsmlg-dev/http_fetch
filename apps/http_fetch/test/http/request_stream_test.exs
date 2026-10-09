@@ -171,15 +171,280 @@ defmodule HTTP.RequestStreamTest do
     refute Map.has_key?(headers, "content-length")
   end
 
-  defp start_raw_http_server!(handler) when is_function(handler, 1) do
+  test "an early final response cancels an open upload before its EOF" do
+    test_pid = self()
+
+    url =
+      start_raw_http_server!(fn listener ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        {_headers, body} = recv_header_block(socket, "")
+        assert body == ""
+        :ok = :gen_tcp.send(socket, "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n")
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+        send(test_pid, :early_peer_closed)
+      end)
+
+    {:ok, upload} = HTTP.Stream.start_link(0)
+    monitor = Process.monitor(upload)
+
+    assert %HTTP.Response{status: 413} =
+             HTTP.fetch(url,
+               method: :post,
+               body: upload,
+               duplex: "half",
+               http_version: :http1,
+               redirect: :manual,
+               timeout: 150
+             )
+             |> HTTP.Promise.await(2_000)
+
+    assert_receive {:DOWN, ^monitor, :process, ^upload, :normal}, 1_000
+    assert_receive :early_peer_closed, 1_000
+  end
+
+  test "an early streamed response drains after the upload source has terminated" do
+    url =
+      start_raw_http_server!(fn listener ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        recv_header_block(socket, "")
+
+        :ok =
+          :gen_tcp.send(
+            socket,
+            "HTTP/1.1 413 Payload Too Large\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nstop\r\n0\r\n\r\n"
+          )
+
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+      end)
+
+    {:ok, upload} = HTTP.Stream.start_link(0)
+
+    response =
+      HTTP.fetch(url, method: :post, body: upload, duplex: :half, timeout: 1_000)
+      |> HTTP.Promise.await()
+
+    assert response.status == 413
+    assert is_pid(response.stream)
+    refute Process.alive?(upload)
+    assert HTTP.Response.read_all(response) == "stop"
+  end
+
+  test "downstream abort cancels an early response with an unacknowledged body chunk" do
+    test_pid = self()
+
+    url =
+      start_raw_http_server!(fn listener ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        recv_header_block(socket, "")
+
+        :ok =
+          :gen_tcp.send(
+            socket,
+            "HTTP/1.1 413 Payload Too Large\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nstop\r\n"
+          )
+
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+        send(test_pid, :cancelled_response_peer_closed)
+      end)
+
+    {:ok, upload} = HTTP.Stream.start_link(0)
+    {:ok, controller} = HTTP.AbortController.start_link()
+
+    response =
+      HTTP.fetch(url,
+        method: :post,
+        body: upload,
+        duplex: :half,
+        signal: controller,
+        timeout: 2_000
+      )
+      |> HTTP.Promise.await()
+
+    stream = response.stream
+    monitor = Process.monitor(stream)
+    send(stream, {:read_chunk, self(), :ack})
+    assert_receive {:stream_chunk, ^stream, "stop", _ack}, 1_000
+    assert :ok = HTTP.AbortController.abort(controller)
+    assert :ok = HTTP.AbortController.abort(controller)
+    assert_receive {:stream_error, ^stream, :aborted}, 1_000
+    assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 1_000
+    assert_receive :cancelled_response_peer_closed, 1_000
+    refute Process.alive?(upload)
+  end
+
+  test "the original request deadline stops a stalled upload" do
+    test_pid = self()
+
+    url =
+      start_raw_http_server!(fn listener ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        recv_header_block(socket, "")
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+        send(test_pid, :deadline_peer_closed)
+      end)
+
+    {:ok, upload} = HTTP.Stream.start_link(0)
+    monitor = Process.monitor(upload)
+
+    assert {:error, :request_timeout} =
+             HTTP.fetch(url, method: :post, body: upload, duplex: :half, timeout: 100)
+             |> HTTP.Promise.await()
+
+    assert_receive {:DOWN, ^monitor, :process, ^upload, :normal}, 1_000
+    assert_receive :deadline_peer_closed, 1_000
+  end
+
+  test "socket owner death stops the upload source and closes the peer" do
+    test_pid = self()
+
+    url =
+      start_raw_http_server!(fn listener ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        recv_header_block(socket, "")
+        send(test_pid, :owner_request_received)
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+        send(test_pid, :owner_peer_closed)
+      end)
+
+    {:ok, upload} = HTTP.Stream.start_link(0)
+    monitor = Process.monitor(upload)
+    {:ok, controller} = HTTP.AbortController.start_link()
+    promise = HTTP.fetch(url, method: :post, body: upload, duplex: :half, signal: controller)
+    assert_receive :owner_request_received, 1_000
+    owner = Agent.get(controller, & &1.request_id)
+    Process.exit(owner, :kill)
+    assert {:error, {:request_process_down, :killed}} = HTTP.Promise.await(promise)
+    assert_receive {:DOWN, ^monitor, :process, ^upload, :normal}, 1_000
+    assert_receive :owner_peer_closed, 1_000
+  end
+
+  test "early redirects never replay a streaming body" do
+    test_pid = self()
+
+    url =
+      start_raw_http_server!(fn listener ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        recv_header_block(socket, "")
+
+        :ok =
+          :gen_tcp.send(
+            socket,
+            "HTTP/1.1 307 Temporary Redirect\r\nLocation: /again\r\nContent-Length: 0\r\n\r\n"
+          )
+
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+        assert {:error, :timeout} = :gen_tcp.accept(listener, 100)
+        send(test_pid, :stream_not_replayed)
+      end)
+
+    {:ok, upload} = HTTP.Stream.start_link(0)
+
+    response =
+      HTTP.fetch(url, method: :post, body: upload, duplex: :half, timeout: 1_000)
+      |> HTTP.Promise.await()
+
+    assert response.status == 307
+    refute Process.alive?(upload)
+    assert_receive :stream_not_replayed, 1_000
+  end
+
+  test "an early final response tears down a filled TCP send queue" do
+    test_pid = self()
+
+    url =
+      start_raw_http_server!(
+        fn listener ->
+          {:ok, socket} = :gen_tcp.accept(listener)
+          recv_header_block(socket, "")
+          send(test_pid, {:slow_upload_peer, self()})
+
+          receive do
+            :reject_upload ->
+              :ok =
+                :gen_tcp.send(
+                  socket,
+                  "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n"
+                )
+          end
+
+          receive do
+            :peer_done -> :gen_tcp.close(socket)
+          end
+        end,
+        recbuf: 1_024
+      )
+
+    {:ok, upload} =
+      HTTP.Stream.from_enumerable(Stream.repeatedly(fn -> :binary.copy("x", 65_536) end))
+
+    {:ok, controller} = HTTP.AbortController.start_link()
+
+    promise =
+      HTTP.fetch(url,
+        method: :post,
+        body: upload,
+        duplex: :half,
+        signal: controller,
+        timeout: 4_000,
+        socket_opts: [sndbuf: 1_024, high_watermark: 1_024, low_watermark: 512]
+      )
+
+    assert_receive {:slow_upload_peer, peer}, 1_000
+    owner = Agent.get(controller, & &1.request_id)
+    owner_monitor = Process.monitor(owner)
+    writer = blocked_upload_writer!(owner, System.monotonic_time(:millisecond) + 2_000)
+    writer_monitor = Process.monitor(writer)
+    send(peer, :reject_upload)
+    assert %HTTP.Response{status: 413} = HTTP.Promise.await(promise, 2_000)
+    assert_receive {:DOWN, ^writer_monitor, :process, ^writer, :killed}, 1_000
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 1_000
+    refute Process.alive?(upload)
+    send(peer, :peer_done)
+  end
+
+  defp blocked_upload_writer!(owner, deadline) do
+    {:links, links} = Process.info(owner, :links)
+
+    writer =
+      Enum.find(Enum.filter(links, &is_pid/1), fn pid ->
+        case Process.info(pid, :current_stacktrace) do
+          {:current_stacktrace, stack} ->
+            Enum.any?(stack, fn {module, function, _, _} ->
+              module == :prim_inet and function == :send
+            end) and Enum.any?(stack, fn {module, _, _, _} -> module == HTTP.HTTP1.Upload end)
+
+          _ ->
+            false
+        end
+      end)
+
+    cond do
+      writer ->
+        writer
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk("upload writer never blocked in TCP send")
+
+      true ->
+        receive do
+        after
+          1 -> blocked_upload_writer!(owner, deadline)
+        end
+    end
+  end
+
+  defp start_raw_http_server!(handler, socket_opts \\ []) when is_function(handler, 1) do
     {:ok, listen_socket} =
-      :gen_tcp.listen(0, [
-        :binary,
-        packet: :raw,
-        active: false,
-        ip: {127, 0, 0, 1},
-        reuseaddr: true
-      ])
+      :gen_tcp.listen(
+        0,
+        [
+          :binary,
+          packet: :raw,
+          active: false,
+          ip: {127, 0, 0, 1},
+          reuseaddr: true
+        ] ++ socket_opts
+      )
 
     {:ok, port} = :inet.port(listen_socket)
 

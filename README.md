@@ -334,6 +334,16 @@ response =
   |> HTTP.Promise.await()
 ```
 
+HTTP/1 receives upstream responses while a stream upload is still open. A final
+response stops the unfinished upload without replaying it. HTTP/1 uploads keep
+one acknowledged source chunk in flight, with a 65,536-byte maximum per chunk;
+larger chunks fail with `:buffer_limit`. Split large producer items into smaller
+chunks. The response owner retains active-once receive credit even while a write
+is blocked. Cancellation signals (`HTTP.AbortController.abort/1` and
+`HTTP.Stream.error/2`) return after signalling; monitor the affected stream PID
+for `:DOWN` to confirm its cleanup. An early response is exposed only after its
+unfinished upload writer and source have terminated.
+
 ## WebSocket Client
 
 The umbrella also includes `HTTP.WebSocket`, a browser-like WebSocket client.
