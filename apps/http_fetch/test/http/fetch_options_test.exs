@@ -60,6 +60,20 @@ defmodule HTTP.FetchOptionsTest do
       assert %HTTP.FetchOptions{duplex: :half} = HTTP.FetchOptions.new(%{"duplex" => "half"})
     end
 
+    test "raw response decoding option supports flat forms and requires a boolean" do
+      assert HTTP.FetchOptions.new([]).decode_body
+
+      for input <- [[decode_body: false], %{"decode_body" => false}, %{"decodeBody" => false}] do
+        options = HTTP.FetchOptions.new(input)
+        refute options.decode_body
+        assert HTTP.FetchOptions.to_transport_options(options)[:decode_body] == false
+      end
+
+      assert_raise ArgumentError, ~r/invalid decode_body/, fn ->
+        HTTP.FetchOptions.new(decode_body: :raw)
+      end
+    end
+
     test "rejects invalid duplex mode" do
       assert_raise ArgumentError, ~r/unsupported duplex mode/, fn ->
         HTTP.FetchOptions.new(duplex: :full)

@@ -121,6 +121,75 @@ defmodule HTTP.FetchHTTP3Test do
     end
   end
 
+  for encoding <- ["gzip", "deflate"], streaming? <- [false, true] do
+    test "H3 raw #{encoding} streaming=#{streaming?} preserves DATA and trailers", context do
+      original = <<0, 255, 128, 1>>
+
+      encoded =
+        if unquote(encoding) == "gzip", do: :zlib.gzip(original), else: :zlib.compress(original)
+
+      fields = [{"content-encoding", unquote(encoding)}]
+
+      fields =
+        if unquote(streaming?),
+          do: fields,
+          else: [{"content-length", to_string(byte_size(encoded))} | fields]
+
+      promise = fetch(context, decode_body: false)
+      connection = accept(context.server)
+      stream = await_stream(connection, 0, deadline())
+      await_fin(stream, deadline(), [])
+      data = for <<byte <- encoded>>, into: <<>>, do: Frame.encode!(:data, <<byte>>)
+      write(stream, headers(200, fields) <> data <> trailers([{"x-stored", "yes"}]), true)
+      response = HTTP.Promise.await(promise)
+      assert response.http_version == :http3
+      assert HTTP.Headers.get(response.headers, "content-encoding") == unquote(encoding)
+      assert HTTP.Response.read_all(response) == encoded
+
+      if unquote(streaming?) do
+        reader = response.stream
+        assert_receive {:stream_trailers, ^reader, trailers}, 5_000
+        assert HTTP.Headers.get(trailers, "x-stored") == "yes"
+      else
+        assert HTTP.Headers.get(response.trailers, "x-stored") == "yes"
+      end
+    end
+  end
+
+  for encoding <- ["gzip", "deflate"] do
+    test "H3 raw #{encoding} interrupted stream preserves ACK and cancellation", context do
+      original = <<0, 255, 128, 1>>
+
+      encoded =
+        if unquote(encoding) == "gzip", do: :zlib.gzip(original), else: :zlib.compress(original)
+
+      controller = HTTP.AbortController.new()
+      promise = fetch(context, decode_body: false, signal: controller)
+      connection = accept(context.server)
+      stream = await_stream(connection, 0, deadline())
+      await_fin(stream, deadline(), [])
+
+      write(
+        stream,
+        headers(200, [{"content-encoding", unquote(encoding)}]) <>
+          Frame.encode!(:data, encoded),
+        false
+      )
+
+      response = HTTP.Promise.await(promise)
+      reader = response.stream
+      monitor = Process.monitor(reader)
+      send(reader, {:read_chunk, self(), :ack})
+      assert_receive {:stream_chunk, ^reader, ^encoded, delivery}, 5_000
+      refute_receive {:stream_end, ^reader}
+      HTTP.AbortController.abort(controller)
+      assert_receive {:stream_error, ^reader, :aborted}, 5_000
+      send(reader, {:stream_chunk_ack, delivery})
+      assert_receive {:DOWN, ^monitor, :process, ^reader, :normal}, 5_000
+      refute_receive {:stream_end, ^reader}
+    end
+  end
+
   test "Fetch rejects wrong reference identity without fallback", context do
     result =
       fetch(context, ssl: Keyword.put(context.ssl, :reference_identity, {:dns_id, "wrong.test"}))
