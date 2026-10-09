@@ -416,6 +416,25 @@ or `HTTP.Blob` for binary frames:
 :ok = HTTP.WebSocket.close(socket, 1000, "done")
 ```
 
+For a WebSocket reverse proxy, use `HTTP.WebSocket.new/3` with
+`http_version: :http1`, `delivery: :ack`, finite `opening_timeout`,
+`idle_timeout`, `write_timeout` and `close_timeout`, and explicit queue/message
+limits. The handshake is validated, including coalesced response/frame bytes;
+redirects and uncertain writes are never retried. Verified WSS keeps CA,
+hostname and SNI checks. This public boundary forwards WebSocket messages;
+Ping/Pong and Close are handled by the client, and original frame fragmentation
+is not preserved.
+
+`send_ack/2` returns `{:ok, ref}` for bounded admission. The owner then receives
+`{HTTP.WebSocket, socket, {:send_result, ref, :ok | {:error, reason}}}` once the
+whole frame is accepted by the local transport or fails. A proxy can release
+its downstream write credit on this completion. It does not prove peer receipt;
+a failed write can be partial and must not be replayed. `write_timeout` defaults
+to 5,000 ms and covers queueing plus writing. `send/2` retains admission-only
+semantics. Acknowledge received Message events after downstream consumption.
+Monitor the socket's public `pid` and wait for `:DOWN` after `close/1` to confirm
+resource cleanup; owner death also cancels the connection.
+
 HTTP/1 remains the default. Select `http_version: :http2` for TLS h2 with RFC 8441
 peer permission, or `:h2c` for cleartext prior knowledge. `:auto` on WSS permits
 one separate HTTP/1 connection before establishment when ALPN or peer capability

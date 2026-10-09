@@ -1,7 +1,8 @@
 defmodule HTTP.Transport do
   @moduledoc false
 
-  @type socket :: port() | :ssl.sslsocket() | SSL.Socket.t()
+  @type socket ::
+          port() | :ssl.sslsocket() | HTTP.Transport.SSL.cancellable_socket() | SSL.Socket.t()
   @type message :: {:data, binary()} | :closed | {:error, term()} | :unknown
 
   @callback connect(String.t(), non_neg_integer(), keyword(), timeout()) ::

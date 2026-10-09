@@ -166,26 +166,13 @@ defmodule HTTP.WebSocket.Connection do
     end
   end
 
-  def handle_call({:send, data}, _from, state) do
-    with {:ok, opcode, payload, bytes} <- normalize_send_data(data),
-         :ok <- send_capacity(state, bytes),
-         {:ok, frame} <- Frame.encode(opcode, payload) do
-      item = %{frame: frame, bytes: bytes, opcode: opcode, kind: :app}
+  def handle_call({:send, data}, _from, state), do: admit_send(state, data, false)
 
-      state = %{
-        state
-        | app_queue: :queue.in(item, state.app_queue),
-          buffered_amount: state.buffered_amount + bytes,
-          pending_send_frames: state.pending_send_frames + 1
-      }
+  def handle_call({:send_ack, data}, _from, %{ready_state: @open} = state),
+    do: admit_send(state, data, true)
 
-      state = pump_send(state)
-      stream_telemetry(state, :queue, :send_admitted)
-      call_result(:ok, advance(state))
-    else
-      {:error, reason} -> {:reply, {:error, reason}, state}
-    end
-  end
+  def handle_call({:send_ack, _data}, _from, state),
+    do: {:reply, {:error, :closed}, state}
 
   def handle_call({:close, code, reason, _payload}, _from, %{ready_state: @connecting} = state) do
     Telemetry.close_start(state.telemetry_uri, code)
@@ -280,6 +267,41 @@ defmodule HTTP.WebSocket.Connection do
       else: transport_terminal(state, {:stream_down, reason})
   end
 
+  def handle_info({:http1_write, worker, result}, %{write: %{worker: worker} = item} = state) do
+    Process.demonitor(item.monitor, [:flush])
+    Process.cancel_timer(item.timer)
+    state = %{state | write: nil}
+
+    case result do
+      :ok ->
+        advance(state |> complete_item(item) |> pump_send())
+
+      {:error, :closed} when item.kind == :close and state.close_received? ->
+        advance(complete_item(state, item))
+
+      {:error, reason} ->
+        settle_send(state, item, {:error, reason})
+        transport_terminal(state, reason)
+    end
+  end
+
+  def handle_info({:http1_write_timeout, worker}, %{write: %{worker: worker}} = state),
+    do: transport_terminal(state, :send_timeout)
+
+  def handle_info({:send_timeout, ref}, state) do
+    pending = [state.write | :queue.to_list(state.app_queue)]
+
+    if Enum.any?(pending, &(&1 && Map.get(&1, :send_ref) == ref)),
+      do: transport_terminal(state, :send_timeout),
+      else: {:noreply, state}
+  end
+
+  def handle_info(
+        {:DOWN, monitor, :process, worker, reason},
+        %{write: %{worker: worker, monitor: monitor}} = state
+      ),
+      do: transport_terminal(state, {:write_worker_down, reason})
+
   def handle_info(message, %{transport: transport, socket: socket} = state)
       when not is_nil(transport) and not is_nil(socket) do
     case transport.normalize_message(message, socket) do
@@ -348,7 +370,8 @@ defmodule HTTP.WebSocket.Connection do
            Handshake.build_request(state.uri, state.options.protocols, state.options.headers, key),
          {:ok, transport, host, port} <- select_transport(state),
          {:ok, socket} <-
-           transport.connect(
+           connect_http1(
+             transport,
              host,
              port,
              [ssl: http1_ssl(state), socket_opts: state.options.socket_opts],
@@ -382,6 +405,12 @@ defmodule HTTP.WebSocket.Connection do
       result
     end
   end
+
+  defp connect_http1(HTTP.Transport.SSL, host, port, opts, timeout),
+    do: HTTP.Transport.SSL.connect_cancellable(host, port, opts, timeout)
+
+  defp connect_http1(transport, host, port, opts, timeout),
+    do: transport.connect(host, port, opts, timeout)
 
   defp select_transport(%{options: %{unix_socket: path}}) when is_binary(path),
     do: {:ok, HTTP.Transport.Unix, path, 0}
@@ -493,6 +522,38 @@ defmodule HTTP.WebSocket.Connection do
        else: {:error, :send_queue_full}
   end
 
+  defp admit_send(state, data, acknowledged?) do
+    with {:ok, opcode, payload, bytes} <- normalize_send_data(data),
+         :ok <- send_capacity(state, bytes),
+         {:ok, frame} <- Frame.encode(opcode, payload) do
+      ref = make_ref()
+      timer = Process.send_after(self(), {:send_timeout, ref}, state.options.write_timeout)
+
+      item = %{
+        frame: frame,
+        bytes: bytes,
+        opcode: opcode,
+        kind: :app,
+        send_ref: ref,
+        send_timer: timer,
+        acknowledged?: acknowledged?
+      }
+
+      state = %{
+        state
+        | app_queue: :queue.in(item, state.app_queue),
+          buffered_amount: state.buffered_amount + bytes,
+          pending_send_frames: state.pending_send_frames + 1
+      }
+
+      state = pump_send(state)
+      stream_telemetry(state, :queue, :send_admitted)
+      call_result(if(acknowledged?, do: {:ok, ref}, else: :ok), advance(state))
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
   defp pump_send(%{write: write} = state) when not is_nil(write), do: state
 
   defp pump_send(state) do
@@ -524,18 +585,28 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   defp submit(state, item) do
-    case state.transport.send(state.socket, item.frame) do
-      :ok ->
-        state |> complete_item(item) |> pump_send()
+    parent = self()
+    transport = state.transport
+    socket = state.socket
 
-      {:error, :closed}
-      when item.kind == :close and state.http_version == :http1 and state.close_received? ->
-        # Preserve HTTP/1's complete peer Close classification after peer EOF.
-        complete_item(state, item)
+    {:ok, worker} =
+      Task.Supervisor.start_child(:http_runtime_task_supervisor, fn ->
+        HTTP.OwnerMonitor.start(self(), parent)
+        send(parent, {:http1_write, self(), transport.send(socket, item.frame)})
+      end)
 
-      {:error, reason} ->
-        park_terminal(state, reason, 1006, "", false)
-    end
+    monitor = Process.monitor(worker)
+
+    timer =
+      Process.send_after(self(), {:http1_write_timeout, worker}, state.options.write_timeout)
+
+    %{
+      state
+      | write:
+          item
+          |> Map.delete(:frame)
+          |> Map.merge(%{worker: worker, monitor: monitor, timer: timer})
+    }
   end
 
   defp write_event(%{write: %{ref: ref} = write} = state, ref, {:progress, sent}) do
@@ -577,6 +648,8 @@ defmodule HTTP.WebSocket.Connection do
   defp write_event(state, _ref, _event), do: {:noreply, state}
 
   defp complete_item(state, %{kind: :app} = item) do
+    settle_send(state, item, :ok)
+
     Telemetry.message_sent(
       state.telemetry_uri,
       Atom.to_string(item.opcode),
@@ -627,6 +700,7 @@ defmodule HTTP.WebSocket.Connection do
   # Local close completes the current frame, discards unsent application frames,
   # then sends Close. Control priority never splices a partially written frame.
   defp begin_close(state, code, reason, payload) do
+    Enum.each(:queue.to_list(state.app_queue), &settle_send(state, &1, {:error, :closed}))
     queued_bytes = Enum.reduce(:queue.to_list(state.app_queue), 0, &(&1.bytes + &2))
 
     state = %{
@@ -947,7 +1021,26 @@ defmodule HTTP.WebSocket.Connection do
     %{state | stream: nil, stream_monitor: nil, stream_handle: nil}
   end
 
+  defp settle_send(state, item, result) do
+    if timer = Map.get(item, :send_timer), do: Process.cancel_timer(timer)
+
+    if Map.get(item, :acknowledged?, false),
+      do: emit(state, {:send_result, item.send_ref, result})
+
+    :ok
+  end
+
   defp detach(state) do
+    reason = if state.terminal, do: elem(state.terminal, 0) || :closed, else: :closed
+    Enum.each(:queue.to_list(state.app_queue), &settle_send(state, &1, {:error, reason}))
+
+    if state.write do
+      settle_send(state, state.write, {:error, reason})
+      if worker = Map.get(state.write, :worker), do: Process.exit(worker, :kill)
+      if monitor = Map.get(state.write, :monitor), do: Process.demonitor(monitor, [:flush])
+      if timer = Map.get(state.write, :timer), do: Process.cancel_timer(timer)
+    end
+
     state =
       state
       |> detach_stream()
@@ -957,8 +1050,36 @@ defmodule HTTP.WebSocket.Connection do
 
     if state.worker, do: Process.exit(state.worker, :kill)
     if state.worker_monitor, do: Process.demonitor(state.worker_monitor, [:flush])
-    if state.transport && state.socket, do: state.transport.close(state.socket)
-    %{state | worker: nil, worker_monitor: nil, transport: nil, socket: nil}
+
+    if state.transport && state.socket do
+      # A terminal cancellation must discard queued TCP output. Default inet
+      # close otherwise waits for a slow peer to drain it beyond our deadline.
+      if state.write || state.terminal ||
+           (state.ready_state == @closing and not state.close_received?) do
+        abort_transport(state.transport, state.socket)
+      else
+        state.transport.close(state.socket)
+      end
+    end
+
+    %{
+      state
+      | worker: nil,
+        worker_monitor: nil,
+        transport: nil,
+        socket: nil,
+        write: nil,
+        app_queue: :queue.new(),
+        buffered_amount: 0,
+        pending_send_frames: 0
+    }
+  end
+
+  defp abort_transport(HTTP.Transport.SSL, socket), do: HTTP.Transport.SSL.abort(socket)
+
+  defp abort_transport(transport, socket) do
+    transport.setopts(socket, linger: {true, 0})
+    transport.close(socket)
   end
 
   defp reset_idle(state) do
