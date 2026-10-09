@@ -10,7 +10,9 @@ defmodule SSL do
 
   STARTTLS callers must own a passive binary/raw TCP socket, fully consume and
   validate the application's upgrade response, and reject any buffered plaintext.
-  Supply `server_name_indication` as the certificate reference DNS name. Once
+  Supply `server_name_indication` as the certificate reference DNS name, or use
+  `ex_ssl: [reference_identity: {:ip, address} | {:dns_id, name}]` to verify a
+  separate IP/DNS identity independently of SNI and the TCP destination. Once
   upgrade is attempted, an owned socket is closed on failure; plaintext must
   never resume. A socket belonging to another process is left untouched.
   """

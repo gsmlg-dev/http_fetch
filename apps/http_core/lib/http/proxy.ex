@@ -54,14 +54,6 @@ defmodule HTTP.Proxy do
       Keyword.get(request.transport_options, :http_version) in [:h2c, :http3] ->
         {:error, :unsupported_proxy_http_version}
 
-      request.url.scheme == "https" and
-        Keyword.get(request.transport_options, :tls_backend) == :ex_ssl and
-          ip_host?(request.url.host) ->
-        # Tracked unsupported ExSSL IP upgrade identity.
-        # credo:disable-for-next-line Credo.Check.Design.TagTODO
-        # TODO(upstream): gsmlg-dev/http_fetch#49
-        {:error, :ex_ssl_proxy_ip_identity_unsupported}
-
       true ->
         :ok
     end
@@ -226,6 +218,5 @@ defmodule HTTP.Proxy do
     do: byte_size(host) in 1..253 and Regex.match?(~r/\A[A-Za-z0-9._:-]+\z/, host)
 
   defp valid_host?(_), do: false
-  defp ip_host?(host), do: match?({:ok, _}, :inet.parse_address(String.to_charlist(host)))
   defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 end

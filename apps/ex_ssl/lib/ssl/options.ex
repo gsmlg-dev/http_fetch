@@ -79,7 +79,11 @@ defmodule SSL.Options do
          {:ok, options} <- option_list(options),
          :ok <- validate_options(options),
          {:ok, identity, context} <-
-           identity(host, Keyword.get(options, :server_name_indication)),
+           identity(
+             host,
+             Keyword.get(options, :server_name_indication),
+             get_in(options, [:ex_ssl, :reference_identity])
+           ),
          {:ok, trust} <- trust_source(options),
          {:ok, profile} <- profile(options, context),
          {:ok, client_identity} <-
@@ -205,9 +209,69 @@ defmodule SSL.Options do
   end
 
   defp valid_option?(:ex_ssl, value) do
-    Keyword.keyword?(value) and Keyword.keys(value) == [:profile] and
-      (value[:profile] == :default or match?(%WireProfile{}, value[:profile]))
+    Keyword.keyword?(value) and value != [] and
+      length(Keyword.keys(value)) == length(Enum.uniq(Keyword.keys(value))) and
+      Enum.all?(value, fn
+        {:profile, profile} -> profile == :default or match?(%WireProfile{}, profile)
+        {:reference_identity, reference} -> match?({:ok, _}, reference_identity(reference))
+        _ -> false
+      end)
   end
+
+  defp identity(host, sni, nil), do: identity(host, sni)
+
+  defp identity(host, sni, reference) do
+    with {:ok, reference} <- reference_identity(reference),
+         {:ok, context} <- reference_context(host, sni),
+         do: {:ok, reference, context}
+  end
+
+  defp reference_context(:upgrade, sni) when sni in [nil, :disable], do: {:ok, %{}}
+
+  defp reference_context(:upgrade, sni) do
+    with {:ok, name} <- dns_name(sni), do: {:ok, %{server_name: name}}
+  end
+
+  defp reference_context(host, sni) do
+    with {:ok, _} <- host_identity(host),
+         {:ok, _, context} <- identity(host, sni) do
+      {:ok, context}
+    else
+      _ -> option_error({:host, :invalid})
+    end
+  end
+
+  defp reference_identity({:dns_id, name}) when is_binary(name) and byte_size(name) in 1..253 do
+    if String.valid?(name) and
+         Enum.all?(String.split(name, "."), fn label ->
+           byte_size(label) in 1..63 and
+             Regex.match?(~r/\A[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\z/, label)
+         end),
+       do: {:ok, {:dns_id, name}},
+       else: :error
+  end
+
+  defp reference_identity({:ip, address})
+       when is_binary(address) and byte_size(address) in 1..45 do
+    if String.valid?(address) do
+      case :inet.parse_address(String.to_charlist(address)) do
+        {:ok, ip} -> reference_identity({:ip, ip})
+        {:error, _} -> :error
+      end
+    else
+      :error
+    end
+  end
+
+  defp reference_identity({:ip, address}) when tuple_size(address) in [4, 8] do
+    maximum = if tuple_size(address) == 4, do: 255, else: 65_535
+
+    if Enum.all?(Tuple.to_list(address), &(is_integer(&1) and &1 >= 0 and &1 <= maximum)),
+      do: {:ok, {:ip, address}},
+      else: :error
+  end
+
+  defp reference_identity(_), do: :error
 
   defp identity(_host, sni) when sni not in [nil, :disable] do
     with {:ok, name} <- dns_name(sni), do: {:ok, {:dns_id, name}, %{server_name: name}}

@@ -367,10 +367,9 @@ body, and plaintext buffered at the TLS boundary fail closed. Abort cancels an
 unfinished tunnel. Proxy failure never retries through a direct-origin route.
 
 Unsupported shapes, H2c, HTTP/3, and Unix socket/proxy combinations fail
-explicitly. ExSSL tunnels currently require a DNS origin; IP-origin socket
-upgrade needs the certificate-identity capability tracked in [#49](https://github.com/gsmlg-dev/http_fetch/issues/49).
-OTP TLS supports IP origins. Environment variables and NO_PROXY selection remain
-caller responsibilities.
+explicitly. Both TLS backends verify DNS and literal-IP origins inside CONNECT
+tunnels. ExSSL keeps the original IP certificate identity separate from SNI.
+Environment variables and NO_PROXY selection remain caller responsibilities.
 
 ## Streaming Request Body
 
@@ -449,10 +448,11 @@ Invalid tuples and pin combinations with HTTP/3, Unix sockets or proxies are
 rejected before network I/O. Caller-supplied SNI must match the original URL
 host. Native trust and hostname verification remain enabled by default.
 
-For HTTPS with `tls_backend: :ex_ssl`, an original literal-IP URL and pin must
-be identical; distinct original IP verification identity is unsupported and
-returns `:connect_address_identity_conflict`. DNS hostnames work with either
-TLS backend and with IPv4 or IPv6 targets.
+Both TLS backends verify the original URL's DNS or literal-IP certificate
+identity when dialing a distinct IPv4 or IPv6 pin. For ExSSL, an explicit
+`ssl: [ex_ssl: [reference_identity: ...]]` must match that original identity;
+a conflicting reference returns `:connect_address_identity_conflict` before I/O.
+Literal-IP pins use no DNS SNI by default and also accept `server_name_indication: :disable`.
 
 ## WebSocket Client
 

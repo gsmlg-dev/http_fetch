@@ -63,7 +63,7 @@ defmodule HTTP.ConnectAddressTest do
              HTTP.SocketClient.request(request)
   end
 
-  test "conflicting SNI and unsupported ExSSL original IP identity reject before I/O" do
+  test "conflicting SNI and explicit certificate identities reject pinned routes before I/O" do
     {:ok, listener} = listen(@ipv4)
     on_exit(fn -> :gen_tcp.close(listener) end)
     {:ok, {_, port}} = :inet.sockname(listener)
@@ -79,11 +79,30 @@ defmodule HTTP.ConnectAddressTest do
                |> HTTP.Promise.await(@timeout)
     end
 
+    for identity <- [
+          {:ip, {127, 0, 0, 2}},
+          {:ip, "127.0.0.2"},
+          {:dns_id, "localhost"},
+          {:ip, "invalid"},
+          {:ip, <<255>>},
+          nil
+        ] do
+      assert {:error, :connect_address_identity_conflict} =
+               HTTP.fetch("https://127.0.0.1:#{port}/",
+                 connect_address: @ipv4,
+                 redirect: :manual,
+                 tls_backend: :ex_ssl,
+                 ssl: [ex_ssl: [reference_identity: identity]]
+               )
+               |> HTTP.Promise.await(@timeout)
+    end
+
     assert {:error, :connect_address_identity_conflict} =
-             HTTP.fetch("https://127.0.0.2:#{port}/",
+             HTTP.fetch("https://pinned.invalid:#{port}/",
                connect_address: @ipv4,
                redirect: :manual,
-               tls_backend: :ex_ssl
+               tls_backend: :ex_ssl,
+               ssl: [ex_ssl: [reference_identity: {:dns_id, "wrong.invalid"}]]
              )
              |> HTTP.Promise.await(@timeout)
 
@@ -178,6 +197,67 @@ defmodule HTTP.ConnectAddressTest do
 
         assert_receive {:tls_handshake, ^peer, {:error, _}}, @timeout
       end
+    end
+  end
+
+  for address <- [{127, 0, 0, 2}, @ipv6], identity <- [nil, {:ip, @ipv4}, {:ip, "127.0.0.1"}] do
+    test "ExSSL original IP #{inspect(identity)} survives dialing a distinct pin #{inspect(address)}" do
+      parent = self()
+
+      {port, _} =
+        tls_peer(
+          unquote(Macro.escape(address)),
+          fn socket ->
+            assert {:ok, info} = :ssl.connection_information(socket, [:sni_hostname])
+            send(parent, {:ip_request, info[:sni_hostname], recv_head(:ssl, socket)})
+            :ok = :ssl.send(socket, response("ip verified"))
+          end,
+          "localhost"
+        )
+
+      identity = unquote(Macro.escape(identity))
+      ssl = [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
+
+      ssl =
+        if identity,
+          do: ssl ++ [server_name_indication: :disable, ex_ssl: [reference_identity: identity]],
+          else: ssl
+
+      result =
+        HTTP.fetch("https://127.0.0.1:#{port}/verified",
+          connect_address: unquote(Macro.escape(address)),
+          redirect: :manual,
+          tls_backend: :ex_ssl,
+          ssl: ssl
+        )
+        |> HTTP.Promise.await(@timeout)
+
+      assert %HTTP.Response{status: 200} = result
+      assert HTTP.Response.read_all(result) == "ip verified"
+      assert_receive {:ip_request, nil, request}, @timeout
+      assert request =~ "Host: 127.0.0.1:#{port}\r\n"
+    end
+  end
+
+  for host <- ["127.0.0.2", "[::1]"] do
+    test "ExSSL pin verifies original #{host} instead of the dialed certificate IP" do
+      {port, peer} =
+        tls_peer(
+          @ipv4,
+          fn _socket -> flunk("mismatched IP identity reached HTTP") end,
+          "localhost"
+        )
+
+      assert {:error, _} =
+               HTTP.fetch("https://#{unquote(host)}:#{port}/",
+                 connect_address: @ipv4,
+                 redirect: :manual,
+                 tls_backend: :ex_ssl,
+                 ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
+               )
+               |> HTTP.Promise.await(@timeout)
+
+      assert_receive {:tls_handshake, ^peer, {:error, _}}, @timeout
     end
   end
 
@@ -431,7 +511,7 @@ defmodule HTTP.ConnectAddressTest do
     {port, peer}
   end
 
-  defp tls_peer(address, handler) do
+  defp tls_peer(address, handler, fixture \\ "pinned") do
     family = if tuple_size(address) == 8, do: :inet6, else: :inet
 
     {:ok, listener} =
@@ -442,8 +522,8 @@ defmodule HTTP.ConnectAddressTest do
         reuseaddr: true,
         ip: address,
         versions: [:"tlsv1.3"],
-        certfile: Path.join(@fixtures, "pinned.pem"),
-        keyfile: Path.join(@fixtures, "pinned.key")
+        certfile: Path.join(@fixtures, fixture <> ".pem"),
+        keyfile: Path.join(@fixtures, fixture <> ".key")
       ])
 
     {:ok, {_, port}} = :ssl.sockname(listener)

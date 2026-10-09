@@ -66,7 +66,7 @@ defmodule HTTP.Runtime.Dialer do
     end
   end
 
-  defp validate_pinned_identity(transport, host, address, request)
+  defp validate_pinned_identity(transport, host, _address, request)
        when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
     sni =
       request.transport_options |> Keyword.get(:ssl, []) |> Keyword.get(:server_name_indication)
@@ -74,14 +74,11 @@ defmodule HTTP.Runtime.Dialer do
     original_ip = :inet.parse_address(String.to_charlist(host))
 
     cond do
-      # credo:disable-for-next-line Credo.Check.Design.TagTODO
-      # TODO(upstream): gsmlg-dev/http_fetch#49
-      transport == HTTP.Transport.ExSSL and match?({:ok, _}, original_ip) and
-          elem(original_ip, 1) != address ->
+      transport == HTTP.Transport.ExSSL and conflicting_reference_identity?(host, request) ->
         {:error, :connect_address_identity_conflict}
 
-      transport == HTTP.Transport.ExSSL and match?({:ok, _}, original_ip) and not is_nil(sni) ->
-        {:error, :connect_address_sni_conflict}
+      transport == HTTP.Transport.ExSSL and match?({:ok, _}, original_ip) and sni == :disable ->
+        :ok
 
       not is_nil(sni) and sni not in [host, String.to_charlist(host)] ->
         {:error, :connect_address_sni_conflict}
@@ -92,6 +89,45 @@ defmodule HTTP.Runtime.Dialer do
   end
 
   defp validate_pinned_identity(_transport, _host, _address, _request), do: :ok
+
+  defp conflicting_reference_identity?(host, request) do
+    ex_ssl = request.transport_options |> Keyword.get(:ssl, []) |> Keyword.get(:ex_ssl, [])
+
+    if Keyword.keyword?(ex_ssl) do
+      case Keyword.fetch(ex_ssl, :reference_identity) do
+        :error -> false
+        {:ok, reference} -> pinned_reference(reference) != pinned_host_reference(host)
+      end
+    else
+      false
+    end
+  end
+
+  defp pinned_host_reference(host) do
+    case :inet.parse_address(String.to_charlist(host)) do
+      {:ok, address} -> {:ip, address}
+      {:error, _} -> {:dns_id, host}
+    end
+  end
+
+  defp pinned_reference({:dns_id, name}) when is_binary(name), do: {:dns_id, name}
+
+  defp pinned_reference({:ip, address}) when is_binary(address) do
+    if String.valid?(address) do
+      case :inet.parse_address(String.to_charlist(address)) do
+        {:ok, ip} -> {:ip, ip}
+        {:error, _} -> :invalid
+      end
+    else
+      :invalid
+    end
+  end
+
+  defp pinned_reference({:ip, address}) do
+    if HTTP.Transport.valid_connect_address?(address), do: {:ip, address}, else: :invalid
+  end
+
+  defp pinned_reference(_reference), do: :invalid
 
   defp validate_transport_option_lists(HTTP.Transport.ExSSL, request) do
     valid? =

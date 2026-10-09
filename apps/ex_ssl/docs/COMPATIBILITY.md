@@ -76,12 +76,23 @@ Supported connection options are:
 - non-negative integer or `:infinity` `send_timeout` (default 5,000 ms);
 - `send_timeout_close: true`;
 - `alpn_advertised_protocols: [nonempty_binary, ...]`;
-- `ex_ssl: [profile: :default | %SSL.ClientHello.WireProfile{}]`.
+- `ex_ssl: [profile: :default | %SSL.ClientHello.WireProfile{}, reference_identity: {:ip, address} | {:dns_id, name}]` (either key may be supplied).
 
 Verification cannot be disabled. Packet modes, list mode, active true/active-N, arbitrary TCP
 options outside the allowlist and `send_timeout_close: false` remain
 unsupported. Unsupported or malformed options return a redacted
 `{:error, {:options, reason}}`; supplied option data is not echoed.
+
+An explicit `ex_ssl.reference_identity` selects certificate verification independently
+of the TCP destination and `server_name_indication`. IP addresses accept valid IPv4/IPv6
+tuples or address strings; DNS identities accept ASCII DNS names up to 253 bytes with
+labels up to 63 bytes. Malformed, duplicate or unknown custom options fail before TLS
+I/O. The explicit identity does not generate SNI: a supplied DNS SNI is preserved;
+otherwise direct DNS dialing retains its inferred SNI, and IP dialing or socket
+upgrade omits it. `server_name_indication: :disable` suppresses SNI while retaining
+verification of the explicit identity. Without the custom option, the existing
+reference-from-SNI or inferred-host behavior remains. Both reference identity and
+SNI participate in the resumption cache partition.
 
 `depth` is passed to OTP `:public_key` path validation as the maximum number of
 intermediate CA certificates. It is independent of the TLS Certificate-message
@@ -247,7 +258,10 @@ before consuming authenticated response bytes.
 STARTTLS callers must own a connected binary/passive/raw `:gen_tcp` socket,
 fully consume and validate the positive upgrade reply, reject plaintext held in
 their own parser, and supply a DNS reference identity through
-`server_name_indication`. Queued or delivered TCP plaintext causes explicit
+`server_name_indication` or an explicit IP/DNS identity through
+`ex_ssl: [reference_identity: ...]`. Explicit IP and DNS references work without
+SNI; a peer must still present a trusted certificate matching that reference.
+Queued or delivered TCP plaintext causes explicit
 failure and owned-socket closure. A non-owner's TCP socket is not closed.
 
 Profiles affect offered wire capabilities only. They cannot replace trust or
@@ -317,7 +331,7 @@ this subset unchanged.
 | --- | --- |
 | `cacerts` / `cacertfile` | Explicit trust sources; no silent replacement with system trust |
 | `depth` | Intermediate-CA bound, independent of parser/resource limits |
-| SNI / reference identity | DNS identity or IP SAN verification; SNI is omitted for IP addresses |
+| SNI / reference identity | DNS identity or IP SAN verification; explicit `ex_ssl.reference_identity` is independent of SNI and destination, including socket upgrades |
 | `customize_hostname_check: [match_fun: fun]` | Supported hostname matching customization; path validation remains required |
 | `verify_fun` | Rejected; supplied callbacks never replace authentication failures |
 | `partial_chain` | Rejected; no user callback can introduce an intermediate trust anchor |

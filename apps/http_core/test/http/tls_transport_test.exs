@@ -99,6 +99,35 @@ defmodule HTTP.TLSTransportTest do
     assert :ok = ExSSL.close(socket)
   end
 
+  test "ex_ssl keeps IP verification separate from DNS SNI with a custom profile" do
+    parent = self()
+
+    port =
+      peer(fn socket ->
+        assert {:ok, info} = :ssl.connection_information(socket, [:sni_hostname])
+        send(parent, {:wire_sni, info[:sni_hostname]})
+        :ssl.send(socket, "ip")
+      end)
+
+    assert {:ok, socket} =
+             ExSSL.connect(
+               "127.0.0.1",
+               port,
+               [
+                 ssl: [
+                   cacertfile: @ca,
+                   server_name_indication: ~c"wrong.example",
+                   ex_ssl: [profile: :default]
+                 ]
+               ],
+               5_000
+             )
+
+    assert_receive {:wire_sni, ~c"wrong.example"}, 5_000
+    assert {:ok, "ip"} = ExSSL.recv(socket, 2, 5_000)
+    assert :ok = ExSSL.close(socket)
+  end
+
   test "ex_ssl rejects unsupported TLS and TCP options before connecting" do
     for ssl <- [
           [verify: :verify_none],
@@ -128,6 +157,27 @@ defmodule HTTP.TLSTransportTest do
   test "ex_ssl rejects malformed and duplicate options" do
     for opts <- [[ssl: nil], [socket_opts: [:binary]], [ssl: [depth: 1, depth: 2]]] do
       assert {:error, {:options, :invalid_options}} = ExSSL.connect("localhost", 0, opts, 100)
+    end
+  end
+
+  test "ex_ssl rejects malformed nested options for literal IP routes before I/O" do
+    for ex_ssl <- [
+          [],
+          nil,
+          123,
+          [:invalid],
+          [reference_identity: {:ip, "127.0.0.1"}, reference_identity: {:ip, "127.0.0.2"}]
+        ] do
+      assert {:error, {:options, {:ex_ssl, :unsupported_or_invalid}}} =
+               ExSSL.connect("127.0.0.1", 0, [ssl: [ex_ssl: ex_ssl]], 100)
+
+      {:ok, tcp} = :gen_tcp.listen(0, [:binary, active: false])
+      on_exit(fn -> :gen_tcp.close(tcp) end)
+
+      assert {:error, {:options, {:ex_ssl, :unsupported_or_invalid}}} =
+               ExSSL.upgrade(tcp, "127.0.0.1", [ssl: [ex_ssl: ex_ssl]], 100)
+
+      assert :erlang.port_info(tcp) == :undefined
     end
   end
 
