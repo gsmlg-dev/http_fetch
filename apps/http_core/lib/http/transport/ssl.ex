@@ -35,7 +35,7 @@ defmodule HTTP.Transport.SSL do
   def abort({:cancellable_ssl, _socket, tcp}), do: abort_tcp(tcp)
 
   defp abort_tcp(tcp) do
-    :inet.setopts(tcp, linger: {true, 0})
+    _ = :inet.setopts(tcp, linger: {true, 0})
     :gen_tcp.close(tcp)
   end
 

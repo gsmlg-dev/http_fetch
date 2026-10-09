@@ -269,7 +269,7 @@ defmodule HTTP.WebSocket.Connection do
 
   def handle_info({:http1_write, worker, result}, %{write: %{worker: worker} = item} = state) do
     Process.demonitor(item.monitor, [:flush])
-    Process.cancel_timer(item.timer)
+    _ = Process.cancel_timer(item.timer)
     state = %{state | write: nil}
 
     case result do
@@ -1022,7 +1022,7 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   defp settle_send(state, item, result) do
-    if timer = Map.get(item, :send_timer), do: Process.cancel_timer(timer)
+    _ = if timer = Map.get(item, :send_timer), do: Process.cancel_timer(timer)
 
     if Map.get(item, :acknowledged?, false),
       do: emit(state, {:send_result, item.send_ref, result})
@@ -1034,12 +1034,13 @@ defmodule HTTP.WebSocket.Connection do
     reason = if state.terminal, do: elem(state.terminal, 0) || :closed, else: :closed
     Enum.each(:queue.to_list(state.app_queue), &settle_send(state, &1, {:error, reason}))
 
-    if state.write do
-      settle_send(state, state.write, {:error, reason})
-      if worker = Map.get(state.write, :worker), do: Process.exit(worker, :kill)
-      if monitor = Map.get(state.write, :monitor), do: Process.demonitor(monitor, [:flush])
-      if timer = Map.get(state.write, :timer), do: Process.cancel_timer(timer)
-    end
+    _ =
+      if state.write do
+        settle_send(state, state.write, {:error, reason})
+        if worker = Map.get(state.write, :worker), do: Process.exit(worker, :kill)
+        if monitor = Map.get(state.write, :monitor), do: Process.demonitor(monitor, [:flush])
+        _ = if timer = Map.get(state.write, :timer), do: Process.cancel_timer(timer)
+      end
 
     state =
       state

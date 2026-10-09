@@ -449,7 +449,7 @@ defmodule HTTP.HTTP1 do
   end
 
   defp validate_request_framing!(headers) do
-    headers |> Headers.delete("Trailer") |> Request.reject_unsupported_request_framing!()
+    _ = headers |> Headers.delete("Trailer") |> Request.reject_unsupported_request_framing!()
     headers
   end
 
