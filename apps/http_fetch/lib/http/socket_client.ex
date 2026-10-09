@@ -310,7 +310,7 @@ defmodule HTTP.SocketClient do
   defp handle_new_connection(context, transport, host, port, selection, timeout, claim) do
     %{parent: parent, ref: ref, request: request} = context
 
-    case HTTP.Runtime.Dialer.connect(
+    case connect_http1_or_new(
            transport,
            host,
            port,
@@ -333,6 +333,18 @@ defmodule HTTP.SocketClient do
       {:error, reason} ->
         fail_http2_connect(claim, reason)
         send_error(parent, ref, reason)
+    end
+  end
+
+  defp connect_http1_or_new(transport, host, port, request, selection, timeout, monitor) do
+    reuse = if selection.mode == :http1, do: HTTP.HTTP1.Pool.checkout(request), else: :none
+
+    case reuse do
+      {:ok, socket} ->
+        {:ok, socket}
+
+      :none ->
+        HTTP.Runtime.Dialer.connect(transport, host, port, request, selection, timeout, monitor)
     end
   end
 
@@ -1302,8 +1314,9 @@ defmodule HTTP.SocketClient do
   end
 
   defp handle_event(%{mode: {:stream, stream_pid}} = state, :done) do
+    result = finish_completed(state)
     HTTP.Stream.finish(stream_pid)
-    finish(state)
+    result
   end
 
   defp handle_event(%{mode: {:buffer, response, chunks}} = state, :done) do
@@ -1317,8 +1330,9 @@ defmodule HTTP.SocketClient do
     if follow_redirect?(state, response) do
       redirect(state, response)
     else
+      result = finish_completed(state)
       send_response(state.parent, state.ref, response, state.request)
-      finish(state)
+      result
     end
   end
 
@@ -1379,6 +1393,52 @@ defmodule HTTP.SocketClient do
     end
 
     finish(state)
+  end
+
+  defp finish_completed(state) do
+    _ = Process.cancel_timer(state.timer_ref)
+
+    if reusable_http1?(state) and not cancellation_pending?(state) do
+      HTTP.HTTP1.Pool.checkin(state.request, state.transport, state.socket)
+      :done
+    else
+      finish(state)
+    end
+  end
+
+  defp reusable_http1?(%{protocol_module: HTTP.HTTP1, protocol: protocol} = state) do
+    opts = state.request.transport_options
+
+    connection =
+      Enum.join(Headers.get_all(protocol.headers, "connection"), ",") |> String.downcase()
+
+    persistent =
+      protocol.version in ["1.0", "1.1"] and
+        (protocol.version == "1.1" or String.contains?(connection, "keep-alive"))
+
+    Keyword.get(opts, :http1_reuse, false) and persistent and
+      not String.contains?(connection, "close") and protocol.state == :done and
+      protocol.buffer == "" and state.upload == nil and not state.upload_cancelled? and
+      (HTTP.HTTP1.body_forbidden?(state.request.method, protocol.status) or
+         Headers.has?(protocol.headers, "content-length") or
+         HTTP.HTTP1.response_body_framing(protocol.headers) == :chunked)
+  end
+
+  defp reusable_http1?(_state), do: false
+
+  defp cancellation_pending?(state) do
+    receive do
+      :abort ->
+        true
+
+      :deadline ->
+        true
+
+      {:DOWN, monitor, :process, _, _} when monitor == state.parent_monitor ->
+        if state.response_sent?, do: cancellation_pending?(state), else: true
+    after
+      0 -> remaining_timeout(state.deadline_at) == 0
+    end
   end
 
   defp finish(state) do
