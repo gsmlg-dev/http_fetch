@@ -9,6 +9,7 @@ defmodule HTTP.HTTP1.UploadTest do
 
       receive do
         :release_write -> :ok
+        :reject_write -> {:error, :header_rejected}
       end
     end
   end
@@ -42,6 +43,44 @@ defmodule HTTP.HTTP1.UploadTest do
     assert :ok = Upload.stop(upload, :buffer_limit, deadline)
     assert {:error, _reason} = Task.await(producer)
     refute Process.alive?(source)
+  end
+
+  test "the header write settles before an acknowledged body chunk can be sent" do
+    {:ok, source} = HTTP.Stream.start_link(0)
+    deadline = System.monotonic_time(:millisecond) + 2_000
+
+    upload =
+      Upload.start(BlockedTransport, self(), source, nil, deadline, %HTTP.Headers{}, "HEAD")
+
+    assert_receive {:blocked_write, worker, "HEAD"}, 1_000
+    producer = Task.async(fn -> HTTP.Stream.chunk(source, "body") end)
+    refute_receive {:blocked_write, ^worker, _}
+    assert Task.yield(producer, 0) == nil
+    send(worker, :release_write)
+    assert_receive {:blocked_write, ^worker, "4\r\nbody\r\n"}, 1_000
+    assert :ok = Upload.stop(upload, :early_response, deadline)
+    assert {:error, _reason} = Task.await(producer)
+    refute Process.alive?(source)
+  end
+
+  test "a header send failure settles the source and its pending producer" do
+    {:ok, source} = HTTP.Stream.start_link(0)
+    source_monitor = Process.monitor(source)
+    deadline = System.monotonic_time(:millisecond) + 2_000
+
+    upload =
+      Upload.start(BlockedTransport, self(), source, nil, deadline, %HTTP.Headers{}, "HEAD")
+
+    token = upload.token
+    assert_receive {:blocked_write, worker, "HEAD"}, 1_000
+    producer = Task.async(fn -> HTTP.Stream.chunk(source, "must-not-send") end)
+    send(worker, :reject_write)
+    assert_receive {:http1_upload, ^token, {:error, :header_rejected}}, 1_000
+    assert :ok = Upload.stop(upload, :header_rejected, deadline)
+    assert_receive {:DOWN, ^source_monitor, :process, ^source, :normal}, 1_000
+    assert {:error, _reason} = Task.await(producer)
+    refute_receive {:blocked_write, ^worker, _}
+    refute Process.alive?(worker)
   end
 
   test "owner death tears down a blocked writer and its source" do

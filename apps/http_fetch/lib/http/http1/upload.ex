@@ -5,34 +5,53 @@ defmodule HTTP.HTTP1.Upload do
 
   # The socket owner keeps read credit; this linked worker holds at most one
   # acknowledged source chunk and performs writes without blocking that owner.
-  def start(transport, socket, stream, remaining, deadline_at, headers \\ %HTTP.Headers{}) do
+  def start(
+        transport,
+        socket,
+        stream,
+        remaining,
+        deadline_at,
+        headers \\ %HTTP.Headers{},
+        head \\ nil
+      ) do
     owner = self()
     token = make_ref()
 
     {pid, monitor} =
       :erlang.spawn_opt(
         fn ->
+          state = %{
+            transport: transport,
+            socket: socket,
+            stream: stream,
+            remaining: remaining,
+            deadline_at: deadline_at,
+            headers: headers,
+            trailers: nil
+          }
+
           result =
-            read_body(%{
-              transport: transport,
-              socket: socket,
-              stream: stream,
-              remaining: remaining,
-              deadline_at: deadline_at,
-              headers: headers,
-              trailers: nil
-            })
+            receive do
+              {:start_upload, ^token} ->
+                with :ok <- send_head(transport, socket, head), do: read_body(state)
+            after
+              remaining_timeout(deadline_at) -> {:error, :request_timeout}
+            end
 
           send(owner, {:http1_upload, token, result})
         end,
         [:link, :monitor]
       )
 
-    # Subscribe from the owner before it can cancel the worker. This also gives
-    # the source a reader monitor when a final response wins the startup race.
+    # Bind source cleanup before releasing the first header write. If the owner
+    # dies on the peer's first header byte, the source still observes reader DOWN.
     send(stream, {:read_chunk, pid, :ack})
+    send(pid, {:start_upload, token})
     %{pid: pid, monitor: monitor, stream: stream, token: token}
   end
+
+  defp send_head(_transport, _socket, nil), do: :ok
+  defp send_head(transport, socket, head), do: transport.send(socket, head)
 
   def completed(upload) do
     Process.unlink(upload.pid)
