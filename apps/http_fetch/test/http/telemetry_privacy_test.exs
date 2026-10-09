@@ -26,15 +26,18 @@ defmodule HTTP.TelemetryPrivacyTest do
     {"x-custom-signature", "sentinel-signature"}
   ]
 
-  setup do
+  setup context do
     handler = {__MODULE__, make_ref()}
-    :ok = :telemetry.attach_many(handler, @events, &__MODULE__.capture/4, self())
+    capture = %{owner: self(), caller_only?: context[:caller_telemetry] == true}
+    :ok = :telemetry.attach_many(handler, @events, &__MODULE__.capture/4, capture)
     on_exit(fn -> :telemetry.detach(handler) end)
     :ok
   end
 
-  def capture(event, measurements, metadata, owner),
-    do: send(owner, {:event, event, measurements, metadata})
+  def capture(event, measurements, metadata, %{owner: owner, caller_only?: caller_only?}) do
+    if not caller_only? or self() == owner,
+      do: send(owner, {:event, event, measurements, metadata})
+  end
 
   for protocol <- [:http1, :h2c], mode <- [:buffered, :streamed, :exception] do
     test "real #{protocol} #{mode} traffic keeps telemetry secret-safe" do
@@ -164,6 +167,7 @@ defmodule HTTP.TelemetryPrivacyTest do
     refute_receive {:event, _, _, _}
   end
 
+  @tag :caller_telemetry
   test "runtime global opt-out covers both shared event prefixes" do
     disable(:http_runtime)
     HTTP.Runtime.Telemetry.http2_pool(:reserve, :ok, %{reservations: 1})
@@ -171,6 +175,22 @@ defmodule HTTP.TelemetryPrivacyTest do
     HTTP.Runtime.Telemetry.http2_runtime(:peer_reset, :received, %{error_code: 8})
     HTTP.Runtime.Telemetry.stream(:fetch, :start, :http2, :ok)
     refute_receive {:event, _, _, _}
+  end
+
+  @tag :caller_telemetry
+  test "helper telemetry assertions isolate emissions from other processes" do
+    task =
+      Task.async(fn ->
+        HTTP.Runtime.Telemetry.http2_connection(:closed, :closed, %{active_streams: 0})
+      end)
+
+    Task.await(task)
+    HTTP.Runtime.Telemetry.http2_connection(:admit, :active, %{active_streams: 1})
+
+    assert_receive {:event, [:http_fetch, :http2, :connection], %{active_streams: 1},
+                    %{event: :admit}}
+
+    refute_receive {:event, _, _, _}, 0
   end
 
   defp disable(app) do
