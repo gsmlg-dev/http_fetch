@@ -5,10 +5,11 @@ defmodule HTTP.HTTPSEarlyUploadTest do
   @timeout 5_000
 
   for backend <- [:ssl, :ex_ssl],
+      version <- [:http1, :auto],
       outcome <- [:buffered, :streamed, :cancel, :deadline, :send_timeout, :owner_down] do
     if backend == :ssl and outcome == :buffered, do: @tag(:tls_repro)
 
-    test "#{backend} #{outcome} cleans up a verified HTTPS upload blocked in TLS send" do
+    test "#{backend} #{version} #{outcome} cleans up a verified HTTPS upload blocked in TLS send" do
       {url, peer} = peer()
 
       {:ok, upload} =
@@ -29,7 +30,7 @@ defmodule HTTP.HTTPSEarlyUploadTest do
           body: upload,
           duplex: :half,
           signal: controller,
-          http_version: :http1,
+          http_version: unquote(version),
           tls_backend: unquote(backend),
           timeout: request_timeout,
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],

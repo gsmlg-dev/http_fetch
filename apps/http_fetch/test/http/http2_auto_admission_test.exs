@@ -227,6 +227,46 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
     end
   end
 
+  test "auto HTTPS streamed upload negotiates H2 through the cancellable OTP TLS adapter", %{
+    pool: pool
+  } do
+    {peer, url} = peer!()
+    command(peer, "handshake")
+    {:ok, upload} = HTTP.Stream.from_enumerable(["wrapped", "-", "h2"])
+    source_monitor = Process.monitor(upload)
+
+    promise =
+      HTTP.fetch(url,
+        method: :post,
+        headers: [{"content-length", "10"}],
+        body: upload,
+        duplex: :half,
+        http_version: :auto,
+        ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
+      )
+
+    barrier(peer, pool, fn counts, _state -> counts["requests"] == 1 end)
+
+    [owner] =
+      for {_, entry} <- :sys.get_state(pool).entries,
+          {owner, _capacity} <- entry.connections,
+          do: owner
+
+    connection = :sys.get_state(owner)
+    assert connection.transport == HTTP.Transport.SSL
+    assert HTTP.Transport.SSL.cancellable?(connection.socket)
+    assert {:ok, "h2"} = HTTP.Transport.SSL.negotiated_protocol(connection.socket)
+    assert_receive {:DOWN, ^source_monitor, :process, ^upload, :normal}, 1_000
+
+    command(peer, "respond")
+    response = HTTP.Promise.await(promise, 5_000)
+    assert %HTTP.Response{status: 200, http_version: :http2} = response
+    assert HTTP.Response.read_all(response) == "ok"
+    assert snapshot(peer)["accepted"] == 1
+    assert snapshot(peer)["handshakes"] == 1
+    assert_idle(pool)
+  end
+
   defp burst(url, backend, n) do
     for _ <- 1..n do
       Task.async(fn -> SocketClient.request(request(url, backend)) end)
