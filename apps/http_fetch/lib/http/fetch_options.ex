@@ -24,6 +24,8 @@ defmodule HTTP.FetchOptions do
     Defaults to `false` (automatic size/framing policy). HEAD and bodyless
     statuses remain buffered empty responses. The request timeout still bounds
     the entire response; callers can observe headers before applying a body deadline.
+  - `request_mode` - `:fetch` (default) or `:proxy`; proxy mode retains request
+    entities for all admitted methods, including GET, DELETE, and HEAD
   - `content_type` - convenience Content-Type value for request bodies
   - `timeout` - request timeout in milliseconds
   - `connect_timeout` - connection timeout in milliseconds
@@ -44,6 +46,8 @@ defmodule HTTP.FetchOptions do
 
   @string_keys %{
     "body" => :body,
+    "request_mode" => :request_mode,
+    "requestMode" => :request_mode,
     "connect_timeout" => :connect_timeout,
     "connectTimeout" => :connect_timeout,
     "content_type" => :content_type,
@@ -84,6 +88,7 @@ defmodule HTTP.FetchOptions do
   }
 
   defstruct method: :get,
+            request_mode: :fetch,
             headers: %HTTP.Headers{},
             content_type: nil,
             body: nil,
@@ -114,6 +119,7 @@ defmodule HTTP.FetchOptions do
 
   @type t :: %__MODULE__{
           method: atom(),
+          request_mode: HTTP.Request.request_mode(),
           headers: HTTP.Headers.t(),
           content_type: String.t() | nil,
           body: any(),
@@ -218,6 +224,9 @@ defmodule HTTP.FetchOptions do
       {:method, method}, acc ->
         %{acc | method: normalize_method(method)}
 
+      {:request_mode, mode}, acc ->
+        %{acc | request_mode: mode}
+
       {:headers, headers}, acc ->
         %{acc | headers: normalize_headers(headers)}
 
@@ -310,6 +319,7 @@ defmodule HTTP.FetchOptions do
     %{
       options
       | method: normalize_method(options.method),
+        request_mode: normalize_request_mode(options.request_mode),
         redirect: normalize_redirect(options.redirect),
         duplex: normalize_duplex(options.duplex),
         decode_body: normalize_decode_body(options.decode_body),
@@ -324,6 +334,17 @@ defmodule HTTP.FetchOptions do
         http2_priority: normalize_http2_priority(options.http2_priority)
     }
   end
+
+  defp normalize_request_mode(mode) when mode in [:fetch, :proxy], do: mode
+  defp normalize_request_mode("fetch"), do: :fetch
+  defp normalize_request_mode("proxy"), do: :proxy
+
+  defp normalize_request_mode(mode),
+    do:
+      raise(
+        ArgumentError,
+        "unsupported request_mode: #{inspect(mode)}; expected :fetch or :proxy"
+      )
 
   defp normalize_telemetry(value) when is_boolean(value), do: value
 

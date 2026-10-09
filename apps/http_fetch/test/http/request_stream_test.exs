@@ -1,6 +1,126 @@
 defmodule HTTP.RequestStreamTest do
   use ExUnit.Case, async: true
 
+  for method <- [:get, :delete, :head] do
+    test "proxy mode preserves a binary #{method} entity and HEAD response semantics" do
+      method = unquote(method)
+      test_pid = self()
+
+      url =
+        start_raw_http_server!(fn listener ->
+          {:ok, socket} = :gen_tcp.accept(listener)
+          send(test_pid, {:proxy_request, recv_request(socket)})
+          response_body = unquote(if method == :head, do: "", else: "ok")
+
+          :ok =
+            :gen_tcp.send(socket, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n" <> response_body)
+
+          :gen_tcp.close(socket)
+        end)
+
+      response =
+        HTTP.fetch(url,
+          method: method,
+          request_mode: :proxy,
+          body: "abc",
+          headers: [{"content-length", "3"}],
+          redirect: :manual
+        )
+        |> HTTP.Promise.await()
+
+      assert response.status == 200
+      assert HTTP.Response.read_all(response) == unquote(if method == :head, do: "", else: "ok")
+      assert_receive {:proxy_request, %{request_line: line, body: "abc", headers: headers}}, 2_000
+      assert line == String.upcase(to_string(method)) <> " /test HTTP/1.1"
+      assert headers["content-length"] == "3"
+    end
+  end
+
+  for method <- [:get, :delete], framing <- [:fixed, :chunked, :explicit_chunked] do
+    test "proxy #{method} stream preserves #{framing} framing" do
+      test_pid = self()
+
+      url =
+        start_raw_http_server!(fn listener ->
+          {:ok, socket} = :gen_tcp.accept(listener)
+          send(test_pid, {:proxy_stream, recv_request(socket)})
+          :ok = :gen_tcp.send(socket, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+          :gen_tcp.close(socket)
+        end)
+
+      {:ok, stream} = HTTP.Stream.from_enumerable(["a", "", "bc"])
+
+      headers =
+        unquote(
+          Macro.escape(
+            case framing do
+              :fixed -> [{"content-length", "3"}]
+              :chunked -> []
+              :explicit_chunked -> [{"transfer-encoding", "chunked"}]
+            end
+          )
+        )
+
+      assert %HTTP.Response{status: 200} =
+               HTTP.fetch(url,
+                 method: unquote(method),
+                 request_mode: :proxy,
+                 body: stream,
+                 duplex: :half,
+                 headers: headers,
+                 redirect: :manual
+               )
+               |> HTTP.Promise.await()
+
+      assert_receive {:proxy_stream, %{request_line: line, body: "abc", headers: received}}, 2_000
+      assert line == String.upcase(to_string(unquote(method))) <> " /test HTTP/1.1"
+
+      if unquote(framing == :fixed) do
+        assert received["content-length"] == "3"
+        refute Map.has_key?(received, "transfer-encoding")
+      else
+        assert received["transfer-encoding"] == "chunked"
+        refute Map.has_key?(received, "content-length")
+      end
+    end
+  end
+
+  for method <- [:get, :delete] do
+    test "proxy #{method} chunked stream transmits declared trailers" do
+      test_pid = self()
+
+      url =
+        start_raw_http_server!(fn listener ->
+          {:ok, socket} = :gen_tcp.accept(listener)
+          {head, rest} = recv_header_block(socket, "")
+          wire = recv_until(socket, rest, "0\r\nX-Checksum: verified\r\n\r\n")
+          send(test_pid, {:proxy_trailers, head, wire})
+          :ok = :gen_tcp.send(socket, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+          :gen_tcp.close(socket)
+        end)
+
+      {:ok, stream} = HTTP.Stream.start_link(0)
+
+      promise =
+        HTTP.fetch(url,
+          method: unquote(method),
+          request_mode: :proxy,
+          body: stream,
+          duplex: :half,
+          headers: [{"Transfer-Encoding", "chunked"}, {"Trailer", "X-Checksum"}]
+        )
+
+      :ok = HTTP.Stream.chunk(stream, "abc")
+      :ok = HTTP.Stream.finish(stream, [{"X-Checksum", "verified"}])
+      assert %HTTP.Response{status: 200} = HTTP.Promise.await(promise)
+
+      assert_receive {:proxy_trailers, head, "3\r\nabc\r\n0\r\nX-Checksum: verified\r\n\r\n"},
+                     2_000
+
+      assert head =~ "Trailer: X-Checksum"
+    end
+  end
+
   for chunks <- [["abc", "", "def"], []] do
     test "uploads exactly the declared HTTP/1 length for #{inspect(chunks)}" do
       chunks = unquote(chunks)
@@ -98,34 +218,37 @@ defmodule HTTP.RequestStreamTest do
     assert_receive {:produced, "def"}
   end
 
-  test "abort stops a fixed-length upload and its source" do
-    test_pid = self()
+  for method <- [:post, :get, :delete] do
+    test "abort stops a fixed-length upload and its source (#{method})" do
+      test_pid = self()
 
-    url =
-      start_raw_http_server!(fn listener ->
-        {:ok, socket} = :gen_tcp.accept(listener)
-        {_headers, body} = recv_header_block(socket, "")
-        send(test_pid, {:aborted_body, recv_closed_body(socket, body)})
-      end)
+      url =
+        start_raw_http_server!(fn listener ->
+          {:ok, socket} = :gen_tcp.accept(listener)
+          {_headers, body} = recv_header_block(socket, "")
+          send(test_pid, {:aborted_body, recv_closed_body(socket, body)})
+        end)
 
-    {:ok, stream} = HTTP.Stream.start_link(6)
-    monitor = Process.monitor(stream)
-    {:ok, controller} = HTTP.AbortController.start_link()
+      {:ok, stream} = HTTP.Stream.start_link(6)
+      monitor = Process.monitor(stream)
+      {:ok, controller} = HTTP.AbortController.start_link()
 
-    promise =
-      HTTP.fetch(url,
-        method: :put,
-        headers: [{"content-length", "6"}],
-        body: stream,
-        duplex: "half",
-        signal: controller
-      )
+      promise =
+        HTTP.fetch(url,
+          method: unquote(method),
+          request_mode: :proxy,
+          headers: [{"content-length", "6"}],
+          body: stream,
+          duplex: "half",
+          signal: controller
+        )
 
-    assert :ok = HTTP.Stream.chunk(stream, "abc")
-    HTTP.AbortController.abort(controller)
-    assert {:error, :aborted} = HTTP.Promise.await(promise)
-    assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 5_000
-    assert_receive {:aborted_body, "abc"}, 5_000
+      assert :ok = HTTP.Stream.chunk(stream, "abc")
+      HTTP.AbortController.abort(controller)
+      assert {:error, :aborted} = HTTP.Promise.await(promise)
+      assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 5_000
+      assert_receive {:aborted_body, "abc"}, 5_000
+    end
   end
 
   test "uploads a duplex half stream as an HTTP/1.1 chunked request body" do
@@ -171,35 +294,41 @@ defmodule HTTP.RequestStreamTest do
     refute Map.has_key?(headers, "content-length")
   end
 
-  test "an early final response cancels an open upload before its EOF" do
-    test_pid = self()
+  for method <- [:post, :get, :delete] do
+    test "an early final response cancels an open upload before its EOF (#{method})" do
+      test_pid = self()
 
-    url =
-      start_raw_http_server!(fn listener ->
-        {:ok, socket} = :gen_tcp.accept(listener)
-        {_headers, body} = recv_header_block(socket, "")
-        assert body == ""
-        :ok = :gen_tcp.send(socket, "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n")
-        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
-        send(test_pid, :early_peer_closed)
-      end)
+      url =
+        start_raw_http_server!(fn listener ->
+          {:ok, socket} = :gen_tcp.accept(listener)
+          {_headers, body} = recv_header_block(socket, "")
+          assert body == ""
 
-    {:ok, upload} = HTTP.Stream.start_link(0)
-    monitor = Process.monitor(upload)
+          :ok =
+            :gen_tcp.send(socket, "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n")
 
-    assert %HTTP.Response{status: 413} =
-             HTTP.fetch(url,
-               method: :post,
-               body: upload,
-               duplex: "half",
-               http_version: :http1,
-               redirect: :manual,
-               timeout: 150
-             )
-             |> HTTP.Promise.await(2_000)
+          assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+          send(test_pid, :early_peer_closed)
+        end)
 
-    assert_receive {:DOWN, ^monitor, :process, ^upload, :normal}, 1_000
-    assert_receive :early_peer_closed, 1_000
+      {:ok, upload} = HTTP.Stream.start_link(0)
+      monitor = Process.monitor(upload)
+
+      assert %HTTP.Response{status: 413} =
+               HTTP.fetch(url,
+                 method: unquote(method),
+                 request_mode: :proxy,
+                 body: upload,
+                 duplex: "half",
+                 http_version: :http1,
+                 redirect: :manual,
+                 timeout: 150
+               )
+               |> HTTP.Promise.await(2_000)
+
+      assert_receive {:DOWN, ^monitor, :process, ^upload, :normal}, 1_000
+      assert_receive :early_peer_closed, 1_000
+    end
   end
 
   test "an early streamed response drains after the upload source has terminated" do

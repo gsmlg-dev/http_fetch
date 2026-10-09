@@ -441,14 +441,33 @@ defmodule HTTP.HTTP1 do
   end
 
   defp request_headers(%Request{} = request) do
-    request.headers
+    request
     |> validate_request_framing!()
     |> ensure_user_agent()
     |> Headers.set_default("Host", Request.authority(request.url))
     |> Headers.set("Connection", "close")
   end
 
-  defp validate_request_framing!(headers) do
+  defp validate_request_framing!(%Request{request_mode: :proxy, headers: headers} = request) do
+    case Headers.get_all(headers, "Transfer-Encoding") do
+      [] ->
+        validate_request_framing!(%{request | request_mode: :fetch})
+
+      [encoding] ->
+        unless String.downcase(String.trim(encoding)) == "chunked" and
+                 Request.streaming_body?(request) and not Headers.has?(headers, "Content-Length") do
+          raise ArgumentError,
+                "proxy Transfer-Encoding requires chunked streaming without Content-Length"
+        end
+
+        headers
+
+      _ ->
+        raise ArgumentError, "conflicting proxy Transfer-Encoding request headers"
+    end
+  end
+
+  defp validate_request_framing!(%Request{headers: headers}) do
     _ = headers |> Headers.delete("Trailer") |> Request.reject_unsupported_request_framing!()
     headers
   end

@@ -8,12 +8,16 @@ defmodule HTTP.Request do
 
   ## Supported Methods
 
-  - `:get` - GET requests (no body)
-  - `:head` - HEAD requests (no body)
+  - `:get` - GET requests
+  - `:head` - HEAD requests
   - `:post` - POST requests (with body)
   - `:put` - PUT requests (with body)
-  - `:delete` - DELETE requests (no body)
+  - `:delete` - DELETE requests
   - `:patch` - PATCH requests (with body)
+
+  By default, GET, HEAD, and DELETE request bodies are omitted for compatibility.
+  Set `request_mode: :proxy` to retain entities for all admitted methods.
+  HEAD response bodies remain empty regardless of the request mode.
 
   ## Usage
 
@@ -57,6 +61,7 @@ defmodule HTTP.Request do
   @allowed_methods ~w(DELETE GET HEAD OPTIONS PATCH POST PUT)
 
   defstruct method: :get,
+            request_mode: :fetch,
             url: nil,
             headers: %HTTP.Headers{},
             # Separate field for Content-Type header
@@ -70,10 +75,12 @@ defmodule HTTP.Request do
   @type method :: atom()
   @type url :: URI.t()
   @type content_type :: String.t() | charlist() | nil
+  @type request_mode :: :fetch | :proxy
   @type duplex :: :half | nil
   @type body_content :: any()
   @type t :: %__MODULE__{
           method: method,
+          request_mode: request_mode(),
           url: url,
           headers: HTTP.Headers.t(),
           content_type: content_type,
@@ -137,7 +144,10 @@ defmodule HTTP.Request do
   @doc false
   @spec body_payload(t()) :: nil | {iodata() | {:stream, pid()}, content_type()}
   def body_payload(%__MODULE__{body: nil}), do: nil
-  def body_payload(%__MODULE__{method: method}) when method in [:get, :head, :delete], do: nil
+
+  def body_payload(%__MODULE__{method: method, request_mode: :fetch})
+      when method in [:get, :head, :delete],
+      do: nil
 
   def body_payload(%__MODULE__{body: body, duplex: :half, content_type: content_type})
       when is_pid(body) do
@@ -214,8 +224,8 @@ defmodule HTTP.Request do
 
   @doc false
   @spec streaming_body?(t()) :: boolean()
-  def streaming_body?(%__MODULE__{body: body, duplex: :half, method: method})
-      when is_pid(body) and method not in [:get, :head, :delete],
+  def streaming_body?(%__MODULE__{body: body, duplex: :half, method: method, request_mode: mode})
+      when is_pid(body) and (mode == :proxy or method not in [:get, :head, :delete]),
       do: true
 
   def streaming_body?(%__MODULE__{}), do: false

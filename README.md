@@ -319,6 +319,29 @@ response =
   |> HTTP.Promise.await()
 ```
 
+## Proxy Request Bodies
+
+Use `request_mode: :proxy` to send request entities for any admitted method,
+including GET, DELETE, and HEAD. The default `:fetch` mode retains the existing
+omission of bodies for these methods. HEAD responses remain bodyless in either
+mode. For transparent forwarding, use `redirect: :manual` and `decode_body: false`
+to avoid automatic redirects and response entity decoding.
+
+```elixir
+response = HTTP.fetch(url, method: :delete, request_mode: :proxy,
+  body: "abc", headers: [{"Content-Length", "3"}], redirect: :manual,
+  decode_body: false) |> HTTP.Promise.await()
+```
+
+PID bodies still require `duplex: :half` and retain the same bounded upload,
+cancellation, and early-response behavior described below. HTTP/1 streams with
+`Content-Length` use fixed framing; streams without it use chunked framing.
+Proxy mode also accepts an explicit `Transfer-Encoding: chunked` for an
+unknown-length HTTP/1 stream, including declared trailers. Conflicting framing,
+other transfer codings, and explicit chunked framing on buffered bodies are
+rejected. HTTP/2 and HTTP/3 prohibit Transfer-Encoding headers and continue to
+reject request trailers explicitly.
+
 ## Streaming Request Body
 
 ```elixir
