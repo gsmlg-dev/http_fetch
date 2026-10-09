@@ -4,7 +4,6 @@ defmodule HTTP.TelemetryTest do
 
   setup do
     # Capture telemetry events
-    events = []
 
     # Start telemetry event capture
     :telemetry.attach_many(
@@ -41,9 +40,7 @@ defmodule HTTP.TelemetryTest do
 
       assert_receive {:telemetry_event, [:http_fetch, :request, :start], measurements, metadata}
       assert is_integer(measurements.start_time)
-      assert metadata.method == "GET"
-      assert metadata.url == url
-      assert %HTTP.Headers{} = metadata.headers
+      assert metadata == %{method: :get, scheme: :https}
     end
 
     test "request_stop emits telemetry event" do
@@ -55,8 +52,7 @@ defmodule HTTP.TelemetryTest do
       assert measurements.duration == 1500
       assert measurements.status == 200
       assert measurements.response_size == 1024
-      assert metadata.url == url
-      assert metadata.status == 200
+      assert metadata == %{scheme: :https, status: 200}
     end
 
     test "request_exception emits telemetry event" do
@@ -68,8 +64,34 @@ defmodule HTTP.TelemetryTest do
                       metadata}
 
       assert measurements.duration == 5000
-      assert metadata.url == url
-      assert metadata.error == :timeout
+      assert metadata == %{scheme: :https, error: :timeout}
+    end
+  end
+
+  test "request helpers omit arbitrary credentials, every URI component, and exception details" do
+    url =
+      URI.parse(
+        "https://sentinel-user:sentinel-password@sentinel-host/sentinel-path?secret=sentinel-query#sentinel-fragment"
+      )
+
+    headers =
+      HTTP.Headers.new([
+        {"authorization", "Bearer sentinel-token"},
+        {"proxy-authorization", "Basic sentinel-proxy"},
+        {"cookie", "sentinel-cookie"},
+        {"set-cookie", "sentinel-set-cookie"},
+        {"x-custom-secret", "sentinel-signature"}
+      ])
+
+    HTTP.Telemetry.request_start("sentinel-method", url, headers)
+    HTTP.Telemetry.request_stop(200, url, 0, 1)
+    HTTP.Telemetry.request_exception(url, {:custom, "sentinel-exception"}, 1)
+
+    for _ <- 1..3 do
+      assert_receive {:telemetry_event, _, _, metadata}
+      refute inspect(metadata) =~ "sentinel"
+      refute Map.has_key?(metadata, :headers)
+      refute Map.has_key?(metadata, :url)
     end
   end
 

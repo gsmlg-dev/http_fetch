@@ -14,6 +14,8 @@ defmodule HTTP.FetchOptions do
 
   The socket transport also accepts Elixir-specific extensions:
 
+  - `telemetry` - emit request and stream telemetry; defaults to `true`. Shared
+    pool/connection counters require the global opt-out in `HTTP.Telemetry`.
   - `decode_body` - decode response Content-Encoding; defaults to `true`. Set
     `false` to preserve stored entity bytes for buffered and streamed HTTP/1,
     HTTP/2, and HTTP/3 responses without changing headers.
@@ -69,6 +71,7 @@ defmodule HTTP.FetchOptions do
     "tls_backend" => :tls_backend,
     "tlsBackend" => :tls_backend,
     "timeout" => :timeout,
+    "telemetry" => :telemetry,
     "unix_socket" => :unix_socket,
     "unixSocket" => :unix_socket
   }
@@ -79,6 +82,7 @@ defmodule HTTP.FetchOptions do
             body: nil,
             duplex: nil,
             decode_body: true,
+            telemetry: true,
             signal: nil,
             unix_socket: nil,
             redirect: :follow,
@@ -107,6 +111,7 @@ defmodule HTTP.FetchOptions do
           body: any(),
           duplex: :half | nil,
           decode_body: boolean(),
+          telemetry: boolean(),
           signal: any() | nil,
           unix_socket: String.t() | nil,
           redirect: redirect(),
@@ -150,6 +155,7 @@ defmodule HTTP.FetchOptions do
   @spec to_transport_options(t()) :: keyword()
   def to_transport_options(%__MODULE__{} = options) do
     []
+    |> maybe_add(:telemetry, options.telemetry)
     |> maybe_add(:decode_body, options.decode_body)
     |> maybe_add(:timeout, options.timeout)
     |> maybe_add(:connect_timeout, options.connect_timeout)
@@ -213,6 +219,9 @@ defmodule HTTP.FetchOptions do
 
       {:duplex, duplex}, acc ->
         %{acc | duplex: normalize_duplex(duplex)}
+
+      {:telemetry, telemetry}, acc ->
+        %{acc | telemetry: telemetry}
 
       {:decode_body, decode_body}, acc ->
         %{acc | decode_body: decode_body}
@@ -291,6 +300,7 @@ defmodule HTTP.FetchOptions do
         redirect: normalize_redirect(options.redirect),
         duplex: normalize_duplex(options.duplex),
         decode_body: normalize_decode_body(options.decode_body),
+        telemetry: normalize_telemetry(options.telemetry),
         http_version: http_version,
         tls_backend: normalize_tls_backend(options.tls_backend, http_version),
         http2_profile: normalize_http2_profile(options.http2_profile),
@@ -300,6 +310,11 @@ defmodule HTTP.FetchOptions do
         http2_priority: normalize_http2_priority(options.http2_priority)
     }
   end
+
+  defp normalize_telemetry(value) when is_boolean(value), do: value
+
+  defp normalize_telemetry(value),
+    do: raise(ArgumentError, "invalid telemetry: #{inspect(value)}; expected boolean")
 
   defp normalize_decode_body(value) when is_boolean(value), do: value
 

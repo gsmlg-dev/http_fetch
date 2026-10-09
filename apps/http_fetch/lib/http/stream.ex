@@ -9,6 +9,7 @@ defmodule HTTP.Stream do
   """
 
   defstruct reader: nil,
+            telemetry: true,
             decoders: [],
             reader_monitor: nil,
             reader_ack?: false,
@@ -24,15 +25,16 @@ defmodule HTTP.Stream do
   def start_link(content_length), do: start_link(content_length, [])
 
   @doc false
-  def start_link(content_length, encodings) do
+  def start_link(content_length, encodings, opts \\ []) do
+    telemetry = Keyword.get(opts, :telemetry, true)
     start_time = System.monotonic_time(:microsecond)
-    HTTP.Telemetry.streaming_start(content_length)
+    if telemetry, do: HTTP.Telemetry.streaming_start(content_length)
 
     Task.start_link(fn ->
       decoders = HTTP.ContentDecoder.open(encodings)
 
       try do
-        loop(%__MODULE__{start_time: start_time, decoders: decoders})
+        loop(%__MODULE__{start_time: start_time, decoders: decoders, telemetry: telemetry})
       after
         HTTP.ContentDecoder.close(decoders)
       end
@@ -42,6 +44,9 @@ defmodule HTTP.Stream do
   @doc """
   Creates a stream from an enumerable.
 
+  Pass `telemetry: false` in the optional second argument to silence producer
+  streaming events. The default is `true`.
+
   Each enumerable item is converted to binary and emitted with backpressure. The
   returned PID can be passed as a streaming request body:
 
@@ -49,8 +54,9 @@ defmodule HTTP.Stream do
       HTTP.fetch(url, method: :post, body: stream, duplex: "half")
   """
   @spec from_enumerable(Enumerable.t()) :: {:ok, pid()} | {:error, term()}
-  def from_enumerable(enumerable) do
-    with {:ok, stream} <- start_link(0),
+  @spec from_enumerable(Enumerable.t(), keyword()) :: {:ok, pid()} | {:error, term()}
+  def from_enumerable(enumerable, opts \\ []) do
+    with {:ok, stream} <- start_link(0, [], opts),
          {:ok, _producer} <-
            Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
              produce_enumerable(stream, enumerable)
@@ -156,7 +162,7 @@ defmodule HTTP.Stream do
           {:ok, decoded} ->
             chunk_size = byte_size(decoded)
             total_bytes = state.total_bytes + chunk_size
-            HTTP.Telemetry.streaming_chunk(chunk_size, total_bytes)
+            if state.telemetry, do: HTTP.Telemetry.streaming_chunk(chunk_size, total_bytes)
 
             state
             |> Map.put(:total_bytes, total_bytes)
@@ -173,7 +179,7 @@ defmodule HTTP.Stream do
 
       :finish ->
         duration = System.monotonic_time(:microsecond) - state.start_time
-        HTTP.Telemetry.streaming_stop(state.total_bytes, duration)
+        if state.telemetry, do: HTTP.Telemetry.streaming_stop(state.total_bytes, duration)
 
         case HTTP.ContentDecoder.finish(state.decoders) do
           :ok ->
@@ -228,7 +234,7 @@ defmodule HTTP.Stream do
 
   defp timeout(%__MODULE__{} = state) do
     duration = System.monotonic_time(:microsecond) - state.start_time
-    HTTP.Telemetry.streaming_stop(state.total_bytes, duration)
+    if state.telemetry, do: HTTP.Telemetry.streaming_stop(state.total_bytes, duration)
 
     _state =
       state

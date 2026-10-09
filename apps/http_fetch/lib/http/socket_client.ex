@@ -156,7 +156,9 @@ defmodule HTTP.SocketClient do
         content_length = stream_content_length(headers)
 
         {:ok, stream_pid} =
-          HTTP.Stream.start_link(content_length, response_encodings(state.request, headers))
+          HTTP.Stream.start_link(content_length, response_encodings(state.request, headers),
+            telemetry: request_telemetry?(state.request)
+          )
 
         response = Response.with_stream_body(response, stream_pid)
         send_response(state.parent, state.ref, response, state.request)
@@ -502,7 +504,7 @@ defmodule HTTP.SocketClient do
              deadline_at,
              context.parent_monitor
            ) do
-      case start_http2_stream(owner, headers, body) do
+      case start_http2_stream(owner, headers, body, request) do
         {:ok, id, bridge} ->
           monitor = Process.monitor(owner)
 
@@ -563,7 +565,7 @@ defmodule HTTP.SocketClient do
 
     {:ok, headers, body} = HTTP.HTTP2.request_headers(request, profile, order?: false)
 
-    case start_http2_stream(owner, headers, body) do
+    case start_http2_stream(owner, headers, body, request) do
       {:ok, id, bridge} ->
         monitor = Process.monitor(owner)
 
@@ -642,15 +644,19 @@ defmodule HTTP.SocketClient do
   defp transfer_http2_socket(transport, socket, owner) when is_atom(transport),
     do: transport.controlling_process(socket, owner)
 
-  defp maybe_start_http2_bridge({:stream, stream}, owner, headers) do
+  defp maybe_start_http2_bridge({:stream, stream}, owner, headers, request) do
     length =
       headers |> Enum.find_value(fn {name, value} -> if name == "content-length", do: value end)
 
-    opts = [content_length: if(length, do: String.to_integer(length))]
+    opts = [
+      content_length: if(length, do: String.to_integer(length)),
+      telemetry: request_telemetry?(request)
+    ]
+
     with {:ok, bridge} <- BodyBridge.start_link(stream, owner, opts), do: {:ok, bridge, nil}
   end
 
-  defp maybe_start_http2_bridge(body, owner, _headers)
+  defp maybe_start_http2_bridge(body, owner, _headers, request)
        when is_binary(body) and byte_size(body) > 0 do
     chunks =
       Stream.unfold(body, fn
@@ -663,8 +669,9 @@ defmodule HTTP.SocketClient do
           {:binary.copy(chunk), rest}
       end)
 
-    with {:ok, stream} <- HTTP.Stream.from_enumerable(chunks) do
-      case BodyBridge.start_link(stream, owner) do
+    with {:ok, stream} <-
+           HTTP.Stream.from_enumerable(chunks, telemetry: request_telemetry?(request)) do
+      case BodyBridge.start_link(stream, owner, telemetry: request_telemetry?(request)) do
         {:ok, bridge} ->
           {:ok, bridge, stream}
 
@@ -675,10 +682,10 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp maybe_start_http2_bridge(_body, _owner, _headers), do: {:ok, nil, nil}
+  defp maybe_start_http2_bridge(_body, _owner, _headers, _request), do: {:ok, nil, nil}
 
-  defp start_http2_stream(owner, headers, body) do
-    with {:ok, bridge, internal_stream} <- maybe_start_http2_bridge(body, owner, headers) do
+  defp start_http2_stream(owner, headers, body, request) do
+    with {:ok, bridge, internal_stream} <- maybe_start_http2_bridge(body, owner, headers, request) do
       opened =
         try do
           ConnectionOwner.open_stream(owner, headers,
@@ -950,7 +957,8 @@ defmodule HTTP.SocketClient do
         {:ok, stream_pid} =
           HTTP.Stream.start_link(
             stream_content_length(headers),
-            response_encodings(state.request, headers)
+            response_encodings(state.request, headers),
+            telemetry: request_telemetry?(state.request)
           )
 
         send_response(
@@ -1243,7 +1251,9 @@ defmodule HTTP.SocketClient do
         content_length = stream_content_length(headers)
 
         {:ok, stream_pid} =
-          HTTP.Stream.start_link(content_length, response_encodings(state.request, headers))
+          HTTP.Stream.start_link(content_length, response_encodings(state.request, headers),
+            telemetry: request_telemetry?(state.request)
+          )
 
         response = Response.with_stream_body(response, stream_pid)
         send_response(state.parent, state.ref, response, state.request)
@@ -1370,6 +1380,9 @@ defmodule HTTP.SocketClient do
         {:error, :request_timeout}
     end
   end
+
+  defp request_telemetry?(request),
+    do: HTTP.Telemetry.enabled?(Keyword.get(request.transport_options, :telemetry, true))
 
   defp response_encodings(request, headers) do
     if Keyword.get(request.transport_options, :decode_body, true),

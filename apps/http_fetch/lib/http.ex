@@ -293,7 +293,8 @@ defmodule HTTP do
     unix_socket_path = options.unix_socket
 
     # Emit telemetry event for request start
-    HTTP.Telemetry.request_start(request.method, request.url, request.headers)
+    if HTTP.Telemetry.enabled?(options.telemetry),
+      do: HTTP.Telemetry.request_start(request.method, request.url, request.headers)
 
     # Spawn a task to handle the asynchronous HTTP request
     task =
@@ -324,18 +325,22 @@ defmodule HTTP do
 
     case result do
       %Response{} = response ->
-        HTTP.Telemetry.request_stop(
-          response.status,
-          request.url,
-          response_body_size(response),
-          duration,
-          response.http_version
-        )
+        if HTTP.Telemetry.enabled?(Keyword.get(request.transport_options, :telemetry, true)) do
+          HTTP.Telemetry.request_stop(
+            response.status,
+            request.url,
+            response_body_size(response),
+            duration,
+            response.http_version
+          )
+        end
 
         response
 
       {:error, reason} ->
-        HTTP.Telemetry.request_exception(request.url, reason, duration)
+        if HTTP.Telemetry.enabled?(Keyword.get(request.transport_options, :telemetry, true)),
+          do: HTTP.Telemetry.request_exception(request.url, reason, duration)
+
         {:error, reason}
     end
   end

@@ -190,6 +190,46 @@ defmodule HTTP.FetchHTTP3Test do
     end
   end
 
+  test "H3 per-request telemetry opt-out covers request and response streaming", context do
+    handler = {__MODULE__, make_ref()}
+
+    events =
+      for category <- [:request, :streaming],
+          phase <- [:start, :stop, :exception, :chunk],
+          do: [:http_fetch, category, phase]
+
+    parent = self()
+
+    :ok =
+      :telemetry.attach_many(
+        handler,
+        events,
+        fn event, measures, metadata, _ ->
+          send(parent, {:disabled_event, event, measures, metadata})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    promise =
+      fetch(context, telemetry: false, headers: [{"authorization", "Bearer sentinel-token"}])
+
+    connection = accept(context.server)
+    stream = await_stream(connection, 0, deadline())
+    await_fin(stream, deadline(), [])
+
+    write(
+      stream,
+      headers(200, [{"set-cookie", "sentinel-cookie"}]) <> Frame.encode!(:data, "OK"),
+      true
+    )
+
+    response = HTTP.Promise.await(promise)
+    assert HTTP.Response.read_all(response) == "OK"
+    refute_receive {:disabled_event, _, _, _}
+  end
+
   test "Fetch rejects wrong reference identity without fallback", context do
     result =
       fetch(context, ssl: Keyword.put(context.ssl, :reference_identity, {:dns_id, "wrong.test"}))
