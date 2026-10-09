@@ -1735,7 +1735,8 @@ defmodule HTTP.SocketClient do
 
   defp stream_response?(request, status, headers) do
     !HTTP.HTTP1.body_forbidden?(request.method, status) &&
-      should_use_streaming?(headers)
+      (Keyword.get(request.transport_options, :stream_response, false) or
+         should_use_streaming?(headers))
   end
 
   defp should_use_streaming?(headers) do
