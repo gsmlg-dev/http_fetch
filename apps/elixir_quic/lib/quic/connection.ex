@@ -117,6 +117,7 @@ defmodule Quic.Connection do
     catch
       :exit, {:timeout, _} -> {:error, :timeout}
       :exit, {:noproc, _} -> {:error, :closed}
+      :exit, {:normal, _} -> {:error, :closed}
       :exit, {reason, _call} -> {:error, {:closed, reason}}
     end
   end
