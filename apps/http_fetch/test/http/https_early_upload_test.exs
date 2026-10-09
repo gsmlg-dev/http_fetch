@@ -82,10 +82,13 @@ defmodule HTTP.HTTPSEarlyUploadTest do
           assert {:error, :request_timeout} = HTTP.Promise.await(promise, 2_000)
 
         :send_timeout ->
-          # OTP closes its TLS connection on send_timeout_close; ExSSL reports
-          # the send timeout directly. Neither is a request-deadline expiry.
-          reason = if unquote(backend) == :ssl, do: :closed, else: :timeout
-          assert {:error, ^reason} = HTTP.Promise.await(promise, 2_000)
+          # OTP's send timeout and send_timeout_close notifications can race;
+          # either native result must settle before the request deadline.
+          assert {:error, reason} = HTTP.Promise.await(promise, 2_000)
+
+          if unquote(backend) == :ssl,
+            do: assert(reason in [:timeout, :closed]),
+            else: assert(reason == :timeout)
 
         :owner_down ->
           Process.exit(owner, :kill)
