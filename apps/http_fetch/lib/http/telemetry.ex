@@ -11,6 +11,22 @@ defmodule HTTP.Telemetry do
   All `HTTP.fetch/2` operations automatically emit telemetry events. No
   configuration is required - simply attach handlers to receive events.
 
+  Request metadata contains only finite method, scheme, protocol and error
+  categories plus numeric status. Headers and all URI components (including
+  host, path, userinfo, query and fragment) are omitted. Arbitrary exception
+  details are replaced with `:request_failed`.
+
+  Pass `telemetry: false` to `HTTP.fetch/2` to suppress request events and its
+  response streams and internally created upload streams/bridges. A producer
+  stream created independently before the request has its own telemetry setting.
+  Shared HTTP/2 connection/pool events contain only safe aggregate measurements
+  and finite categories and remain independent of a single request's option.
+  For a strict global opt-out, configure `config :http_fetch, telemetry: false`;
+  this suppresses both `[:http_fetch, ...]` and the shared runtime's
+  `[:http_runtime, ...]` events, including other clients using that runtime.
+  `config :http_runtime, telemetry: false` independently suppresses all shared
+  runtime events. The bundled TLS and QUIC engines emit no telemetry events.
+
   ## Event Types
 
   ### Request Events
@@ -18,7 +34,7 @@ defmodule HTTP.Telemetry do
   **`[:http_fetch, :request, :start]`** - Emitted when a request begins
 
   - Measurements: `%{start_time: integer}` (microseconds)
-  - Metadata: `%{method: atom, url: URI.t(), headers: HTTP.Headers.t()}`
+  - Metadata: `%{method: atom, scheme: :http | :https | :other}`
 
   **`[:http_fetch, :request, :stop]`** - Emitted when a request completes successfully
 
@@ -26,12 +42,12 @@ defmodule HTTP.Telemetry do
     - `duration` - Request duration in microseconds
     - `status` - HTTP status code
     - `response_size` - Response body size in bytes
-  - Metadata: `%{url: URI.t(), status: integer}`
+  - Metadata: `%{scheme: atom, status: integer, http_version: atom}`
 
   **`[:http_fetch, :request, :exception]`** - Emitted when a request fails
 
   - Measurements: `%{duration: integer}` (microseconds)
-  - Metadata: `%{url: URI.t(), error: term()}`
+  - Metadata: `%{scheme: atom, error: atom}`
 
   ### Streaming Events
 
@@ -98,7 +114,7 @@ defmodule HTTP.Telemetry do
         fn event_name, measurements, metadata, _config ->
           case event_name do
             [:http_fetch, :request, :start] ->
-              IO.puts("Request started: " <> to_string(metadata.url))
+              IO.puts("Request started: " <> Atom.to_string(metadata.scheme))
 
             [:http_fetch, :request, :stop] ->
               duration_ms = measurements.duration / 1000
@@ -120,7 +136,7 @@ defmodule HTTP.Telemetry do
         fn _event, measurements, metadata, _config ->
           # Send to your metrics system
           MyMetrics.record_http_request(
-            url: to_string(metadata.url),
+            scheme: metadata.scheme,
             status: metadata.status,
             duration_us: measurements.duration
           )
@@ -164,17 +180,13 @@ defmodule HTTP.Telemetry do
       iex> HTTP.Telemetry.request_start("GET", URI.parse("https://example.com"), %HTTP.Headers{})
       :ok
   """
-  @spec request_start(String.t(), URI.t(), HTTP.Headers.t()) :: :ok
-  def request_start(method, url, headers) do
+  @spec request_start(atom() | String.t(), URI.t(), HTTP.Headers.t()) :: :ok
+  def request_start(method, url, _headers) do
     measurements = %{start_time: System.system_time(:microsecond)}
 
-    metadata = %{
-      method: method,
-      url: url,
-      headers: headers
-    }
+    metadata = %{method: safe_method(method), scheme: safe_scheme(url)}
 
-    :telemetry.execute([:http_fetch, :request, :start], measurements, metadata)
+    execute([:http_fetch, :request, :start], measurements, metadata)
   end
 
   @doc """
@@ -194,10 +206,14 @@ defmodule HTTP.Telemetry do
       response_size: response_size
     }
 
-    metadata = %{url: url, status: status}
-    metadata = if http_version, do: Map.put(metadata, :http_version, http_version), else: metadata
+    metadata = %{scheme: safe_scheme(url), status: status}
 
-    :telemetry.execute([:http_fetch, :request, :stop], measurements, metadata)
+    metadata =
+      if http_version,
+        do: Map.put(metadata, :http_version, safe_protocol(http_version)),
+        else: metadata
+
+    execute([:http_fetch, :request, :stop], measurements, metadata)
   end
 
   @doc """
@@ -210,9 +226,9 @@ defmodule HTTP.Telemetry do
   @spec request_exception(URI.t(), term(), integer()) :: :ok
   def request_exception(url, error, duration_us) do
     measurements = %{duration: duration_us}
-    metadata = %{url: url, error: error}
+    metadata = %{scheme: safe_scheme(url), error: safe_error(error)}
 
-    :telemetry.execute([:http_fetch, :request, :exception], measurements, metadata)
+    execute([:http_fetch, :request, :exception], measurements, metadata)
   end
 
   @doc """
@@ -225,7 +241,7 @@ defmodule HTTP.Telemetry do
   @spec response_body_read_start(integer()) :: :ok
   def response_body_read_start(content_length) do
     measurements = %{content_length: content_length}
-    :telemetry.execute([:http_fetch, :response, :body_read_start], measurements, %{})
+    execute([:http_fetch, :response, :body_read_start], measurements, %{})
   end
 
   @doc """
@@ -238,7 +254,7 @@ defmodule HTTP.Telemetry do
   @spec response_body_read_stop(integer(), integer()) :: :ok
   def response_body_read_stop(bytes_read, duration_us) do
     measurements = %{bytes_read: bytes_read, duration: duration_us}
-    :telemetry.execute([:http_fetch, :response, :body_read_stop], measurements, %{})
+    execute([:http_fetch, :response, :body_read_stop], measurements, %{})
   end
 
   @doc """
@@ -251,7 +267,7 @@ defmodule HTTP.Telemetry do
   @spec streaming_start(integer()) :: :ok
   def streaming_start(content_length) do
     measurements = %{content_length: content_length}
-    :telemetry.execute([:http_fetch, :streaming, :start], measurements, %{})
+    execute([:http_fetch, :streaming, :start], measurements, %{})
   end
 
   @doc """
@@ -268,7 +284,7 @@ defmodule HTTP.Telemetry do
       total_bytes: total_bytes
     }
 
-    :telemetry.execute([:http_fetch, :streaming, :chunk], measurements, %{})
+    execute([:http_fetch, :streaming, :chunk], measurements, %{})
   end
 
   @doc """
@@ -281,12 +297,12 @@ defmodule HTTP.Telemetry do
   @spec streaming_stop(integer(), integer()) :: :ok
   def streaming_stop(total_bytes, duration_us) do
     measurements = %{total_bytes: total_bytes, duration: duration_us}
-    :telemetry.execute([:http_fetch, :streaming, :stop], measurements, %{})
+    execute([:http_fetch, :streaming, :stop], measurements, %{})
   end
 
   @doc false
   def http2_connection(event, lifecycle, measurements) do
-    :telemetry.execute([:http_fetch, :http2, :connection], measurements, %{
+    execute([:http_fetch, :http2, :connection], measurements, %{
       event: event,
       lifecycle: lifecycle
     })
@@ -294,7 +310,7 @@ defmodule HTTP.Telemetry do
 
   @doc false
   def http2_pool(event, outcome, measurements) do
-    :telemetry.execute([:http_fetch, :http2, :pool], measurements, %{
+    execute([:http_fetch, :http2, :pool], measurements, %{
       event: event,
       outcome: outcome
     })
@@ -302,7 +318,7 @@ defmodule HTTP.Telemetry do
 
   @doc false
   def http2_runtime(event, outcome, measurements) do
-    :telemetry.execute([:http_fetch, :http2, :runtime], measurements, %{
+    execute([:http_fetch, :http2, :runtime], measurements, %{
       event: event,
       outcome: outcome
     })
@@ -310,6 +326,62 @@ defmodule HTTP.Telemetry do
 
   @doc false
   def http2_body_bridge(outcome, measurements) do
-    :telemetry.execute([:http_fetch, :http2, :body_bridge], measurements, %{outcome: outcome})
+    execute([:http_fetch, :http2, :body_bridge], measurements, %{outcome: outcome})
   end
+
+  @doc false
+  def enabled?(request_enabled \\ true),
+    do: request_enabled and Application.get_env(:http_fetch, :telemetry, true) != false
+
+  defp execute(event, measurements, metadata) do
+    if enabled?(), do: :telemetry.execute(event, measurements, metadata), else: :ok
+  end
+
+  defp safe_scheme(%URI{scheme: "http"}), do: :http
+  defp safe_scheme(%URI{scheme: "https"}), do: :https
+  defp safe_scheme(_url), do: :other
+
+  defp safe_method(method)
+       when method in [:get, :head, :post, :put, :patch, :delete, :options, :connect, :trace],
+       do: method
+
+  defp safe_method(method) when is_binary(method) do
+    case String.upcase(method) do
+      "GET" -> :get
+      "HEAD" -> :head
+      "POST" -> :post
+      "PUT" -> :put
+      "PATCH" -> :patch
+      "DELETE" -> :delete
+      "OPTIONS" -> :options
+      "CONNECT" -> :connect
+      "TRACE" -> :trace
+      _ -> :other
+    end
+  end
+
+  defp safe_method(_method), do: :other
+
+  defp safe_protocol(value) when value in [:http1, :http2, :http3], do: value
+  defp safe_protocol(_value), do: :other
+
+  defp safe_error(value)
+       when value in [
+              :aborted,
+              :timeout,
+              :request_timeout,
+              :connect_timeout,
+              :closed,
+              :econnrefused,
+              :nxdomain,
+              :enetunreach,
+              :ehostunreach,
+              :redirect,
+              :too_many_redirects,
+              :invalid_http_response,
+              :content_length_mismatch
+            ],
+       do: value
+
+  defp safe_error(_error), do: :request_failed
 end

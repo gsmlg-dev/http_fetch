@@ -606,7 +606,7 @@ Comprehensive telemetry and metrics for HTTP requests and responses.
   fn event_name, measurements, metadata, _config ->
     case event_name do
       [:http_fetch, :request, :start] ->
-        IO.puts("Starting request to #{metadata.url}")
+        IO.puts("Starting #{metadata.method} request over #{metadata.scheme}")
       [:http_fetch, :request, :stop] ->
         IO.puts("Request completed: #{measurements.status} in #{measurements.duration}μs")
       [:http_fetch, :request, :exception] ->
@@ -621,6 +621,20 @@ HTTP.Telemetry.request_start("GET", URI.parse("https://example.com"), %HTTP.Head
 HTTP.Telemetry.request_stop(200, URI.parse("https://example.com"), 1024, 1500)
 HTTP.Telemetry.request_exception(URI.parse("https://example.com"), :timeout, 5000)
 ```
+
+Request events omit all headers and URI values, including host, path, userinfo,
+query and fragment. Method, scheme, protocol and error use finite categories;
+unknown failure details appear as `:request_failed`.
+
+Use `HTTP.fetch(url, telemetry: false)` to disable request events and response
+stream / internal upload telemetry. Independently created upload producers can
+use `HTTP.Stream.from_enumerable(chunks, telemetry: false)`. Shared HTTP/2 pool
+and connection counters remain aggregate and contain no request attributes.
+For strict global silence, use `config :http_fetch, telemetry: false`, which
+also disables both Fetch and shared runtime event prefixes, including other
+clients using that runtime. `config :http_runtime, telemetry: false`
+independently disables all shared runtime events.
+The bundled TLS and QUIC engines do not emit telemetry.
 
 ### HTTP.Request
 Request configuration struct.

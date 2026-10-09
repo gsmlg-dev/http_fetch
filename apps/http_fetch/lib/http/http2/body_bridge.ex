@@ -33,6 +33,7 @@ defmodule HTTP.HTTP2.BodyBridge do
     {:ok,
      %{
        stream: stream,
+       telemetry: Keyword.get(opts, :telemetry, true),
        owner: owner,
        monitor: monitor,
        owner_monitor: owner_monitor,
@@ -241,11 +242,13 @@ defmodule HTTP.HTTP2.BodyBridge do
     duration_us =
       System.convert_time_unit(System.monotonic_time() - state.started_at, :native, :microsecond)
 
-    HTTP.Telemetry.http2_body_bridge(outcome, %{
-      duration_us: duration_us,
-      bytes: state.bytes,
-      peak_buffered_bytes: state.peak_buffered_bytes
-    })
+    if state.telemetry do
+      HTTP.Telemetry.http2_body_bridge(outcome, %{
+        duration_us: duration_us,
+        bytes: state.bytes,
+        peak_buffered_bytes: state.peak_buffered_bytes
+      })
+    end
 
     %{
       state

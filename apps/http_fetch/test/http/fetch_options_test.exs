@@ -74,6 +74,20 @@ defmodule HTTP.FetchOptionsTest do
       end
     end
 
+    test "telemetry opt-out supports flat forms and requires boolean" do
+      assert HTTP.FetchOptions.new([]).telemetry
+
+      for input <- [[telemetry: false], %{"telemetry" => false}] do
+        options = HTTP.FetchOptions.new(input)
+        refute options.telemetry
+        assert HTTP.FetchOptions.to_transport_options(options)[:telemetry] == false
+      end
+
+      assert_raise ArgumentError, ~r/invalid telemetry/, fn ->
+        HTTP.FetchOptions.new(telemetry: :disabled)
+      end
+    end
+
     test "rejects invalid duplex mode" do
       assert_raise ArgumentError, ~r/unsupported duplex mode/, fn ->
         HTTP.FetchOptions.new(duplex: :full)
