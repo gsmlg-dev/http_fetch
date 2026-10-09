@@ -39,7 +39,8 @@ defmodule HTTP.Runtime.Dialer do
   def connect(transport, host, port, request, selection, timeout, cancel_monitor \\ nil) do
     connect_timeout = min(connect_timeout(request), timeout)
 
-    with :ok <- validate_transport_option_lists(transport, request) do
+    with :ok <- validate_transport_option_lists(transport, request),
+         :ok <- validate_connect_address(transport, host, request) do
       interruptible_connect(
         transport,
         host,
@@ -50,6 +51,45 @@ defmodule HTTP.Runtime.Dialer do
       )
     end
   end
+
+  defp validate_connect_address(transport, host, request) do
+    case Keyword.get(request.transport_options, :connect_address) do
+      nil ->
+        :ok
+
+      address ->
+        if HTTP.Transport.valid_connect_address?(address),
+          do: validate_pinned_identity(transport, host, address, request),
+          else: {:error, :invalid_connect_address}
+    end
+  end
+
+  defp validate_pinned_identity(transport, host, address, request)
+       when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
+    sni =
+      request.transport_options |> Keyword.get(:ssl, []) |> Keyword.get(:server_name_indication)
+
+    original_ip = :inet.parse_address(String.to_charlist(host))
+
+    cond do
+      # credo:disable-for-next-line Credo.Check.Design.TagTODO
+      # TODO(upstream): gsmlg-dev/http_fetch#49
+      transport == HTTP.Transport.ExSSL and match?({:ok, _}, original_ip) and
+          elem(original_ip, 1) != address ->
+        {:error, :connect_address_identity_conflict}
+
+      transport == HTTP.Transport.ExSSL and match?({:ok, _}, original_ip) and not is_nil(sni) ->
+        {:error, :connect_address_sni_conflict}
+
+      not is_nil(sni) and sni not in [host, String.to_charlist(host)] ->
+        {:error, :connect_address_sni_conflict}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_pinned_identity(_transport, _host, _address, _request), do: :ok
 
   defp validate_transport_option_lists(HTTP.Transport.ExSSL, request) do
     valid? =
@@ -158,24 +198,60 @@ defmodule HTTP.Runtime.Dialer do
     end
   end
 
-  def select_transport(_request, socket_path) when is_binary(socket_path) do
+  def validate_connect_address_route(request, unix_socket_path) do
+    options = request.transport_options
+
+    case Keyword.get(options, :connect_address) do
+      nil ->
+        :ok
+
+      address ->
+        cond do
+          not HTTP.Transport.valid_connect_address?(address) ->
+            {:error, :invalid_connect_address}
+
+          options[:http_version] == :http3 or unix_socket_path != nil or
+            options[:unix_socket] != nil or options[:proxy] != nil ->
+            {:error, :connect_address_unsupported_route}
+
+          Keyword.get(options, :redirect, :follow) not in [:manual, :error] ->
+            {:error, :connect_address_requires_manual_redirect}
+
+          true ->
+            :ok
+        end
+    end
+  end
+
+  def select_transport(request, socket_path) do
+    with :ok <- validate_connect_address_route(request, socket_path),
+         {:ok, transport, host, port} <- select_origin_transport(request, socket_path),
+         :ok <- validate_connect_address(transport, host, request) do
+      {:ok, transport, host, port}
+    end
+  end
+
+  defp select_origin_transport(_request, socket_path) when is_binary(socket_path) do
     {:ok, HTTP.Transport.Unix, socket_path, 0}
   end
 
-  def select_transport(%Request{url: %URI{scheme: "http", host: host} = uri}, _socket_path)
-      when is_binary(host) do
+  defp select_origin_transport(
+         %Request{url: %URI{scheme: "http", host: host} = uri},
+         _socket_path
+       )
+       when is_binary(host) do
     {:ok, HTTP.Transport.TCP, host, uri.port || 80}
   end
 
-  def select_transport(
-        %Request{url: %URI{scheme: "https", host: host} = uri} = request,
-        _socket_path
-      )
-      when is_binary(host) do
+  defp select_origin_transport(
+         %Request{url: %URI{scheme: "https", host: host} = uri} = request,
+         _socket_path
+       )
+       when is_binary(host) do
     {:ok, HTTP.TLSBackend.transport(tls_backend(request)), host, uri.port || 443}
   end
 
-  def select_transport(%Request{url: %URI{scheme: scheme}}, _socket_path) do
+  defp select_origin_transport(%Request{url: %URI{scheme: scheme}}, _socket_path) do
     {:error, {:unsupported_scheme, scheme}}
   end
 
@@ -248,12 +324,14 @@ defmodule HTTP.Runtime.Dialer do
 
     [
       cancellable: selection.mode in [:http1, :auto_https] and is_pid(request.body),
+      connect_address: Keyword.get(request.transport_options, :connect_address),
       ssl:
         request.transport_options
         |> Keyword.get(:ssl, [])
         |> put_alpn(selection.alpn_protocols),
       socket_opts: socket_opts
     ]
+    |> Enum.reject(fn {key, value} -> key == :connect_address and is_nil(value) end)
   end
 
   defp put_alpn(ssl_opts, []), do: ssl_opts

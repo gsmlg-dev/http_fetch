@@ -6,7 +6,14 @@ defmodule HTTP.Transport.ExSSL do
   @impl true
   def connect(host, port, opts, timeout) do
     with {:ok, ssl_opts} <- tls_options(opts) do
-      SSL.connect(connect_host(host), port, ssl_opts, timeout)
+      ssl_opts = pinned_identity(host, opts, ssl_opts)
+
+      SSL.connect(
+        Keyword.get(opts, :connect_address, connect_host(host)),
+        port,
+        ssl_opts,
+        timeout
+      )
     end
   end
 
@@ -96,6 +103,13 @@ defmodule HTTP.Transport.ExSSL do
       nil -> :ok
       {key, _} -> {:error, {:options, {key, :unsupported_or_invalid}}}
     end
+  end
+
+  defp pinned_identity(host, opts, ssl_opts) do
+    if Keyword.get(opts, :connect_address) != nil and
+         match?({:error, _}, :inet.parse_address(String.to_charlist(host))),
+       do: Keyword.put_new(ssl_opts, :server_name_indication, String.to_charlist(host)),
+       else: ssl_opts
   end
 
   defp connect_host(host) do

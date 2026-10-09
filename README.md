@@ -372,6 +372,35 @@ Framing, routing, connection-specific, authentication, cookie, and content
 processing fields are rejected as trailers. Trailer values remain separate from
 the initial response headers.
 
+## Validated connection addresses
+
+A caller enforcing an address policy can pin Fetch to one validated literal
+IPv4 or IPv6 tuple while keeping the original URL host for HTTP authority,
+TLS SNI and certificate verification:
+
+```elixir
+HTTP.fetch("https://api.example.com/resource",
+  connect_address: validated_ip,
+  http_version: :http1,
+  redirect: :manual,
+  timeout: remaining_budget)
+```
+
+The pin is request-local, participates in connection pool isolation, and never
+falls back to DNS, another address or request replay. One tuple is supported;
+address-list failover is left to the caller before a request is established.
+Request/connect deadlines and cancellation still cover connection establishment.
+Use `redirect: :manual` or `:error`: for every permitted redirect, validate its
+hostname/addresses independently and submit a new request with that hop's pin.
+Invalid tuples and pin combinations with HTTP/3, Unix sockets or proxies are
+rejected before network I/O. Caller-supplied SNI must match the original URL
+host. Native trust and hostname verification remain enabled by default.
+
+For HTTPS with `tls_backend: :ex_ssl`, an original literal-IP URL and pin must
+be identical; distinct original IP verification identity is unsupported and
+returns `:connect_address_identity_conflict`. DNS hostnames work with either
+TLS backend and with IPv4 or IPv6 targets.
+
 ## WebSocket Client
 
 The umbrella also includes `HTTP.WebSocket`, a browser-like WebSocket client.
