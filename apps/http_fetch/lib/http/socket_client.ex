@@ -426,35 +426,30 @@ defmodule HTTP.SocketClient do
   end
 
   defp initialize_legacy_owner(context, transport, socket, selection) do
-    %{parent: parent, ref: ref, request: request, deadline_at: deadline_at, timer_ref: timer_ref} =
-      context
+    %{parent: parent, ref: ref, request: request, timer_ref: timer_ref} = context
 
     case initialize_protocol(transport, socket, request, selection) do
       {:ok, protocol_module, protocol, prepared_request} ->
-        with :ok <-
-               send_prepared_request(
-                 transport,
-                 socket,
-                 prepared_request,
-                 deadline_at
-               ),
-             :ok <- activate_socket(transport, socket) do
-          state =
-            Map.merge(context, %{
-              transport: transport,
-              socket: socket,
-              protocol_module: protocol_module,
-              protocol: protocol,
-              mode: nil,
-              response_sent?: false
-            })
+        state =
+          Map.merge(context, %{
+            transport: transport,
+            socket: socket,
+            protocol_module: protocol_module,
+            protocol: protocol,
+            mode: nil,
+            response_sent?: false,
+            upload: nil
+          })
 
-          owner_loop(state)
-        else
+        case start_prepared_request(state, prepared_request) do
+          {:ok, state} ->
+            case activate_socket(transport, socket) do
+              :ok -> owner_loop(state)
+              {:error, reason} -> fail(state, reason)
+            end
+
           {:error, reason} ->
-            transport.close(socket)
-            _ = Process.cancel_timer(timer_ref)
-            send_error(parent, ref, reason)
+            fail(state, reason)
         end
 
       {:error, reason} ->
@@ -1176,6 +1171,19 @@ defmodule HTTP.SocketClient do
       :deadline ->
         fail(state, :request_timeout)
 
+      {:DOWN, monitor, :process, _parent, _reason} when monitor == state.parent_monitor ->
+        if state.response_sent?, do: owner_loop(state), else: fail(state, :subscriber_down)
+
+      {:http1_upload, token, result} when state.upload != nil and token == state.upload.token ->
+        case result do
+          :ok ->
+            HTTP.HTTP1.Upload.completed(state.upload)
+            owner_loop(%{state | upload: nil})
+
+          {:error, reason} ->
+            fail(state, reason)
+        end
+
       message ->
         case state.transport.normalize_message(message, state.socket) do
           {:data, data} -> handle_data(state, data)
@@ -1229,7 +1237,7 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp handle_event(state, {:headers, status, headers}) do
+  defp handle_http1_headers(state, status, headers) do
     response =
       Response.new(
         status: status,
@@ -1262,6 +1270,13 @@ defmodule HTTP.SocketClient do
 
       true ->
         {:continue, %{state | mode: {:buffer, response, []}}}
+    end
+  end
+
+  defp handle_event(state, {:headers, status, headers}) do
+    case stop_http1_upload(state, :early_response) do
+      {:ok, state} -> handle_http1_headers(state, status, headers)
+      {:error, reason, state} -> fail(state, reason)
     end
   end
 
@@ -1356,6 +1371,7 @@ defmodule HTTP.SocketClient do
 
   defp cleanup(state) do
     _ = Process.cancel_timer(state.timer_ref)
+    _ = stop_http1_upload(state, :aborted)
     state.transport.close(state.socket)
   end
 
@@ -1504,86 +1520,36 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp send_prepared_request(transport, socket, {:buffer, iodata}, deadline_at) do
-    send_request(transport, socket, iodata, remaining_timeout(deadline_at))
-  end
-
-  defp send_prepared_request(
-         transport,
-         socket,
-         {:http1_stream, head, stream, length},
-         deadline_at
-       ) do
-    with :ok <- send_request(transport, socket, head, remaining_timeout(deadline_at)) do
-      send_http1_stream_body(transport, socket, stream, deadline_at, length)
+  defp start_prepared_request(state, {:buffer, iodata}) do
+    case send_request(state.transport, state.socket, iodata, remaining_timeout(state.deadline_at)) do
+      :ok -> {:ok, state}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp send_http1_stream_body(transport, socket, stream, deadline_at, remaining) do
-    send(stream, {:read_chunk, self(), :ack})
-    read_http1_stream_body(transport, socket, stream, deadline_at, remaining)
-  end
+  defp start_prepared_request(state, {:http1_stream, head, stream, length}) do
+    with :ok <-
+           send_request(state.transport, state.socket, head, remaining_timeout(state.deadline_at)) do
+      upload =
+        HTTP.HTTP1.Upload.start(state.transport, state.socket, stream, length, state.deadline_at)
 
-  defp read_http1_stream_body(transport, socket, stream, deadline_at, remaining) do
-    receive do
-      {:stream_chunk, ^stream, chunk, ack_ref} ->
-        send_http1_stream_chunk(transport, socket, stream, chunk, ack_ref, deadline_at, remaining)
-
-      {:stream_chunk, ^stream, chunk} ->
-        send_http1_stream_chunk(transport, socket, stream, chunk, nil, deadline_at, remaining)
-
-      {:stream_end, ^stream} ->
-        case remaining do
-          nil -> send_request(transport, socket, "0\r\n\r\n", remaining_timeout(deadline_at))
-          0 -> :ok
-          _ -> fail_http1_upload(transport, socket, stream, :content_length_mismatch)
-        end
-
-      {:stream_error, ^stream, reason} ->
-        transport.close(socket)
-        {:error, reason}
-
-      :abort ->
-        fail_http1_upload(transport, socket, stream, :aborted)
-
-      :deadline ->
-        fail_http1_upload(transport, socket, stream, :request_timeout)
-    after
-      remaining_timeout(deadline_at) ->
-        fail_http1_upload(transport, socket, stream, :request_timeout)
+      {:ok, %{state | upload: upload}}
     end
   end
 
-  defp send_http1_stream_chunk(transport, socket, stream, chunk, ack_ref, deadline_at, remaining) do
-    if remaining != nil and byte_size(chunk) > remaining do
-      fail_http1_upload(transport, socket, stream, :content_length_mismatch)
-    else
-      request_chunk =
-        if remaining == nil and chunk != "",
-          do: [Integer.to_string(byte_size(chunk), 16), "\r\n", chunk, "\r\n"],
-          else: chunk
+  defp stop_http1_upload(%{upload: nil} = state, _reason), do: {:ok, state}
 
-      case send_request(transport, socket, request_chunk, remaining_timeout(deadline_at)) do
-        :ok ->
-          ack_stream_chunk(stream, ack_ref)
-          remaining = if remaining != nil, do: remaining - byte_size(chunk)
-          read_http1_stream_body(transport, socket, stream, deadline_at, remaining)
+  defp stop_http1_upload(state, reason) do
+    # A killed write may leave bytes in the inet driver's output queue. Preserve
+    # response reads, but make the eventual close abort that unfinished upload
+    # instead of waiting indefinitely for a peer that has stopped reading.
+    _ = state.transport.setopts(state.socket, linger: {true, 0})
 
-        {:error, reason} ->
-          HTTP.Stream.error(stream, reason)
-          {:error, reason}
-      end
+    case HTTP.HTTP1.Upload.stop(state.upload, reason, state.deadline_at) do
+      :ok -> {:ok, %{state | upload: nil}}
+      {:error, reason} -> {:error, reason, %{state | upload: nil}}
     end
   end
-
-  defp fail_http1_upload(transport, socket, stream, reason) do
-    HTTP.Stream.error(stream, reason)
-    transport.close(socket)
-    {:error, reason}
-  end
-
-  defp ack_stream_chunk(_stream, nil), do: :ok
-  defp ack_stream_chunk(stream, ack_ref), do: send(stream, {:stream_chunk_ack, ack_ref})
 
   defp flush_protocol_writes(
          %{protocol_module: HTTP.HTTP2, protocol: protocol} = state,
