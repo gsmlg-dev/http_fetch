@@ -32,6 +32,24 @@ defmodule HTTP.Transport.SSL do
   end
 
   @doc false
+  def upgrade(tcp, host, opts, timeout) do
+    tls_opts =
+      [:binary, packet: :raw, active: false] ++
+        ssl_options(host, Keyword.get(opts, :ssl, [])) ++ Keyword.get(opts, :socket_opts, [])
+
+    case :ssl.connect(tcp, tls_opts, timeout) do
+      {:ok, socket} ->
+        if Keyword.get(opts, :cancellable, false),
+          do: {:ok, {:cancellable_ssl, socket, tcp}},
+          else: {:ok, socket}
+
+      {:error, _} = error ->
+        abort_tcp(tcp)
+        error
+    end
+  end
+
+  @doc false
   def cancellable?({:cancellable_ssl, _socket, _tcp}), do: true
   def cancellable?(_socket), do: false
 

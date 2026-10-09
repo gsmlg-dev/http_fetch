@@ -116,6 +116,26 @@ defmodule HTTP.HTTP2PoolKeyTest do
     refute first.reuse == :shared
   end
 
+  test "proxy endpoint and authentication participate in safe reusable connection identity" do
+    build = fn host, port, auth ->
+      PoolKey.build(
+        request(proxy: {:http, host, port, [headers: [{"Proxy-Authorization", auth}]]}),
+        WireProfile.native_v1(),
+        :h2
+      )
+    end
+
+    assert {:ok, first} = build.("proxy.test", 8080, "Basic secret-one")
+    assert {:ok, normalized} = build.("PROXY.TEST", 8080, "Basic secret-one")
+    assert first == normalized
+    assert {:ok, other_port} = build.("proxy.test", 8081, "Basic secret-one")
+    assert {:ok, other_auth} = build.("proxy.test", 8080, "Basic secret-two")
+    refute first == other_port
+    refute first == other_auth
+    refute inspect(first) =~ "secret"
+    refute inspect(first) =~ "proxy.test"
+  end
+
   test "h2c and unsupported proxy routes are explicit" do
     assert {:ok, h2c} =
              PoolKey.build(

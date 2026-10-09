@@ -45,6 +45,13 @@ defmodule HTTP.FetchOptions do
     All callers share a maximum of 256 idle sockets. TLS identities, socket
     options, isolation scope and route policies are part of the reuse key;
     opaque callbacks disable reuse. HTTP/1 reuse defaults to `false`.
+
+  - `proxy` - explicit HTTP proxy `{:http, host, port, opts}`. Options are
+    `headers: [{"Proxy-Authorization", value}]` and a finite positive `timeout`.
+    HTTP/1 cleartext uses absolute-form forwarding; HTTPS uses CONNECT and then
+    origin TLS/ALPN. H2 over HTTPS is supported. H2c, HTTP/3, Unix socket routes,
+    and ExSSL IP-origin tunnels are rejected explicitly. Environment/NO_PROXY
+    selection belongs to the caller.
   - `http2_profile` - versioned HTTP/2 wire profile (only used by HTTP/2)
   - `http2_reuse` - whether an HTTP/2 connection may be reused; defaults to `true`
   - `http3_profile` - QUIC wire profile; defaults to `:ordered`
@@ -157,11 +164,11 @@ defmodule HTTP.FetchOptions do
           connect_timeout: integer() | nil,
           ssl: list() | nil,
           socket_opts: list() | nil,
-          proxy: term(),
           http1_reuse: boolean(),
           http1_scope: atom() | String.t() | nil,
           http1_pool_size: pos_integer(),
           http1_idle_timeout: pos_integer(),
+          proxy: {:http, String.t(), :inet.port_number(), keyword()} | nil,
           http2_profile: atom() | String.t() | map() | nil,
           http2_reuse: boolean(),
           http3_profile: atom() | map() | nil,

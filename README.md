@@ -342,6 +342,36 @@ other transfer codings, and explicit chunked framing on buffered bodies are
 rejected. HTTP/2 and HTTP/3 prohibit Transfer-Encoding headers and continue to
 reject request trailers explicitly.
 
+## Explicit HTTP Proxies
+
+```elixir
+HTTP.fetch("https://api.example.com/data", proxy:
+  {:http, "proxy.example.com", 8080,
+    [headers: [{"Proxy-Authorization", "Basic " <> Base.encode64("user:password")}],
+     timeout: 5_000]}, http_version: :auto, redirect: :manual)
+|> HTTP.Promise.await()
+```
+
+`proxy` accepts only `{:http, host, port, opts}`. The options are a single optional
+`Proxy-Authorization` header (at most 8,192 bytes, without control characters)
+and a positive finite `timeout` in milliseconds (default 30,000). Cleartext
+HTTP/1 uses absolute-form requests to the proxy. HTTPS establishes CONNECT and
+then verifies the origin's certificate and negotiates HTTP/1 or HTTP/2 inside
+the tunnel. Proxy credentials appear only on the proxy hop; they are removed
+from tunneled origin requests. The same route remains selected across redirects.
+
+Connecting and establishing the tunnel share the smaller of the proxy timeout,
+request timeout, and connect timeout. CONNECT response headers are bounded to
+16,384 bytes; malformed responses, failed status codes, framing indicating a
+body, and plaintext buffered at the TLS boundary fail closed. Abort cancels an
+unfinished tunnel. Proxy failure never retries through a direct-origin route.
+
+Unsupported shapes, H2c, HTTP/3, and Unix socket/proxy combinations fail
+explicitly. ExSSL tunnels currently require a DNS origin; IP-origin socket
+upgrade needs the certificate-identity capability tracked in [#49](https://github.com/gsmlg-dev/http_fetch/issues/49).
+OTP TLS supports IP origins. Environment variables and NO_PROXY selection remain
+caller responsibilities.
+
 ## Streaming Request Body
 
 ```elixir

@@ -10,6 +10,12 @@ defmodule HTTP.Transport.ExSSL do
     end
   end
 
+  @doc false
+  def upgrade(tcp, host, opts, timeout) do
+    with {:ok, ssl_opts} <- tls_options(opts),
+         do: SSL.connect(tcp, Keyword.put_new(ssl_opts, :server_name_indication, host), timeout)
+  end
+
   @impl true
   def controlling_process(socket, pid), do: SSL.controlling_process(socket, pid)
 
