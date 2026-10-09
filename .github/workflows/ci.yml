@@ -65,7 +65,7 @@ jobs:
       - name: Check selected app with Credo
         run: mix credo --files-included "apps/${HTTP_FETCH_CI_APP}/**/*.{ex,exs}"
       - name: Check selected app with Dialyzer
-        run: mix dialyzer --format github
+        run: mix dialyzer --force-check --format github
       - name: Build selected portable Hex package
         run: |
           version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' mix.exs)
