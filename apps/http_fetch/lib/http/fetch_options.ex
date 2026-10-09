@@ -19,6 +19,11 @@ defmodule HTTP.FetchOptions do
   - `decode_body` - decode response Content-Encoding; defaults to `true`. Set
     `false` to preserve stored entity bytes for buffered and streamed HTTP/1,
     HTTP/2, and HTTP/3 responses without changing headers.
+  - `stream_response` - set `true` to resolve at final response headers and
+    expose an acknowledged body stream, even for small Content-Length bodies.
+    Defaults to `false` (automatic size/framing policy). HEAD and bodyless
+    statuses remain buffered empty responses. The request timeout still bounds
+    the entire response; callers can observe headers before applying a body deadline.
   - `content_type` - convenience Content-Type value for request bodies
   - `timeout` - request timeout in milliseconds
   - `connect_timeout` - connection timeout in milliseconds
@@ -46,6 +51,8 @@ defmodule HTTP.FetchOptions do
     "duplex" => :duplex,
     "decode_body" => :decode_body,
     "decodeBody" => :decode_body,
+    "stream_response" => :stream_response,
+    "streamResponse" => :stream_response,
     "headers" => :headers,
     "http_version" => :http_version,
     "httpVersion" => :http_version,
@@ -82,6 +89,7 @@ defmodule HTTP.FetchOptions do
             body: nil,
             duplex: nil,
             decode_body: true,
+            stream_response: false,
             telemetry: true,
             signal: nil,
             unix_socket: nil,
@@ -111,6 +119,7 @@ defmodule HTTP.FetchOptions do
           body: any(),
           duplex: :half | nil,
           decode_body: boolean(),
+          stream_response: boolean(),
           telemetry: boolean(),
           signal: any() | nil,
           unix_socket: String.t() | nil,
@@ -157,6 +166,7 @@ defmodule HTTP.FetchOptions do
     []
     |> maybe_add(:telemetry, options.telemetry)
     |> maybe_add(:decode_body, options.decode_body)
+    |> maybe_add(:stream_response, options.stream_response)
     |> maybe_add(:timeout, options.timeout)
     |> maybe_add(:connect_timeout, options.connect_timeout)
     |> maybe_add(:ssl, options.ssl)
@@ -222,6 +232,9 @@ defmodule HTTP.FetchOptions do
 
       {:telemetry, telemetry}, acc ->
         %{acc | telemetry: telemetry}
+
+      {:stream_response, stream_response}, acc ->
+        %{acc | stream_response: stream_response}
 
       {:decode_body, decode_body}, acc ->
         %{acc | decode_body: decode_body}
@@ -300,6 +313,7 @@ defmodule HTTP.FetchOptions do
         redirect: normalize_redirect(options.redirect),
         duplex: normalize_duplex(options.duplex),
         decode_body: normalize_decode_body(options.decode_body),
+        stream_response: normalize_stream_response(options.stream_response),
         telemetry: normalize_telemetry(options.telemetry),
         http_version: http_version,
         tls_backend: normalize_tls_backend(options.tls_backend, http_version),
@@ -315,6 +329,11 @@ defmodule HTTP.FetchOptions do
 
   defp normalize_telemetry(value),
     do: raise(ArgumentError, "invalid telemetry: #{inspect(value)}; expected boolean")
+
+  defp normalize_stream_response(value) when is_boolean(value), do: value
+
+  defp normalize_stream_response(value),
+    do: raise(ArgumentError, "invalid stream_response: #{inspect(value)}; expected boolean")
 
   defp normalize_decode_body(value) when is_boolean(value), do: value
 
