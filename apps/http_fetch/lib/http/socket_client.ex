@@ -10,6 +10,12 @@ defmodule HTTP.SocketClient do
 
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
+    with :ok <- HTTP.Runtime.Dialer.validate_connect_address_route(request, unix_socket_path) do
+      do_request(request, abort_controller_pid, unix_socket_path)
+    end
+  end
+
+  defp do_request(request, abort_controller_pid, unix_socket_path) do
     cond do
       http_version(request) == :http3 and Keyword.get(request.transport_options, :proxy) != nil ->
         {:error, :proxy_not_supported_for_quic}

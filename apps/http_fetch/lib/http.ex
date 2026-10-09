@@ -124,6 +124,7 @@ defmodule HTTP do
                   request value takes precedence. HTTP/3 does not support this option.
                 - `:timeout`, `:connect_timeout`, `:ssl`, and `:socket_opts`: Elixir-specific transport
                   extensions used by the socket or QUIC transport.
+                - `:connect_address`: Caller-validated IPv4/IPv6 tuple, preserving the URL authority/TLS hostname. Requires manual/error redirects.
                 - `:unix_socket`: Path to a Unix Domain Socket file (e.g., "/var/run/docker.sock").
                                   When provided, the request is sent over the Unix socket instead of TCP/IP.
 

@@ -29,6 +29,16 @@ defmodule HTTP.FetchOptions do
   - `content_type` - convenience Content-Type value for request bodies
   - `timeout` - request timeout in milliseconds
   - `connect_timeout` - connection timeout in milliseconds
+  - `connect_address` - caller-validated literal IPv4/IPv6 tuple to dial instead
+    of resolving the URL hostname. Keeps original HTTP authority, TLS SNI and
+    certificate hostname verification. No DNS/address fallback or request replay.
+    Requires `redirect: :manual` or `:error`; validate every permitted redirect
+    hop independently and provide that hop's pin. HTTP/3, Unix sockets and
+    proxies are unsupported. Pools isolate each pin from DNS and other targets.
+    Cancellation and request/connect deadlines cover establishment. Conflicting
+    TLS SNI rejects before I/O; native verification and trust defaults remain.
+    With `:ex_ssl`, a literal-IP HTTPS URL must match the pin, since a distinct
+    original IP verification identity is currently unsupported.
   - `http_version` - protocol selection, one of `:http1`, `:http2`, `:http3`,
     `:h2c`, or `:auto`; defaults to `:http1`
   - `tls_backend` - TLS implementation, `:ssl` or `:ex_ssl`; defaults to the
@@ -64,6 +74,8 @@ defmodule HTTP.FetchOptions do
     "body" => :body,
     "request_mode" => :request_mode,
     "requestMode" => :request_mode,
+    "connect_address" => :connect_address,
+    "connectAddress" => :connect_address,
     "connect_timeout" => :connect_timeout,
     "connectTimeout" => :connect_timeout,
     "content_type" => :content_type,
@@ -127,6 +139,7 @@ defmodule HTTP.FetchOptions do
             tls_backend: nil,
             timeout: nil,
             connect_timeout: nil,
+            connect_address: nil,
             ssl: nil,
             socket_opts: nil,
             proxy: nil,
@@ -162,6 +175,7 @@ defmodule HTTP.FetchOptions do
           tls_backend: tls_backend(),
           timeout: integer() | nil,
           connect_timeout: integer() | nil,
+          connect_address: :inet.ip_address() | nil,
           ssl: list() | nil,
           socket_opts: list() | nil,
           http1_reuse: boolean(),
@@ -207,6 +221,7 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:stream_response, options.stream_response)
     |> maybe_add(:timeout, options.timeout)
     |> maybe_add(:connect_timeout, options.connect_timeout)
+    |> maybe_add(:connect_address, options.connect_address)
     |> maybe_add(:ssl, options.ssl)
     |> maybe_add(:socket_opts, options.socket_opts)
     |> maybe_add(:proxy, options.proxy)
@@ -305,6 +320,9 @@ defmodule HTTP.FetchOptions do
       {:connect_timeout, connect_timeout}, acc ->
         %{acc | connect_timeout: connect_timeout}
 
+      {:connect_address, connect_address}, acc ->
+        %{acc | connect_address: connect_address}
+
       {:ssl, ssl}, acc ->
         %{acc | ssl: ssl}
 
@@ -386,6 +404,26 @@ defmodule HTTP.FetchOptions do
         http2_scope: normalize_http2_scope(options.http2_scope),
         http2_priority: normalize_http2_priority(options.http2_priority)
     }
+    |> validate_connect_address()
+  end
+
+  defp validate_connect_address(%{connect_address: nil} = options), do: options
+
+  defp validate_connect_address(options) do
+    cond do
+      not HTTP.Transport.valid_connect_address?(options.connect_address) ->
+        raise ArgumentError, "invalid connect_address: expected a literal IPv4 or IPv6 tuple"
+
+      options.redirect == :follow ->
+        raise ArgumentError,
+              "connect_address requires redirect: :manual or :error; validate each hop"
+
+      options.http_version == :http3 or options.unix_socket != nil or options.proxy != nil ->
+        raise ArgumentError, "connect_address is unsupported with HTTP/3, Unix sockets or proxies"
+
+      true ->
+        options
+    end
   end
 
   defp normalize_request_mode(mode) when mode in [:fetch, :proxy], do: mode

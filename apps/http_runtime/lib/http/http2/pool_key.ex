@@ -54,6 +54,7 @@ defmodule HTTP.HTTP2.PoolKey do
         protocol: protocol,
         route: route,
         unix_socket: digest_optional(Keyword.get(transport_options, :unix_socket)),
+        connect_address: digest_optional(Keyword.get(transport_options, :connect_address)),
         proxy: digest_optional(proxy),
         tls: tls_identity,
         socket_options: socket_identity,

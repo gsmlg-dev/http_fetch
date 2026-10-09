@@ -14,7 +14,13 @@ defmodule HTTP.Transport.SSL do
     socket_opts = [:binary, packet: :raw, active: false] ++ Keyword.get(opts, :socket_opts, [])
     ssl_opts = ssl_options(host, Keyword.get(opts, :ssl, []))
 
-    with {:ok, tcp} <- :gen_tcp.connect(String.to_charlist(host), port, socket_opts, timeout) do
+    with {:ok, tcp} <-
+           :gen_tcp.connect(
+             Keyword.get(opts, :connect_address, String.to_charlist(host)),
+             port,
+             socket_opts,
+             timeout
+           ) do
       remaining = if deadline == :infinity, do: :infinity, else: max(deadline - now(), 0)
 
       tls_opts =
@@ -77,7 +83,12 @@ defmodule HTTP.Transport.SSL do
         active: false
       ] ++ ssl_opts ++ Keyword.get(opts, :socket_opts, [])
 
-    :ssl.connect(String.to_charlist(host), port, socket_opts, timeout)
+    :ssl.connect(
+      Keyword.get(opts, :connect_address, String.to_charlist(host)),
+      port,
+      socket_opts,
+      timeout
+    )
   end
 
   @impl true

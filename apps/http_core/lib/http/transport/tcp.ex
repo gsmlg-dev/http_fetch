@@ -12,7 +12,12 @@ defmodule HTTP.Transport.TCP do
         active: false
       ] ++ Keyword.get(opts, :socket_opts, [])
 
-    :gen_tcp.connect(String.to_charlist(host), port, socket_opts, timeout)
+    :gen_tcp.connect(
+      Keyword.get(opts, :connect_address, String.to_charlist(host)),
+      port,
+      socket_opts,
+      timeout
+    )
   end
 
   @impl true
