@@ -7,6 +7,9 @@ defmodule HTTP.WebSocket.Options do
   @default_max_send_queue 16 * 1024 * 1024
 
   @string_keys %{
+    "mode" => :mode,
+    "automatic_pong" => :automatic_pong,
+    "automaticPong" => :automatic_pong,
     "owner" => :owner,
     "headers" => :headers,
     "telemetry_url" => :telemetry_url,
@@ -44,6 +47,8 @@ defmodule HTTP.WebSocket.Options do
             protocols: [],
             owner: nil,
             binary_type: :blob,
+            mode: :browser,
+            automatic_pong: true,
             headers: [],
             timeout: @default_timeout,
             connect_timeout: @default_connect_timeout,
@@ -76,6 +81,8 @@ defmodule HTTP.WebSocket.Options do
           protocols: [String.t()],
           owner: pid(),
           binary_type: :blob | :array_buffer,
+          mode: :browser | :proxy,
+          automatic_pong: boolean(),
           headers: [{String.t(), String.t()}],
           timeout: timeout(),
           connect_timeout: timeout(),
@@ -108,6 +115,7 @@ defmodule HTTP.WebSocket.Options do
     with {:ok, uri} <- normalize_url(url),
          {:ok, protocols} <- normalize_protocols(protocols),
          {:ok, init} <- normalize_init(init),
+         :ok <- validate_mode(init),
          {:ok, init} <- HTTP.Runtime.Options.validate(uri, init),
          :ok <- validate_limits(init),
          :ok <- validate_delivery_capacity(init) do
@@ -119,6 +127,8 @@ defmodule HTTP.WebSocket.Options do
          protocols: protocols,
          owner: Keyword.get(init, :owner, self()),
          binary_type: Keyword.get(init, :binary_type, :blob),
+         mode: Keyword.get(init, :mode, :browser),
+         automatic_pong: Keyword.get(init, :automatic_pong, true),
          headers: Keyword.get(init, :headers, []),
          timeout: Keyword.get(init, :timeout, @default_timeout),
          connect_timeout: Keyword.get(init, :connect_timeout, @default_connect_timeout),
@@ -268,7 +278,7 @@ defmodule HTTP.WebSocket.Options do
        |> Keyword.put(:socket_opts, socket_opts)
        |> Keyword.put(:tls_backend, tls_backend)
        |> Keyword.put(:telemetry_url, telemetry_url)
-       |> Keyword.put_new(:max_queue_bytes, 2 * valid_message_limit(init) + 7)}
+       |> Keyword.put_new(:max_queue_bytes, 2 * delivery_message_limit(init) + 7)}
     end
   end
 
@@ -365,8 +375,37 @@ defmodule HTTP.WebSocket.Options do
     end)
   end
 
+  defp validate_mode(init) do
+    mode = Keyword.get(init, :mode, :browser)
+    automatic_pong = Keyword.get(init, :automatic_pong, true)
+
+    cond do
+      mode not in [:browser, :proxy] ->
+        {:error, {:invalid_option, :mode}}
+
+      not is_boolean(automatic_pong) ->
+        {:error, {:invalid_option, :automatic_pong}}
+
+      mode == :browser and not automatic_pong ->
+        {:error, :automatic_pong_requires_proxy}
+
+      mode == :proxy and
+          Keyword.get(init, :http_version, :http1) not in [:http1, "http1", "http/1.1"] ->
+        {:error, :proxy_requires_http1}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp delivery_message_limit(init) do
+    if Keyword.get(init, :mode, :browser) == :proxy,
+      do: max(valid_message_limit(init), 125),
+      else: valid_message_limit(init)
+  end
+
   defp validate_delivery_capacity(init) do
-    if init[:delivery] == :ack and init[:max_queue_bytes] < valid_message_limit(init) + 7,
+    if init[:delivery] == :ack and init[:max_queue_bytes] < delivery_message_limit(init) + 7,
       do: {:error, :message_limit_exceeds_delivery_limit},
       else: :ok
   end

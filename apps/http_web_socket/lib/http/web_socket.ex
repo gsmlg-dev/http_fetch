@@ -32,6 +32,25 @@ defmodule HTTP.WebSocket do
 
   ## HTTP/1 WebSocket proxy boundary
 
+  For frame forwarding, select `mode: :proxy`, `http_version: :http1`,
+  `delivery: :ack` and `automatic_pong: false`. Proxy mode delivers
+  `%HTTP.WebSocket.Event.Frame{opcode: opcode, data: binary}` for text, binary,
+  ping and pong, with the same delivery reference/`acknowledge/2` contract.
+  `binary_type` does not alter proxy frame data. Close retains its lifecycle
+  event and automatic reply. `send_frame/2` and `send_frame_ack/2` accept
+  `{opcode, binary}` for those four opcodes. Automatic pong defaults to true;
+  disabling it requires proxy mode. Proxy `close/3` accepts nil with an empty
+  reason, 1000-1014 except 1004/1005/1006, and 3000-4999. Reserved/non-wire
+  codes, invalid UTF-8 and reasons over 123 bytes remain rejected.
+
+  Proxy HTTP/2, h2c and auto selection return `{:error, :proxy_requires_http1}`.
+  Wait for successful completion of **every** `send_frame_ack/2` reference
+  before initiating Close: local close discards queued application frames in
+  both HTTP versions. This provides ordered local write completion over HTTP/1;
+  proxy mode supplies no HTTP/2 drain contract. Control sends share the bounded
+  application send FIFO, including zero-length payloads. Control delivery uses
+  the receive limits too; ACK capacity must accommodate at least 132 bytes.
+
   Use this public client for the upstream half of a WebSocket proxy. Select
   `http_version: :http1` and `delivery: :ack`; acknowledge each Message only
   after downstream consumption. Set finite `opening_timeout`, `idle_timeout`,
@@ -177,6 +196,30 @@ defmodule HTTP.WebSocket do
   def send_ack(socket, data),
     do: connection_call(socket, {:send_ack, data}, {:error, :closed})
 
+  @doc """
+  Admits an explicit text, binary, ping or pong frame in `mode: :proxy`.
+
+  Control payloads are limited to 125 bytes; text must be valid UTF-8. Frames
+  share the bounded FIFO send queue and write deadline with `send/2`. This
+  reports admission only; use `send_frame_ack/2` before forwarding Close.
+  Send Close using `close/3`, preserving the connection's close deadline.
+  """
+  @spec send_frame(t(), {:text | :binary | :ping | :pong, binary()}) :: :ok | {:error, term()}
+  def send_frame(socket, frame),
+    do: connection_call(socket, {:send_frame, frame, false}, {:error, :closed})
+
+  @doc """
+  Admits an explicit proxy frame and returns a local write completion reference.
+
+  The owner receives the same `{:send_result, ref, result}` event as `send_ack/2`.
+  Wait for `:ok` for every admitted frame before calling `close/3` to preserve
+  prior writes. Completion does not prove peer application receipt.
+  """
+  @spec send_frame_ack(t(), {:text | :binary | :ping | :pong, binary()}) ::
+          {:ok, reference()} | {:error, term()}
+  def send_frame_ack(socket, frame),
+    do: connection_call(socket, {:send_frame, frame, true}, {:error, :closed})
+
   @spec close(t()) :: :ok | {:error, term()}
   def close(socket), do: close(socket, nil, "")
 
@@ -185,7 +228,7 @@ defmodule HTTP.WebSocket do
 
   @spec close(t(), non_neg_integer() | nil, String.t()) :: :ok | {:error, term()}
   def close(socket, code, reason) when is_binary(reason) do
-    with {:ok, payload} <- Frame.close_payload(code, reason) do
+    with {:ok, payload} <- Frame.protocol_close_payload(code, reason) do
       connection_call(socket, {:close, code, reason, payload}, {:error, :closed})
     end
   end
