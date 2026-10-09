@@ -163,6 +163,7 @@ defmodule HTTPRuntimeConsumerGate do
       Enum.sort(Enum.map(children, &elem(&1, 0))) ==
         Enum.sort([
           :http_runtime_task_supervisor,
+          HTTP.HTTP1.Pool,
           HTTP.HTTP2.ConnectionSupervisor,
           HTTP.HTTP2.Pool,
           HTTP.HTTP3.ConnectionSupervisor,
@@ -312,6 +313,7 @@ defmodule HTTPRuntimeConsumerGate do
       [
         HTTPRuntime.Application,
         :http_runtime_task_supervisor,
+        HTTP.HTTP1.Pool,
         :http_fetch_http2_connection_supervisor,
         :http_fetch_http2_pool,
         :http_fetch_http3_connection_supervisor,
