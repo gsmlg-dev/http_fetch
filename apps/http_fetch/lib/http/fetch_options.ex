@@ -36,6 +36,15 @@ defmodule HTTP.FetchOptions do
   - `ssl` - TLS options passed to the selected TLS backend
   - `socket_opts` - socket options passed to the underlying transport
   - `unix_socket` - Unix Domain Socket path
+  - `http1_reuse` - opt in to HTTP/1 keep-alive; requires `http_version: :http1`.
+    Only fully consumed, self-delimited responses are reusable. Failed or
+    cancelled requests are closed, and requests are never retried on stale peers.
+  - `http1_scope` - optional atom or string separating caller routes sharing an origin.
+  - `http1_pool_size` - retained idle sockets per route/policy, 1..16 (default 2).
+  - `http1_idle_timeout` - idle retention in milliseconds, 1..60,000 (default 30,000).
+    All callers share a maximum of 256 idle sockets. TLS identities, socket
+    options, isolation scope and route policies are part of the reuse key;
+    opaque callbacks disable reuse. HTTP/1 reuse defaults to `false`.
   - `http2_profile` - versioned HTTP/2 wire profile (only used by HTTP/2)
   - `http2_reuse` - whether an HTTP/2 connection may be reused; defaults to `true`
   - `http3_profile` - QUIC wire profile; defaults to `:ordered`
@@ -60,6 +69,14 @@ defmodule HTTP.FetchOptions do
     "headers" => :headers,
     "http_version" => :http_version,
     "httpVersion" => :http_version,
+    "http1_reuse" => :http1_reuse,
+    "http1Reuse" => :http1_reuse,
+    "http1_scope" => :http1_scope,
+    "http1Scope" => :http1_scope,
+    "http1_pool_size" => :http1_pool_size,
+    "http1PoolSize" => :http1_pool_size,
+    "http1_idle_timeout" => :http1_idle_timeout,
+    "http1IdleTimeout" => :http1_idle_timeout,
     "http2_profile" => :http2_profile,
     "http2Profile" => :http2_profile,
     "http2_reuse" => :http2_reuse,
@@ -106,6 +123,10 @@ defmodule HTTP.FetchOptions do
             ssl: nil,
             socket_opts: nil,
             proxy: nil,
+            http1_reuse: false,
+            http1_scope: nil,
+            http1_pool_size: 2,
+            http1_idle_timeout: 30_000,
             http2_profile: nil,
             http2_reuse: true,
             http3_profile: nil,
@@ -137,6 +158,10 @@ defmodule HTTP.FetchOptions do
           ssl: list() | nil,
           socket_opts: list() | nil,
           proxy: term(),
+          http1_reuse: boolean(),
+          http1_scope: atom() | String.t() | nil,
+          http1_pool_size: pos_integer(),
+          http1_idle_timeout: pos_integer(),
           http2_profile: atom() | String.t() | map() | nil,
           http2_reuse: boolean(),
           http3_profile: atom() | map() | nil,
@@ -181,6 +206,10 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:redirect, options.redirect)
     |> maybe_add(:http_version, options.http_version)
     |> maybe_add(:tls_backend, options.tls_backend)
+    |> maybe_add(:http1_reuse, if(options.http1_reuse, do: true, else: nil))
+    |> maybe_add(:http1_scope, options.http1_scope)
+    |> maybe_add(:http1_pool_size, if(options.http1_reuse, do: options.http1_pool_size))
+    |> maybe_add(:http1_idle_timeout, if(options.http1_reuse, do: options.http1_idle_timeout))
     |> maybe_add(:http2_profile, options.http2_profile)
     |> maybe_add(:http2_reuse, if(options.http2_reuse, do: nil, else: false))
     |> maybe_add(:http3_profile, options.http3_profile)
@@ -278,6 +307,18 @@ defmodule HTTP.FetchOptions do
       {:socket_opts, socket_opts}, acc ->
         %{acc | socket_opts: socket_opts}
 
+      {:http1_reuse, reuse}, acc ->
+        %{acc | http1_reuse: reuse}
+
+      {:http1_scope, scope}, acc ->
+        %{acc | http1_scope: scope}
+
+      {:http1_pool_size, size}, acc ->
+        %{acc | http1_pool_size: size}
+
+      {:http1_idle_timeout, timeout}, acc ->
+        %{acc | http1_idle_timeout: timeout}
+
       {:http2_profile, profile}, acc ->
         %{acc | http2_profile: profile}
 
@@ -327,6 +368,11 @@ defmodule HTTP.FetchOptions do
         telemetry: normalize_telemetry(options.telemetry),
         http_version: http_version,
         tls_backend: normalize_tls_backend(options.tls_backend, http_version),
+        http1_reuse: normalize_http1_reuse(options.http1_reuse, http_version),
+        http1_scope: normalize_http2_scope(options.http1_scope),
+        http1_pool_size: normalize_http1_limit(options.http1_pool_size, 16, :http1_pool_size),
+        http1_idle_timeout:
+          normalize_http1_limit(options.http1_idle_timeout, 60_000, :http1_idle_timeout),
         http2_profile: normalize_http2_profile(options.http2_profile),
         http2_reuse: normalize_http2_reuse(options.http2_reuse),
         http3_reuse: normalize_http3_reuse(options.http3_reuse),
@@ -345,6 +391,19 @@ defmodule HTTP.FetchOptions do
         ArgumentError,
         "unsupported request_mode: #{inspect(mode)}; expected :fetch or :proxy"
       )
+
+  defp normalize_http1_reuse(false, _version), do: false
+  defp normalize_http1_reuse(true, :http1), do: true
+
+  defp normalize_http1_reuse(value, version),
+    do: raise(ArgumentError, "invalid http1_reuse: #{inspect(value)} for #{inspect(version)}")
+
+  defp normalize_http1_limit(value, limit, _key)
+       when is_integer(value) and value >= 1 and value <= limit,
+       do: value
+
+  defp normalize_http1_limit(value, _limit, key),
+    do: raise(ArgumentError, "invalid #{key}: #{inspect(value)}")
 
   defp normalize_telemetry(value) when is_boolean(value), do: value
 

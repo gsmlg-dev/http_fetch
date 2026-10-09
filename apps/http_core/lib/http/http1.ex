@@ -10,6 +10,7 @@ defmodule HTTP.HTTP1 do
 
   defstruct method: :get,
             state: :head,
+            version: nil,
             buffer: <<>>,
             status: nil,
             headers: %Headers{},
@@ -94,8 +95,8 @@ defmodule HTTP.HTTP1 do
           head = binary_part(buffer, 0, index)
           body = binary_part(buffer, index + 4, byte_size(buffer) - index - 4)
 
-          with {:ok, status, headers} <- parse_head(head) do
-            parse_head_response(conn, status, headers, body, events)
+          with {:ok, status, headers, version} <- parse_head(head) do
+            parse_head_response(%{conn | version: version}, status, headers, body, events)
           end
         end
 
@@ -234,9 +235,9 @@ defmodule HTTP.HTTP1 do
   defp parse_head(head) do
     case String.split(head, "\r\n") do
       [status_line | header_lines] ->
-        with {:ok, status} <- parse_status_line(status_line),
+        with {:ok, status, version} <- parse_status_line(status_line),
              {:ok, headers} <- parse_headers(header_lines) do
-          {:ok, status, headers}
+          {:ok, status, headers, version}
         end
 
       _ ->
@@ -246,9 +247,9 @@ defmodule HTTP.HTTP1 do
 
   defp parse_status_line(line) do
     case String.split(line, " ", parts: 3) do
-      ["HTTP/" <> _version, status_code | _] ->
+      ["HTTP/" <> version, status_code | _] ->
         case Integer.parse(status_code) do
-          {status, ""} -> {:ok, status}
+          {status, ""} -> {:ok, status, version}
           _ -> {:error, :invalid_status_line}
         end
 
@@ -445,7 +446,13 @@ defmodule HTTP.HTTP1 do
     |> validate_request_framing!()
     |> ensure_user_agent()
     |> Headers.set_default("Host", Request.authority(request.url))
-    |> Headers.set("Connection", "close")
+    |> Headers.set(
+      "Connection",
+      if(Keyword.get(request.transport_options, :http1_reuse, false),
+        do: "keep-alive",
+        else: "close"
+      )
+    )
   end
 
   defp validate_request_framing!(%Request{request_mode: :proxy, headers: headers} = request) do
