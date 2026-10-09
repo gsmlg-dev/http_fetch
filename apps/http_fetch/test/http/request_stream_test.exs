@@ -318,6 +318,41 @@ defmodule HTTP.RequestStreamTest do
     assert_receive :owner_peer_closed, 1_000
   end
 
+  test "owner death on the first header byte stops the upload source" do
+    test_pid = self()
+    {:ok, controller} = HTTP.AbortController.start_link()
+
+    url =
+      start_raw_http_server!(fn listener ->
+        Process.flag(:priority, :high)
+        {:ok, socket} = :gen_tcp.accept(listener)
+        assert {:ok, "P"} = :gen_tcp.recv(socket, 1, 1_000)
+        owner = Agent.get(controller, & &1.request_id)
+        Process.exit(owner, :kill)
+        send(test_pid, :owner_killed_on_header)
+        drain_until_closed(socket)
+        send(test_pid, :owner_header_peer_closed)
+      end)
+
+    {:ok, upload} = HTTP.Stream.start_link(0)
+    source_monitor = Process.monitor(upload)
+
+    promise =
+      HTTP.fetch(url,
+        method: :post,
+        headers: [{"x-large-header", :binary.copy("x", 65_536)}],
+        socket_opts: [sndbuf: 1_024],
+        body: upload,
+        duplex: :half,
+        signal: controller
+      )
+
+    assert_receive :owner_killed_on_header, 1_000
+    assert {:error, {:request_process_down, :killed}} = HTTP.Promise.await(promise)
+    assert_receive {:DOWN, ^source_monitor, :process, ^upload, :normal}, 1_000
+    assert_receive :owner_header_peer_closed, 1_000
+  end
+
   test "early redirects never replay a streaming body" do
     test_pid = self()
 
@@ -430,6 +465,14 @@ defmodule HTTP.RequestStreamTest do
         after
           1 -> blocked_upload_writer!(owner, deadline)
         end
+    end
+  end
+
+  defp drain_until_closed(socket) do
+    case :gen_tcp.recv(socket, 0, 1_000) do
+      {:ok, _header_bytes} -> drain_until_closed(socket)
+      {:error, :closed} -> :ok
+      other -> flunk("expected header socket closure, got #{inspect(other)}")
     end
   end
 

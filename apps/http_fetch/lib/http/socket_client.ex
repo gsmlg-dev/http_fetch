@@ -1555,9 +1555,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp start_prepared_request(state, {:http1_stream, head, stream, length}) do
-    with :ok <- enable_http1_duplex_reads(state),
-         :ok <-
-           send_request(state.transport, state.socket, head, remaining_timeout(state.deadline_at)) do
+    with :ok <- enable_http1_duplex_reads(state) do
       upload =
         HTTP.HTTP1.Upload.start(
           state.transport,
@@ -1565,7 +1563,8 @@ defmodule HTTP.SocketClient do
           stream,
           length,
           state.deadline_at,
-          state.request.headers
+          state.request.headers,
+          head
         )
 
       {:ok, %{state | upload: upload}}
