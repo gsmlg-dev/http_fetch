@@ -713,4 +713,17 @@ defmodule HTTP.HTTP3.RuntimeTest do
         await_leases(pool, count, deadline)
     end
   end
+
+  test "upload trailers fail explicitly before EOF" do
+    {:ok, bridge} = BodyBridge.start_link(self(), self())
+    monitor = Process.monitor(bridge)
+    :ok = BodyBridge.credit(bridge, 1)
+    assert_receive {:read_chunk, ^bridge, :ack}
+    send(bridge, {:stream_trailers, self(), HTTP.Headers.new([{"X-Checksum", "one"}])})
+    send(bridge, {:stream_end, self()})
+    assert_receive {:body_error, ^bridge, :request_trailers_unsupported}
+    assert_receive {:error, :request_trailers_unsupported}
+    assert_receive {:DOWN, ^monitor, :process, ^bridge, :normal}
+    refute_receive {:body_eof, ^bridge}, 0
+  end
 end

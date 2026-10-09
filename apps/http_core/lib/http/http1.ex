@@ -5,7 +5,6 @@ defmodule HTTP.HTTP1 do
   alias HTTP.Request
 
   @max_head_bytes 64 * 1024
-  @max_trailer_bytes 64 * 1024
   @max_line_bytes 8 * 1024
   @max_chunk_emit_bytes 64 * 1024
 
@@ -17,7 +16,11 @@ defmodule HTTP.HTTP1 do
             remaining: nil,
             chunk_size: nil
 
-  @type event :: {:headers, non_neg_integer(), Headers.t()} | {:body, binary()} | :done
+  @type event ::
+          {:headers, non_neg_integer(), Headers.t()}
+          | {:body, binary()}
+          | {:trailers, Headers.t()}
+          | :done
   @type t :: %__MODULE__{}
 
   @spec new(atom()) :: t()
@@ -42,6 +45,7 @@ defmodule HTTP.HTTP1 do
     target = Request.origin_form(request.url)
 
     {headers, body} = request |> request_headers() |> Request.put_body_headers(request)
+    validate_request_trailers!(request, headers)
     header_lines = Enum.map(headers.headers, fn {name, value} -> header_line(name, value) end)
 
     {[method, " ", target, " HTTP/1.1\r\n", header_lines, "\r\n"], body}
@@ -196,8 +200,9 @@ defmodule HTTP.HTTP1 do
   end
 
   defp parse(%__MODULE__{state: :chunk_trailers, buffer: buffer} = conn, events) do
-    case trailer_end(buffer) do
-      {:ok, rest} ->
+    case trailer_end(buffer, conn.headers) do
+      {:ok, trailers, rest} ->
+        events = if trailers.headers == [], do: events, else: [{:trailers, trailers} | events]
         parse(%{conn | state: :done, buffer: rest}, [:done | events])
 
       :more ->
@@ -219,7 +224,8 @@ defmodule HTTP.HTTP1 do
   defp parse_head_response(conn, status, headers, body, events) do
     conn = Map.merge(conn, %{status: status, headers: headers, buffer: body})
 
-    with {:ok, conn} <- set_body_framing(conn) do
+    with {:ok, _names} <- HTTP.Trailers.declaration(headers),
+         {:ok, conn} <- set_body_framing(conn) do
       events = [{:headers, status, headers} | events]
       parse(conn, maybe_done_event(conn, events))
     end
@@ -400,22 +406,24 @@ defmodule HTTP.HTTP1 do
     end
   end
 
-  defp trailer_end(buffer) do
-    cond do
-      String.starts_with?(buffer, "\r\n") ->
-        {:ok, binary_part(buffer, 2, byte_size(buffer) - 2)}
+  defp trailer_end(buffer, initial) do
+    if String.starts_with?(buffer, "\r\n") do
+      {:ok, %Headers{}, binary_part(buffer, 2, byte_size(buffer) - 2)}
+    else
+      case :binary.match(buffer, "\r\n\r\n") do
+        {index, 4} ->
+          block = binary_part(buffer, 0, index)
 
-      byte_size(buffer) > @max_trailer_bytes ->
-        {:error, :trailers_too_large}
+          with {:ok, trailers} <- HTTP.Trailers.parse(block, initial) do
+            {:ok, trailers, binary_part(buffer, index + 4, byte_size(buffer) - index - 4)}
+          end
 
-      true ->
-        case :binary.match(buffer, "\r\n\r\n") do
-          {index, 4} ->
-            {:ok, binary_part(buffer, index + 4, byte_size(buffer) - index - 4)}
+        :nomatch when byte_size(buffer) > 65_536 ->
+          {:error, :trailers_too_large}
 
-          :nomatch ->
-            :more
-        end
+        :nomatch ->
+          :more
+      end
     end
   end
 
@@ -434,10 +442,31 @@ defmodule HTTP.HTTP1 do
 
   defp request_headers(%Request{} = request) do
     request.headers
-    |> Request.reject_unsupported_request_framing!()
+    |> validate_request_framing!()
     |> ensure_user_agent()
     |> Headers.set_default("Host", Request.authority(request.url))
     |> Headers.set("Connection", "close")
+  end
+
+  defp validate_request_framing!(headers) do
+    headers |> Headers.delete("Trailer") |> Request.reject_unsupported_request_framing!()
+    headers
+  end
+
+  defp validate_request_trailers!(request, headers) do
+    if Headers.has?(headers, "trailer") do
+      unless Request.streaming_body?(request) and not Headers.has?(headers, "content-length") do
+        raise ArgumentError, "Trailer request headers require a chunked HTTP/1 streaming body"
+      end
+
+      case HTTP.Trailers.declaration(request.headers) do
+        {:ok, _names} ->
+          :ok
+
+        {:error, reason} ->
+          raise ArgumentError, "invalid Trailer request declaration: #{inspect(reason)}"
+      end
+    end
   end
 
   defp ensure_user_agent(headers) do

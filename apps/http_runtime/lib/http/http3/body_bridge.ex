@@ -109,6 +109,15 @@ defmodule HTTP.HTTP3.BodyBridge do
     end
   end
 
+  def handle_info(
+        {:stream_trailers, source, _headers},
+        %{source: source, stopped?: false} = state
+      ) do
+    send(state.owner, {:body_error, self(), :request_trailers_unsupported})
+    send(source, {:error, :request_trailers_unsupported})
+    {:stop, :normal, state}
+  end
+
   def handle_info({:stream_end, source}, %{source: source} = state) do
     {:noreply, advance(%{state | eof?: true, reading?: false})}
   end

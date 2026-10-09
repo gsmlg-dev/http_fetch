@@ -106,9 +106,11 @@ defmodule HTTP.HTTP1Test do
         body: "hello"
       }
 
-      assert_raise ArgumentError, ~r/Trailer request headers are not supported/, fn ->
-        HTTP.HTTP1.serialize_request(request)
-      end
+      assert_raise ArgumentError,
+                   ~r/Trailer request headers require a chunked HTTP\/1 streaming body/,
+                   fn ->
+                     HTTP.HTTP1.serialize_request(request)
+                   end
     end
 
     test "removes user content-length when no request body is sent" do
