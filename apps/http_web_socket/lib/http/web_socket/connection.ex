@@ -174,15 +174,44 @@ defmodule HTTP.WebSocket.Connection do
   def handle_call({:send_ack, _data}, _from, state),
     do: {:reply, {:error, :closed}, state}
 
-  def handle_call({:close, code, reason, _payload}, _from, %{ready_state: @connecting} = state) do
+  def handle_call(
+        {:send_frame, _frame, _acknowledged?},
+        _from,
+        %{options: %{mode: :browser}} = state
+      ),
+      do: {:reply, {:error, :proxy_mode_required}, state}
+
+  def handle_call({:send_frame, frame, acknowledged?}, _from, %{ready_state: @open} = state) do
+    case normalize_frame(frame) do
+      {:ok, opcode, payload, bytes} -> admit_frame(state, opcode, payload, bytes, acknowledged?)
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:send_frame, _frame, _acknowledged?}, _from, state),
+    do: {:reply, {:error, :closed}, state}
+
+  def handle_call({:close, code, reason, payload}, from, state) do
+    validation =
+      if state.options.mode == :proxy,
+        do: Frame.protocol_close_payload(code, reason),
+        else: Frame.close_payload(code, reason)
+
+    case validation do
+      {:ok, _} -> close_call(code, reason, payload, from, state)
+      {:error, error} -> {:reply, {:error, error}, state}
+    end
+  end
+
+  defp close_call(code, reason, _payload, _from, %{ready_state: @connecting} = state) do
     Telemetry.close_start(state.telemetry_uri, code)
     {:stop, :normal, :ok, finish(state, code || 1006, reason, false)}
   end
 
-  def handle_call({:close, _code, _reason, _payload}, _from, %{ready_state: @closing} = state),
+  defp close_call(_code, _reason, _payload, _from, %{ready_state: @closing} = state),
     do: {:reply, :ok, state}
 
-  def handle_call({:close, code, reason, payload}, _from, state) do
+  defp close_call(code, reason, payload, _from, state) do
     Telemetry.close_start(state.telemetry_uri, code)
     state = begin_close(state, code, reason, payload)
     call_result(:ok, advance(state))
@@ -523,8 +552,14 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   defp admit_send(state, data, acknowledged?) do
-    with {:ok, opcode, payload, bytes} <- normalize_send_data(data),
-         :ok <- send_capacity(state, bytes),
+    case normalize_send_data(data) do
+      {:ok, opcode, payload, bytes} -> admit_frame(state, opcode, payload, bytes, acknowledged?)
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp admit_frame(state, opcode, payload, bytes, acknowledged?) do
+    with :ok <- send_capacity(state, bytes),
          {:ok, frame} <- Frame.encode(opcode, payload) do
       ref = make_ref()
       timer = Process.send_after(self(), {:send_timeout, ref}, state.options.write_timeout)
@@ -777,8 +812,13 @@ defmodule HTTP.WebSocket.Connection do
     status = Delivery.status(state.delivery)
 
     status.queued_events < state.options.max_queue_events and
-      status.queued_bytes + state.options.max_message_size + 7 <= state.options.max_queue_bytes
+      status.queued_bytes + delivery_message_limit(state) + 7 <= state.options.max_queue_bytes
   end
+
+  defp delivery_message_limit(%{options: %{mode: :proxy} = options}),
+    do: max(options.max_message_size, 125)
+
+  defp delivery_message_limit(state), do: state.options.max_message_size
 
   defp drain_raw(%{close_received?: true} = state) do
     Enum.each(:queue.to_list(state.raw_queue), fn {_data, ref} ->
@@ -867,6 +907,9 @@ defmodule HTTP.WebSocket.Connection do
 
   defp frame_events(state, []), do: state
 
+  defp frame_events(%{options: %{mode: :proxy}} = state, [{:message, opcode, data}]),
+    do: deliver_frame(state, opcode, data)
+
   defp frame_events(state, [{:message, opcode, data}]) do
     data = :binary.copy(data)
 
@@ -892,7 +935,17 @@ defmodule HTTP.WebSocket.Connection do
   defp frame_events(%{terminal: terminal} = state, [{:ping, _payload}]) when not is_nil(terminal),
     do: state
 
-  defp frame_events(state, [{:ping, payload}]), do: queue_control(state, :pong, payload)
+  defp frame_events(state, [{:ping, payload}]) do
+    state = if state.options.automatic_pong, do: queue_control(state, :pong, payload), else: state
+
+    if state.options.mode == :proxy and is_nil(state.terminal),
+      do: deliver_frame(state, :ping, payload),
+      else: state
+  end
+
+  defp frame_events(%{options: %{mode: :proxy}} = state, [{:pong, payload}]),
+    do: deliver_frame(state, :pong, payload)
+
   defp frame_events(state, [{:pong, _payload}]), do: state
 
   defp frame_events(state, [{:close, code, reason}]) do
@@ -905,6 +958,26 @@ defmodule HTTP.WebSocket.Connection do
     else
       {:ok, payload} = Frame.protocol_close_payload(code, reason)
       begin_close(state, code, reason, payload)
+    end
+  end
+
+  defp deliver_frame(state, opcode, data) do
+    event = %HTTP.WebSocket.Event.Frame{
+      target: state.target,
+      opcode: opcode,
+      data: :binary.copy(data)
+    }
+
+    case Delivery.push(state.delivery, event, byte_size(data) + 7, state.owner) do
+      {:ok, delivery, events} ->
+        Telemetry.message_received(state.telemetry_uri, Atom.to_string(opcode), byte_size(data))
+        emit_deliveries(state, events)
+        state = %{state | delivery: delivery}
+        stream_telemetry(state, :queue, :receive_admitted)
+        state
+
+      {:error, reason} ->
+        park_terminal(state, reason, 1006, "", false)
     end
   end
 
@@ -1156,6 +1229,19 @@ defmodule HTTP.WebSocket.Connection do
 
     state.uri.scheme <> "://" <> state.uri.host <> port
   end
+
+  defp normalize_frame({opcode, payload}) when opcode in [:ping, :pong] and is_binary(payload) do
+    if byte_size(payload) <= 125,
+      do: {:ok, opcode, payload, byte_size(payload)},
+      else: {:error, :control_payload_too_large}
+  end
+
+  defp normalize_frame({:text, payload}) when is_binary(payload), do: normalize_send_data(payload)
+
+  defp normalize_frame({:binary, payload}) when is_binary(payload),
+    do: {:ok, :binary, payload, byte_size(payload)}
+
+  defp normalize_frame(_frame), do: {:error, :invalid_frame}
 
   defp normalize_send_data(%ArrayBuffer{data: data}) when is_binary(data) do
     {:ok, :binary, data, byte_size(data)}

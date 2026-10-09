@@ -416,7 +416,36 @@ or `HTTP.Blob` for binary frames:
 :ok = HTTP.WebSocket.close(socket, 1000, "done")
 ```
 
-For a WebSocket reverse proxy, use `HTTP.WebSocket.new/3` with
+For text/binary/control frame forwarding, opt into HTTP/1 proxy mode:
+
+```elixir
+socket = HTTP.WebSocket.new("wss://example.com/socket", [],
+  mode: :proxy, http_version: :http1, delivery: :ack, automatic_pong: false)
+
+# Received frames use {HTTP.WebSocket, socket, %Event.Frame{opcode: ..., data: binary}, ref}.
+# Acknowledge after downstream consumption; Close keeps the Event.Close envelope.
+{:ok, ref} = HTTP.WebSocket.send_frame_ack(socket, {:ping, "probe"})
+receive do
+  {HTTP.WebSocket, ^socket, {:send_result, ^ref, :ok}} -> :ok
+end
+:ok = HTTP.WebSocket.close(socket, 1001, "Going Away")
+```
+
+Proxy mode delivers validated, reassembled text/binary messages and ping/pong
+frames as `HTTP.WebSocket.Event.Frame`, with binary data regardless of
+`binary_type`. `send_frame/2` reports bounded FIFO admission;
+`send_frame_ack/2` reports local write completion. Wait for every admitted
+frame's successful completion before calling `close/3`, because Close discards
+unsent queued frames. Empty controls count toward send limits. Control payloads
+remain limited to 125 bytes and ACK receive capacity must admit at least 132
+bytes. Automatic pong defaults to true; disable it only in proxy mode when
+forwarding controls. Proxy close accepts wire codes 1000-1014 except
+1004/1005/1006, and 3000-4999, with valid UTF-8 reasons up to 123 bytes.
+HTTP/2, h2c and auto proxy mode are rejected with `:proxy_requires_http1`.
+Browser behavior remains the default, including hidden controls and restricted
+initiated close codes.
+
+For a message-only WebSocket reverse proxy, use `HTTP.WebSocket.new/3` with
 `http_version: :http1`, `delivery: :ack`, finite `opening_timeout`,
 `idle_timeout`, `write_timeout` and `close_timeout`, and explicit queue/message
 limits. The handshake is validated, including coalesced response/frame bytes;

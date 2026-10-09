@@ -52,3 +52,21 @@ defmodule HTTP.WebSocket.Event.Close do
           was_clean: boolean()
         }
 end
+
+defmodule HTTP.WebSocket.Event.Frame do
+  @moduledoc """
+  Proxy-mode text, binary, ping or pong event. Data is always a binary.
+
+  Fragmented data frames are reassembled and UTF-8/protocol validated. Close
+  retains the existing `HTTP.WebSocket.Event.Close` lifecycle event.
+  """
+
+  defstruct target: nil, type: "frame", opcode: nil, data: <<>>
+
+  @type t :: %__MODULE__{
+          target: HTTP.WebSocket.t() | nil,
+          type: String.t(),
+          opcode: :text | :binary | :ping | :pong | nil,
+          data: binary()
+        }
+end
