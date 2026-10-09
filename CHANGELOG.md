@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-10
+
+### Added
+- Return header-first Fetch responses with `stream_response: true` and retain
+  acknowledged streaming backpressure and cancellation.
+- Preserve GET, HEAD and DELETE request bodies with `request_mode: :proxy`;
+  ordinary Fetch behavior remains the default.
+- Expose bounded HTTP/1 WebSocket proxy frames, acknowledged frame writes,
+  configurable automatic pong and validated wire close codes.
+- Support explicit HTTP proxies with absolute-form forwarding and HTTPS
+  CONNECT tunnels, isolated proxy authorization and origin TLS verification.
+- Add opt-in bounded HTTP/1 keep-alive reuse with route, TLS and caller isolation.
+- Accept validated IPv4/IPv6 `connect_address` pins while preserving original
+  HTTP authority, TLS identity and trust. Require explicit redirect handling;
+  reject unsupported proxy, Unix and HTTP/3 combinations before network I/O.
+  ExSSL cannot yet verify a distinct original literal IP against a pinned
+  address; this case rejects explicitly pending upstream issue #49.
+
+### Changed
+- Update Dialyxir, Earmark Parser, Erlex, ExDoc, Jason, Makeup, Makeup Erlang
+  and Telemetry to current compatible releases. Retain Credo 1.7.13 because
+  newer releases report unrelated existing nesting violations.
+- Verify candidate-package Telemetry archives against the version and checksum
+  in the lockfile instead of a fixed historical version.
+
 ## [0.17.2] - 2026-10-09
 
 ### Added
