@@ -89,4 +89,35 @@ defmodule HTTP.StreamTest do
     assert {:error, {:reader_down, :normal}} = Task.await(producer)
     assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}
   end
+
+  test "completion trailers wait for the outstanding body acknowledgement" do
+    {:ok, stream} = HTTP.Stream.start_link(0)
+    send(stream, {:read_chunk, self(), :ack})
+    producer = Task.async(fn -> HTTP.Stream.chunk(stream, "data") end)
+    assert_receive {:stream_chunk, ^stream, "data", ref}
+    assert :ok = HTTP.Stream.finish(stream, [{"X-Checksum", "one"}, {"X-Checksum", "two"}])
+    refute_receive {:stream_trailers, ^stream, _}, 0
+    send(stream, {:stream_chunk_ack, ref})
+    assert :ok = Task.await(producer)
+    assert_receive {:stream_trailers, ^stream, headers}
+    assert headers.headers == [{"X-Checksum", "one"}, {"X-Checksum", "two"}]
+    assert_receive {:stream_end, ^stream}
+  end
+
+  test "invalid completion trailers do not terminate the stream" do
+    {:ok, stream} = HTTP.Stream.start_link(0)
+    send(stream, {:read_chunk, self(), :ack})
+    assert {:error, :invalid_trailer} = HTTP.Stream.finish(stream, [{"Bad Field", "one"}])
+    assert {:error, {:forbidden_trailer, "host"}} = HTTP.Stream.finish(stream, [{"Host", "one"}])
+
+    assert {:error, :trailers_too_large} =
+             HTTP.Stream.finish(stream, List.duplicate({"X", "one"}, 129))
+
+    assert {:error, :trailers_too_large} =
+             HTTP.Stream.finish(stream, [{"X", String.duplicate("a", 65_530)}])
+
+    refute_receive {:stream_end, ^stream}, 0
+    assert :ok = HTTP.Stream.finish(stream, [])
+    assert_receive {:stream_end, ^stream}
+  end
 end

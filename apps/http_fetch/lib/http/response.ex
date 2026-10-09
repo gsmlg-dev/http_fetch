@@ -34,7 +34,10 @@ defmodule HTTP.Response do
   bytes. These byte budgets include 32 bytes of overhead per field, and the
   protocol's HPACK limits also apply. Exceeding a retention budget fails with
   `:http2_informational_limit` or `:http2_trailers_limit` rather than dropping
-  fields. HTTP/1 informational fields and trailers are currently not exposed.
+  fields. HTTP/1 informational fields are currently not exposed. HTTP/1 trailers
+  retain at most 128 fields and 65,536 serialized bytes, including delimiters,
+  and reject malformed or forbidden fields. Permitted undeclared response
+  trailers are accepted; `Trailer` declarations are advisory and validated.
   Exposing metadata does not establish gRPC support.
 
   ## HTTP Content-Encoding

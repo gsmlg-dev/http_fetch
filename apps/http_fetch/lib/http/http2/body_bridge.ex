@@ -140,6 +140,15 @@ defmodule HTTP.HTTP2.BodyBridge do
     end
   end
 
+  def handle_info(
+        {:stream_trailers, stream, _headers},
+        %{stream: stream, stopped?: false} = state
+      ) do
+    {:noreply, stop_stream(state, :request_trailers_unsupported)}
+  end
+
+  def handle_info({:stream_trailers, _stream, _headers}, state), do: {:noreply, state}
+
   def handle_info({:stream_end, stream}, %{stream: stream} = state) do
     cond do
       state.stopped? ->
@@ -262,6 +271,7 @@ defmodule HTTP.HTTP2.BodyBridge do
     }
   end
 
+  defp bridge_outcome(:request_trailers_unsupported), do: :source_error
   defp bridge_outcome(:cancelled), do: :cancelled
   defp bridge_outcome(:early_response), do: :early_response
   defp bridge_outcome(:owner_down), do: :owner_down

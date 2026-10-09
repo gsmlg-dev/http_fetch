@@ -5,14 +5,24 @@ defmodule HTTP.HTTP1.Upload do
 
   # The socket owner keeps read credit; this linked worker holds at most one
   # acknowledged source chunk and performs writes without blocking that owner.
-  def start(transport, socket, stream, remaining, deadline_at) do
+  def start(transport, socket, stream, remaining, deadline_at, headers \\ %HTTP.Headers{}) do
     owner = self()
     token = make_ref()
 
     {pid, monitor} =
       :erlang.spawn_opt(
         fn ->
-          result = read_body(transport, socket, stream, remaining, deadline_at)
+          result =
+            read_body(%{
+              transport: transport,
+              socket: socket,
+              stream: stream,
+              remaining: remaining,
+              deadline_at: deadline_at,
+              headers: headers,
+              trailers: nil
+            })
+
           send(owner, {:http1_upload, token, result})
         end,
         [:link, :monitor]
@@ -53,46 +63,67 @@ defmodule HTTP.HTTP1.Upload do
     end
   end
 
-  defp read_body(transport, socket, stream, remaining, deadline_at) do
+  defp read_body(state) do
+    stream = state.stream
+
     receive do
       {:stream_chunk, ^stream, chunk, ack_ref} ->
-        write_chunk(transport, socket, stream, chunk, ack_ref, remaining, deadline_at)
+        write_chunk(state, chunk, ack_ref)
 
       {:stream_chunk, ^stream, chunk} ->
-        write_chunk(transport, socket, stream, chunk, nil, remaining, deadline_at)
+        write_chunk(state, chunk, nil)
+
+      {:stream_trailers, ^stream, fields} ->
+        if state.remaining != nil do
+          {:error, :request_trailers_require_chunked}
+        else
+          case HTTP.Trailers.upload(fields, state.headers) do
+            {:ok, trailers} -> read_body(%{state | trailers: trailers})
+            error -> error
+          end
+        end
 
       {:stream_end, ^stream} ->
-        case remaining do
-          nil -> transport.send(socket, "0\r\n\r\n")
-          0 -> :ok
-          _ -> {:error, :content_length_mismatch}
+        case state.remaining do
+          nil ->
+            state.transport.send(state.socket, [
+              "0\r\n",
+              if(state.trailers, do: HTTP.Trailers.serialize(state.trailers), else: []),
+              "\r\n"
+            ])
+
+          0 ->
+            :ok
+
+          _ ->
+            {:error, :content_length_mismatch}
         end
 
       {:stream_error, ^stream, reason} ->
         {:error, reason}
     after
-      remaining_timeout(deadline_at) -> {:error, :request_timeout}
+      remaining_timeout(state.deadline_at) -> {:error, :request_timeout}
     end
   end
 
-  defp write_chunk(transport, socket, stream, chunk, ack_ref, remaining, deadline_at) do
+  defp write_chunk(state, chunk, ack_ref) do
     cond do
       byte_size(chunk) > @max_chunk_bytes ->
         {:error, :buffer_limit}
 
-      remaining != nil and byte_size(chunk) > remaining ->
+      state.remaining != nil and byte_size(chunk) > state.remaining ->
         {:error, :content_length_mismatch}
 
       true ->
         data =
-          if remaining == nil and chunk != "",
+          if state.remaining == nil and chunk != "",
             do: [Integer.to_string(byte_size(chunk), 16), "\r\n", chunk, "\r\n"],
             else: chunk
 
-        with :ok <- transport.send(socket, data) do
-          if ack_ref, do: send(stream, {:stream_chunk_ack, ack_ref})
-          remaining = if remaining != nil, do: remaining - byte_size(chunk)
-          read_body(transport, socket, stream, remaining, deadline_at)
+        with :ok <- state.transport.send(state.socket, data) do
+          if ack_ref, do: send(state.stream, {:stream_chunk_ack, ack_ref})
+          remaining = if state.remaining != nil, do: state.remaining - byte_size(chunk)
+          read_body(%{state | remaining: remaining})
         end
     end
   end

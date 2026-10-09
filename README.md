@@ -344,6 +344,34 @@ is blocked. Cancellation signals (`HTTP.AbortController.abort/1` and
 for `:DOWN` to confirm its cleanup. An early response is exposed only after its
 unfinished upload writer and source have terminated.
 
+For HTTP/1 upload trailers, use an unknown-length stream, declare trailer names
+in the initial headers, and complete the stream with ordered fields:
+
+```elixir
+{:ok, upload} = HTTP.Stream.start_link(0)
+promise = HTTP.fetch(url, method: :post, body: upload, duplex: :half,
+  headers: [{"Trailer", "X-Checksum"}])
+:ok = HTTP.Stream.chunk(upload, "data")
+:ok = HTTP.Stream.finish(upload, [{"X-Checksum", "expected"}])
+response = HTTP.Promise.await(promise)
+```
+
+`finish/2` validates at most 128 fields and 65,536 serialized bytes, including
+field separators and the final blank line. It returns a validation error without
+finishing the stream for invalid fields. Completion is asynchronous; monitor the
+stream to confirm termination. Nonempty trailers require chunked uploads, and
+every name must appear in the `Trailer` declaration; undeclared names fail with
+`:undeclared_trailer`. HTTP/2 and HTTP/3 upload trailers currently fail explicitly
+with `:request_trailers_unsupported`.
+
+HTTP/1 response trailers preserve ordered duplicate fields and are delivered as
+`{:stream_trailers, stream, headers}` after body acknowledgements and before
+stream end. They use the same byte/count limits as uploads. Permitted undeclared
+response trailers are accepted; declared names are validated but advisory.
+Framing, routing, connection-specific, authentication, cookie, and content
+processing fields are rejected as trailers. Trailer values remain separate from
+the initial response headers.
+
 ## WebSocket Client
 
 The umbrella also includes `HTTP.WebSocket`, a browser-like WebSocket client.

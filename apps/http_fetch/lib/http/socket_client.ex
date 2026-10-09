@@ -1291,6 +1291,15 @@ defmodule HTTP.SocketClient do
     {:continue, %{state | mode: {:buffer, response, [chunk | chunks]}}}
   end
 
+  defp handle_event(%{mode: {:stream, stream_pid}} = state, {:trailers, headers}) do
+    HTTP.Stream.trailers(stream_pid, headers)
+    {:continue, state}
+  end
+
+  defp handle_event(%{mode: {:buffer, response, chunks}} = state, {:trailers, headers}) do
+    {:continue, %{state | mode: {:buffer, %{response | trailers: headers}, chunks}}}
+  end
+
   defp handle_event(%{mode: {:stream, stream_pid}} = state, :done) do
     HTTP.Stream.finish(stream_pid)
     finish(state)
@@ -1531,7 +1540,14 @@ defmodule HTTP.SocketClient do
     with :ok <-
            send_request(state.transport, state.socket, head, remaining_timeout(state.deadline_at)) do
       upload =
-        HTTP.HTTP1.Upload.start(state.transport, state.socket, stream, length, state.deadline_at)
+        HTTP.HTTP1.Upload.start(
+          state.transport,
+          state.socket,
+          stream,
+          length,
+          state.deadline_at,
+          state.request.headers
+        )
 
       {:ok, %{state | upload: upload}}
     end

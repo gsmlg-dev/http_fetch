@@ -158,4 +158,14 @@ defmodule HTTP.HTTP2BodyBridgeTest do
     assert {{:error, :early_response}, {:error, _reason}} = Task.await(producer, 1_000)
     refute_receive {:body_error, ^bridge, _reason}, 20
   end
+
+  test "upload trailers fail explicitly instead of being discarded" do
+    {:ok, stream} = HTTP.Stream.start_link(0)
+    {:ok, bridge} = BodyBridge.start_link(stream, self())
+    assert :ok = BodyBridge.credit(bridge, 1)
+    assert :ok = HTTP.Stream.finish(stream, [{"X-Checksum", "one"}])
+    assert_receive {:body_error, ^bridge, :request_trailers_unsupported}, 1_000
+    assert BodyBridge.status(bridge).stopped?
+    refute_receive {:body_eof, ^bridge}, 0
+  end
 end

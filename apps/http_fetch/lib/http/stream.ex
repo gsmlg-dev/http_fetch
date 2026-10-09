@@ -106,6 +106,24 @@ defmodule HTTP.Stream do
     :ok
   end
 
+  @doc """
+  Finishes a stream with ordered trailer fields (a list or `HTTP.Headers`).
+
+  Validation limits trailers to 128 fields and 65,536 serialized bytes. Invalid
+  trailers return an error without finishing the stream. For HTTP/1 uploads,
+  every field must be declared in the request's `Trailer` header and the body
+  must use chunk framing (no `Content-Length`). HTTP/2 and HTTP/3 uploads return
+  `:request_trailers_unsupported`; their response trailer support is unchanged.
+  Completion is signalled asynchronously, like `finish/1`.
+  """
+  @spec finish(pid(), HTTP.Headers.t() | HTTP.Headers.headers_list()) :: :ok | {:error, term()}
+  def finish(pid, trailers) when is_pid(pid) do
+    with {:ok, headers} <- HTTP.Trailers.validate(trailers) do
+      if headers.headers == [], do: finish(pid), else: send(pid, {:finish, headers})
+      :ok
+    end
+  end
+
   @doc "Sends response trailers to the reader before the terminal stream event."
   def trailers(pid, headers) when is_pid(pid), do: send(pid, {:trailers, headers})
 
@@ -176,6 +194,10 @@ defmodule HTTP.Stream do
 
       {:trailers, headers} ->
         loop(%{state | trailers: headers})
+
+      {:finish, trailers} ->
+        send(self(), :finish)
+        loop(%{state | trailers: trailers})
 
       :finish ->
         duration = System.monotonic_time(:microsecond) - state.start_time
