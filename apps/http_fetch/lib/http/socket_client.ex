@@ -316,7 +316,7 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp handle_new_connection(context, transport, host, port, selection, timeout, claim) do
+  defp handle_new_connection(context, transport, host, port, selection, _timeout, claim) do
     %{parent: parent, ref: ref, request: request} = context
 
     case connect_http1_or_new(
@@ -325,7 +325,7 @@ defmodule HTTP.SocketClient do
            port,
            request,
            selection,
-           timeout,
+           context.deadline_at,
            context.parent_monitor
          ) do
       {:ok, socket} ->
@@ -345,15 +345,58 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp connect_http1_or_new(transport, host, port, request, selection, timeout, monitor) do
+  defp connect_http1_or_new(transport, host, port, request, selection, deadline_at, monitor) do
     reuse = if selection.mode == :http1, do: HTTP.HTTP1.Pool.checkout(request), else: :none
 
-    case reuse do
-      {:ok, socket} ->
+    case request_ready(deadline_at, monitor) do
+      :ok ->
+        timeout = remaining_timeout(deadline_at)
+
+        case reuse do
+          {:ok, socket} ->
+            refresh_http1_socket(transport, socket, request, timeout)
+
+          :none ->
+            HTTP.Runtime.Dialer.connect(
+              transport,
+              host,
+              port,
+              request,
+              selection,
+              timeout,
+              monitor
+            )
+        end
+
+      {:error, _} = error ->
+        if match?({:ok, _}, reuse), do: transport.close(elem(reuse, 1))
+        error
+    end
+  end
+
+  defp request_ready(deadline_at, monitor) do
+    receive do
+      :abort -> {:error, :aborted}
+      :deadline -> {:error, :request_timeout}
+      {:DOWN, ^monitor, :process, _, _} -> {:error, :subscriber_down}
+    after
+      0 -> if remaining_timeout(deadline_at) == 0, do: {:error, :request_timeout}, else: :ok
+    end
+  end
+
+  defp refresh_http1_socket(transport, socket, request, timeout) do
+    opts = Keyword.get(request.transport_options, :socket_opts, [])
+
+    case transport.setopts(socket,
+           send_timeout: min(Keyword.get(opts, :send_timeout, timeout), timeout),
+           send_timeout_close: Keyword.get(opts, :send_timeout_close, true)
+         ) do
+      :ok ->
         {:ok, socket}
 
-      :none ->
-        HTTP.Runtime.Dialer.connect(transport, host, port, request, selection, timeout, monitor)
+      {:error, _} = error ->
+        transport.close(socket)
+        error
     end
   end
 
@@ -463,7 +506,12 @@ defmodule HTTP.SocketClient do
             upload_cancelled?: false
           })
 
-        case start_prepared_request(state, prepared_request) do
+        result =
+          with :ok <- request_ready(state.deadline_at, state.parent_monitor) do
+            start_prepared_request(state, prepared_request)
+          end
+
+        case result do
           {:ok, state} ->
             case activate_socket(transport, socket) do
               :ok -> owner_loop(state)
