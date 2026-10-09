@@ -192,6 +192,26 @@ before the next bounded `:write_next` step, so responses and peer KeyUpdate
 messages continue to make progress without bypassing older input. Application
 active-once credit remains independent of this internal rearming.
 
+The owner may explicitly opt in to `SSL.enable_duplex_reads/1` on an established
+open connection with a finite send timeout. This idempotent operation permits
+bounded inbound processing while one application output job is pending. The
+handshake, control and shutdown barriers stay intact; mandatory inbound protocol
+responses on an occupied writer fail closed with `:busy`. Infinite-timeout write
+admission is rejected in this mode. The pending job is immutable and retains its
+original deadline, including any automatic KeyUpdate bundled with its application
+record; no epoch rollback, re-encryption or retransmission occurs.
+
+`SSL.abandon_send/1` is a separate owner-only, one-way operation. It settles an
+admitted logical send as `{:error, :write_abandoned}`, drops unsent plaintext and
+its caller monitor/timer, and rejects future application sends. Only the existing
+bounded protected job (up to 16,384 application plaintext bytes plus TLS and
+optional KeyUpdate overhead) and already-buffered TCP bytes may remain. Reads
+retain their bounds and may finish before that job; `SSL.close/1` aborts remaining
+uncertain output. Abandonment rejects a pending job without a finite output timer.
+HTTP/1 streamed Fetch uploads use these operations under their original request
+deadline; confirmed logical upload/source death is distinct from the surviving
+bounded transport job.
+
 Timeout or sender death after transmission starts fails the connection closed;
 uncertain application bytes are never retried. Close and owner death abort an
 uncertain blocked output immediately, including for an infinite send timeout.

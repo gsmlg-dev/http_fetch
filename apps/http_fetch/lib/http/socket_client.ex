@@ -438,7 +438,8 @@ defmodule HTTP.SocketClient do
             protocol: protocol,
             mode: nil,
             response_sent?: false,
-            upload: nil
+            upload: nil,
+            upload_cancelled?: false
           })
 
         case start_prepared_request(state, prepared_request) do
@@ -1361,6 +1362,13 @@ defmodule HTTP.SocketClient do
   end
 
   defp fail(state, reason) do
+    # TLS output and the request timer can expire together. Classify their race
+    # by the original deadline, while preserving earlier transport timeouts.
+    reason =
+      if reason == :timeout and remaining_timeout(state.deadline_at) == 0,
+        do: :request_timeout,
+        else: reason
+
     if state.response_sent? do
       case state.mode do
         {:stream, stream_pid} -> HTTP.Stream.error(stream_pid, reason)
@@ -1380,8 +1388,18 @@ defmodule HTTP.SocketClient do
 
   defp cleanup(state) do
     _ = Process.cancel_timer(state.timer_ref)
-    _ = stop_http1_upload(state, :aborted)
-    state.transport.close(state.socket)
+
+    case stop_http1_upload(state, :aborted) do
+      {:ok, state} ->
+        close_http1_socket(state)
+
+      {:error, _reason, state} ->
+        close_http1_socket(state)
+
+        if state.upload != nil do
+          HTTP.HTTP1.Upload.stop(state.upload, :aborted, state.deadline_at)
+        end
+    end
   end
 
   defp await_owner(ref, owner_pid, timeout) do
@@ -1537,7 +1555,8 @@ defmodule HTTP.SocketClient do
   end
 
   defp start_prepared_request(state, {:http1_stream, head, stream, length}) do
-    with :ok <-
+    with :ok <- enable_http1_duplex_reads(state),
+         :ok <-
            send_request(state.transport, state.socket, head, remaining_timeout(state.deadline_at)) do
       upload =
         HTTP.HTTP1.Upload.start(
@@ -1553,19 +1572,69 @@ defmodule HTTP.SocketClient do
     end
   end
 
+  defp enable_http1_duplex_reads(%{transport: HTTP.Transport.ExSSL} = state) do
+    remaining = remaining_timeout(state.deadline_at)
+
+    configured =
+      state.request.transport_options
+      |> Keyword.get(:socket_opts, [])
+      |> Keyword.get(:send_timeout, remaining)
+
+    timeout = if configured == :infinity, do: remaining, else: min(configured, remaining)
+    HTTP.Transport.ExSSL.enable_duplex_reads(state.socket, timeout)
+  end
+
+  defp enable_http1_duplex_reads(_state), do: :ok
+
   defp stop_http1_upload(%{upload: nil} = state, _reason), do: {:ok, state}
 
   defp stop_http1_upload(state, reason) do
     # A killed write may leave bytes in the inet driver's output queue. Preserve
     # response reads, but make the eventual close abort that unfinished upload
     # instead of waiting indefinitely for a peer that has stopped reading.
-    _ = state.transport.setopts(state.socket, linger: {true, 0})
+    abandonment =
+      case {state.transport, state.socket} do
+        {HTTP.Transport.SSL, socket} ->
+          if HTTP.Transport.SSL.cancellable?(socket) do
+            :ok
+          else
+            _ = state.transport.setopts(socket, linger: {true, 0})
+            :ok
+          end
 
-    case HTTP.HTTP1.Upload.stop(state.upload, reason, state.deadline_at) do
-      :ok -> {:ok, %{state | upload: nil}}
-      {:error, reason} -> {:error, reason, %{state | upload: nil}}
+        {HTTP.Transport.ExSSL, socket} ->
+          HTTP.Transport.ExSSL.abandon_send(socket)
+
+        {_transport, socket} ->
+          _ = state.transport.setopts(socket, linger: {true, 0})
+          :ok
+      end
+
+    # OTP's TLS sender can still hold a bounded write after its caller dies.
+    # Keep the read side for the entire response, then abort the retained TCP
+    # transport at final cleanup rather than waiting in the sender's queue.
+    case abandonment do
+      :ok ->
+        upload = state.upload
+        state = %{state | upload: nil, upload_cancelled?: true}
+
+        case HTTP.HTTP1.Upload.stop(upload, reason, state.deadline_at) do
+          :ok -> {:ok, state}
+          {:error, reason} -> {:error, reason, state}
+        end
+
+      {:error, reason} ->
+        {:error, {:upload_abandon, reason}, state}
     end
   end
+
+  defp close_http1_socket(%{transport: HTTP.Transport.SSL, upload_cancelled?: true} = state) do
+    if HTTP.Transport.SSL.cancellable?(state.socket),
+      do: HTTP.Transport.SSL.abort(state.socket),
+      else: HTTP.Transport.SSL.close(state.socket)
+  end
+
+  defp close_http1_socket(state), do: state.transport.close(state.socket)
 
   defp flush_protocol_writes(
          %{protocol_module: HTTP.HTTP2, protocol: protocol} = state,

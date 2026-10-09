@@ -31,6 +31,10 @@ defmodule HTTP.Transport.SSL do
     end
   end
 
+  @doc false
+  def cancellable?({:cancellable_ssl, _socket, _tcp}), do: true
+  def cancellable?(_socket), do: false
+
   @spec abort(cancellable_socket()) :: :ok
   def abort({:cancellable_ssl, _socket, tcp}), do: abort_tcp(tcp)
 
@@ -42,6 +46,9 @@ defmodule HTTP.Transport.SSL do
   defp now, do: System.monotonic_time(:millisecond)
 
   @impl true
+  def connect(host, port, [{:cancellable, true} | opts], timeout),
+    do: connect_cancellable(host, port, opts, timeout)
+
   def connect(host, port, opts, timeout) do
     ssl_opts = ssl_options(host, Keyword.get(opts, :ssl, []))
 

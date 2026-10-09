@@ -16,6 +16,15 @@ defmodule HTTP.Transport.ExSSL do
   @impl true
   def send(socket, iodata), do: SSL.send(socket, iodata)
 
+  @doc false
+  def enable_duplex_reads(socket, timeout) do
+    with :ok <- SSL.setopts(socket, send_timeout: timeout),
+         do: SSL.enable_duplex_reads(socket)
+  end
+
+  @doc false
+  def abandon_send(socket), do: SSL.abandon_send(socket)
+
   @impl true
   def recv(socket, length, timeout), do: SSL.recv(socket, length, timeout)
 

@@ -247,6 +247,7 @@ defmodule HTTP.Runtime.Dialer do
       |> Keyword.put_new(:send_timeout_close, true)
 
     [
+      cancellable: selection.mode == :http1 and is_pid(request.body),
       ssl:
         request.transport_options
         |> Keyword.get(:ssl, [])
