@@ -4,13 +4,14 @@ defmodule HTTP.HTTP2RequestLengthTest do
   alias HTTP.HTTP2.HPACK
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer
 
-  for bytes <- ["", "abcdef", :binary.copy("u", 131_072)] do
-    test "preserves Content-Length for a #{byte_size(bytes)} byte streaming HTTP/2 upload" do
+  for method <- [:put, :get, :delete], bytes <- ["", "abcdef", :binary.copy("u", 131_072)] do
+    test "preserves Content-Length for a #{byte_size(bytes)} byte streaming HTTP/2 #{method} upload" do
       bytes = unquote(bytes)
 
       {url, peer} =
         Peer.start(self(), fn socket ->
           {id, headers, _decoder} = request_headers(socket, HPACK.new_decoder())
+          assert {":method", unquote(String.upcase(to_string(method)))} in headers
           assert {"content-length", to_string(byte_size(bytes))} in headers
           refute Enum.any?(headers, fn {name, _} -> name == "transfer-encoding" end)
           assert Peer.body(socket, id) == bytes
@@ -32,7 +33,8 @@ defmodule HTTP.HTTP2RequestLengthTest do
 
       response =
         fetch(url,
-          method: :put,
+          method: unquote(method),
+          request_mode: :proxy,
           body: stream,
           duplex: "half",
           headers: [{"content-length", to_string(byte_size(bytes))}]

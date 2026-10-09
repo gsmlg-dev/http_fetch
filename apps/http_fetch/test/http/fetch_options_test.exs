@@ -2,6 +2,22 @@ defmodule HTTP.FetchOptionsTest do
   use ExUnit.Case
 
   describe "new/1" do
+    test "validates proxy request mode in flat init options" do
+      assert Map.get(HTTP.FetchOptions.new([]), :request_mode) == :fetch
+
+      for input <- [
+            [request_mode: :proxy],
+            %{"request_mode" => "proxy"},
+            %{"requestMode" => "proxy"}
+          ] do
+        assert Map.get(HTTP.FetchOptions.new(input), :request_mode) == :proxy
+      end
+
+      assert_raise ArgumentError, ~r/unsupported request_mode/, fn ->
+        HTTP.FetchOptions.new(request_mode: :invalid)
+      end
+    end
+
     test "creates from keyword list" do
       options = HTTP.FetchOptions.new(method: "GET", timeout: 5_000)
       assert %HTTP.FetchOptions{method: :get, timeout: 5_000} = options

@@ -1,6 +1,40 @@
 defmodule HTTP.HTTP1Test do
   use ExUnit.Case, async: true
 
+  test "proxy streams reject conflicting or unsupported framing before serialization" do
+    for fields <- [
+          [{"Transfer-Encoding", "chunked"}, {"Content-Length", "3"}],
+          [{"Transfer-Encoding", "gzip"}],
+          [{"Transfer-Encoding", "chunked, gzip"}],
+          [{"Transfer-Encoding", "chunked"}, {"Transfer-Encoding", "chunked"}]
+        ] do
+      request = %HTTP.Request{
+        method: :delete,
+        request_mode: :proxy,
+        url: URI.parse("http://example.test/"),
+        body: self(),
+        duplex: :half,
+        headers: HTTP.Headers.new(fields)
+      }
+
+      assert_raise ArgumentError, ~r/proxy Transfer-Encoding/, fn ->
+        HTTP.HTTP1.prepare_request(request)
+      end
+    end
+
+    request = %HTTP.Request{
+      method: :get,
+      request_mode: :proxy,
+      url: URI.parse("http://example.test/"),
+      body: "abc",
+      headers: HTTP.Headers.new([{"Transfer-Encoding", "chunked"}])
+    }
+
+    assert_raise ArgumentError, ~r/proxy Transfer-Encoding/, fn ->
+      HTTP.HTTP1.prepare_request(request)
+    end
+  end
+
   describe "serialize_request/1" do
     test "serializes path, query, host, connection, content headers, and body" do
       request = %HTTP.Request{

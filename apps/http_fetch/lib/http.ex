@@ -104,6 +104,9 @@ defmodule HTTP do
                               or a map that will be converted to the tuple format.
                 - `:body`: The request body. Buffered bodies may be binary or iodata; streaming
                            bodies may be an `HTTP.Stream` PID when `duplex: "half"` is set.
+                - `:request_mode`: `:fetch` (default) or `:proxy`. Proxy mode preserves
+                                   request bodies for all admitted methods, including GET,
+                                   DELETE, and HEAD. HEAD response bodies remain empty.
                 - `:duplex`: Set to `:half` or `"half"` to enable Fetch-style request body streaming.
                              HTTP/1.1 uses chunked framing; HTTP/2 uses flow-controlled DATA frames.
                 - `:content_type`: The Content-Type header value. If not provided for methods with body,
@@ -278,6 +281,7 @@ defmodule HTTP do
     request = %Request{
       url: uri,
       method: HTTP.FetchOptions.get_method(options),
+      request_mode: options.request_mode,
       headers:
         options
         |> HTTP.FetchOptions.get_headers()
