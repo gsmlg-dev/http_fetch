@@ -976,6 +976,9 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   defp rearm(%{transport: nil} = state), do: {:noreply, state}
+  # A peer Close ends HTTP/1 frame reads. Let the bounded close reply settle
+  # without granting read credit to a TCP socket the peer may already have closed.
+  defp rearm(%{http_version: :http1, close_received?: true} = state), do: {:noreply, state}
   defp rearm(%{raw_bytes: bytes} = state) when bytes > 0, do: {:noreply, state}
 
   defp rearm(state) do
