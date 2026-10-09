@@ -122,6 +122,20 @@ response bytes or peer-requested KeyUpdate traffic, while a control response
 still cannot overtake already-protected application ciphertext. Consumer calls
 must not use repeated `setopts/2` as a polling mechanism for TLS progress.
 
+For HTTP/1 streamed uploads, Fetch bounds the send timeout by the remaining
+request deadline and explicitly enables the owner-only `SSL.enable_duplex_reads/1`
+mode before starting the upload. This mode permits response reads during a pending
+application output job while retaining handshake/control/shutdown barriers.
+After a final response it calls `SSL.abandon_send/1` before terminating the logical
+upload worker. Abandonment settles that send as `:write_abandoned`, drops unsent
+plaintext and its caller monitor/timer, permanently rejects further application
+sends, and retains only an immutable protected output job under its old finite
+deadline. The job can bundle automatic KeyUpdate plus one application record;
+it is not reconstructed or replayed. Reads remain bounded. A mandatory TLS reply
+while output is occupied fails closed; there is no extra output queue. Finishing
+or cancelling the response closes the transport and releases that surviving job.
+The ordinary sender-death policy remains fail-close without explicit abandonment.
+
 All TLS output paths share the same connection-owned asynchronous writer.
 Handshake deadlines include ClientHello/retry/client-Finished transport output;
 logical send deadlines are not restarted by interleaved input or control

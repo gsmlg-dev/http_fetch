@@ -73,6 +73,37 @@ defmodule SSL do
          do: call(socket, {:send, token, cursor, size})
   end
 
+  @doc """
+  Enables bounded response reads during an application send.
+
+  This owner-only, idempotent operation applies to an established open socket.
+  It requires a finite send timeout and rejects later infinite-timeout sends.
+  Reads may progress while one already-protected application output job is
+  pending. Handshake, control and shutdown output barriers remain in place;
+  inbound protocol traffic requiring output on a busy writer fails closed.
+  Normal sender death still fails the connection closed.
+  """
+  @spec enable_duplex_reads(Socket.t()) :: :ok | {:error, term()}
+  def enable_duplex_reads(socket), do: call(socket, :enable_duplex_reads)
+
+  @doc """
+  Permanently abandons application writes while retaining response reads.
+
+  Only the controlling owner may call this on an established connection. An
+  admitted send settles as `{:error, :write_abandoned}`; unsent plaintext is discarded and
+  future sends are rejected. A bounded already-protected application output job may
+  still finish its original transport write under its original finite deadline.
+  The job may include an automatic KeyUpdate followed by one application record. It is
+  never re-encrypted or replayed. Reads keep their existing byte bounds; inbound
+  protocol traffic that requires output while this record is pending fails closed.
+
+  Call `close/1` after consuming the response, or to abort the pending record.
+  Ordinary sender death continues to fail the connection closed unless the owner
+  explicitly abandons writes before the sender dies.
+  """
+  @spec abandon_send(Socket.t()) :: :ok | {:error, term()}
+  def abandon_send(socket), do: call(socket, :abandon_send)
+
   @doc "Changes supported delivery, send, and mutable TCP options after validation."
   @spec setopts(Socket.t(), list()) :: :ok | {:error, term()}
   def setopts(socket, options) do

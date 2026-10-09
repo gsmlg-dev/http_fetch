@@ -8,6 +8,36 @@ defmodule HTTP.WebSocket.LifecycleBoundsTest do
   @timeout 5_000
   @preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
+  test "acknowledged sends complete only after H2 write credit settles" do
+    parent = self()
+
+    {url, peer} =
+      peer(
+        fn socket ->
+          {id, 4} = request(socket)
+          :ok = :gen_tcp.send(socket, frame(1, 4, id, <<0x88>>))
+          receive do: (:grant -> :ok)
+          :ok = :gen_tcp.send(socket, frame(8, 0, id, <<0::1, 128::31>>))
+          assert {1, "credit"} = websocket_frame(socket, id)
+          send(parent, {:written, self()})
+          receive do: (:close -> clean_close(socket, id))
+        end,
+        0
+      )
+
+    ws = websocket(url)
+    assert_receive {WebSocket, ^ws, %Open{}}, @timeout
+    assert {:ok, ref} = WebSocket.send_ack(ws, "credit")
+    assert %{pending_send_frames: 1} = WebSocket.status(ws)
+    refute_receive {WebSocket, ^ws, {:send_result, ^ref, :ok}}, 0
+    send(peer, :grant)
+    assert_receive {WebSocket, ^ws, {:send_result, ^ref, :ok}}, @timeout
+    assert_receive {:written, ^peer}, @timeout
+    send(peer, :close)
+    assert_receive {WebSocket, ^ws, %Close{was_clean: true}}, @timeout
+    refute_receive {WebSocket, ^ws, {:send_result, ^ref, _}}, 0
+  end
+
   test "empty application frames count toward the send bound and blocked close is finite" do
     parent = self()
 

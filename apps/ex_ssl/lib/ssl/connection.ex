@@ -61,6 +61,8 @@ defmodule SSL.Connection do
       size: 0,
       armed: false,
       closed: false,
+      write_abandoned?: false,
+      duplex_reads?: false,
       active_terminal: false,
       terminal_notified: false
     ]
@@ -292,10 +294,47 @@ defmodule SSL.Connection do
     end
   end
 
+  def handle_event({:call, from}, {_ref, :enable_duplex_reads}, :connected, state) do
+    cond do
+      elem(from, 0) != state.owner ->
+        reply(from, {:error, :not_owner})
+
+      state.closed or state.write_abandoned? ->
+        reply(from, {:error, :closed})
+
+      state.send_timeout == :infinity or match?(%{deadline: :infinity}, state.write) or
+          match?(%{timer: nil}, state.output) ->
+        reply(from, {:error, :infinite_send_timeout})
+
+      true ->
+        drain_or_continue(:connected, %{state | duplex_reads?: true}, [{:reply, from, :ok}])
+    end
+  end
+
+  def handle_event({:call, from}, {_ref, :abandon_send}, :connected, state) do
+    cond do
+      elem(from, 0) != state.owner ->
+        reply(from, {:error, :not_owner})
+
+      state.output != nil and state.output.timer == nil ->
+        reply(from, {:error, :infinite_send_timeout})
+
+      true ->
+        # Drop the plaintext cursor and caller monitor. Retain only the immutable
+        # protected application job (possibly a KeyUpdate plus one record),
+        # its original timer, and bytes already handed to the TCP driver.
+        state = settle_write(state, {:error, :write_abandoned})
+        drain_or_continue(:connected, %{state | write_abandoned?: true}, [{:reply, from, :ok}])
+    end
+  end
+
   def handle_event({:call, from}, {_ref, :reserve_write}, :connected, state) do
     cond do
-      state.closed ->
+      state.closed or state.write_abandoned? ->
         reply(from, {:error, :closed})
+
+      state.duplex_reads? and state.send_timeout == :infinity ->
+        reply(from, {:error, :infinite_send_timeout})
 
       state.write != nil ->
         reply(from, {:error, :busy})
@@ -557,7 +596,7 @@ defmodule SSL.Connection do
 
   defp drain_or_continue(phase, state, actions \\ []) do
     cond do
-      state.output != nil ->
+      output_barrier?(state) ->
         {:next_state, phase, state, actions}
 
       not :queue.is_empty(state.input) ->
@@ -571,13 +610,23 @@ defmodule SSL.Connection do
     end
   end
 
+  defp output_barrier?(%{output: nil}), do: false
+  defp output_barrier?(%{output: %{kind: :application}, write_abandoned?: true}), do: false
+  defp output_barrier?(%{output: %{kind: :application}, duplex_reads?: true}), do: false
+  defp output_barrier?(_state), do: true
+
   defp ready_for_write?(%{write: %{cursor: cursor, waiting: nil}}) when not is_nil(cursor),
     do: true
 
   defp ready_for_write?(_state), do: false
 
-  defp drain_input(phase, %{output: output} = state) when not is_nil(output),
-    do: {:next_state, phase, state}
+  defp drain_input(
+         phase,
+         %{output: output, write_abandoned?: abandoned?, duplex_reads?: duplex?} = state
+       )
+       when not is_nil(output) and
+              ((not abandoned? and not duplex?) or output.kind != :application),
+       do: {:next_state, phase, state}
 
   defp drain_input(phase, state) do
     case :queue.out(state.input) do
@@ -842,7 +891,7 @@ defmodule SSL.Connection do
 
   defp continue(phase, state, actions) do
     can_read = state.size < @max_plaintext - @rearm_reserve or state.recv != nil
-    input_idle = state.output == nil and :queue.is_empty(state.input)
+    input_idle = not output_barrier?(state) and :queue.is_empty(state.input)
 
     if state.tcp && not state.armed && not state.closed && can_read && input_idle do
       case :inet.setopts(state.tcp, active: :once) do
@@ -1007,6 +1056,9 @@ defmodule SSL.Connection do
   defp start_output(_state, _bytes, _kind, _continuation, _deadline), do: {:error, :busy}
 
   defp complete_output(phase, %{continuation: :handshake_start}, state),
+    do: drain_or_continue(phase, state)
+
+  defp complete_output(phase, %{continuation: :application}, %{write: nil} = state),
     do: drain_or_continue(phase, state)
 
   defp complete_output(phase, %{continuation: :application}, %{write: write} = state) do

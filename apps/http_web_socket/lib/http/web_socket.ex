@@ -30,6 +30,31 @@ defmodule HTTP.WebSocket do
   are always stripped. This option applies to every lifecycle/message event
   and never changes the transport URL or handshake.
 
+  ## HTTP/1 WebSocket proxy boundary
+
+  Use this public client for the upstream half of a WebSocket proxy. Select
+  `http_version: :http1` and `delivery: :ack`; acknowledge each Message only
+  after downstream consumption. Set finite `opening_timeout`, `idle_timeout`,
+  `write_timeout` and `close_timeout`, and size/count limits for messages,
+  receive queues and pending sends. `send_ack/2` reports local transport
+  completion for each admitted frame. `send/2` reports admission only.
+
+  The client validates status 101, Upgrade/Connection tokens, exactly one
+  matching Sec-WebSocket-Accept and the selected subprotocol. Bytes coalesced
+  after the response head enter the frame parser. Redirects and uncertain
+  operations are never replayed. Ping is answered with Pong automatically;
+  Close is exchanged with the peer. This interface proxies WebSocket messages,
+  not raw TCP bytes or exact frame fragmentation. Forward binary messages
+  with `array_buffer/1` and configure the upstream protocols explicitly.
+
+  WSS retains the selected TLS backend's CA, hostname and SNI verification;
+  supply trusted `ssl: [cacertfile: ...]` for private CAs. Owner death closes
+  the connection. `close/1` signals cancellation; monitor the socket's public
+  `pid` for `:DOWN` to confirm cleanup, including a cancelled opening. A
+  Close event describes the handshake result; it does not prove peer
+  application receipt of earlier writes. Terminal cancellation discards
+  pending transport bytes, so a failed write may have reached the peer partly.
+
   Plain Elixir binaries are sent as text frames. Use `array_buffer/1` or
   `HTTP.Blob` for binary frames.
 
@@ -136,6 +161,21 @@ defmodule HTTP.WebSocket do
 
   @spec send(t(), String.t() | HTTP.Blob.t() | ArrayBuffer.t()) :: :ok | {:error, term()}
   def send(socket, data), do: connection_call(socket, {:send, data}, {:error, :closed})
+
+  @doc """
+  Admits a bounded send and returns its completion reference.
+
+  The owner receives `{HTTP.WebSocket, socket, {:send_result, ref, result}}`,
+  where `result` is `:ok` only after the complete frame was accepted by the
+  transport, or `{:error, reason}` on cancellation/failure. This confirms local
+  write completion, not peer application receipt. Failed/uncertain writes are
+  never replayed. Unlike `send/2`, a closed connection rejects admission.
+  Queuing and writing share the finite `write_timeout` (default 5 seconds).
+  """
+  @spec send_ack(t(), String.t() | HTTP.Blob.t() | ArrayBuffer.t()) ::
+          {:ok, reference()} | {:error, term()}
+  def send_ack(socket, data),
+    do: connection_call(socket, {:send_ack, data}, {:error, :closed})
 
   @spec close(t()) :: :ok | {:error, term()}
   def close(socket), do: close(socket, nil, "")

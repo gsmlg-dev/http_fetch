@@ -247,9 +247,10 @@ defmodule HTTP.WebSocket.Handshake do
   end
 
   defp validate_accept(headers, key) do
-    case HTTP.Headers.get(headers, "sec-websocket-accept") do
-      nil -> {:error, :missing_accept}
-      value -> if value == accept_key(key), do: :ok, else: {:error, :invalid_accept}
+    case HTTP.Headers.get_all(headers, "sec-websocket-accept") do
+      [] -> {:error, :missing_accept}
+      [value] -> if value == accept_key(key), do: :ok, else: {:error, :invalid_accept}
+      _ -> {:error, :invalid_accept}
     end
   end
 

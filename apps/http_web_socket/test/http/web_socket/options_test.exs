@@ -16,6 +16,16 @@ defmodule HTTP.WebSocket.OptionsTest do
     assert {:error, :fragment_not_allowed} = Options.new("ws://example.com/socket#frag")
   end
 
+  test "write deadline is finite and accepts flat map keys" do
+    assert {:ok, %{write_timeout: 123}} =
+             Options.new("ws://example.com", [], %{"writeTimeout" => 123})
+
+    for value <- [:infinity, 0, -1] do
+      assert {:error, {:invalid_option, :write_timeout}} =
+               Options.new("ws://example.com", [], write_timeout: value)
+    end
+  end
+
   test "normalizes protocols" do
     assert {:ok, %{protocols: []}} = Options.new("ws://example.com/socket")
     assert {:ok, %{protocols: ["chat"]}} = Options.new("ws://example.com/socket", "chat")

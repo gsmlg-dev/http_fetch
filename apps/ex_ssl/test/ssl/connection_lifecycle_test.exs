@@ -287,20 +287,27 @@ defmodule SSL.ConnectionLifecycleTest do
   end
 
   test "failed handshake times out and leaves no connection process or raw socket" do
+    parent = self()
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
     {:ok, {_, port}} = :inet.sockname(listener)
 
     task =
       Task.async(fn ->
         {:ok, tcp} = :gen_tcp.accept(listener, 1_000)
-        assert {:ok, _hello} = :gen_tcp.recv(tcp, 0, 1_000)
-        assert {:error, :closed} = :gen_tcp.recv(tcp, 0, 1_000)
+        assert {:ok, _hello} = :gen_tcp.recv(tcp, 0, 5_000)
+        send(parent, :timeout_handshake_observed)
+        assert {:error, :closed} = :gen_tcp.recv(tcp, 0, 7_000)
       end)
 
-    before = DynamicSupervisor.count_children(SSL.ConnectionSupervisor).active
-    assert {:error, :timeout} = SSL.connect(~c"127.0.0.1", port, Peer.client_options(), 50)
+    before = connection_children()
+    caller = Task.async(fn -> SSL.connect(~c"127.0.0.1", port, Peer.client_options(), 5_000) end)
+    assert_receive :timeout_handshake_observed, 5_000
+    [connection] = MapSet.difference(connection_children(), before) |> MapSet.to_list()
+    monitor = Process.monitor(connection)
+    assert {:error, :timeout} = Task.await(caller, 7_000)
+    assert_receive {:DOWN, ^monitor, :process, ^connection, :normal}, 1_000
     Task.await(task)
-    assert DynamicSupervisor.count_children(SSL.ConnectionSupervisor).active == before
+    assert connection_children() == before
     :gen_tcp.close(listener)
   end
 

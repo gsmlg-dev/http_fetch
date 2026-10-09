@@ -58,6 +58,18 @@ defmodule HTTP.WebSocket.HandshakeTest do
     assert {:error, :invalid_accept} = Handshake.validate_response(101, headers, @key, [])
   end
 
+  test "rejects duplicated accept even when the first value is correct" do
+    headers =
+      HTTP.Headers.new([
+        {"upgrade", "websocket"},
+        {"connection", "Upgrade"},
+        {"sec-websocket-accept", Handshake.accept_key(@key)},
+        {"sec-websocket-accept", "wrong"}
+      ])
+
+    assert {:error, :invalid_accept} = Handshake.validate_response(101, headers, @key, [])
+  end
+
   test "rejects unsupported extensions and unexpected protocols" do
     headers =
       HTTP.Headers.new([
