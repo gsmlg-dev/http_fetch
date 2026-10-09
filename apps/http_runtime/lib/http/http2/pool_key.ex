@@ -37,6 +37,7 @@ defmodule HTTP.HTTP2.PoolKey do
          {:ok, origin} <- origin(request.url, protocol),
          transport_options = Keyword.merge(request.transport_options, opts),
          :ok <- validate_route(transport_options),
+         {:ok, proxy} <- HTTP.Proxy.route(%{request | transport_options: transport_options}),
          {:ok, tls_identity, tls_reusable?} <- tls_identity(transport_options, origin),
          {:ok, socket_identity, socket_reusable?} <-
            option_identity(Keyword.get(transport_options, :socket_opts, []), :socket_opts),
@@ -53,7 +54,7 @@ defmodule HTTP.HTTP2.PoolKey do
         protocol: protocol,
         route: route,
         unix_socket: digest_optional(Keyword.get(transport_options, :unix_socket)),
-        proxy: digest_optional(Keyword.get(transport_options, :proxy)),
+        proxy: digest_optional(proxy),
         tls: tls_identity,
         socket_options: socket_identity,
         connection_options: connect_identity,
@@ -106,7 +107,7 @@ defmodule HTTP.HTTP2.PoolKey do
   defp default_port(_), do: nil
 
   defp validate_route(options) do
-    unsupported = [:proxy, :proxy_url, :proxy_opts]
+    unsupported = [:proxy_url, :proxy_opts]
 
     bad_proxy =
       Enum.find(unsupported, fn key ->
@@ -115,10 +116,9 @@ defmodule HTTP.HTTP2.PoolKey do
 
     case bad_proxy do
       nil ->
-        case Keyword.get(options, :route, :direct) do
-          :direct -> :ok
-          nil -> :ok
-          _ -> {:error, {:unsupported_route, :route}}
+        case HTTP.Proxy.normalize(Keyword.get(options, :proxy)) do
+          {:error, _} -> {:error, {:unsupported_route, :proxy}}
+          {:ok, _} -> validate_direct_route(options)
         end
 
       key ->
@@ -126,9 +126,20 @@ defmodule HTTP.HTTP2.PoolKey do
     end
   end
 
+  defp validate_direct_route(options) do
+    case Keyword.get(options, :route, :direct) do
+      :direct -> :ok
+      nil -> :ok
+      _ -> {:error, {:unsupported_route, :route}}
+    end
+  end
+
   defp route_identity(options) do
-    route = Keyword.get(options, :route, :direct)
-    safe_identity(route, :route)
+    case HTTP.Proxy.normalize(Keyword.get(options, :proxy)) do
+      {:ok, nil} -> safe_identity(Keyword.get(options, :route, :direct), :route)
+      {:ok, proxy} -> safe_identity({:http_proxy, proxy}, :route)
+      {:error, _} -> {:error, {:unsupported_route, :proxy}}
+    end
   end
 
   defp tls_identity(options, origin) do

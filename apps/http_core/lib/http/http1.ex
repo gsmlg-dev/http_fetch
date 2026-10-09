@@ -42,7 +42,7 @@ defmodule HTTP.HTTP1 do
   @spec prepare_request(Request.t()) :: {iolist(), iodata() | {:stream, pid()}}
   def prepare_request(%Request{} = request) do
     method = Request.method_token(request.method)
-    target = Request.origin_form(request.url)
+    target = HTTP.Proxy.target(request)
 
     {headers, body} = request |> request_headers() |> Request.put_body_headers(request)
     validate_request_trailers!(request, headers)
@@ -441,7 +441,8 @@ defmodule HTTP.HTTP1 do
   end
 
   defp request_headers(%Request{} = request) do
-    request.headers
+    request
+    |> HTTP.Proxy.request_headers()
     |> validate_request_framing!()
     |> ensure_user_agent()
     |> Headers.set_default("Host", Request.authority(request.url))

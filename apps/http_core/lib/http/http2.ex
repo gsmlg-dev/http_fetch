@@ -876,7 +876,8 @@ defmodule HTTP.HTTP2 do
   end
 
   defp base_request_headers(%Request{} = request) do
-    request.headers
+    request
+    |> HTTP.Proxy.request_headers()
     |> Request.reject_unsupported_request_framing!()
     |> Headers.set_default("User-Agent", Headers.user_agent())
   end

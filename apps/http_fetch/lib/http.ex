@@ -100,6 +100,10 @@ defmodule HTTP do
               Supported options:
                 - `:method`: The HTTP method (e.g., "GET", "POST"). Defaults to "GET".
                              Can be a string or an atom (e.g., "GET" or :get).
+                - `:proxy`: Explicit HTTP proxy `{:http, host, port, opts}`. Options are
+                            proxy-only authorization headers and a bounded timeout.
+                            HTTP/1 forwards cleartext requests; HTTPS uses CONNECT
+                            before origin TLS and HTTP/1 or HTTP/2 negotiation.
                 - `:headers`: A list of request headers as `{name, value}` tuples (e.g., [{"Content-Type", "application/json"}])
                               or a map that will be converted to the tuple format.
                 - `:body`: The request body. Buffered bodies may be binary or iodata; streaming

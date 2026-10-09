@@ -39,12 +39,13 @@ defmodule HTTP.Runtime.Dialer do
   def connect(transport, host, port, request, selection, timeout, cancel_monitor \\ nil) do
     connect_timeout = min(connect_timeout(request), timeout)
 
-    with :ok <- validate_transport_option_lists(transport, request) do
+    with {:ok, proxy} <- HTTP.Proxy.route(request),
+         :ok <- validate_transport_option_lists(transport, request) do
       interruptible_connect(
         transport,
         host,
         port,
-        transport_opts(request, selection, timeout),
+        Keyword.put(transport_opts(request, selection, timeout), :proxy_route, proxy),
         connect_timeout,
         cancel_monitor
       )
@@ -126,7 +127,13 @@ defmodule HTTP.Runtime.Dialer do
   defp close_connect_socket(transport, socket), do: transport.close(socket)
 
   defp connect_in_worker(transport, host, port, opts, timeout, owner, ref) do
-    case transport.connect(host, port, opts, timeout) do
+    result =
+      case Keyword.get(opts, :proxy_route) do
+        nil -> transport.connect(host, port, Keyword.delete(opts, :proxy_route), timeout)
+        proxy -> HTTP.Proxy.connect(transport, host, port, opts, timeout, proxy)
+      end
+
+    case result do
       {:ok, socket} ->
         send(owner, {:connect_socket, ref, socket})
         transfer_connected_socket(transport, socket, owner, ref, timeout)
@@ -158,24 +165,32 @@ defmodule HTTP.Runtime.Dialer do
     end
   end
 
-  def select_transport(_request, socket_path) when is_binary(socket_path) do
+  def select_transport(request, socket_path) do
+    with {:ok, _proxy} <- HTTP.Proxy.route(request, socket_path),
+         do: select_origin_transport(request, socket_path)
+  end
+
+  defp select_origin_transport(_request, socket_path) when is_binary(socket_path) do
     {:ok, HTTP.Transport.Unix, socket_path, 0}
   end
 
-  def select_transport(%Request{url: %URI{scheme: "http", host: host} = uri}, _socket_path)
-      when is_binary(host) do
+  defp select_origin_transport(
+         %Request{url: %URI{scheme: "http", host: host} = uri},
+         _socket_path
+       )
+       when is_binary(host) do
     {:ok, HTTP.Transport.TCP, host, uri.port || 80}
   end
 
-  def select_transport(
-        %Request{url: %URI{scheme: "https", host: host} = uri} = request,
-        _socket_path
-      )
-      when is_binary(host) do
+  defp select_origin_transport(
+         %Request{url: %URI{scheme: "https", host: host} = uri} = request,
+         _socket_path
+       )
+       when is_binary(host) do
     {:ok, HTTP.TLSBackend.transport(tls_backend(request)), host, uri.port || 443}
   end
 
-  def select_transport(%Request{url: %URI{scheme: scheme}}, _socket_path) do
+  defp select_origin_transport(%Request{url: %URI{scheme: scheme}}, _socket_path) do
     {:error, {:unsupported_scheme, scheme}}
   end
 
