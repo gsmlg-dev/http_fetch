@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-10-09
+
+### Added
+- Expose bounded HTTP/1 request and response trailers, including
+  `HTTP.Stream.finish/2` for streamed request trailers.
+- Provide acknowledged WebSocket writes with finite deadlines and document
+  the public WebSocket client boundary for reverse proxies.
+- Support `decode_body: false` to preserve original response bytes across
+  HTTP/1, HTTP/2 and HTTP/3, for both buffered and streamed responses.
+
+### Fixed
+- Read HTTP/1 responses while streaming uploads are backpressured; stop
+  unfinished uploads on early final responses and bound cancellation for
+  plain TCP, OTP TLS and ExSSL without replaying uncertain writes.
+- Remove credentials and nested request secrets from Fetch telemetry by
+  default and honor per-request and global telemetry opt-outs.
+- Validate WebSocket handshakes and clean up blocked writes on cancellation,
+  deadlines and owner loss, including verified secure connections.
+
 ## [0.17.1] - 2026-10-09
 
 ### Fixed
