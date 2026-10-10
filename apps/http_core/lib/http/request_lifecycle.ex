@@ -26,20 +26,36 @@ defmodule HTTP.RequestLifecycle do
   def bind_connector(tracker, token, deadline),
     do: deadline_call(tracker, {:bind_connector, token}, deadline)
 
-  def track_tls(opts, {:sslsocket, _, processes}) when is_list(processes) do
-    tracker = Keyword.get(opts, :request_lifecycle)
+  def track_tls(opts, socket) do
+    case Keyword.get(opts, :request_lifecycle) do
+      nil ->
+        :ok
 
-    if tracker do
-      Enum.each(processes, fn
-        pid when is_pid(pid) -> GenServer.call(tracker, {:track_independent, pid, :tls})
-        _ -> :ok
-      end)
+      tracker ->
+        case tls_resources(socket) do
+          {:ok, tcp, processes} ->
+            register(tracker, tcp, :socket)
+            Enum.each(processes, &register(tracker, &1, :tls))
+            :ok
+
+          :error ->
+            unconfirmed_tls(tracker)
+            {:error, :unsupported_tls_socket_representation}
+        end
     end
-
-    :ok
   end
 
-  def track_tls(_opts, _socket), do: :ok
+  # OTP 27 and earlier return the process list in the third record field.
+  defp tls_resources({:sslsocket, {:gen_tcp, tcp, _, _}, [receiver, sender]})
+       when is_port(tcp) and is_pid(receiver) and is_pid(sender),
+       do: {:ok, tcp, [receiver, sender]}
+
+  # OTP 28's ssl_api.hrl names these fields connection_handler/payload_sender.
+  defp tls_resources({:sslsocket, tcp, receiver, sender, :gen_tcp, _, _, _})
+       when is_port(tcp) and is_pid(receiver) and is_pid(sender),
+       do: {:ok, tcp, [receiver, sender]}
+
+  defp tls_resources(_socket), do: :error
 
   def enter(nil, _kind), do: :ok
 
@@ -69,6 +85,26 @@ defmodule HTTP.RequestLifecycle do
   def unconfirmed(nil), do: :ok
   def unconfirmed(tracker), do: GenServer.cast(tracker, :unconfirmed)
 
+  def unconfirmed_tls(nil), do: :ok
+  def unconfirmed_tls(tracker), do: GenServer.cast(tracker, :unconfirmed_tls)
+
+  # TLS setup rejects unsupported sockets before pooling. Recheckout preserves
+  # the socket-return API; track_tls records any missing evidence conservatively.
+  def track_socket(opts, {:cancellable_ssl, ssl, _tcp} = socket) do
+    _ = track_tls(opts, ssl)
+    socket
+  end
+
+  def track_socket(opts, {:sslsocket, _, _} = socket) do
+    _ = track_tls(opts, socket)
+    socket
+  end
+
+  def track_socket(opts, {:sslsocket, _, _, _, _, _, _, _} = socket) do
+    _ = track_tls(opts, socket)
+    socket
+  end
+
   def track_socket(opts, socket) do
     register(Keyword.get(opts, :request_lifecycle), socket_resource(socket), :socket)
     socket
@@ -78,12 +114,34 @@ defmodule HTTP.RequestLifecycle do
   # available to another request. Cancellation must never close a handed-off socket.
   def handoff_socket(nil, _socket), do: :ok
 
-  def handoff_socket(tracker, socket), do: handoff(tracker, [socket_resource(socket)])
+  def handoff_socket(tracker, socket), do: handoff_connection_resources(tracker, socket, [])
 
   def handoff_connection(nil, _socket, _owner), do: :ok
 
   def handoff_connection(tracker, socket, owner),
-    do: handoff(tracker, [socket_resource(socket), owner])
+    do: handoff_connection_resources(tracker, socket, [owner])
+
+  defp handoff_connection_resources(tracker, socket, owners) do
+    case connection_resources(socket) do
+      {:ok, resources} ->
+        handoff(tracker, owners ++ resources)
+
+      :error ->
+        unconfirmed_tls(tracker)
+        {:error, :unsupported_tls_socket_representation}
+    end
+  end
+
+  defp connection_resources({:cancellable_ssl, ssl, _tcp}), do: connection_resources(ssl)
+
+  defp connection_resources(socket) when is_tuple(socket) and elem(socket, 0) == :sslsocket do
+    case tls_resources(socket) do
+      {:ok, tcp, processes} -> {:ok, [tcp | processes]}
+      :error -> :error
+    end
+  end
+
+  defp connection_resources(socket), do: {:ok, [socket_resource(socket)]}
 
   defp handoff(tracker, resources) do
     GenServer.call(tracker, {:handoff, resources}, :infinity)
@@ -189,14 +247,20 @@ defmodule HTTP.RequestLifecycle do
   def handle_call({:bind_connector, token}, _, state),
     do: {:reply, :ok, %{state | connector: token}}
 
-  def handle_call({:track_independent, resource, kind}, _, state),
-    do: {:reply, :ok, track_scope(state, resource, kind)}
-
   def handle_call({:register, resource, kind}, _from, state) do
     state = track_scope(state, resource, kind)
     state = if kind in [:task, :owner], do: release_starter(state), else: state
-    monitor = if is_port(resource), do: Port.monitor(resource), else: Process.monitor(resource)
-    state = %{state | resources: Map.put(state.resources, monitor, {resource, kind})}
+
+    state =
+      if resource_kind(state, resource) do
+        state
+      else
+        monitor =
+          if is_port(resource), do: Port.monitor(resource), else: Process.monitor(resource)
+
+        %{state | resources: Map.put(state.resources, monitor, {resource, kind})}
+      end
+
     if state.aborted?, do: cancel(resource, kind)
     {:reply, :ok, state}
   end
@@ -204,7 +268,7 @@ defmodule HTTP.RequestLifecycle do
   def handle_call({:handoff, handed_off}, _from, state) do
     resources =
       Enum.reduce(state.resources, state.resources, fn {ref, {resource, kind}}, acc ->
-        if kind in [:socket, :connection] and resource in handed_off do
+        if kind in [:socket, :connection, :tls] and resource in handed_off do
           Process.demonitor(ref, [:flush])
           Map.delete(acc, ref)
         else
@@ -235,6 +299,11 @@ defmodule HTTP.RequestLifecycle do
 
   @impl true
   def handle_cast(:unconfirmed, state), do: {:noreply, %{state | uncertain?: true}}
+
+  def handle_cast(:unconfirmed_tls, state) do
+    if state.scope, do: GenServer.cast(state.scope, :unconfirmed)
+    {:noreply, %{state | uncertain?: true}}
+  end
 
   def handle_cast({:complete, pid}, state), do: {:noreply, mark_complete(state, pid)}
 
@@ -333,6 +402,8 @@ defmodule HTTP.RequestLifecycle do
   defp cancel(pid, :connection), do: send(pid, :http2_shutdown_exclusive)
   defp cancel(_pid, :starter), do: :ok
   defp cancel(_pid, :task), do: :ok
+  # TCP closure initiates TLS shutdown; each TLS process must actually go DOWN.
+  defp cancel(_pid, :tls), do: :ok
   defp cancel(_pid, :stream_starting), do: :ok
 
   defp cancel(pid, :managed_stream_starting),

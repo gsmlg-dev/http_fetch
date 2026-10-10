@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-10-11
+
+### Fixed
+- Track OTP 27 and OTP 28 TLS receiver and sender processes independently
+  through connection setup, HTTP/1 reuse and HTTP/2 pool handoff. Retain managed
+  connection capacity and retirement barriers until both processes terminate.
+- Retire managed generations with unconfirmed cleanup when TLS setup returns
+  no resource inventory or an unsupported socket representation. Preserve
+  durable retirement receipts after the coordinator has terminated.
+
 ## [0.21.1] - 2026-10-11
 
 ### Fixed

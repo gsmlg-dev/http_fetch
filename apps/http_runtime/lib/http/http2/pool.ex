@@ -123,25 +123,34 @@ defmodule HTTP.HTTP2.Pool do
         {:reply, {:error, :connection_capacity}, state}
 
       true ->
-        HTTP.RequestLifecycle.handoff_connection(
-          Keyword.get(opts, :request_lifecycle),
-          Keyword.get(opts, :socket),
-          owner
-        )
+        case HTTP.RequestLifecycle.handoff_connection(
+               Keyword.get(opts, :request_lifecycle),
+               Keyword.get(opts, :socket),
+               owner
+             ) do
+          :ok ->
+            state =
+              register_internal(
+                state,
+                key,
+                owner,
+                Keyword.get(opts, :max_streams, state.max_streams)
+              )
 
-        state =
-          register_internal(state, key, owner, Keyword.get(opts, :max_streams, state.max_streams))
+            state =
+              if Keyword.get(opts, :connecting?, false) do
+                state
+                |> put_in([:entries, key, :connections, owner, :admission_caller], elem(from, 0))
+                |> finish_connect(key)
+              else
+                state
+              end
 
-        state =
-          if Keyword.get(opts, :connecting?, false) do
-            state
-            |> put_in([:entries, key, :connections, owner, :admission_caller], elem(from, 0))
-            |> finish_connect(key)
-          else
-            state
-          end
+            {:reply, :ok, state |> dispatch_waiters(key) |> emit_pool(:connection, :registered)}
 
-        {:reply, :ok, state |> dispatch_waiters(key) |> emit_pool(:connection, :registered)}
+          {:error, _} = error ->
+            {:reply, error, state}
+        end
     end
   end
 

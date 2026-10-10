@@ -82,7 +82,7 @@ defmodule HTTP.ManagedTransport.Scope do
 
   def handle_call({:connect_start, tracker}, _, state) do
     cond do
-      state.lifecycle in [:aborting, :stopping] ->
+      state.uncertain? or state.lifecycle in [:aborting, :stopping] ->
         {:reply, {:error, :transport_scope_retired}, state}
 
       tracker not in Map.values(state.requests) ->
@@ -118,6 +118,11 @@ defmodule HTTP.ManagedTransport.Scope do
   end
 
   @impl true
+  def handle_cast(:unconfirmed, state) do
+    send(self(), :settle)
+    {:noreply, retire(%{state | uncertain?: true}, :graceful)}
+  end
+
   def handle_cast({:connect_done, token}, state) do
     slots = update_slot(state.slots, token, &%{&1 | done?: true})
     {:noreply, prune_slots(%{state | slots: slots})}
@@ -166,7 +171,7 @@ defmodule HTTP.ManagedTransport.Scope do
           settle(state)
         else
           send(self(), :settle)
-          {:noreply, retire(%{state | uncertain?: reason != :normal}, :abort)}
+          {:noreply, retire(%{state | uncertain?: state.uncertain? or reason != :normal}, :abort)}
         end
 
       true ->

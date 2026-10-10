@@ -82,6 +82,11 @@ defmodule HTTP.ManagedTransport do
   receipt waits after `{:error, :cleanup_pending}`. Lost evidence produces
   `{:error, :cleanup_unconfirmed}`. Normal coordinator termination preserves the
   durable receipt; unexpected coordinator death cannot report success.
+
+  OTP TLS connections retain independent receiver and sender termination
+  evidence after pool handoff. If TLS setup fails without returning a socket,
+  or its resource representation is unsupported, the generation retires with
+  unconfirmed cleanup; open a new scope for subsequent requests.
   """
   alias HTTP.ManagedTransport.{Policy, Scope}
 
@@ -136,7 +141,7 @@ defmodule HTTP.ManagedTransport do
       receipt = %Receipt{coordinator: scope.coordinator, latch: scope.latch}
 
       case :atomics.get(scope.latch, 1) do
-        2 ->
+        settled when settled in [2, 3] ->
           {:ok, receipt}
 
         _ ->
@@ -150,7 +155,7 @@ defmodule HTTP.ManagedTransport do
   defp retire_call(scope, receipt, mode) do
     case call(scope.coordinator, {:retire, mode}, 5_000) do
       :ok -> {:ok, receipt}
-      error -> if :atomics.get(scope.latch, 1) == 2, do: {:ok, receipt}, else: error
+      error -> if :atomics.get(scope.latch, 1) in [2, 3], do: {:ok, receipt}, else: error
     end
   end
 

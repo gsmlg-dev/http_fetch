@@ -68,6 +68,71 @@ defmodule HTTP.ManagedTransport.ScopeTest do
     end
   end
 
+  test "unknown TLS inventory retires admission and preserves unconfirmed generation evidence" do
+    {:ok, scope} =
+      ManagedTransport.open(
+        origin: "https://localhost:443",
+        ssl: [
+          cacertfile:
+            Path.expand("../../../http_fetch/test/support/fixtures/localhost-ca.pem", __DIR__)
+        ],
+        connect_address: {127, 0, 0, 1},
+        http_version: :http1,
+        max_requests: 1,
+        max_connections: 1
+      )
+
+    {tracker, latch} = HTTP.RequestLifecycle.start()
+
+    request = %HTTP.Request{
+      url: URI.parse("https://localhost/"),
+      transport_options: [
+        transport_scope: scope,
+        redirect: :manual,
+        decode_body: false,
+        stream_response: true
+      ]
+    }
+
+    assert {:ok, request} = ManagedTransport.prepare(request, [])
+    assert :ok = ManagedTransport.associate(request, tracker)
+    assert :ok = ManagedTransport.admit(request, tracker)
+
+    parent = self()
+
+    owner =
+      spawn(fn ->
+        HTTP.RequestLifecycle.enter(tracker, :owner)
+        send(parent, :registered)
+
+        receive do
+          :finish -> HTTP.RequestLifecycle.complete(tracker)
+        end
+      end)
+
+    assert_receive :registered
+
+    assert {:error, :unsupported_tls_socket_representation} =
+             HTTP.RequestLifecycle.track_tls([request_lifecycle: tracker], {:sslsocket, :opaque})
+
+    assert :sys.get_state(tracker).uncertain?
+    wait_for(scope, :lifecycle, :draining)
+    assert Process.alive?(owner)
+    assert {:messages, []} = Process.info(owner, :messages)
+    Process.put(HTTP.RequestLifecycle, tracker)
+    assert {:error, :transport_scope_retired} = ManagedTransport.connect_start(request)
+    Process.delete(HTTP.RequestLifecycle)
+    monitor = Process.monitor(tracker)
+    send(owner, :finish)
+    assert_receive {:DOWN, ^monitor, :process, ^tracker, :normal}, 1_000
+    assert :atomics.get(latch, 1) == 3
+    assert {:ok, receipt} = ManagedTransport.retire(scope, mode: :abort)
+    assert {:error, :cleanup_unconfirmed} = ManagedTransport.await_retired(receipt, 1_000)
+    assert {:error, :cleanup_unconfirmed} = ManagedTransport.await_retired(receipt, 0)
+
+    assert {:error, :transport_scope_retired} = ManagedTransport.prepare(request, [])
+  end
+
   defp wait_for(scope, key, expected, remaining \\ 100)
   defp wait_for(_, _, _, 0), do: flunk("scope resources did not settle")
 
