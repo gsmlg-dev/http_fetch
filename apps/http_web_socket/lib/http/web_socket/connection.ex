@@ -23,6 +23,7 @@ defmodule HTTP.WebSocket.Connection do
 
   defstruct options: nil,
             owner: nil,
+            owner_guard: nil,
             target: nil,
             uri: nil,
             telemetry_uri: nil,
@@ -78,11 +79,13 @@ defmodule HTTP.WebSocket.Connection do
 
   @impl true
   def init(%Options{} = options) do
-    HTTP.OwnerMonitor.start(self(), options.owner)
+    Process.flag(:trap_exit, true)
+    owner_guard = HTTP.OwnerMonitor.start(self(), options.owner)
 
     state = %__MODULE__{
       options: options,
       owner: options.owner,
+      owner_guard: owner_guard,
       uri: options.uri,
       telemetry_uri:
         if(options.telemetry_url == :default, do: options.uri, else: options.telemetry_url),
@@ -219,6 +222,14 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   @impl true
+  def handle_info({:EXIT, guard, :shutdown}, %{owner_guard: guard} = state) do
+    state = park_terminal(state, :owner_down, 1006, "", false)
+    {:stop, :shutdown, finish(state, 1006, "", false)}
+  end
+
+  def handle_info({:EXIT, _sender, :normal}, state), do: {:noreply, state}
+  def handle_info({:EXIT, _sender, reason}, state), do: {:stop, reason, state}
+
   def handle_info(
         {:opening_timeout, token},
         %{opening_timer: {_timer, token}, ready_state: @connecting} = state
