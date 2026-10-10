@@ -24,6 +24,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   @default_max_streams 100
   @default_drain_timeout 30_000
   @max_header_fragments 256
+  @max_informational_heads 128
+  @max_informational_bytes 65_536
 
   @type transport :: module() | map()
   @type t :: %{
@@ -117,6 +119,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         pool: nil,
         pool_key: nil,
         pool_monitor: nil,
+        capacity_inflight: nil,
+        capacity_acknowledged: nil,
         settings_timer: nil,
         returned_connection_credit: 0,
         max_receive_buffer_bytes: max(1_048_576, profile.connection_initial_window),
@@ -171,12 +175,44 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     end
   end
 
+  def handle_info({:http2_pool, pool, key}, %{pool: pool, pool_key: key} = state),
+    do: {:noreply, state}
+
   def handle_info({:http2_pool, pool, key}, state) do
+    if state.pool_monitor, do: Process.demonitor(state.pool_monitor, [:flush])
     monitor = Process.monitor(pool)
-    state = %{state | pool: pool, pool_key: key, pool_monitor: monitor}
-    report_capacity(state)
-    {:noreply, state}
+
+    state = %{
+      state
+      | pool: pool,
+        pool_key: key,
+        pool_monitor: monitor,
+        capacity_inflight: nil,
+        capacity_acknowledged: nil
+    }
+
+    {:noreply, report_capacity(state)}
   end
+
+  def handle_info(
+        {:http2_capacity_ack, pool, token},
+        %{pool: pool, capacity_inflight: {token, snapshot}} = state
+      ) do
+    state = %{state | capacity_inflight: nil, capacity_acknowledged: snapshot}
+    {:noreply, report_capacity(state)}
+  end
+
+  def handle_info({:http2_capacity_ack, _, _}, state), do: {:noreply, state}
+
+  def handle_info(
+        {:http2_capacity_rejected, pool, token},
+        %{pool: pool, capacity_inflight: {token, _}} = state
+      ) do
+    notify_all(state, {:http2, :transport_error, :pool_registration_lost})
+    {:stop, :normal, %{state | lifecycle: :closed, close_reason: :pool_registration_lost}}
+  end
+
+  def handle_info({:http2_capacity_rejected, _, _}, state), do: {:noreply, state}
 
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, %{pool_monitor: monitor} = state) do
     notify_all(state, {:http2, :transport_error, :pool_down})
@@ -572,6 +608,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
               monitor: Process.monitor(Keyword.get(opts, :subscriber, elem(from, 0))),
               committed?: true,
               terminal?: false,
+              informational_heads: 0,
+              informational_bytes: 0,
               body_bridge: Keyword.get(opts, :body_bridge),
               upload_stopped?: false,
               pending_body: nil,
@@ -773,7 +811,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         {:reply, {:error, reason}, state}
 
       :more ->
-        {:reply, :ok, %{state | buffer: buffer}}
+        {:reply, :ok, %{state | buffer: :binary.copy(buffer)}}
 
       {:ok, frame, rest} ->
         case validate_and_dispatch(state, frame) do
@@ -880,8 +918,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         end)
 
         state = %{state | connection: connection, peer_settings?: true, capability_waiters: %{}}
-        report_capacity(state)
-        drain_pending_body(state, 0)
+        drain_pending_body(report_capacity(state), 0)
       else
         {:error, reason} -> settings_failure(state, reason)
         {:error, reason, _} -> {:error, reason, state}
@@ -896,30 +933,36 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     case Connection.receive_goaway(state.connection, last) do
       {:ok, connection, _} ->
         HTTP.Runtime.Telemetry.http2_runtime(:peer_goaway, :received, %{error_code: error})
-        if state.pool, do: GenServer.cast(state.pool, {:owner_draining, state.pool_key, self()})
+        first_goaway? = state.lifecycle != :draining
+
+        if first_goaway? and state.pool,
+          do: GenServer.cast(state.pool, {:owner_draining, state.pool_key, self()})
 
         state =
           Enum.reduce(state.streams, state, fn {id, _}, acc ->
-            if id > last do
-              terminal_stream(
-                acc,
-                id,
-                {:http2, :stream_error, {:goaway, last, error, :unprocessed}}
-              )
-            else
-              notify_stream(acc, id, {:http2, :goaway, last, error})
-              acc
+            cond do
+              id > last ->
+                terminal_stream(
+                  acc,
+                  id,
+                  {:http2, :stream_error, {:goaway, last, error, :unprocessed}}
+                )
+
+              first_goaway? ->
+                notify_stream(acc, id, {:http2, :goaway, last, error})
+                acc
+
+              true ->
+                acc
             end
           end)
 
-        _ = if state.drain_timer, do: Process.cancel_timer(elem(state.drain_timer, 0))
-
         {timer_ref, timer_token} =
-          if state.drain_timeout > 0 do
+          if first_goaway? and state.drain_timeout > 0 do
             token = make_ref()
             {Process.send_after(self(), {:drain_timeout, token}, state.drain_timeout), token}
           else
-            {nil, nil}
+            state.drain_timer || {nil, nil}
           end
 
         {:ok,
@@ -1081,7 +1124,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   defp dispatch_frame(state, _frame), do: {:ok, state}
 
   defp retain_header_fragment(fragments, <<>>), do: fragments
-  defp retain_header_fragment(fragments, payload), do: [payload | fragments]
+  defp retain_header_fragment(fragments, payload), do: [:binary.copy(payload) | fragments]
 
   defp settings_failure(state, reason)
        when reason in [:invalid_enable_connect_protocol, :enable_connect_protocol_reversed] do
@@ -1202,30 +1245,34 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       {:ok, decoder, headers} ->
         state = %{state | connection: %{state.connection | decoder: decoder}}
 
-        case Connection.stream(state.connection, id) do
-          {:ok, stream} ->
-            case StreamState.receive_response_headers(stream, headers, Frame.flag?(flags, 1)) do
-              {:ok, stream, phase} ->
-                state = %{state | connection: Connection.put_stream(state.connection, stream)}
-                phase = upload_phase(stream, phase)
-                state = stop_upload(state, id, phase)
-
-                {:ok,
-                 %{
-                   state
-                   | response_events: [
-                       {id, {:http2, :headers, headers, flags}} | state.response_events
-                     ]
-                 }}
-
-              {:error, reason} ->
-                fail_stream(state, id, reason)
-            end
-
-          :error when rem(id, 2) == 1 and id < state.connection.next_stream_id ->
+        case {Connection.stream(state.connection, id), state.streams[id]} do
+          {{:ok, _}, %{terminal?: true}} ->
+            # Keep the shared HPACK decoder synchronized without renewing any
+            # terminal-stream notifications or upload-stop messages.
             {:ok, state}
 
-          :error ->
+          {{:ok, stream}, _} ->
+            with {:ok, stream, phase} <-
+                   StreamState.receive_response_headers(stream, headers, Frame.flag?(flags, 1)),
+                 {:ok, state} <- admit_header_event(state, id, phase, headers) do
+              state = %{state | connection: Connection.put_stream(state.connection, stream)}
+              state = stop_upload(state, id, upload_phase(stream, phase))
+
+              {:ok,
+               %{
+                 state
+                 | response_events: [
+                     {id, {:http2, :headers, headers, flags}} | state.response_events
+                   ]
+               }}
+            else
+              {:error, reason} -> fail_stream(state, id, reason)
+            end
+
+          {:error, _} when rem(id, 2) == 1 and id < state.connection.next_stream_id ->
+            {:ok, state}
+
+          {:error, _} ->
             {:error, :protocol_error, state}
         end
 
@@ -1233,6 +1280,29 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         {:error, {:hpack, reason}, state}
     end
   end
+
+  defp admit_header_event(state, id, :informational, headers) do
+    entry = state.streams[id]
+
+    bytes =
+      Enum.reduce(headers, entry.informational_bytes, fn
+        {":" <> _, _}, sum -> sum
+        {name, value}, sum -> sum + byte_size(name) + byte_size(value) + 32
+      end)
+
+    if entry.informational_heads >= @max_informational_heads or bytes > @max_informational_bytes do
+      {:error, :http2_informational_limit}
+    else
+      {:ok,
+       put_in(state.streams[id], %{
+         entry
+         | informational_heads: entry.informational_heads + 1,
+           informational_bytes: bytes
+       })}
+    end
+  end
+
+  defp admit_header_event(state, _id, _phase, _headers), do: {:ok, state}
 
   defp discard_closed_data(state, payload) do
     # Discarded in-flight DATA still consumes and returns connection credit.
@@ -1596,6 +1666,13 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   defp terminal_stream(state, id, message) do
+    case state.streams[id] do
+      %{terminal?: false} -> do_terminal_stream(state, id, message)
+      _ -> state
+    end
+  end
+
+  defp do_terminal_stream(state, id, message) do
     state = flush_byte_stream_events(state, id)
     state = finish_upload_stall(state, id, :stopped)
     notify_stream(state, id, message)
@@ -1708,25 +1785,31 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   defp close_category(:flow_control_error), do: :flow_control_error
   defp close_category(_), do: :other_error
 
-  defp report_capacity(%{pool: pool} = state) when is_pid(pool) do
+  # One unacknowledged snapshot per owner; peer SETTINGS replace only the
+  # current connection state while it is in flight. ACK recomputes the latest
+  # desired snapshot, so neither mailbox retains a history of peer updates.
+  defp report_capacity(%{pool: pool, capacity_inflight: nil} = state) when is_pid(pool) do
     limit = state.connection.max_streams
     limit = if limit == :infinity, do: state.max_streams, else: min(limit, state.max_streams)
 
-    if state.peer_settings? do
-      GenServer.cast(
-        pool,
-        {:owner_settings, state.pool_key, self(),
-         %{extended_connect: state.connection.peer.values.enable_connect_protocol == 1}, limit}
-      )
+    limit =
+      if not state.peer_settings? and state.limit_initial_capacity?,
+        do: min(limit, 1),
+        else: limit
+
+    snapshot =
+      {state.peer_settings?, state.connection.peer.values.enable_connect_protocol == 1, limit}
+
+    if snapshot == state.capacity_acknowledged do
+      state
     else
-      # Let automatic negotiation make progress before peer SETTINGS, while
-      # preventing a burst from reserving the entire speculative capacity.
-      limit = if state.limit_initial_capacity?, do: min(limit, 1), else: limit
-      GenServer.cast(pool, {:owner_capacity, state.pool_key, self(), limit})
+      token = make_ref()
+      GenServer.cast(pool, {:owner_snapshot, state.pool_key, self(), token, snapshot})
+      %{state | capacity_inflight: {token, snapshot}}
     end
   end
 
-  defp report_capacity(_), do: :ok
+  defp report_capacity(state), do: state
 
   defp stop_body_bridge(state, id) do
     case get_in(state.streams, [id, :body_bridge]) do

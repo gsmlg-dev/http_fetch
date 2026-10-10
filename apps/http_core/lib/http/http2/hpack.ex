@@ -766,7 +766,7 @@ defmodule HTTP.HTTP2.HPACK do
 
   defp take_bytes(data, length) when byte_size(data) >= length do
     <<value::binary-size(^length), rest::binary>> = data
-    {:ok, value, rest}
+    {:ok, :binary.copy(value), rest}
   end
 
   defp take_bytes(_data, _length), do: {:error, :truncated_hpack_string}

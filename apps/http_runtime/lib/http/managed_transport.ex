@@ -48,7 +48,13 @@ defmodule HTTP.ManagedTransport do
   waiting queue. Policy is bounded to 1 MiB, request metadata to 64 KiB/256 fields,
   buffered upload bodies to 1 MiB, and upload chunks/bridges to 64 KiB. The native
   HTTP/2 writer/receive budgets are 1 MiB each per connection, header blocks are
-  bounded to 64 KiB/256 fields/256 frames. Caller-owned producer input, arbitrary
+  bounded to 64 KiB/256 fields/256 frames. The H2 owner admits at most 128
+  informational heads/64 KiB regular metadata over each request lifetime, before
+  enqueueing. Each request generates at most 130 header notifications including
+  final headers/trailers. SETTINGS pool snapshots coalesce with one in flight;
+  GOAWAY draining notices are one-shot. See the managed transport guide for
+  accounted-data, representation and decode/copy overlap reservations.
+  Caller-owned producer input, arbitrary
   public-operation messages, OS/TLS allocations and the whole VM are outside
   these retained transport bounds.
 

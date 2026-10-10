@@ -337,6 +337,23 @@ defmodule HTTP.HTTP2.Pool do
   end
 
   @impl true
+  def handle_cast({:owner_snapshot, key, owner, token, {ready?, enabled, limit}}, state)
+      when is_pid(owner) and is_reference(token) and is_boolean(ready?) and
+             is_boolean(enabled) and is_integer(limit) and limit >= 0 do
+    if get_in(state.entries, [key, :connections, owner]) do
+      state =
+        if ready?,
+          do: set_settings(state, key, owner, enabled, limit),
+          else: set_capacity(state, key, owner, limit)
+
+      send(owner, {:http2_capacity_ack, self(), token})
+      {:noreply, state}
+    else
+      send(owner, {:http2_capacity_rejected, self(), token})
+      {:noreply, state}
+    end
+  end
+
   def handle_cast({:owner_settings, key, owner, %{extended_connect: enabled}, limit}, state)
       when is_boolean(enabled) and
              ((is_integer(limit) and limit >= 0) or limit == :infinity),
