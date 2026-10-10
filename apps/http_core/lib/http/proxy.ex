@@ -8,7 +8,7 @@ defmodule HTTP.Proxy do
 
   def normalize(nil), do: {:ok, nil}
 
-  def normalize({:http, host, port, opts}) when is_list(opts) do
+  def normalize({scheme, host, port, opts}) when scheme in [:http, :https] and is_list(opts) do
     if valid_host?(host) and is_integer(port) and port in 1..65_535 and
          Keyword.keyword?(opts) and
          length(Keyword.keys(opts)) == length(Enum.uniq(Keyword.keys(opts))) and
@@ -17,7 +17,14 @@ defmodule HTTP.Proxy do
       timeout = Keyword.get(opts, :timeout, 30_000)
 
       if valid_auth?(headers) and is_integer(timeout) and timeout > 0 do
-        {:ok, %{host: String.downcase(host), port: port, headers: headers, timeout: timeout}}
+        {:ok,
+         %{
+           scheme: scheme,
+           host: String.downcase(host),
+           port: port,
+           headers: headers,
+           timeout: timeout
+         }}
       else
         {:error, :invalid_proxy_configuration}
       end
@@ -37,13 +44,16 @@ defmodule HTTP.Proxy do
 
   defp compatible(_request, nil, _unix_socket), do: :ok
 
-  defp compatible(request, _proxy, unix_socket) do
+  defp compatible(request, proxy, unix_socket) do
     cond do
       unix_socket != nil ->
         {:error, :proxy_not_supported_for_unix_socket}
 
       request.url.scheme not in ["http", "https"] ->
         {:error, :unsupported_proxy_scheme}
+
+      proxy.scheme == :https and request.url.scheme != "http" ->
+        {:error, :https_proxy_requires_http_origin}
 
       not is_integer(request.url.port) or request.url.port not in 1..65_535 ->
         {:error, :invalid_proxy_origin}
@@ -91,6 +101,12 @@ defmodule HTTP.Proxy do
       {:error, reason} ->
         raise ArgumentError, "invalid proxy route: #{reason}"
     end
+  end
+
+  def connect(transport, _host, _port, opts, timeout, %{scheme: :https} = proxy) do
+    ssl = opts |> Keyword.get(:ssl, []) |> Keyword.put(:alpn_advertised_protocols, ["http/1.1"])
+    opts = opts |> Keyword.put(:ssl, ssl) |> Keyword.put(:cancellable, true)
+    transport.connect(proxy.host, proxy.port, opts, min(timeout, proxy.timeout))
   end
 
   def connect(transport, host, port, opts, timeout, proxy) do

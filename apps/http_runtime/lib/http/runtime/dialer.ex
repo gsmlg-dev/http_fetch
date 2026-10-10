@@ -49,7 +49,8 @@ defmodule HTTP.Runtime.Dialer do
         port,
         Keyword.put(transport_opts(request, selection, timeout), :proxy_route, proxy),
         connect_timeout,
-        cancel_monitor
+        cancel_monitor,
+        timeout
       )
     end
   end
@@ -147,10 +148,28 @@ defmodule HTTP.Runtime.Dialer do
 
   defp validate_transport_option_lists(_transport, _request), do: :ok
 
-  defp interruptible_connect(transport, host, port, opts, timeout, cancel_monitor) do
+  defp interruptible_connect(
+         transport,
+         host,
+         port,
+         opts,
+         timeout,
+         cancel_monitor,
+         request_timeout
+       ) do
     parent = self()
     ref = make_ref()
-    deadline_at = connect_deadline(timeout)
+    # Structured callers need the low-level TCP failure, rather than a timer
+    # racing that result. The connect call keeps its smaller timeout; observing
+    # its outcome remains bounded by the original request deadline and signal.
+    confirmation_timeout =
+      if is_reference(Keyword.get(opts, :connect_failure_token)) and
+           Keyword.get(opts, :proxy_route) == nil and
+           transport in [HTTP.Transport.TCP, HTTP.Transport.SSL],
+         do: request_timeout,
+         else: timeout
+
+    deadline_at = connect_deadline(confirmation_timeout)
 
     tracker = Keyword.get(opts, :request_lifecycle)
 
@@ -299,9 +318,14 @@ defmodule HTTP.Runtime.Dialer do
 
   def select_transport(request, socket_path) do
     with :ok <- validate_connect_address_route(request, socket_path),
-         {:ok, _proxy} <- HTTP.Proxy.route(request, socket_path),
+         {:ok, proxy} <- HTTP.Proxy.route(request, socket_path),
          {:ok, transport, host, port} <- select_origin_transport(request, socket_path),
          :ok <- validate_connect_address(transport, host, request) do
+      transport =
+        if proxy != nil and proxy.scheme == :https,
+          do: HTTP.TLSBackend.transport(tls_backend(request)),
+          else: transport
+
       {:ok, transport, host, port}
     end
   end
@@ -340,7 +364,8 @@ defmodule HTTP.Runtime.Dialer do
     end
   end
 
-  def protocol_selection(%Request{url: %URI{scheme: "http"}} = request, HTTP.Transport.TCP) do
+  def protocol_selection(%Request{url: %URI{scheme: "http"}} = request, transport)
+      when transport in [HTTP.Transport.TCP, HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
     case http_version(request) do
       version when version in [:http1, :auto] ->
         if http2_options?(request),
@@ -401,7 +426,9 @@ defmodule HTTP.Runtime.Dialer do
       cancellable:
         Keyword.get(request.transport_options, :request_lifecycle) != nil or
           (selection.mode in [:http1, :auto_https] and
-             (is_pid(request.body) or Keyword.get(request.transport_options, :http1_reuse, false))),
+             (is_pid(request.body) or Keyword.get(request.transport_options, :http1_reuse, false))) or
+          is_reference(Keyword.get(request.transport_options, :connect_failure_token)),
+      connect_failure_token: Keyword.get(request.transport_options, :connect_failure_token),
       request_lifecycle: Keyword.get(request.transport_options, :request_lifecycle),
       connect_address: Keyword.get(request.transport_options, :connect_address),
       ssl:

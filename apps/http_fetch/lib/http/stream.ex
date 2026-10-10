@@ -126,8 +126,9 @@ defmodule HTTP.Stream do
   Validation limits trailers to 128 fields and 65,536 serialized bytes. Invalid
   trailers return an error without finishing the stream. For HTTP/1 uploads,
   every field must be declared in the request's `Trailer` header and the body
-  must use chunk framing (no `Content-Length`). HTTP/2 and HTTP/3 uploads return
-  `:request_trailers_unsupported`; their response trailer support is unchanged.
+  must use chunk framing (no `Content-Length`). HTTP/2 uploads send trailing
+  HEADERS after acknowledged DATA; fixed content length counts DATA bytes only.
+  HTTP/3 uploads return `:request_trailers_unsupported`.
   Completion is signalled asynchronously, like `finish/1`.
   """
   @spec finish(pid(), HTTP.Headers.t() | HTTP.Headers.headers_list()) :: :ok | {:error, term()}
@@ -144,6 +145,12 @@ defmodule HTTP.Stream do
   @spec error(pid(), term()) :: :ok
   def error(pid, reason) when is_pid(pid) do
     send(pid, {:error, reason})
+    :ok
+  end
+
+  @doc false
+  def stop(pid, reason) when is_pid(pid) do
+    send(pid, {:request_lifecycle_stop, reason})
     :ok
   end
 

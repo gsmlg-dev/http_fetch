@@ -13,6 +13,14 @@ defmodule HTTP.Transport do
 
   def valid_connect_address?(_address), do: false
 
+  @doc false
+  def connect_error(opts, reason) do
+    case Keyword.get(opts, :connect_failure_token) do
+      token when is_reference(token) -> {:error, {:connect_failure, token, reason}}
+      _ -> {:error, reason}
+    end
+  end
+
   @callback connect(String.t(), non_neg_integer(), keyword(), timeout()) ::
               {:ok, socket()} | {:error, term()}
   @callback controlling_process(socket(), pid()) :: :ok | {:error, term()}

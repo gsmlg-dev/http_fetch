@@ -339,8 +339,8 @@ cancellation, and early-response behavior described below. HTTP/1 streams with
 Proxy mode also accepts an explicit `Transfer-Encoding: chunked` for an
 unknown-length HTTP/1 stream, including declared trailers. Conflicting framing,
 other transfer codings, and explicit chunked framing on buffered bodies are
-rejected. HTTP/2 and HTTP/3 prohibit Transfer-Encoding headers and continue to
-reject request trailers explicitly.
+rejected. HTTP/2 and HTTP/3 prohibit Transfer-Encoding headers. HTTP/2 supports
+bounded request trailers; HTTP/3 rejects them explicitly.
 
 ## Explicit HTTP Proxies
 
@@ -414,10 +414,25 @@ response = HTTP.Promise.await(promise)
 `finish/2` validates at most 128 fields and 65,536 serialized bytes, including
 field separators and the final blank line. It returns a validation error without
 finishing the stream for invalid fields. Completion is asynchronous; monitor the
-stream to confirm termination. Nonempty trailers require chunked uploads, and
-every name must appear in the `Trailer` declaration; undeclared names fail with
-`:undeclared_trailer`. HTTP/2 and HTTP/3 upload trailers currently fail explicitly
-with `:request_trailers_unsupported`.
+stream to confirm termination. For HTTP/1, nonempty trailers require chunked
+uploads, and every name must appear in the `Trailer` declaration; undeclared
+names fail with `:undeclared_trailer`.
+
+HTTP/2 streams use the same `finish/2` API and limits without requiring a
+`Trailer` declaration. Ordered duplicate permitted fields are sent as trailing
+HEADERS with END_STREAM after every DATA write is acknowledged. Large blocks
+use an atomic HEADERS/CONTINUATION batch and the connection's existing HPACK
+encoder. The peer's maximum header-list size also applies; exceeding it fails
+only the request with `{:body_error, :trailers_too_large}`. Fixed Content-Length
+validates DATA bytes independently from trailers.
+
+An early final response abandons pending DATA and unsent trailers. Cancellation
+before transmission discards unsent trailers; cancellation during a trailer
+write completes the atomic header batch before resetting the request, preserving
+HPACK state for siblings. Cancellation after transmission resets the response
+half. Existing request deadlines and transport write timeouts apply. A failed
+partial transport write retires the connection and fails its active requests.
+HTTP/3 upload trailers remain unsupported (`:request_trailers_unsupported`).
 
 HTTP/1 response trailers preserve ordered duplicate fields and are delivered as
 `{:stream_trailers, stream, headers}` after body acknowledgements and before
