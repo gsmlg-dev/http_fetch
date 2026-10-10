@@ -334,6 +334,7 @@ defmodule HTTP do
                 result =
                   handle_async_request(request, self(), abort_controller_pid, unix_socket_path)
 
+                stop_failed_upload(result, request.body)
                 if match?({:error, _}, result), do: HTTP.RequestLifecycle.abort(tracker)
                 HTTP.RequestLifecycle.complete(tracker)
                 result
@@ -388,4 +389,9 @@ defmodule HTTP do
   end
 
   defp response_body_size(%Response{} = response), do: Response.body_size(response)
+
+  defp stop_failed_upload({:error, reason}, body) when is_pid(body),
+    do: HTTP.Stream.stop(body, reason)
+
+  defp stop_failed_upload(_result, _body), do: :ok
 end
