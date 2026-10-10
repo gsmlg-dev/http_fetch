@@ -176,11 +176,16 @@ defmodule HTTP.HTTPSProxyWireTest do
       assert {:ok, <<22, _::binary>>} = :gen_tcp.recv(socket, 0, 2_000)
       if unquote(stop) == :abort, do: HTTP.AbortController.abort(controller)
       assert {:error, reason} = HTTP.Promise.await(promise, 3_000)
-      assert reason in [:aborted, :request_timeout, :connect_timeout]
+      assert_handshake_stop(unquote(stop), reason)
       await_tls_close(socket)
       :gen_tcp.close(socket)
     end
   end
+
+  defp assert_handshake_stop(:abort, reason), do: assert(reason == :aborted)
+
+  defp assert_handshake_stop(:deadline, reason),
+    do: assert(reason in [:request_timeout, :connect_timeout, :timeout])
 
   defp proxy_peer(certificate \\ "localhost") do
     {:ok, listener} =

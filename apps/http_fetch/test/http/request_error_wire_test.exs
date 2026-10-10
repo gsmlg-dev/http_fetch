@@ -4,16 +4,15 @@ defmodule HTTP.RequestErrorWireTest do
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
   test "a saturated first pin times out before establishment and permits a successful second pin" do
-    {:ok, blocked} = :gen_tcp.listen(0, [:binary, active: false, backlog: 0, ip: {127, 0, 0, 2}])
-    {:ok, {_, port}} = :inet.sockname(blocked)
-    {:ok, queued} = :gen_tcp.connect({127, 0, 0, 2}, port, [:binary, active: false], 500)
-    {:ok, available} = :gen_tcp.listen(port, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {blocked, available, port} = paired_listeners(10)
 
     on_exit(fn ->
-      :gen_tcp.close(queued)
       :gen_tcp.close(blocked)
       :gen_tcp.close(available)
     end)
+
+    {:ok, queued} = :gen_tcp.connect({127, 0, 0, 2}, port, [:binary, active: false], 500)
+    on_exit(fn -> :gen_tcp.close(queued) end)
 
     deadline = System.monotonic_time(:millisecond) + 3_000
 
@@ -75,6 +74,25 @@ defmodule HTTP.RequestErrorWireTest do
 
     Task.await(peer)
     assert System.monotonic_time(:millisecond) < deadline
+  end
+
+  # Reserve both IP tuples before a queued client can auto-bind the second one.
+  defp paired_listeners(attempts) do
+    {:ok, blocked} = :gen_tcp.listen(0, [:binary, active: false, backlog: 0, ip: {127, 0, 0, 2}])
+    {:ok, {_, port}} = :inet.sockname(blocked)
+
+    case :gen_tcp.listen(port, [:binary, active: false, ip: {127, 0, 0, 1}]) do
+      {:ok, available} ->
+        {blocked, available, port}
+
+      {:error, :eaddrinuse} when attempts > 1 ->
+        :gen_tcp.close(blocked)
+        paired_listeners(attempts - 1)
+
+      {:error, reason} ->
+        :gen_tcp.close(blocked)
+        flunk("could not reserve paired listeners: #{inspect(reason)}")
+    end
   end
 
   for scheme <- ["http", "https"] do
