@@ -172,6 +172,30 @@ defmodule HTTP.WebSocket.ProxyBoundaryTest do
     assert_receive {:owner_peer_closed, ^peer}, @timeout
   end
 
+  test "a non-guard shutdown still terminates the connection and closes its socket" do
+    parent = self()
+
+    {url, peer} =
+      peer(fn socket, key ->
+        :ok = :gen_tcp.send(socket, head(key))
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, @timeout)
+        send(parent, {:shutdown_peer_closed, self()})
+      end)
+
+    ws = WebSocket.new(url)
+    assert_receive {WebSocket, ^ws, %Open{}}, @timeout
+    socket = :sys.get_state(ws.pid).socket
+    socket_monitor = Port.monitor(socket)
+    monitor = Process.monitor(ws.pid)
+
+    Process.exit(ws.pid, :normal)
+    assert WebSocket.ready_state(ws) == WebSocket.open()
+    Process.exit(ws.pid, :shutdown)
+    assert_receive {:DOWN, ^monitor, :process, _, :shutdown}, 1_000
+    assert_receive {:DOWN, ^socket_monitor, :port, ^socket, _}, 1_000
+    assert_receive {:shutdown_peer_closed, ^peer}, @timeout
+  end
+
   for backend <- [:ssl, :ex_ssl] do
     test "verified WSS slow-peer cancellation is bounded with #{backend}" do
       fixtures = Path.expand("../../support/fixtures", __DIR__)
@@ -288,9 +312,28 @@ defmodule HTTP.WebSocket.ProxyBoundaryTest do
                  )
       end
 
+      state = :sys.get_state(ws.pid)
+      assert %{worker: writer} = state.write
+      writer_monitor = Process.monitor(writer)
+
+      {tcp, tcp_monitor} =
+        if unquote(backend) == :ssl do
+          {:cancellable_ssl, _socket, tcp} = state.socket
+          on_exit(fn -> HTTP.Transport.SSL.abort(state.socket) end)
+          {tcp, Port.monitor(tcp)}
+        else
+          {nil, nil}
+        end
+
       monitor = Process.monitor(ws.pid)
       send(owner, :stop)
       assert_receive {:DOWN, ^monitor, :process, _, _}, 1_000
+      assert_receive {:DOWN, ^writer_monitor, :process, ^writer, _}, 1_000
+
+      if tcp_monitor do
+        assert_receive {:DOWN, ^tcp_monitor, :port, ^tcp, _}, 1_000
+      end
+
       send(peer, :drain)
       assert_receive {:lost_owner_closed, ^peer}, 1_000
     end
