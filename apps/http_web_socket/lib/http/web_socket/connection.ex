@@ -54,6 +54,7 @@ defmodule HTTP.WebSocket.Connection do
             close_received?: false,
             local_end?: false,
             remote_end?: false,
+            read_close_pending?: false,
             terminal: nil,
             close_code: nil,
             close_reason: "",
@@ -238,6 +239,26 @@ defmodule HTTP.WebSocket.Connection do
     state = detach(state)
     advance(%{state | remote_end?: true, local_end?: true})
   end
+
+  def handle_info(
+        {:http1_read_closed, generation, socket},
+        %{
+          generation: generation,
+          socket: socket,
+          http_version: :http1,
+          read_close_pending?: true
+        } = state
+      ) do
+    advance(%{
+      state
+      | remote_end?: true,
+        transport: nil,
+        socket: nil,
+        read_close_pending?: false
+    })
+  end
+
+  def handle_info({:http1_read_closed, _generation, _socket}, state), do: {:noreply, state}
 
   def handle_info(
         {:http1_ready, generation, worker, transport, socket},
@@ -1052,15 +1073,26 @@ defmodule HTTP.WebSocket.Connection do
   # A peer Close ends HTTP/1 frame reads. Let the bounded close reply settle
   # without granting read credit to a TCP socket the peer may already have closed.
   defp rearm(%{http_version: :http1, close_received?: true} = state), do: {:noreply, state}
+  defp rearm(%{read_close_pending?: true} = state), do: {:noreply, state}
   defp rearm(%{raw_bytes: bytes} = state) when bytes > 0, do: {:noreply, state}
 
   defp rearm(state) do
     case state.transport.setopts(state.socket, active: :once) do
       :ok -> {:noreply, state}
-      {:error, :closed} -> advance(%{state | remote_end?: true, transport: nil, socket: nil})
+      {:error, :closed} -> read_closed(state)
       {:error, reason} -> transport_terminal(state, reason)
     end
   end
+
+  defp read_closed(%{http_version: :http1} = state) do
+    # A synchronous setopts call can select its closed reply ahead of TLS data
+    # already in this mailbox. Keep the socket until those frames are processed.
+    send(self(), {:http1_read_closed, state.generation, state.socket})
+    {:noreply, %{state | read_close_pending?: true}}
+  end
+
+  defp read_closed(state),
+    do: advance(%{state | remote_end?: true, transport: nil, socket: nil})
 
   defp fail(state, reason) do
     stream_telemetry(state, :error, :rejected)
