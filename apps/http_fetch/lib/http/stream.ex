@@ -147,6 +147,12 @@ defmodule HTTP.Stream do
     :ok
   end
 
+  @doc false
+  def stop(pid, reason) when is_pid(pid) do
+    send(pid, {:request_lifecycle_stop, reason})
+    :ok
+  end
+
   defp produce_enumerable(stream, enumerable) do
     enumerable
     |> Enum.reduce_while(:ok, fn chunk, :ok ->
