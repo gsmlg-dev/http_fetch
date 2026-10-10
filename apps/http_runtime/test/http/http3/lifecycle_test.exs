@@ -343,13 +343,29 @@ defmodule HTTP.HTTP3.LifecycleTest do
   end
 
   test "idle budget starts again after the last request activity", %{controller: controller} do
-    owner = owner(controller, idle_timeout: 60)
+    idle_timeout = 60_000
+    owner = owner(controller, idle_timeout: idle_timeout)
     monitor = Process.monitor(owner)
     assert {:ok, request} = ConnectionOwner.open(owner, fields(), "", self(), make_ref())
-    refute_receive {:DOWN, ^monitor, :process, ^owner, _}, 70
-    ConnectionOwner.cancel(owner, request)
-    refute_receive {:DOWN, ^monitor, :process, ^owner, _}, 20
-    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 500
+    expired = System.monotonic_time(:millisecond) - idle_timeout - 1
+    :sys.replace_state(owner, &%{&1 | last_activity: expired})
+    send(owner, :tick)
+    assert %{requests: 1} = ConnectionOwner.status(owner)
+
+    assert :ok = ConnectionOwner.cancel(owner, request)
+    assert %{last_activity: activity} = :sys.get_state(owner)
+    assert activity > expired
+    send(owner, :tick)
+
+    assert %{requests: 0, pending: false, continuations: 0, queued: 0} =
+             ConnectionOwner.status(owner)
+
+    :sys.replace_state(owner, fn state ->
+      %{state | last_activity: System.monotonic_time(:millisecond) - idle_timeout - 1}
+    end)
+
+    send(owner, :tick)
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 1_000
   end
 
   test "subscriber death during unknown opening reconciles then cancels the same stream", %{

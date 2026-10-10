@@ -90,6 +90,58 @@ error to its source before terminating, so its producer also observes the error.
 TLS material or credentials. The identity is a policy digest, not a public pool
 key. Expired control-operation waits return `{:error, :cleanup_pending}`.
 
+## HTTP/2 peer notifications
+
+The native owner admits at most 128 informational heads and 65,536 regular-field
+metadata bytes over each stream's entire lifetime, before queueing or notifying
+the recipient. Flushing or consuming events does not replenish this allowance.
+Overflow resets only the offending stream with `:http2_informational_limit`;
+the rejected block still advances the shared HPACK decoder. Terminal streams
+cannot renew recipient notifications or upload-stop messages. Final headers and
+trailers are each allowed once. These limits also apply to ordinary H2 clients.
+
+A request can therefore create at most 130 header notifications and 33,280 field
+pairs. A conservative accounted-data allowance is 218,368 bytes per request:
+65,536 informational regular metadata, 128 status fields of at most 42 accounted
+bytes, and two final/trailer blocks of at most `65,536 + 256 * 32` bytes each.
+Reserve this allowance for both owner events and recipient representations;
+Fetch's retained response/header representation can add another allowance. List,
+tuple and map overhead must be reserved for the finite event/field counts; these
+figures are not byte-exact BEAM heap sizes.
+
+Managed request leases remain occupied until the lifecycle tracker and its
+recipient resources terminate, including after a protocol stream slot is freed.
+The notification envelope uses `max_requests`, rather than current protocol
+stream count. Ordinary subscribers accumulating history after releasing their
+own streams own that history themselves.
+
+Raw decoded literal strings and retained encoded fragments own compact backing.
+The native HPACK dynamic table is bounded to 4,096 accounted bytes. Decode/copy
+scratch is separately finite: reserve three 64-KiB encoded-block representations
+for fragment concatenation overlap, a 64-KiB decoded block and up to 256 fields,
+old/new 4,096-byte dynamic tables, and Huffman scratch: at most 524,288
+bit-list cells, 65,536 one-byte binary entries, their original and reversed
+lists, the resulting output binary and the fixed decoding trie. Header/event
+list reversal and dynamic-table insertion/eviction also overlap; reserve
+structural storage using the bounded field/event/table-entry counts.
+Raw current transport deliveries, the library's `state.buffer <> delivery`
+concatenation and their copy overlap require a separate ingress allowance. The
+notification figures above do not bound that delivery allocation or claim a
+complete whole-generation heap envelope. Retained partial-frame backing is
+compacted; complete deliveries are processed and released within the callback.
+
+SETTINGS reporting keeps one constant-size unacknowledged pool snapshot and one
+current desired state per connection. New SETTINGS coalesce into the current
+connection state; a matching pool/token acknowledgement permits only the latest
+differing snapshot. All wire SETTINGS acknowledgements continue while the pool
+is busy. Pool capacity may briefly lag the peer, but the owner checks stream
+admission before sending request headers. Pool death or lost registration cannot
+block retirement waiting for a capacity acknowledgement.
+
+GOAWAY sends one draining update per connection and at most one nonterminal
+notice per surviving stream. Lower subsequent cutoffs still terminate newly
+excluded streams once, without replay or extending the original drain deadline.
+
 ## Immutable security and deadlines
 
 `open/1` freezes authority/SNI, dial destination, TLS verification/CA/client
