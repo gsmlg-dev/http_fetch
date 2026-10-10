@@ -342,7 +342,7 @@ other transfer codings, and explicit chunked framing on buffered bodies are
 rejected. HTTP/2 and HTTP/3 prohibit Transfer-Encoding headers and continue to
 reject request trailers explicitly.
 
-## Explicit HTTP Proxies
+## Explicit Proxies
 
 ```elixir
 HTTP.fetch("https://api.example.com/data", proxy:
@@ -352,13 +352,26 @@ HTTP.fetch("https://api.example.com/data", proxy:
 |> HTTP.Promise.await()
 ```
 
-`proxy` accepts only `{:http, host, port, opts}`. The options are a single optional
+`proxy` accepts `{:http, host, port, opts}` and `{:https, host, port, opts}`.
+The options are a single optional
 `Proxy-Authorization` header (at most 8,192 bytes, without control characters)
 and a positive finite `timeout` in milliseconds (default 30,000). Cleartext
 HTTP/1 uses absolute-form requests to the proxy. HTTPS establishes CONNECT and
 then verifies the origin's certificate and negotiates HTTP/1 or HTTP/2 inside
 the tunnel. Proxy credentials appear only on the proxy hop; they are removed
 from tunneled origin requests. The same route remains selected across redirects.
+
+An HTTPS proxy supports HTTP origins using TLS to the proxy and absolute-form
+HTTP/1 forwarding. `tls_backend` and `ssl` configure proxy TLS; trust and hostname
+verification use the proxy host. Scheme, endpoint, credentials, and TLS policy
+isolate pooled connections. HTTPS origins through HTTPS proxies are rejected
+with `:https_proxy_requires_http_origin` before dialing.
+
+```elixir
+HTTP.fetch("http://origin.example/resource",
+  proxy: {:https, "proxy.example", 443, []}, request_mode: :proxy,
+  redirect: :manual, decode_body: false) |> HTTP.Promise.await()
+```
 
 Connecting and establishing the tunnel share the smaller of the proxy timeout,
 request timeout, and connect timeout. CONNECT response headers are bounded to
@@ -373,6 +386,35 @@ direct or proxy connections, caller-supplied DNS SNI also selects the DNS
 certificate identity. Use `ssl: [ex_ssl: [reference_identity: {:ip, ...}]]` to
 verify a separate IP identity while sending DNS SNI. Environment variables and
 NO_PROXY selection remain caller responsibilities.
+
+## Pre-send failure evidence
+
+Use `error_mode: :structured` to receive `{:error, %HTTP.RequestError{}}`.
+The default keeps existing raw error reasons. `error.reason` contains the
+original reason; `HTTP.RequestError.pre_send?(error)` is true only when direct
+TCP or OTP TLS dialing failed before TCP establishment, using manual/error
+redirects. A fresh request-local token ties evidence to that attempt. TLS
+negotiation, pooled socket failures, partial uploads, source/send/response
+errors, cancellation, and uncertain deadline outcomes remain unconfirmed.
+Automatic redirect chains and ExSSL never provide positive pre-send evidence.
+
+Fetch performs no automatic address failover or HTTP retry. A caller may try
+another independently validated `connect_address` only after positive evidence,
+while checking its original absolute deadline and cancellation signal. Set each
+attempt's `timeout` to the remaining total budget and keep the same authority,
+TLS verification policy, and signal. Confirm cleanup before replacing an upload
+source: terminal attempt errors stop its stream, which cannot be reused.
+
+```elixir
+result = HTTP.fetch(url, connect_address: validated_ip, redirect: :manual,
+  error_mode: :structured, timeout: remaining_budget, signal: controller)
+  |> HTTP.Promise.await()
+
+case result do
+  {:error, %HTTP.RequestError{} = error} -> HTTP.RequestError.pre_send?(error)
+  %HTTP.Response{} -> false
+end
+```
 
 ## Streaming Request Body
 
