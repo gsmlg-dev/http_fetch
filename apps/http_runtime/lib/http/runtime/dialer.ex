@@ -399,9 +399,9 @@ defmodule HTTP.Runtime.Dialer do
 
     [
       cancellable:
-        selection.mode in [:http1, :auto_https] and
-          (is_pid(request.body) or Keyword.get(request.transport_options, :http1_reuse, false) or
-             Keyword.get(request.transport_options, :request_lifecycle) != nil),
+        Keyword.get(request.transport_options, :request_lifecycle) != nil or
+          (selection.mode in [:http1, :auto_https] and
+             (is_pid(request.body) or Keyword.get(request.transport_options, :http1_reuse, false))),
       request_lifecycle: Keyword.get(request.transport_options, :request_lifecycle),
       connect_address: Keyword.get(request.transport_options, :connect_address),
       ssl:

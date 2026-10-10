@@ -2,15 +2,17 @@ defmodule HTTP.RequestCompletion do
   @moduledoc """
   A request-scoped cleanup barrier obtained from `HTTP.Promise.completion/1`.
 
-  Supported for HTTP/1 requests with reuse disabled, manual/error redirects,
-  and direct TCP or OTP TLS transport. Awaiting the Promise or monitoring its
-  response stream alone does not establish request cleanup.
+  Supported for HTTP/1 (including reuse) and HTTP/2 requests, manual/error
+  redirects, and direct TCP or OTP TLS transport. Awaiting the Promise or
+  monitoring its response stream alone does not establish request cleanup.
 
   A finite timeout covers the entire wait. `:ok` confirms termination of tracked
   request resources; `{:error, :cleanup_pending}` leaves cleanup in progress.
   `{:error, :cleanup_unconfirmed}` means evidence was lost (for example, an
   owner died without completing cleanup). Repeated and concurrent waits are safe
   from any process. This barrier does not prove remote receipt of request bytes.
+  Pooled completion confirms return of an HTTP/1 connection or release of the
+  HTTP/2 stream and reservation; healthy shared connections remain open.
   """
   @opaque t :: %__MODULE__{
             tracker: pid() | nil,
@@ -26,11 +28,8 @@ defmodule HTTP.RequestCompletion do
   @doc false
   def new(options) do
     cond do
-      options.http_version != :http1 ->
+      options.http_version not in [:http1, :http2, :h2c] ->
         %__MODULE__{unsupported: :http_version}
-
-      options.http1_reuse ->
-        %__MODULE__{unsupported: :http1_reuse}
 
       options.redirect == :follow ->
         %__MODULE__{unsupported: :redirect}
