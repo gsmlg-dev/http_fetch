@@ -363,6 +363,18 @@ defmodule HTTP do
   def handle_async_request(request, _calling_pid, abort_controller_pid, unix_socket_path \\ nil) do
     start_time = System.monotonic_time(:microsecond)
 
+    failure_token =
+      if Keyword.get(request.transport_options, :error_mode, :raw) == :structured do
+        if Keyword.get(request.transport_options, :redirect, :follow) in [:manual, :error],
+          do: make_ref()
+      end
+
+    request = %{
+      request
+      | transport_options:
+          Keyword.put(request.transport_options, :connect_failure_token, failure_token)
+    }
+
     result = HTTP.SocketClient.request(request, abort_controller_pid, unix_socket_path)
     duration = System.monotonic_time(:microsecond) - start_time
 
@@ -384,7 +396,12 @@ defmodule HTTP do
         if HTTP.Telemetry.enabled?(Keyword.get(request.transport_options, :telemetry, true)),
           do: HTTP.Telemetry.request_exception(request.url, reason, duration)
 
-        {:error, reason}
+        error =
+          if Keyword.get(request.transport_options, :error_mode, :raw) == :structured,
+            do: HTTP.RequestError.new(reason, failure_token),
+            else: reason
+
+        {:error, error}
     end
   end
 

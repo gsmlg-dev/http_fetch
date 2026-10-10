@@ -19,7 +19,7 @@ defmodule HTTP.Transport.TCP do
            timeout
          ) do
       {:ok, socket} -> {:ok, HTTP.RequestLifecycle.track_socket(opts, socket)}
-      error -> error
+      {:error, reason} -> HTTP.Transport.connect_error(opts, reason)
     end
   end
 

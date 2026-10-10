@@ -159,13 +159,43 @@ defmodule HTTP.HTTP2BodyBridgeTest do
     refute_receive {:body_error, ^bridge, _reason}, 20
   end
 
-  test "upload trailers fail explicitly instead of being discarded" do
+  test "custom sources cannot bypass trailer validation" do
+    for {fields, expected} <- [
+          {[{":status", "200"}], :invalid_trailer},
+          {[{"host", "other"}], {:forbidden_trailer, "host"}},
+          {List.duplicate({"x", "y"}, 129), :trailers_too_large}
+        ] do
+      source = fake_stream(self())
+      {:ok, bridge} = BodyBridge.start_link(source, self())
+      send(bridge, {:stream_trailers, source, fields})
+      assert_receive {:body_error, ^bridge, ^expected}, 500
+      send(bridge, {:stream_end, source})
+      assert BodyBridge.status(bridge).stopped?
+      refute_receive {:body_trailers, ^bridge, _}, 0
+      refute_receive {:body_eof, ^bridge}, 0
+    end
+  end
+
+  test "early response discards a held trailer block and ignores its later EOF" do
+    source = fake_stream(self())
+    {:ok, bridge} = BodyBridge.start_link(source, self())
+    send(bridge, {:stream_trailers, source, [{"x-checksum", "held"}]})
+    assert :ok = BodyBridge.early_response(bridge)
+    send(bridge, {:stream_end, source})
+    assert BodyBridge.status(bridge).stopped?
+    refute_receive {:body_trailers, ^bridge, _}, 0
+    refute_receive {:body_error, ^bridge, _}, 0
+  end
+
+  test "upload trailers are delivered once instead of a DATA EOF" do
     {:ok, stream} = HTTP.Stream.start_link(0)
     {:ok, bridge} = BodyBridge.start_link(stream, self())
     assert :ok = BodyBridge.credit(bridge, 1)
     assert :ok = HTTP.Stream.finish(stream, [{"X-Checksum", "one"}])
-    assert_receive {:body_error, ^bridge, :request_trailers_unsupported}, 1_000
+    assert_receive {:body_trailers, ^bridge, [{"X-Checksum", "one"}]}, 1_000
     assert BodyBridge.status(bridge).stopped?
     refute_receive {:body_eof, ^bridge}, 0
+    send(bridge, {:stream_end, stream})
+    refute_receive {:body_trailers, ^bridge, _}, 20
   end
 end
