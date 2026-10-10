@@ -3,8 +3,9 @@ defmodule HTTP.RequestCompletion do
   A request-scoped cleanup barrier obtained from `HTTP.Promise.completion/1`.
 
   Supported for HTTP/1 (including reuse) and HTTP/2 requests, manual/error
-  redirects, and direct TCP or OTP TLS transport. Awaiting the Promise or
-  monitoring its response stream alone does not establish request cleanup.
+  redirects, explicit HTTP and HTTPS proxies, and direct TCP or OTP TLS
+  transport. Awaiting the Promise or monitoring its response stream alone does
+  not establish request cleanup.
 
   A finite timeout covers the entire wait. `:ok` confirms termination of tracked
   request resources; `{:error, :cleanup_pending}` leaves cleanup in progress.
@@ -34,18 +35,34 @@ defmodule HTTP.RequestCompletion do
       options.redirect == :follow ->
         %__MODULE__{unsupported: :redirect}
 
-      options.proxy != nil ->
-        %__MODULE__{unsupported: :proxy}
-
       options.unix_socket != nil ->
         %__MODULE__{unsupported: :unix_socket}
 
       options.tls_backend == :ex_ssl ->
         %__MODULE__{unsupported: :tls_backend}
 
+      unsupported_proxy?(options) ->
+        %__MODULE__{unsupported: :proxy}
+
       true ->
         {tracker, latch} = HTTP.RequestLifecycle.start()
         %__MODULE__{tracker: tracker, latch: latch}
+    end
+  end
+
+  defp unsupported_proxy?(options) do
+    case options.proxy do
+      nil ->
+        false
+
+      proxy ->
+        case HTTP.Proxy.normalize(proxy) do
+          {:ok, _} ->
+            options.http_version == :h2c
+
+          {:error, _} ->
+            true
+        end
     end
   end
 

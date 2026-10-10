@@ -115,7 +115,10 @@ defmodule HTTP.Proxy do
     socket_opts =
       opts |> Keyword.get(:socket_opts, []) |> Keyword.delete(:active) |> Keyword.delete(:packet)
 
-    tcp_opts = [socket_opts: socket_opts]
+    tcp_opts =
+      opts
+      |> Keyword.take([:request_lifecycle])
+      |> Keyword.put(:socket_opts, socket_opts)
 
     with {:ok, tcp} <-
            HTTP.Transport.TCP.connect(proxy.host, proxy.port, tcp_opts, remaining(deadline)) do
@@ -123,8 +126,10 @@ defmodule HTTP.Proxy do
         if transport == HTTP.Transport.TCP do
           {:ok, tcp}
         else
+          upgrade_opts = Keyword.put_new(opts, :cancellable, true)
+
           with :ok <- establish_tunnel(tcp, host, port, proxy, deadline),
-               do: transport.upgrade(tcp, host, opts, remaining(deadline))
+               do: transport.upgrade(tcp, host, upgrade_opts, remaining(deadline))
         end
 
       case result do

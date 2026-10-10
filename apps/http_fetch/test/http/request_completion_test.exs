@@ -290,7 +290,10 @@ defmodule HTTP.RequestCompletionTest do
           [http_version: :auto],
           [tls_backend: :ex_ssl],
           [tls_backend: "ex_ssl"],
-          [redirect: :follow]
+          [redirect: :follow],
+          [proxy: {:http, "proxy.example", 3128, []}, http_version: :h2c],
+          [proxy: {:socks5, "proxy.example", 1080, []}],
+          [proxy: {:http, "proxy.example", 3128, [invalid: 1]}]
         ] do
       options = HTTP.FetchOptions.new(Keyword.merge([redirect: :manual], opts))
       handle = RequestCompletion.new(options)

@@ -1164,11 +1164,11 @@ For ownership and retirement of reusable transports across several requests, see
 [managed transport generations](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/managed-transports.md). Request completion
 and generation retirement are separate barriers.
 
-For a direct HTTP/1 request (including `http1_reuse: true`) or explicit HTTP/2
-request with `redirect: :manual` (or `:error`), retain the original Promise's
-completion handle before awaiting headers. The handle is created before the
-request starts and is exposed on the original Promise. Another process can use
-it, including during service drain:
+For a direct HTTP/1 request (including `http1_reuse: true`), explicit HTTP
+or HTTPS proxy route, or explicit HTTP/2 request with `redirect: :manual` (or
+`:error`), retain the original Promise's completion handle before awaiting
+headers. The handle is created before the request starts and is exposed on the
+original Promise. Another process can use it, including during service drain:
 
 ```elixir
 promise = HTTP.fetch(url,
@@ -1202,9 +1202,10 @@ owner/task termination or loss of the coordinator returns `:cleanup_unconfirmed`
 when the cleanup evidence is insufficient. User-created producer processes are
 owned by the caller and must respond to their stream's termination themselves.
 
-The barrier supports direct TCP and the default OTP TLS backend, including TLS
-handshake cancellation, explicit `:http1`, `:http2`, and `:h2c` selection.
-ExSSL, proxy/Unix routes, redirects followed internally, `:auto`, and HTTP/3 return
+The barrier supports direct TCP, explicit HTTP and HTTPS proxies, and the default
+OTP TLS backend, including TLS handshake cancellation, explicit `:http1` and
+`:http2` selection, and direct `:h2c`. ExSSL, Unix socket routes, proxies with
+`:h2c`, redirects followed internally, `:auto`, and HTTP/3 return
 `{:error, {:unsupported_completion, reason}}`. Existing asynchronous
 `HTTP.AbortController.abort/1` is unchanged; its cancellation can be followed by
 `HTTP.RequestCompletion.await/2`. Chained promises return `nil` from
