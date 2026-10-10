@@ -69,6 +69,28 @@ defmodule HTTP.HTTPSProxyWireTest do
     end
   end
 
+  for backend <- [:ssl, :ex_ssl] do
+    test "#{backend} TLS proxy rejects a trusted certificate for the wrong hostname" do
+      {port, _peer} = proxy_peer("pinned")
+
+      assert {:error, reason} =
+               HTTP.fetch("http://origin.invalid/",
+                 proxy: {:https, "localhost", port, []},
+                 tls_backend: unquote(backend),
+                 ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")],
+                 redirect: :manual,
+                 telemetry: false,
+                 timeout: 2_000
+               )
+               |> HTTP.Promise.await(3_000)
+
+      assert_hostname_failure(unquote(backend), reason)
+      assert_receive {:proxy_handshake_error, {:tls_alert, {alert, _}}}, 2_000
+      assert alert == hostname_alert(unquote(backend))
+      refute_receive {:proxy_request, _, _, _}, 0
+    end
+  end
+
   test "proxy TLS verifies proxy identity and rejects TLS-over-TLS origins before dialing" do
     {port, _peer} = proxy_peer()
 
@@ -134,8 +156,8 @@ defmodule HTTP.HTTPSProxyWireTest do
     refute String.downcase(head) =~ "transfer-encoding"
   end
 
-  for stop <- [:abort, :deadline] do
-    test "TLS proxy handshake is bounded by #{stop}" do
+  for backend <- [:ssl, :ex_ssl], stop <- [:abort, :deadline] do
+    test "#{backend} TLS proxy handshake is bounded by #{stop}" do
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
       {:ok, {_, port}} = :inet.sockname(listener)
       on_exit(fn -> :gen_tcp.close(listener) end)
@@ -144,6 +166,7 @@ defmodule HTTP.HTTPSProxyWireTest do
       promise =
         HTTP.fetch("http://origin.invalid/",
           proxy: {:https, "localhost", port, []},
+          tls_backend: unquote(backend),
           signal: controller,
           redirect: :manual,
           timeout: if(unquote(stop) == :deadline, do: 2_000, else: 5_000)
@@ -159,15 +182,15 @@ defmodule HTTP.HTTPSProxyWireTest do
     end
   end
 
-  defp proxy_peer do
+  defp proxy_peer(certificate \\ "localhost") do
     {:ok, listener} =
       :ssl.listen(0, [
         :binary,
         active: false,
         reuseaddr: true,
         ip: {127, 0, 0, 1},
-        certfile: Path.join(@fixtures, "localhost.pem"),
-        keyfile: Path.join(@fixtures, "localhost.key"),
+        certfile: Path.join(@fixtures, "#{certificate}.pem"),
+        keyfile: Path.join(@fixtures, "#{certificate}.key"),
         alpn_preferred_protocols: ["http/1.1"]
       ])
 
@@ -182,6 +205,18 @@ defmodule HTTP.HTTPSProxyWireTest do
 
     {port, peer}
   end
+
+  defp assert_hostname_failure(:ssl, reason) do
+    assert {:tls_alert, {:bad_certificate, _}} = reason
+    assert inspect(reason) =~ "hostname_check_failed"
+  end
+
+  defp assert_hostname_failure(:ex_ssl, reason) do
+    assert {:tls_alert, {:certificate_unknown, _}} = reason
+  end
+
+  defp hostname_alert(:ssl), do: :bad_certificate
+  defp hostname_alert(:ex_ssl), do: :certificate_unknown
 
   defp accept(listener, parent) do
     case :ssl.transport_accept(listener) do
@@ -204,8 +239,12 @@ defmodule HTTP.HTTPSProxyWireTest do
 
   defp handshake(socket, parent) do
     case :ssl.handshake(socket, 3_000) do
-      {:ok, socket} -> serve(socket, parent, "")
-      {:error, _} -> :ssl.close(socket)
+      {:ok, socket} ->
+        serve(socket, parent, "")
+
+      {:error, reason} ->
+        send(parent, {:proxy_handshake_error, reason})
+        :ssl.close(socket)
     end
   end
 
