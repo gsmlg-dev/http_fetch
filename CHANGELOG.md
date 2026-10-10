@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Extend request cleanup completion to pooled HTTP/1 and explicit HTTP/2/h2c
+  requests. Confirm safe HTTP/1 pool handoff or closure, and HTTP/2 stream,
+  helper, delivery and reservation release without closing healthy siblings.
+
 ## [0.19.1] - 2026-10-10
 
 ### Fixed

@@ -20,7 +20,7 @@ defmodule HTTP.HTTP1.Pool do
          :ok <- transport.setopts(socket, active: false),
          {:ok, token} <- GenServer.call(__MODULE__, {:prepare, key, transport, socket}),
          :ok <- transport.controlling_process(socket, Process.whereis(__MODULE__)) do
-      GenServer.call(__MODULE__, {:activate, token})
+      GenServer.call(__MODULE__, {:activate, token, HTTP.RequestLifecycle.current()})
     else
       _ -> transport.close(socket)
     end
@@ -78,7 +78,10 @@ defmodule HTTP.HTTP1.Pool do
     end
   end
 
-  def handle_call({:activate, token}, _from, state) do
+  def handle_call({:activate, token}, from, state),
+    do: handle_call({:activate, token, nil}, from, state)
+
+  def handle_call({:activate, token, tracker}, _from, state) do
     current_time = now()
 
     case Map.fetch(state.entries, token) do
@@ -91,6 +94,8 @@ defmodule HTTP.HTTP1.Pool do
 
         case entry.transport.setopts(entry.socket, active: :once) do
           :ok ->
+            HTTP.RequestLifecycle.handoff_socket(tracker, entry.socket)
+
             entry = %{
               entry
               | status: :idle,

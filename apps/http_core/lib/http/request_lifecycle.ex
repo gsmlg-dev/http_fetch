@@ -39,12 +39,35 @@ defmodule HTTP.RequestLifecycle do
   def abort(nil), do: :ok
   def abort(tracker), do: send(tracker, :abort)
 
+  def unconfirmed(nil), do: :ok
   def unconfirmed(tracker), do: GenServer.cast(tracker, :unconfirmed)
 
   def track_socket(opts, socket) do
-    register(Keyword.get(opts, :request_lifecycle), socket, :socket)
+    register(Keyword.get(opts, :request_lifecycle), socket_resource(socket), :socket)
     socket
   end
+
+  # Called at the ownership boundary, before a pool makes the connection
+  # available to another request. Cancellation must never close a handed-off socket.
+  def handoff_socket(nil, _socket), do: :ok
+
+  def handoff_socket(tracker, socket), do: handoff(tracker, [socket_resource(socket)])
+
+  def handoff_connection(nil, _socket, _owner), do: :ok
+
+  def handoff_connection(tracker, socket, owner),
+    do: handoff(tracker, [socket_resource(socket), owner])
+
+  defp handoff(tracker, resources) do
+    GenServer.call(tracker, {:handoff, resources}, :infinity)
+  catch
+    # A lost coordinator already makes its handle unconfirmed. It must not
+    # crash the pool, which may own unrelated idle connections.
+    :exit, _ -> :ok
+  end
+
+  defp socket_resource({:cancellable_ssl, _ssl, tcp}), do: tcp
+  defp socket_resource(socket), do: socket
 
   def attach_stream(nil, _stream), do: :ok
 
@@ -86,6 +109,20 @@ defmodule HTTP.RequestLifecycle do
     state = %{state | resources: Map.put(state.resources, monitor, {resource, kind})}
     if state.aborted?, do: cancel(resource, kind)
     {:reply, :ok, state}
+  end
+
+  def handle_call({:handoff, handed_off}, _from, state) do
+    resources =
+      Enum.reduce(state.resources, state.resources, fn {ref, {resource, kind}}, acc ->
+        if kind in [:socket, :connection] and resource in handed_off do
+          Process.demonitor(ref, [:flush])
+          Map.delete(acc, ref)
+        else
+          acc
+        end
+      end)
+
+    {:reply, :ok, %{state | resources: resources}}
   end
 
   def handle_call({:stream_ready, stream}, _from, state) do
@@ -180,6 +217,8 @@ defmodule HTTP.RequestLifecycle do
   defp cancel(pid, :dial), do: send(pid, :abort)
   # Upload workers are linked to the owner, which unlinks before stopping them.
   defp cancel(pid, :upload), do: send(pid, :abort)
+  defp cancel(pid, :body_bridge), do: GenServer.cast(pid, :stop)
+  defp cancel(pid, :connection), do: send(pid, :http2_shutdown_exclusive)
   defp cancel(_pid, :starter), do: :ok
   defp cancel(_pid, :task), do: :ok
   defp cancel(_pid, :stream_starting), do: :ok
