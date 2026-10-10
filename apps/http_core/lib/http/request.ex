@@ -117,7 +117,7 @@ defmodule HTTP.Request do
         path -> path
       end
 
-    if uri.query && uri.query != "" do
+    if uri.query do
       valid_request_target!(path <> "?" <> uri.query)
     else
       valid_request_target!(path)

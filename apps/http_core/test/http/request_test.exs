@@ -87,6 +87,22 @@ defmodule HTTP.RequestTest do
       assert HTTP.Request.authority(URI.parse("http://[::1]:8080/path")) == "[::1]:8080"
     end
 
+    for suffix <- ["", "?", "?key=%2F%3F&value=a%20b"] do
+      test "preserves the path and query bytes for #{inspect(suffix)}" do
+        target = "/up%2Fload" <> unquote(suffix)
+
+        request = %HTTP.Request{
+          method: :get,
+          request_mode: :proxy,
+          url: URI.parse("http://example.test" <> target <> "#fragment"),
+          headers: HTTP.Headers.new([])
+        }
+
+        wire = request |> HTTP.Request.to_iodata() |> IO.iodata_to_binary()
+        assert hd(String.split(wire, "\r\n")) == "GET #{target} HTTP/1.1"
+      end
+    end
+
     test "exposes prepared request body with inferred content type" do
       request = %HTTP.Request{method: :post, body: "payload"}
 
