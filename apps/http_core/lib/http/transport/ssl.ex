@@ -30,6 +30,7 @@ defmodule HTTP.Transport.SSL do
 
         case :ssl.connect(tcp, tls_opts, remaining) do
           {:ok, socket} ->
+            HTTP.RequestLifecycle.track_tls(opts, socket)
             {:ok, {:cancellable_ssl, socket, tcp}}
 
           {:error, _} = error ->

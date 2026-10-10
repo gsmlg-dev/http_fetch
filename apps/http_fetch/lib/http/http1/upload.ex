@@ -42,6 +42,11 @@ defmodule HTTP.HTTP1.Upload do
               remaining_timeout(deadline_at) -> {:error, :request_timeout}
             end
 
+          if match?({:error, _}, result) do
+            {:error, reason} = result
+            HTTP.Stream.error(stream, reason)
+          end
+
           send(owner, {:http1_upload, token, result})
         end,
         [:link, :monitor]

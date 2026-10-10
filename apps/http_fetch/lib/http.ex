@@ -305,8 +305,28 @@ defmodule HTTP do
     if HTTP.Telemetry.enabled?(options.telemetry),
       do: HTTP.Telemetry.request_start(request.method, request.url, request.headers)
 
+    preparation = HTTP.ManagedTransport.prepare(request, init)
+
+    request =
+      case preparation do
+        {:ok, prepared} -> prepared
+        _ -> request
+      end
+
+    options = %{
+      options
+      | http_version: request.transport_options[:http_version],
+        tls_backend: request.transport_options[:tls_backend]
+    }
+
     completion = HTTP.RequestCompletion.new(options)
     tracker = completion.tracker
+
+    association =
+      case preparation do
+        {:ok, _} -> HTTP.ManagedTransport.associate(request, tracker)
+        error -> error
+      end
 
     request = %{
       request
@@ -328,15 +348,33 @@ defmodule HTTP do
                 Process.demonitor(launch_monitor, [:flush])
                 Process.put(HTTP.RequestLifecycle, tracker)
 
-                if is_pid(request.body),
-                  do: HTTP.RequestLifecycle.attach_stream(tracker, request.body)
+                admission =
+                  with :ok <- association,
+                       :ok <- attach_upload(tracker, request),
+                       do: HTTP.ManagedTransport.admit(request, tracker)
 
                 result =
-                  handle_async_request(request, self(), abort_controller_pid, unix_socket_path)
+                  case admission do
+                    :ok ->
+                      handle_async_request(
+                        request,
+                        self(),
+                        abort_controller_pid,
+                        unix_socket_path
+                      )
+
+                    error ->
+                      error
+                  end
 
                 stop_failed_upload(result, request.body)
                 if match?({:error, _}, result), do: HTTP.RequestLifecycle.abort(tracker)
-                HTTP.RequestLifecycle.complete(tracker)
+
+                HTTP.RequestLifecycle.complete(
+                  tracker,
+                  request.transport_options[:managed_deadline_at]
+                )
+
                 result
 
               {:DOWN, ^launch_monitor, :process, ^calling_pid, _reason} ->
@@ -351,6 +389,16 @@ defmodule HTTP do
     send(task.pid, :request_launch)
     %Promise{task: task, completion: completion}
   end
+
+  defp attach_upload(tracker, %{body: body} = request) when is_pid(body),
+    do:
+      HTTP.RequestLifecycle.attach_stream(
+        tracker,
+        body,
+        request.transport_options[:managed_deadline_at]
+      )
+
+  defp attach_upload(_, _), do: :ok
 
   # Internal function, not part of public API
   @doc false

@@ -46,7 +46,13 @@ defmodule HTTP.SocketClient do
     ref = make_ref()
     parent = self()
     timeout = request_timeout(request)
-    deadline_at = System.monotonic_time(:millisecond) + timeout
+
+    deadline_at =
+      Keyword.get(
+        request.transport_options,
+        :managed_deadline_at,
+        System.monotonic_time(:millisecond) + timeout
+      )
 
     tracker = Keyword.get(request.transport_options, :request_lifecycle)
 
@@ -410,16 +416,20 @@ defmodule HTTP.SocketClient do
   defp refresh_http1_socket(transport, socket, request, timeout) do
     opts = Keyword.get(request.transport_options, :socket_opts, [])
 
-    case transport.setopts(socket,
-           send_timeout: min(Keyword.get(opts, :send_timeout, timeout), timeout),
-           send_timeout_close: Keyword.get(opts, :send_timeout_close, true)
-         ) do
-      :ok ->
-        {:ok, socket}
+    if Keyword.has_key?(request.transport_options, :managed_coordinator) do
+      {:ok, socket}
+    else
+      case transport.setopts(socket,
+             send_timeout: min(Keyword.get(opts, :send_timeout, timeout), timeout),
+             send_timeout_close: Keyword.get(opts, :send_timeout_close, true)
+           ) do
+        :ok ->
+          {:ok, socket}
 
-      {:error, _} = error ->
-        transport.close(socket)
-        error
+        {:error, _} = error ->
+          transport.close(socket)
+          error
+      end
     end
   end
 
@@ -428,7 +438,13 @@ defmodule HTTP.SocketClient do
          Keyword.get(request.transport_options, :http2_reuse, true) != false do
       profile = Keyword.get(request.transport_options, :http2_profile, :native_v1)
       protocol = if selection.mode == :h2c, do: :h2c, else: :h2
-      pool = Process.whereis(:http_fetch_http2_pool)
+
+      pool =
+        Keyword.get(
+          request.transport_options,
+          :http2_pool,
+          Process.whereis(:http_fetch_http2_pool)
+        )
 
       with pool when is_pid(pool) <- pool,
            {:ok, key} <- PoolKey.build(request, profile, protocol) do
@@ -575,11 +591,23 @@ defmodule HTTP.SocketClient do
     with {:ok, headers, body} <- HTTP.HTTP2.request_headers(request, profile, order?: false),
          {:ok, owner} <-
            ConnectionSupervisor.start_connection(
-             transport: transport,
-             socket: socket,
-             profile: profile,
-             activate?: false,
-             limit_initial_capacity?: http_version(request) == :auto
+             [
+               transport: transport,
+               socket: socket,
+               profile: profile,
+               write_timeout:
+                 if(request.transport_options[:managed_coordinator],
+                   do: Keyword.fetch!(request.transport_options[:socket_opts], :send_timeout),
+                   else: 1_000
+                 ),
+               activate?: false,
+               limit_initial_capacity?: http_version(request) == :auto
+             ],
+             Keyword.get(
+               request.transport_options,
+               :http2_connection_supervisor,
+               :http_fetch_http2_connection_supervisor
+             )
            ),
          :ok <-
            HTTP.RequestLifecycle.register(HTTP.RequestLifecycle.current(), owner, :connection),
@@ -720,7 +748,12 @@ defmodule HTTP.SocketClient do
          Keyword.get(request.transport_options, :http2_reuse, true) == false do
       {:ok, nil, nil, nil}
     else
-      pool = Process.whereis(:http_fetch_http2_pool)
+      pool =
+        Keyword.get(
+          request.transport_options,
+          :http2_pool,
+          Process.whereis(:http_fetch_http2_pool)
+        )
 
       with pool when is_pid(pool) <- pool,
            {:ok, key} <- pool_key_for_registration(request, profile, claim),

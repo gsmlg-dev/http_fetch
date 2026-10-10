@@ -1160,6 +1160,10 @@ See `HTTP.Response` for the complete header and consumption contract.
 
 ### Request cleanup completion
 
+For ownership and retirement of reusable transports across several requests, see
+[managed transport generations](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/managed-transports.md). Request completion
+and generation retirement are separate barriers.
+
 For a direct HTTP/1 request (including `http1_reuse: true`) or explicit HTTP/2
 request with `redirect: :manual` (or `:error`), retain the original Promise's
 completion handle before awaiting headers. The handle is created before the
