@@ -14,27 +14,31 @@ defmodule HTTP.Transport.SSL do
     socket_opts = [:binary, packet: :raw, active: false] ++ Keyword.get(opts, :socket_opts, [])
     ssl_opts = ssl_options(host, Keyword.get(opts, :ssl, []))
 
-    with {:ok, tcp} <-
-           :gen_tcp.connect(
-             Keyword.get(opts, :connect_address, String.to_charlist(host)),
-             port,
-             socket_opts,
-             timeout
-           ) do
-      HTTP.RequestLifecycle.track_socket(opts, tcp)
-      remaining = if deadline == :infinity, do: :infinity, else: max(deadline - now(), 0)
+    case :gen_tcp.connect(
+           Keyword.get(opts, :connect_address, String.to_charlist(host)),
+           port,
+           socket_opts,
+           timeout
+         ) do
+      {:ok, tcp} ->
+        HTTP.RequestLifecycle.track_socket(opts, tcp)
+        remaining = if deadline == :infinity, do: :infinity, else: max(deadline - now(), 0)
 
-      tls_opts =
-        [:binary, packet: :raw, active: false] ++ ssl_opts ++ Keyword.get(opts, :socket_opts, [])
+        tls_opts =
+          [:binary, packet: :raw, active: false] ++
+            ssl_opts ++ Keyword.get(opts, :socket_opts, [])
 
-      case :ssl.connect(tcp, tls_opts, remaining) do
-        {:ok, socket} ->
-          {:ok, {:cancellable_ssl, socket, tcp}}
+        case :ssl.connect(tcp, tls_opts, remaining) do
+          {:ok, socket} ->
+            {:ok, {:cancellable_ssl, socket, tcp}}
 
-        {:error, _} = error ->
-          abort_tcp(tcp)
-          error
-      end
+          {:error, _} = error ->
+            abort_tcp(tcp)
+            error
+        end
+
+      {:error, reason} ->
+        HTTP.Transport.connect_error(opts, reason)
     end
   end
 
