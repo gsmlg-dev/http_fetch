@@ -141,6 +141,8 @@ defmodule HTTP.HTTP2RequestTrailersTest do
     {:ok, source} = HTTP.Stream.start_link(6)
     promise = fetch(url, body: source, duplex: :half, headers: [{"content-length", "6"}])
     upload_id = event(peer, "headers")["id"]
+    # The tiny peer window applies after the client has received its SETTINGS.
+    event(peer, "settings_ack")
     producer = Task.async(fn -> HTTP.Stream.chunk(source, "abcdef", 4_000) end)
     assert event(peer, "data", upload_id)["bytes"] == 3
     assert :ok = HTTP.Stream.finish(source, [{"x-checksum", "six"}])
@@ -160,6 +162,7 @@ defmodule HTTP.HTTP2RequestTrailersTest do
       {peer, url} = peer(["--window", "3"])
       sibling = fetch(hold(url), [])
       sibling_id = event(peer, "headers")["id"]
+      event(peer, "settings_ack")
       {:ok, source} = HTTP.Stream.start_link(6)
       controller = HTTP.AbortController.new()
 

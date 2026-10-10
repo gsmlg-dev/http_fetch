@@ -118,7 +118,9 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
 
           :deadline ->
             assert {:error, reason} = Task.await(task, 3_000)
-            assert reason in [:request_timeout, :deadline_exceeded, :connect_timeout]
+            # A dialing TLS handshake can time out before the outer deadline wins.
+            assert reason in [:request_timeout, :deadline_exceeded, :connect_timeout] or
+                     (stage == :dialing and reason == :timeout)
 
           :caller_down ->
             Task.shutdown(task, :brutal_kill)

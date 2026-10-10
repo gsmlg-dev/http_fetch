@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-11
+
+### Added
+- Add caller-owned managed HTTP/1 and HTTP/2 transport scopes with private
+  pools, finite admission, frozen destination and TLS policy, bounded status,
+  and durable graceful/abort retirement receipts. Keep request cleanup
+  completion separate from whole-scope retirement. Managed scopes support
+  direct TCP/OTP TLS, explicit protocols, and raw streamed responses with
+  manual/error redirects; reject unsupported policies before dialing.
+
+### Fixed
+- Limit each inbound HTTP/2 header block to 256 frames, including empty
+  HEADERS/CONTINUATION and the final frame, and omit empty fragment storage.
+  Reject excess fragmentation at connection scope while preserving separate
+  connections and existing compressed-byte, HPACK and decoded-header limits.
+
 ## [0.20.0] - 2026-10-10
 
 ### Added

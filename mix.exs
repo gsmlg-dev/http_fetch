@@ -21,6 +21,7 @@ defmodule HttpFetch.Umbrella.MixProject do
         extras: [
           "README.md",
           "CHANGELOG.md",
+          "docs/managed-transports.md",
           "docs/migration-provenance.md",
           "docs/migration-validation.md",
           "docs/ex-ssl-consumer-contract.md",

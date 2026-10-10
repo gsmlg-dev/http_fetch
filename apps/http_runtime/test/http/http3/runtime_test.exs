@@ -409,8 +409,10 @@ defmodule HTTP.HTTP3.RuntimeTest do
       assert %{pending: 0, leases: 1} = Pool.status(pool)
       [owner] = Map.keys(:sys.get_state(pool).owners)
       assert %{allocations: 2} = ConnectionOwner.status(owner)
+      first_monitor = Process.monitor(first)
       Stream.close(first)
-      assert %{leases: 0} = await_released(pool)
+      assert_receive {:DOWN, ^first_monitor, :process, ^first, :normal}, 1_000
+      assert %{leases: 0} = Pool.status(pool)
 
       assert {:ok, sibling, generation} =
                Stream.start(request, self(), pool: pool, max_streams: 1)
@@ -685,25 +687,22 @@ defmodule HTTP.HTTP3.RuntimeTest do
     end
   end
 
-  defp await_pending(pool, count, attempts \\ 1_000)
-  defp await_pending(_pool, _count, 0), do: flunk("pool waiter was not queued")
+  defp await_pending(pool, count),
+    do: await_pending(pool, count, System.monotonic_time(:millisecond) + 2_000)
 
-  defp await_pending(pool, count, attempts) do
+  defp await_pending(pool, count, deadline) do
     case Pool.status(pool) do
-      %{pending: ^count} = status -> status
-      _ -> await_pending(pool, count, attempts - 1)
+      %{pending: ^count} = status ->
+        status
+
+      status ->
+        assert System.monotonic_time(:millisecond) < deadline, inspect(status)
+        :erlang.yield()
+        await_pending(pool, count, deadline)
     end
   end
 
-  defp await_released(pool, attempts \\ 1_000)
-  defp await_released(_pool, 0), do: flunk("pool lease was not released")
-
-  defp await_released(pool, attempts) do
-    case Pool.status(pool) do
-      %{leases: 0} = status -> status
-      _ -> await_released(pool, attempts - 1)
-    end
-  end
+  defp await_released(pool), do: await_leases(pool, 0)
 
   defp await_leases(pool, count),
     do: await_leases(pool, count, System.monotonic_time(:millisecond) + 2_000)
