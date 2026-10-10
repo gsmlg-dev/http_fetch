@@ -110,7 +110,7 @@ defmodule HTTP.ManagedTransport.Policy do
 
   def freeze(_), do: {:error, :invalid_transport_scope_policy}
 
-  def prepare(policy, request, supplied) do
+  def prepare(policy, %HTTP.Request{} = request, supplied) do
     supplied = if is_map(supplied), do: Map.to_list(supplied), else: supplied
     supplied = Enum.map(supplied, fn {key, value} -> {normalize_key(key), value} end)
     options = request.transport_options
@@ -148,7 +148,7 @@ defmodule HTTP.ManagedTransport.Policy do
     end
   end
 
-  defp normalize_request(request) do
+  defp normalize_request(%HTTP.Request{} = request) do
     fields = request.headers |> HTTP.Headers.to_list() |> Enum.take(257)
 
     with true <- length(fields) <= 256,
@@ -157,7 +157,8 @@ defmodule HTTP.ManagedTransport.Policy do
          {:ok, body} <- normalize_body(request.body),
          {:ok, content_type} <- normalize_content_type(request.content_type),
          true <-
-           fields_bytes(fields) + byte_size(content_type || "") + url_bytes(url) <=
+           fields_bytes(fields) + byte_size(content_type || "") +
+             url_bytes(url.scheme, url.host, url.path, url.query) <=
              @max_request_bytes do
       headers = HTTP.Headers.new(Enum.map(fields, fn {key, value} -> {own(key), own(value)} end))
       request = %{request | url: url, headers: headers, body: body, content_type: content_type}
@@ -176,18 +177,23 @@ defmodule HTTP.ManagedTransport.Policy do
     _ -> {:error, :transport_scope_request_limit}
   end
 
+  @spec normalize_url(URI.t()) :: {:ok, URI.t()} | {:error, :transport_scope_request_limit}
   defp normalize_url(url) do
     path = if url.path in [nil, ""], do: "/", else: url.path
 
-    normalized = %URI{
-      scheme: url.scheme,
-      host: url.host,
-      port: url.port,
-      path: path,
-      query: url.query
+    # Preserve the parser-owned opaque authority while discarding unused URI metadata.
+    normalized = %{
+      URI.parse("")
+      | scheme: url.scheme,
+        host: url.host,
+        port: url.port,
+        path: path,
+        query: url.query
     }
 
-    if byte_size(url.host) <= 253 and url_bytes(normalized) <= @max_request_bytes do
+    if byte_size(url.host) <= 253 and
+         url_bytes(normalized.scheme, normalized.host, normalized.path, normalized.query) <=
+           @max_request_bytes do
       {:ok,
        %{
          normalized
@@ -201,10 +207,8 @@ defmodule HTTP.ManagedTransport.Policy do
     end
   end
 
-  defp url_bytes(url),
-    do:
-      byte_size(url.scheme) + byte_size(url.host) + byte_size(url.path) +
-        byte_size(url.query || "")
+  defp url_bytes(scheme, host, path, query),
+    do: byte_size(scheme) + byte_size(host) + byte_size(path) + byte_size(query || "")
 
   defp normalize_body(body) when is_nil(body) or is_pid(body), do: {:ok, body}
 
@@ -251,7 +255,7 @@ defmodule HTTP.ManagedTransport.Policy do
 
   defp scan_input(_, _, _, _, _), do: {:error, :transport_scope_request_limit}
 
-  defp effective_fields(%{transport_options: options} = request) do
+  defp effective_fields(%HTTP.Request{transport_options: options} = request) do
     # Accounting must not replace upload attachment or the later duplex validation.
     request = if is_pid(request.body), do: %{request | duplex: :half}, else: request
 
