@@ -299,9 +299,14 @@ defmodule HTTP.Runtime.Dialer do
 
   def select_transport(request, socket_path) do
     with :ok <- validate_connect_address_route(request, socket_path),
-         {:ok, _proxy} <- HTTP.Proxy.route(request, socket_path),
+         {:ok, proxy} <- HTTP.Proxy.route(request, socket_path),
          {:ok, transport, host, port} <- select_origin_transport(request, socket_path),
          :ok <- validate_connect_address(transport, host, request) do
+      transport =
+        if proxy != nil and proxy.scheme == :https,
+          do: HTTP.TLSBackend.transport(tls_backend(request)),
+          else: transport
+
       {:ok, transport, host, port}
     end
   end
@@ -340,7 +345,8 @@ defmodule HTTP.Runtime.Dialer do
     end
   end
 
-  def protocol_selection(%Request{url: %URI{scheme: "http"}} = request, HTTP.Transport.TCP) do
+  def protocol_selection(%Request{url: %URI{scheme: "http"}} = request, transport)
+      when transport in [HTTP.Transport.TCP, HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
     case http_version(request) do
       version when version in [:http1, :auto] ->
         if http2_options?(request),
