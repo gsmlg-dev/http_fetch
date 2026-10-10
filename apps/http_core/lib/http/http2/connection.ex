@@ -292,6 +292,37 @@ defmodule HTTP.HTTP2.Connection do
       else: {:ok, %{c | pending_headers: Map.delete(c.pending_headers, id)}, []}
   end
 
+  @doc "Commits bounded request trailers using the connection encoder and closes the send half."
+  def send_trailers(%__MODULE__{} = c, id, fields) do
+    with {:ok, stream} <- Map.fetch(c.streams, id),
+         true <- MapSet.member?(c.committed, id) || {:error, :headers_not_committed},
+         {:ok, trailers} <- HTTP.Trailers.validate(fields),
+         headers <-
+           Enum.map(trailers.headers, fn {name, value} -> {String.downcase(name), value} end),
+         :ok <- trailer_header_limit(c, headers),
+         {:ok, stream} <- StreamState.send_data(stream, 0, true) do
+      {encoder, block} = HPACK.encode_headers(c.encoder, headers, c.encoder_options)
+      frames = header_frames(id, block, true, c.peer.values.max_frame_size)
+      connection = %{c | encoder: encoder, streams: Map.put(c.streams, id, stream)}
+      {:ok, connection, [{:headers, id, frames}]}
+    else
+      :error -> {:error, :unknown_stream}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp trailer_header_limit(c, headers) do
+    bytes =
+      Enum.reduce(headers, 0, fn {name, value}, total ->
+        total + byte_size(name) + byte_size(value) + 32
+      end)
+
+    if c.peer.values.max_header_list_size == :infinity or
+         bytes <= c.peer.values.max_header_list_size,
+       do: :ok,
+       else: {:error, :trailers_too_large}
+  end
+
   @doc """
   Consumes connection and stream send credit and returns one DATA effect.
   """

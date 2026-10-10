@@ -273,6 +273,13 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     end
   end
 
+  def handle_info({:body_trailers, bridge, fields}, state) do
+    case dispatch_event(state, {:body_trailers, bridge, fields}) do
+      {:ok, state} -> {:noreply, state}
+      {:error, reason, state} -> {:noreply, %{state | close_reason: reason}}
+    end
+  end
+
   def handle_info({:body_error, bridge, reason}, state) do
     case dispatch_event(state, {:body_error, bridge, reason}) do
       {:ok, state} -> {:noreply, state}
@@ -1311,6 +1318,34 @@ defmodule HTTP.HTTP2.ConnectionOwner do
               {:error, write_reason, state} ->
                 {:error, write_reason, state}
             end
+        end
+
+      nil ->
+        {:ok, state}
+    end
+  end
+
+  defp dispatch_event(%{write_closed?: true} = state, {:body_trailers, _bridge, _fields}),
+    do: {:ok, state}
+
+  defp dispatch_event(state, {:body_trailers, bridge, fields}) when is_pid(bridge) do
+    case Enum.find(state.streams, fn {_id, entry} -> entry.body_bridge == bridge end) do
+      {_id, %{upload_stopped?: true}} ->
+        {:ok, state}
+
+      {id, _entry} ->
+        case Connection.send_trailers(state.connection, id, fields) do
+          {:ok, connection, [{:headers, ^id, frames}] = effects} ->
+            # Queue admission precedes encoder commitment. A rejected batch must
+            # retain the peer's HPACK state and fail only this request.
+            if state.bytes + IO.iodata_length(frames) > state.max_queue_bytes do
+              dispatch_event(state, {:body_error, bridge, :writer_queue_full})
+            else
+              write_effects(%{state | connection: connection}, effects)
+            end
+
+          {:error, reason} ->
+            dispatch_event(state, {:body_error, bridge, reason})
         end
 
       nil ->

@@ -51,6 +51,7 @@ defmodule HTTP.HTTP2.BodyBridge do
        started_at: System.monotonic_time(),
        bytes: 0,
        content_length: Keyword.get(opts, :content_length),
+       trailers: nil,
        peak_buffered_bytes: 0
      }}
   end
@@ -141,10 +142,19 @@ defmodule HTTP.HTTP2.BodyBridge do
   end
 
   def handle_info(
-        {:stream_trailers, stream, _headers},
+        {:stream_trailers, stream, headers},
         %{stream: stream, stopped?: false} = state
       ) do
-    {:noreply, stop_stream(state, :request_trailers_unsupported)}
+    case HTTP.Trailers.validate(headers) do
+      {:ok, trailers} when state.trailers == nil ->
+        {:noreply, %{state | trailers: trailers.headers}}
+
+      {:ok, _trailers} ->
+        {:noreply, stop_stream(state, :invalid_trailer)}
+
+      {:error, reason} ->
+        {:noreply, stop_stream(state, reason)}
+    end
   end
 
   def handle_info({:stream_trailers, _stream, _headers}, state), do: {:noreply, state}
@@ -158,7 +168,10 @@ defmodule HTTP.HTTP2.BodyBridge do
         {:noreply, stop_stream(state, :content_length_mismatch)}
 
       true ->
-        send(state.owner, {:body_eof, self()})
+        if state.trailers,
+          do: send(state.owner, {:body_trailers, self(), state.trailers}),
+          else: send(state.owner, {:body_eof, self()})
+
         {:noreply, finish(%{state | eof?: true, read_pending?: false}, :eof)}
     end
   end
@@ -267,14 +280,15 @@ defmodule HTTP.HTTP2.BodyBridge do
         pending_chunk: nil,
         source_ref: nil,
         read_pending?: false,
-        buffered_bytes: 0
+        buffered_bytes: 0,
+        trailers: nil
     }
   end
 
-  defp bridge_outcome(:request_trailers_unsupported), do: :source_error
   defp bridge_outcome(:cancelled), do: :cancelled
   defp bridge_outcome(:early_response), do: :early_response
   defp bridge_outcome(:owner_down), do: :owner_down
   defp bridge_outcome(:buffer_limit), do: :buffer_limit
   defp bridge_outcome(:content_length_mismatch), do: :content_length_mismatch
+  defp bridge_outcome(_reason), do: :source_error
 end
