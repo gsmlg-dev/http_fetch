@@ -56,14 +56,15 @@ defmodule HTTP.ProxyWireTest do
     assert {:error, :timeout} = :gen_tcp.accept(origin, 100)
   end
 
-  for {backend, origin_host} <- [
-        {:ssl, "localhost"},
-        {:ex_ssl, "localhost"},
-        {:ssl, "127.0.0.1"},
-        {:ex_ssl, "127.0.0.1"}
+  for {backend, origin_host, fixture, sni} <- [
+        {:ssl, "localhost", "localhost", nil},
+        {:ex_ssl, "localhost", "localhost", nil},
+        {:ssl, "127.0.0.1", "localhost", nil},
+        {:ex_ssl, "127.0.0.1", "localhost", nil},
+        {:ex_ssl, "127.0.0.1", "pinned", ~c"pinned.invalid"}
       ],
       protocol <- [:http1, :http2, :auto] do
-    test "HTTPS #{protocol} #{origin_host} tunnels with #{backend} and keeps proxy auth outside TLS" do
+    test "HTTPS #{protocol} #{origin_host} tunnels with #{backend} using #{fixture} and keeps proxy auth outside TLS" do
       parent = self()
       {origin, origin_port} = listener()
       {proxy, proxy_port} = listener()
@@ -80,8 +81,8 @@ defmodule HTTP.ProxyWireTest do
             :ssl.handshake(
               tcp,
               [
-                certfile: String.to_charlist(Path.join(@fixtures, "localhost.pem")),
-                keyfile: String.to_charlist(Path.join(@fixtures, "localhost.key")),
+                certfile: String.to_charlist(Path.join(@fixtures, unquote(fixture) <> ".pem")),
+                keyfile: String.to_charlist(Path.join(@fixtures, unquote(fixture) <> ".key")),
                 active: false,
                 mode: :binary,
                 alpn_preferred_protocols: alpn
@@ -99,11 +100,16 @@ defmodule HTTP.ProxyWireTest do
 
       on_exit(fn -> if Process.alive?(peer), do: Process.exit(peer, :kill) end)
 
+      ssl = [cacertfile: Path.join(@fixtures, unquote(fixture) <> "-ca.pem")]
+
+      ssl =
+        if unquote(sni), do: Keyword.put(ssl, :server_name_indication, unquote(sni)), else: ssl
+
       response =
         HTTP.fetch("https://#{unquote(origin_host)}:#{origin_port}/private",
           http_version: unquote(protocol),
           tls_backend: unquote(backend),
-          ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
+          ssl: ssl,
           proxy:
             {:http, "127.0.0.1", proxy_port,
              [headers: [{"Proxy-Authorization", "Basic proxy-secret"}]]},
@@ -173,7 +179,8 @@ defmodule HTTP.ProxyWireTest do
           tls_backend: :ex_ssl,
           ssl: [
             cacertfile: Path.join(@fixtures, "localhost-ca.pem"),
-            server_name_indication: ~c"localhost"
+            server_name_indication: ~c"localhost",
+            ex_ssl: [reference_identity: {:ip, unquote(String.trim(host, "[]"))}]
           ],
           proxy: {:http, "127.0.0.1", proxy_port, []},
           timeout: 5_000

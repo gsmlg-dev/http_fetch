@@ -6,7 +6,6 @@ defmodule HTTP.TLSTransportTest do
   @fixtures Path.expand("../../../http_fetch/test/support/fixtures", __DIR__)
   @ca Path.join(@fixtures, "localhost-ca.pem")
   @cert Path.join(@fixtures, "localhost.pem")
-  @key Path.join(@fixtures, "localhost.key")
 
   for transport <- [HTTP.Transport.SSL, ExSSL] do
     @transport transport
@@ -117,7 +116,7 @@ defmodule HTTP.TLSTransportTest do
                  ssl: [
                    cacertfile: @ca,
                    server_name_indication: ~c"wrong.example",
-                   ex_ssl: [profile: :default]
+                   ex_ssl: [profile: :default, reference_identity: {:ip, {127, 0, 0, 1}}]
                  ]
                ],
                5_000
@@ -126,6 +125,52 @@ defmodule HTTP.TLSTransportTest do
     assert_receive {:wire_sni, ~c"wrong.example"}, 5_000
     assert {:ok, "ip"} = ExSSL.recv(socket, 2, 5_000)
     assert :ok = ExSSL.close(socket)
+  end
+
+  test "ex_ssl direct IP dialing preserves DNS SNI identity with profile-only options" do
+    port = peer(fn socket -> :ssl.send(socket, "dns") end, [], "pinned")
+
+    assert {:ok, socket} =
+             ExSSL.connect(
+               "127.0.0.1",
+               port,
+               [
+                 ssl: [
+                   cacertfile: Path.join(@fixtures, "pinned-ca.pem"),
+                   server_name_indication: ~c"pinned.invalid",
+                   ex_ssl: [profile: :default]
+                 ]
+               ],
+               5_000
+             )
+
+    assert {:ok, "dns"} = ExSSL.recv(socket, 3, 5_000)
+    assert :ok = ExSSL.close(socket)
+  end
+
+  for fixture <- ["localhost", "pinned"] do
+    test "ex_ssl direct IP with wrong DNS SNI rejects trusted #{fixture} certificate" do
+      port =
+        peer(
+          fn _socket -> flunk("wrong DNS identity was authenticated") end,
+          [],
+          unquote(fixture)
+        )
+
+      assert {:error, {:tls_alert, {:certificate_unknown, _}}} =
+               ExSSL.connect(
+                 "127.0.0.1",
+                 port,
+                 [
+                   ssl: [
+                     cacertfile: Path.join(@fixtures, unquote(fixture) <> "-ca.pem"),
+                     server_name_indication: ~c"wrong.example",
+                     ex_ssl: [profile: :default]
+                   ]
+                 ],
+                 5_000
+               )
+    end
   end
 
   test "ex_ssl rejects unsupported TLS and TCP options before connecting" do
@@ -293,7 +338,7 @@ defmodule HTTP.TLSTransportTest do
     assert :ok = ExSSL.close(socket)
   end
 
-  defp peer(handler, options \\ []) do
+  defp peer(handler, options \\ [], fixture \\ "localhost") do
     {:ok, listener} =
       :ssl.listen(
         0,
@@ -302,8 +347,8 @@ defmodule HTTP.TLSTransportTest do
           packet: :raw,
           active: false,
           ip: {127, 0, 0, 1},
-          certfile: @cert,
-          keyfile: @key
+          certfile: Path.join(@fixtures, fixture <> ".pem"),
+          keyfile: Path.join(@fixtures, fixture <> ".key")
         ] ++ Keyword.put_new(options, :versions, [:"tlsv1.3"])
       )
 

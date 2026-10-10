@@ -6,7 +6,8 @@ defmodule HTTP.Transport.ExSSL do
   @impl true
   def connect(host, port, opts, timeout) do
     with {:ok, ssl_opts} <- tls_options(opts) do
-      ssl_opts = origin_identity(host, ssl_opts, Keyword.get(opts, :connect_address) != nil)
+      route = if Keyword.get(opts, :connect_address) != nil, do: :pinned, else: :direct
+      ssl_opts = origin_identity(host, ssl_opts, route)
 
       SSL.connect(
         Keyword.get(opts, :connect_address, connect_host(host)),
@@ -20,7 +21,7 @@ defmodule HTTP.Transport.ExSSL do
   @doc false
   def upgrade(tcp, host, opts, timeout) do
     with {:ok, ssl_opts} <- tls_options(opts),
-         do: SSL.connect(tcp, origin_identity(host, ssl_opts, true), timeout)
+         do: SSL.connect(tcp, origin_identity(host, ssl_opts, :upgrade), timeout)
   end
 
   @impl true
@@ -111,13 +112,19 @@ defmodule HTTP.Transport.ExSSL do
     end
   end
 
-  defp origin_identity(host, ssl_opts, dns_sni?) do
+  defp origin_identity(host, ssl_opts, route) do
     case :inet.parse_address(String.to_charlist(host)) do
       {:ok, address} ->
         ex_ssl = Keyword.get(ssl_opts, :ex_ssl, [])
 
-        if not Keyword.has_key?(ssl_opts, :ex_ssl) or
-             (Keyword.keyword?(ex_ssl) and ex_ssl != []) do
+        valid_options? =
+          not Keyword.has_key?(ssl_opts, :ex_ssl) or
+            (Keyword.keyword?(ex_ssl) and ex_ssl != [])
+
+        ip_reference? =
+          route == :pinned or Keyword.get(ssl_opts, :server_name_indication) in [nil, :disable]
+
+        if valid_options? and ip_reference? do
           ssl_opts
           |> Keyword.put(:ex_ssl, Keyword.put_new(ex_ssl, :reference_identity, {:ip, address}))
           |> Keyword.put_new(:server_name_indication, :disable)
@@ -126,7 +133,7 @@ defmodule HTTP.Transport.ExSSL do
         end
 
       {:error, _} ->
-        if dns_sni?,
+        if route != :direct,
           do: Keyword.put_new(ssl_opts, :server_name_indication, String.to_charlist(host)),
           else: ssl_opts
     end

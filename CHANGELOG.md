@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow an explicit ExSSL certificate reference identity independently of
   SNI while retaining mandatory peer verification and socket upgrade checks.
 - Isolate TLS session tickets by both certificate reference identity and SNI.
+- Retain SNI-derived certificate verification for ordinary ExSSL calls unless
+  an explicit independent reference identity is supplied.
 
 ## [0.18.0] - 2026-10-10
 
