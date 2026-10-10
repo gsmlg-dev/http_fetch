@@ -7,10 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-10
+
 ### Added
 - Extend request cleanup completion to pooled HTTP/1 and explicit HTTP/2/h2c
   requests. Confirm safe HTTP/1 pool handoff or closure, and HTTP/2 stream,
   helper, delivery and reservation release without closing healthy siblings.
+- Support bounded HTTP/2 upload trailers through `HTTP.Stream.finish/2`, with
+  ordered fields, shared HPACK encoding, atomic HEADERS/CONTINUATION writes,
+  peer header-list limits and request-local validation failures.
+- Add opt-in `error_mode: :structured` and `HTTP.RequestError.pre_send?/1`
+  evidence for confirmed failures before direct TCP establishment. Preserve
+  raw errors by default and leave validated-address failover to the caller.
+- Support explicit HTTPS proxies for HTTP origins with verified proxy TLS,
+  absolute-form HTTP/1 forwarding and isolated pooled connections. Reject
+  HTTPS origins through HTTPS proxies before dialing; never fall back directly.
+
+### Fixed
+- Stop caller upload streams and wake blocked producers on terminal request
+  failures, including proxy and pooled-route failures before connection setup.
+  Preserve successful header-first responses and early-response cleanup.
 
 ## [0.19.1] - 2026-10-10
 
