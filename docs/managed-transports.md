@@ -84,6 +84,34 @@ Oversized chunks fail with `:buffer_limit` (H2 wraps this as
 `{:body_error, :buffer_limit}` on the request). The H1 writer signals the exact
 error to its source before terminating, so its producer also observes the error.
 
+### Managed request normalization
+
+Before admission, managed requests discard redundant URI `authority` metadata
+and retain only scheme, host, port, path and query. Supported URL, header,
+buffered-body and convenience Content-Type binaries receive compact owned
+backing. Bounded iodata is flattened to one binary; its original list structure
+is not retained by the admitted request. Buffered bodies remain limited to
+1 MiB. Body and Content-Type list traversal additionally permits at most 65,536
+nodes (cons cells and leaves, including empty lists) and 32 nesting levels before
+conversion, so zero-byte and deeply nested representations have finite work.
+
+Both retained input metadata (headers, used URI strings and convenience
+Content-Type) and effective request metadata must fit 64 KiB. Fields cost their
+name and value bytes plus 32 bytes each; effective fields plus the HTTP/1 origin-form
+target must fit the same byte limit and contain at most 256 fields. Effective
+fields include generated Content-Type/framing, HTTP/1 Host/Connection and HTTP/2
+pseudo-fields. The original explicit fields stay intact for protocol framing
+validation; explicit Content-Type takes precedence over the convenience value.
+Over-budget or unsupported managed representations return
+`:transport_scope_request_limit` before dialing or sending request bytes.
+
+These are conservative payload and structure charges, not an exact heap-memory
+envelope. Caller input, rejected-request handling, preparation traversal and
+temporary conversion/copy allocations are outside the retained-input contract.
+The normalized payload may have several references or bounded preparation
+copies; the charges do not claim one allocation per reference or bound OTP/OS
+transport internals. Non-managed Fetch keeps its ordinary input contract.
+
 `snapshot/2` accepts a finite nonnegative millisecond timeout and returns aggregate
 `active_requests`, `preparing_requests`, `pending`, `connections`, `resources`,
 `limits`, `identity` and `lifecycle`. It returns no request history, URLs, headers,

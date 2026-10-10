@@ -2,6 +2,9 @@ defmodule HTTP.ManagedTransport.Policy do
   @moduledoc false
 
   @max_policy_bytes 1_048_576
+  @max_request_bytes 65_536
+  @max_input_nodes 65_536
+  @max_input_depth 32
   @tls_options [
     :verify,
     :depth,
@@ -107,7 +110,7 @@ defmodule HTTP.ManagedTransport.Policy do
 
   def freeze(_), do: {:error, :invalid_transport_scope_policy}
 
-  def prepare(policy, request, supplied) do
+  def prepare(policy, %HTTP.Request{} = request, supplied) do
     supplied = if is_map(supplied), do: Map.to_list(supplied), else: supplied
     supplied = Enum.map(supplied, fn {key, value} -> {normalize_key(key), value} end)
     options = request.transport_options
@@ -137,31 +140,148 @@ defmodule HTTP.ManagedTransport.Policy do
           not valid_deadline?(Keyword.get(options, :connect_timeout, 30_000)) ->
         {:error, :transport_scope_invalid_deadline}
 
-      not request_bounded?(request) ->
-        {:error, :transport_scope_request_limit}
-
       true ->
-        {:ok, %{request | transport_options: Keyword.merge(options, policy.transport)}}
+        normalize_request(%{
+          request
+          | transport_options: Keyword.merge(options, policy.transport)
+        })
     end
   end
 
-  defp request_bounded?(request) do
-    fields = HTTP.Headers.to_list(request.headers)
+  defp normalize_request(%HTTP.Request{} = request) do
+    fields = request.headers |> HTTP.Headers.to_list() |> Enum.take(257)
 
-    bytes =
-      Enum.reduce(fields, 0, fn {name, value}, sum ->
-        sum + byte_size(name) + byte_size(value) + 32
-      end)
+    with true <- length(fields) <= 256,
+         true <- fields_bytes(fields) <= @max_request_bytes,
+         {:ok, url} <- normalize_url(request.url),
+         {:ok, body} <- normalize_body(request.body),
+         {:ok, content_type} <- normalize_content_type(request.content_type),
+         true <-
+           fields_bytes(fields) + byte_size(content_type || "") +
+             url_bytes(url.scheme, url.host, url.path, url.query) <=
+             @max_request_bytes do
+      headers = HTTP.Headers.new(Enum.map(fields, fn {key, value} -> {own(key), own(value)} end))
+      request = %{request | url: url, headers: headers, body: body, content_type: content_type}
+      {effective, target_bytes} = effective_fields(request)
 
-    target = (request.url.path || "/") <> (request.url.query || "")
-    length(fields) <= 256 and bytes + byte_size(target) <= 65_536 and body_bounded?(request.body)
+      if length(effective) <= 256 and
+           fields_bytes(effective) + target_bytes <= @max_request_bytes do
+        {:ok, request}
+      else
+        {:error, :transport_scope_request_limit}
+      end
+    else
+      _ -> {:error, :transport_scope_request_limit}
+    end
   rescue
-    _ -> false
+    _ -> {:error, :transport_scope_request_limit}
   end
 
-  defp body_bounded?(body) when body in [nil, ""], do: true
-  defp body_bounded?(body) when is_pid(body), do: true
-  defp body_bounded?(body), do: IO.iodata_length(body) <= @max_policy_bytes
+  @spec normalize_url(URI.t()) :: {:ok, URI.t()} | {:error, :transport_scope_request_limit}
+  defp normalize_url(url) do
+    path = if url.path in [nil, ""], do: "/", else: url.path
+
+    # Preserve the parser-owned opaque authority while discarding unused URI metadata.
+    normalized = %{
+      URI.parse("")
+      | scheme: url.scheme,
+        host: url.host,
+        port: url.port,
+        path: path,
+        query: url.query
+    }
+
+    if byte_size(url.host) <= 253 and
+         url_bytes(normalized.scheme, normalized.host, normalized.path, normalized.query) <=
+           @max_request_bytes do
+      {:ok,
+       %{
+         normalized
+         | scheme: own(url.scheme),
+           host: own(url.host),
+           path: own(path),
+           query: own(url.query)
+       }}
+    else
+      {:error, :transport_scope_request_limit}
+    end
+  end
+
+  defp url_bytes(scheme, host, path, query),
+    do: byte_size(scheme) + byte_size(host) + byte_size(path) + byte_size(query || "")
+
+  defp normalize_body(body) when is_nil(body) or is_pid(body), do: {:ok, body}
+
+  defp normalize_body(body) do
+    with {:ok, _, _} <- scan_input(body, @max_input_depth, @max_input_nodes, 0, 255) do
+      {:ok, body |> IO.iodata_to_binary() |> own()}
+    end
+  end
+
+  defp normalize_content_type(nil), do: {:ok, nil}
+
+  defp normalize_content_type(value) do
+    with {:ok, _, _} <- scan_input(value, @max_input_depth, @max_input_nodes, 0, 0x10FFFF),
+         value <- to_string(value),
+         true <- byte_size(value) <= @max_request_bytes do
+      {:ok, own(value)}
+    end
+  end
+
+  # Count cons cells and leaves before flattening; tails do not increase nesting.
+  defp scan_input(_, depth, nodes, bytes, _)
+       when depth < 0 or nodes <= 0 or bytes > @max_policy_bytes,
+       do: {:error, :transport_scope_request_limit}
+
+  defp scan_input([], _, nodes, bytes, _), do: {:ok, nodes - 1, bytes}
+
+  defp scan_input([head | tail], depth, nodes, bytes, max_char) do
+    with {:ok, nodes, bytes} <- scan_input(head, depth - 1, nodes - 1, bytes, max_char) do
+      scan_input(tail, depth, nodes, bytes, max_char)
+    end
+  end
+
+  defp scan_input(value, _, nodes, bytes, _) when is_binary(value) do
+    bytes = bytes + byte_size(value)
+
+    if bytes <= @max_policy_bytes,
+      do: {:ok, nodes - 1, bytes},
+      else: {:error, :transport_scope_request_limit}
+  end
+
+  defp scan_input(value, _, nodes, bytes, max_char)
+       when is_integer(value) and value >= 0 and value <= max_char,
+       do: {:ok, nodes - 1, bytes + 1}
+
+  defp scan_input(_, _, _, _, _), do: {:error, :transport_scope_request_limit}
+
+  defp effective_fields(%HTTP.Request{transport_options: options} = request) do
+    # Accounting must not replace upload attachment or the later duplex validation.
+    request = if is_pid(request.body), do: %{request | duplex: :half}, else: request
+
+    if options[:http_version] == :http1 do
+      headers =
+        request.headers
+        |> HTTP.Headers.set_default("User-Agent", HTTP.Headers.user_agent())
+        |> HTTP.Headers.set_default("Host", HTTP.Request.authority(request.url))
+        |> HTTP.Headers.set("Connection", "keep-alive")
+
+      {headers, _} = HTTP.Request.put_body_headers(headers, request)
+      {HTTP.Headers.to_list(headers), byte_size(HTTP.Request.origin_form(request.url))}
+    else
+      {:ok, headers, _} = HTTP.HTTP2.request_headers(request, :native_v1)
+      {headers, 0}
+    end
+  end
+
+  defp fields_bytes(fields),
+    do:
+      Enum.reduce(fields, 0, fn {key, value}, sum ->
+        sum + byte_size(key) + byte_size(value) + 32
+      end)
+
+  defp own(nil), do: nil
+  defp own(value), do: :binary.copy(value)
 
   defp valid_deadline?(value), do: is_integer(value) and value > 0 and value <= 86_400_000
 
