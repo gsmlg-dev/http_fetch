@@ -171,6 +171,12 @@ defmodule HTTP.RequestErrorWireTest do
           {:ok, bytes} = :gen_tcp.recv(socket, 0, 2_000)
           send(parent, {:accepted_bytes, bytes})
 
+          if unquote(terminal) == :source_error do
+            assert {:ok, entity} = :gen_tcp.recv(socket, 0, 2_000)
+            assert entity == "7\r\npartial\r\n"
+            send(parent, :partial_entity_received)
+          end
+
           receive do
             :close -> :gen_tcp.close(socket)
             :await_close -> assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
@@ -202,6 +208,8 @@ defmodule HTTP.RequestErrorWireTest do
           send(peer.pid, :await_close)
 
         :source_error ->
+          assert :ok = HTTP.Stream.chunk(upload, "partial", 2_000)
+          assert_receive :partial_entity_received, 2_000
           HTTP.Stream.error(upload, {:connect_failure, make_ref(), :econnrefused})
           send(peer.pid, :await_close)
       end
