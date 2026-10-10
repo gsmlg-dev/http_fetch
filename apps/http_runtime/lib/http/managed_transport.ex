@@ -45,7 +45,10 @@ defmodule HTTP.ManagedTransport do
   Request capacity includes preparation and unread streams. Connections include
   connecting, checked-out and idle transports. Exhaustion returns
   `{:error, {:transport_scope_capacity, :requests | :connections}}`, with no
-  waiting queue. Policy is bounded to 1 MiB, request metadata to 64 KiB/256 fields,
+  waiting queue. Frozen TLS/socket policy owns compact binary backing within its
+  1 MiB serialized limit. Freeze/preparation copy overlap and OTP's parsed TLS
+  state are outside that retained-policy payload bound. Request metadata is
+  bounded to 64 KiB/256 fields,
   buffered upload bodies to 1 MiB, and upload chunks/bridges to 64 KiB. The native
   HTTP/2 writer/receive budgets are 1 MiB each per connection, header blocks are
   bounded to 64 KiB/256 fields/256 frames. The H2 owner admits at most 128

@@ -68,6 +68,12 @@ defmodule HTTP.ManagedTransport.Policy do
          {:ok, sockets} <- freeze_sockets(Keyword.get(opts, :socket_opts, [])),
          true <- bounded_term?({ssl, sockets}, 16),
          true <- :erlang.external_size({ssl, sockets}) <= @max_policy_bytes do
+      # Validate logical/serialized size first, then detach every accepted
+      # binary from caller/file/system-CA backing before policy retention.
+      origin = %{origin | scheme: own(origin.scheme), host: own(origin.host)}
+      ssl = own_policy(ssl)
+      sockets = own_policy(sockets)
+
       transport =
         [
           http_version: version,
@@ -282,6 +288,14 @@ defmodule HTTP.ManagedTransport.Policy do
 
   defp own(nil), do: nil
   defp own(value), do: :binary.copy(value)
+
+  defp own_policy(value) when is_binary(value), do: own(value)
+  defp own_policy(value) when is_list(value), do: Enum.map(value, &own_policy/1)
+
+  defp own_policy(value) when is_tuple(value),
+    do: value |> Tuple.to_list() |> own_policy() |> List.to_tuple()
+
+  defp own_policy(value), do: value
 
   defp valid_deadline?(value), do: is_integer(value) and value > 0 and value <= 86_400_000
 
