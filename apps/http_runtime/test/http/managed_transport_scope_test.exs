@@ -122,22 +122,15 @@ defmodule HTTP.ManagedTransport.ScopeTest do
     Process.put(HTTP.RequestLifecycle, tracker)
     assert {:error, :transport_scope_retired} = ManagedTransport.connect_start(request)
     Process.delete(HTTP.RequestLifecycle)
+    monitor = Process.monitor(tracker)
     send(owner, :finish)
-    handle = %HTTP.RequestCompletion{tracker: tracker, latch: latch}
-    assert {:error, :cleanup_unconfirmed} = HTTP.RequestCompletion.await(handle, 1_000)
+    assert_receive {:DOWN, ^monitor, :process, ^tracker, :normal}, 1_000
+    assert :atomics.get(latch, 1) == 3
     assert {:ok, receipt} = ManagedTransport.retire(scope, mode: :abort)
     assert {:error, :cleanup_unconfirmed} = ManagedTransport.await_retired(receipt, 1_000)
     assert {:error, :cleanup_unconfirmed} = ManagedTransport.await_retired(receipt, 0)
 
-    assert {:error, :transport_scope_retired} =
-             HTTP.Promise.await(
-               HTTP.fetch("https://localhost/",
-                 transport_scope: scope,
-                 stream_response: true,
-                 decode_body: false,
-                 redirect: :manual
-               )
-             )
+    assert {:error, :transport_scope_retired} = ManagedTransport.prepare(request, [])
   end
 
   defp wait_for(scope, key, expected, remaining \\ 100)
