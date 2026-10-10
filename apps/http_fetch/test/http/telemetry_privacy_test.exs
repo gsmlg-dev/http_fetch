@@ -27,6 +27,8 @@ defmodule HTTP.TelemetryPrivacyTest do
   ]
 
   setup context do
+    if app = context[:disable_telemetry], do: disable(app)
+
     handler = {__MODULE__, make_ref()}
     capture = %{owner: self(), caller_only?: context[:caller_telemetry] == true}
     :ok = :telemetry.attach_many(handler, @events, &__MODULE__.capture/4, capture)
@@ -148,9 +150,8 @@ defmodule HTTP.TelemetryPrivacyTest do
     end
   end
 
+  @tag disable_telemetry: :http_fetch
   test "global Fetch opt-out suppresses helpers and actual shared H2 counters" do
-    disable(:http_fetch)
-
     HTTP.Telemetry.request_start(
       "GET",
       URI.parse("https://sentinel.test"),
@@ -168,8 +169,8 @@ defmodule HTTP.TelemetryPrivacyTest do
   end
 
   @tag :caller_telemetry
+  @tag disable_telemetry: :http_runtime
   test "runtime global opt-out covers both shared event prefixes" do
-    disable(:http_runtime)
     HTTP.Runtime.Telemetry.http2_pool(:reserve, :ok, %{reservations: 1})
     HTTP.Runtime.Telemetry.http2_connection(:admit, :active, %{active_streams: 1})
     HTTP.Runtime.Telemetry.http2_runtime(:peer_reset, :received, %{error_code: 8})
