@@ -209,6 +209,12 @@ a body. Malformed/conflicting lengths, values longer than 20 decimal digits,
 and values outside the unsigned 64-bit bound return `:invalid_content_length`.
 Inbound frames are limited to the advertised 16,384-byte payload size and
 compressed header blocks to 65,536 bytes, including CONTINUATION fragments.
+Each header block permits at most 256 frames in total (the initial HEADERS and
+all CONTINUATION frames, including empty frames and the final END_HEADERS
+frame). Empty payloads are not retained. Exceeding this frame count reports
+`{:transport_error, :header_block_too_fragmented}` and closes that HTTP/2
+connection, failing its unfinished requests; other connections remain usable.
+The existing compressed-byte, HPACK and decoded-header limits still apply.
 Content-Length is forbidden on informational/204 responses and in trailers;
 DATA or HEADERS after END_STREAM is rejected rather than completed again.
 Truncation, required writes before completion, abnormal closure, cancellation
