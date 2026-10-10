@@ -1,7 +1,7 @@
 defmodule HttpCore.MixProject do
   use Mix.Project
 
-  @version "0.19.0"
+  @version "0.19.1"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
 
   def project do
@@ -37,8 +37,8 @@ defmodule HttpCore.MixProject do
 
   defp deps do
     [
-      {:ex_ssl, "== 0.19.0", in_umbrella: true, hex: :ex_ssl},
-      {:elixir_quic, "== 0.19.0", in_umbrella: true, hex: :elixir_quic},
+      {:ex_ssl, "== 0.19.1", in_umbrella: true, hex: :ex_ssl},
+      {:elixir_quic, "== 0.19.1", in_umbrella: true, hex: :elixir_quic},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
   end
