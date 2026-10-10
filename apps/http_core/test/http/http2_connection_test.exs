@@ -55,6 +55,71 @@ defmodule HTTP.HTTP2ConnectionTest do
     assert {:ok, _conn, [{:rst_stream, 1, :cancel}]} = Connection.cancel_headers(conn, 1)
   end
 
+  test "trailers close the send half without consuming windows and share the HPACK encoder" do
+    peer = %{Settings.new() | values: %{Settings.new().values | max_frame_size: 8}}
+    {:ok, _, conn} = Connection.open_stream(Connection.new(peer_settings: peer))
+    initial = [{":method", "POST"}, {"x-initial", "shared"}]
+    {:ok, conn, [{:headers, 1, frames}]} = Connection.commit_headers(conn, 1, initial)
+    {:ok, decoder, ^initial} = HPACK.decode(HPACK.new_decoder(), header_block(frames))
+    {:ok, conn, []} = Connection.update_send_window(conn, 1, 1)
+    {:ok, stream} = Connection.stream(conn, 1)
+    conn = Connection.put_stream(conn, %{stream | send_window: -1})
+    conn = %{conn | connection_send_window: 0}
+    fields = [{"X-Checksum", "one"}, {"X-Checksum", "two"}]
+
+    assert {:ok, conn, [{:headers, 1, frames}]} = Connection.send_trailers(conn, 1, fields)
+    assert length(frames) > 1
+
+    assert Enum.map(frames, &:binary.part(&1, 3, 1)) == [
+             <<1>> | List.duplicate(<<9>>, length(frames) - 1)
+           ]
+
+    assert :binary.part(hd(frames), 4, 1) == <<1>>
+    assert :binary.part(List.last(frames), 4, 1) == <<4>>
+    assert Enum.all?(frames, &(byte_size(&1) - 9 <= 8))
+
+    assert {:ok, decoder, [{"x-checksum", "one"}, {"x-checksum", "two"}]} =
+             HPACK.decode(decoder, header_block(frames))
+
+    assert {:ok, %{state: :half_closed_local, send_window: -1}} = Connection.stream(conn, 1)
+    assert conn.connection_send_window == 0
+    assert {:error, :stream_closed} = Connection.send_trailers(conn, 1, fields)
+    {:ok, _, conn} = Connection.open_stream(conn)
+    {:ok, conn, [{:headers, 3, frames}]} = Connection.commit_headers(conn, 3, initial)
+    assert {:ok, decoder, ^initial} = HPACK.decode(decoder, header_block(frames))
+    {:ok, _conn, [{:headers, 3, frames}]} = Connection.send_trailers(conn, 3, fields)
+
+    assert {:ok, _decoder, [{"x-checksum", "one"}, {"x-checksum", "two"}]} =
+             HPACK.decode(decoder, header_block(frames))
+  end
+
+  test "empty trailers end with HEADERS and invalid trailers fail before encoder mutation" do
+    conn = Connection.new()
+    assert {:error, :unknown_stream} = Connection.send_trailers(conn, 1, [])
+    {:ok, _, conn} = Connection.open_stream(conn)
+    assert {:error, :headers_not_committed} = Connection.send_trailers(conn, 1, [])
+    {:ok, conn, _} = Connection.commit_headers(conn, 1, [{":method", "POST"}])
+    assert {:error, :invalid_trailer} = Connection.send_trailers(conn, 1, [{":status", "200"}])
+
+    assert {:error, {:forbidden_trailer, "content-length"}} =
+             Connection.send_trailers(conn, 1, [{"content-length", "0"}])
+
+    {:ok, _conn, [{:headers, 1, frames}]} = Connection.send_trailers(conn, 1, [])
+    assert [<<0::24, 1, 5, 1::32>>] = frames
+  end
+
+  test "trailer peer limit counts RFC header-list overhead before encoding" do
+    {:ok, _, conn} = Connection.open_stream(Connection.new())
+    {:ok, conn, _} = Connection.commit_headers(conn, 1, [{":method", "POST"}])
+    {:ok, conn, _} = Connection.update_peer_settings(conn, [{:max_header_list_size, 33}])
+    assert {:error, :trailers_too_large} = Connection.send_trailers(conn, 1, [{"x", "y"}])
+    {:ok, conn, _} = Connection.update_peer_settings(conn, [{:max_header_list_size, 34}])
+    assert {:ok, _conn, _effects} = Connection.send_trailers(conn, 1, [{"x", "y"}])
+  end
+
+  defp header_block(frames),
+    do: frames |> Enum.map(&:binary.part(&1, 9, byte_size(&1) - 9)) |> IO.iodata_to_binary()
+
   test "goaway last stream id only tightens and stops new streams" do
     conn = Connection.new()
     assert {:ok, conn, []} = Connection.goaway(conn, 3)
