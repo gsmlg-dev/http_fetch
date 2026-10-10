@@ -22,9 +22,23 @@ defmodule Quic.DatagramTest do
 
   defp pair(server_opts, client_opts) do
     {server_tls, client_tls} = credentials()
-    {:ok, server} = Quic.listen([tls: server_tls] ++ server_opts)
-    {:ok, client} = Quic.client([tls: client_tls] ++ client_opts)
-    on_exit(fn -> for pid <- [server, client], Process.alive?(pid), do: GenServer.stop(pid) end)
+
+    # Let ExUnit own endpoint shutdown instead of racing the test owner's exit.
+    # Keep its acceptor identity when the public start function runs in the supervisor.
+    server =
+      start_supervised!(%{
+        id: :server,
+        start: {Quic, :listen, [[acceptor: self(), tls: server_tls] ++ server_opts]},
+        restart: :temporary
+      })
+
+    client =
+      start_supervised!(%{
+        id: :client,
+        start: {Quic, :client, [[acceptor: self(), tls: client_tls] ++ client_opts]},
+        restart: :temporary
+      })
+
     {:ok, outgoing} = Quic.connect(client, Endpoint.local(server))
     :ok = Quic.attach(outgoing, self())
     assert_receive {:quic_ready, ^outgoing, _}, 2_000

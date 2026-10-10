@@ -10,7 +10,7 @@ import sys
 
 from h2.config import H2Configuration
 from h2.connection import H2Connection
-from h2.events import DataReceived, RequestReceived, StreamEnded, StreamReset, TrailersReceived
+from h2.events import DataReceived, RequestReceived, SettingsAcknowledged, StreamEnded, StreamReset, TrailersReceived
 from h2.settings import Settings, SettingCodes
 
 
@@ -99,7 +99,9 @@ with socket.socket() as listener:
                         wire = wire[9 + length:]
                     for event in connection.receive_data(data):
                         stream_id = getattr(event, "stream_id", None)
-                        if isinstance(event, RequestReceived):
+                        if isinstance(event, SettingsAcknowledged):
+                            report("settings_ack")
+                        elif isinstance(event, RequestReceived):
                             requests[stream_id] = dict(body=bytearray(), trailers=[], continuation=0,
                                                       path=dict(event.headers)[":path"])
                             report("headers", id=stream_id, fields=event.headers)
