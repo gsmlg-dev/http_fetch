@@ -31,6 +31,9 @@ defmodule HTTP.FetchOptions do
   - `error_mode` - `:raw` (default) or `:structured`; structured failures return
     `HTTP.RequestError` with conservative pre-send evidence. No automatic retry.
   - `connect_timeout` - connection timeout in milliseconds
+  - `transport_scope` - opaque `HTTP.ManagedTransport` generation selecting
+    private reusable HTTP/1 or HTTP/2 transports. Requires raw streamed responses,
+    manual/error redirects, and the origin/policy frozen by `open/1`.
   - `connect_address` - caller-validated literal IPv4/IPv6 tuple to dial instead
     of resolving the URL hostname. Keeps original HTTP authority, TLS SNI and
     certificate hostname verification. No DNS/address fallback or request replay.
@@ -79,6 +82,8 @@ defmodule HTTP.FetchOptions do
 
   @string_keys %{
     "body" => :body,
+    "transport_scope" => :transport_scope,
+    "transportScope" => :transport_scope,
     "request_mode" => :request_mode,
     "requestMode" => :request_mode,
     "error_mode" => :error_mode,
@@ -133,6 +138,7 @@ defmodule HTTP.FetchOptions do
   }
 
   defstruct method: :get,
+            transport_scope: nil,
             request_mode: :fetch,
             headers: %HTTP.Headers{},
             content_type: nil,
@@ -227,6 +233,7 @@ defmodule HTTP.FetchOptions do
   @spec to_transport_options(t()) :: keyword()
   def to_transport_options(%__MODULE__{} = options) do
     []
+    |> maybe_add(:transport_scope, options.transport_scope)
     |> maybe_add(:telemetry, options.telemetry)
     |> maybe_add(:decode_body, options.decode_body)
     |> maybe_add(:stream_response, options.stream_response)
@@ -284,6 +291,9 @@ defmodule HTTP.FetchOptions do
 
   defp merge_options(%__MODULE__{} = struct, options) do
     Enum.reduce(options, struct, fn
+      {:transport_scope, scope}, acc ->
+        %{acc | transport_scope: scope}
+
       {:method, method}, acc ->
         %{acc | method: normalize_method(method)}
 

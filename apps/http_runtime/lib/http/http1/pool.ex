@@ -6,11 +6,16 @@ defmodule HTTP.HTTP1.Pool do
 
   @max_idle 256
 
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  def start_link(opts) do
+    name =
+      if Keyword.has_key?(opts, :name), do: Keyword.take(opts, [:name]), else: [name: __MODULE__]
+
+    GenServer.start_link(__MODULE__, opts, Enum.reject(name, fn {_, value} -> value == nil end))
+  end
 
   def checkout(request) do
     case key(request) do
-      {:ok, key} -> GenServer.call(__MODULE__, {:checkout, key})
+      {:ok, key} -> GenServer.call(pool(request), {:checkout, key})
       _ -> :none
     end
   end
@@ -18,47 +23,55 @@ defmodule HTTP.HTTP1.Pool do
   def checkin(request, transport, socket) do
     with {:ok, key} <- key(request),
          :ok <- transport.setopts(socket, active: false),
-         {:ok, token} <- GenServer.call(__MODULE__, {:prepare, key, transport, socket}),
-         :ok <- transport.controlling_process(socket, Process.whereis(__MODULE__)) do
-      GenServer.call(__MODULE__, {:activate, token, HTTP.RequestLifecycle.current()})
+         {:ok, token} <- GenServer.call(pool(request), {:prepare, key, transport, socket}),
+         :ok <- transport.controlling_process(socket, pool(request)) do
+      GenServer.call(pool(request), {:activate, token, HTTP.RequestLifecycle.current()})
     else
       _ -> transport.close(socket)
     end
   end
 
+  defp pool(request),
+    do: Keyword.get(request.transport_options, :http1_pool, Process.whereis(__MODULE__))
+
   defp key(request) do
     opts = request.transport_options
     protocol = if request.url.scheme == "https", do: :h2, else: :h2c
 
-    if Keyword.get(opts, :http1_reuse, false) do
-      identity_request = %{
-        request
-        | transport_options: Keyword.put(opts, :http2_scope, Keyword.get(opts, :http1_scope))
-      }
+    cond do
+      opts[:managed_pool_key] != nil ->
+        {:ok, opts[:managed_pool_key]}
 
-      with {:ok, key} <- PoolKey.build(identity_request, :native_v1, protocol) do
-        {:ok,
-         Map.merge(key, %{
-           protocol: :http1,
-           http1_policy:
-             {Keyword.get(opts, :http1_pool_size, 2),
-              Keyword.get(opts, :http1_idle_timeout, 30_000)}
-         })}
-      end
-    else
-      :disabled
+      Keyword.get(opts, :http1_reuse, false) ->
+        identity_request = %{
+          request
+          | transport_options: Keyword.put(opts, :http2_scope, Keyword.get(opts, :http1_scope))
+        }
+
+        with {:ok, key} <- PoolKey.build(identity_request, :native_v1, protocol) do
+          {:ok,
+           Map.merge(key, %{
+             protocol: :http1,
+             http1_policy:
+               {Keyword.get(opts, :http1_pool_size, 2),
+                Keyword.get(opts, :http1_idle_timeout, 30_000)}
+           })}
+        end
+
+      true ->
+        :disabled
     end
   end
 
   @impl true
-  def init(_opts), do: {:ok, %{entries: %{}}}
+  def init(_opts), do: {:ok, %{entries: %{}, retiring?: false}}
 
   @impl true
   def handle_call({:prepare, key, transport, socket}, {owner, _}, state) do
     {limit, idle_timeout} = key.http1_policy
     count = Enum.count(state.entries, fn {_, entry} -> entry.key == key end)
 
-    if count < limit and map_size(state.entries) < @max_idle do
+    if not state.retiring? and count < limit and map_size(state.entries) < @max_idle do
       token = make_ref()
 
       entry = %{
@@ -135,6 +148,18 @@ defmodule HTTP.HTTP1.Pool do
          false <- queued_socket_event?(entry) do
       entry.transport.controlling_process(entry.socket, owner)
     end
+  end
+
+  @impl true
+  def handle_cast(:close_idle, state) do
+    tokens = Map.keys(state.entries)
+    {:noreply, %{Enum.reduce(tokens, state, &discard(&2, &1)) | retiring?: true}}
+  end
+
+  @impl true
+  def terminate(_, state) do
+    Enum.each(state.entries, fn {_, entry} -> entry.transport.close(entry.socket) end)
+    :ok
   end
 
   @impl true

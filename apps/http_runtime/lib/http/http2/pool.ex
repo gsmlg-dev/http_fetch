@@ -86,7 +86,8 @@ defmodule HTTP.HTTP2.Pool do
        callers: %{},
        connectors: %{},
        promotions: %{},
-       deadlines: %{}
+       deadlines: %{},
+       retiring?: false
      }}
   end
 
@@ -352,6 +353,16 @@ defmodule HTTP.HTTP2.Pool do
 
   def handle_cast({:owner_capabilities, _, _, _}, state), do: {:noreply, state}
 
+  def handle_cast(:close_idle, state) do
+    Enum.each(state.entries, fn {_, entry} ->
+      Enum.each(entry.connections, fn {owner, connection} ->
+        if connection.streams == 0, do: Process.exit(owner, :shutdown)
+      end)
+    end)
+
+    {:noreply, %{state | retiring?: true}}
+  end
+
   def handle_cast({:owner_draining, key, owner}, state),
     do: {:noreply, set_draining(state, key, owner)}
 
@@ -616,6 +627,7 @@ defmodule HTTP.HTTP2.Pool do
       connection ->
         entry = Map.fetch!(state.entries, key)
         streams = max(connection.streams - 1, 0)
+        if streams == 0 and state.retiring?, do: Process.exit(owner, :shutdown)
 
         {idle_timer, idle_token} =
           if streams == 0 and not connection.draining and state.idle_timeout > 0 do

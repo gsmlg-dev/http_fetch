@@ -31,44 +31,48 @@ defmodule HTTP.HTTP2.PoolKey do
   def build(request, profile, actual_protocol, opts \\ [])
 
   def build(%Request{} = request, profile, actual_protocol, opts) when is_list(opts) do
-    with {:ok, protocol} <- normalize_protocol(actual_protocol),
-         {:ok, profile} <- WireProfile.compile(profile),
-         {:ok, profile_digest} <- WireProfile.digest(profile),
-         {:ok, origin} <- origin(request.url, protocol),
-         transport_options = Keyword.merge(request.transport_options, opts),
-         :ok <- validate_route(transport_options),
-         {:ok, proxy} <- HTTP.Proxy.route(%{request | transport_options: transport_options}),
-         {:ok, tls_identity, tls_reusable?} <- tls_identity(transport_options, origin),
-         {:ok, socket_identity, socket_reusable?} <-
-           option_identity(Keyword.get(transport_options, :socket_opts, []), :socket_opts),
-         {:ok, connect_identity, connect_reusable?} <-
-           option_identity(connection_options(transport_options), :connection_options),
-         {:ok, scope, scope_reusable?} <- scope_identity(transport_options),
-         {:ok, route, route_reusable?} <- route_identity(transport_options),
-         {:ok, reuse} <- reuse_marker(transport_options) do
-      key = %{
-        version: 1,
-        scheme: origin.scheme,
-        host: origin.host,
-        port: origin.port,
-        protocol: protocol,
-        route: route,
-        unix_socket: digest_optional(Keyword.get(transport_options, :unix_socket)),
-        connect_address: digest_optional(Keyword.get(transport_options, :connect_address)),
-        proxy: digest_optional(proxy),
-        tls: tls_identity,
-        socket_options: socket_identity,
-        connection_options: connect_identity,
-        wire_profile: profile_digest,
-        http2_scope: scope,
-        reuse: reuse
-      }
+    if request.transport_options[:managed_pool_key] do
+      {:ok, Map.put(request.transport_options[:managed_pool_key], :protocol, actual_protocol)}
+    else
+      with {:ok, protocol} <- normalize_protocol(actual_protocol),
+           {:ok, profile} <- WireProfile.compile(profile),
+           {:ok, profile_digest} <- WireProfile.digest(profile),
+           {:ok, origin} <- origin(request.url, protocol),
+           transport_options = Keyword.merge(request.transport_options, opts),
+           :ok <- validate_route(transport_options),
+           {:ok, proxy} <- HTTP.Proxy.route(%{request | transport_options: transport_options}),
+           {:ok, tls_identity, tls_reusable?} <- tls_identity(transport_options, origin),
+           {:ok, socket_identity, socket_reusable?} <-
+             option_identity(Keyword.get(transport_options, :socket_opts, []), :socket_opts),
+           {:ok, connect_identity, connect_reusable?} <-
+             option_identity(connection_options(transport_options), :connection_options),
+           {:ok, scope, scope_reusable?} <- scope_identity(transport_options),
+           {:ok, route, route_reusable?} <- route_identity(transport_options),
+           {:ok, reuse} <- reuse_marker(transport_options) do
+        key = %{
+          version: 1,
+          scheme: origin.scheme,
+          host: origin.host,
+          port: origin.port,
+          protocol: protocol,
+          route: route,
+          unix_socket: digest_optional(Keyword.get(transport_options, :unix_socket)),
+          connect_address: digest_optional(Keyword.get(transport_options, :connect_address)),
+          proxy: digest_optional(proxy),
+          tls: tls_identity,
+          socket_options: socket_identity,
+          connection_options: connect_identity,
+          wire_profile: profile_digest,
+          http2_scope: scope,
+          reuse: reuse
+        }
 
-      reusable? =
-        tls_reusable? and socket_reusable? and connect_reusable? and
-          scope_reusable? and route_reusable? and reuse == :shared
+        reusable? =
+          tls_reusable? and socket_reusable? and connect_reusable? and
+            scope_reusable? and route_reusable? and reuse == :shared
 
-      if reusable?, do: {:ok, key}, else: {:ok, :non_reusable, key}
+        if reusable?, do: {:ok, key}, else: {:ok, :non_reusable, key}
+      end
     end
   end
 

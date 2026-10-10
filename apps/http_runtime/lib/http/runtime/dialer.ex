@@ -43,15 +43,21 @@ defmodule HTTP.Runtime.Dialer do
          {:ok, proxy} <- HTTP.Proxy.route(request),
          :ok <- validate_transport_option_lists(transport, request),
          :ok <- validate_connect_address(transport, host, request) do
-      interruptible_connect(
-        transport,
-        host,
-        port,
-        Keyword.put(transport_opts(request, selection, timeout), :proxy_route, proxy),
-        connect_timeout,
-        cancel_monitor,
-        timeout
-      )
+      with {:ok, managed_token} <- HTTP.ManagedTransport.connect_start(request) do
+        result =
+          interruptible_connect(
+            transport,
+            host,
+            port,
+            Keyword.put(transport_opts(request, selection, timeout), :proxy_route, proxy),
+            connect_timeout,
+            cancel_monitor,
+            timeout
+          )
+
+        HTTP.ManagedTransport.connect_done(request, managed_token)
+        result
+      end
     end
   end
 
