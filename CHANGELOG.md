@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-10
+
+### Fixed
+- Preserve the `?` delimiter for a present empty query in HTTP request targets,
+  including streaming proxy-mode requests and HTTP proxy absolute-form targets.
+
 ## [0.19.0] - 2026-10-10
 
 ### Added
