@@ -53,9 +53,13 @@ defmodule HTTP.Promise do
       |> HTTP.Promise.await()
   """
 
-  defstruct task: nil
+  defstruct task: nil, completion: nil
 
-  @type t :: %__MODULE__{task: Task.t()}
+  @type t :: %__MODULE__{task: Task.t(), completion: HTTP.RequestCompletion.t() | nil}
+  @doc "Returns the original request's cleanup handle. Chained promises return nil."
+  @spec completion(t()) :: HTTP.RequestCompletion.t() | nil
+  def completion(%__MODULE__{completion: completion}), do: completion
+
   @type success_callback_fun :: (HTTP.Response.t() -> any())
   @type error_callback_fun :: (term() -> any())
 

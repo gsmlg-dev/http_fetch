@@ -27,6 +27,7 @@ defmodule HTTP.HTTPSEarlyUploadTest do
       promise =
         HTTP.fetch(url,
           method: :post,
+          redirect: :manual,
           body: upload,
           duplex: :half,
           signal: controller,
@@ -99,6 +100,15 @@ defmodule HTTP.HTTPSEarlyUploadTest do
       assert_receive {:DOWN, ^writer_monitor, :process, ^writer, _}, 1_000
       assert_receive {:DOWN, ^source_monitor, :process, ^upload, :normal}, 1_000
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _}, 1_000
+
+      if unquote(backend) == :ssl and unquote(version) == :http1 do
+        completion = HTTP.Promise.completion(promise)
+
+        expected =
+          if unquote(outcome) == :owner_down, do: {:error, :cleanup_unconfirmed}, else: :ok
+
+        assert HTTP.RequestCompletion.await(completion, 1_000) == expected
+      end
 
       if unquote(outcome) != :deadline,
         do: assert(System.monotonic_time(:millisecond) - started < 1_000)

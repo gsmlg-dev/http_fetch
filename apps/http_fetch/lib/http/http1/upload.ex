@@ -17,9 +17,13 @@ defmodule HTTP.HTTP1.Upload do
     owner = self()
     token = make_ref()
 
+    tracker = HTTP.RequestLifecycle.current()
+
     {pid, monitor} =
       :erlang.spawn_opt(
         fn ->
+          Process.put(HTTP.RequestLifecycle, tracker)
+
           state = %{
             transport: transport,
             socket: socket,
@@ -45,6 +49,7 @@ defmodule HTTP.HTTP1.Upload do
 
     # Bind source cleanup before releasing the first header write. If the owner
     # dies on the peer's first header byte, the source still observes reader DOWN.
+    HTTP.RequestLifecycle.register(tracker, pid, :upload)
     send(stream, {:read_chunk, pid, :ack})
     send(pid, {:start_upload, token})
     %{pid: pid, monitor: monitor, stream: stream, token: token}

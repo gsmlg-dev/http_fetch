@@ -9,6 +9,7 @@ defmodule HTTP.Stream do
   """
 
   defstruct reader: nil,
+            producer: nil,
             telemetry: true,
             decoders: [],
             reader_monitor: nil,
@@ -33,9 +34,12 @@ defmodule HTTP.Stream do
     Task.start_link(fn ->
       decoders = HTTP.ContentDecoder.open(encodings)
 
+      Process.put(:stream_producer, nil)
+
       try do
         loop(%__MODULE__{start_time: start_time, decoders: decoders, telemetry: telemetry})
       after
+        if producer = Process.get(:stream_producer), do: Process.exit(producer, :kill)
         HTTP.ContentDecoder.close(decoders)
       end
     end)
@@ -57,10 +61,20 @@ defmodule HTTP.Stream do
   @spec from_enumerable(Enumerable.t(), keyword()) :: {:ok, pid()} | {:error, term()}
   def from_enumerable(enumerable, opts \\ []) do
     with {:ok, stream} <- start_link(0, [], opts),
-         {:ok, _producer} <-
+         {:ok, producer} <-
            Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
-             produce_enumerable(stream, enumerable)
+             launch_monitor = Process.monitor(stream)
+
+             receive do
+               :produce ->
+                 Process.demonitor(launch_monitor, [:flush])
+                 produce_enumerable(stream, enumerable)
+
+               {:DOWN, ^launch_monitor, :process, ^stream, _reason} ->
+                 :ok
+             end
            end) do
+      send(stream, {:enumerable_producer, producer})
       {:ok, stream}
     else
       {:error, reason} -> {:error, reason}
@@ -151,6 +165,25 @@ defmodule HTTP.Stream do
 
   defp loop(%__MODULE__{} = state) do
     receive do
+      {:enumerable_producer, producer} ->
+        Process.put(:stream_producer, producer)
+        send(producer, :produce)
+        loop(%{state | producer: producer})
+
+      {:request_lifecycle, tracker, caller, ref} ->
+        if state.producer, do: HTTP.RequestLifecycle.register(tracker, state.producer, :producer)
+        send(caller, {:request_lifecycle_attached, ref})
+        loop(state)
+
+      {:request_lifecycle_stop, reason} ->
+        _ =
+          state
+          |> reply_pending({:error, reason})
+          |> Map.merge(%{error: reason, chunks: []})
+          |> flush()
+
+        :ok
+
       {:read_chunk, reader} when is_pid(reader) ->
         state
         |> monitor_reader(reader)

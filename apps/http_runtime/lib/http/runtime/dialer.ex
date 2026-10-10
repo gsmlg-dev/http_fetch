@@ -152,11 +152,26 @@ defmodule HTTP.Runtime.Dialer do
     ref = make_ref()
     deadline_at = connect_deadline(timeout)
 
+    tracker = Keyword.get(opts, :request_lifecycle)
+
     case Task.Supervisor.start_child(:http_runtime_task_supervisor, fn ->
-           result = connect_in_worker(transport, host, port, opts, timeout, parent, ref)
-           send(parent, {:connect_result, ref, result})
+           launch_monitor = Process.monitor(parent)
+
+           receive do
+             :connect_launch ->
+               Process.demonitor(launch_monitor, [:flush])
+               Process.put(HTTP.RequestLifecycle, tracker)
+               result = connect_in_worker(transport, host, port, opts, timeout, parent, ref)
+               HTTP.RequestLifecycle.complete(tracker)
+               send(parent, {:connect_result, ref, result})
+
+             {:DOWN, ^launch_monitor, :process, ^parent, _reason} ->
+               :ok
+           end
          end) do
       {:ok, pid} ->
+        HTTP.RequestLifecycle.register(tracker, pid, :dial)
+        send(pid, :connect_launch)
         await_connect_result(transport, pid, ref, nil, deadline_at, cancel_monitor)
 
       {:error, reason} ->
@@ -177,26 +192,37 @@ defmodule HTTP.Runtime.Dialer do
       when is_reference(cancel_monitor) ->
         send(pid, {:close_socket, ref})
         close_connect_socket(transport, socket)
-        Process.exit(pid, :kill)
+        stop_connect_worker(pid, ref)
         {:error, :subscriber_down}
 
       :abort ->
         send(pid, {:close_socket, ref})
         close_connect_socket(transport, socket)
-        Process.exit(pid, :kill)
+        stop_connect_worker(pid, ref)
         {:error, :aborted}
 
       :deadline ->
         send(pid, {:close_socket, ref})
         close_connect_socket(transport, socket)
-        Process.exit(pid, :kill)
+        stop_connect_worker(pid, ref)
         {:error, :request_timeout}
     after
       remaining_timeout(deadline_at) ->
         send(pid, {:close_socket, ref})
         close_connect_socket(transport, socket)
-        Process.exit(pid, :kill)
+        stop_connect_worker(pid, ref)
         {:error, :connect_timeout}
+    end
+  end
+
+  defp stop_connect_worker(pid, ref) do
+    case HTTP.RequestLifecycle.current() do
+      nil ->
+        Process.exit(pid, :kill)
+
+      tracker ->
+        HTTP.RequestLifecycle.abort(tracker)
+        send(pid, {:close_socket, ref})
     end
   end
 
@@ -233,6 +259,10 @@ defmodule HTTP.Runtime.Dialer do
         end
 
       {:close_socket, ^ref} ->
+        transport.close(socket)
+        {:error, :aborted}
+
+      :abort ->
         transport.close(socket)
         {:error, :aborted}
     after
@@ -370,7 +400,9 @@ defmodule HTTP.Runtime.Dialer do
     [
       cancellable:
         selection.mode in [:http1, :auto_https] and
-          (is_pid(request.body) or Keyword.get(request.transport_options, :http1_reuse, false)),
+          (is_pid(request.body) or Keyword.get(request.transport_options, :http1_reuse, false) or
+             Keyword.get(request.transport_options, :request_lifecycle) != nil),
+      request_lifecycle: Keyword.get(request.transport_options, :request_lifecycle),
       connect_address: Keyword.get(request.transport_options, :connect_address),
       ssl:
         request.transport_options

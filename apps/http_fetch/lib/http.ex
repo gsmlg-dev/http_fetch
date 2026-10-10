@@ -305,17 +305,50 @@ defmodule HTTP do
     if HTTP.Telemetry.enabled?(options.telemetry),
       do: HTTP.Telemetry.request_start(request.method, request.url, request.headers)
 
-    # Spawn a task to handle the asynchronous HTTP request
+    completion = HTTP.RequestCompletion.new(options)
+    tracker = completion.tracker
+
+    request = %{
+      request
+      | transport_options: Keyword.put(request.transport_options, :request_lifecycle, tracker)
+    }
+
+    # Bind the task before releasing it, including cancellation before startup.
+    calling_pid = self()
+
     task =
-      Task.Supervisor.async_nolink(
-        :http_fetch_task_supervisor,
-        HTTP,
-        :handle_async_request,
-        [request, self(), abort_controller_pid, unix_socket_path]
-      )
+      HTTP.RequestLifecycle.launch(tracker, fn ->
+        Task.Supervisor.async_nolink(
+          :http_fetch_task_supervisor,
+          fn ->
+            launch_monitor = Process.monitor(calling_pid)
+
+            receive do
+              :request_launch ->
+                Process.demonitor(launch_monitor, [:flush])
+                Process.put(HTTP.RequestLifecycle, tracker)
+
+                if is_pid(request.body),
+                  do: HTTP.RequestLifecycle.attach_stream(tracker, request.body)
+
+                result =
+                  handle_async_request(request, self(), abort_controller_pid, unix_socket_path)
+
+                if match?({:error, _}, result), do: HTTP.RequestLifecycle.abort(tracker)
+                HTTP.RequestLifecycle.complete(tracker)
+                result
+
+              {:DOWN, ^launch_monitor, :process, ^calling_pid, _reason} ->
+                exit(:request_launch_abandoned)
+            end
+          end
+        )
+      end)
 
     # Wrap the task in our new Promise struct
-    %Promise{task: task}
+    HTTP.RequestLifecycle.register(tracker, task.pid, :task)
+    send(task.pid, :request_launch)
+    %Promise{task: task, completion: completion}
   end
 
   # Internal function, not part of public API
