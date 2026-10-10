@@ -368,8 +368,11 @@ unfinished tunnel. Proxy failure never retries through a direct-origin route.
 
 Unsupported shapes, H2c, HTTP/3, and Unix socket/proxy combinations fail
 explicitly. Both TLS backends verify DNS and literal-IP origins inside CONNECT
-tunnels. ExSSL keeps the original IP certificate identity separate from SNI.
-Environment variables and NO_PROXY selection remain caller responsibilities.
+tunnels. ExSSL verifies IP origins without DNS SNI by default. For ordinary
+direct or proxy connections, caller-supplied DNS SNI also selects the DNS
+certificate identity. Use `ssl: [ex_ssl: [reference_identity: {:ip, ...}]]` to
+verify a separate IP identity while sending DNS SNI. Environment variables and
+NO_PROXY selection remain caller responsibilities.
 
 ## Streaming Request Body
 
