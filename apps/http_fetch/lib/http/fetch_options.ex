@@ -28,6 +28,8 @@ defmodule HTTP.FetchOptions do
     entities for all admitted methods, including GET, DELETE, and HEAD
   - `content_type` - convenience Content-Type value for request bodies
   - `timeout` - request timeout in milliseconds
+  - `error_mode` - `:raw` (default) or `:structured`; structured failures return
+    `HTTP.RequestError` with conservative pre-send evidence. No automatic retry.
   - `connect_timeout` - connection timeout in milliseconds
   - `connect_address` - caller-validated literal IPv4/IPv6 tuple to dial instead
     of resolving the URL hostname. Keeps original HTTP authority, TLS SNI and
@@ -79,6 +81,8 @@ defmodule HTTP.FetchOptions do
     "body" => :body,
     "request_mode" => :request_mode,
     "requestMode" => :request_mode,
+    "error_mode" => :error_mode,
+    "errorMode" => :error_mode,
     "connect_address" => :connect_address,
     "connectAddress" => :connect_address,
     "connect_timeout" => :connect_timeout,
@@ -143,6 +147,7 @@ defmodule HTTP.FetchOptions do
             http_version: :http1,
             tls_backend: nil,
             timeout: nil,
+            error_mode: :raw,
             connect_timeout: nil,
             connect_address: nil,
             ssl: nil,
@@ -179,6 +184,7 @@ defmodule HTTP.FetchOptions do
           http_version: http_version(),
           tls_backend: tls_backend(),
           timeout: integer() | nil,
+          error_mode: :raw | :structured,
           connect_timeout: integer() | nil,
           connect_address: :inet.ip_address() | nil,
           ssl: list() | nil,
@@ -225,6 +231,7 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:decode_body, options.decode_body)
     |> maybe_add(:stream_response, options.stream_response)
     |> maybe_add(:timeout, options.timeout)
+    |> maybe_add(:error_mode, options.error_mode)
     |> maybe_add(:connect_timeout, options.connect_timeout)
     |> maybe_add(:connect_address, options.connect_address)
     |> maybe_add(:ssl, options.ssl)
@@ -322,6 +329,9 @@ defmodule HTTP.FetchOptions do
       {:timeout, timeout}, acc ->
         %{acc | timeout: timeout}
 
+      {:error_mode, mode}, acc ->
+        %{acc | error_mode: mode}
+
       {:connect_timeout, connect_timeout}, acc ->
         %{acc | connect_timeout: connect_timeout}
 
@@ -396,6 +406,7 @@ defmodule HTTP.FetchOptions do
         decode_body: normalize_decode_body(options.decode_body),
         stream_response: normalize_stream_response(options.stream_response),
         telemetry: normalize_telemetry(options.telemetry),
+        error_mode: normalize_error_mode(options.error_mode),
         http_version: http_version,
         tls_backend: normalize_tls_backend(options.tls_backend, http_version),
         http1_reuse: normalize_http1_reuse(options.http1_reuse, http_version),
@@ -454,6 +465,11 @@ defmodule HTTP.FetchOptions do
 
   defp normalize_http1_limit(value, _limit, key),
     do: raise(ArgumentError, "invalid #{key}: #{inspect(value)}")
+
+  defp normalize_error_mode(mode) when mode in [:raw, :structured], do: mode
+
+  defp normalize_error_mode(mode),
+    do: raise(ArgumentError, "invalid error_mode: #{inspect(mode)}; expected :raw or :structured")
 
   defp normalize_telemetry(value) when is_boolean(value), do: value
 
