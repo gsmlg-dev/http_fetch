@@ -23,6 +23,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   @default_queue_bytes 1_048_576
   @default_max_streams 100
   @default_drain_timeout 30_000
+  @max_header_fragments 256
 
   @type transport :: module() | map()
   @type t :: %{
@@ -990,7 +991,14 @@ defmodule HTTP.HTTP2.ConnectionOwner do
             decode_headers(state, id, payload, flags)
 
           true ->
-            block = %{stream_id: id, fragments: [payload], flags: flags, size: byte_size(payload)}
+            block = %{
+              stream_id: id,
+              fragments: retain_header_fragment([], payload),
+              fragment_count: 1,
+              flags: flags,
+              size: byte_size(payload)
+            }
+
             {:ok, %{state | connection: %{state.connection | header_block: block}}}
         end
 
@@ -1006,6 +1014,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     size = block.size + byte_size(payload)
 
     cond do
+      block.fragment_count >= @max_header_fragments ->
+        {:error, :header_block_too_fragmented, state}
+
       size > 65_536 ->
         {:error, :header_block_too_large, state}
 
@@ -1015,7 +1026,13 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         decode_headers(state, id, encoded, block.flags ||| flags)
 
       true ->
-        next = %{block | fragments: [payload | block.fragments], size: size}
+        next = %{
+          block
+          | fragments: retain_header_fragment(block.fragments, payload),
+            fragment_count: block.fragment_count + 1,
+            size: size
+        }
+
         {:ok, %{state | connection: %{state.connection | header_block: next}}}
     end
   end
@@ -1062,6 +1079,9 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   defp dispatch_frame(state, _frame), do: {:ok, state}
+
+  defp retain_header_fragment(fragments, <<>>), do: fragments
+  defp retain_header_fragment(fragments, payload), do: [payload | fragments]
 
   defp settings_failure(state, reason)
        when reason in [:invalid_enable_connect_protocol, :enable_connect_protocol_reversed] do

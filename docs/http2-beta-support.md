@@ -42,6 +42,20 @@ per field. HPACK validation remains authoritative. Invalid trailer fields,
 nonterminal trailers, resets and cancellation are errors, not successful EOF.
 Exposing trailers does not establish gRPC support.
 
+Inbound header blocks are limited to 65,536 compressed bytes and 256 frames,
+counting the initial HEADERS, empty CONTINUATION and final END_HEADERS frames.
+Empty payloads consume the frame budget without retaining list entries. Frame
+257 is rejected before retention or HPACK decoding. The same policy applies to
+initial, informational and trailer field blocks; HPACK and decoded field limits
+remain in force. The error `{:transport_error, :header_block_too_fragmented}`
+closes the offending connection and fails all its unfinished streams, because
+the incomplete field block cannot be skipped while preserving connection HPACK
+state. Separate connections remain usable and the pool can open a replacement.
+Dedicated request completion confirms teardown; a lost shared owner produces
+the existing conservative `{:error, :cleanup_unconfirmed}` result instead of
+claiming reservation release. This is a header-fragment retention/work bound,
+not a bound on VM-wide memory or all traffic over a connection's lifetime.
+
 ## Acceptance workload and budgets
 
 The acceptance environment uses Elixir 1.18 and OTP 28. Other runtime versions
