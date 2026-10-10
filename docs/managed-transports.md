@@ -66,7 +66,7 @@ The HTTP/1 idle pool keeps at most
 | Connecting, checked-out and idle connections combined | `max_connections`: 1..256, default 2 |
 | Pending pool waiters | `max_pending`: exactly 0 |
 | Idle retention | `idle_timeout`: 1..60,000 ms, default 30,000 |
-| Frozen TLS/socket policy | 1 MiB serialized; policy nesting and list sizes also bounded |
+| Frozen TLS/socket policy | 1 MiB serialized with compact owned binary backing; nesting/list sizes also bounded |
 | Request headers and target | 64 KiB accounted metadata, at most 256 fields |
 | Non-streamed request body | 1 MiB iodata |
 | Upload worker/source chunk and H2 body bridge | 64 KiB per chunk/bridge |
@@ -180,6 +180,23 @@ later file changes cannot change an existing generation. File reads and final
 policy size are bounded. Unencrypted RSA, EC and PKCS8 private keys are accepted.
 Unsupported TLS callbacks/options, encrypted/malformed files, conflicting SNI
 and invalid socket options reject at open. Use a new scope for rotated policy.
+
+After final structural and 1-MiB serialized-policy validation, every retained
+TLS/socket binary is copied into compact owned backing. This covers in-memory
+CA/certificate/private-key values, materialized files, system CA defaults and
+supported nested option representations; accepted origin binaries are compact
+as well. A small borrowed slice cannot pin its caller's larger carrier binary
+through the frozen policy. Copying preserves values, verification, override
+equality and the policy digest.
+
+The sum of owned policy binary payload is bounded by the serialized-policy
+budget. Repeated occurrences are copied independently at freezing; later scope,
+configuration, request and connection references can share ref-counted payload.
+Conservative reservations must account for each retained representation and its
+bounded list/tuple structures rather than assume physical sharing. Caller-owned
+source backing, file/PEM processing and freeze/preparation copy overlap are
+transients outside the retained-policy payload bound. This does not bound OTP
+TLS's internal parsed credential state or the whole VM heap.
 
 TLS/socket overrides that conflict with the frozen policy reject before dialing.
 The supported socket policy uses finite `send_timeout` and
