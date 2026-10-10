@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   completion separate from whole-scope retirement. Managed scopes support
   direct TCP/OTP TLS, explicit protocols, and raw streamed responses with
   manual/error redirects; reject unsupported policies before dialing.
+- Extend request completion to supported explicit HTTP/HTTPS proxy routes,
+  including pending CONNECT/TLS, uploads, response streams, cancellation and
+  safe pooled return. Preserve proxy identity and authentication isolation.
 
 ### Fixed
 - Limit each inbound HTTP/2 header block to 256 frames, including empty
