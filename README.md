@@ -438,8 +438,11 @@ larger chunks fail with `:buffer_limit`. Split large producer items into smaller
 chunks. The response owner retains active-once receive credit even while a write
 is blocked. Cancellation signals (`HTTP.AbortController.abort/1` and
 `HTTP.Stream.error/2`) return after signalling; monitor the affected stream PID
-for `:DOWN` to confirm its cleanup. An early response is exposed only after its
-unfinished upload writer and source have terminated.
+for `:DOWN` to confirm its cleanup. Terminal request errors also stop the upload
+stream and wake blocked producers, including failures before connection setup
+on routes without a completion barrier. A stopped stream cannot be reused.
+An early response is exposed only after its unfinished upload writer and source
+have terminated.
 
 For HTTP/1 upload trailers, use an unknown-length stream, declare trailer names
 in the initial headers, and complete the stream with ordered fields:
@@ -1151,10 +1154,11 @@ See `HTTP.Response` for the complete header and consumption contract.
 
 ### Request cleanup completion
 
-For a direct HTTP/1 request with `http1_reuse: false` and `redirect: :manual`
-(or `:error`), retain the original Promise's completion handle before awaiting
-headers. The handle is created before the request starts and is exposed on the
-original Promise. Another process can use it, including during service drain:
+For a direct HTTP/1 request (including `http1_reuse: true`) or explicit HTTP/2
+request with `redirect: :manual` (or `:error`), retain the original Promise's
+completion handle before awaiting headers. The handle is created before the
+request starts and is exposed on the original Promise. Another process can use
+it, including during service drain:
 
 ```elixir
 promise = HTTP.fetch(url,
@@ -1178,16 +1182,19 @@ operations accept a finite, nonnegative timeout in milliseconds (default 5,000),
 covering the entire wait. A timeout leaves cleanup running; later waits can
 confirm completion. Repeated and concurrent cancellation/waits are safe.
 
-`:ok` requires the request owner, transport, dial/write/upload helpers, attached
-streams, and library-created enumerable producer to terminate. A response
-stream terminal event or DOWN alone does not prove this. Abnormal owner/task
-termination or loss of the coordinator returns `:cleanup_unconfirmed` when the
-cleanup evidence is insufficient. User-created producer processes are owned by
-the caller and must respond to their stream's termination themselves.
+`:ok` requires the request owner, dial/write/upload helpers, attached streams,
+and library-created enumerable producer to terminate. Dedicated transports
+must close. A reusable HTTP/1 transport must be safely returned to its pool or
+closed; an HTTP/2 request must release its stream, queued deliveries, and pool
+reservation. Healthy shared connections and sibling streams remain open. A
+response stream terminal event or DOWN alone does not prove this. Abnormal
+owner/task termination or loss of the coordinator returns `:cleanup_unconfirmed`
+when the cleanup evidence is insufficient. User-created producer processes are
+owned by the caller and must respond to their stream's termination themselves.
 
 The barrier supports direct TCP and the default OTP TLS backend, including TLS
-handshake cancellation. ExSSL, proxy/Unix routes, redirects followed internally,
-connection reuse, and HTTP/2 or HTTP/3 return
+handshake cancellation, explicit `:http1`, `:http2`, and `:h2c` selection.
+ExSSL, proxy/Unix routes, redirects followed internally, `:auto`, and HTTP/3 return
 `{:error, {:unsupported_completion, reason}}`. Existing asynchronous
 `HTTP.AbortController.abort/1` is unchanged; its cancellation can be followed by
 `HTTP.RequestCompletion.await/2`. Chained promises return `nil` from
