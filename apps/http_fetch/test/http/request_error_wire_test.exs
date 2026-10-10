@@ -3,6 +3,80 @@ defmodule HTTP.RequestErrorWireTest do
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
+  test "a saturated first pin times out before establishment and permits a successful second pin" do
+    {:ok, blocked} = :gen_tcp.listen(0, [:binary, active: false, backlog: 0, ip: {127, 0, 0, 2}])
+    {:ok, {_, port}} = :inet.sockname(blocked)
+    {:ok, queued} = :gen_tcp.connect({127, 0, 0, 2}, port, [:binary, active: false], 500)
+    {:ok, available} = :gen_tcp.listen(port, [:binary, active: false, ip: {127, 0, 0, 1}])
+
+    on_exit(fn ->
+      :gen_tcp.close(queued)
+      :gen_tcp.close(blocked)
+      :gen_tcp.close(available)
+    end)
+
+    deadline = System.monotonic_time(:millisecond) + 3_000
+
+    opts = [
+      method: :post,
+      body: "once",
+      redirect: :manual,
+      error_mode: :structured,
+      connect_timeout: 100,
+      telemetry: false
+    ]
+
+    url = "http://pinned.invalid:#{port}/mutation"
+
+    assert {:error,
+            %{
+              __struct__: HTTP.RequestError,
+              phase: :connect,
+              request_started: false,
+              reason: :timeout
+            } = error} =
+             HTTP.fetch(
+               url,
+               opts ++
+                 [
+                   connect_address: {127, 0, 0, 2},
+                   timeout: max(deadline - System.monotonic_time(:millisecond), 0)
+                 ]
+             )
+             |> HTTP.Promise.await(4_000)
+
+    assert HTTP.RequestError.pre_send?(error)
+
+    peer =
+      Task.async(fn ->
+        {:ok, socket} = :gen_tcp.accept(available, 2_000)
+        {:ok, bytes} = :gen_tcp.recv(socket, 0, 2_000)
+        assert bytes =~ "POST /mutation"
+
+        :ok =
+          :gen_tcp.send(
+            socket,
+            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+          )
+
+        :gen_tcp.close(socket)
+      end)
+
+    assert %HTTP.Response{status: 200} =
+             HTTP.fetch(
+               url,
+               opts ++
+                 [
+                   connect_address: {127, 0, 0, 1},
+                   timeout: max(deadline - System.monotonic_time(:millisecond), 0)
+                 ]
+             )
+             |> HTTP.Promise.await(4_000)
+
+    Task.await(peer)
+    assert System.monotonic_time(:millisecond) < deadline
+  end
+
   for scheme <- ["http", "https"] do
     test "#{scheme} refusal exposes pre-send evidence and caller can try a second validated pin" do
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])

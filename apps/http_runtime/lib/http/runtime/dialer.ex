@@ -49,7 +49,8 @@ defmodule HTTP.Runtime.Dialer do
         port,
         Keyword.put(transport_opts(request, selection, timeout), :proxy_route, proxy),
         connect_timeout,
-        cancel_monitor
+        cancel_monitor,
+        timeout
       )
     end
   end
@@ -147,10 +148,28 @@ defmodule HTTP.Runtime.Dialer do
 
   defp validate_transport_option_lists(_transport, _request), do: :ok
 
-  defp interruptible_connect(transport, host, port, opts, timeout, cancel_monitor) do
+  defp interruptible_connect(
+         transport,
+         host,
+         port,
+         opts,
+         timeout,
+         cancel_monitor,
+         request_timeout
+       ) do
     parent = self()
     ref = make_ref()
-    deadline_at = connect_deadline(timeout)
+    # Structured callers need the low-level TCP failure, rather than a timer
+    # racing that result. The connect call keeps its smaller timeout; observing
+    # its outcome remains bounded by the original request deadline and signal.
+    confirmation_timeout =
+      if is_reference(Keyword.get(opts, :connect_failure_token)) and
+           Keyword.get(opts, :proxy_route) == nil and
+           transport in [HTTP.Transport.TCP, HTTP.Transport.SSL],
+         do: request_timeout,
+         else: timeout
+
+    deadline_at = connect_deadline(confirmation_timeout)
 
     tracker = Keyword.get(opts, :request_lifecycle)
 
