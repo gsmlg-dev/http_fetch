@@ -21,6 +21,7 @@ defmodule HTTP.Transport.SSL do
              socket_opts,
              timeout
            ) do
+      HTTP.RequestLifecycle.track_socket(opts, tcp)
       remaining = if deadline == :infinity, do: :infinity, else: max(deadline - now(), 0)
 
       tls_opts =

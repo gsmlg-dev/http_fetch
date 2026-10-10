@@ -48,10 +48,23 @@ defmodule HTTP.SocketClient do
     timeout = request_timeout(request)
     deadline_at = System.monotonic_time(:millisecond) + timeout
 
+    tracker = Keyword.get(request.transport_options, :request_lifecycle)
+
     case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
-           owner(parent, ref, request, unix_socket_path, 0, false, deadline_at)
+           launch_monitor = Process.monitor(parent)
+
+           receive do
+             :owner_launch ->
+               Process.demonitor(launch_monitor, [:flush])
+               owner(parent, ref, request, unix_socket_path, 0, false, deadline_at)
+
+             {:DOWN, ^launch_monitor, :process, ^parent, _reason} ->
+               :ok
+           end
          end) do
       {:ok, owner_pid} ->
+        HTTP.RequestLifecycle.register(tracker, owner_pid, :owner)
+        send(owner_pid, :owner_launch)
         set_abort_owner(abort_controller_pid, owner_pid)
         await_owner(ref, owner_pid, timeout)
 
@@ -169,6 +182,7 @@ defmodule HTTP.SocketClient do
             telemetry: request_telemetry?(state.request)
           )
 
+        HTTP.RequestLifecycle.attach_stream(HTTP.RequestLifecycle.current(), stream_pid)
         response = Response.with_stream_body(response, stream_pid)
         send_response(state.parent, state.ref, response, state.request)
 
@@ -240,19 +254,25 @@ defmodule HTTP.SocketClient do
   end
 
   defp owner(parent, ref, request, unix_socket_path, redirects, redirected?, deadline_at) do
+    tracker = Keyword.get(request.transport_options, :request_lifecycle)
+    Process.put(HTTP.RequestLifecycle, tracker)
     parent_monitor = Process.monitor(parent)
 
     try do
-      owner_request(
-        parent,
-        ref,
-        request,
-        unix_socket_path,
-        redirects,
-        redirected?,
-        deadline_at,
-        parent_monitor
-      )
+      result =
+        owner_request(
+          parent,
+          ref,
+          request,
+          unix_socket_path,
+          redirects,
+          redirected?,
+          deadline_at,
+          parent_monitor
+        )
+
+      HTTP.RequestLifecycle.complete(tracker)
+      result
     after
       Process.demonitor(parent_monitor, [:flush])
     end
@@ -1333,6 +1353,7 @@ defmodule HTTP.SocketClient do
             telemetry: request_telemetry?(state.request)
           )
 
+        HTTP.RequestLifecycle.attach_stream(HTTP.RequestLifecycle.current(), stream_pid)
         response = Response.with_stream_body(response, stream_pid)
         send_response(state.parent, state.ref, response, state.request)
 
@@ -1433,6 +1454,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp fail(state, reason) do
+    HTTP.RequestLifecycle.abort(HTTP.RequestLifecycle.current())
     # TLS output and the request timer can expire together. Classify their race
     # by the original deadline, while preserving earlier transport timeouts.
     reason =
@@ -1632,10 +1654,24 @@ defmodule HTTP.SocketClient do
     parent = self()
     ref = make_ref()
 
+    tracker = HTTP.RequestLifecycle.current()
+
     case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
-           send(parent, {:send_result, ref, transport.send(socket, iodata)})
+           launch_monitor = Process.monitor(parent)
+
+           receive do
+             :send_launch ->
+               Process.demonitor(launch_monitor, [:flush])
+               send(parent, {:send_result, ref, transport.send(socket, iodata)})
+
+             {:DOWN, ^launch_monitor, :process, ^parent, _reason} ->
+               :ok
+           end
          end) do
       {:ok, pid} ->
+        HTTP.RequestLifecycle.register(tracker, pid, :send)
+        send(pid, :send_launch)
+
         receive do
           {:send_result, ^ref, result} ->
             # The caller owns cleanup. A failed control write can leave readable

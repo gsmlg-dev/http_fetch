@@ -417,8 +417,14 @@ defmodule SSL.ConnectionLifecycleTest do
     existing = connection_children()
 
     assert {:error, :timeout} = SSL.connect(tcp, Peer.client_options(), 50)
-    assert {:ok, _client_hello} = :gen_tcp.recv(server, 0, 1_000)
-    assert {:error, :closed} = :gen_tcp.recv(server, 0, 1_000)
+
+    for pid <- MapSet.difference(connection_children(), existing) do
+      monitor = Process.monitor(pid)
+      assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, 1_000
+    end
+
+    # The deadline may expire before ClientHello is written on a cold VM.
+    assert :closed = await_tcp_closed(server)
     assert {:error, :closed} = :gen_tcp.send(tcp, "plaintext-must-not-resume")
     assert connection_children() == existing
 

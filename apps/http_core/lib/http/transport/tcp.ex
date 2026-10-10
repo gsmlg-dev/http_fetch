@@ -12,12 +12,15 @@ defmodule HTTP.Transport.TCP do
         active: false
       ] ++ Keyword.get(opts, :socket_opts, [])
 
-    :gen_tcp.connect(
-      Keyword.get(opts, :connect_address, String.to_charlist(host)),
-      port,
-      socket_opts,
-      timeout
-    )
+    case :gen_tcp.connect(
+           Keyword.get(opts, :connect_address, String.to_charlist(host)),
+           port,
+           socket_opts,
+           timeout
+         ) do
+      {:ok, socket} -> {:ok, HTTP.RequestLifecycle.track_socket(opts, socket)}
+      error -> error
+    end
   end
 
   @impl true

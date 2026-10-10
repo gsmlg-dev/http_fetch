@@ -1091,3 +1091,48 @@ Malformed or truncated gzip/deflate produces
 `:stream_error` for streamed bodies. Stream reading methods raise on that error;
 `write_to/2` returns it and may leave a partial file. Raw deflate is rejected.
 See `HTTP.Response` for the complete header and consumption contract.
+
+### Request cleanup completion
+
+For a direct HTTP/1 request with `http1_reuse: false` and `redirect: :manual`
+(or `:error`), retain the original Promise's completion handle before awaiting
+headers. The handle is created before the request starts and is exposed on the
+original Promise. Another process can use it, including during service drain:
+
+```elixir
+promise = HTTP.fetch(url,
+  http_version: :http1,
+  http1_reuse: false,
+  redirect: :manual,
+  stream_response: true
+)
+completion = HTTP.Promise.completion(promise)
+response = HTTP.Promise.await(promise)
+
+case HTTP.RequestCompletion.abort_and_await(completion, 1_000) do
+  :ok -> :cleanup_confirmed
+  {:error, :cleanup_pending} -> :retry_cleanup_wait_later
+  {:error, :cleanup_unconfirmed} -> :cleanup_evidence_lost
+end
+```
+
+`HTTP.RequestCompletion.await/2` waits without requesting cancellation. Both
+operations accept a finite, nonnegative timeout in milliseconds (default 5,000),
+covering the entire wait. A timeout leaves cleanup running; later waits can
+confirm completion. Repeated and concurrent cancellation/waits are safe.
+
+`:ok` requires the request owner, transport, dial/write/upload helpers, attached
+streams, and library-created enumerable producer to terminate. A response
+stream terminal event or DOWN alone does not prove this. Abnormal owner/task
+termination or loss of the coordinator returns `:cleanup_unconfirmed` when the
+cleanup evidence is insufficient. User-created producer processes are owned by
+the caller and must respond to their stream's termination themselves.
+
+The barrier supports direct TCP and the default OTP TLS backend, including TLS
+handshake cancellation. ExSSL, proxy/Unix routes, redirects followed internally,
+connection reuse, and HTTP/2 or HTTP/3 return
+`{:error, {:unsupported_completion, reason}}`. Existing asynchronous
+`HTTP.AbortController.abort/1` is unchanged; its cancellation can be followed by
+`HTTP.RequestCompletion.await/2`. Chained promises return `nil` from
+`HTTP.Promise.completion/1`; keep the original request's handle. Confirmation
+covers local cleanup, not whether a remote application received earlier bytes.

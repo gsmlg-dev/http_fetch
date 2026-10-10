@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-10
+
+### Added
+- Expose `HTTP.Promise.completion/1` and bounded
+  `HTTP.RequestCompletion.await/2` / `abort_and_await/2` for request-scoped
+  cleanup confirmation on explicit HTTP/1 requests without connection reuse,
+  using manual/error redirects and direct TCP or OTP TLS transport.
+- Distinguish confirmed cleanup, cleanup still pending at the caller's deadline,
+  and cleanup whose completion cannot be confirmed. Preserve asynchronous
+  AbortController cancellation and streaming Promise response behavior.
+
+### Fixed
+- Abort the WebSocket transport when its owner exits during a blocked TLS
+  write, and settle pending writes before stopping the connection.
+
 ## [0.18.1] - 2026-10-10
 
 ### Fixed
