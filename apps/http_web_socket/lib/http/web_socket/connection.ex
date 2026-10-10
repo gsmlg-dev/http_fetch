@@ -1078,14 +1078,34 @@ defmodule HTTP.WebSocket.Connection do
 
   defp rearm(state) do
     case state.transport.setopts(state.socket, active: :once) do
-      :ok -> {:noreply, state}
-      {:error, :closed} -> read_closed(state)
-      {:error, reason} -> transport_terminal(state, reason)
+      :ok ->
+        {:noreply, state}
+
+      {:error, :closed} ->
+        read_closed(state)
+
+      {:error, :einval} ->
+        if state.transport == HTTP.Transport.TCP and closed_tcp_socket?(state.socket),
+          do: read_closed(state),
+          else: transport_terminal(state, :einval)
+
+      {:error, reason} ->
+        transport_terminal(state, reason)
     end
   end
 
+  # Native TCP reports einval for both invalid live options and exited sockets.
+  # Only confirmed port/server death establishes EOF for queued frame draining.
+  defp closed_tcp_socket?(socket) when is_port(socket),
+    do: :erlang.port_info(socket) == :undefined
+
+  defp closed_tcp_socket?({:"$inet", :gen_tcp_socket, {server, _socket}}) when is_pid(server),
+    do: not Process.alive?(server)
+
+  defp closed_tcp_socket?(_socket), do: false
+
   defp read_closed(%{http_version: :http1} = state) do
-    # A synchronous setopts call can select its closed reply ahead of TLS data
+    # A synchronous setopts call can select its closed reply ahead of transport data
     # already in this mailbox. Keep the socket until those frames are processed.
     send(self(), {:http1_read_closed, state.generation, state.socket})
     {:noreply, %{state | read_close_pending?: true}}

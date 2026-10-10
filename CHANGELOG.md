@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Isolate TLS session tickets by both certificate reference identity and SNI.
 - Retain SNI-derived certificate verification for ordinary ExSSL calls unless
   an explicit independent reference identity is supplied.
-- Process already-delivered HTTP/1 WebSocket Close frames before finalizing
-  TLS read termination; retain abnormal closure when no valid peer Close exists.
+- Process already-delivered HTTP/1 WebSocket frames before finalizing
+  TCP or TLS read termination; retain abnormal closure when no valid peer Close exists.
 
 ## [0.18.0] - 2026-10-10
 

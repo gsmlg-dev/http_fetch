@@ -79,6 +79,112 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
     end
   end
 
+  for backend <- [:inet, :socket], terminal <- [:close, :eof, :truncated, :invalid] do
+    @tag tcp_backend: backend
+    test "TCP #{backend} processes queued #{terminal} frames after the native socket closes" do
+      set_tcp_backend(unquote(backend))
+      terminal = unquote(terminal)
+      {peer, port} = close_peer(self(), terminal, :gen_tcp)
+      socket = WebSocket.new("ws://127.0.0.1:#{port}/socket")
+      on_exit(fn -> Process.exit(socket.pid, :kill) end)
+      assert_receive {WebSocket, ^socket, %Open{}}, 5_000
+      %{generation: generation, socket: tcp} = :sys.get_state(socket.pid)
+      consumer = socket.pid
+      {native, native_type} = tcp_actor(tcp)
+
+      native_monitor =
+        if native_type == :port, do: :inet.monitor(tcp), else: Process.monitor(native)
+
+      writer_supervisor = Process.whereis(:http_runtime_task_supervisor)
+      :erlang.trace(consumer, true, [:send])
+      :erlang.trace(writer_supervisor, true, [:send, :set_on_spawn])
+      :erlang.trace(native, true, [:send])
+      :ok = :sys.suspend(writer_supervisor)
+
+      try do
+        close_task = Task.async(fn -> WebSocket.close(socket, 1000, "done") end)
+        on_exit(fn -> Process.exit(close_task.pid, :kill) end)
+
+        # Park the consumer at its real writer admission, before it can rearm.
+        assert_receive {:trace, ^consumer, :send, {:"$gen_call", _, _}, ^writer_supervisor},
+                       5_000
+
+        true = :erlang.suspend_process(consumer)
+
+        try do
+          :ok = :sys.resume(writer_supervisor)
+          assert_receive {:peer_received_close, ^peer}, 5_000
+
+          assert_receive {:trace, writer, :send, {:http1_write, writer, :ok}, ^consumer},
+                         5_000
+
+          send(consumer, {:http1_read_closed, make_ref(), tcp})
+          send(consumer, {:http1_read_closed, generation, make_ref()})
+          send(peer, :reply_close)
+          assert_receive {:trace, ^native, :send, {:tcp, ^tcp, _}, ^consumer}, 5_000
+
+          # Model the next read credit with final data queued and the owner paused.
+          # Native socket death proves this is EOF, not an invalid live option.
+          assert :ok = :inet.setopts(tcp, active: :once)
+          assert_receive {:DOWN, ^native_monitor, ^native_type, ^native, _}, 5_000
+          assert_tcp_exited(native)
+          assert {:error, :einval} = :inet.setopts(tcp, active: :once)
+          {:messages, pending} = Process.info(consumer, :messages)
+          write_index = Enum.find_index(pending, &match?({:http1_write, _, :ok}, &1))
+          data_index = Enum.find_index(pending, &match?({:tcp, ^tcp, _}, &1))
+          assert is_integer(write_index) and is_integer(data_index)
+          assert write_index < data_index
+        after
+          :erlang.trace(consumer, false, [:send])
+          true = :erlang.resume_process(consumer)
+        end
+
+        assert :ok = Task.await(close_task, 5_000)
+      after
+        :erlang.trace(writer_supervisor, false, [:send, :set_on_spawn])
+        :ok = :sys.resume(writer_supervisor)
+      end
+
+      assert_receive {WebSocket, ^socket, %Message{data: "tail"}}, 5_000
+      expected_code = %{close: 1000, eof: 1006, truncated: 1006, invalid: 1002}[terminal]
+      expected_clean = unquote(terminal == :close)
+
+      assert_receive {WebSocket, ^socket,
+                      %Close{code: ^expected_code, was_clean: ^expected_clean}},
+                     5_000
+
+      assert_terminal_error(terminal, socket)
+      refute_receive {WebSocket, ^socket, %Close{}}, 0
+    end
+  end
+
+  for backend <- [:inet, :socket] do
+    test "invalid options on live TCP #{backend} retain errors without closing the connection" do
+      set_tcp_backend(unquote(backend))
+      {:ok, _peer, port} = HTTPWebSocket.TestServer.start_link()
+      socket = WebSocket.new("ws://127.0.0.1:#{port}/socket")
+      on_exit(fn -> Process.exit(socket.pid, :kill) end)
+      assert_receive {WebSocket, ^socket, %Open{}}, 5_000
+      %{socket: tcp} = :sys.get_state(socket.pid)
+
+      assert {:error, :einval} = HTTP.Transport.TCP.setopts(tcp, active: :invalid)
+      {native, native_type} = tcp_actor(tcp)
+
+      assert if(native_type == :port,
+               do: is_list(:erlang.port_info(native)),
+               else: Process.alive?(native)
+             )
+
+      assert :ok = HTTP.Transport.TCP.setopts(tcp, active: :once)
+      assert :ok = WebSocket.send(socket, "still-open")
+      assert_receive {WebSocket, ^socket, %Message{data: "echo:still-open"}}, 5_000
+      refute_receive {WebSocket, ^socket, %Error{}}, 0
+      refute_receive {WebSocket, ^socket, %Close{}}, 0
+      assert :ok = WebSocket.close(socket, 1000, "done")
+      assert_receive {WebSocket, ^socket, %Close{code: 1000, was_clean: true}}, 5_000
+    end
+  end
+
   test "stale or unsolicited deferred EOF cannot close a live socket" do
     {:ok, _peer, port} = HTTPWebSocket.TestServer.start_link()
     socket = WebSocket.new("ws://127.0.0.1:#{port}/socket")
@@ -97,36 +203,28 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
     assert_receive {WebSocket, ^socket, %Close{code: 1000, was_clean: true}}, 5_000
   end
 
-  defp close_peer(parent, terminal) do
-    {:ok, listener} =
-      :ssl.listen(0,
-        mode: :binary,
-        active: false,
-        ip: {127, 0, 0, 1},
-        versions: [:"tlsv1.3"],
-        certfile: Path.join(@fixtures, "localhost.pem"),
-        keyfile: Path.join(@fixtures, "localhost.key")
-      )
+  defp close_peer(parent, terminal, transport \\ :ssl) do
+    {:ok, listener} = listen_peer(transport)
 
-    {:ok, {_, port}} = :ssl.sockname(listener)
+    {:ok, {_, port}} =
+      if transport == :ssl, do: :ssl.sockname(listener), else: :inet.sockname(listener)
 
     peer =
       spawn_link(fn ->
-        {:ok, tcp} = :ssl.transport_accept(listener, 5_000)
-        {:ok, tls} = :ssl.handshake(tcp, 5_000)
-        request = receive_upgrade(tls)
+        {:ok, socket} = accept_peer(transport, listener)
+        request = receive_upgrade(transport, socket)
         [_, key] = Regex.run(~r/Sec-WebSocket-Key: ([^\r]+)\r\n/, request)
         accept = :crypto.hash(:sha, key <> "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
 
         :ok =
-          :ssl.send(tls, [
+          transport.send(socket, [
             "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ",
             Base.encode64(accept),
             "\r\n\r\n"
           ])
 
         assert {:ok, <<0x88, 0x86, mask::binary-size(4), payload::binary-size(6)>>} =
-                 :ssl.recv(tls, 12, 5_000)
+                 transport.recv(socket, 12, 5_000)
 
         decoded =
           for {byte, index} <- Enum.with_index(:binary.bin_to_list(payload)), into: <<>> do
@@ -136,17 +234,57 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
         assert decoded == <<1000::16, "done">>
         send(parent, {:peer_received_close, self()})
         receive do: (:reply_close -> :ok)
-        :ok = :ssl.send(tls, [<<0x81, 4, "tail">>, terminal_frame(terminal)])
-        :ok = :ssl.close(tls)
+        :ok = transport.send(socket, [<<0x81, 4, "tail">>, terminal_frame(terminal)])
+        :ok = transport.close(socket)
       end)
 
     on_exit(fn ->
       Process.exit(peer, :kill)
-      :ssl.close(listener)
+      transport.close(listener)
     end)
 
     {peer, port}
   end
+
+  defp listen_peer(:ssl) do
+    :ssl.listen(0,
+      mode: :binary,
+      active: false,
+      ip: {127, 0, 0, 1},
+      versions: [:"tlsv1.3"],
+      certfile: Path.join(@fixtures, "localhost.pem"),
+      keyfile: Path.join(@fixtures, "localhost.key")
+    )
+  end
+
+  defp listen_peer(:gen_tcp),
+    do: :gen_tcp.listen(0, [{:inet_backend, :inet}, :binary, active: false, ip: {127, 0, 0, 1}])
+
+  defp accept_peer(:ssl, listener) do
+    with {:ok, tcp} <- :ssl.transport_accept(listener, 5_000), do: :ssl.handshake(tcp, 5_000)
+  end
+
+  defp accept_peer(:gen_tcp, listener), do: :gen_tcp.accept(listener, 5_000)
+
+  defp set_tcp_backend(backend) do
+    key = {:kernel, :inet_backend}
+    previous = :persistent_term.get(key, :undefined)
+    :persistent_term.put(key, backend)
+
+    on_exit(fn ->
+      if previous == :undefined,
+        do: :persistent_term.erase(key),
+        else: :persistent_term.put(key, previous)
+    end)
+  end
+
+  defp tcp_actor(socket) when is_port(socket), do: {socket, :port}
+  defp tcp_actor({:"$inet", :gen_tcp_socket, {pid, _socket}}), do: {pid, :process}
+
+  defp assert_tcp_exited(socket) when is_port(socket),
+    do: assert(:undefined == :erlang.port_info(socket))
+
+  defp assert_tcp_exited(pid), do: refute(Process.alive?(pid))
 
   defp terminal_frame(:close), do: <<0x88, 2, 1000::16>>
   defp terminal_frame(:eof), do: <<>>
@@ -175,12 +313,12 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
     assert_receive {:trace, ^pid, :send, {:ssl, _, _}, ^consumer}, 5_000
   end
 
-  defp receive_upgrade(socket, buffer \\ "") do
+  defp receive_upgrade(transport, socket, buffer \\ "") do
     if String.contains?(buffer, "\r\n\r\n") do
       buffer
     else
-      {:ok, data} = :ssl.recv(socket, 0, 5_000)
-      receive_upgrade(socket, buffer <> data)
+      {:ok, data} = transport.recv(socket, 0, 5_000)
+      receive_upgrade(transport, socket, buffer <> data)
     end
   end
 end
