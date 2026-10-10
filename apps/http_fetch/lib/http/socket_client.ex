@@ -453,7 +453,13 @@ defmodule HTTP.SocketClient do
             {:ok, {:reused, owner, {pool, reservation}, key}}
 
           :none ->
-            reserve_or_claim_http2_owner(pool, key, deadline_at, parent_monitor)
+            reserve_or_claim_http2_owner(
+              pool,
+              key,
+              deadline_at,
+              parent_monitor,
+              request.transport_options[:transport_scope]
+            )
         end
       else
         _ -> {:ok, {:connect, nil}}
@@ -463,7 +469,7 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp reserve_or_claim_http2_owner(pool, key, deadline_at, parent_monitor) do
+  defp reserve_or_claim_http2_owner(pool, key, deadline_at, parent_monitor, scope) do
     case Pool.claim_connect(pool, key) do
       :start ->
         {:ok, {:connect, {pool, key}}}
@@ -475,6 +481,9 @@ defmodule HTTP.SocketClient do
 
           {:connect, _token} ->
             {:ok, {:connect, {pool, key}}}
+
+          {:error, :pending_capacity} when not is_nil(scope) ->
+            {:error, {:transport_scope_capacity, :connections}}
 
           {:error, reason} ->
             {:error, reason}
