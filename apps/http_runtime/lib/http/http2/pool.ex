@@ -122,6 +122,12 @@ defmodule HTTP.HTTP2.Pool do
         {:reply, {:error, :connection_capacity}, state}
 
       true ->
+        HTTP.RequestLifecycle.handoff_connection(
+          Keyword.get(opts, :request_lifecycle),
+          Keyword.get(opts, :socket),
+          owner
+        )
+
         state =
           register_internal(state, key, owner, Keyword.get(opts, :max_streams, state.max_streams))
 

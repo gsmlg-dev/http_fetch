@@ -286,8 +286,8 @@ defmodule HTTP.RequestCompletionTest do
 
   test "unsupported configurations and chained promise expose no broad guarantee" do
     for opts <- [
-          [http_version: :http2],
-          [http1_reuse: true],
+          [http_version: :http3],
+          [http_version: :auto],
           [tls_backend: :ex_ssl],
           [tls_backend: "ex_ssl"],
           [redirect: :follow]

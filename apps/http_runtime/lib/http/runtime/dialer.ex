@@ -424,9 +424,9 @@ defmodule HTTP.Runtime.Dialer do
 
     [
       cancellable:
-        (selection.mode in [:http1, :auto_https] and
-           (is_pid(request.body) or Keyword.get(request.transport_options, :http1_reuse, false) or
-              Keyword.get(request.transport_options, :request_lifecycle) != nil)) or
+        Keyword.get(request.transport_options, :request_lifecycle) != nil or
+          (selection.mode in [:http1, :auto_https] and
+             (is_pid(request.body) or Keyword.get(request.transport_options, :http1_reuse, false))) or
           is_reference(Keyword.get(request.transport_options, :connect_failure_token)),
       connect_failure_token: Keyword.get(request.transport_options, :connect_failure_token),
       request_lifecycle: Keyword.get(request.transport_options, :request_lifecycle),

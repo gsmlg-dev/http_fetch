@@ -368,6 +368,9 @@ defmodule HTTP.SocketClient do
   defp connect_http1_or_new(transport, host, port, request, selection, deadline_at, monitor) do
     reuse = if selection.mode == :http1, do: HTTP.HTTP1.Pool.checkout(request), else: :none
 
+    if match?({:ok, _}, reuse),
+      do: HTTP.RequestLifecycle.track_socket(request.transport_options, elem(reuse, 1))
+
     case request_ready(deadline_at, monitor) do
       :ok ->
         timeout = remaining_timeout(deadline_at)
@@ -578,18 +581,20 @@ defmodule HTTP.SocketClient do
              activate?: false,
              limit_initial_capacity?: http_version(request) == :auto
            ),
-         :ok <- transfer_http2_socket(transport, socket, owner),
-         :ok <- ConnectionOwner.activate(owner),
+         :ok <-
+           HTTP.RequestLifecycle.register(HTTP.RequestLifecycle.current(), owner, :connection),
          {:ok, pool, reservation, key} <-
-           register_http2_owner(
+           initialize_http2_owner(
+             transport,
              request,
              profile,
              owner,
+             socket,
              claim,
              deadline_at,
              context.parent_monitor
            ) do
-      case start_http2_stream(owner, headers, body, request) do
+      case start_http2_stream(owner, headers, body, request, deadline_at) do
         {:ok, id, bridge} ->
           monitor = Process.monitor(owner)
 
@@ -617,7 +622,7 @@ defmodule HTTP.SocketClient do
 
         {:error, reason} ->
           if is_pid(pool) and is_reference(reservation),
-            do: safe_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
+            do: confirm_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
 
           if not is_pid(pool),
             do: safe_http2_cleanup(fn -> GenServer.stop(owner, :normal) end)
@@ -650,7 +655,7 @@ defmodule HTTP.SocketClient do
 
     {:ok, headers, body} = HTTP.HTTP2.request_headers(request, profile, order?: false)
 
-    case start_http2_stream(owner, headers, body, request) do
+    case start_http2_stream(owner, headers, body, request, deadline_at) do
       {:ok, id, bridge} ->
         monitor = Process.monitor(owner)
 
@@ -677,12 +682,40 @@ defmodule HTTP.SocketClient do
         })
 
       {:error, reason} ->
-        _ = Pool.release(pool, key, reservation)
+        confirm_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
         send_error(parent, ref, reason)
     end
   end
 
-  defp register_http2_owner(request, profile, owner, claim, deadline_at, parent_monitor) do
+  defp initialize_http2_owner(
+         transport,
+         request,
+         profile,
+         owner,
+         socket,
+         claim,
+         deadline_at,
+         parent_monitor
+       ) do
+    result =
+      with :ok <- transfer_http2_socket(transport, socket, owner),
+           :ok <- ConnectionOwner.activate(owner) do
+        register_http2_owner(request, profile, owner, socket, claim, deadline_at, parent_monitor)
+      end
+
+    case result do
+      {:error, _reason} ->
+        if Process.alive?(owner),
+          do: safe_http2_cleanup(fn -> GenServer.stop(owner, :normal) end)
+
+        result
+
+      _ ->
+        result
+    end
+  end
+
+  defp register_http2_owner(request, profile, owner, socket, claim, deadline_at, parent_monitor) do
     if request.url.scheme not in ["http", "https"] or
          Keyword.get(request.transport_options, :http2_reuse, true) == false do
       {:ok, nil, nil, nil}
@@ -691,13 +724,19 @@ defmodule HTTP.SocketClient do
 
       with pool when is_pid(pool) <- pool,
            {:ok, key} <- pool_key_for_registration(request, profile, claim),
-           :ok <- Pool.register(pool, key, owner, connecting?: is_tuple(claim), max_streams: 0) do
+           :ok <-
+             Pool.register(pool, key, owner,
+               connecting?: is_tuple(claim),
+               max_streams: 0,
+               request_lifecycle: HTTP.RequestLifecycle.current(),
+               socket: socket
+             ) do
         case await_http2_reservation(pool, key, deadline_at, owner, parent_monitor) do
           {:ok, ^owner, reservation} ->
             {:ok, pool, reservation, key}
 
           {:ok, _other_owner, reservation} ->
-            _ = Pool.release(pool, key, reservation)
+            confirm_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
             {:error, :owner_mismatch, :registered}
 
           {:error, reason} ->
@@ -738,7 +777,10 @@ defmodule HTTP.SocketClient do
       telemetry: request_telemetry?(request)
     ]
 
-    with {:ok, bridge} <- BodyBridge.start_link(stream, owner, opts), do: {:ok, bridge, nil}
+    with {:ok, bridge} <- BodyBridge.start_link(stream, owner, opts) do
+      HTTP.RequestLifecycle.register(HTTP.RequestLifecycle.current(), bridge, :body_bridge)
+      {:ok, bridge, nil}
+    end
   end
 
   defp maybe_start_http2_bridge(body, owner, _headers, request)
@@ -756,8 +798,11 @@ defmodule HTTP.SocketClient do
 
     with {:ok, stream} <-
            HTTP.Stream.from_enumerable(chunks, telemetry: request_telemetry?(request)) do
+      HTTP.RequestLifecycle.attach_stream(HTTP.RequestLifecycle.current(), stream)
+
       case BodyBridge.start_link(stream, owner, telemetry: request_telemetry?(request)) do
         {:ok, bridge} ->
+          HTTP.RequestLifecycle.register(HTTP.RequestLifecycle.current(), bridge, :body_bridge)
           {:ok, bridge, stream}
 
         {:error, reason} ->
@@ -769,17 +814,21 @@ defmodule HTTP.SocketClient do
 
   defp maybe_start_http2_bridge(_body, _owner, _headers, _request), do: {:ok, nil, nil}
 
-  defp start_http2_stream(owner, headers, body, request) do
-    with {:ok, bridge, internal_stream} <- maybe_start_http2_bridge(body, owner, headers, request) do
+  defp start_http2_stream(owner, headers, body, request, deadline_at) do
+    with :ok <- request_ready(deadline_at, nil),
+         {:ok, bridge, internal_stream} <- maybe_start_http2_bridge(body, owner, headers, request) do
       opened =
         try do
           ConnectionOwner.open_stream(owner, headers,
             subscriber: self(),
             body_bridge: bridge,
+            deadline_at: deadline_at,
             end_stream: body == ""
           )
         catch
-          :exit, _ -> {:error, :owner_closed}
+          :exit, _ ->
+            HTTP.RequestLifecycle.unconfirmed(HTTP.RequestLifecycle.current())
+            {:error, :owner_closed}
         end
 
       case opened do
@@ -797,7 +846,7 @@ defmodule HTTP.SocketClient do
 
             {:error, reason} ->
               discard_http2_bridge(bridge, internal_stream)
-              safe_http2_cleanup(fn -> ConnectionOwner.release_stream(owner, id) end)
+              confirm_http2_cleanup(fn -> ConnectionOwner.release_stream(owner, id) end)
               {:error, reason}
           end
 
@@ -1046,6 +1095,8 @@ defmodule HTTP.SocketClient do
             telemetry: request_telemetry?(state.request)
           )
 
+        HTTP.RequestLifecycle.attach_stream(HTTP.RequestLifecycle.current(), stream_pid)
+
         send_response(
           state.parent,
           state.ref,
@@ -1093,6 +1144,7 @@ defmodule HTTP.SocketClient do
            send(coordinator, {:http2_delivery, token, result})
          end) do
       {:ok, worker} ->
+        HTTP.RequestLifecycle.register(HTTP.RequestLifecycle.current(), worker, :delivery)
         monitor = Process.monitor(worker)
 
         await_http2_response(%{
@@ -1202,6 +1254,8 @@ defmodule HTTP.SocketClient do
   defp parse_status(_), do: nil
 
   defp fail_http2(state, reason) do
+    HTTP.RequestLifecycle.abort(HTTP.RequestLifecycle.current())
+
     if state.response_sent? do
       case state.mode do
         {:stream, stream_pid} -> HTTP.Stream.error(stream_pid, reason)
@@ -1220,15 +1274,17 @@ defmodule HTTP.SocketClient do
     maybe_cancel_http2_bridge(state)
     stop_http2_bridge(state)
 
-    safe_http2_cleanup(fn ->
-      ConnectionOwner.release_stream(state.owner, state.stream_id)
-    end)
-
     if is_pid(state.pool) and is_reference(state.reservation) do
-      safe_http2_cleanup(fn ->
+      confirm_http2_cleanup(fn ->
+        ConnectionOwner.release_stream(state.owner, state.stream_id)
+      end)
+
+      confirm_http2_cleanup(fn ->
         Pool.release(state.pool, state.pool_key, state.reservation)
       end)
     else
+      # The tracker retains the dedicated owner and raw socket until DOWN.
+      # Cancellation can already have stopped them before this call arrives.
       safe_http2_cleanup(fn -> GenServer.stop(state.owner, :normal) end)
     end
 
@@ -1251,6 +1307,12 @@ defmodule HTTP.SocketClient do
     fun.()
   catch
     :exit, _reason -> :ok
+  end
+
+  defp confirm_http2_cleanup(fun) do
+    :ok = fun.()
+  catch
+    :exit, _reason -> HTTP.RequestLifecycle.unconfirmed(HTTP.RequestLifecycle.current())
   end
 
   defp owner_loop(state) do
