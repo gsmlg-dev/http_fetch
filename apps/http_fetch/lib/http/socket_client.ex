@@ -625,7 +625,7 @@ defmodule HTTP.SocketClient do
             do: confirm_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
 
           if not is_pid(pool),
-            do: confirm_http2_cleanup(fn -> GenServer.stop(owner, :normal) end)
+            do: safe_http2_cleanup(fn -> GenServer.stop(owner, :normal) end)
 
           send_error(parent, ref, reason)
       end
@@ -706,7 +706,7 @@ defmodule HTTP.SocketClient do
     case result do
       {:error, _reason} ->
         if Process.alive?(owner),
-          do: confirm_http2_cleanup(fn -> GenServer.stop(owner, :normal) end)
+          do: safe_http2_cleanup(fn -> GenServer.stop(owner, :normal) end)
 
         result
 
@@ -1274,16 +1274,18 @@ defmodule HTTP.SocketClient do
     maybe_cancel_http2_bridge(state)
     stop_http2_bridge(state)
 
-    confirm_http2_cleanup(fn ->
-      ConnectionOwner.release_stream(state.owner, state.stream_id)
-    end)
-
     if is_pid(state.pool) and is_reference(state.reservation) do
+      confirm_http2_cleanup(fn ->
+        ConnectionOwner.release_stream(state.owner, state.stream_id)
+      end)
+
       confirm_http2_cleanup(fn ->
         Pool.release(state.pool, state.pool_key, state.reservation)
       end)
     else
-      confirm_http2_cleanup(fn -> GenServer.stop(state.owner, :normal) end)
+      # The tracker retains the dedicated owner and raw socket until DOWN.
+      # Cancellation can already have stopped them before this call arrives.
+      safe_http2_cleanup(fn -> GenServer.stop(state.owner, :normal) end)
     end
 
     :ok
@@ -1308,10 +1310,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp confirm_http2_cleanup(fun) do
-    case fun.() do
-      :ok -> :ok
-      _ -> HTTP.RequestLifecycle.unconfirmed(HTTP.RequestLifecycle.current())
-    end
+    :ok = fun.()
   catch
     :exit, _reason -> HTTP.RequestLifecycle.unconfirmed(HTTP.RequestLifecycle.current())
   end

@@ -358,6 +358,44 @@ defmodule HTTP.PooledRequestCompletionTest do
   end
 
   for mode <- [:disabled_reuse, :non_reusable_key] do
+    test "HTTP2 #{mode} cancellation confirms dedicated owner and socket termination" do
+      parent = self()
+
+      {url, peer} =
+        Peer.start(parent, fn socket ->
+          {id, true} = Peer.request(socket)
+          :ok = :gen_tcp.send(socket, Peer.frame(1, 4, id, <<0x88>>))
+          await_tcp_close(socket)
+          send(parent, :cancelled_exclusive_socket_closed)
+        end)
+
+      promise = h2_fetch(url, exclusive_options(unquote(mode)))
+      assert %HTTP.Response{status: 200} = Promise.await(promise)
+      handle = Promise.completion(promise)
+
+      owner =
+        :sys.get_state(handle.tracker).resources
+        |> Enum.find_value(fn {_ref, {resource, kind}} ->
+          if kind == :connection, do: resource
+        end)
+
+      monitor = Process.monitor(owner)
+      :sys.suspend(owner)
+
+      try do
+        assert {:error, :cleanup_pending} = RequestCompletion.abort_and_await(handle, 0)
+        assert :sys.get_state(handle.tracker).aborted?
+      after
+        :sys.resume(owner)
+      end
+
+      assert :ok = RequestCompletion.await(handle, 1_000)
+      assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}
+      assert_receive :cancelled_exclusive_socket_closed
+      assert_receive {:peer_complete, ^peer}
+      send(peer, :close)
+    end
+
     test "HTTP2 exclusive cleanup retains connection evidence for #{mode}" do
       parent = self()
 
