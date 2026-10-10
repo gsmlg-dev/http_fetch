@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and cleanup whose completion cannot be confirmed. Preserve asynchronous
   AbortController cancellation and streaming Promise response behavior.
 
+### Fixed
+- Abort the WebSocket transport when its owner exits during a blocked TLS
+  write, and settle pending writes before stopping the connection.
+
 ## [0.18.1] - 2026-10-10
 
 ### Fixed
