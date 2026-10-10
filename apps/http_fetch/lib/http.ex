@@ -319,7 +319,7 @@ defmodule HTTP do
         tls_backend: request.transport_options[:tls_backend]
     }
 
-    completion = HTTP.RequestCompletion.new(options)
+    completion = HTTP.RequestCompletion.new(options, request)
     tracker = completion.tracker
 
     association =

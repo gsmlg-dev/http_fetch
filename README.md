@@ -1164,7 +1164,7 @@ For ownership and retirement of reusable transports across several requests, see
 [managed transport generations](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/managed-transports.md). Request completion
 and generation retirement are separate barriers.
 
-For a direct HTTP/1 request (including `http1_reuse: true`) or explicit HTTP/2
+For an HTTP/1 request (including `http1_reuse: true`) or explicit HTTP/2
 request with `redirect: :manual` (or `:error`), retain the original Promise's
 completion handle before awaiting headers. The handle is created before the
 request starts and is exposed on the original Promise. Another process can use
@@ -1203,8 +1203,23 @@ when the cleanup evidence is insufficient. User-created producer processes are
 owned by the caller and must respond to their stream's termination themselves.
 
 The barrier supports direct TCP and the default OTP TLS backend, including TLS
-handshake cancellation, explicit `:http1`, `:http2`, and `:h2c` selection.
-ExSSL, proxy/Unix routes, redirects followed internally, `:auto`, and HTTP/3 return
+handshake cancellation, explicit `:http1`, `:http2`, and direct `:h2c` selection.
+Explicit proxies with the OTP TLS backend support the following routes, including
+pending TCP connection, CONNECT and TLS negotiation, uploads, response streams,
+and safe pooled return:
+
+| Proxy | Origin | HTTP version |
+| --- | --- | --- |
+| `{:http, host, port, opts}` | HTTP | `:http1` (absolute-form forwarding) |
+| `{:http, host, port, opts}` | HTTPS | `:http1` or `:http2` (CONNECT tunnel) |
+| `{:https, host, port, opts}` | HTTP | `:http1` (TLS to proxy, absolute form) |
+
+Proxy endpoint, authentication and TLS policy isolate pooled connections.
+Proxy authorization is excluded from origin requests inside CONNECT tunnels.
+For example, adding `proxy: {:http, "proxy.example", 3128, []}` to the example
+above retains the same completion contract. HTTPS proxies to HTTPS origins
+(nested TLS), proxy `:h2c`, ExSSL, Unix routes, redirects followed internally,
+`:auto`, and HTTP/3 return
 `{:error, {:unsupported_completion, reason}}`. Existing asynchronous
 `HTTP.AbortController.abort/1` is unchanged; its cancellation can be followed by
 `HTTP.RequestCompletion.await/2`. Chained promises return `nil` from
