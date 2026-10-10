@@ -1,7 +1,7 @@
 defmodule HttpWebSocket.MixProject do
   use Mix.Project
 
-  @version "0.20.0"
+  @version "0.21.0"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
 
   def project do
@@ -49,8 +49,8 @@ defmodule HttpWebSocket.MixProject do
 
   defp deps do
     [
-      {:http_core, "== 0.20.0", in_umbrella: true, hex: :http_core},
-      {:http_runtime, "== 0.20.0", in_umbrella: true, hex: :http_runtime},
+      {:http_core, "== 0.21.0", in_umbrella: true, hex: :http_core},
+      {:http_runtime, "== 0.21.0", in_umbrella: true, hex: :http_runtime},
       {:telemetry, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
