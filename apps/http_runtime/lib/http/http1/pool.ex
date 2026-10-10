@@ -105,22 +105,19 @@ defmodule HTTP.HTTP1.Pool do
         Process.demonitor(entry.monitor, [:flush])
         _ = Process.cancel_timer(entry.timer)
 
-        case entry.transport.setopts(entry.socket, active: :once) do
-          :ok ->
-            HTTP.RequestLifecycle.handoff_socket(tracker, entry.socket)
+        with :ok <- entry.transport.setopts(entry.socket, active: :once),
+             :ok <- HTTP.RequestLifecycle.handoff_socket(tracker, entry.socket) do
+          entry = %{
+            entry
+            | status: :idle,
+              monitor: nil,
+              expires_at: now() + entry.idle_timeout,
+              timer: Process.send_after(self(), {:expire, token}, entry.idle_timeout)
+          }
 
-            entry = %{
-              entry
-              | status: :idle,
-                monitor: nil,
-                expires_at: now() + entry.idle_timeout,
-                timer: Process.send_after(self(), {:expire, token}, entry.idle_timeout)
-            }
-
-            {:reply, :ok, put_in(state.entries[token], entry)}
-
-          {:error, _} ->
-            {:reply, :closed, discard(state, token)}
+          {:reply, :ok, put_in(state.entries[token], entry)}
+        else
+          {:error, _} -> {:reply, :closed, discard(state, token)}
         end
 
       :error ->

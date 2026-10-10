@@ -60,10 +60,16 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
       :erlang.garbage_collect(self())
       promise = fetch(origin, scope)
       assert {:error, {:tls_alert, {unquote(alert), _}}} = Promise.await(promise)
-      assert :ok = RequestCompletion.await(Promise.completion(promise), 3_000)
+
+      assert {:error, :cleanup_unconfirmed} =
+               RequestCompletion.await(Promise.completion(promise), 3_000)
+
       assert {:handshake_error, _} = Task.await(peer, 3_000)
       assert {:error, :timeout} = :ssl.transport_accept(listener, 100)
-      retire(scope)
+      assert {:ok, receipt} = ManagedTransport.retire(scope, mode: :abort)
+      assert {:error, :cleanup_unconfirmed} = ManagedTransport.await_retired(receipt, 3_000)
+      assert {:error, :cleanup_unconfirmed} = ManagedTransport.await_retired(receipt, 0)
+      assert {:error, :transport_scope_retired} = Promise.await(fetch(origin, scope))
     end
   end
 

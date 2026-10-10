@@ -436,6 +436,7 @@ defmodule HTTP.Runtime.Dialer do
           is_reference(Keyword.get(request.transport_options, :connect_failure_token)),
       connect_failure_token: Keyword.get(request.transport_options, :connect_failure_token),
       request_lifecycle: Keyword.get(request.transport_options, :request_lifecycle),
+      managed_coordinator: Keyword.get(request.transport_options, :managed_coordinator),
       connect_address: Keyword.get(request.transport_options, :connect_address),
       ssl:
         request.transport_options

@@ -30,10 +30,17 @@ defmodule HTTP.Transport.SSL do
 
         case :ssl.connect(tcp, tls_opts, remaining) do
           {:ok, socket} ->
-            HTTP.RequestLifecycle.track_tls(opts, socket)
-            {:ok, {:cancellable_ssl, socket, tcp}}
+            case HTTP.RequestLifecycle.track_tls(opts, socket) do
+              :ok ->
+                {:ok, {:cancellable_ssl, socket, tcp}}
+
+              {:error, _} = error ->
+                abort_tcp(tcp)
+                error
+            end
 
           {:error, _} = error ->
+            unconfirmed_setup(opts)
             abort_tcp(tcp)
             error
         end
@@ -45,17 +52,27 @@ defmodule HTTP.Transport.SSL do
 
   @doc false
   def upgrade(tcp, host, opts, timeout) do
+    HTTP.RequestLifecycle.track_socket(opts, tcp)
+
     tls_opts =
       [:binary, packet: :raw, active: false] ++
         ssl_options(host, Keyword.get(opts, :ssl, [])) ++ Keyword.get(opts, :socket_opts, [])
 
     case :ssl.connect(tcp, tls_opts, timeout) do
       {:ok, socket} ->
-        if Keyword.get(opts, :cancellable, false),
-          do: {:ok, {:cancellable_ssl, socket, tcp}},
-          else: {:ok, socket}
+        case HTTP.RequestLifecycle.track_tls(opts, socket) do
+          :ok ->
+            if Keyword.get(opts, :cancellable, false),
+              do: {:ok, {:cancellable_ssl, socket, tcp}},
+              else: {:ok, socket}
+
+          {:error, _} = error ->
+            abort_tcp(tcp)
+            error
+        end
 
       {:error, _} = error ->
+        unconfirmed_setup(opts)
         abort_tcp(tcp)
         error
     end
@@ -73,6 +90,13 @@ defmodule HTTP.Transport.SSL do
     :gen_tcp.close(tcp)
   end
 
+  # A failed public connect returns no TLS socket. OTP may reply before its
+  # receiver/sender terminate, so a managed generation has no proven DOWN barrier.
+  defp unconfirmed_setup(opts) do
+    if Keyword.get(opts, :managed_coordinator),
+      do: HTTP.RequestLifecycle.unconfirmed_tls(Keyword.get(opts, :request_lifecycle))
+  end
+
   defp now, do: System.monotonic_time(:millisecond)
 
   @impl true
@@ -80,6 +104,14 @@ defmodule HTTP.Transport.SSL do
     do: connect_cancellable(host, port, opts, timeout)
 
   def connect(host, port, opts, timeout) do
+    if Keyword.get(opts, :request_lifecycle) do
+      connect_cancellable(host, port, opts, timeout)
+    else
+      connect_unmanaged(host, port, opts, timeout)
+    end
+  end
+
+  defp connect_unmanaged(host, port, opts, timeout) do
     ssl_opts = ssl_options(host, Keyword.get(opts, :ssl, []))
 
     socket_opts =
