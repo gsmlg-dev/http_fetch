@@ -115,7 +115,10 @@ defmodule HTTP.Proxy do
     socket_opts =
       opts |> Keyword.get(:socket_opts, []) |> Keyword.delete(:active) |> Keyword.delete(:packet)
 
-    tcp_opts = [socket_opts: socket_opts]
+    tcp_opts = [
+      socket_opts: socket_opts,
+      request_lifecycle: Keyword.get(opts, :request_lifecycle)
+    ]
 
     with {:ok, tcp} <-
            HTTP.Transport.TCP.connect(proxy.host, proxy.port, tcp_opts, remaining(deadline)) do

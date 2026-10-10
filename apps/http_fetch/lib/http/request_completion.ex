@@ -3,8 +3,12 @@ defmodule HTTP.RequestCompletion do
   A request-scoped cleanup barrier obtained from `HTTP.Promise.completion/1`.
 
   Supported for HTTP/1 (including reuse) and HTTP/2 requests, manual/error
-  redirects, and direct TCP or OTP TLS transport. Awaiting the Promise or
-  monitoring its response stream alone does not establish request cleanup.
+  redirects, and direct TCP or OTP TLS transport, including explicit HTTP and
+  HTTPS proxies. HTTP proxies support HTTP/1 forwarding and HTTP/1 or HTTP/2
+  CONNECT tunnels to HTTPS origins. HTTPS proxies support HTTP/1 forwarding to
+  HTTP origins. Nested TLS and proxy h2c routes remain unsupported.
+  Awaiting the Promise or monitoring its response stream alone does not
+  establish request cleanup.
 
   A finite timeout covers the entire wait. `:ok` confirms termination of tracked
   request resources; `{:error, :cleanup_pending}` leaves cleanup in progress.
@@ -26,7 +30,8 @@ defmodule HTTP.RequestCompletion do
           | {:error, :cleanup_pending | :cleanup_unconfirmed | {:unsupported_completion, atom()}}
 
   @doc false
-  def new(options) do
+  @spec new(HTTP.FetchOptions.t(), HTTP.Request.t() | nil) :: %__MODULE__{}
+  def new(options, request \\ nil) do
     cond do
       options.http_version not in [:http1, :http2, :h2c] ->
         %__MODULE__{unsupported: :http_version}
@@ -34,7 +39,7 @@ defmodule HTTP.RequestCompletion do
       options.redirect == :follow ->
         %__MODULE__{unsupported: :redirect}
 
-      options.proxy != nil ->
+      options.proxy != nil and not supported_proxy?(options, request) ->
         %__MODULE__{unsupported: :proxy}
 
       options.unix_socket != nil ->
@@ -48,6 +53,22 @@ defmodule HTTP.RequestCompletion do
         %__MODULE__{tracker: tracker, latch: latch}
     end
   end
+
+  defp supported_proxy?(options, %HTTP.Request{} = request) do
+    case HTTP.Proxy.route(request, options.unix_socket) do
+      {:ok, %{scheme: :http}} ->
+        (request.url.scheme == "http" and options.http_version == :http1) or
+          (request.url.scheme == "https" and options.http_version in [:http1, :http2])
+
+      {:ok, %{scheme: :https}} ->
+        request.url.scheme == "http" and options.http_version == :http1
+
+      _ ->
+        false
+    end
+  end
+
+  defp supported_proxy?(_options, _request), do: false
 
   @doc "Waits for cleanup with a finite timeout in milliseconds."
   @spec await(t(), non_neg_integer()) :: result()
