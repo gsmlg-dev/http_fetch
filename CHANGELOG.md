@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including HTTP/1 chunk-line and trailer parser errors. Late first readers can
   observe the terminal error; unread responses retain their request lease and
   keep completion pending until consumed or explicitly cancelled.
+- Preserve abort and deadline errors for late readers of response streams from
+  requests without a completion tracker, including default redirect-follow requests.
 
 ## [0.21.2] - 2026-10-11
 

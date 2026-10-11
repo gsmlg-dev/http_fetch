@@ -83,7 +83,13 @@ defmodule HTTP.RequestLifecycle do
   def abort(tracker), do: send(tracker, :abort)
 
   # Published response streams retain internal failures for their first reader.
-  # Cancellation or lost worker evidence still terminates unread streams.
+  # Untracked streams retain their legacy terminal delivery even on cancellation.
+  def fail_response(nil, stream, reason) do
+    send(stream, {:error, reason})
+    :ok
+  end
+
+  # Tracked cancellation or lost worker evidence still terminates unread streams.
   def fail_response(tracker, stream, reason) when reason in [:aborted, :request_timeout],
     do: cancel_response(tracker, stream, reason)
 
