@@ -82,6 +82,27 @@ defmodule HTTP.RequestLifecycle do
   def abort(nil), do: :ok
   def abort(tracker), do: send(tracker, :abort)
 
+  # Published response streams retain internal failures for their first reader.
+  # Cancellation or lost worker evidence still terminates unread streams.
+  def fail_response(tracker, stream, reason) when reason in [:aborted, :request_timeout],
+    do: cancel_response(tracker, stream, reason)
+
+  def fail_response(tracker, stream, {kind, _} = reason)
+      when kind in [:request_process_down, :body_delivery_down, :connection_owner_down],
+      do: cancel_response(tracker, stream, reason)
+
+  def fail_response(tracker, stream, reason) do
+    send(stream, {:error, reason})
+    if tracker, do: send(tracker, {:response_failure, stream})
+    :ok
+  end
+
+  defp cancel_response(tracker, stream, reason) do
+    abort(tracker)
+    send(stream, {:request_lifecycle_stop, reason})
+    :ok
+  end
+
   def unconfirmed(nil), do: :ok
   def unconfirmed(tracker), do: GenServer.cast(tracker, :unconfirmed)
 
@@ -320,6 +341,15 @@ defmodule HTTP.RequestLifecycle do
 
   def handle_info(:abort, state) do
     Enum.each(state.resources, fn {_ref, {pid, kind}} -> cancel(pid, kind) end)
+    {:noreply, %{state | aborted?: true}}
+  end
+
+  def handle_info({:response_failure, stream}, state) do
+    Enum.each(state.resources, fn
+      {_ref, {^stream, :stream}} -> :ok
+      {_ref, {pid, kind}} -> cancel(pid, kind)
+    end)
+
     {:noreply, %{state | aborted?: true}}
   end
 

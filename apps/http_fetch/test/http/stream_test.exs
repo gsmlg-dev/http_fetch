@@ -120,4 +120,58 @@ defmodule HTTP.StreamTest do
     assert :ok = HTTP.Stream.finish(stream, [])
     assert_receive {:stream_end, ^stream}
   end
+
+  test "internal response failure retains only the response and cancels an unread upload" do
+    {owner, completion, upload, response} = tracked_streams()
+    upload_monitor = Process.monitor(upload)
+    send(owner.pid, {:fail, :line_too_long})
+    Task.await(owner)
+
+    assert_receive {:DOWN, ^upload_monitor, :process, ^upload, :normal}
+    assert {:error, :cleanup_pending} = HTTP.RequestCompletion.await(completion, 20)
+    send(response, {:read_chunk, self(), :ack})
+    assert_receive {:stream_error, ^response, :line_too_long}
+    assert :ok = HTTP.RequestCompletion.await(completion, 1_000)
+  end
+
+  for {name, reason} <- [
+        abort: :aborted,
+        deadline: :request_timeout,
+        request_process_down: {:request_process_down, :killed},
+        body_delivery_down: {:body_delivery_down, :killed},
+        connection_owner_down: {:connection_owner_down, {:killed, {GenServer, :call, []}}}
+      ] do
+    test "#{name} releases an unread response instead of retaining its error" do
+      {owner, completion, _upload, _response} = tracked_streams()
+      send(owner.pid, {:fail, unquote(Macro.escape(reason))})
+      Task.await(owner)
+      assert :ok = HTTP.RequestCompletion.await(completion, 1_000)
+    end
+  end
+
+  defp tracked_streams do
+    parent = self()
+
+    owner =
+      Task.async(fn ->
+        {tracker, latch} = HTTP.RequestLifecycle.start()
+        HTTP.RequestLifecycle.enter(tracker, :owner)
+        {:ok, upload} = HTTP.Stream.start_link(0)
+        {:ok, response} = HTTP.Stream.start_link(0)
+        HTTP.RequestLifecycle.attach_stream(tracker, upload)
+        HTTP.RequestLifecycle.attach_stream(tracker, response)
+        completion = %HTTP.RequestCompletion{tracker: tracker, latch: latch}
+        send(parent, {:tracked_streams, completion, upload, response})
+
+        receive do
+          {:fail, reason} -> HTTP.RequestLifecycle.fail_response(tracker, response, reason)
+        end
+
+        HTTP.RequestLifecycle.complete(tracker)
+      end)
+
+    assert_receive {:tracked_streams, completion, upload, response}
+    on_exit(fn -> HTTP.RequestCompletion.abort_and_await(completion, 1_000) end)
+    {owner, completion, upload, response}
+  end
 end
