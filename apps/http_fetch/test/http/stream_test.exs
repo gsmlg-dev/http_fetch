@@ -134,6 +134,18 @@ defmodule HTTP.StreamTest do
     assert :ok = HTTP.RequestCompletion.await(completion, 1_000)
   end
 
+  for reason <- [:aborted, :request_timeout] do
+    test "untracked #{reason} remains available to a late first reader" do
+      {:ok, stream} = HTTP.Stream.start_link(0)
+      on_exit(fn -> HTTP.Stream.stop(stream, :fixture_cleanup) end)
+      HTTP.RequestLifecycle.fail_response(nil, stream, unquote(reason))
+      send(stream, {:read_chunk, self(), :ack})
+      assert_receive {:stream_error, ^stream, unquote(reason)}
+      refute_receive {:stream_error, ^stream, _}, 0
+      refute_receive {:stream_end, ^stream}, 0
+    end
+  end
+
   for {name, reason} <- [
         abort: :aborted,
         deadline: :request_timeout,
