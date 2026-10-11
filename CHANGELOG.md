@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.3] - 2026-10-11
+
+### Fixed
+- Preserve the original streamed response failure during internal request cleanup,
+  including HTTP/1 chunk-line and trailer parser errors. Late first readers can
+  observe the terminal error; unread responses retain their request lease and
+  keep completion pending until consumed or explicitly cancelled.
+
 ## [0.21.2] - 2026-10-11
 
 ### Fixed

@@ -1296,17 +1296,7 @@ defmodule HTTP.SocketClient do
   defp parse_status(_), do: nil
 
   defp fail_http2(state, reason) do
-    HTTP.RequestLifecycle.abort(HTTP.RequestLifecycle.current())
-
-    if state.response_sent? do
-      case state.mode do
-        {:stream, stream_pid} -> HTTP.Stream.error(stream_pid, reason)
-        _ -> :ok
-      end
-    else
-      send_error(state.parent, state.ref, reason)
-    end
-
+    report_failure(state, reason)
     finish_http2(state, reason)
   end
 
@@ -1558,7 +1548,6 @@ defmodule HTTP.SocketClient do
   end
 
   defp fail(state, reason) do
-    HTTP.RequestLifecycle.abort(HTTP.RequestLifecycle.current())
     # TLS output and the request timer can expire together. Classify their race
     # by the original deadline, while preserving earlier transport timeouts.
     reason =
@@ -1566,16 +1555,16 @@ defmodule HTTP.SocketClient do
         do: :request_timeout,
         else: reason
 
-    if state.response_sent? do
-      case state.mode do
-        {:stream, stream_pid} -> HTTP.Stream.error(stream_pid, reason)
-        _ -> :ok
-      end
-    else
-      send_error(state.parent, state.ref, reason)
-    end
-
+    report_failure(state, reason)
     finish(state)
+  end
+
+  defp report_failure(%{response_sent?: true, mode: {:stream, stream}}, reason),
+    do: HTTP.RequestLifecycle.fail_response(HTTP.RequestLifecycle.current(), stream, reason)
+
+  defp report_failure(state, reason) do
+    HTTP.RequestLifecycle.abort(HTTP.RequestLifecycle.current())
+    unless state.response_sent?, do: send_error(state.parent, state.ref, reason)
   end
 
   defp finish_completed(state) do

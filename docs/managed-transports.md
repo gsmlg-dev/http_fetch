@@ -208,6 +208,14 @@ request's deadline; stream deadlines remain independent.
 
 ## Retirement proof
 
+Streamed parser failures retain their original terminal error for an attached
+or late first reader. Internal failure cleanup closes the transport and stops
+upload resources while an unread failed response retains its request lease.
+Awaiting the original `HTTP.Promise.completion/1` handle returns
+`{:error, :cleanup_pending}` until that stream is consumed or explicitly
+cancelled. Graceful retirement waits for the unread response; abort retirement
+can release it without a reader.
+
 `retire/2` stops new admission (`:transport_scope_retired`) and closes idle sockets
 immediately. `mode: :graceful` lets admitted live requests and unread responses
 drain; `mode: :abort` additionally requests cancellation. The default is graceful.
