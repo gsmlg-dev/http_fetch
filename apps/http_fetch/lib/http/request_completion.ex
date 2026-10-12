@@ -14,7 +14,10 @@ defmodule HTTP.RequestCompletion do
   request resources; `{:error, :cleanup_pending}` leaves cleanup in progress.
   `{:error, :cleanup_unconfirmed}` means evidence was lost (for example, an
   owner died without completing cleanup). Repeated and concurrent waits are safe
-  from any process. This barrier does not prove remote receipt of request bytes.
+  from any process. Success also requires the lifecycle tracker to terminate.
+  This is a logical resource barrier: it does not certify native timer, alias,
+  monitor, signal-buffer or deferred ERTS reclamation, allocator carriers, RSS,
+  kernel memory return, or remote receipt of request bytes.
   Pooled completion confirms return of an HTTP/1 connection or release of the
   HTTP/2 stream and reservation; healthy shared connections remain open.
   """
@@ -109,29 +112,31 @@ defmodule HTTP.RequestCompletion do
   defp wait(handle, monitor, deadline) do
     case :atomics.get(handle.latch, 1) do
       2 ->
-        :ok
+        if Process.alive?(handle.tracker),
+          do: wait_down(handle, monitor, deadline),
+          else: :ok
 
       3 ->
         {:error, :cleanup_unconfirmed}
 
       1 ->
-        remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+        if Process.alive?(handle.tracker),
+          do: wait_down(handle, monitor, deadline),
+          else: terminal_result(handle)
+    end
+  end
 
-        if remaining == 0 do
-          if Process.alive?(handle.tracker),
-            do: {:error, :cleanup_pending},
-            else: terminal_result(handle)
-        else
-          receive do
-            {:DOWN, ^monitor, :process, _pid, _reason} ->
-              case :atomics.get(handle.latch, 1) do
-                2 -> :ok
-                _ -> {:error, :cleanup_unconfirmed}
-              end
-          after
-            min(remaining, 10) -> wait(handle, monitor, deadline)
-          end
-        end
+  defp wait_down(handle, monitor, deadline) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    if remaining == 0 do
+      {:error, :cleanup_pending}
+    else
+      receive do
+        {:DOWN, ^monitor, :process, _pid, _reason} -> terminal_result(handle)
+      after
+        min(remaining, 10) -> wait(handle, monitor, deadline)
+      end
     end
   end
 end

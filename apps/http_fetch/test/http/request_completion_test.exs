@@ -3,6 +3,61 @@ defmodule HTTP.RequestCompletionTest do
 
   alias HTTP.{Promise, RequestCompletion, RequestLifecycle}
 
+  test "expired handoff retains the tracker resource monitors" do
+    {tracker, _latch} = RequestLifecycle.start()
+    resource = spawn(fn -> receive do: (:stop -> :ok) end)
+    :ok = RequestLifecycle.register(tracker, resource, :tls)
+
+    assert {:error, :handoff_expired} =
+             RequestLifecycle.handoff_socket(
+               tracker,
+               resource,
+               System.monotonic_time(:millisecond)
+             )
+
+    assert Enum.any?(:sys.get_state(tracker).resources, fn {_, value} ->
+             value == {resource, :tls}
+           end)
+
+    send(resource, :stop)
+    GenServer.stop(tracker)
+  end
+
+  test "deadline handoff does not manufacture success after tracker death" do
+    {tracker, _latch} = RequestLifecycle.start()
+    GenServer.stop(tracker)
+
+    assert {:error, :handoff_unconfirmed} =
+             RequestLifecycle.handoff_socket(
+               tracker,
+               self(),
+               System.monotonic_time(:millisecond) + 1_000
+             )
+  end
+
+  test "a settled latch still waits for the tracker to terminate" do
+    latch = :atomics.new(1, [])
+    :atomics.put(latch, 1, 2)
+    parent = self()
+
+    tracker =
+      spawn(fn ->
+        send(parent, :tracker_ready)
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    assert_receive :tracker_ready
+    handle = %RequestCompletion{tracker: tracker, latch: latch}
+    assert {:error, :cleanup_pending} = RequestCompletion.await(handle, 0)
+    monitor = Process.monitor(tracker)
+    send(tracker, :stop)
+    assert_receive {:DOWN, ^monitor, :process, ^tracker, :normal}
+    assert :ok = RequestCompletion.await(handle, 0)
+  end
+
   test "a stream terminal event is not cleanup completion; concurrent waits and retries" do
     {tracker, latch} = RequestLifecycle.start()
     handle = %RequestCompletion{tracker: tracker, latch: latch}

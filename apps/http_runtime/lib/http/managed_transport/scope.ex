@@ -28,7 +28,7 @@ defmodule HTTP.ManagedTransport.Scope do
     gate = :atomics.new(1, [])
     :atomics.put(gate, 1, 1)
     :ets.insert(configuration, {:policy, policy, injection(policy, h1, h2, h2_supervisor)})
-    Process.send_after(self(), :reconcile, 5)
+    reconcile_timer = :erlang.start_timer(5, self(), :reconcile)
 
     {:ok,
      %{
@@ -47,7 +47,8 @@ defmodule HTTP.ManagedTransport.Scope do
        ingress: ingress,
        configuration: configuration,
        gate: gate,
-       request_leases: %{}
+       request_leases: %{},
+       reconcile_timer: reconcile_timer
      }}
   end
 
@@ -181,10 +182,19 @@ defmodule HTTP.ManagedTransport.Scope do
 
   def handle_info(:settle, state), do: settle(state)
 
-  def handle_info(:reconcile, state) do
-    Process.send_after(self(), :reconcile, 5)
-    settle(reconcile(state))
+  def handle_info({:timeout, timer, :reconcile}, %{reconcile_timer: timer} = state) do
+    case settle(reconcile(state)) do
+      {:noreply, state} ->
+        timer = :erlang.start_timer(5, self(), :reconcile)
+        {:noreply, %{state | reconcile_timer: timer}}
+
+      stop ->
+        stop
+    end
   end
+
+  def handle_info({:timeout, _timer, :reconcile}, state), do: {:noreply, state}
+  def handle_info(:reconcile, state), do: {:noreply, state}
 
   def handle_info({:EXIT, _, _}, state), do: {:noreply, state}
 
