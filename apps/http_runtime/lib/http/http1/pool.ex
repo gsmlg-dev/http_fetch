@@ -5,6 +5,7 @@ defmodule HTTP.HTTP1.Pool do
   alias HTTP.HTTP2.PoolKey
 
   @max_idle 256
+  @expiry_interval 1_000
 
   def start_link(opts) do
     name =
@@ -64,7 +65,7 @@ defmodule HTTP.HTTP1.Pool do
   end
 
   @impl true
-  def init(_opts), do: {:ok, %{entries: %{}, retiring?: false}}
+  def init(_opts), do: {:ok, %{entries: %{}, retiring?: false, expiry_timer: nil}}
 
   @impl true
   def handle_call({:prepare, key, transport, socket}, {owner, _}, state) do
@@ -79,13 +80,13 @@ defmodule HTTP.HTTP1.Pool do
         transport: transport,
         socket: socket,
         status: :pending,
+        owner: owner,
         monitor: Process.monitor(owner),
         idle_timeout: idle_timeout,
-        expires_at: now() + 1_000,
-        timer: Process.send_after(self(), {:expire, token}, 1_000)
+        expires_at: now() + 1_000
       }
 
-      {:reply, {:ok, token}, put_in(state.entries[token], entry)}
+      {:reply, {:ok, token}, schedule_expiry(put_in(state.entries[token], entry))}
     else
       {:reply, :full, state}
     end
@@ -94,33 +95,35 @@ defmodule HTTP.HTTP1.Pool do
   def handle_call({:activate, token}, from, state),
     do: handle_call({:activate, token, nil}, from, state)
 
-  def handle_call({:activate, token, tracker}, _from, state) do
+  def handle_call({:activate, token, tracker}, {owner, _}, state) do
     current_time = now()
 
     case Map.fetch(state.entries, token) do
-      {:ok, entry} when entry.expires_at <= current_time ->
+      {:ok, %{status: :pending} = entry} when entry.expires_at <= current_time ->
         {:reply, :expired, discard(state, token)}
 
-      {:ok, entry} ->
-        Process.demonitor(entry.monitor, [:flush])
-        _ = Process.cancel_timer(entry.timer)
-
+      {:ok, %{status: :pending, owner: ^owner} = entry} ->
         with :ok <- entry.transport.setopts(entry.socket, active: :once),
-             :ok <- HTTP.RequestLifecycle.handoff_socket(tracker, entry.socket) do
+             true <- entry.expires_at > now(),
+             true <- Process.alive?(owner),
+             :ok <- HTTP.RequestLifecycle.handoff_socket(tracker, entry.socket, entry.expires_at) do
+          Process.demonitor(entry.monitor, [:flush])
+
           entry = %{
             entry
             | status: :idle,
+              owner: nil,
               monitor: nil,
-              expires_at: now() + entry.idle_timeout,
-              timer: Process.send_after(self(), {:expire, token}, entry.idle_timeout)
+              expires_at: now() + entry.idle_timeout
           }
 
           {:reply, :ok, put_in(state.entries[token], entry)}
         else
+          false -> {:reply, :expired, discard(state, token)}
           {:error, _} -> {:reply, :closed, discard(state, token)}
         end
 
-      :error ->
+      _ ->
         {:reply, :expired, state}
     end
   end
@@ -142,8 +145,11 @@ defmodule HTTP.HTTP1.Pool do
     with false <- entry.expires_at <= now(),
          :ok <- entry.transport.setopts(entry.socket, active: false),
          {:error, :timeout} <- entry.transport.recv(entry.socket, 0, 0),
-         false <- queued_socket_event?(entry) do
-      entry.transport.controlling_process(entry.socket, owner)
+         false <- queued_socket_event?(entry),
+         true <- entry.expires_at > now() and Process.alive?(owner),
+         :ok <- entry.transport.controlling_process(entry.socket, owner),
+         true <- entry.expires_at > now() do
+      :ok
     end
   end
 
@@ -169,6 +175,16 @@ defmodule HTTP.HTTP1.Pool do
     end
   end
 
+  def handle_info({:timeout, timer, :expire}, %{expiry_timer: timer} = state)
+      when is_reference(timer) do
+    current_time = now()
+    tokens = for {token, entry} <- state.entries, entry.expires_at <= current_time, do: token
+    state = Enum.reduce(tokens, %{state | expiry_timer: nil}, &discard(&2, &1))
+    {:noreply, schedule_expiry(state)}
+  end
+
+  def handle_info({:timeout, _timer, :expire}, state), do: {:noreply, state}
+
   def handle_info({:DOWN, monitor, :process, _, _}, state) do
     tokens = for {token, entry} <- state.entries, entry.monitor == monitor, do: token
     {:noreply, Enum.reduce(tokens, state, &discard(&2, &1))}
@@ -190,6 +206,15 @@ defmodule HTTP.HTTP1.Pool do
 
   defp now, do: System.monotonic_time(:millisecond)
 
+  # Removing/replacing an entry never cancels this timer. The pool consumes its
+  # tick before scheduling another; checkout/activation enforce their own deadlines.
+  # This bounds logical tick state, not retired ERTS timer allocations.
+  defp schedule_expiry(%{expiry_timer: nil, entries: entries} = state)
+       when map_size(entries) > 0,
+       do: %{state | expiry_timer: :erlang.start_timer(@expiry_interval, self(), :expire)}
+
+  defp schedule_expiry(state), do: state
+
   defp discard(state, token) do
     case Map.fetch(state.entries, token) do
       {:ok, entry} -> entry.transport.close(entry.socket)
@@ -202,7 +227,6 @@ defmodule HTTP.HTTP1.Pool do
   defp remove(state, token) do
     case Map.fetch(state.entries, token) do
       {:ok, entry} ->
-        _ = Process.cancel_timer(entry.timer)
         if entry.monitor, do: Process.demonitor(entry.monitor, [:flush])
 
       :error ->
