@@ -7,11 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.4] - 2026-10-13
+
 ### Fixed
 - Send ordered, repeated HTTP/3 request trailers through `HTTP.Stream.finish/2`,
   including zero-DATA uploads and valid `Trailer` declarations. Trailing HEADERS
   finish the request exactly once; asynchronous failures, cancellation, finite
   deadlines and unknown-operation reconciliation retain their existing behavior.
+- Use a stable managed HTTP/1 response writer session with consumer-driven
+  chunk acknowledgements instead of creating a stream monitor for every chunk.
+  Retain uncertain chunk ownership after timeout, abort and deadline.
+- Coalesce HTTP/1 pool expiration into a reference-matched maintenance timer
+  while enforcing pending handoff and idle checkout deadlines independently.
+  Validate handoff deadlines before tracker monitors are released; ignore stale
+  scope reconciliation timers and wait for tracker termination on completion.
+
+### Documentation
+- Record the pinned OTP managed-H1 control-accounting audit, workload/build
+  manifest, proof gaps and empirical TLS stress evidence. These hardening changes
+  do not certify native/deferred memory reclamation or a numerical activation
+  budget. Issue #97 remains open; Gaoxy numerical managed production stays disabled.
 
 ## [0.21.3] - 2026-10-11
 
