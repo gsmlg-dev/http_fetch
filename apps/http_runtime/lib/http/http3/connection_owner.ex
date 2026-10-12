@@ -20,6 +20,9 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   def send_data(owner, ref, bytes, fin, recipient, write_ref),
     do: GenServer.cast(owner, {:write, ref, bytes, fin, recipient, write_ref})
 
+  def send_trailers(owner, ref, fields, recipient, write_ref),
+    do: GenServer.cast(owner, {:write, ref, {:trailers, fields}, true, recipient, write_ref})
+
   def acknowledge(owner, ref), do: GenServer.cast(owner, {:ack, ref})
 
   def cancel_open(owner, subscriber, generation),
@@ -324,7 +327,7 @@ defmodule HTTP.HTTP3.ConnectionOwner do
         state,
         action,
         guarded(state, state.timeout, fn ->
-          Session.send_data(state.session, ref, bytes, fin, [])
+          write(state.session, ref, bytes, fin)
         end)
       )
 
@@ -354,6 +357,11 @@ defmodule HTTP.HTTP3.ConnectionOwner do
         action,
         guarded(state, state.timeout, fn -> Session.reset_send(state.session, ref) end)
       )
+
+  defp write(session, ref, {:trailers, fields}, true),
+    do: Session.send_trailers(session, ref, fields, [])
+
+  defp write(session, ref, bytes, fin), do: Session.send_data(session, ref, bytes, fin, [])
 
   defp result(state, context, response) do
     next = apply_result(state, context, response)

@@ -128,7 +128,8 @@ defmodule HTTP.Stream do
   every field must be declared in the request's `Trailer` header and the body
   must use chunk framing (no `Content-Length`). HTTP/2 uploads send trailing
   HEADERS after acknowledged DATA; fixed content length counts DATA bytes only.
-  HTTP/3 uploads return `:request_trailers_unsupported`.
+  HTTP/3 uploads send ordered trailing HEADERS with FIN after acknowledged DATA;
+  valid `Trailer` declarations are optional.
   Completion is signalled asynchronously, like `finish/1`.
   """
   @spec finish(pid(), HTTP.Headers.t() | HTTP.Headers.headers_list()) :: :ok | {:error, term()}

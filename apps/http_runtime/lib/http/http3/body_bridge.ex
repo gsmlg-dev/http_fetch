@@ -30,6 +30,7 @@ defmodule HTTP.HTTP3.BodyBridge do
          reading?: false,
          stopped?: false,
          eof?: false,
+         trailers: nil,
          buffered_bytes: 0,
          peak_buffered_bytes: 0,
          max_chunk_bytes: Keyword.get(opts, :max_chunk_bytes, 16_384),
@@ -110,12 +111,10 @@ defmodule HTTP.HTTP3.BodyBridge do
   end
 
   def handle_info(
-        {:stream_trailers, source, _headers},
-        %{source: source, stopped?: false} = state
+        {:stream_trailers, source, fields},
+        %{source: source, stopped?: false, trailers: nil} = state
       ) do
-    send(state.owner, {:body_error, self(), :request_trailers_unsupported})
-    send(source, {:error, :request_trailers_unsupported})
-    {:stop, :normal, state}
+    {:noreply, %{state | trailers: fields}}
   end
 
   def handle_info({:stream_end, source}, %{source: source} = state) do
@@ -142,7 +141,10 @@ defmodule HTTP.HTTP3.BodyBridge do
   defp advance(%{stopped?: true} = state), do: state
 
   defp advance(%{eof?: true, pending: nil, inflight: nil} = state) do
-    send(state.owner, {:body_eof, self()})
+    if state.trailers,
+      do: send(state.owner, {:body_trailers, self(), state.trailers}),
+      else: send(state.owner, {:body_eof, self()})
+
     %{state | stopped?: true}
   end
 
