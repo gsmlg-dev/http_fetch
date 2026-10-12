@@ -34,8 +34,15 @@ responses stop the upload; errors, cancellation and unknown admission never
 manufacture an acknowledgement or replay the request. A native-call watchdog
 returns `{:indeterminate_operation, operation_ref}` when admission cannot be
 resolved; the identity is `:unknown` if the synchronous call never exposed its
-native reference. Redirects that preserve a
-streamed body return `:streaming_body_redirect_not_replayable`. Cross-origin
+native reference. `HTTP.Stream.finish(upload, ordered_fields)` sends one trailing
+HEADERS section with FIN after all admitted DATA, including for zero-DATA uploads.
+Repeated fields retain their order. `Trailer` declarations are optional and
+validated independently of HTTP/1 chunk framing. Session field-section and encoding
+limits or native admission failures propagate asynchronously through the existing
+promise/response result. Raw session callers use
+`QuicHttp3.Session.send_trailers(session, request_ref, fields, options)` and retain
+the returned session for blocked/unknown reconciliation, just as for DATA.
+Redirects that preserve a streamed body return `:streaming_body_redirect_not_replayable`. Cross-origin
 redirects with client certificate/key identity return an explicit error.
 
 Network responses expose their actual `http_version` as `:http1`, `:http2` or

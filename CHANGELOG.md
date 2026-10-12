@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Send ordered, repeated HTTP/3 request trailers through `HTTP.Stream.finish/2`,
+  including zero-DATA uploads and valid `Trailer` declarations. Trailing HEADERS
+  finish the request exactly once; asynchronous failures, cancellation, finite
+  deadlines and unknown-operation reconciliation retain their existing behavior.
+
 ## [0.21.3] - 2026-10-11
 
 ### Fixed

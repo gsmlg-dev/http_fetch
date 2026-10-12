@@ -44,6 +44,33 @@ defmodule QuicHttp3.SessionTest do
     assert_received {:send, {:ok, {{:stream, :bidi}, ^data_frame, true}}}
   end
 
+  test "request trailers preserve repeats, close upload and reject later writes", %{
+    session: session
+  } do
+    {:ok, session} = Session.open(session)
+    {:ok, session, ref} = Session.request(session, [{":path", "/"}], :stream, [])
+    fields = [{"x-check", "one"}, {"x-check", "two"}]
+    {:ok, block} = Qpack.encode_header_block(fields)
+    frame = Frame.encode!(:headers, block)
+    assert {:ok, session} = Session.send_trailers(session, ref, fields, [])
+    assert_received {:send, {:ok, {{:stream, :bidi}, ^frame, true}}}
+    assert {:error, _, :upload_closed} = Session.send_trailers(session, ref, fields, [])
+    assert {:error, _, :upload_closed} = Session.send_data(session, ref, "late", false, [])
+  end
+
+  test "invalid trailing fields fail without closing or writing the upload", %{session: session} do
+    {:ok, session} = Session.open(session)
+    {:ok, session, ref} = Session.request(session, [{":path", "/"}], :stream, [])
+    assert_received {:send, {:ok, {{:stream, :bidi}, _headers, false}}}
+
+    for fields <- [[{":status", "200"}], [{"content-length", "0"}], [{"x-check", "bad\r\nvalue"}]] do
+      assert {:error, ^session, _reason} = Session.send_trailers(session, ref, fields, [])
+    end
+
+    refute_received {:send, {:ok, {{:stream, :bidi}, _bytes, _fin}}}
+    assert {:ok, _session} = Session.send_trailers(session, ref, [{"x-check", "valid"}], [])
+  end
+
   test "partial response frames are retained across reads", %{session: session} do
     {:ok, session} = Session.open(session)
     {:ok, session, ref} = Session.request(session, [{":path", "/"}], "", [])

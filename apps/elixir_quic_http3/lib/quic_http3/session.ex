@@ -144,6 +144,30 @@ defmodule QuicHttp3.Session do
 
   def send_data(session, _ref, _bytes, _fin, _opts), do: {:error, session, :invalid_upload_chunk}
 
+  @doc "Sends ordered request trailing HEADERS with FIN through resumable admission."
+  def send_trailers(session, ref, fields, opts) do
+    case Map.fetch(session.requests, ref) do
+      {:ok, %{upload: :open, stream: stream}} ->
+        with {:ok, trailers} <- HTTP.Trailers.validate(fields),
+             fields =
+               Enum.map(trailers.headers, fn {name, value} -> {String.downcase(name), value} end),
+             :ok <- outgoing_fields(session, fields),
+             {:ok, block} <- Qpack.encode_header_block(fields, opts),
+             :ok <- encoded_headers(session, block),
+             {:ok, frame} <- Frame.encode(:headers, block) do
+          begin(session, :send_trailers, chunks(stream, frame, true, session.max_frame), opts)
+        else
+          {:error, reason} -> {:error, session, reason}
+        end
+
+      {:ok, _request} ->
+        {:error, session, :upload_closed}
+
+      :error ->
+        {:error, session, :unknown_request}
+    end
+  end
+
   def suspend_blocked(%{pending: %{status: :blocked}} = session) do
     if map_size(session.continuations) < 128 do
       id = make_ref()

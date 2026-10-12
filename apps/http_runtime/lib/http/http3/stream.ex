@@ -264,9 +264,20 @@ defmodule HTTP.HTTP3.Stream do
        end) do
       {:error, :invalid_http3_headers}
     else
-      {:ok, fields, body} = HTTP.HTTP2.request_headers(request, :native_v1, order?: false)
-      fields = Enum.reject(fields, fn {name, _} -> name == "transfer-encoding" end)
-      {:ok, fields, body}
+      with {:ok, _names} <- HTTP.Trailers.declaration(request.headers) do
+        # H2's builder rejects H1 framing; H3 validates declarations independently.
+        headers = HTTP.Headers.delete(request.headers, "trailer")
+
+        {:ok, fields, body} =
+          HTTP.HTTP2.request_headers(%{request | headers: headers}, :native_v1, order?: false)
+
+        declarations =
+          for {name, value} <- original,
+              String.downcase(name) == "trailer",
+              do: {"trailer", value}
+
+        {:ok, fields ++ declarations, body}
+      end
     end
   end
 
@@ -314,6 +325,11 @@ defmodule HTTP.HTTP3.Stream do
       {:body_chunk, bridge, bytes, ref} when bridge == state.bridge ->
         ConnectionOwner.send_data(state.owner, state.ref, bytes, false, self(), ref)
         relay(%{state | write: {ref, :producer}})
+
+      {:body_trailers, bridge, fields} when bridge == state.bridge ->
+        ref = make_ref()
+        ConnectionOwner.send_trailers(state.owner, state.ref, fields, self(), ref)
+        relay(%{state | write: {ref, :fin}})
 
       {:body_eof, bridge} when bridge == state.bridge ->
         ref = make_ref()

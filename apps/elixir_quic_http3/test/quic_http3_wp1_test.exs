@@ -117,6 +117,38 @@ defmodule QuicHttp3.WP1Test do
     assert Enum.count(refs, &(&1 == ref)) == 1
   end
 
+  test "unknown fragmented request trailers reconcile without replay or duplicate FIN", %{
+    session: session
+  } do
+    {:ok, session} = Session.open(session)
+    {:ok, session, request_ref} = Session.request(session, [{":path", "/"}], :stream, [])
+    _ = drain_calls()
+    fields = [{"x-check", "one"}, {"x-check", "two"}]
+    Process.put({:results, :send_stream}, [fn [_, _, _, opts] -> {:unknown, opts[:ref]} end])
+
+    assert {:unknown, session, operation_ref} =
+             Session.send_trailers(session, request_ref, fields, [])
+
+    assert {:unknown, session, ^operation_ref} = Session.resume(session)
+
+    Process.put({:results, :operation_status}, [
+      %{status: :admitted, result: {:ok, operation_ref}}
+    ])
+
+    assert {:ok, session} = Session.resume(session)
+    assert session.requests[request_ref].upload == :closed
+
+    writes =
+      for {:call, :send_stream, [_, bytes, fin, opts]} <- drain_calls(),
+          do: {bytes, fin, opts[:ref]}
+
+    assert Enum.count(writes, &(elem(&1, 2) == operation_ref)) == 1
+    assert Enum.count(writes, &elem(&1, 1)) == 1
+    assert elem(List.last(writes), 1)
+    {:ok, block} = Qpack.encode_header_block(fields)
+    assert Enum.map_join(writes, &elem(&1, 0)) == Frame.encode!(:headers, block)
+  end
+
   test "unknown event batch and read retain exact consumed results", %{session: session} do
     {:ok, session} = Session.open(session)
     {:ok, session, request_ref} = Session.request(session, [{":path", "/"}], "", [])

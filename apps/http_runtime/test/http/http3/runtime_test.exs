@@ -719,16 +719,21 @@ defmodule HTTP.HTTP3.RuntimeTest do
     end
   end
 
-  test "upload trailers fail explicitly before EOF" do
+  test "upload trailers follow admitted DATA and replace EOF" do
     {:ok, bridge} = BodyBridge.start_link(self(), self())
-    monitor = Process.monitor(bridge)
+    on_exit(fn -> if Process.alive?(bridge), do: GenServer.stop(bridge) end)
     :ok = BodyBridge.credit(bridge, 1)
     assert_receive {:read_chunk, ^bridge, :ack}
-    send(bridge, {:stream_trailers, self(), HTTP.Headers.new([{"X-Checksum", "one"}])})
+    producer_ref = make_ref()
+    send(bridge, {:stream_chunk, self(), "a", producer_ref})
+    assert_receive {:body_chunk, ^bridge, "a", admitted_ref}
+    fields = HTTP.Headers.new([{"X-Checksum", "one"}, {"X-Checksum", "two"}])
+    send(bridge, {:stream_trailers, self(), fields})
     send(bridge, {:stream_end, self()})
-    assert_receive {:body_error, ^bridge, :request_trailers_unsupported}
-    assert_receive {:error, :request_trailers_unsupported}
-    assert_receive {:DOWN, ^monitor, :process, ^bridge, :normal}
+    refute_receive {:body_trailers, ^bridge, _}, 0
+    assert :ok = BodyBridge.ack(bridge, admitted_ref)
+    assert_receive {:stream_chunk_ack, ^producer_ref}
+    assert_receive {:body_trailers, ^bridge, ^fields}
     refute_receive {:body_eof, ^bridge}, 0
   end
 end

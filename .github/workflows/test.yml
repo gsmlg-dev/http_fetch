@@ -63,6 +63,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up pinned independent HTTP/3 peer runner
+        if: matrix.app == 'http_fetch'
+        uses: astral-sh/setup-uv@v5
+
       - name: Install independent admission peer dependencies
         if: matrix.app == 'http_fetch'
         run: python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt
