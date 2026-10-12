@@ -13,6 +13,7 @@ defmodule HTTP.Stream do
             telemetry: true,
             decoders: [],
             reader_monitor: nil,
+            writer: nil,
             reader_ack?: false,
             chunks: [],
             pending_ack: nil,
@@ -28,21 +29,45 @@ defmodule HTTP.Stream do
   @doc false
   def start_link(content_length, encodings, opts \\ []) do
     telemetry = Keyword.get(opts, :telemetry, true)
+    writer = Keyword.get(opts, :writer)
     start_time = System.monotonic_time(:microsecond)
     if telemetry, do: HTTP.Telemetry.streaming_start(content_length)
 
-    Task.start_link(fn ->
+    start = if writer, do: &Task.start/1, else: &Task.start_link/1
+
+    start.(fn ->
       decoders = HTTP.ContentDecoder.open(encodings)
 
       Process.put(:stream_producer, nil)
 
       try do
-        loop(%__MODULE__{start_time: start_time, decoders: decoders, telemetry: telemetry})
+        writer =
+          if writer do
+            {owner, token} = writer
+            %{owner: owner, token: token, monitor: Process.monitor(owner)}
+          end
+
+        loop(%__MODULE__{
+          start_time: start_time,
+          decoders: decoders,
+          telemetry: telemetry,
+          writer: writer
+        })
       after
         if producer = Process.get(:stream_producer), do: Process.exit(producer, :kill)
         HTTP.ContentDecoder.close(decoders)
       end
     end)
+  end
+
+  @doc false
+  def start_writer(content_length, encodings, opts) do
+    token = make_ref()
+
+    with {:ok, stream} <-
+           start_link(content_length, encodings, Keyword.put(opts, :writer, {self(), token})) do
+      {:ok, stream, HTTP.Stream.Writer.new(stream, token)}
+    end
   end
 
   @doc """
@@ -212,25 +237,30 @@ defmodule HTTP.Stream do
         |> flush()
         |> maybe_continue()
 
-      {:chunk, sender, ref, chunk} ->
-        case HTTP.ContentDecoder.decode(state.decoders, chunk) do
-          {:ok, ""} when state.decoders != [] ->
-            send(sender, {:chunk_ack, ref})
+      {:writer_chunk, sender, token, ref, chunk} ->
+        case state.writer do
+          %{owner: ^sender, token: ^token}
+          when state.pending_ack == nil and
+                 not state.done? and state.error == nil ->
+            consume_chunk(state, sender, ref, chunk)
+
+          _ ->
+            send(sender, {:chunk_error, ref, :writer_closed})
             loop(state)
+        end
 
-          {:ok, decoded} ->
-            chunk_size = byte_size(decoded)
-            total_bytes = state.total_bytes + chunk_size
-            if state.telemetry, do: HTTP.Telemetry.streaming_chunk(chunk_size, total_bytes)
+      {:writer_stop, sender, token, reason} ->
+        case state.writer do
+          %{owner: ^sender, token: ^token} -> fail(state, reason)
+          _ -> loop(state)
+        end
 
-            state
-            |> Map.put(:total_bytes, total_bytes)
-            |> push_chunk(decoded, {sender, ref})
-            |> loop()
-
-          {:error, reason} ->
-            send(sender, {:chunk_error, ref, reason})
-            fail(state, reason)
+      {:chunk, sender, ref, chunk} ->
+        if state.writer do
+          send(sender, {:chunk_error, ref, :writer_leased})
+          loop(state)
+        else
+          consume_chunk(state, sender, ref, chunk)
         end
 
       {:trailers, headers} ->
@@ -258,12 +288,42 @@ defmodule HTTP.Stream do
       {:error, reason} ->
         fail(state, reason)
 
+      {:DOWN, monitor, :process, _owner, reason}
+      when state.writer != nil and monitor == state.writer.monitor ->
+        if state.done? or state.error != nil do
+          loop(state)
+        else
+          fail(state, {:writer_down, reason})
+        end
+
       {:DOWN, monitor, :process, _reader, reason} when monitor == state.reader_monitor ->
         _ = reply_pending(state, {:error, {:reader_down, reason}})
         :ok
     after
       HTTP.Config.streaming_timeout() ->
         timeout(state)
+    end
+  end
+
+  defp consume_chunk(state, sender, ref, chunk) do
+    case HTTP.ContentDecoder.decode(state.decoders, chunk) do
+      {:ok, ""} when state.decoders != [] ->
+        send(sender, {:chunk_ack, ref})
+        loop(state)
+
+      {:ok, decoded} ->
+        chunk_size = byte_size(decoded)
+        total_bytes = state.total_bytes + chunk_size
+        if state.telemetry, do: HTTP.Telemetry.streaming_chunk(chunk_size, total_bytes)
+
+        state
+        |> Map.put(:total_bytes, total_bytes)
+        |> push_chunk(decoded, {sender, ref})
+        |> loop()
+
+      {:error, reason} ->
+        send(sender, {:chunk_error, ref, reason})
+        fail(state, reason)
     end
   end
 

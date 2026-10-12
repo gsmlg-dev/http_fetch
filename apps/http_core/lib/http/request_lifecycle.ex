@@ -143,6 +143,25 @@ defmodule HTTP.RequestLifecycle do
 
   def handoff_socket(tracker, socket), do: handoff_connection_resources(tracker, socket, [])
 
+  # The tracker decides deadline acceptance before releasing its monitors.
+  # A delayed reply after acceptance does not undo the transfer to the pool.
+  def handoff_socket(tracker, socket, deadline) do
+    case connection_resources(socket) do
+      {:ok, resources} ->
+        if tracker do
+          GenServer.call(tracker, {:handoff, resources, deadline}, :infinity)
+        else
+          if remaining(deadline) > 0, do: :ok, else: {:error, :handoff_expired}
+        end
+
+      :error ->
+        unconfirmed_tls(tracker)
+        {:error, :unsupported_tls_socket_representation}
+    end
+  catch
+    :exit, _ -> {:error, :handoff_unconfirmed}
+  end
+
   def handoff_connection(nil, _socket, _owner), do: :ok
 
   def handoff_connection(tracker, socket, owner),
@@ -290,6 +309,12 @@ defmodule HTTP.RequestLifecycle do
 
     if state.aborted?, do: cancel(resource, kind)
     {:reply, :ok, state}
+  end
+
+  def handle_call({:handoff, handed_off, deadline}, from, state) do
+    if remaining(deadline) > 0,
+      do: handle_call({:handoff, handed_off}, from, state),
+      else: {:reply, {:error, :handoff_expired}, state}
   end
 
   def handle_call({:handoff, handed_off}, _from, state) do

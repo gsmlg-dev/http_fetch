@@ -1,0 +1,78 @@
+{
+  "status": "HARDENING_COMPLETE_NATIVE_CONTRACT_UNRESOLVED",
+  "native_budget_authorized": false,
+  "audit_date": "2026-10-13",
+  "library_baseline": {
+    "version": "0.21.3",
+    "commit": "ceecbf2df62ca80c361597c7303f65a153f2ce3c"
+  },
+  "runtime_source": {
+    "repository": "erlang/otp",
+    "tag": "OTP-28.5.0.7",
+    "commit": "09fb046150ab94104e03ee816b95c8b7e6b04683",
+    "sha256": {
+      "erts/emulator/beam/erl_hl_timer.c": "3b80a2872c32e2b719375a7b342215f1ba102d36b2f09e33eceabd72fffdb254",
+      "erts/emulator/beam/erl_monitor_link.c": "47addb89c2cf25d430aeea803d335c28980641fac9e06029b5cbd10c258904f9",
+      "erts/emulator/beam/erl_proc_sig_queue.c": "2d5cc2ce101428130ccb284cdd25e78993cebd34e6dc3a49afa26837903720db",
+      "erts/emulator/beam/erl_proc_sig_queue.h": "ca6c71cbfd860260cd218f2443d176000ff216bc0f8941ace4a7f3debb485168",
+      "erts/emulator/beam/erl_process.c": "536d5dd1509ad10081d79198b5161287d470f3c22b6914b5865d11d7ab175466",
+      "erts/emulator/internal_doc/ThreadProgress.md": "4dfa4f41cdf8a02bb215e7bc38992393a4cd17445bf17d6679a4edbbe3aa61b6",
+      "lib/ssl/src/ssl.erl": "39875e9c5cce61d05e69e90b047038c2d1a53b096d7b86848219766a30d51f32",
+      "lib/ssl/src/ssl_gen_statem.erl": "6be9ac90ece29d7936bff0ab678fc34511f58964cfe7121962f74bb9ecc37d62",
+      "lib/ssl/src/tls_gen_connection.erl": "c281f3b8cda54b861f80b3136263f1187755ba6f057885c3a2cbab7eebfd4b7b",
+      "lib/ssl/src/tls_sender.erl": "d7c721475422a24da4e13261c034400fd9c439fd031b1fbeb49b08ac1da5dfc2",
+      "lib/stdlib/src/gen.erl": "b828697b055865df24aad48ec4cd7f23821fa54a7aa2baa0408a444a5d0d04be"
+    }
+  },
+  "required_profile": {
+    "elixir": "1.18.5",
+    "otp": "28.5.0.7",
+    "erts": "16.4.0.6",
+    "ssl": "11.6.0.6",
+    "os": "Linux",
+    "architecture": "x86_64",
+    "word_bytes": 8,
+    "normal_schedulers": 2,
+    "outer_generation_slots": 4,
+    "max_connections": 2,
+    "max_requests": 32,
+    "max_pending": 0,
+    "http_version": "http1",
+    "tls_backend": "ssl",
+    "redirect": "manual",
+    "decode_body": false,
+    "stream_response": true,
+    "upload_sources": [
+      "nil",
+      "bounded_pid"
+    ],
+    "immutable_finite_deadlines": true,
+    "socket_opts": {
+      "buffer": 8192,
+      "recbuf": 8192,
+      "sndbuf": 8192
+    },
+    "public_operation_callers": "fixed counts, no retry fanout or unbounded diagnostics"
+  },
+  "local_validation_runtime": {
+    "elixir": "1.18.5",
+    "otp": "28.5.0.5",
+    "erts": "16.4.0.5",
+    "ssl": "11.6.0.4",
+    "architecture": "x86_64-pc-linux-gnu",
+    "word_bytes": 8,
+    "normal_schedulers": 8,
+    "dirty_cpu_schedulers": 8,
+    "dirty_io_schedulers": 10,
+    "emu_flavor": "jit"
+  },
+  "certification": {
+    "build_configuration": null,
+    "native_abi_layout": null,
+    "allocator_flags_and_carrier_bound": null,
+    "included_population_bound": null,
+    "tls_caller_delivery_metadata_bound": null,
+    "consumer_72_row_requalification": null
+  },
+  "missing_certificate_behavior": "No numeric budget or native reclamation authorization. Logical managed transport APIs remain available."
+}

@@ -22,6 +22,7 @@ defmodule HttpFetch.Umbrella.MixProject do
           "README.md",
           "CHANGELOG.md",
           "docs/managed-transports.md",
+          "docs/managed-h1-control-accounting.md",
           "docs/migration-provenance.md",
           "docs/migration-validation.md",
           "docs/ex-ssl-consumer-contract.md",

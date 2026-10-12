@@ -3,6 +3,17 @@ defmodule HTTP.ManagedTransport.ScopeTest do
 
   alias HTTP.ManagedTransport
 
+  test "stale reconciliation messages cannot create maintenance chains" do
+    state = %{reconcile_timer: make_ref()}
+
+    for _ <- 1..500 do
+      assert {:noreply, ^state} =
+               HTTP.ManagedTransport.Scope.handle_info({:timeout, make_ref(), :reconcile}, state)
+
+      assert {:noreply, ^state} = HTTP.ManagedTransport.Scope.handle_info(:reconcile, state)
+    end
+  end
+
   for kind <- [:connection, :tls] do
     test "closed raw socket retains capacity until its #{kind} process terminates" do
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])

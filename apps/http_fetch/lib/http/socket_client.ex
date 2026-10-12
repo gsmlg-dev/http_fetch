@@ -551,7 +551,8 @@ defmodule HTTP.SocketClient do
             mode: nil,
             response_sent?: false,
             upload: nil,
-            upload_cancelled?: false
+            upload_cancelled?: false,
+            writer: nil
           })
 
         result =
@@ -1421,6 +1422,18 @@ defmodule HTTP.SocketClient do
     end
   end
 
+  defp start_http1_response_stream(state, content_length, headers) do
+    encodings = response_encodings(state.request, headers)
+    opts = [telemetry: request_telemetry?(state.request)]
+
+    if state.request.transport_options[:managed_coordinator] do
+      HTTP.Stream.start_writer(content_length, encodings, opts)
+    else
+      with {:ok, stream} <- HTTP.Stream.start_link(content_length, encodings, opts),
+           do: {:ok, stream, nil}
+    end
+  end
+
   defp handle_http1_headers(state, status, headers) do
     response =
       Response.new(
@@ -1442,16 +1455,14 @@ defmodule HTTP.SocketClient do
       stream_response?(state.request, status, headers) ->
         content_length = stream_content_length(headers)
 
-        {:ok, stream_pid} =
-          HTTP.Stream.start_link(content_length, response_encodings(state.request, headers),
-            telemetry: request_telemetry?(state.request)
-          )
+        {:ok, stream_pid, writer} =
+          start_http1_response_stream(state, content_length, headers)
 
         HTTP.RequestLifecycle.attach_stream(HTTP.RequestLifecycle.current(), stream_pid)
         response = Response.with_stream_body(response, stream_pid)
         send_response(state.parent, state.ref, response, state.request)
 
-        {:continue, %{state | mode: {:stream, stream_pid}, response_sent?: true}}
+        {:continue, %{state | mode: {:stream, stream_pid}, response_sent?: true, writer: writer}}
 
       true ->
         {:continue, %{state | mode: {:buffer, response, []}}}
@@ -1466,7 +1477,13 @@ defmodule HTTP.SocketClient do
   end
 
   defp handle_event(%{mode: {:stream, stream_pid}} = state, {:body, chunk}) do
-    case HTTP.Stream.chunk(stream_pid, chunk, stream_chunk_timeout(state.deadline_at)) do
+    result =
+      if state.writer,
+        do:
+          HTTP.Stream.Writer.chunk(state.writer, chunk, stream_chunk_timeout(state.deadline_at)),
+        else: HTTP.Stream.chunk(stream_pid, chunk, stream_chunk_timeout(state.deadline_at))
+
+    case result do
       :ok -> {:continue, state}
       {:error, reason} -> fail(state, reason)
     end
@@ -1568,6 +1585,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp finish_completed(state) do
+    if state.writer, do: HTTP.Stream.Writer.close(state.writer)
     _ = Process.cancel_timer(state.timer_ref)
 
     if reusable_http1?(state) and not cancellation_pending?(state) do
@@ -1619,6 +1637,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp cleanup(state) do
+    if state.writer, do: HTTP.Stream.Writer.close(state.writer)
     _ = Process.cancel_timer(state.timer_ref)
 
     case stop_http1_upload(state, :aborted) do

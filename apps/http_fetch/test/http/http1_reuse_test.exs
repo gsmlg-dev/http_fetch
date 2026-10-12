@@ -59,7 +59,7 @@ defmodule HTTP.HTTP1ReuseTest do
     suspend_pool!()
     task = Task.async(fn -> GenServer.call(pool, {:activate, token}) end)
     await!(fn -> queued_message?(pool, &match?({:"$gen_call", _, {:activate, ^token}}, &1)) end)
-    await!(fn -> Process.read_timer(pending.timer) == false end)
+    await!(fn -> System.monotonic_time(:millisecond) >= pending.expires_at end)
     :sys.resume(pool)
     assert Task.await(task) == :expired
     assert_receive {:closed, ^peer}, 2_000
@@ -74,7 +74,7 @@ defmodule HTTP.HTTP1ReuseTest do
     pool = suspend_pool!()
     promise = start_fetch(url, opts)
     await!(fn -> queued_checkout?(pool) end)
-    await!(fn -> Process.read_timer(entry.timer) == false end)
+    await!(fn -> System.monotonic_time(:millisecond) >= entry.expires_at end)
     :sys.resume(pool)
     assert HTTP.Promise.await(promise, 4_000).body == "ok"
     assert_receive {:closed, ^peer}, 2_000

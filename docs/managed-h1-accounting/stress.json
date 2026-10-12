@@ -1,0 +1,96 @@
+{
+  "local": {
+    "long": {
+      "ports": 5,
+      "processes": 171,
+      "snapshot": {
+        "pending": 0,
+        "identity": "979546998a2ad32da8c4b58c65039c0b79ad63abaa1d33d17ad41bbde7e37cc5",
+        "resources": 3,
+        "limits": {
+          "idle_timeout": 30000,
+          "max_requests": 32,
+          "max_connections": 2,
+          "max_pending": 0
+        },
+        "connections": 1,
+        "lifecycle": "open",
+        "active_requests": 0,
+        "preparing_requests": 0
+      },
+      "process_bytes": 18934032,
+      "total_bytes": 57993240,
+      "binary_bytes": 873952,
+      "rss": "VmRSS:\t  124932 kB",
+      "control_mailboxes": "[{#PID<0.436.0>, {:message_queue_len, 0}}, {#PID<0.437.0>, {:message_queue_len, 0}}, {#PID<0.439.0>, {:message_queue_len, 0}}, {#PID<0.438.0>, {:message_queue_len, 0}}]",
+      "heap_allocator_sizes": "[{:instance, 0, [mbcs: [{:blocks, [eheap_alloc: [{:size, 206688, 206688, 213848}]]}, {:carriers_size, 262144, 262144, 262144}], sbcs: [{:blocks, [eheap_alloc: [{:size, 0, 0, 44220464}]]}, {:carriers_size, 0, 0, 44224512}]]}, {:instance, 1, [mbcs: [{:blocks, [eheap_alloc: [{:size, 598064, 1263672, 4088768}]]}, {:carriers_size, 786432, 2883584, 6029312}], mbcs_pool: [blocks: [eheap_alloc: [size: 471808]], carriers_size: 2097152], sbcs: [{:blocks, [eheap_alloc: [{:size, 2916888, 2916888, 8980192}]]}, {:carriers_size, 3153920, 3153920, 9457664}]]}, {:instance, 2, [mbcs: [{:blocks, [eheap_alloc: [{:size, 1975312, 1983336, 3603272}]]}, {:carriers_size, 5505024, 5505024, 5505024}], mbcs_pool: [blocks: [], carriers_size: 0], sbcs: [{:blocks, [eheap_alloc: [{:size, 0, 0, 4348240}]]}, {:carriers_size, 0, 0, 4730880}]]}]"
+    },
+    "retired": {
+      "ports": 3,
+      "processes": 164,
+      "snapshot": null,
+      "process_bytes": 18878608,
+      "total_bytes": 57791712,
+      "binary_bytes": 874088,
+      "rss": "VmRSS:\t  124932 kB",
+      "control_mailboxes": "[]",
+      "heap_allocator_sizes": "[{:instance, 0, [mbcs: [{:blocks, [eheap_alloc: [{:size, 206688, 206688, 213848}]]}, {:carriers_size, 262144, 262144, 262144}], sbcs: [{:blocks, [eheap_alloc: [{:size, 0, 0, 44220464}]]}, {:carriers_size, 0, 0, 44224512}]]}, {:instance, 1, [mbcs: [{:blocks, [eheap_alloc: [{:size, 1014408, 1290800, 4088768}]]}, {:carriers_size, 2883584, 2883584, 6029312}], mbcs_pool: [blocks: [], carriers_size: 0], sbcs: [{:blocks, [eheap_alloc: [{:size, 2916888, 2916888, 8980192}]]}, {:carriers_size, 3153920, 3153920, 9457664}]]}, {:instance, 2, [mbcs: [{:blocks, [eheap_alloc: [{:size, 1975312, 1975312, 3603272}]]}, {:carriers_size, 5505024, 5505024, 5505024}], mbcs_pool: [blocks: [], carriers_size: 0], sbcs: [{:blocks, [eheap_alloc: [{:size, 0, 0, 4348240}]]}, {:carriers_size, 0, 0, 4730880}]]}]"
+    },
+    "before": {
+      "ports": 3,
+      "processes": 165,
+      "snapshot": {
+        "pending": 0,
+        "identity": "979546998a2ad32da8c4b58c65039c0b79ad63abaa1d33d17ad41bbde7e37cc5",
+        "resources": 0,
+        "limits": {
+          "idle_timeout": 30000,
+          "max_requests": 32,
+          "max_connections": 2,
+          "max_pending": 0
+        },
+        "connections": 0,
+        "lifecycle": "open",
+        "active_requests": 0,
+        "preparing_requests": 0
+      },
+      "process_bytes": 18715008,
+      "total_bytes": 55632056,
+      "binary_bytes": 766824,
+      "rss": "VmRSS:\t  121900 kB",
+      "control_mailboxes": "[{#PID<0.436.0>, {:message_queue_len, 0}}, {#PID<0.437.0>, {:message_queue_len, 0}}, {#PID<0.439.0>, {:message_queue_len, 0}}, {#PID<0.438.0>, {:message_queue_len, 0}}]",
+      "heap_allocator_sizes": "[{:instance, 0, [mbcs: [{:blocks, [eheap_alloc: [{:size, 206688, 213848, 213848}]]}, {:carriers_size, 262144, 262144, 262144}], sbcs: [{:blocks, [eheap_alloc: [{:size, 0, 44220464, 44220464}]]}, {:carriers_size, 0, 44224512, 44224512}]]}, {:instance, 1, [mbcs: [{:blocks, [eheap_alloc: [{:size, 408096, 4088768, 4088768}]]}, {:carriers_size, 786432, 6029312, 6029312}], mbcs_pool: [blocks: [eheap_alloc: [size: 290008]], carriers_size: 2097152], sbcs: [{:blocks, [eheap_alloc: [{:size, 2545504, 8980192, 8980192}]]}, {:carriers_size, 2547712, 9457664, 9457664}]]}, {:instance, 2, [mbcs: [{:blocks, [eheap_alloc: [{:size, 2429400, 3603272, 3603272}]]}, {:carriers_size, 5505024, 5505024, 5505024}], mbcs_pool: [blocks: [], carriers_size: 0], sbcs: [{:blocks, [eheap_alloc: [{:size, 20696, 4348240, 4348240}]]}, {:carriers_size, 32768, 4730880, 4730880}]]}]"
+    },
+    "repeated": {
+      "ports": 5,
+      "processes": 171,
+      "snapshot": {
+        "pending": 0,
+        "identity": "979546998a2ad32da8c4b58c65039c0b79ad63abaa1d33d17ad41bbde7e37cc5",
+        "resources": 3,
+        "limits": {
+          "idle_timeout": 30000,
+          "max_requests": 32,
+          "max_connections": 2,
+          "max_pending": 0
+        },
+        "connections": 1,
+        "lifecycle": "open",
+        "active_requests": 0,
+        "preparing_requests": 0
+      },
+      "process_bytes": 18951712,
+      "total_bytes": 57855792,
+      "binary_bytes": 873720,
+      "rss": "VmRSS:\t  124932 kB",
+      "control_mailboxes": "[{#PID<0.436.0>, {:message_queue_len, 0}}, {#PID<0.437.0>, {:message_queue_len, 0}}, {#PID<0.439.0>, {:message_queue_len, 0}}, {#PID<0.438.0>, {:message_queue_len, 0}}]",
+      "heap_allocator_sizes": "[{:instance, 0, [mbcs: [{:blocks, [eheap_alloc: [{:size, 206688, 206688, 213848}]]}, {:carriers_size, 262144, 262144, 262144}], sbcs: [{:blocks, [eheap_alloc: [{:size, 0, 0, 44220464}]]}, {:carriers_size, 0, 0, 44224512}]]}, {:instance, 1, [mbcs: [{:blocks, [eheap_alloc: [{:size, 562272, 1581032, 4088768}]]}, {:carriers_size, 786432, 2883584, 6029312}], mbcs_pool: [blocks: [eheap_alloc: [size: 491840]], carriers_size: 2097152], sbcs: [{:blocks, [eheap_alloc: [{:size, 2916888, 3146416, 8980192}]]}, {:carriers_size, 3153920, 3153920, 9457664}]]}, {:instance, 2, [mbcs: [{:blocks, [eheap_alloc: [{:size, 1975312, 2826368, 3603272}]]}, {:carriers_size, 5505024, 5505024, 5505024}], mbcs_pool: [blocks: [], carriers_size: 0], sbcs: [{:blocks, [eheap_alloc: [{:size, 0, 0, 4348240}]]}, {:carriers_size, 0, 0, 4730880}]]}]"
+    }
+  },
+  "profile": "OTP TLS, H1, raw stream, manual redirect, 2 connections/32 requests/0 pending, buffers 8192",
+  "runtime": "Erlang/OTP 28 [erts-16.4.0.5] [source] [64-bit] [smp:2:2] [ds:2:2:10] [async-threads:1] [jit:ns]\n",
+  "status": "PASS_EMPIRICAL_ONLY",
+  "requests": 201,
+  "long_request_chunks": 1000,
+  "limitations": "One process/allocator/RSS sample per phase; different patch runtime; no GC/native frontier or universal population theorem."
+}

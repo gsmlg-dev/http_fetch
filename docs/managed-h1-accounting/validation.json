@@ -1,0 +1,68 @@
+{
+  "status": "HARDENING_COMPLETE_NATIVE_CONTRACT_UNRESOLVED",
+  "source_baseline": "ceecbf2df62ca80c361597c7303f65a153f2ce3c",
+  "full_source_test_command": "PATH=/tmp/http-fetch-97-python/bin:$PATH MIX_ENV=test mix test --seed 28092026",
+  "full_source_test_status": "PASS",
+  "full_source_test_summaries": [
+    "20 properties, 632 tests, 0 failures, 194 excluded",
+    "241 tests, 0 failures",
+    "347 tests, 0 failures, 3 skipped",
+    "104 tests, 0 failures",
+    "133 tests, 0 failures",
+    "20 doctests, 810 tests, 0 failures",
+    "127 tests, 0 failures",
+    "24 tests, 0 failures",
+    "75 tests, 0 failures"
+  ],
+  "excluded_integration": 194,
+  "skipped": 3,
+  "gates": {
+    "test_compile_warnings_as_errors": "PASS",
+    "dev_compile_warnings_as_errors": "PASS",
+    "format": "PASS",
+    "credo": "PASS",
+    "dialyzer": "PASS with two intentional ignored warnings; two unnecessary-ignore notices retained",
+    "docs_dev": "PASS",
+    "independent_review": "PASS after two reproduced defects repaired",
+    "otp_tls_stress": "PASS_EMPIRICAL_ONLY: 201 requests, 1000 ACKed chunks; ERL_FLAGS=+S 2:2"
+  },
+  "failed_checkpoints": [
+    {
+      "log": "/tmp/http-fetch-97-full-test.log",
+      "status": "FAIL_ENV",
+      "detail": "42 Fetch failures from missing h2 Python fixture dependency; 807 tests in Fetch before final additions",
+      "sha256": "bb2c5ad20c86669b4387f923996ae48967f2cc00a39d232c9d628f5b0fd16cd5"
+    },
+    {
+      "log": "/tmp/http-fetch-97-full-test-2.log",
+      "status": "FAIL_TEST",
+      "detail": "1 writer death test expected :normal before monitor initialization; actual :noproc. Added explicit initialization actor handshake",
+      "sha256": "91fe1240d86fc0458fe3165cf8374fb2e556cc1a808d9f7591bbb8bd6ab063c6"
+    },
+    {
+      "log": "/tmp/http-fetch-97-stress.log",
+      "status": "FAIL_HARNESS",
+      "detail": "Harness expected {:ok, binary}; HTTP.Response.read_all returns binary. Corrected before final empirical sample",
+      "sha256": "ad35310df7dfa51ade6743a9392b07ddf8253a994c70b414588fe0e759ddf5e4"
+    },
+    {
+      "log": "/tmp/http-fetch-97-docs.log",
+      "status": "FAIL_COMMAND",
+      "detail": "MIX_ENV=test excludes ExDoc; reran mix docs in dev",
+      "sha256": "bfaecd524419d96c31216860ce5833885af091e66ec3f3705f812944ba16ff6d"
+    },
+    {
+      "log": "/tmp/http-fetch-97-credo-final.log",
+      "status": "FAIL_LINT",
+      "detail": "New one-clause with had readability suggestion; replaced with case; configured Credo clean",
+      "sha256": "3c28bb13158b12e6d3a69ca15d235b3ea5d22edc1db3a0001afbb4bfb4bd66bd"
+    }
+  ],
+  "not_certified": [
+    "original OTP patch/build/native ABI",
+    "arbitrary-history native/control population envelope",
+    "consumer 72-row ledger",
+    "numerical production activation"
+  ],
+  "pass_log_sha256": "6b338235e1bf9ac7c8e826de3a7bb5877c5ba04fce2c38a3a0b80561e06e60ac"
+}

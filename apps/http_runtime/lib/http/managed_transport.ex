@@ -14,6 +14,10 @@ defmodule HTTP.ManagedTransport do
   ports, owners, private pools, supervisor and coordinator. A finite wait can
   return `:cleanup_pending`; lost evidence returns `:cleanup_unconfirmed`.
   Creator death initiates abort retirement. No request is replayed.
+  Success is logical resource retirement, not a certificate of native/deferred
+  timer, monitor, alias or signal-buffer reclamation, allocator/OS memory return,
+  or a numerical native-memory budget. Missing or mismatched native accounting
+  certification cannot be replaced by a snapshot or retirement receipt.
 
   ## Opening and selecting a generation
 
