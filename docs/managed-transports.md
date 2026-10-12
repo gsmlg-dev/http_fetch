@@ -242,3 +242,15 @@ socket may remain after a request completes. Individual request evidence may be
 conservative after abnormal termination while generation retirement independently
 proves every monitored resource gone. Neither barrier establishes whether a
 remote application received bytes before cancellation.
+
+
+## Native accounting status
+
+Completion and retirement confirm their documented logical resource lifecycles.
+They do not certify native/deferred timer, alias, monitor or signal-buffer
+reclamation, allocator carriers, RSS, or kernel/OS memory return. A cancellation
+result, ACK, DOWN, zero snapshot or settled latch cannot substitute for a native
+accounting certificate. Managed H1 native numerical accounting remains unresolved
+in #97; see [the source audit](managed-h1-control-accounting.md) and its exact
+profile manifest. Missing or mismatched certification must keep consumer numerical
+activation disabled.
