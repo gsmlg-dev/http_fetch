@@ -185,6 +185,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Set up pinned independent HTTP/3 peer runner
+        uses: astral-sh/setup-uv@v5
       - name: Install pinned independent peers
         run: python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt
       - name: Run candidate H2 consumer and package gates
