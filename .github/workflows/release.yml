@@ -147,6 +147,7 @@ jobs:
           mix run scripts/interop/stream_interop.exs
           mix run scripts/datagram/interop.exs client
           mix run scripts/datagram/interop.exs server
+          python3 scripts/interop/abyss_concurrent.py
 
       - name: Verify QUIC reliable streams under impairment
         env:

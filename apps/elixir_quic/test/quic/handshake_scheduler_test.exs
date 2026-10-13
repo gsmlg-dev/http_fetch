@@ -381,7 +381,7 @@ defmodule Quic.HandshakeSchedulerTest do
     assert [%{type: :crypto, offset: 0, bytes: <<1, 2>>}] = events
     assert receiver.tls.tls.received == [<<1, 2>>]
 
-    assert {:ok, duplicate, [_duplicate_event]} =
+    assert {:ok, duplicate, []} =
              HandshakeScheduler.receive_datagram(receiver, effect.bytes, 11)
 
     assert duplicate.tls.tls.received == [<<1, 2>>]

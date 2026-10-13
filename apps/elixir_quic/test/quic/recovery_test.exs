@@ -35,14 +35,16 @@ defmodule Quic.RecoveryTest do
     {:ok, state} = Recovery.note_received(state, :initial, 4)
     {:ok, state} = Recovery.note_received(state, :initial, 2)
     assert state.spaces.initial.ack_ranges == [{2, 2}, {4, 4}]
-    assert {:error, :ack_range_limit} = Recovery.note_received(state, :initial, 0)
+    {:ok, state} = Recovery.note_received(state, :initial, 0)
+    assert state.spaces.initial.ack_ranges == [{2, 2}, {4, 4}]
+    assert state.spaces.initial.receive_floor == 1
     {:ok, state} = Recovery.note_received(state, :initial, 3)
     assert state.spaces.initial.ack_ranges == [{2, 4}]
     {:ok, state} = Recovery.note_received(state, :initial, 2)
     assert state.spaces.initial.ack_ranges == [{2, 4}]
     assert state.spaces.initial.largest_received == 4
     {:ok, state} = Recovery.note_received(state, :initial, 0)
-    assert state.spaces.initial.ack_ranges == [{0, 0}, {2, 4}]
+    assert state.spaces.initial.ack_ranges == [{2, 4}]
   end
 
   test "rejects an ACK whose largest field is below another acknowledged number" do

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.6] - 2026-10-14
+
+### Added
+- Accept the optional fixed `alpn_advertised_protocols: ["http/1.1"]` policy
+  for managed HTTP/1 OTP TLS scopes. Preserve the default without ALPN and
+  reject conflicting protocol overrides.
+
+### Fixed
+- Bound QUIC receive ACK history by retiring old ranges instead of closing
+  active connections when historical packet-number gaps fill the range limit.
+  Ignore duplicate and retired packets before applying stream or control effects,
+  while preserving valid reordering and retransmissions with fresh packet numbers.
+
 ## [0.21.5] - 2026-10-13
 
 ### Fixed
