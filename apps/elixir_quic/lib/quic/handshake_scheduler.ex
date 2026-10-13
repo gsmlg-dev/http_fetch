@@ -609,15 +609,8 @@ defmodule Quic.HandshakeScheduler do
   defp receive_coalesced(state, bytes, at, events, count) do
     result =
       with {:ok, packet, authenticated} <- decode_protected_packet(state, bytes, at),
-           :ok <- validate_packet_frames(packet.plaintext, packet.level),
-           {:ok, recovery} <-
-             Recovery.note_received(authenticated.recovery, packet.space, packet.number),
            {:ok, next, generated} <-
-             dispatch_inbound(
-               learn_peer_cid(%{authenticated | recovery: recovery}, packet),
-               packet,
-               at
-             ) do
+             receive_authenticated(authenticated, packet, at) do
         next =
           if next.role == :server and packet.level == :handshake do
             next = %{next | tls: TLSDriver.mark_address_validated(next.tls)}
@@ -647,6 +640,28 @@ defmodule Quic.HandshakeScheduler do
 
       {:error, reason} ->
         coalesced_error(state, events, count, reason)
+    end
+  end
+
+  defp receive_authenticated(state, packet, at) do
+    cond do
+      packet.number < state.recovery.spaces[packet.space].receive_floor ->
+        {:ok, state, []}
+
+      Recovery.received?(state.recovery, packet.space, packet.number) ->
+        # A retained duplicate still needs an ACK if it elicited one, but none
+        # of its STREAM, DATAGRAM, ACK or control effects may run twice.
+        case Codec.decode_frames(packet.plaintext) do
+          {:ok, frames, <<>>} -> {:ok, acknowledge_inbound(state, packet.space, frames), []}
+          _ -> {:ok, state, []}
+        end
+
+      true ->
+        with :ok <- validate_packet_frames(packet.plaintext, packet.level),
+             {:ok, recovery} <-
+               Recovery.note_received(state.recovery, packet.space, packet.number) do
+          dispatch_inbound(learn_peer_cid(%{state | recovery: recovery}, packet), packet, at)
+        end
     end
   end
 
@@ -1374,23 +1389,7 @@ defmodule Quic.HandshakeScheduler do
        ) do
     case Codec.decode_frames(plaintext) do
       {:ok, frames, <<>>} ->
-        state =
-          if Enum.any?(
-               frames,
-               &(&1.type not in [:ack, :padding, :connection_close, :application_close])
-             ) do
-            received = state.recovery.spaces[space]
-
-            queue_ack(state, space, %{
-              type: :ack,
-              largest: received.largest_received,
-              delay: 0,
-              ranges: Enum.reverse(received.ack_ranges)
-            })
-          else
-            state
-          end
-
+        state = acknowledge_inbound(state, space, frames)
         dispatch_frames(state, level, space, number, frames, at, [])
 
       {:ok, _frames, _tail} ->
@@ -1398,6 +1397,24 @@ defmodule Quic.HandshakeScheduler do
 
       {:error, reason} ->
         {:error, {:malformed_frame, reason}}
+    end
+  end
+
+  defp acknowledge_inbound(state, space, frames) do
+    if Enum.any?(
+         frames,
+         &(&1.type not in [:ack, :padding, :connection_close, :application_close])
+       ) do
+      received = state.recovery.spaces[space]
+
+      queue_ack(state, space, %{
+        type: :ack,
+        largest: received.largest_received,
+        delay: 0,
+        ranges: Enum.reverse(received.ack_ranges)
+      })
+    else
+      state
     end
   end
 

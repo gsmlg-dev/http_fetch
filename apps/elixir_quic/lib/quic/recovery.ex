@@ -6,6 +6,11 @@ defmodule Quic.Recovery do
   moves through `:reserved`, `:queued`, `:sent`, then `:acked`, `:lost`, or
   `:failed`. ACKs received before a local send receipt are retained as a bounded
   pending acknowledgement and resolved when the receipt arrives.
+
+  Receive ACK history retains the newest `max_ack_ranges` (1..256) ranges per
+  space. A monotonic receive floor discards older packet numbers, including
+  previously unseen delayed packets; reliable data can be retransmitted under
+  a fresh packet number. Discarding an encryption space resets its receive epoch.
   """
 
   alias Quic.Congestion.NewReno
@@ -31,6 +36,7 @@ defmodule Quic.Recovery do
     defstruct retired: false,
               next: 0,
               largest_received: -1,
+              receive_floor: 0,
               largest_acked: -1,
               ack_ranges: [],
               sent: %{},
@@ -58,7 +64,7 @@ defmodule Quic.Recovery do
             ssthresh: term()
           },
           deadline: nil,
-          max_ack_ranges: term(),
+          max_ack_ranges: 1..256,
           max_sent_packets: term(),
           rtt: %Quic.Recovery.RTT{
             ack_delay_exponent: term(),
@@ -75,6 +81,11 @@ defmodule Quic.Recovery do
 
   @spec new(keyword()) :: initial_state()
   def new(opts \\ []) do
+    max_ack_ranges = Keyword.get(opts, :max_ack_ranges, 256)
+
+    unless is_integer(max_ack_ranges) and max_ack_ranges in 1..256,
+      do: raise(ArgumentError, "max_ack_ranges must be in 1..256")
+
     rtt = %RTT{
       max_ack_delay: Keyword.get(opts, :max_ack_delay, 25_000),
       ack_delay_exponent: Keyword.get(opts, :ack_delay_exponent, 3)
@@ -87,7 +98,7 @@ defmodule Quic.Recovery do
       rtt: rtt,
       congestion: NewReno.new(opts),
       max_sent_packets: Keyword.get(opts, :max_sent_packets, 4096),
-      max_ack_ranges: Keyword.get(opts, :max_ack_ranges, 256)
+      max_ack_ranges: max_ack_ranges
     }
   end
 
@@ -291,22 +302,37 @@ defmodule Quic.Recovery do
       when space in @spaces and is_integer(number) and number >= 0 do
     current = state.spaces[space]
 
-    ranges = merge_ranges(current.ack_ranges, [{number, number}])
+    if number < current.receive_floor do
+      {:ok, state}
+    else
+      ranges = merge_ranges(current.ack_ranges, [{number, number}])
+      {retired, ranges} = Enum.split(ranges, max(0, length(ranges) - state.max_ack_ranges))
 
-    if length(ranges) <= state.max_ack_ranges do
+      floor =
+        case List.last(retired) do
+          nil -> current.receive_floor
+          {_low, high} -> max(current.receive_floor, high + 1)
+        end
+
       next = %{
         current
         | largest_received: max(number, current.largest_received),
+          receive_floor: floor,
           ack_ranges: ranges
       }
 
       {:ok, %{state | spaces: Map.put(state.spaces, space, next)}}
-    else
-      {:error, :ack_range_limit}
     end
   end
 
   def note_received(_, _, _), do: {:error, :invalid_received_packet}
+
+  @doc false
+  def received?(state, space, number) do
+    Enum.any?(state.spaces[space].ack_ranges, fn {low, high} ->
+      number >= low and number <= high
+    end)
+  end
 
   @doc "Discard an encryption space's outstanding work while preserving allocated packet numbers."
   def discard_space(state, space) when space in @spaces do
@@ -326,6 +352,7 @@ defmodule Quic.Recovery do
       | sent: sent,
         pending_acks: MapSet.new(),
         ack_ranges: [],
+        receive_floor: 0,
         largest_received: -1
     }
 
