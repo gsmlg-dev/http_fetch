@@ -5,6 +5,8 @@ defmodule QuicHttp3.Session do
   Mutating failures return the advanced session. Call `resume/1` to reconcile an
   unknown operation, or retry a definitely blocked operation after credit changes.
   Unknown operations are never replayed, including after result-cache eviction.
+  Definitely credit-blocked stream writes are split into smaller ordered
+  fragments under the original deadline; `max_frame` remains an upper bound.
   Native query calls and DNS retain their transport timeout bounds; the session
   deadline is an admission/reconciliation budget, not a shorter wall-clock bound.
   """
@@ -497,6 +499,17 @@ defmodule QuicHttp3.Session do
 
   defp complete(session, _action, {:unknown, ref}),
     do: {:unknown, %{session | pending: %{session.pending | ref: ref}}, ref}
+
+  defp complete(session, {:send, stream, bytes, fin}, {:blocked, %{type: :data_blocked}})
+       when byte_size(bytes) > 1 do
+    # Definite rejection has no send effects. Keep FIN on the final suffix and
+    # retain the same deadline; unknown admission never reaches this clause.
+    size = div(byte_size(bytes), 2)
+    <<prefix::binary-size(^size), suffix::binary>> = bytes
+    [_ | rest] = session.work.steps
+    steps = [{:send, stream, prefix, false}, {:send, stream, suffix, fin} | rest]
+    drive(%{session | pending: nil, work: %{session.work | steps: steps}})
+  end
 
   defp complete(session, _action, {:blocked, reason}),
     do: {:blocked, %{session | pending: %{session.pending | status: :blocked}}, reason}

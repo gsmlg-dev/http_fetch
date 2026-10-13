@@ -24,20 +24,44 @@ defmodule HTTP3SessionGate do
       end
 
       {:ok, session} = Session.open(session)
-      body = :binary.copy(<<0, 1, 13, 10, 255>>, 12_345)
+      tiny? = System.get_env("HTTP3_TINY_WINDOW") == "1"
+
+      body =
+        if tiny?,
+          do: :binary.copy(<<0, 1, 13, 10, 255, 17, 42, 128>>, 131_072),
+          else: :binary.copy(<<0, 1, 13, 10, 255>>, 12_345)
 
       fields = [
         {":method", "POST"},
         {":scheme", "https"},
         {":authority", "example.test"},
-        {":path", "/"},
+        {":path", if(tiny?, do: "/tiny-upload", else: "/")},
         {"content-length", Integer.to_string(byte_size(body))}
       ]
 
-      {:ok, session, ref} = Session.request(session, fields, body, [])
+      {session, ref} =
+        if tiny? do
+          {:ok, session, ref} = Session.request(session, fields, :stream, [])
+
+          session =
+            for <<chunk::binary-size(16_384) <- body>>, reduce: session do
+              session ->
+                admit(Session.send_data(session, ref, chunk, false, []), nil)
+            end
+
+          {admit(Session.send_data(session, ref, <<>>, true, []), nil), ref}
+        else
+          {:ok, session, ref} = Session.request(session, fields, body, [])
+          {session, ref}
+        end
+
       {session, events} = poll(session, ref, now() + 5_000, [])
       chunks = for {:data, ^ref, bytes} <- events, do: bytes
-      if IO.iodata_to_binary(chunks) != body, do: raise("HTTP/3 body integrity failure")
+
+      expected =
+        if tiny?, do: Base.encode16(:crypto.hash(:sha256, body), case: :lower), else: body
+
+      if IO.iodata_to_binary(chunks) != expected, do: raise("HTTP/3 body integrity failure")
       if map_size(session.requests) != 0, do: raise("terminal request retained")
 
       if not Enum.any?(events, fn
@@ -46,11 +70,45 @@ defmodule HTTP3SessionGate do
          end),
          do: raise("missing final response headers")
 
+      if tiny? do
+        {:headers, ^ref, headers} = Enum.find(events, &match?({:headers, ^ref, _}, &1))
+
+        if {"x-request-headers", "1"} not in headers or {"x-request-fins", "1"} not in headers,
+          do: raise("HTTP/3 upload request or FIN replay")
+
+        IO.puts(
+          "HTTP/3 1MiB upload / 16KiB chunks / 16KiB peer window / original deadlines / exact digest / one request FIN: PASS"
+        )
+      end
+
       IO.puts("HTTP/3 companion independent aioquic DATA/integrity/cleanup result: PASS")
     after
       QuicHttp3.Transport.Quic.cleanup(session.connection)
     end
   end
+
+  defp admit({:ok, session}, _deadline), do: session
+
+  defp admit({:blocked, session, _reason}, deadline) do
+    original = deadline || session.work.deadline
+
+    if session.work.deadline != original or session.pending.deadline != original,
+      do: raise("HTTP/3 admission deadline changed")
+
+    receive do
+      {:quic_closed, _, reason} -> raise "HTTP/3 peer closed: #{inspect(reason)}"
+    after
+      1 -> :ok
+    end
+
+    admit(Session.resume(session), original)
+  end
+
+  defp admit({:unknown, session, _ref}, deadline),
+    do: admit(Session.resume(session), deadline || session.work.deadline)
+
+  defp admit(failure, _deadline),
+    do: raise("HTTP/3 upload admission failed: #{inspect(failure, limit: 5)}")
 
   defp poll(session, ref, deadline, events) do
     if now() >= deadline, do: raise("HTTP/3 response deadline expired")

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.5] - 2026-10-13
+
+### Fixed
+- Make HTTP/3 Session uploads progress when peer stream or connection credit
+  cannot admit a complete transport fragment. Split definitely blocked sends
+  while preserving byte order, the terminal FIN and the original deadline;
+  reconcile uncertain sends without replaying accepted data.
+
 ## [0.21.4] - 2026-10-13
 
 ### Fixed
