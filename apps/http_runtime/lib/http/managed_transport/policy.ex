@@ -20,7 +20,8 @@ defmodule HTTP.ManagedTransport.Policy do
     :honor_cipher_order,
     :reuse_sessions,
     :session_tickets,
-    :middlebox_comp_mode
+    :middlebox_comp_mode,
+    :alpn_advertised_protocols
   ]
   @socket_options [
     :nodelay,
@@ -64,7 +65,7 @@ defmodule HTTP.ManagedTransport.Policy do
          {:ok, requests} <- limit(opts, :max_requests, 100, 2_048),
          {:ok, connections} <- limit(opts, :max_connections, 2, 256),
          {:ok, idle} <- limit(opts, :idle_timeout, 30_000, 60_000),
-         {:ok, ssl} <- freeze_ssl(origin, Keyword.get(opts, :ssl, [])),
+         {:ok, ssl} <- freeze_ssl(origin, Keyword.get(opts, :ssl, []), version),
          {:ok, sockets} <- freeze_sockets(Keyword.get(opts, :socket_opts, [])),
          true <- bounded_term?({ssl, sockets}, 16),
          true <- :erlang.external_size({ssl, sockets}) <= @max_policy_bytes do
@@ -316,10 +317,12 @@ defmodule HTTP.ManagedTransport.Policy do
       else: {:error, {:invalid_transport_scope_limit, key}}
   end
 
-  defp freeze_ssl(%{scheme: "http"}, []), do: {:ok, []}
-  defp freeze_ssl(%{scheme: "http"}, _), do: {:error, :transport_scope_tls_requires_https}
+  defp freeze_ssl(%{scheme: "http"}, [], _version), do: {:ok, []}
 
-  defp freeze_ssl(origin, opts) do
+  defp freeze_ssl(%{scheme: "http"}, _, _version),
+    do: {:error, :transport_scope_tls_requires_https}
+
+  defp freeze_ssl(origin, opts, version) do
     with true <- Keyword.keyword?(opts),
          true <- length(opts) == length(Enum.uniq(Keyword.keys(opts))),
          true <-
@@ -327,6 +330,7 @@ defmodule HTTP.ManagedTransport.Policy do
              Keyword.keys(opts),
              &(&1 in (@tls_options ++ [:cacertfile, :certfile, :keyfile]))
            ),
+         true <- not Keyword.has_key?(opts, :alpn_advertised_protocols) or version == :http1,
          true <- bounded_term?(opts, 16),
          {:ok, opts} <- materialize(opts, :cacertfile, :cacerts),
          {:ok, opts} <- materialize(opts, :certfile, :cert),
@@ -413,6 +417,8 @@ defmodule HTTP.ManagedTransport.Policy do
 
   defp valid_socket_option?({key, value}),
     do: key in @socket_options and is_integer(value) and value > 0 and value <= 1_048_576
+
+  defp valid_tls_option?({:alpn_advertised_protocols, value}), do: value == ["http/1.1"]
 
   defp valid_tls_option?({:verify, value}), do: value in [:verify_peer, :verify_none]
   defp valid_tls_option?({:depth, value}), do: is_integer(value) and value >= 0 and value <= 100

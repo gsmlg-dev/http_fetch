@@ -44,7 +44,12 @@ defmodule HTTP.ManagedTransport do
   `idle_timeout: 1..60000` milliseconds (default 30000). `ssl` and `socket_opts`
   freeze supported OTP TLS/socket settings. Only `tls_backend: :ssl` and
   `http2_profile: :native_v1` are accepted. TLS files and system CAs are captured
-  once at open; rotated policy requires a new scope.
+  once at open; rotated policy requires a new scope. For explicit HTTPS `:http1`,
+  `ssl: [alpn_advertised_protocols: ["http/1.1"]]` optionally advertises the single
+  fixed binary protocol. Omitting it preserves no ALPN advertisement. Other
+  ALPN lists, server ALPN settings and explicit ALPN overrides for managed H2
+  are rejected; H2 retains its protocol-selected `"h2"` advertisement. See the
+  managed transport guide for the supported SSL option keys.
 
   Request capacity includes preparation and unread streams. Connections include
   connecting, checked-out and idle transports. Exhaustion returns
