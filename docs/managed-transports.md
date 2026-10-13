@@ -172,6 +172,27 @@ excluded streams once, without replay or extending the original drain deadline.
 
 ## Immutable security and deadlines
 
+Managed `ssl` settings support `verify`, `depth`, `versions`, `ciphers`,
+`cacerts`, `cert`, `key`, `server_name_indication`, `signature_algs`,
+`signature_algs_cert`, `supported_groups`, `honor_cipher_order`, `reuse_sessions`,
+`session_tickets` and `middlebox_comp_mode`. `cacertfile`, `certfile` and `keyfile`
+are materialized at scope creation and cannot accompany their corresponding
+in-memory values. Unsupported or duplicate keys reject before dialing. TLS
+versions are limited to TLS 1.2 and 1.3; trust, hostname/SNI and credential
+validation retain their existing policy.
+
+Explicit HTTPS `http_version: :http1` also accepts the optional fixed setting
+`ssl: [alpn_advertised_protocols: ["http/1.1"]]`. Its representation is exactly
+one eight-byte binary in a one-item list, copied into compact owned policy
+backing and included in the existing serialized-policy limit and identity.
+Omitting this setting preserves the no-ALPN advertisement default; opting in
+allows a supporting peer to select `"http/1.1"`. It does not require the peer to
+negotiate ALPN. Empty lists, charlists, additional/different protocols and
+`alpn_preferred_protocols` reject. Cleartext scopes reject TLS settings, and
+managed HTTPS H2 keeps its existing protocol-selected `"h2"` advertisement;
+explicit managed H2 ALPN overrides remain unsupported. Per-request SSL
+settings must match the entire frozen policy, including the ALPN choice.
+
 `open/1` freezes authority/SNI, dial destination, TLS verification/CA/client
 credentials, socket settings and the HTTP/2 `:native_v1` profile. TLS defaults
 are peer verification, TLS 1.2/1.3, depth 4, system CAs and SNI from the original
