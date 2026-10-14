@@ -13,6 +13,21 @@ defmodule HTTP.HTTP1ReuseTest do
     end
   end
 
+  for {scheme, backend} <- [{:http, nil}, {:https, :ssl}, {:https, :ex_ssl}] do
+    test "#{scheme}/#{backend} reuses a connection with an infinite request deadline" do
+      {url, peer, opts} = peer(unquote(scheme))
+
+      opts =
+        Keyword.merge(opts, http1_reuse: true, tls_backend: unquote(backend), timeout: :infinity)
+
+      assert fetch(url, opts).body == "ok"
+      assert fetch(url, opts).body == "ok"
+      assert_receive {:accepted, ^peer}, 2_000
+      refute_receive {:accepted, ^peer}, 50
+      assert_receive {:requests, ^peer, 2}, 2_000
+    end
+  end
+
   test "default policy uses separate connections" do
     {url, peer, opts} = peer(:http)
     assert fetch(url, opts).body == "ok"

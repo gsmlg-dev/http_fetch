@@ -51,7 +51,7 @@ defmodule HTTP.SocketClient do
       Keyword.get(
         request.transport_options,
         :managed_deadline_at,
-        System.monotonic_time(:millisecond) + timeout
+        request_deadline(timeout)
       )
 
     tracker = Keyword.get(request.transport_options, :request_lifecycle)
@@ -299,7 +299,7 @@ defmodule HTTP.SocketClient do
         send_error(parent, ref, :request_timeout)
 
       timeout ->
-        timer_ref = Process.send_after(self(), :deadline, timeout)
+        timer_ref = start_request_timer(timeout)
 
         context = %{
           parent: parent,
@@ -319,7 +319,7 @@ defmodule HTTP.SocketClient do
                maybe_reused_http2_owner(parent_monitor, request, selection, deadline_at) do
           case socket do
             {:reused, owner, reservation, key} ->
-              _ = Process.cancel_timer(timer_ref)
+              _ = cancel_request_timer(timer_ref)
 
               run_http2_reused_owner(context, owner, reservation, key)
 
@@ -336,7 +336,7 @@ defmodule HTTP.SocketClient do
           end
         else
           {:error, reason} ->
-            _ = Process.cancel_timer(timer_ref)
+            _ = cancel_request_timer(timer_ref)
             send_error(parent, ref, reason)
         end
     end
@@ -357,7 +357,7 @@ defmodule HTTP.SocketClient do
       {:ok, socket} ->
         case maybe_http2_owner(context, selection, transport, socket, claim) do
           {:handled, result} ->
-            _ = Process.cancel_timer(context.timer_ref)
+            _ = cancel_request_timer(context.timer_ref)
             result
 
           :legacy ->
@@ -573,7 +573,7 @@ defmodule HTTP.SocketClient do
 
       {:error, reason} ->
         transport.close(socket)
-        _ = Process.cancel_timer(timer_ref)
+        _ = cancel_request_timer(timer_ref)
         send_error(parent, ref, reason)
     end
   end
@@ -1586,7 +1586,7 @@ defmodule HTTP.SocketClient do
 
   defp finish_completed(state) do
     if state.writer, do: HTTP.Stream.Writer.close(state.writer)
-    _ = Process.cancel_timer(state.timer_ref)
+    _ = cancel_request_timer(state.timer_ref)
 
     if reusable_http1?(state) and not cancellation_pending?(state) do
       HTTP.HTTP1.Pool.checkin(state.request, state.transport, state.socket)
@@ -1638,7 +1638,7 @@ defmodule HTTP.SocketClient do
 
   defp cleanup(state) do
     if state.writer, do: HTTP.Stream.Writer.close(state.writer)
-    _ = Process.cancel_timer(state.timer_ref)
+    _ = cancel_request_timer(state.timer_ref)
 
     case stop_http1_upload(state, :aborted) do
       {:ok, state} ->
@@ -1668,7 +1668,7 @@ defmodule HTTP.SocketClient do
       {:DOWN, ^monitor_ref, :process, ^owner_pid, reason} ->
         {:error, {:request_process_down, reason}}
     after
-      timeout + 1_000 ->
+      owner_wait_timeout(timeout) ->
         send(owner_pid, :abort)
         Process.demonitor(monitor_ref, [:flush])
         {:error, :request_timeout}
@@ -1839,10 +1839,15 @@ defmodule HTTP.SocketClient do
   defp enable_http1_duplex_reads(%{transport: HTTP.Transport.ExSSL} = state) do
     remaining = remaining_timeout(state.deadline_at)
 
+    # ExSSL duplex reads require a finite per-write timeout even when the
+    # request has no total deadline. Explicit socket send limits stay separate.
+    default_send_timeout =
+      if remaining == :infinity, do: HTTP.Config.default_request_timeout(), else: remaining
+
     configured =
       state.request.transport_options
       |> Keyword.get(:socket_opts, [])
-      |> Keyword.get(:send_timeout, remaining)
+      |> Keyword.get(:send_timeout, default_send_timeout)
 
     timeout = if configured == :infinity, do: remaining, else: min(configured, remaining)
     HTTP.Transport.ExSSL.enable_duplex_reads(state.socket, timeout)
@@ -1990,9 +1995,25 @@ defmodule HTTP.SocketClient do
     %{request | transport_options: Keyword.put(request.transport_options, :timeout, timeout)}
   end
 
+  defp request_deadline(:infinity), do: :infinity
+  defp request_deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
+
+  defp start_request_timer(:infinity), do: nil
+  defp start_request_timer(timeout), do: Process.send_after(self(), :deadline, timeout)
+
+  defp cancel_request_timer(nil), do: :ok
+  defp cancel_request_timer(timer), do: Process.cancel_timer(timer)
+
+  defp owner_wait_timeout(:infinity), do: :infinity
+  defp owner_wait_timeout(timeout), do: timeout + 1_000
+
+  defp remaining_timeout(:infinity), do: :infinity
+
   defp remaining_timeout(deadline_at) do
     max(deadline_at - System.monotonic_time(:millisecond), 0)
   end
+
+  defp stream_chunk_timeout(:infinity), do: HTTP.Config.streaming_timeout()
 
   defp stream_chunk_timeout(deadline_at) do
     min(remaining_timeout(deadline_at), HTTP.Config.streaming_timeout())

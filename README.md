@@ -150,6 +150,37 @@ response =
 IO.puts("Docker Version: #{docker_info["Version"]}")
 ```
 
+## Request and Connection Timeouts
+
+For HTTP/1 fetches, `timeout: :infinity` disables the total request deadline,
+including streamed uploads and downloads. `connect_timeout` remains independent:
+use a finite millisecond value to bound connection establishment, or `:infinity`
+to leave it unlimited. A finite request deadline still bounds connection setup
+even when `connect_timeout: :infinity`. Cancellation and caller/stream-owner
+cleanup continue to apply with either timeout set to `:infinity`.
+
+`HTTP.Promise.await/2` has its own caller wait timeout. Pass `:infinity` there
+as well when the caller should wait indefinitely for response headers:
+
+```elixir
+HTTP.fetch(url,
+  http_version: :http1,
+  timeout: :infinity,
+  connect_timeout: 5_000,
+  decode_body: false
+)
+|> HTTP.Promise.await(:infinity)
+```
+
+Managed transport scopes continue to require positive finite request and
+connection timeouts. A configured proxy also retains its separate finite
+tunnel-establishment timeout. Stream reader and chunk acknowledgement timeouts
+remain separate from the request deadline.
+The `:ex_ssl` backend also requires a finite per-write timeout for streaming
+uploads. With an unlimited request deadline, it uses the configured default
+request timeout for writes unless a finite `socket_opts: [send_timeout: ms]`
+is supplied; an explicit infinite write timeout remains unsupported.
+
 ## HTTP/1 Response Framing
 
 HTTP/1 parsing is strict by default. Status codes must contain exactly three

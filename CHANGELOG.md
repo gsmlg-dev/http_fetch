@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.9] - 2026-10-15
+
+### Fixed
+- Support unlimited HTTP/1 request and connection timeouts without deadline
+  arithmetic crashes. Preserve independent finite connection/request limits,
+  streamed upload/download cancellation and owner cleanup.
+
 ## [0.21.8] - 2026-10-14
 
 ### Fixed

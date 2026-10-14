@@ -6,10 +6,12 @@ defmodule HTTP.HTTPSEarlyUploadTest do
 
   for backend <- [:ssl, :ex_ssl],
       version <- [:http1, :auto],
-      outcome <- [:buffered, :streamed, :cancel, :deadline, :send_timeout, :owner_down] do
+      outcome <- [:buffered, :streamed, :cancel, :deadline, :send_timeout, :owner_down],
+      timeout <- [4_000, :infinity],
+      not (outcome == :deadline and timeout == :infinity) do
     if backend == :ssl and outcome == :buffered, do: @tag(:tls_repro)
 
-    test "#{backend} #{version} #{outcome} cleans up a verified HTTPS upload blocked in TLS send" do
+    test "#{backend} #{version} #{outcome} #{timeout} cleans up a verified HTTPS upload blocked in TLS send" do
       {url, peer} = peer()
 
       {:ok, upload} =
@@ -17,7 +19,7 @@ defmodule HTTP.HTTPSEarlyUploadTest do
 
       source_monitor = Process.monitor(upload)
       controller = HTTP.AbortController.new()
-      request_timeout = if unquote(outcome) == :deadline, do: 1_500, else: 4_000
+      request_timeout = if unquote(outcome) == :deadline, do: 1_500, else: unquote(timeout)
 
       socket_opts =
         if unquote(outcome) == :send_timeout,

@@ -31,10 +31,10 @@ defmodule HTTP.FetchOptions do
   - `request_mode` - `:fetch` (default) or `:proxy`; proxy mode retains request
     entities for all admitted methods, including GET, DELETE, and HEAD
   - `content_type` - convenience Content-Type value for request bodies
-  - `timeout` - request timeout in milliseconds
+  - `timeout` - request timeout in milliseconds or `:infinity` for HTTP/1
   - `error_mode` - `:raw` (default) or `:structured`; structured failures return
     `HTTP.RequestError` with conservative pre-send evidence. No automatic retry.
-  - `connect_timeout` - connection timeout in milliseconds
+  - `connect_timeout` - connection timeout in milliseconds or `:infinity`
   - `transport_scope` - opaque `HTTP.ManagedTransport` generation selecting
     private reusable HTTP/1 or HTTP/2 transports. Requires raw streamed responses,
     manual/error redirects, and the origin/policy frozen by `open/1`.
@@ -193,9 +193,9 @@ defmodule HTTP.FetchOptions do
           redirect: redirect(),
           http_version: http_version(),
           tls_backend: tls_backend(),
-          timeout: integer() | nil,
+          timeout: timeout() | nil,
           error_mode: :raw | :structured,
-          connect_timeout: integer() | nil,
+          connect_timeout: timeout() | nil,
           connect_address: :inet.ip_address() | nil,
           ssl: list() | nil,
           socket_opts: list() | nil,

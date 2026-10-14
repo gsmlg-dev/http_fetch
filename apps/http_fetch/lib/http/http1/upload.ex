@@ -157,6 +157,8 @@ defmodule HTTP.HTTP1.Upload do
     end
   end
 
+  defp remaining_timeout(:infinity), do: :infinity
+
   defp remaining_timeout(deadline_at),
     do: max(deadline_at - System.monotonic_time(:millisecond), 0)
 end
