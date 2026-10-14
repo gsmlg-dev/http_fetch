@@ -5,7 +5,11 @@ defmodule HTTP.FetchOptions do
   `HTTP.fetch/2` accepts a flat init keyword list or map, mirroring the browser
   `fetch(input, init)` shape. Supported fetch-style options are:
 
-  - `method` - HTTP method, defaulting to `GET`
+  - `method` - nonempty ASCII HTTP method token, defaulting to `GET`. Common
+    methods normalize to their conventional atoms; other binary methods retain
+    their case, and atom methods are uppercased on the wire. DAV methods such as
+    `:propfind` and `:report` carry bodies normally. Invalid token bytes reject
+    before network I/O; extension strings are never converted into new atoms.
   - `headers` - request headers as a list, map, or `HTTP.Headers`
   - `body` - request body
   - `duplex` - request streaming mode; `:half` or `"half"` for streaming bodies
@@ -175,7 +179,7 @@ defmodule HTTP.FetchOptions do
   @type tls_backend :: term()
 
   @type t :: %__MODULE__{
-          method: atom(),
+          method: HTTP.Request.method(),
           request_mode: HTTP.Request.request_mode(),
           headers: HTTP.Headers.t(),
           content_type: String.t() | nil,
@@ -262,7 +266,7 @@ defmodule HTTP.FetchOptions do
   @doc """
   Extracts the HTTP method from options.
   """
-  @spec get_method(t()) :: atom()
+  @spec get_method(t()) :: HTTP.Request.method()
   def get_method(%__MODULE__{method: method}), do: method
 
   @doc """
@@ -496,11 +500,18 @@ defmodule HTTP.FetchOptions do
   defp normalize_decode_body(value),
     do: raise(ArgumentError, "invalid decode_body: #{inspect(value)}; expected boolean")
 
-  defp normalize_method(method) when is_binary(method) do
-    method |> String.downcase() |> String.to_atom()
+  defp normalize_method(method) do
+    case method |> HTTP.Request.method_token() |> String.upcase() do
+      "DELETE" -> :delete
+      "GET" -> :get
+      "HEAD" -> :head
+      "OPTIONS" -> :options
+      "PATCH" -> :patch
+      "POST" -> :post
+      "PUT" -> :put
+      _ -> method
+    end
   end
-
-  defp normalize_method(method) when is_atom(method), do: method
 
   defp normalize_redirect(nil), do: :follow
   defp normalize_redirect(:follow), do: :follow

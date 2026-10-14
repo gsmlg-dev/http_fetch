@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.21.8] - 2026-10-14
 
 ### Fixed
+- Accept valid ASCII HTTP extension methods, including DAV `PROPFIND` and
+  `REPORT`, preserving binary method case, bodies and authorization without
+  creating atoms from caller-supplied method strings.
 - Validate a certificate path ending at a supplied trust anchor when the peer
   includes trailing cross-signed alternatives. Preserve PKIX signatures,
   hostname, validity, depth and certificate-signature policy checks.
