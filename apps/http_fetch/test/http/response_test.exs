@@ -368,7 +368,7 @@ defmodule HTTP.ResponseTest do
       assert_receive {:server_recv_after_timeout, {:error, :closed}}, 2_000
     end
 
-    test "streams chunked responses even when content-length is small" do
+    test "rejects chunked responses with a conflicting content-length" do
       url =
         start_raw_http_server!(fn listen_socket ->
           {:ok, socket} = :gen_tcp.accept(listen_socket)
@@ -377,6 +377,23 @@ defmodule HTTP.ResponseTest do
             "HTTP/1.1 200 OK\r\n",
             "Transfer-Encoding: chunked\r\n",
             "Content-Length: 1\r\n",
+            "Connection: close\r\n",
+            "\r\n",
+            "5\r\nhello\r\n0\r\n\r\n"
+          ])
+        end)
+
+      assert {:error, :conflicting_response_framing} = url |> HTTP.fetch() |> HTTP.Promise.await()
+    end
+
+    test "streams small chunked responses without a content-length" do
+      url =
+        start_raw_http_server!(fn listen_socket ->
+          {:ok, socket} = :gen_tcp.accept(listen_socket)
+
+          send_raw_response(socket, [
+            "HTTP/1.1 200 OK\r\n",
+            "Transfer-Encoding: chunked\r\n",
             "Connection: close\r\n",
             "\r\n",
             "5\r\nhello\r\n0\r\n\r\n"

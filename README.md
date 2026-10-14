@@ -150,6 +150,25 @@ response =
 IO.puts("Docker Version: #{docker_info["Version"]}")
 ```
 
+## HTTP/1 Response Framing
+
+HTTP/1 parsing is strict by default. Status codes must contain exactly three
+digits in the range 100–599. Bare chunk sizes require hexadecimal digits without
+leading or trailing whitespace. RFC 9112 chunk extensions accept token names,
+optional token or quoted values, and permitted spaces/tabs around delimiters;
+unfinished quotes, escapes and invalid control bytes fail with
+`:invalid_chunk_size`. Chunk-size lines are limited to 8 KiB of content whether
+received together or fragmented, including a split CRLF terminator.
+
+Conflicting `Transfer-Encoding` and `Content-Length` are rejected before
+response headers or completion, including HEAD, bodyless and informational
+responses. Supported chunked framing reports `:conflicting_response_framing`;
+unsupported transfer codings retain their existing error classification on
+responses with bodies. Parsing failures close the connection and are never
+replayed or returned to the reusable connection pool. If headers already
+resolved a streamed response, its reader receives `:stream_error` instead of
+successful completion. `HTTP.RequestCompletion` remains the cleanup barrier.
+
 ## TLS Backend Selection
 
 HTTPS fetch (HTTP/1.1 and HTTP/2), secure WebSocket, and HTTPS EventSource share

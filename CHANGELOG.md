@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.21.8] - 2026-10-14
 
 ### Fixed
+- Reject malformed HTTP/1 status lines and chunk syntax, conflicting response
+  Transfer-Encoding/Content-Length, and oversized completed chunk lines while
+  preserving valid extension grammar and connection cleanup without replay.
 - Accept valid ASCII HTTP extension methods, including DAV `PROPFIND` and
   `REPORT`, preserving binary method case, bodies and authorization without
   creating atoms from caller-supplied method strings.
