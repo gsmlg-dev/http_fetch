@@ -95,7 +95,8 @@ defmodule HTTP.HTTP1 do
           head = binary_part(buffer, 0, index)
           body = binary_part(buffer, index + 4, byte_size(buffer) - index - 4)
 
-          with {:ok, status, headers, version} <- parse_head(head) do
+          with {:ok, status, headers, version} <- parse_head(head),
+               :ok <- validate_response_framing(conn.method, status, headers) do
             parse_head_response(%{conn | version: version}, status, headers, body, events)
           end
         end
@@ -245,16 +246,30 @@ defmodule HTTP.HTTP1 do
     end
   end
 
-  defp parse_status_line(line) do
-    case String.split(line, " ", parts: 3) do
-      ["HTTP/" <> version, status_code | _] ->
-        case Integer.parse(status_code) do
-          {status, ""} -> {:ok, status, version}
-          _ -> {:error, :invalid_status_line}
-        end
+  defp parse_status_line(<<"HTTP/", major, ?., minor, ?\s, a, b, c, ?\s, reason::binary>>)
+       when major in ?0..?9 and minor in ?0..?9 and a in ?1..?5 and b in ?0..?9 and
+              c in ?0..?9 do
+    if safe_header_value?(reason) do
+      {:ok, (a - ?0) * 100 + (b - ?0) * 10 + c - ?0, <<major, ?., minor>>}
+    else
+      {:error, :invalid_status_line}
+    end
+  end
 
-      _ ->
-        {:error, :invalid_status_line}
+  defp parse_status_line(_line), do: {:error, :invalid_status_line}
+
+  defp validate_response_framing(method, status, headers) do
+    if Headers.has?(headers, "transfer-encoding") and Headers.has?(headers, "content-length") do
+      if body_forbidden?(method, status) do
+        {:error, :conflicting_response_framing}
+      else
+        case response_body_framing(headers) do
+          {:error, reason} -> {:error, reason}
+          _ -> {:error, :conflicting_response_framing}
+        end
+      end
+    else
+      :ok
     end
   end
 
@@ -361,14 +376,24 @@ defmodule HTTP.HTTP1 do
   @spec response_body_framing(Headers.t()) ::
           :identity
           | :chunked
+          | {:error, :conflicting_response_framing}
           | {:error, :invalid_transfer_encoding}
           | {:error, {:unsupported_transfer_encoding, [String.t()]}}
   def response_body_framing(%Headers{} = headers) do
     case transfer_codings(headers) do
-      [] -> :identity
-      ["chunked"] -> :chunked
-      {:error, reason} -> {:error, reason}
-      codings -> {:error, {:unsupported_transfer_encoding, codings}}
+      [] ->
+        :identity
+
+      ["chunked"] ->
+        if Headers.has?(headers, "content-length"),
+          do: {:error, :conflicting_response_framing},
+          else: :chunked
+
+      {:error, reason} ->
+        {:error, reason}
+
+      codings ->
+        {:error, {:unsupported_transfer_encoding, codings}}
     end
   end
 
@@ -393,13 +418,19 @@ defmodule HTTP.HTTP1 do
 
   defp read_line(buffer) do
     case :binary.match(buffer, "\r\n") do
+      {index, 2} when index > @max_line_bytes ->
+        {:error, :line_too_long}
+
       {index, 2} ->
         line = binary_part(buffer, 0, index)
         rest = binary_part(buffer, index + 2, byte_size(buffer) - index - 2)
         {:ok, line, rest}
 
       :nomatch ->
-        if byte_size(buffer) > @max_line_bytes do
+        partial_terminator? =
+          byte_size(buffer) == @max_line_bytes + 1 and :binary.last(buffer) == ?\r
+
+        if byte_size(buffer) > @max_line_bytes and not partial_terminator? do
           {:error, :line_too_long}
         else
           :more
@@ -428,18 +459,67 @@ defmodule HTTP.HTTP1 do
     end
   end
 
-  defp parse_chunk_size(line) do
-    chunk_size =
-      line
-      |> String.split(";", parts: 2)
-      |> hd()
-      |> String.trim()
+  defp parse_chunk_size(<<first, _::binary>> = line)
+       when first in ?0..?9 or first in ?a..?f or first in ?A..?F do
+    {size, extensions} = Integer.parse(line, 16)
 
-    case Integer.parse(chunk_size, 16) do
-      {size, ""} when size >= 0 -> {:ok, size}
-      _ -> {:error, :invalid_chunk_size}
+    if valid_chunk_extensions?(extensions) do
+      {:ok, size}
+    else
+      {:error, :invalid_chunk_size}
     end
   end
+
+  defp parse_chunk_size(_line), do: {:error, :invalid_chunk_size}
+
+  defp valid_chunk_extensions?(<<>>), do: true
+
+  defp valid_chunk_extensions?(extensions) do
+    with <<";", rest::binary>> <- skip_bws(extensions),
+         {:ok, rest} <- take_chunk_token(skip_bws(rest)),
+         {:ok, rest} <- chunk_extension_value(rest) do
+      valid_chunk_extensions?(rest)
+    else
+      _ -> false
+    end
+  end
+
+  defp chunk_extension_value(rest) do
+    case skip_bws(rest) do
+      <<"=", value::binary>> -> take_chunk_value(skip_bws(value))
+      _ -> {:ok, rest}
+    end
+  end
+
+  defp take_chunk_value(<<"\"", rest::binary>>), do: take_chunk_quoted(rest)
+  defp take_chunk_value(rest), do: take_chunk_token(rest)
+
+  defp take_chunk_token(<<char, rest::binary>>) do
+    if token_char?(char), do: {:ok, take_chunk_token_tail(rest)}, else: :error
+  end
+
+  defp take_chunk_token(<<>>), do: :error
+
+  defp take_chunk_token_tail(<<char, rest::binary>> = token) do
+    if token_char?(char), do: take_chunk_token_tail(rest), else: token
+  end
+
+  defp take_chunk_token_tail(<<>>), do: <<>>
+
+  defp take_chunk_quoted(<<"\"", rest::binary>>), do: {:ok, rest}
+
+  defp take_chunk_quoted(<<"\\", char, rest::binary>>)
+       when char == ?\t or (char >= 32 and char != 127),
+       do: take_chunk_quoted(rest)
+
+  defp take_chunk_quoted(<<char, rest::binary>>)
+       when char in [9, 32, 33] or char in 35..91 or char in 93..126 or char >= 128,
+       do: take_chunk_quoted(rest)
+
+  defp take_chunk_quoted(_rest), do: :error
+
+  defp skip_bws(<<char, rest::binary>>) when char in [?\s, ?\t], do: skip_bws(rest)
+  defp skip_bws(rest), do: rest
 
   defp request_headers(%Request{} = request) do
     %{request | headers: HTTP.Proxy.request_headers(request)}
