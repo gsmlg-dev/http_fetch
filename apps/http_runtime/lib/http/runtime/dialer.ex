@@ -164,7 +164,7 @@ defmodule HTTP.Runtime.Dialer do
          request_timeout
        ) do
     parent = self()
-    ref = make_ref()
+    ref = Process.alias()
     # Structured callers need the low-level TCP failure, rather than a timer
     # racing that result. The connect call keeps its smaller timeout; observing
     # its outcome remains bounded by the original request deadline and signal.
@@ -188,30 +188,73 @@ defmodule HTTP.Runtime.Dialer do
                Process.put(HTTP.RequestLifecycle, tracker)
                result = connect_in_worker(transport, host, port, opts, timeout, parent, ref)
                HTTP.RequestLifecycle.complete(tracker)
-               send(parent, {:connect_result, ref, result})
+               send(ref, {:connect_result, ref, result})
 
              {:DOWN, ^launch_monitor, :process, ^parent, _reason} ->
                :ok
            end
          end) do
       {:ok, pid} ->
-        HTTP.RequestLifecycle.register(tracker, pid, :dial)
-        send(pid, :connect_launch)
-        await_connect_result(transport, pid, ref, nil, deadline_at, cancel_monitor)
+        worker_monitor = Process.monitor(pid)
+
+        try do
+          HTTP.RequestLifecycle.register(tracker, pid, :dial)
+          send(pid, :connect_launch)
+
+          result =
+            await_connect_result(
+              transport,
+              pid,
+              ref,
+              worker_monitor,
+              nil,
+              deadline_at,
+              cancel_monitor
+            )
+
+          Process.unalias(ref)
+          flush_connect_messages(transport, ref, result)
+          result
+        after
+          Process.unalias(ref)
+          Process.demonitor(worker_monitor, [:flush])
+        end
 
       {:error, reason} ->
+        Process.unalias(ref)
         {:error, reason}
     end
   end
 
-  defp await_connect_result(transport, pid, ref, socket, deadline_at, cancel_monitor) do
+  defp await_connect_result(
+         transport,
+         pid,
+         ref,
+         worker_monitor,
+         socket,
+         deadline_at,
+         cancel_monitor
+       ) do
     receive do
       {:connect_socket, ^ref, connected_socket} ->
         send(pid, {:transfer_socket, ref})
-        await_connect_result(transport, pid, ref, connected_socket, deadline_at, cancel_monitor)
+
+        await_connect_result(
+          transport,
+          pid,
+          ref,
+          worker_monitor,
+          connected_socket,
+          deadline_at,
+          cancel_monitor
+        )
 
       {:connect_result, ^ref, result} ->
         result
+
+      {:DOWN, ^worker_monitor, :process, ^pid, _reason} ->
+        close_connect_socket(transport, socket)
+        {:error, :connect_worker_down}
 
       {:DOWN, ^cancel_monitor, :process, _subscriber, _reason}
       when is_reference(cancel_monitor) ->
@@ -240,6 +283,30 @@ defmodule HTTP.Runtime.Dialer do
     end
   end
 
+  # Revoking the reply alias blocks late worker messages. Drain replies already
+  # queued at cancellation, including sockets whose ownership was transferred.
+  defp flush_connect_messages(transport, ref, result) do
+    receive do
+      {:connect_socket, ^ref, socket} ->
+        close_unreturned_socket(transport, socket, result)
+        flush_connect_messages(transport, ref, result)
+
+      {:connect_result, ^ref, {:ok, socket}} ->
+        close_unreturned_socket(transport, socket, result)
+        flush_connect_messages(transport, ref, result)
+
+      {:connect_result, ^ref, _result} ->
+        flush_connect_messages(transport, ref, result)
+    after
+      0 -> :ok
+    end
+  end
+
+  defp close_unreturned_socket(_transport, socket, {:ok, socket}), do: :ok
+
+  defp close_unreturned_socket(transport, socket, _result),
+    do: close_connect_socket(transport, socket)
+
   defp stop_connect_worker(pid, ref) do
     case HTTP.RequestLifecycle.current() do
       nil ->
@@ -263,7 +330,7 @@ defmodule HTTP.Runtime.Dialer do
 
     case result do
       {:ok, socket} ->
-        send(owner, {:connect_socket, ref, socket})
+        send(ref, {:connect_socket, ref, socket})
         transfer_connected_socket(transport, socket, owner, ref, timeout)
 
       {:error, reason} ->

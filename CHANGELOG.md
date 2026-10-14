@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.7] - 2026-10-14
+
+### Fixed
+- Observe connection worker exits and promptly return a sanitized connection
+  failure instead of waiting for the connect timeout. Preserve socket cleanup,
+  cancellation, subscriber death and finite deadlines during connection setup.
+
 ## [0.21.6] - 2026-10-14
 
 ### Added
