@@ -63,6 +63,46 @@ defmodule HTTP.FetchOptionsTest do
       assert %HTTP.FetchOptions{method: :get} = HTTP.FetchOptions.new(method: :get)
     end
 
+    test "preserves extension method case without interning caller strings" do
+      for method <- ["PROPFIND", "REPORT", "MiXeD", "propfind", "!token~"] do
+        assert HTTP.FetchOptions.new(method: method).method == method
+        assert HTTP.FetchOptions.new(%{"method" => method}).method == method
+        assert HTTP.FetchOptions.new(%HTTP.FetchOptions{method: method}).method == method
+      end
+
+      method = "X-Unique-Method-#{System.unique_integer([:positive])}"
+      assert HTTP.FetchOptions.new(method: method).method == method
+
+      for token <- [method, String.downcase(method)] do
+        assert_raise ArgumentError, fn -> String.to_existing_atom(token) end
+      end
+    end
+
+    test "retains conventional method normalization and rejects malformed tokens" do
+      assert HTTP.FetchOptions.new(method: "gEt").method == :get
+      assert HTTP.FetchOptions.new(method: :POST).method == :post
+      assert HTTP.FetchOptions.new(method: :propfind).method == :propfind
+
+      for method <- [
+            "",
+            "BAD METHOD",
+            "BAD\tMETHOD",
+            "BAD\r\nMETHOD",
+            "BAD/METHOD",
+            "BAD:METHOD",
+            "BAD\0METHOD",
+            "BAD\x7fMETHOD",
+            "ß",
+            :ß,
+            <<255>>,
+            123
+          ] do
+        assert_raise ArgumentError, ~r/unsupported HTTP method/, fn ->
+          HTTP.FetchOptions.new(method: method)
+        end
+      end
+    end
+
     test "normalizes redirect mode" do
       assert %HTTP.FetchOptions{redirect: :follow} = HTTP.FetchOptions.new([])
       assert %HTTP.FetchOptions{redirect: :follow} = HTTP.FetchOptions.new(redirect: "follow")

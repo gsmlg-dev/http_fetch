@@ -15,6 +15,11 @@ defmodule HTTP.Request do
   - `:delete` - DELETE requests
   - `:patch` - PATCH requests (with body)
 
+  Any nonempty ASCII HTTP token is accepted, including DAV methods such as
+  `:propfind` and `:report`. Atom methods are uppercased; binary methods retain
+  their case because extension methods are case-sensitive. Whitespace, control
+  characters, non-ASCII bytes and token separators are rejected before normalization.
+
   By default, GET, HEAD, and DELETE request bodies are omitted for compatibility.
   Set `request_mode: :proxy` to retain entities for all admitted methods.
   HEAD response bodies remain empty regardless of the request mode.
@@ -58,8 +63,6 @@ defmodule HTTP.Request do
 
   alias HTTP.Headers
 
-  @allowed_methods ~w(DELETE GET HEAD OPTIONS PATCH POST PUT)
-
   defstruct method: :get,
             request_mode: :fetch,
             url: nil,
@@ -72,7 +75,7 @@ defmodule HTTP.Request do
             # Socket transport options (e.g., timeout, connect_timeout, ssl, redirect)
             transport_options: []
 
-  @type method :: atom()
+  @type method :: atom() | String.t()
   @type url :: URI.t()
   @type content_type :: String.t() | charlist() | nil
   @type request_mode :: :fetch | :proxy
@@ -97,15 +100,18 @@ defmodule HTTP.Request do
 
   @doc false
   @spec method_token(atom() | String.t()) :: String.t()
-  def method_token(method) do
-    method = method |> to_string() |> String.upcase()
+  def method_token(method) when is_atom(method) or is_binary(method) do
+    token = if is_atom(method), do: Atom.to_string(method), else: method
 
-    if method in @allowed_methods and valid_token?(method) do
-      method
+    if valid_token?(token) do
+      if is_atom(method), do: String.upcase(token), else: token
     else
       raise ArgumentError, "unsupported HTTP method: #{inspect(method)}"
     end
   end
+
+  def method_token(method),
+    do: raise(ArgumentError, "unsupported HTTP method: #{inspect(method)}")
 
   @doc false
   @spec origin_form(URI.t()) :: String.t()
