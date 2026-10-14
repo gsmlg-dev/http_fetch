@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.8] - 2026-10-14
+
+### Fixed
+- Validate a certificate path ending at a supplied trust anchor when the peer
+  includes trailing cross-signed alternatives. Preserve PKIX signatures,
+  hostname, validity, depth and certificate-signature policy checks.
+
 ## [0.21.7] - 2026-10-14
 
 ### Fixed

@@ -321,6 +321,14 @@ shared signature verifier. Unsupported key/parameter combinations fail explicitl
 
 ## Advanced certificate-policy boundary (Phase 3 audit)
 
+Peer chains may include trailing cross-signed alternatives. Path selection
+considers leaf-first prefixes terminating at an explicitly supplied trust anchor
+or a certificate it issued. Each candidate still passes OTP `:public_key` PKIX
+validation, including signature, validity, policy and depth checks. Hostname
+verification remains required; certificate-signature policy applies to the
+selected path. This does not reorder arbitrary peer chains or discover new
+trust anchors. Bounds and certificate decoding cover the full presented chain.
+
 The http_fetch production inventory uses CA overrides, depth, inferred DNS/IP
 identity, and the HTTPS hostname matcher. It has no production calls requesting
 `verify_fun`, `partial_chain`, CRL or OCSP policies. Those options therefore do
