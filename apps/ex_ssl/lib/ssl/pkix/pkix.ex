@@ -257,13 +257,24 @@ defmodule SSL.PKIX do
   defp validate_path(chain, trust_anchors, depth, signature_schemes) do
     Enum.reduce_while(trust_anchors, {:error, {:path_validation_failed, :unknown_ca}}, fn anchor,
                                                                                           previous_error ->
-      path = otp_path(chain, anchor)
+      case validate_anchor_paths(chain, anchor, depth, signature_schemes, previous_error) do
+        {:ok, _public_key} = result -> {:halt, result}
+        {:error, _reason} = error -> {:cont, error}
+      end
+    end)
+  end
+
+  defp validate_anchor_paths(chain, anchor, depth, signature_schemes, previous_error) do
+    chain
+    |> anchor_paths(anchor)
+    |> Enum.reduce_while(previous_error, fn selected_chain, error ->
+      path = selected_chain |> Enum.map(& &1.der) |> Enum.reverse()
 
       case safe_path_validation(anchor.der, path, depth) do
         {:ok, public_key} ->
           if signature_schemes == nil or
                CertificateSignaturePolicy.compatible?(
-                 Enum.map(chain, & &1.der),
+                 Enum.map(selected_chain, & &1.der),
                  anchor.der,
                  signature_schemes
                ) do
@@ -273,9 +284,9 @@ defmodule SSL.PKIX do
           end
 
         {:error, reason} ->
-          case previous_error do
+          case error do
             {:error, {:certificate_signature_scheme_not_allowed, _}} ->
-              {:cont, previous_error}
+              {:cont, error}
 
             _ ->
               {:cont, {:error, {:path_validation_failed, reason}}}
@@ -284,18 +295,32 @@ defmodule SSL.PKIX do
     end)
   end
 
-  defp otp_path(chain, anchor) do
+  # A peer may append an alternative cross-sign or certificates above a supplied
+  # anchor. Consider only leaf-first prefixes ending at that anchor or its issued
+  # certificate. Issuer matching selects candidates; PKIX still verifies each
+  # candidate's signatures, constraints, validity and depth.
+  defp anchor_paths(chain, anchor) do
     chain
-    |> maybe_drop_anchor(anchor.der)
-    |> Enum.map(& &1.der)
+    |> Enum.with_index()
     |> Enum.reverse()
+    |> Enum.flat_map(fn {certificate, index} ->
+      cond do
+        certificate.der == anchor.der ->
+          [Enum.take(chain, index)]
+
+        safe_is_issuer(certificate.decoded, anchor.decoded) ->
+          [Enum.take(chain, index + 1)]
+
+        true ->
+          []
+      end
+    end)
   end
 
-  defp maybe_drop_anchor(chain, anchor_der) do
-    case List.last(chain) do
-      %Certificate{der: ^anchor_der} -> Enum.drop(chain, -1)
-      _certificate -> chain
-    end
+  defp safe_is_issuer(certificate, anchor) do
+    :public_key.pkix_is_issuer(certificate, anchor)
+  catch
+    _kind, _reason -> false
   end
 
   defp safe_path_validation(anchor_der, path, depth) do
