@@ -2457,6 +2457,7 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert_receive :cross_record_stream_first_sent, 5_000
 
     {tls_pid, ^first_record} = await_owner_tls_data(owner, first_record)
+    tls_monitor = Process.monitor(tls_pid)
     assert_owner_has_only_tls_data(owner, tls_pid, 1)
 
     send(server_pid, :send_cross_record_stream_second)
@@ -2465,7 +2466,6 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert_owner_has_only_tls_data(owner, tls_pid, 1)
 
     owner_monitor = Process.monitor(owner)
-    tls_monitor = Process.monitor(tls_pid)
     true = :erlang.resume_process(owner)
     {tls_pid, owner_monitor, tls_monitor}
   end
