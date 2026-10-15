@@ -2068,7 +2068,7 @@ defmodule HTTP.SocketClient do
 
   defp disarm_read_idle(state) do
     {timer, _token} = state.read_idle_timer
-    Process.cancel_timer(timer)
+    _ = Process.cancel_timer(timer)
     %{state | read_idle_timer: nil}
   end
 
