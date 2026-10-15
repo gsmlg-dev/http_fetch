@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.10] - 2026-10-15
+
+### Fixed
+- Reject non-HTTP/1 textual response versions before accepting headers or bodies
+  on OTP TLS and ex_ssl, preserving compatible HTTP/1 minor versions and closing
+  rejected connections without replay or reuse (#121).
+
 ## [0.21.9] - 2026-10-15
 
 ### Fixed
