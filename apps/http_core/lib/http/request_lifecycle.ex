@@ -307,7 +307,11 @@ defmodule HTTP.RequestLifecycle do
         %{state | resources: Map.put(state.resources, monitor, {resource, kind})}
       end
 
-    if state.aborted?, do: cancel(resource, kind)
+    if state.aborted? do
+      cancel_owners(state.resources)
+      if kind != :owner, do: cancel(resource, kind)
+    end
+
     {:reply, :ok, state}
   end
 
@@ -371,21 +375,20 @@ defmodule HTTP.RequestLifecycle do
   end
 
   def handle_info(:abort, state) do
-    Enum.each(state.resources, fn {_ref, {pid, kind}} -> cancel(pid, kind) end)
+    cancel_resources(state.resources)
     {:noreply, %{state | aborted?: true}}
   end
 
   def handle_info({:response_failure, stream}, state) do
-    Enum.each(state.resources, fn
-      {_ref, {^stream, :stream}} -> :ok
-      {_ref, {pid, kind}} -> cancel(pid, kind)
-    end)
+    state.resources
+    |> Enum.reject(fn {_ref, {pid, kind}} -> pid == stream and kind == :stream end)
+    |> cancel_resources()
 
     {:noreply, %{state | aborted?: true}}
   end
 
   def handle_info({:DOWN, ref, :process, _, _}, %{scope_monitor: ref} = state) do
-    Enum.each(state.resources, fn {_ref, {pid, kind}} -> cancel(pid, kind) end)
+    cancel_resources(state.resources)
     {:noreply, %{state | aborted?: true, uncertain?: true}}
   end
 
@@ -407,9 +410,7 @@ defmodule HTTP.RequestLifecycle do
             else: state
 
         if incomplete? do
-          Enum.each(resources, fn {_ref, {pid, resource_kind}} ->
-            cancel(pid, resource_kind)
-          end)
+          cancel_resources(resources)
         end
 
         settle(state)
@@ -451,8 +452,27 @@ defmodule HTTP.RequestLifecycle do
     state
   catch
     :exit, _ ->
+      cancel_owners(state.resources)
       cancel(resource, kind)
       %{state | uncertain?: true, aborted?: true}
+  end
+
+  defp cancel_resources(resources) do
+    # Notify owners before invalidating sockets or stopping send workers. A
+    # syscall released by closure must not beat its causal cancellation message.
+    cancel_owners(resources)
+
+    Enum.each(resources, fn
+      {_ref, {_pid, :owner}} -> :ok
+      {_ref, {pid, kind}} -> cancel(pid, kind)
+    end)
+  end
+
+  defp cancel_owners(resources) do
+    Enum.each(resources, fn
+      {_ref, {pid, :owner}} -> cancel(pid, :owner)
+      _ -> :ok
+    end)
   end
 
   defp cancel(pid, :owner), do: send(pid, :abort)

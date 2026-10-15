@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.21.10] - 2026-10-15
 
 ### Fixed
+- Preserve HTTP/1 cancellation when cleanup closes the socket during post-send
+  activation or final send result delivery, retaining independent transport and
+  protocol failures and the existing logical cleanup barrier (#122).
 - Reject non-HTTP/1 textual response versions before accepting headers or bodies
   on OTP TLS and ex_ssl, preserving compatible HTTP/1 minor versions and closing
   rejected connections without replay or reuse (#121).
