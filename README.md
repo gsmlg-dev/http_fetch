@@ -183,10 +183,15 @@ is supplied; an explicit infinite write timeout remains unsupported.
 
 ## HTTP/1 Response Framing
 
-HTTP/1 parsing is strict by default. Status codes must contain exactly three
-digits in the range 100–599. Bare chunk sizes require hexadecimal digits without
-leading or trailing whitespace. RFC 9112 chunk extensions accept token names,
-optional token or quoted values, and permitted spaces/tabs around delimiters;
+HTTP/1 parsing is strict by default. Textual response versions must use major
+version 1 and a single-digit minor version (HTTP/1.0 through HTTP/1.9); other
+versions, including HTTP/0.9 and HTTP/2.0, fail with `:invalid_status_line` before
+response headers or body are accepted. Higher HTTP/1 minor versions use the same
+framing rules and are conservatively closed after the response. Status codes must
+contain exactly three digits in the range 100–599. Bare chunk sizes require
+hexadecimal digits without leading or trailing whitespace. RFC 9112 chunk
+extensions accept token names, optional token or quoted values, and permitted
+spaces/tabs around delimiters;
 unfinished quotes, escapes and invalid control bytes fail with
 `:invalid_chunk_size`. Chunk-size lines are limited to 8 KiB of content whether
 received together or fragmented, including a split CRLF terminator.

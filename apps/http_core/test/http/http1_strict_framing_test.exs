@@ -75,6 +75,47 @@ defmodule HTTP.HTTP1StrictFramingTest do
     end
   end
 
+  test "non-HTTP/1 and malformed textual versions fail before headers or body" do
+    for version <- [
+          "HTTP/0.9",
+          "HTTP/2.0",
+          "HTTP/3.0",
+          "HTTP/9.9",
+          "HTTP/01.1",
+          "HTTP/1.10",
+          "HTTP/1",
+          "HTTP/1.",
+          "HTTP/1.x",
+          "http/1.1"
+        ] do
+      wire = version <> " 200 OK\r\nContent-Length: 2\r\n\r\nok"
+
+      for split <- 0..byte_size(wire),
+          do: assert({:error, :invalid_status_line} = fragmented(wire, split))
+    end
+  end
+
+  test "HTTP/1 single-digit minor versions retain compatible response framing" do
+    for minor <- 0..9 do
+      version = "1.#{minor}"
+      wire = "HTTP/#{version} 200 OK\r\nContent-Length: 2\r\n\r\nok"
+
+      for split <- 0..byte_size(wire) do
+        assert {:ok, %{version: ^version, state: :done}, events} = fragmented(wire, split)
+        assert [{:headers, 200, _} | _] = events
+
+        assert events
+               |> Enum.flat_map(fn
+                 {:body, body} -> [body]
+                 _ -> []
+               end)
+               |> IO.iodata_to_binary() == "ok"
+
+        assert List.last(events) == :done
+      end
+    end
+  end
+
   test "conflicting TE and CL fail before headers for HEAD, bodyless and informational responses" do
     for method <- [:post, :head],
         status <- [100, 101, 103, 200, 204, 304],

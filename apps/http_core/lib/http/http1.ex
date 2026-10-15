@@ -247,7 +247,7 @@ defmodule HTTP.HTTP1 do
   end
 
   defp parse_status_line(<<"HTTP/", major, ?., minor, ?\s, a, b, c, ?\s, reason::binary>>)
-       when major in ?0..?9 and minor in ?0..?9 and a in ?1..?5 and b in ?0..?9 and
+       when major == ?1 and minor in ?0..?9 and a in ?1..?5 and b in ?0..?9 and
               c in ?0..?9 do
     if safe_header_value?(reason) do
       {:ok, (a - ?0) * 100 + (b - ?0) * 10 + c - ?0, <<major, ?., minor>>}
