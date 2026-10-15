@@ -562,7 +562,7 @@ defmodule HTTP.SocketClient do
 
         case result do
           {:ok, state} ->
-            case activate_socket(transport, socket) do
+            case activate_socket(state) do
               :ok -> owner_loop(state)
               {:error, reason} -> fail(state, reason)
             end
@@ -1956,14 +1956,27 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp activate_socket(transport, socket) do
-    case transport.setopts(socket, active: :once) do
+  defp activate_socket(state) do
+    case state.transport.setopts(state.socket, active: :once) do
       :ok ->
         :ok
 
       {:error, reason} ->
-        transport.close(socket)
-        {:error, reason}
+        state.transport.close(state.socket)
+
+        # The tracker queues cancellation before closing this request's socket.
+        # Native active-once then reports a closed handle instead of the abort.
+        # Restrict this classification to closure errors at this boundary;
+        # parser errors and already-delivered send failures keep their reason.
+        if reason in [:closed, :einval] do
+          receive do
+            :abort -> {:error, :aborted}
+          after
+            0 -> {:error, reason}
+          end
+        else
+          {:error, reason}
+        end
     end
   end
 
