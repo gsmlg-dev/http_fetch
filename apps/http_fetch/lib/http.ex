@@ -149,6 +149,18 @@ defmodule HTTP do
   `HTTP.Config.default_request_timeout/0` for that limit. Managed transport scopes
   require finite, positive request and connection timeouts.
 
+  `read_idle_timeout` and `write_idle_timeout` are independent positive millisecond
+  limits for HTTP/1 requests (TCP, OTP TLS and ExSSL). They default to
+  `nil`; automatic protocol selection, HTTP/2, HTTP/3 and managed transport scopes
+  are unsupported. Read idle measures armed response reads and resets on nonempty
+  transport data, pausing during consumer acknowledgement backpressure. Write
+  idle bounds each transport write of at most 16 KiB and resets before the next
+  write; successful transport acceptance does not establish peer receipt. Waiting
+  for the upload producer does not consume the write budget. Expiry reports
+  `:read_idle_timeout` or `:write_idle_timeout`, with existing structured-error
+  wrapping before response delivery and stream errors afterwards. Overall and
+  connection deadlines, socket send limits and cancellation remain independent.
+
   Example Usage:
 
       # GET request and awaiting JSON

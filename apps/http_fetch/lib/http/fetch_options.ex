@@ -34,6 +34,22 @@ defmodule HTTP.FetchOptions do
   - `timeout` - request timeout in milliseconds or `:infinity` for HTTP/1
   - `error_mode` - `:raw` (default) or `:structured`; structured failures return
     `HTTP.RequestError` with conservative pre-send evidence. No automatic retry.
+  - `read_idle_timeout` - positive milliseconds (1..4,294,967,295), or `nil`
+    to disable (default). Bounds each pending HTTP/1 transport read, including
+    headers; nonempty transport data resets the clock. Consumer acknowledgement
+    backpressure pauses reads and this clock. Writes do not reset it.
+  - `write_idle_timeout` - positive milliseconds (same range), or `nil` to disable
+    (default). Bounds each at-most-16KiB HTTP/1 transport write; each successful
+    nonempty send starts a fresh write budget. This is transport acceptance,
+    not peer acknowledgement or a partial-syscall progress guarantee. Waiting
+    for an upload source does not consume a write budget. Shorter existing
+    `socket_opts[:send_timeout]` and overall request limits still apply.
+    Both idle options support ordinary HTTP/1 TCP, OTP TLS and ExSSL, including
+    HTTP/1 reuse. They require `http_version: :http1` (the default); automatic/H2/H3
+    protocols and managed `transport_scope` are rejected. Timeouts report
+    `:read_idle_timeout` / `:write_idle_timeout` (or `HTTP.RequestError` in
+    structured mode before response headers). Neither changes connection or
+    overall request deadlines or the cleanup completion contract.
   - `connect_timeout` - connection timeout in milliseconds or `:infinity`
   - `transport_scope` - opaque `HTTP.ManagedTransport` generation selecting
     private reusable HTTP/1 or HTTP/2 transports. Requires raw streamed responses,
@@ -96,6 +112,10 @@ defmodule HTTP.FetchOptions do
     "connectAddress" => :connect_address,
     "connect_timeout" => :connect_timeout,
     "connectTimeout" => :connect_timeout,
+    "read_idle_timeout" => :read_idle_timeout,
+    "readIdleTimeout" => :read_idle_timeout,
+    "write_idle_timeout" => :write_idle_timeout,
+    "writeIdleTimeout" => :write_idle_timeout,
     "content_type" => :content_type,
     "contentType" => :content_type,
     "duplex" => :duplex,
@@ -159,6 +179,8 @@ defmodule HTTP.FetchOptions do
             timeout: nil,
             error_mode: :raw,
             connect_timeout: nil,
+            read_idle_timeout: nil,
+            write_idle_timeout: nil,
             connect_address: nil,
             ssl: nil,
             socket_opts: nil,
@@ -196,6 +218,8 @@ defmodule HTTP.FetchOptions do
           timeout: timeout() | nil,
           error_mode: :raw | :structured,
           connect_timeout: timeout() | nil,
+          read_idle_timeout: pos_integer() | nil,
+          write_idle_timeout: pos_integer() | nil,
           connect_address: :inet.ip_address() | nil,
           ssl: list() | nil,
           socket_opts: list() | nil,
@@ -244,6 +268,8 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:timeout, options.timeout)
     |> maybe_add(:error_mode, options.error_mode)
     |> maybe_add(:connect_timeout, options.connect_timeout)
+    |> maybe_add(:read_idle_timeout, options.read_idle_timeout)
+    |> maybe_add(:write_idle_timeout, options.write_idle_timeout)
     |> maybe_add(:connect_address, options.connect_address)
     |> maybe_add(:ssl, options.ssl)
     |> maybe_add(:socket_opts, options.socket_opts)
@@ -349,6 +375,12 @@ defmodule HTTP.FetchOptions do
       {:connect_timeout, connect_timeout}, acc ->
         %{acc | connect_timeout: connect_timeout}
 
+      {:read_idle_timeout, timeout}, acc ->
+        %{acc | read_idle_timeout: timeout}
+
+      {:write_idle_timeout, timeout}, acc ->
+        %{acc | write_idle_timeout: timeout}
+
       {:connect_address, connect_address}, acc ->
         %{acc | connect_address: connect_address}
 
@@ -422,6 +454,9 @@ defmodule HTTP.FetchOptions do
         telemetry: normalize_telemetry(options.telemetry),
         error_mode: normalize_error_mode(options.error_mode),
         http_version: http_version,
+        read_idle_timeout: normalize_idle_timeout(options.read_idle_timeout, :read_idle_timeout),
+        write_idle_timeout:
+          normalize_idle_timeout(options.write_idle_timeout, :write_idle_timeout),
         tls_backend: normalize_tls_backend(options.tls_backend, http_version),
         http1_reuse: normalize_http1_reuse(options.http1_reuse, http_version),
         http1_scope: normalize_http2_scope(options.http1_scope),
@@ -435,7 +470,28 @@ defmodule HTTP.FetchOptions do
         http2_priority: normalize_http2_priority(options.http2_priority)
     }
     |> validate_connect_address()
+    |> validate_idle_protocol()
   end
+
+  defp normalize_idle_timeout(nil, _key), do: nil
+
+  defp normalize_idle_timeout(timeout, _key)
+       when is_integer(timeout) and timeout > 0 and timeout <= 4_294_967_295,
+       do: timeout
+
+  defp normalize_idle_timeout(_timeout, key),
+    do: raise(ArgumentError, "#{key} must be positive milliseconds in 1..4294967295 or nil")
+
+  defp validate_idle_protocol(%{read_idle_timeout: nil, write_idle_timeout: nil} = options),
+    do: options
+
+  defp validate_idle_protocol(%{transport_scope: scope}) when scope != nil,
+    do: raise(ArgumentError, "idle deadlines are unsupported with transport_scope")
+
+  defp validate_idle_protocol(%{http_version: :http1} = options), do: options
+
+  defp validate_idle_protocol(_options),
+    do: raise(ArgumentError, "idle deadlines require http_version: :http1")
 
   defp validate_connect_address(%{connect_address: nil} = options), do: options
 

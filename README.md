@@ -181,6 +181,46 @@ uploads. With an unlimited request deadline, it uses the configured default
 request timeout for writes unless a finite `socket_opts: [send_timeout: ms]`
 is supplied; an explicit infinite write timeout remains unsupported.
 
+### Independent HTTP/1 Read and Write Idle Timeouts
+
+`read_idle_timeout` and `write_idle_timeout` accept positive integer milliseconds
+up to 4,294,967,295. Both default to `nil` (disabled); zero and `:infinity` are
+invalid. They require `http_version: :http1` (the default) and support HTTP over TCP and HTTPS
+with either `:ssl` or `:ex_ssl`. Automatic protocol selection, HTTP/2, HTTP/3 and
+managed transport scopes reject these options explicitly.
+
+```elixir
+HTTP.fetch(url,
+  http_version: :http1,
+  timeout: :infinity,
+  connect_timeout: 5_000,
+  read_idle_timeout: 30_000,
+  write_idle_timeout: 10_000,
+  redirect: :manual,
+  decode_body: false,
+  stream_response: true
+)
+|> HTTP.Promise.await(:infinity)
+```
+
+Read idle measures an armed response read, including partial headers and body
+data. Nonempty transport data resets it; writing does not. It pauses while
+delivery waits for the consumer's chunk acknowledgement. Streaming uploads keep
+response reads independent of the upload worker.
+
+Write idle bounds each transport write, split into at most 16 KiB, and resets
+before the next write. A successful write means transport acceptance, without a
+promise of peer receipt or acknowledgement. Time waiting for the upload producer
+does not count as write idle. These are per-operation limits, rather than a total
+transfer deadline: a progressing transfer can exceed either idle duration.
+
+Expiry reports `:read_idle_timeout` or `:write_idle_timeout`; failures before
+response delivery use `HTTP.RequestError` when `error_mode: :structured` is set.
+After a streamed response is returned, its stream reports the reason. Shorter
+overall request deadlines and explicit socket send limits retain their own
+errors. Connection setup, consumer acknowledgement limits and cancellation stay
+independent; failed requests close their owned connection without replay or reuse.
+
 ## HTTP/1 Response Framing
 
 HTTP/1 parsing is strict by default. Textual response versions must use major
