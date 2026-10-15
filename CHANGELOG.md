@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.11] - 2026-10-15
+
+### Added
+- Independent HTTP/1 read and write idle deadlines for TCP, OTP TLS and ExSSL,
+  with positive millisecond options, direction-specific progress, typed timeout
+  reasons and owned cleanup. Preserve total request/connect limits, cancellation
+  and streaming backpressure; reject unsupported protocols and managed scopes
+  explicitly (#126).
+
 ## [0.21.10] - 2026-10-15
 
 ### Fixed

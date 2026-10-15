@@ -10,7 +10,8 @@ defmodule HTTP.SocketClient do
 
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
-    with :ok <- HTTP.Runtime.Dialer.validate_connect_address_route(request, unix_socket_path) do
+    with :ok <- validate_idle_protocol(request),
+         :ok <- HTTP.Runtime.Dialer.validate_connect_address_route(request, unix_socket_path) do
       do_request(request, abort_controller_pid, unix_socket_path)
     end
   end
@@ -552,7 +553,8 @@ defmodule HTTP.SocketClient do
             response_sent?: false,
             upload: nil,
             upload_cancelled?: false,
-            writer: nil
+            writer: nil,
+            read_idle_timer: nil
           })
 
         result =
@@ -563,7 +565,7 @@ defmodule HTTP.SocketClient do
         case result do
           {:ok, state} ->
             case activate_socket(state) do
-              :ok -> owner_loop(state)
+              :ok -> owner_loop(arm_read_idle(state))
               {:error, reason} -> fail(state, reason)
             end
 
@@ -1356,6 +1358,15 @@ defmodule HTTP.SocketClient do
       :deadline ->
         fail(state, :request_timeout)
 
+      {:read_idle_timeout, token}
+      when state.read_idle_timer != nil and token == elem(state.read_idle_timer, 1) ->
+        reason =
+          if remaining_timeout(state.deadline_at) == 0,
+            do: :request_timeout,
+            else: :read_idle_timeout
+
+        fail(state, reason)
+
       {:DOWN, monitor, :process, _parent, _reason} when monitor == state.parent_monitor ->
         if state.response_sent?, do: owner_loop(state), else: fail(state, :subscriber_down)
 
@@ -1371,9 +1382,10 @@ defmodule HTTP.SocketClient do
 
       message ->
         case state.transport.normalize_message(message, state.socket) do
-          {:data, data} -> handle_data(state, data)
+          {:data, <<>>} -> rearm(state)
+          {:data, data} -> handle_data(disarm_read_idle(state), data)
           :closed -> handle_closed(state)
-          {:error, reason} -> fail(state, reason)
+          {:error, reason} -> fail_transport(state, reason)
           :unknown -> owner_loop(state)
         end
     end
@@ -1405,6 +1417,58 @@ defmodule HTTP.SocketClient do
         |> handle_events(events)
 
       {:error, reason} ->
+        fail_transport(state, reason)
+    end
+  end
+
+  # A timed-out send can notify the read owner before the writer receives its
+  # native result. Reconcile that bounded write so a driver close cannot hide
+  # its typed deadline. Wake a writer waiting for source data with the original
+  # transport error; cancellation and the overall deadline remain independent.
+  defp fail_transport(%{upload: upload} = state, reason)
+       when upload != nil and reason in [:closed, :timeout] do
+    case state.request.transport_options[:write_idle_timeout] do
+      nil ->
+        fail(state, reason)
+
+      timeout ->
+        HTTP.Stream.error(upload.stream, reason)
+        state = disarm_read_idle(state)
+
+        deadline =
+          System.monotonic_time(:millisecond) + min(timeout, remaining_timeout(state.deadline_at))
+
+        await_failed_write(state, reason, deadline)
+    end
+  end
+
+  defp fail_transport(state, reason), do: fail(state, reason)
+
+  defp await_failed_write(state, reason, deadline) do
+    upload = state.upload
+
+    receive do
+      {:http1_upload, token, {:error, write_reason}} when token == upload.token ->
+        fail(state, write_reason)
+
+      {:http1_upload, token, :ok} when token == upload.token ->
+        fail(state, reason)
+
+      :abort ->
+        fail(state, :aborted)
+
+      :deadline ->
+        fail(state, :request_timeout)
+
+      {:DOWN, monitor, :process, _parent, _reason} when monitor == state.parent_monitor ->
+        if state.response_sent?,
+          do: await_failed_write(state, reason, deadline),
+          else: fail(state, :subscriber_down)
+    after
+      remaining_timeout(deadline) ->
+        reason =
+          if remaining_timeout(state.deadline_at) == 0, do: :request_timeout, else: reason
+
         fail(state, reason)
     end
   end
@@ -1532,7 +1596,7 @@ defmodule HTTP.SocketClient do
 
   defp rearm(state) do
     case state.transport.setopts(state.socket, active: :once) do
-      :ok -> owner_loop(state)
+      :ok -> owner_loop(arm_read_idle(state))
       {:error, :closed} -> handle_closed(state)
       {:error, reason} -> fail(state, reason)
     end
@@ -1585,6 +1649,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp finish_completed(state) do
+    state = disarm_read_idle(state)
     if state.writer, do: HTTP.Stream.Writer.close(state.writer)
     _ = cancel_request_timer(state.timer_ref)
 
@@ -1637,6 +1702,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp cleanup(state) do
+    state = disarm_read_idle(state)
     if state.writer, do: HTTP.Stream.Writer.close(state.writer)
     _ = cancel_request_timer(state.timer_ref)
 
@@ -1762,7 +1828,7 @@ defmodule HTTP.SocketClient do
   defp connect(transport, host, port, request, selection, timeout),
     do: HTTP.Runtime.Dialer.connect(transport, host, port, request, selection, timeout)
 
-  defp send_request(transport, socket, iodata, timeout) do
+  defp send_request(transport, socket, iodata, timeout, options \\ []) do
     parent = self()
     ref = make_ref()
 
@@ -1774,7 +1840,8 @@ defmodule HTTP.SocketClient do
            receive do
              :send_launch ->
                Process.demonitor(launch_monitor, [:flush])
-               send(parent, {:send_result, ref, transport.send(socket, iodata)})
+               result = HTTP.HTTP1.IdleTimeout.send(transport, socket, iodata, options)
+               send(parent, {:send_result, ref, result})
 
              {:DOWN, ^launch_monitor, :process, ^parent, _reason} ->
                :ok
@@ -1813,7 +1880,15 @@ defmodule HTTP.SocketClient do
   end
 
   defp start_prepared_request(state, {:buffer, iodata}) do
-    case send_request(state.transport, state.socket, iodata, remaining_timeout(state.deadline_at)) do
+    options = Keyword.put(state.request.transport_options, :deadline_at, state.deadline_at)
+
+    case send_request(
+           state.transport,
+           state.socket,
+           iodata,
+           remaining_timeout(state.deadline_at),
+           options
+         ) do
       :ok -> {:ok, state}
       {:error, reason} -> {:error, reason}
     end
@@ -1829,7 +1904,8 @@ defmodule HTTP.SocketClient do
           length,
           state.deadline_at,
           state.request.headers,
-          head
+          head,
+          state.request.transport_options
         )
 
       {:ok, %{state | upload: upload}}
@@ -1954,6 +2030,46 @@ defmodule HTTP.SocketClient do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp validate_idle_protocol(request) do
+    options = request.transport_options
+
+    cond do
+      options[:read_idle_timeout] == nil and options[:write_idle_timeout] == nil ->
+        :ok
+
+      options[:transport_scope] != nil or options[:managed_coordinator] != nil ->
+        {:error, {:unsupported_idle_timeout, :transport_scope}}
+
+      http_version(request) != :http1 ->
+        {:error, {:unsupported_idle_timeout, :http_version}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp arm_read_idle(%{read_idle_timer: {_timer, _token}} = state), do: state
+
+  defp arm_read_idle(state) do
+    case state.request.transport_options[:read_idle_timeout] do
+      nil ->
+        state
+
+      timeout ->
+        token = make_ref()
+        timer = Process.send_after(self(), {:read_idle_timeout, token}, timeout)
+        %{state | read_idle_timer: {timer, token}}
+    end
+  end
+
+  defp disarm_read_idle(%{read_idle_timer: nil} = state), do: state
+
+  defp disarm_read_idle(state) do
+    {timer, _token} = state.read_idle_timer
+    _ = Process.cancel_timer(timer)
+    %{state | read_idle_timer: nil}
   end
 
   defp activate_socket(state) do

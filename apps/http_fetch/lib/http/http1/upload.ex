@@ -12,7 +12,8 @@ defmodule HTTP.HTTP1.Upload do
         remaining,
         deadline_at,
         headers \\ %HTTP.Headers{},
-        head \\ nil
+        head \\ nil,
+        options \\ []
       ) do
     owner = self()
     token = make_ref()
@@ -31,13 +32,14 @@ defmodule HTTP.HTTP1.Upload do
             remaining: remaining,
             deadline_at: deadline_at,
             headers: headers,
-            trailers: nil
+            trailers: nil,
+            options: Keyword.put(options, :deadline_at, deadline_at)
           }
 
           result =
             receive do
               {:start_upload, ^token} ->
-                with :ok <- send_head(transport, socket, head), do: read_body(state)
+                with :ok <- send_head(state, head), do: read_body(state)
             after
               remaining_timeout(deadline_at) -> {:error, :request_timeout}
             end
@@ -60,8 +62,11 @@ defmodule HTTP.HTTP1.Upload do
     %{pid: pid, monitor: monitor, stream: stream, token: token}
   end
 
-  defp send_head(_transport, _socket, nil), do: :ok
-  defp send_head(transport, socket, head), do: transport.send(socket, head)
+  defp send_head(_state, nil), do: :ok
+  defp send_head(state, head), do: send_data(state, head)
+
+  defp send_data(state, data),
+    do: HTTP.HTTP1.IdleTimeout.send(state.transport, state.socket, data, state.options)
 
   def completed(upload) do
     Process.unlink(upload.pid)
@@ -115,7 +120,7 @@ defmodule HTTP.HTTP1.Upload do
       {:stream_end, ^stream} ->
         case state.remaining do
           nil ->
-            state.transport.send(state.socket, [
+            send_data(state, [
               "0\r\n",
               if(state.trailers, do: HTTP.Trailers.serialize(state.trailers), else: []),
               "\r\n"
@@ -149,7 +154,7 @@ defmodule HTTP.HTTP1.Upload do
             do: [Integer.to_string(byte_size(chunk), 16), "\r\n", chunk, "\r\n"],
             else: chunk
 
-        with :ok <- state.transport.send(state.socket, data) do
+        with :ok <- send_data(state, data) do
           if ack_ref, do: send(state.stream, {:stream_chunk_ack, ack_ref})
           remaining = if state.remaining != nil, do: state.remaining - byte_size(chunk)
           read_body(%{state | remaining: remaining})
