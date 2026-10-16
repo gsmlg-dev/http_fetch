@@ -167,6 +167,7 @@ HTTP.fetch(url,
   http_version: :http1,
   timeout: :infinity,
   connect_timeout: 5_000,
+  response_stream_idle_timeout: :infinity,
   decode_body: false
 )
 |> HTTP.Promise.await(:infinity)
@@ -174,8 +175,10 @@ HTTP.fetch(url,
 
 Managed transport scopes continue to require positive finite request and
 connection timeouts. A configured proxy also retains its separate finite
-tunnel-establishment timeout. Stream reader and chunk acknowledgement timeouts
-remain separate from the request deadline.
+tunnel-establishment timeout. Response stream inactivity and consumer chunk
+acknowledgement limits remain separate from the request deadline. Set
+`response_stream_idle_timeout: :infinity` to disable the additional response
+stream inactivity limit without changing the consumer acknowledgement limit.
 The `:ex_ssl` backend also requires a finite per-write timeout for streaming
 uploads. With an unlimited request deadline, it uses the configured default
 request timeout for writes unless a finite `socket_opts: [send_timeout: ms]`
@@ -196,6 +199,7 @@ HTTP.fetch(url,
   connect_timeout: 5_000,
   read_idle_timeout: 30_000,
   write_idle_timeout: 10_000,
+  response_stream_idle_timeout: :infinity,
   redirect: :manual,
   decode_body: false,
   stream_response: true
@@ -220,6 +224,30 @@ After a streamed response is returned, its stream reports the reason. Shorter
 overall request deadlines and explicit socket send limits retain their own
 errors. Connection setup, consumer acknowledgement limits and cancellation stay
 independent; failed requests close their owned connection without replay or reuse.
+
+### Per-Request Response Stream Idle Policy
+
+`response_stream_idle_timeout` controls inactivity while waiting for response
+body data. It accepts positive integer milliseconds up to 4,294,967,295 or
+`:infinity` to disable this additional timer. The default `nil` keeps the existing
+`HTTP.Config.streaming_timeout/0` policy; setting `timeout: :infinity` alone does
+not disable that default stream limit. Zero is invalid.
+
+Use `response_stream_idle_timeout: :infinity` with `read_idle_timeout` when the
+socket read deadline should determine network stalls. A progressing response can
+then span gaps longer than the global stream limit, while a genuine socket stall
+still reports `:read_idle_timeout`. A finite response stream idle expiry reports
+`:timeout` and closes the owned request connection.
+
+The policy also applies to `HTTP.Response.read_all/1`, `text/1`, `json/1`,
+`clone/1`, and `write_to/2`, and requires no application-wide configuration
+changes. It supports ordinary HTTP/1 over TCP, OTP TLS and ExSSL. Automatic
+protocol selection, HTTP/2, HTTP/3 and managed transport scopes reject an explicit
+policy. Upload-source streams retain their existing policy.
+
+Consumer acknowledgement safety stays independent: a delivered chunk awaiting
+acknowledgement still has the existing finite streaming-operation budget. Overall
+request and connection limits, cancellation and reader cleanup also remain active.
 
 ## HTTP/1 Response Framing
 

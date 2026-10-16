@@ -172,6 +172,7 @@ defmodule HTTP.Response do
             type: :basic,
             stream: nil,
             http_version: nil,
+            response_stream_idle_timeout: nil,
             informational: [],
             trailers: %HTTP.Headers{}
 
@@ -189,6 +190,7 @@ defmodule HTTP.Response do
           type: response_type(),
           stream: pid() | nil,
           http_version: :http1 | :http2 | :http3 | nil,
+          response_stream_idle_timeout: pos_integer() | :infinity | nil,
           informational: [{integer(), HTTP.Headers.t()}],
           trailers: HTTP.Headers.t()
         }
@@ -312,7 +314,7 @@ defmodule HTTP.Response do
   def read_all(%__MODULE__{} = response) do
     case response_stream(response) do
       stream when is_pid(stream) ->
-        case read_stream(stream) do
+        case read_stream(stream, response.response_stream_idle_timeout) do
           {:ok, body} -> body
           {:error, reason} -> raise RuntimeError, "stream read failed: #{inspect(reason)}"
         end
@@ -335,9 +337,10 @@ defmodule HTTP.Response do
   def stream_pid(%__MODULE__{} = response), do: response_stream(response)
 
   @doc false
-  @spec with_stream_body(t(), pid()) :: t()
-  def with_stream_body(%__MODULE__{} = response, stream) when is_pid(stream) do
-    %{response | body: stream, stream: stream}
+  @spec with_stream_body(t(), pid(), pos_integer() | :infinity | nil) :: t()
+  def with_stream_body(%__MODULE__{} = response, stream, idle_timeout \\ nil)
+      when is_pid(stream) do
+    %{response | body: stream, stream: stream, response_stream_idle_timeout: idle_timeout}
   end
 
   @doc false
@@ -361,29 +364,45 @@ defmodule HTTP.Response do
     end
   end
 
-  defp read_stream(stream) do
-    send(stream, {:read_chunk, self(), :ack})
-    collect_stream(stream, [])
+  defp read_stream(stream, policy) do
+    monitor = Process.monitor(stream)
+
+    try do
+      send(stream, {:read_chunk, self(), :ack})
+      collect_stream(stream, [], monitor, policy)
+    after
+      Process.demonitor(monitor, [:flush])
+    end
   end
 
-  defp collect_stream(stream, acc) do
+  defp collect_stream(stream, acc, monitor, policy) do
     receive do
       {:stream_chunk, ^stream, chunk, ack_ref} ->
         send(stream, {:stream_chunk_ack, ack_ref})
-        collect_stream(stream, [chunk | acc])
+        collect_stream(stream, [chunk | acc], monitor, policy)
 
       {:stream_chunk, ^stream, chunk} ->
-        collect_stream(stream, [chunk | acc])
+        collect_stream(stream, [chunk | acc], monitor, policy)
 
       {:stream_end, ^stream} ->
         {:ok, collected_body(acc)}
 
       {:stream_error, ^stream, reason} ->
         {:error, reason}
+
+      {:DOWN, ^monitor, :process, ^stream, reason} ->
+        {:error, {:stream_down, reason}}
     after
-      HTTP.Config.streaming_timeout() -> {:error, :timeout}
+      stream_wait_timeout(policy) ->
+        HTTP.Stream.stop(stream, :timeout)
+        {:error, :timeout}
     end
   end
+
+  # Explicit network policies belong to HTTP.Stream. Waiting for its terminal
+  # event avoids a competing receive timer hiding typed socket idle failures.
+  defp stream_wait_timeout(nil), do: HTTP.Config.streaming_timeout()
+  defp stream_wait_timeout(_policy), do: :infinity
 
   defp collected_body(acc) do
     acc
@@ -624,7 +643,9 @@ defmodule HTTP.Response do
   defp write_stream_to_file(response, file_path) do
     with stream when is_pid(stream) <- response_stream(response),
          {:ok, result} <-
-           File.open(file_path, [:write, :binary], &write_stream_chunks(stream, &1)) do
+           File.open(file_path, [:write, :binary], fn file ->
+             write_stream_chunks(stream, file, response.response_stream_idle_timeout)
+           end) do
       result
     else
       {:error, reason} -> {:error, reason}
@@ -632,29 +653,40 @@ defmodule HTTP.Response do
     end
   end
 
-  defp write_stream_chunks(stream, file) do
-    send(stream, {:read_chunk, self(), :ack})
-    do_write_stream_chunks(stream, file)
+  defp write_stream_chunks(stream, file, policy) do
+    monitor = Process.monitor(stream)
+
+    try do
+      send(stream, {:read_chunk, self(), :ack})
+      do_write_stream_chunks(stream, file, monitor, policy)
+    after
+      Process.demonitor(monitor, [:flush])
+    end
   end
 
-  defp do_write_stream_chunks(stream, file) do
+  defp do_write_stream_chunks(stream, file, monitor, policy) do
     receive do
       {:stream_chunk, ^stream, chunk, ack_ref} ->
         :ok = IO.binwrite(file, chunk)
         send(stream, {:stream_chunk_ack, ack_ref})
-        do_write_stream_chunks(stream, file)
+        do_write_stream_chunks(stream, file, monitor, policy)
 
       {:stream_chunk, ^stream, chunk} ->
         :ok = IO.binwrite(file, chunk)
-        do_write_stream_chunks(stream, file)
+        do_write_stream_chunks(stream, file, monitor, policy)
 
       {:stream_end, ^stream} ->
         :ok
 
       {:stream_error, ^stream, reason} ->
         {:error, reason}
+
+      {:DOWN, ^monitor, :process, ^stream, reason} ->
+        {:error, {:stream_down, reason}}
     after
-      HTTP.Config.streaming_timeout() -> {:error, :timeout}
+      stream_wait_timeout(policy) ->
+        HTTP.Stream.stop(stream, :timeout)
+        {:error, :timeout}
     end
   end
 end

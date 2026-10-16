@@ -161,6 +161,15 @@ defmodule HTTP do
   wrapping before response delivery and stream errors afterwards. Overall and
   connection deadlines, socket send limits and cancellation remain independent.
 
+  `response_stream_idle_timeout` sets a per-request response-body inactivity
+  policy for ordinary HTTP/1 (TCP, OTP TLS and ExSSL). It accepts positive
+  milliseconds up to 4_294_967_295 or `:infinity`; `nil` keeps the existing global
+  stream timeout. Set it to `:infinity` to leave network stalls to
+  `read_idle_timeout` or to allow uncapped response reads. Response convenience
+  readers follow this policy. Consumer chunk acknowledgement budgets, total
+  deadlines, cancellation and owned cleanup remain independent. Automatic/H2/H3
+  protocols and managed transport scopes reject an explicit policy.
+
   Example Usage:
 
       # GET request and awaiting JSON

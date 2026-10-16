@@ -10,7 +10,8 @@ defmodule HTTP.SocketClient do
 
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
-    with :ok <- validate_idle_protocol(request),
+    with :ok <- validate_response_stream_idle_protocol(request),
+         :ok <- validate_idle_protocol(request),
          :ok <- HTTP.Runtime.Dialer.validate_connect_address_route(request, unix_socket_path) do
       do_request(request, abort_controller_pid, unix_socket_path)
     end
@@ -554,6 +555,7 @@ defmodule HTTP.SocketClient do
             upload: nil,
             upload_cancelled?: false,
             writer: nil,
+            response_stream_monitor: nil,
             read_idle_timer: nil
           })
 
@@ -1370,6 +1372,10 @@ defmodule HTTP.SocketClient do
       {:DOWN, monitor, :process, _parent, _reason} when monitor == state.parent_monitor ->
         if state.response_sent?, do: owner_loop(state), else: fail(state, :subscriber_down)
 
+      {:DOWN, monitor, :process, _stream, _reason}
+      when monitor == state.response_stream_monitor ->
+        finish(state)
+
       {:http1_upload, token, result} when state.upload != nil and token == state.upload.token ->
         case result do
           :ok ->
@@ -1493,6 +1499,13 @@ defmodule HTTP.SocketClient do
     if state.request.transport_options[:managed_coordinator] do
       HTTP.Stream.start_writer(content_length, encodings, opts)
     else
+      opts =
+        Keyword.put(
+          opts,
+          :idle_timeout,
+          state.request.transport_options[:response_stream_idle_timeout]
+        )
+
       with {:ok, stream} <- HTTP.Stream.start_link(content_length, encodings, opts),
            do: {:ok, stream, nil}
     end
@@ -1523,10 +1536,25 @@ defmodule HTTP.SocketClient do
           start_http1_response_stream(state, content_length, headers)
 
         HTTP.RequestLifecycle.attach_stream(HTTP.RequestLifecycle.current(), stream_pid)
-        response = Response.with_stream_body(response, stream_pid)
+
+        response =
+          Response.with_stream_body(
+            response,
+            stream_pid,
+            state.request.transport_options[:response_stream_idle_timeout]
+          )
+
+        monitor = if writer == nil, do: Process.monitor(stream_pid)
         send_response(state.parent, state.ref, response, state.request)
 
-        {:continue, %{state | mode: {:stream, stream_pid}, response_sent?: true, writer: writer}}
+        {:continue,
+         %{
+           state
+           | mode: {:stream, stream_pid},
+             response_sent?: true,
+             writer: writer,
+             response_stream_monitor: monitor
+         }}
 
       true ->
         {:continue, %{state | mode: {:buffer, response, []}}}
@@ -1649,6 +1677,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp finish_completed(state) do
+    demonitor_response_stream(state)
     state = disarm_read_idle(state)
     if state.writer, do: HTTP.Stream.Writer.close(state.writer)
     _ = cancel_request_timer(state.timer_ref)
@@ -1702,6 +1731,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp cleanup(state) do
+    demonitor_response_stream(state)
     state = disarm_read_idle(state)
     if state.writer, do: HTTP.Stream.Writer.close(state.writer)
     _ = cancel_request_timer(state.timer_ref)
@@ -2029,6 +2059,29 @@ defmodule HTTP.SocketClient do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp demonitor_response_stream(%{response_stream_monitor: nil}), do: :ok
+
+  defp demonitor_response_stream(%{response_stream_monitor: monitor}),
+    do: Process.demonitor(monitor, [:flush])
+
+  defp validate_response_stream_idle_protocol(request) do
+    options = request.transport_options
+
+    cond do
+      options[:response_stream_idle_timeout] == nil ->
+        :ok
+
+      options[:transport_scope] != nil or options[:managed_coordinator] != nil ->
+        {:error, {:unsupported_response_stream_idle_timeout, :transport_scope}}
+
+      http_version(request) != :http1 ->
+        {:error, {:unsupported_response_stream_idle_timeout, :http_version}}
+
+      true ->
+        :ok
     end
   end
 
