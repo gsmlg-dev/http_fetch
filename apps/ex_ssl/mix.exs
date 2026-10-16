@@ -4,7 +4,7 @@ defmodule SSL.MixProject do
   def project do
     [
       app: :ex_ssl,
-      version: "0.21.12",
+      version: "0.21.13",
       elixir: "~> 1.18",
       build_path: "../../_build",
       config_path: "../../config/config.exs",
