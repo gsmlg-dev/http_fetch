@@ -17,6 +17,8 @@ defmodule HTTP.HTTP1.Upload do
       ) do
     owner = self()
     token = make_ref()
+    completion = :atomics.new(2, [])
+    if remaining == 0, do: begin_completion(completion, deadline_at)
 
     tracker = HTTP.RequestLifecycle.current()
 
@@ -30,6 +32,7 @@ defmodule HTTP.HTTP1.Upload do
             socket: socket,
             stream: stream,
             remaining: remaining,
+            completion: completion,
             deadline_at: deadline_at,
             headers: headers,
             trailers: nil,
@@ -59,7 +62,23 @@ defmodule HTTP.HTTP1.Upload do
     HTTP.RequestLifecycle.register(tracker, pid, :upload)
     send(stream, {:read_chunk, pid, :ack})
     send(pid, {:start_upload, token})
-    %{pid: pid, monitor: monitor, stream: stream, token: token}
+    %{pid: pid, monitor: monitor, stream: stream, token: token, completion: completion}
+  end
+
+  # Publish eligibility before the final native write: peer headers can reach
+  # the read owner before that write returns or its result message is delivered.
+  def completion_deadline(upload) do
+    if :atomics.get(upload.completion, 1) == 1,
+      do: :atomics.get(upload.completion, 2)
+  end
+
+  defp begin_completion(completion, deadline_at) do
+    if :atomics.get(completion, 1) == 0 do
+      budget = HTTP.Config.streaming_timeout()
+      deadline = min(deadline_at, System.monotonic_time(:millisecond) + budget)
+      :atomics.put(completion, 2, deadline)
+      :atomics.put(completion, 1, 1)
+    end
   end
 
   defp send_head(_state, nil), do: :ok
@@ -77,13 +96,22 @@ defmodule HTTP.HTTP1.Upload do
   # Signalling error alone is not confirmation: await both writer termination
   # and the source's reader cleanup before exposing the final response.
   def stop(upload, reason, deadline_at) do
+    # The owner can already have consumed the original DOWN while observing a
+    # lost completion result. A fresh monitor still confirms a terminated writer.
+    writer_monitor = Process.monitor(upload.pid)
+    Process.demonitor(upload.monitor, [:flush])
     source_monitor = Process.monitor(upload.stream)
     HTTP.Stream.error(upload.stream, reason)
     Process.unlink(upload.pid)
     Process.exit(upload.pid, :kill)
 
-    with :ok <- await_down(upload.monitor, deadline_at) do
-      await_down(source_monitor, deadline_at)
+    try do
+      with :ok <- await_down(writer_monitor, deadline_at) do
+        await_down(source_monitor, deadline_at)
+      end
+    after
+      Process.demonitor(writer_monitor, [:flush])
+      Process.demonitor(source_monitor, [:flush])
     end
   end
 
@@ -98,6 +126,12 @@ defmodule HTTP.HTTP1.Upload do
   end
 
   defp read_body(state) do
+    if remaining_timeout(body_deadline(state)) == 0,
+      do: {:error, body_timeout(state)},
+      else: receive_body(state)
+  end
+
+  defp receive_body(state) do
     stream = state.stream
 
     receive do
@@ -127,7 +161,9 @@ defmodule HTTP.HTTP1.Upload do
             ])
 
           0 ->
-            :ok
+            if remaining_timeout(body_deadline(state)) == 0,
+              do: {:error, body_timeout(state)},
+              else: :ok
 
           _ ->
             {:error, :content_length_mismatch}
@@ -136,7 +172,7 @@ defmodule HTTP.HTTP1.Upload do
       {:stream_error, ^stream, reason} ->
         {:error, reason}
     after
-      remaining_timeout(state.deadline_at) -> {:error, :request_timeout}
+      remaining_timeout(body_deadline(state)) -> {:error, body_timeout(state)}
     end
   end
 
@@ -149,6 +185,9 @@ defmodule HTTP.HTTP1.Upload do
         {:error, :content_length_mismatch}
 
       true ->
+        if state.remaining != nil and byte_size(chunk) == state.remaining,
+          do: begin_completion(state.completion, state.deadline_at)
+
         data =
           if state.remaining == nil and chunk != "",
             do: [Integer.to_string(byte_size(chunk), 16), "\r\n", chunk, "\r\n"],
@@ -160,6 +199,16 @@ defmodule HTTP.HTTP1.Upload do
           read_body(%{state | remaining: remaining})
         end
     end
+  end
+
+  defp body_deadline(state) do
+    if :atomics.get(state.completion, 1) == 1,
+      do: :atomics.get(state.completion, 2),
+      else: state.deadline_at
+  end
+
+  defp body_timeout(state) do
+    if remaining_timeout(state.deadline_at) == 0, do: :request_timeout, else: :timeout
   end
 
   defp remaining_timeout(:infinity), do: :infinity

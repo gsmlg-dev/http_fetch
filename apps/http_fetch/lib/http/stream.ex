@@ -202,6 +202,8 @@ defmodule HTTP.Stream do
     end
   rescue
     error -> __MODULE__.error(stream, error)
+  catch
+    kind, reason -> __MODULE__.error(stream, {:source_failure, kind, reason})
   end
 
   defp loop(%__MODULE__{} = state) do

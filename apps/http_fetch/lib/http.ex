@@ -178,6 +178,13 @@ defmodule HTTP do
   Automatic/H2/H3 protocols and managed scopes reject explicit values; upload
   sources retain their existing policy.
 
+  For an ordinary HTTP/1 fixed-length stream upload, a response after the final
+  declared bytes waits for source completion, including enumerable resource
+  finalization, under a finite completion budget capped by the total deadline.
+  Source/finalizer exceptions fail the request even if the peer sent success.
+  Cancellation or expiry may forcibly stop the source; process termination alone
+  does not certify callback completion.
+
   Example Usage:
 
       # GET request and awaiting JSON
