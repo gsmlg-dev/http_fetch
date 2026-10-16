@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finite defaults, network idle policies, cancellation and total limits stay
   independent (#131).
 
+### Fixed
+- Confirm fixed-length HTTP/1 upload source completion before exposing an
+  immediate peer response, preserving enumerable resource finalization. Source
+  failures and bounded completion expiry fail the request; genuinely early
+  responses and cancellation retain bounded teardown (#132).
+
 ## [0.21.12] - 2026-10-16
 
 ### Added

@@ -1567,7 +1567,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp handle_event(state, {:headers, status, headers}) do
-    case stop_http1_upload(state, :early_response) do
+    case settle_http1_upload(state) do
       {:ok, state} -> handle_http1_headers(state, status, headers)
       {:error, reason, state} -> fail(state, reason)
     end
@@ -1630,6 +1630,70 @@ defmodule HTTP.SocketClient do
   defp handle_event(state, :done) do
     send_error(state.parent, state.ref, :invalid_http_response)
     finish(state)
+  end
+
+  defp settle_http1_upload(%{upload: nil} = state), do: {:ok, state}
+
+  defp settle_http1_upload(state) do
+    case HTTP.HTTP1.Upload.completion_deadline(state.upload) do
+      nil -> stop_http1_upload(state, :early_response)
+      deadline -> await_http1_upload_completion(state, deadline)
+    end
+  end
+
+  # Stream end is emitted only after enumerable finalization returns. The
+  # final DATA write alone cannot establish source validation or cleanup.
+  defp await_http1_upload_completion(state, deadline) do
+    upload = state.upload
+
+    receive do
+      {:http1_upload, token, :ok} when token == upload.token ->
+        case upload_completion_interruption(state, deadline) do
+          nil ->
+            HTTP.HTTP1.Upload.completed(upload)
+            {:ok, %{state | upload: nil}}
+
+          reason ->
+            {:error, reason, state}
+        end
+
+      {:http1_upload, token, {:error, reason}} when token == upload.token ->
+        {:error, reason, state}
+
+      {:DOWN, monitor, :process, _pid, reason} when monitor == upload.monitor ->
+        {:error, {:upload_process_down, reason}, state}
+
+      :abort ->
+        {:error, :aborted, state}
+
+      :deadline ->
+        {:error, :request_timeout, state}
+
+      {:DOWN, monitor, :process, _pid, _reason} when monitor == state.parent_monitor ->
+        {:error, :subscriber_down, state}
+    after
+      remaining_timeout(deadline) ->
+        {:error, upload_completion_timeout(state), state}
+    end
+  end
+
+  defp upload_completion_interruption(state, deadline) do
+    receive do
+      :abort ->
+        :aborted
+
+      :deadline ->
+        :request_timeout
+
+      {:DOWN, monitor, :process, _pid, _reason} when monitor == state.parent_monitor ->
+        :subscriber_down
+    after
+      0 -> if remaining_timeout(deadline) == 0, do: upload_completion_timeout(state)
+    end
+  end
+
+  defp upload_completion_timeout(state) do
+    if remaining_timeout(state.deadline_at) == 0, do: :request_timeout, else: :timeout
   end
 
   defp rearm(state) do

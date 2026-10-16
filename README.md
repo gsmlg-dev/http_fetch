@@ -590,17 +590,31 @@ response =
 ```
 
 HTTP/1 receives upstream responses while a stream upload is still open. A final
-response stops the unfinished upload without replaying it. HTTP/1 uploads keep
+response stops an incomplete upload without replaying it. HTTP/1 uploads keep
 one acknowledged source chunk in flight, with a 65,536-byte maximum per chunk;
 larger chunks fail with `:buffer_limit`. Split large producer items into smaller
 chunks. The response owner retains active-once receive credit even while a write
 is blocked. Cancellation signals (`HTTP.AbortController.abort/1` and
 `HTTP.Stream.error/2`) return after signalling; monitor the affected stream PID
-for `:DOWN` to confirm its cleanup. Terminal request errors also stop the upload
+for `:DOWN` to confirm its termination. Terminal request errors also stop the upload
 stream and wake blocked producers, including failures before connection setup
 on routes without a completion barrier. A stopped stream cannot be reused.
 An early response is exposed only after its unfinished upload writer and source
 have terminated.
+
+For a fixed `Content-Length` upload whose declared bytes have been sent, an
+immediate peer response waits for the source to end before it is exposed. With
+`HTTP.Stream.from_enumerable/2`, normal source completion includes return from
+`Stream.resource/3` finalization, so successful completion cannot cut off that
+callback. Overflow and raised/thrown/exited source or finalizer failures fail the
+request even if the peer sent HTTP 200. Enumerable finalizer return values are
+ignored by Elixir; failed final validation must raise, throw or exit.
+
+Completion confirmation has a finite streaming-operation budget, further bounded
+by the request deadline. Cancellation, caller loss and expiry remain effective;
+failed or genuinely early requests may forcibly terminate the source. Process
+termination alone does not certify that an interrupted callback completed. The
+response ACK policy does not change this upload completion budget.
 
 For HTTP/1 upload trailers, use an unknown-length stream, declare trailer names
 in the initial headers, and complete the stream with ordered fields:
