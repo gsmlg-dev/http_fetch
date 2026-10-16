@@ -14,6 +14,8 @@ defmodule HTTP.Stream do
             decoders: [],
             reader_monitor: nil,
             writer: nil,
+            idle_timeout: nil,
+            idle_deadline: nil,
             reader_ack?: false,
             chunks: [],
             pending_ack: nil,
@@ -47,12 +49,15 @@ defmodule HTTP.Stream do
             %{owner: owner, token: token, monitor: Process.monitor(owner)}
           end
 
-        loop(%__MODULE__{
+        %__MODULE__{
           start_time: start_time,
           decoders: decoders,
           telemetry: telemetry,
-          writer: writer
-        })
+          writer: writer,
+          idle_timeout: Keyword.get(opts, :idle_timeout)
+        }
+        |> reset_idle_deadline()
+        |> loop()
       after
         if producer = Process.get(:stream_producer), do: Process.exit(producer, :kill)
         HTTP.ContentDecoder.close(decoders)
@@ -197,6 +202,12 @@ defmodule HTTP.Stream do
   end
 
   defp loop(%__MODULE__{} = state) do
+    # Check before receive as queued control messages can otherwise starve an
+    # expired receive-after deadline without providing any network progress.
+    if idle_expired?(state), do: timeout(state), else: receive_message(state)
+  end
+
+  defp receive_message(state) do
     receive do
       {:enumerable_producer, producer} ->
         Process.put(:stream_producer, producer)
@@ -300,12 +311,33 @@ defmodule HTTP.Stream do
         _ = reply_pending(state, {:error, {:reader_down, reason}})
         :ok
     after
-      HTTP.Config.streaming_timeout() ->
+      idle_timeout(state) ->
         timeout(state)
     end
   end
 
+  defp idle_expired?(%{pending_ack: nil, idle_timeout: timeout, done?: false, error: nil} = state)
+       when is_integer(timeout),
+       do: idle_timeout(state) == 0
+
+  defp idle_expired?(_state), do: false
+
+  defp idle_timeout(%{pending_ack: nil, idle_timeout: timeout} = state) when timeout != nil do
+    if state.done? or state.error != nil or timeout == :infinity,
+      do: :infinity,
+      else: max(state.idle_deadline - System.monotonic_time(:millisecond), 0)
+  end
+
+  defp idle_timeout(_state), do: HTTP.Config.streaming_timeout()
+
+  defp reset_idle_deadline(%{idle_timeout: timeout} = state) when is_integer(timeout),
+    do: %{state | idle_deadline: System.monotonic_time(:millisecond) + timeout}
+
+  defp reset_idle_deadline(state), do: state
+
   defp consume_chunk(state, sender, ref, chunk) do
+    state = if chunk == "", do: state, else: reset_idle_deadline(state)
+
     case HTTP.ContentDecoder.decode(state.decoders, chunk) do
       {:ok, ""} when state.decoders != [] ->
         send(sender, {:chunk_ack, ref})
@@ -361,9 +393,9 @@ defmodule HTTP.Stream do
 
     _state =
       state
+      |> reply_pending({:error, :timeout})
       |> Map.put(:error, :timeout)
       |> flush()
-      |> reply_pending({:error, :timeout})
 
     :ok
   end
@@ -432,7 +464,7 @@ defmodule HTTP.Stream do
 
   defp reply_pending(%__MODULE__{pending_ack: {sender, ref}} = state, :ok) do
     send(sender, {:chunk_ack, ref})
-    %{state | pending_ack: nil}
+    reset_idle_deadline(%{state | pending_ack: nil})
   end
 
   defp reply_pending(%__MODULE__{pending_ack: {sender, ref}} = state, {:error, reason}) do

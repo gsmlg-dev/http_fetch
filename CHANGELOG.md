@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.12] - 2026-10-16
+
+### Added
+- Per-request HTTP/1 response stream idle policy, including `:infinity`, without
+  changing global configuration or consumer acknowledgement safety. Response
+  readers follow the policy; socket idle deadlines, cancellation and owned
+  cleanup remain independent (#129).
+
 ## [0.21.11] - 2026-10-15
 
 ### Added
