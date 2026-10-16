@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.13] - 2026-10-16
+
+### Added
+- Per-request ordinary HTTP/1 response consumer delivery/acknowledgement deadlines,
+  including `:infinity`, across both Stream and socket producer waits. Existing
+  finite defaults, network idle policies, cancellation and total limits stay
+  independent (#131).
+
 ## [0.21.12] - 2026-10-16
 
 ### Added

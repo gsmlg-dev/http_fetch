@@ -170,6 +170,14 @@ defmodule HTTP do
   deadlines, cancellation and owned cleanup remain independent. Automatic/H2/H3
   protocols and managed transport scopes reject an explicit policy.
 
+  `response_stream_ack_timeout` sets a separate ordinary HTTP/1 response
+  consumer delivery/acknowledgement deadline in positive milliseconds up to
+  4_294_967_295 or `:infinity`; omitted/nil retains the global streaming-operation
+  limit. Both the Stream and socket producer use this policy. Network inactivity,
+  total request deadlines, cancellation and reader cleanup stay independent.
+  Automatic/H2/H3 protocols and managed scopes reject explicit values; upload
+  sources retain their existing policy.
+
   Example Usage:
 
       # GET request and awaiting JSON

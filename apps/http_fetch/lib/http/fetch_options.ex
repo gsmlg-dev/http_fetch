@@ -54,9 +54,16 @@ defmodule HTTP.FetchOptions do
   - `response_stream_idle_timeout` - ordinary HTTP/1 response-stream inactivity
     in positive milliseconds (1..4,294,967,295), or `:infinity` to disable the
     network-wait clock. `nil` (default) retains the global streaming timeout.
-    Consumer acknowledgement waits still use the finite global timeout.
+    Consumer acknowledgement waits use the separate ACK policy below.
     Convenience body readers use the same stream policy. Other protocols and
     managed `transport_scope` reject explicit policies.
+  - `response_stream_ack_timeout` - ordinary HTTP/1 response chunk delivery and
+    consumer acknowledgement budget in positive milliseconds (1..4,294,967,295),
+    or `:infinity`. `nil` (default) retains the global streaming timeout.
+    This covers a buffered chunk awaiting a reader and a delivered chunk awaiting
+    acknowledgement. It does not change network idle, overall request deadlines,
+    cancellation or reader-death cleanup. Other protocols and managed
+    `transport_scope` reject explicit policies.
   - `transport_scope` - opaque `HTTP.ManagedTransport` generation selecting
     private reusable HTTP/1 or HTTP/2 transports. Requires raw streamed responses,
     manual/error redirects, and the origin/policy frozen by `open/1`.
@@ -122,6 +129,8 @@ defmodule HTTP.FetchOptions do
     "readIdleTimeout" => :read_idle_timeout,
     "write_idle_timeout" => :write_idle_timeout,
     "writeIdleTimeout" => :write_idle_timeout,
+    "response_stream_ack_timeout" => :response_stream_ack_timeout,
+    "responseStreamAckTimeout" => :response_stream_ack_timeout,
     "response_stream_idle_timeout" => :response_stream_idle_timeout,
     "responseStreamIdleTimeout" => :response_stream_idle_timeout,
     "content_type" => :content_type,
@@ -190,6 +199,7 @@ defmodule HTTP.FetchOptions do
             read_idle_timeout: nil,
             write_idle_timeout: nil,
             response_stream_idle_timeout: nil,
+            response_stream_ack_timeout: nil,
             connect_address: nil,
             ssl: nil,
             socket_opts: nil,
@@ -230,6 +240,7 @@ defmodule HTTP.FetchOptions do
           read_idle_timeout: pos_integer() | nil,
           write_idle_timeout: pos_integer() | nil,
           response_stream_idle_timeout: pos_integer() | :infinity | nil,
+          response_stream_ack_timeout: pos_integer() | :infinity | nil,
           connect_address: :inet.ip_address() | nil,
           ssl: list() | nil,
           socket_opts: list() | nil,
@@ -281,6 +292,7 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:read_idle_timeout, options.read_idle_timeout)
     |> maybe_add(:write_idle_timeout, options.write_idle_timeout)
     |> maybe_add(:response_stream_idle_timeout, options.response_stream_idle_timeout)
+    |> maybe_add(:response_stream_ack_timeout, options.response_stream_ack_timeout)
     |> maybe_add(:connect_address, options.connect_address)
     |> maybe_add(:ssl, options.ssl)
     |> maybe_add(:socket_opts, options.socket_opts)
@@ -392,6 +404,9 @@ defmodule HTTP.FetchOptions do
       {:write_idle_timeout, timeout}, acc ->
         %{acc | write_idle_timeout: timeout}
 
+      {:response_stream_ack_timeout, timeout}, acc ->
+        %{acc | response_stream_ack_timeout: timeout}
+
       {:response_stream_idle_timeout, timeout}, acc ->
         %{acc | response_stream_idle_timeout: timeout}
 
@@ -473,6 +488,8 @@ defmodule HTTP.FetchOptions do
           normalize_idle_timeout(options.write_idle_timeout, :write_idle_timeout),
         response_stream_idle_timeout:
           normalize_response_stream_idle_timeout(options.response_stream_idle_timeout),
+        response_stream_ack_timeout:
+          normalize_response_stream_ack_timeout(options.response_stream_ack_timeout),
         tls_backend: normalize_tls_backend(options.tls_backend, http_version),
         http1_reuse: normalize_http1_reuse(options.http1_reuse, http_version),
         http1_scope: normalize_http2_scope(options.http1_scope),
@@ -488,6 +505,7 @@ defmodule HTTP.FetchOptions do
     |> validate_connect_address()
     |> validate_idle_protocol()
     |> validate_response_stream_idle_protocol()
+    |> validate_response_stream_ack_protocol()
   end
 
   defp normalize_response_stream_idle_timeout(timeout) when timeout in [nil, :infinity],
@@ -506,6 +524,23 @@ defmodule HTTP.FetchOptions do
 
   defp validate_response_stream_idle_protocol(_options),
     do: raise(ArgumentError, "response_stream_idle_timeout requires http_version: :http1")
+
+  defp normalize_response_stream_ack_timeout(timeout) when timeout in [nil, :infinity],
+    do: timeout
+
+  defp normalize_response_stream_ack_timeout(timeout),
+    do: normalize_idle_timeout(timeout, :response_stream_ack_timeout)
+
+  defp validate_response_stream_ack_protocol(%{response_stream_ack_timeout: nil} = options),
+    do: options
+
+  defp validate_response_stream_ack_protocol(%{transport_scope: scope}) when scope != nil,
+    do: raise(ArgumentError, "response_stream_ack_timeout is unsupported with transport_scope")
+
+  defp validate_response_stream_ack_protocol(%{http_version: :http1} = options), do: options
+
+  defp validate_response_stream_ack_protocol(_options),
+    do: raise(ArgumentError, "response_stream_ack_timeout requires http_version: :http1")
 
   defp normalize_idle_timeout(nil, _key), do: nil
 
