@@ -10,7 +10,8 @@ defmodule HTTP.SocketClient do
 
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
-    with :ok <- validate_response_stream_idle_protocol(request),
+    with :ok <- validate_response_stream_ack_protocol(request),
+         :ok <- validate_response_stream_idle_protocol(request),
          :ok <- validate_idle_protocol(request),
          :ok <- HTTP.Runtime.Dialer.validate_connect_address_route(request, unix_socket_path) do
       do_request(request, abort_controller_pid, unix_socket_path)
@@ -1505,6 +1506,10 @@ defmodule HTTP.SocketClient do
           :idle_timeout,
           state.request.transport_options[:response_stream_idle_timeout]
         )
+        |> Keyword.put(
+          :ack_timeout,
+          state.request.transport_options[:response_stream_ack_timeout]
+        )
 
       with {:ok, stream} <- HTTP.Stream.start_link(content_length, encodings, opts),
            do: {:ok, stream, nil}
@@ -1573,7 +1578,12 @@ defmodule HTTP.SocketClient do
       if state.writer,
         do:
           HTTP.Stream.Writer.chunk(state.writer, chunk, stream_chunk_timeout(state.deadline_at)),
-        else: HTTP.Stream.chunk(stream_pid, chunk, stream_chunk_timeout(state.deadline_at))
+        else:
+          HTTP.Stream.chunk(
+            stream_pid,
+            chunk,
+            response_stream_chunk_timeout(state)
+          )
 
     case result do
       :ok -> {:continue, state}
@@ -2067,6 +2077,24 @@ defmodule HTTP.SocketClient do
   defp demonitor_response_stream(%{response_stream_monitor: monitor}),
     do: Process.demonitor(monitor, [:flush])
 
+  defp validate_response_stream_ack_protocol(request) do
+    options = request.transport_options
+
+    cond do
+      options[:response_stream_ack_timeout] == nil ->
+        :ok
+
+      options[:transport_scope] != nil or options[:managed_coordinator] != nil ->
+        {:error, {:unsupported_response_stream_ack_timeout, :transport_scope}}
+
+      http_version(request) != :http1 ->
+        {:error, {:unsupported_response_stream_ack_timeout, :http_version}}
+
+      true ->
+        :ok
+    end
+  end
+
   defp validate_response_stream_idle_protocol(request) do
     options = request.transport_options
 
@@ -2193,6 +2221,14 @@ defmodule HTTP.SocketClient do
 
   defp remaining_timeout(deadline_at) do
     max(deadline_at - System.monotonic_time(:millisecond), 0)
+  end
+
+  defp response_stream_chunk_timeout(state) do
+    timeout =
+      state.request.transport_options[:response_stream_ack_timeout] ||
+        HTTP.Config.streaming_timeout()
+
+    min(remaining_timeout(state.deadline_at), timeout)
   end
 
   defp stream_chunk_timeout(:infinity), do: HTTP.Config.streaming_timeout()

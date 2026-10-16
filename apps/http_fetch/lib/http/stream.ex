@@ -16,6 +16,8 @@ defmodule HTTP.Stream do
             writer: nil,
             idle_timeout: nil,
             idle_deadline: nil,
+            ack_timeout: nil,
+            ack_deadline: nil,
             reader_ack?: false,
             chunks: [],
             pending_ack: nil,
@@ -54,7 +56,8 @@ defmodule HTTP.Stream do
           decoders: decoders,
           telemetry: telemetry,
           writer: writer,
-          idle_timeout: Keyword.get(opts, :idle_timeout)
+          idle_timeout: Keyword.get(opts, :idle_timeout),
+          ack_timeout: Keyword.get(opts, :ack_timeout)
         }
         |> reset_idle_deadline()
         |> loop()
@@ -203,7 +206,7 @@ defmodule HTTP.Stream do
 
   defp loop(%__MODULE__{} = state) do
     # Check before receive as queued control messages can otherwise starve an
-    # expired receive-after deadline without providing any network progress.
+    # expired receive-after deadline without providing network or ACK progress.
     if idle_expired?(state), do: timeout(state), else: receive_message(state)
   end
 
@@ -320,12 +323,23 @@ defmodule HTTP.Stream do
        when is_integer(timeout),
        do: idle_timeout(state) == 0
 
+  defp idle_expired?(%{pending_ack: ack, ack_timeout: timeout} = state)
+       when ack != nil and is_integer(timeout),
+       do: idle_timeout(state) == 0
+
   defp idle_expired?(_state), do: false
 
   defp idle_timeout(%{pending_ack: nil, idle_timeout: timeout} = state) when timeout != nil do
     if state.done? or state.error != nil or timeout == :infinity,
       do: :infinity,
       else: max(state.idle_deadline - System.monotonic_time(:millisecond), 0)
+  end
+
+  defp idle_timeout(%{pending_ack: ack, ack_timeout: timeout} = state)
+       when ack != nil and timeout != nil do
+    if timeout == :infinity,
+      do: :infinity,
+      else: max(state.ack_deadline - System.monotonic_time(:millisecond), 0)
   end
 
   defp idle_timeout(_state), do: HTTP.Config.streaming_timeout()
@@ -384,6 +398,10 @@ defmodule HTTP.Stream do
 
   defp maybe_continue(%__MODULE__{} = state), do: loop(state)
 
+  defp timeout(%__MODULE__{pending_ack: ack, ack_timeout: timeout} = state)
+       when ack != nil and timeout != nil,
+       do: fail(state, :timeout)
+
   defp timeout(%__MODULE__{done?: true} = state), do: loop(state)
   defp timeout(%__MODULE__{error: error} = state) when not is_nil(error), do: loop(state)
 
@@ -401,18 +419,26 @@ defmodule HTTP.Stream do
   end
 
   defp push_chunk(%__MODULE__{reader: nil, chunks: chunks} = state, chunk, ack) do
-    %{state | chunks: [chunk | chunks], pending_ack: ack}
+    set_pending_ack(%{state | chunks: [chunk | chunks]}, ack)
   end
 
   defp push_chunk(%__MODULE__{reader: reader, reader_ack?: true} = state, chunk, ack) do
     {_sender, ref} = ack
     send(reader, {:stream_chunk, self(), chunk, ref})
-    %{state | pending_ack: ack}
+    set_pending_ack(state, ack)
   end
 
   defp push_chunk(%__MODULE__{reader: reader} = state, chunk, ack) do
     send(reader, {:stream_chunk, self(), chunk})
     reply_pending(%{state | pending_ack: ack}, :ok)
+  end
+
+  defp set_pending_ack(state, ack) do
+    deadline =
+      if is_integer(state.ack_timeout),
+        do: System.monotonic_time(:millisecond) + state.ack_timeout
+
+    %{state | pending_ack: ack, ack_deadline: deadline}
   end
 
   defp flush(%__MODULE__{reader: nil} = state), do: state

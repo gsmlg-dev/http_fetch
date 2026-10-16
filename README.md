@@ -246,8 +246,37 @@ protocol selection, HTTP/2, HTTP/3 and managed transport scopes reject an explic
 policy. Upload-source streams retain their existing policy.
 
 Consumer acknowledgement safety stays independent: a delivered chunk awaiting
-acknowledgement still has the existing finite streaming-operation budget. Overall
+acknowledgement still has the existing finite streaming-operation budget by default.
+Use `response_stream_ack_timeout` to select a separate per-request policy. Overall
 request and connection limits, cancellation and reader cleanup also remain active.
+
+### Per-Request Response Consumer Acknowledgement Deadline
+
+`response_stream_ack_timeout` controls how long an ordinary HTTP/1 response
+chunk may wait for a consumer, including delivery and acknowledgement. It accepts
+positive integer milliseconds up to 4,294,967,295 or `:infinity`; omitted or `nil`
+keeps the existing global streaming-operation limit. Zero is invalid.
+
+Use a longer finite value for bounded slow sinks, or explicitly disable this
+additional limit for application-paced delivery:
+
+```elixir
+HTTP.fetch(url,
+  http_version: :http1,
+  stream_response: true,
+  response_stream_idle_timeout: :infinity,
+  response_stream_ack_timeout: :infinity,
+  timeout: :infinity
+)
+```
+
+Keep at most one acknowledged chunk and acknowledge it after delivery. This
+setting covers both the response Stream and the socket producer's ACK wait;
+it does not buffer the whole response. Network inactivity retains its separate
+`response_stream_idle_timeout` policy. Overall deadlines, cancellation and reader
+loss still terminate the owned request. The option supports TCP, OTP TLS and
+ExSSL; automatic/H2/H3 protocols and managed transport scopes reject explicit
+values. Upload-source streams retain their existing policy.
 
 ## HTTP/1 Response Framing
 
