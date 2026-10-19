@@ -21,6 +21,14 @@ defmodule HTTP.Transport do
     end
   end
 
+  @doc false
+  def tls_setup_error(opts, reason) do
+    case Keyword.get(opts, :connect_failure_token) do
+      token when is_reference(token) -> {:error, {:tls_setup_failure, token, reason}}
+      _ -> {:error, reason}
+    end
+  end
+
   @callback connect(String.t(), non_neg_integer(), keyword(), timeout()) ::
               {:ok, socket()} | {:error, term()}
   @callback controlling_process(socket(), pid()) :: :ok | {:error, term()}

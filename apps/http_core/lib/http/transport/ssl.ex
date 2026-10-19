@@ -28,7 +28,7 @@ defmodule HTTP.Transport.SSL do
           [:binary, packet: :raw, active: false] ++
             ssl_opts ++ Keyword.get(opts, :socket_opts, [])
 
-        case :ssl.connect(tcp, tls_opts, remaining) do
+        case connect_tls(tcp, tls_opts, opts, deadline, remaining) do
           {:ok, socket} ->
             case HTTP.RequestLifecycle.track_tls(opts, socket) do
               :ok ->
@@ -40,7 +40,7 @@ defmodule HTTP.Transport.SSL do
             end
 
           {:error, _} = error ->
-            unconfirmed_setup(opts)
+            if not Keyword.get(opts, :tls_setup_evidence, false), do: unconfirmed_setup(opts)
             abort_tcp(tcp)
             error
         end
@@ -49,6 +49,50 @@ defmodule HTTP.Transport.SSL do
         HTTP.Transport.connect_error(opts, reason)
     end
   end
+
+  # Public hello pause exposes the exact TLS receiver/sender before certificate
+  # validation. No HTTP bytes can be sent before this continuation returns.
+  defp connect_tls(tcp, tls_opts, opts, deadline, remaining) do
+    if Keyword.get(opts, :tls_setup_evidence, false) do
+      case :ssl.connect(tcp, Keyword.put(tls_opts, :handshake, :hello), remaining) do
+        {:ok, socket, _extensions} ->
+          with :ok <- HTTP.RequestLifecycle.track_tls(opts, socket) do
+            socket
+            |> :ssl.handshake_continue([], remaining(deadline))
+            |> setup_result(opts, deadline)
+          end
+
+        {:error, _} = error ->
+          unconfirmed_setup(opts)
+          error
+      end
+    else
+      :ssl.connect(tcp, tls_opts, remaining)
+    end
+  end
+
+  defp setup_result({:error, {:tls_alert, {alert, _}} = reason}, opts, deadline)
+       when alert in [
+              :handshake_failure,
+              :bad_certificate,
+              :unsupported_certificate,
+              :certificate_revoked,
+              :certificate_expired,
+              :certificate_unknown,
+              :unknown_ca,
+              :access_denied,
+              :certificate_required,
+              :no_application_protocol
+            ] do
+    if remaining(deadline) > 0,
+      do: HTTP.Transport.tls_setup_error(opts, reason),
+      else: {:error, reason}
+  end
+
+  defp setup_result(result, _opts, _deadline), do: result
+
+  defp remaining(:infinity), do: :infinity
+  defp remaining(deadline), do: max(deadline - now(), 0)
 
   @doc false
   def upgrade(tcp, host, opts, timeout) do
@@ -91,10 +135,9 @@ defmodule HTTP.Transport.SSL do
   end
 
   # A failed public connect returns no TLS socket. OTP may reply before its
-  # receiver/sender terminate, so a managed generation has no proven DOWN barrier.
+  # receiver/sender terminate, so there is no proven DOWN barrier.
   defp unconfirmed_setup(opts) do
-    if Keyword.get(opts, :managed_coordinator),
-      do: HTTP.RequestLifecycle.unconfirmed_tls(Keyword.get(opts, :request_lifecycle))
+    HTTP.RequestLifecycle.unconfirmed_tls(Keyword.get(opts, :request_lifecycle))
   end
 
   defp now, do: System.monotonic_time(:millisecond)

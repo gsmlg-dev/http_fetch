@@ -49,7 +49,9 @@ defmodule HTTP.Runtime.Dialer do
             transport,
             host,
             port,
-            Keyword.put(transport_opts(request, selection, timeout), :proxy_route, proxy),
+            transport_opts(request, selection, timeout)
+            |> Keyword.put(:proxy_route, proxy)
+            |> Keyword.update!(:tls_setup_evidence, &(&1 and is_nil(proxy))),
             connect_timeout,
             cancel_monitor,
             timeout
@@ -248,6 +250,23 @@ defmodule HTTP.Runtime.Dialer do
           deadline_at,
           cancel_monitor
         )
+
+      {:connect_result, ^ref, {:error, {:tls_setup_failure, _, _}} = result} ->
+        # Cancellation/deadline may already be queued behind the native result.
+        # Evidence never authorizes a retry when either has won the request race.
+        receive do
+          :abort ->
+            {:error, :aborted}
+
+          :deadline ->
+            {:error, :request_timeout}
+
+          {:DOWN, ^cancel_monitor, :process, _, _} when is_reference(cancel_monitor) ->
+            {:error, :subscriber_down}
+        after
+          0 ->
+            if remaining_timeout(deadline_at) == 0, do: {:error, :request_timeout}, else: result
+        end
 
       {:connect_result, ^ref, result} ->
         result
@@ -502,6 +521,7 @@ defmodule HTTP.Runtime.Dialer do
              (is_pid(request.body) or Keyword.get(request.transport_options, :http1_reuse, false))) or
           is_reference(Keyword.get(request.transport_options, :connect_failure_token)),
       connect_failure_token: Keyword.get(request.transport_options, :connect_failure_token),
+      tls_setup_evidence: tls_setup_evidence?(request, selection),
       request_lifecycle: Keyword.get(request.transport_options, :request_lifecycle),
       managed_coordinator: Keyword.get(request.transport_options, :managed_coordinator),
       connect_address: Keyword.get(request.transport_options, :connect_address),
@@ -512,6 +532,19 @@ defmodule HTTP.Runtime.Dialer do
       socket_opts: socket_opts
     ]
     |> Enum.reject(fn {key, value} -> key == :connect_address and is_nil(value) end)
+  end
+
+  defp tls_setup_evidence?(request, selection) do
+    opts = request.transport_options
+    ssl_opts = Keyword.get(opts, :ssl, [])
+
+    is_reference(Keyword.get(opts, :connect_failure_token)) and
+      is_pid(Keyword.get(opts, :request_lifecycle)) and selection.mode == :http1 and
+      not Keyword.get(opts, :http1_reuse, false) and
+      is_nil(Keyword.get(opts, :managed_coordinator)) and
+      is_nil(Keyword.get(opts, :proxy)) and
+      not Keyword.has_key?(ssl_opts, :handshake) and
+      not Keyword.has_key?(ssl_opts, :early_data)
   end
 
   defp put_alpn(ssl_opts, []), do: ssl_opts

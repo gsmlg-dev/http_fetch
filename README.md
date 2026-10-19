@@ -549,30 +549,50 @@ NO_PROXY selection remain caller responsibilities.
 
 Use `error_mode: :structured` to receive `{:error, %HTTP.RequestError{}}`.
 The default keeps existing raw error reasons. `error.reason` contains the
-original reason; `HTTP.RequestError.pre_send?(error)` is true only when direct
-TCP or OTP TLS dialing failed before TCP establishment, using manual/error
-redirects. A fresh request-local token ties evidence to that attempt. TLS
-negotiation, pooled socket failures, partial uploads, source/send/response
-errors, cancellation, and uncertain deadline outcomes remain unconfirmed.
+original reason; `HTTP.RequestError.pre_send?(error)` is true when direct
+TCP or OTP TLS dialing failed before TCP establishment (`phase: :connect`),
+using manual/error redirects. Ordinary direct HTTP/1 with OTP TLS can also
+report `phase: :tls_setup` for a confirmed TLS alert after ServerHello, before
+any HTTP bytes are sent. This path registers the TLS receiver and sender before
+continuing the handshake, so the request completion barrier can wait for both.
+A fresh request-local token ties evidence to that attempt.
+
+TLS failures before ServerHello, interrupted or uncertain negotiation, pooled
+requests, partial uploads, source/send/response errors, cancellation, and
+uncertain deadline outcomes remain unconfirmed. TLS setup evidence excludes
+reuse, proxies, managed scopes, H2/H3, and custom handshake or early-data options.
 Automatic redirect chains and ExSSL never provide positive pre-send evidence.
 
 Fetch performs no automatic address failover or HTTP retry. A caller may try
 another independently validated `connect_address` only after positive evidence,
 while checking its original absolute deadline and cancellation signal. Set each
 attempt's `timeout` to the remaining total budget and keep the same authority,
-TLS verification policy, and signal. Confirm cleanup before replacing an upload
-source: terminal attempt errors stop its stream, which cannot be reused.
+TLS verification policy, and signal. Require
+`HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), remaining_budget)`
+to return `:ok` before another attempt, then recheck cancellation and the original
+absolute deadline. A TLS failure without known receiver/sender handles leaves
+cleanup unconfirmed. Terminal attempt errors stop an upload stream, which must
+be replaced before another attempt. Completion confirms tracked logical
+resources, not native ERTS reclamation or remote receipt.
 
 ```elixir
-result = HTTP.fetch(url, connect_address: validated_ip, redirect: :manual,
-  error_mode: :structured, timeout: remaining_budget, signal: controller)
-  |> HTTP.Promise.await()
+deadline = System.monotonic_time(:millisecond) + 5_000
+remaining = fn -> max(deadline - System.monotonic_time(:millisecond), 0) end
+
+promise = HTTP.fetch(url, connect_address: validated_ip, redirect: :manual,
+  error_mode: :structured, timeout: remaining.(), signal: controller)
+result = HTTP.Promise.await(promise)
 
 case result do
-  {:error, %HTTP.RequestError{} = error} -> HTTP.RequestError.pre_send?(error)
+  {:error, %HTTP.RequestError{} = error} ->
+    HTTP.RequestError.pre_send?(error) and
+      HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), remaining.()) == :ok
   %HTTP.Response{} -> false
 end
 ```
+
+The boolean above checks evidence and cleanup only; recheck the original deadline
+and cancellation signal before advancing to another validated pin.
 
 ## Streaming Request Body
 
