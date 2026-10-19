@@ -801,6 +801,14 @@ semantics. Acknowledge received Message events after downstream consumption.
 Monitor the socket's public `pid` and wait for `:DOWN` after `close/1` to confirm
 resource cleanup; owner death also cancels the connection.
 
+Default connection process status and OTP termination formatting expose only validated
+operational metadata. URLs, transport options, parser buffers, queued payloads,
+current messages and error terms are redacted. Abnormal connection exits and
+cleanup failures use the literal monitor reason `:shutdown` to keep independent
+OTP crash reports from disclosing private terms; normal exits retain `:normal`.
+Explicit debugger access, including `:sys.get_state/1`, `:sys.log/2` and
+`:sys.trace/2`, can still expose live state or messages.
+
 HTTP/1 remains the default. Select `http_version: :http2` for TLS h2 with RFC 8441
 peer permission, or `:h2c` for cleartext prior knowledge. `:auto` on WSS permits
 one separate HTTP/1 connection before establishment when ALPN or peer capability

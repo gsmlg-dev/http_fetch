@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still requires successful completion and deadline/cancellation checks (#135).
 
 ### Fixed
+- Redact private WebSocket connection state, messages and errors from OTP
+  status and termination diagnostics. Normalize abnormal process exits and
+  cleanup failures to `:shutdown` to suppress independent private crash reports
+  while preserving normal transport processing (#136).
 - Report cleanup as unconfirmed when OTP TLS setup fails without returning a
   trackable TLS socket, including proxy and HTTP/2 setup. TCP closure or dial
   helper termination cannot certify the missing TLS receiver/sender cleanup (#135).

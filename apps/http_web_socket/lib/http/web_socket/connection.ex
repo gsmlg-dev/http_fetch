@@ -376,10 +376,46 @@ defmodule HTTP.WebSocket.Connection do
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, state) do
-    _ = detach(state)
-    :ok
+  def terminate(reason, state) do
+    _ =
+      try do
+        detach(state)
+      catch
+        _kind, _private_reason -> exit(:shutdown)
+      end
+
+    # OTP can report the original exception and queued messages independently
+    # of format_status/1. A literal shutdown prevents those crash reports.
+    if reason in [:normal, :shutdown], do: :ok, else: exit(:shutdown)
   end
+
+  @impl true
+  def format_status(status) do
+    Map.new(status, fn
+      {:state, state} -> {:state, diagnostic_summary(state)}
+      {:log, _log} -> {:log, []}
+      {key, _private_value} -> {key, :redacted}
+    end)
+  end
+
+  defp diagnostic_summary(state) when is_map(state) do
+    %{
+      http_version: diagnostic_enum(Map.get(state, :http_version), [:http1, :http2]),
+      ready_state:
+        diagnostic_enum(Map.get(state, :ready_state), [@connecting, @open, @closing, @closed]),
+      binary_type: diagnostic_enum(Map.get(state, :binary_type), [:blob, :array_buffer]),
+      fallback?: diagnostic_enum(Map.get(state, :fallback?), [true, false]),
+      raw_bytes: diagnostic_count(Map.get(state, :raw_bytes)),
+      buffered_amount: diagnostic_count(Map.get(state, :buffered_amount)),
+      pending_send_frames: diagnostic_count(Map.get(state, :pending_send_frames)),
+      control_frames: diagnostic_count(Map.get(state, :control_frames))
+    }
+  end
+
+  defp diagnostic_summary(_state), do: :redacted
+  defp diagnostic_enum(value, allowed), do: if(value in allowed, do: value)
+  defp diagnostic_count(value) when is_integer(value) and value >= 0, do: value
+  defp diagnostic_count(_value), do: nil
 
   defp connect_http2(state) do
     with {:ok, request} <-
