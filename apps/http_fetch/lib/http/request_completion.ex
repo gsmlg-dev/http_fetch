@@ -13,7 +13,10 @@ defmodule HTTP.RequestCompletion do
   A finite timeout covers the entire wait. `:ok` confirms termination of tracked
   request resources; `{:error, :cleanup_pending}` leaves cleanup in progress.
   `{:error, :cleanup_unconfirmed}` means evidence was lost (for example, an
-  owner died without completing cleanup). Repeated and concurrent waits are safe
+  owner died without completing cleanup, or TLS setup failed before a socket
+  exposing its receiver/sender could be tracked). TCP closure and dial-worker
+  termination alone cannot confirm cleanup of those missing TLS processes.
+  Repeated and concurrent waits are safe
   from any process. Success also requires the lifecycle tracker to terminate.
   This is a logical resource barrier: it does not certify native timer, alias,
   monitor, signal-buffer or deferred ERTS reclamation, allocator carriers, RSS,

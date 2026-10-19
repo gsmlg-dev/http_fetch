@@ -238,7 +238,7 @@ defmodule HTTP.ProxyCompletionAcceptanceTest do
     assert_receive {:peer_complete, ^peer}, 1_000
   end
 
-  test "verified proxy identity failure confirms cleanup without origin fallback or replay" do
+  test "proxy identity failure leaves TLS cleanup unconfirmed without origin fallback or replay" do
     {origin, origin_port} = listener()
     {listener, port} = listener()
 
@@ -264,8 +264,13 @@ defmodule HTTP.ProxyCompletionAcceptanceTest do
 
     assert {:error, {:tls_alert, {:bad_certificate, description}}} = Promise.await(promise, 3_000)
     assert to_string(description) =~ "hostname_check_failed"
-    assert :ok = RequestCompletion.await(Promise.completion(promise), 1_000)
-    assert :ok = RequestCompletion.abort_and_await(Promise.completion(promise), 0)
+
+    assert {:error, :cleanup_unconfirmed} =
+             RequestCompletion.await(Promise.completion(promise), 1_000)
+
+    assert {:error, :cleanup_unconfirmed} =
+             RequestCompletion.abort_and_await(Promise.completion(promise), 0)
+
     assert_receive :wrong_proxy_identity_rejected, 1_000
     assert_receive {:peer_complete, ^peer}, 1_000
     assert {:error, :timeout} = :gen_tcp.accept(origin, 0)

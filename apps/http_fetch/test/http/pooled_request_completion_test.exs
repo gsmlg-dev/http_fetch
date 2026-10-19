@@ -321,7 +321,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     end
   end
 
-  test "HTTP2 TLS dialing cancellation confirms cleanup before negotiation" do
+  test "HTTP2 TLS cancellation closes TCP but leaves unreturned TLS cleanup unconfirmed" do
     parent = self()
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
     {:ok, {_, port}} = :inet.sockname(listener)
@@ -346,7 +346,10 @@ defmodule HTTP.PooledRequestCompletionTest do
       )
 
     assert_receive :tls_dial_started, 1_000
-    assert :ok = RequestCompletion.abort_and_await(Promise.completion(promise), 1_000)
+
+    assert {:error, :cleanup_unconfirmed} =
+             RequestCompletion.abort_and_await(Promise.completion(promise), 1_000)
+
     assert {:error, _} = Promise.await(promise)
     assert :ok = Task.await(peer)
   end

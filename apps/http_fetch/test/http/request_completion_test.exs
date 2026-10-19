@@ -217,7 +217,7 @@ defmodule HTTP.RequestCompletionTest do
     assert :ok = Task.await(server)
   end
 
-  test "OTP TLS handshake cancellation confirms the retained TCP and dial worker stop" do
+  test "OTP TLS cancellation closes TCP but leaves unreturned TLS cleanup unconfirmed" do
     {server, url} =
       server(fn socket, parent ->
         {:ok, _client_hello} = :gen_tcp.recv(socket, 0, 2_000)
@@ -234,7 +234,7 @@ defmodule HTTP.RequestCompletionTest do
 
     handle = Promise.completion(promise)
     assert_receive :handshake_started, 1_000
-    assert :ok = RequestCompletion.abort_and_await(handle, 1_000)
+    assert {:error, :cleanup_unconfirmed} = RequestCompletion.abort_and_await(handle, 1_000)
     assert {:error, _} = Promise.await(promise)
     assert_receive {:handshake_closed, {:error, :closed}}
     assert :ok = Task.await(server)

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.14] - 2026-10-19
+
+### Added
+- Confirmed pre-HTTP TLS setup failure evidence for ordinary direct HTTP/1
+  structured requests after ServerHello, with tracked receiver/sender cleanup.
+  Earlier or ambiguous TLS failures remain unconfirmed; caller-managed failover
+  still requires successful completion and deadline/cancellation checks (#135).
+
+### Fixed
+- Report cleanup as unconfirmed when OTP TLS setup fails without returning a
+  trackable TLS socket, including proxy and HTTP/2 setup. TCP closure or dial
+  helper termination cannot certify the missing TLS receiver/sender cleanup (#135).
+
 ## [0.21.13] - 2026-10-16
 
 ### Added

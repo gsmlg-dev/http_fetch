@@ -26,11 +26,13 @@ defmodule HTTP.ProxyRequestCompletionTest do
   end
 
   for stage <- [:connect, :origin_tls, :proxy_tls] do
-    test "#{stage} cancellation tracks the pending socket and waits for the dial helper" do
+    completion = if stage == :connect, do: "confirmed", else: "unconfirmed without a TLS handle"
+
+    test "#{stage} cancellation waits for the dial helper with cleanup #{completion}" do
       assert_pending_stage(unquote(stage))
     end
 
-    test "#{stage} deadline closes the pending proxy route and confirms cleanup" do
+    test "#{stage} deadline closes the pending proxy route with cleanup #{completion}" do
       assert_pending_deadline(unquote(stage))
     end
   end
@@ -138,7 +140,8 @@ defmodule HTTP.ProxyRequestCompletionTest do
       :erlang.resume_process(dial)
     end
 
-    assert :ok = RequestCompletion.await(handle, 1_000)
+    expected = if stage == :connect, do: :ok, else: {:error, :cleanup_unconfirmed}
+    assert ^expected = RequestCompletion.await(handle, 1_000)
     assert_receive {:DOWN, ^monitor, :process, ^dial, :normal}
     assert {:error, _} = Promise.await(promise)
     assert :ok = Task.await(peer)
@@ -152,9 +155,10 @@ defmodule HTTP.ProxyRequestCompletionTest do
     assert {:error, :cleanup_pending} = RequestCompletion.await(handle, 0)
     assert {:error, reason} = Promise.await(promise, 2_000)
     assert reason in [:request_timeout, :connect_timeout, :timeout, :proxy_tunnel_timeout]
-    assert :ok = RequestCompletion.await(handle, 1_000)
+    expected = if stage == :connect, do: :ok, else: {:error, :cleanup_unconfirmed}
+    assert ^expected = RequestCompletion.await(handle, 1_000)
     assert_receive {:pending_closed, {:error, :closed}}, 1_000
-    assert :ok = RequestCompletion.await(handle, 0)
+    assert ^expected = RequestCompletion.await(handle, 0)
     assert :ok = Task.await(peer)
   end
 
