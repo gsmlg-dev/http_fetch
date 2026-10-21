@@ -244,9 +244,16 @@ defmodule HTTP.TLSTransportTest do
     assert :ok = ExSSL.close(socket)
   end
 
-  test "ex_ssl rejects TLS 1.2-only peers without backend fallback" do
+  test "ex_ssl explicit TLS 1.3 rejects TLS 1.2-only peers without backend fallback" do
     port = peer(fn _socket -> :ok end, versions: [:"tlsv1.2"])
-    assert {:error, _} = ExSSL.connect("localhost", port, [ssl: [cacertfile: @ca]], 5_000)
+
+    assert {:error, _} =
+             ExSSL.connect(
+               "localhost",
+               port,
+               [ssl: [cacertfile: @ca, versions: [:"tlsv1.3"]]],
+               5_000
+             )
   end
 
   test "ex_ssl keeps partial passive bytes across receive timeouts" do

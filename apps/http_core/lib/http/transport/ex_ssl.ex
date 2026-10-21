@@ -76,12 +76,47 @@ defmodule HTTP.Transport.ExSSL do
         packet: :raw,
         active: false,
         verify: :verify_peer,
-        versions: [:"tlsv1.3"],
+        versions: Keyword.get_lazy(ssl_opts, :versions, fn -> default_versions(ssl_opts) end),
         depth: 4,
         customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]
       ]
 
       {:ok, defaults |> Keyword.merge(ssl_opts) |> Keyword.merge(socket_opts)}
+    end
+  end
+
+  # Concrete profiles retain their ordered version policy. Auto tickets and an
+  # explicit cipher policy retain the previous TLS 1.3 context unless versions
+  # are explicit. This does not infer protocol versions from cipher spellings.
+  # Ordinary HTTP with no concrete policy offers both supported versions.
+  defp default_versions(ssl_opts) do
+    ex_ssl = Keyword.get(ssl_opts, :ex_ssl, [])
+    profile = if Keyword.keyword?(ex_ssl), do: Keyword.get(ex_ssl, :profile)
+
+    case profile do
+      %SSL.ClientHello.WireProfile{extensions: extensions} when is_list(extensions) ->
+        profile_versions(extensions)
+
+      _ ->
+        if Keyword.get(ssl_opts, :session_tickets) == :auto or
+             Keyword.has_key?(ssl_opts, :ciphers),
+           do: [:"tlsv1.3"],
+           else: [:"tlsv1.3", :"tlsv1.2"]
+    end
+  end
+
+  defp profile_versions(extensions) do
+    case List.keyfind(extensions, :supported_versions, 0) do
+      {:supported_versions, versions} when is_list(versions) ->
+        Enum.flat_map(versions, fn
+          {:grease, _slot} -> []
+          version when version in [0x0304, :tlsv1_3] -> [:"tlsv1.3"]
+          version when version in [0x0303, :tlsv1_2] -> [:"tlsv1.2"]
+          version -> [version]
+        end)
+
+      _ ->
+        [:"tlsv1.3"]
     end
   end
 
