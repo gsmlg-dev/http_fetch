@@ -38,7 +38,7 @@ Test paths below are relative to the repository root.
 | Default TLS versions | 1.3 + 1.2 | HTTP ordinary default now mixed; raw engine default 1.3 | One ClientHello; explicit versions and concrete profile order retained, auto tickets/explicit cipher policy keep existing 1.3 context absent versions (implemented adapter slice) | core | [version-policy tests](../apps/http_core/test/http/ex_ssl_version_policy_test.exs) | Broader P1 compatibility/consumer gates remain |
 | TLS 1.2 endpoint profile | OTP policy | ECDHE AES-GCM, EMS, initial secure renegotiation | Independent peer coverage; decide PKCS1 SHA256+ handshake support separately from TLS1.3 (decision) | ex_ssl | `apps/ex_ssl/test/ssl/tls12_interop_test.exs` | Yes |
 | CA precedence / reference identity | System roots unless explicit CA; origin verification | Explicit cacerts, then file, then roots; DNS/IP identity and SNI | Preserve system/custom trust, pinned and tunnel-origin identity (supported subset) | core, ex_ssl | `tls_transport_test.exs`, `reference_identity_interop_test.exs` under respective app tests | Additional route matrix |
-| `verify_none` | Public adapter passes through; managed allows | Rejects | Faithful implementation or explicit versioned compatibility change (decision); keep verify_peer default | ex_ssl, core | `tls_transport_test.exs`, `apps/ex_ssl/test/ssl/certificate_policy_options_test.exs` | Yes |
+| `verify_none` | Public adapter passes through; managed allows | Explicit TCP mode skips path/identity policy; verify_peer remains default | Preserve CV/SKE/Finished/AEAD and TLS credential constraints; auto tickets partition verification mode; QUIC still rejects none | ex_ssl, core | engine verify_none interop/authentication negatives and core transport references | Proxy-specific cases, package/runtime matrix and managed lifecycle remain open |
 | Verification callbacks, partial chain, CRL/OCSP, encrypted keys, identities | Ordinary OTP backend accepts backend-specific options; managed policy explicitly excludes callbacks/revocation/encrypted keys | Bounded verified subset, explicit unsupported errors | Classify ordinary escape hatches separately; verify_fun has actual HTTP tests and special pool treatment; no whole-OTP claim (decision) | ex_ssl | `certificate_policy_options_test.exs`, `apps/http_fetch/test/http/tls_setup_evidence_test.exs`, mTLS candidate groups | Yes until individually resolved |
 | Safe TCP/send options | OTP options | Adapter allowlist; defaults < ssl < socket options | Preserve explicit precedence and mutation/binding rules (supported) | core, ex_ssl | `scripts/ex_ssl_options_test.exs` | Required matrix |
 | Managed H1/H2 | OTP only | Rejected before dial | Enable after provider lifecycle and policy are complete (required) | runtime, core | `apps/http_fetch/test/http/managed_otp_tls_lifecycle_test.exs` adapted to ExSSL | Yes |
@@ -163,7 +163,7 @@ excludes ExSSL, automatic protocol/redirect, Unix and H3 today. H1 prepare/owner
 activate and H2 handoff-before-registration are existing publication points; the
 provider authority commit below must join them rather than infer transfer from a cast.
 
-## Provider lifecycle boundary (v1 implementation contract; runtime not implemented)
+## Provider lifecycle boundary (v1 implementation contract; integration pending)
 
 The internal [ResourceLedger](../apps/ex_ssl/lib/ssl/lifecycle/resource_ledger.ex)
 now models five fixed resource roles, acknowledged allocation permits, exact
@@ -183,6 +183,25 @@ recipient is idempotent and cannot reopen cancelled admission. The runtime must
 supply fresh references, authenticated owner acknowledgments and real monitors;
 this pure model performs none of those operations. Observer, receipt sealing,
 resource teardown and destructive socket-call enforcement are still required.
+
+The private [Receipt](../apps/ex_ssl/lib/ssl/lifecycle/receipt.ex) and
+[Reader](../apps/ex_ssl/lib/ssl/lifecycle/reader.ex) now implement the publication
+and wait foundation. Receipt retains eight unsigned atomic words: publication
+state plus seven finite enum/mask/epoch values. Only its creating observer may
+claim storage; all payload writes precede one final seal. Partial publication
+remains unsealed. Terminal maps contain finite setup failure categories, logical
+closure, scope, cleanup/loss masks and authority epoch, without TLS secrets, raw
+errors or resource identity lists. The proof input is still the trusted internal
+ledger: this storage does not establish the real monitors or authenticate events.
+
+Reader observes current observer absence before trusting a final seal, and
+rechecks publication after DOWN. Sealed/live stays pending; absent/unsealed is
+unconfirmed regardless of exit reason. Await preserves one absolute deadline,
+selectively receives the exact ref/type/PID DOWN and removes its waiter monitor.
+A sealed loss attestation is readable as terminal status but returns unconfirmed
+from await; only confirmed evidence plus observer absence yields successful await.
+The real attempt observer, resource admission and socket/public-facade integration
+remain unimplemented; these private components do not certify actual TLS cleanup.
 
 Source review identified these runtime integration gates before the public facade:
 

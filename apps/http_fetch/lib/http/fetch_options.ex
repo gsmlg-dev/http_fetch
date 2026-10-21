@@ -98,8 +98,8 @@ defmodule HTTP.FetchOptions do
     `{:https, host, port, opts}`. Options are
     `headers: [{"Proxy-Authorization", value}]` and a finite positive `timeout`.
     HTTP/1 cleartext uses absolute-form forwarding; HTTPS uses CONNECT and then
-    origin TLS/ALPN. H2 over HTTPS is supported. H2c, HTTP/3, Unix socket routes,
-    and ExSSL IP-origin tunnels are rejected explicitly. Environment/NO_PROXY
+    origin TLS/ALPN. H2 over HTTPS and ExSSL IP-origin tunnels are supported;
+    H2c, HTTP/3 and Unix socket proxy routes are rejected explicitly. Environment/NO_PROXY
     selection belongs to the caller.
     HTTPS proxies support HTTP origins only, using TLS to the proxy and
     absolute-form HTTP/1 forwarding. `ssl` and `tls_backend` apply to the proxy;

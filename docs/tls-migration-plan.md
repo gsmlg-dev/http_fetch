@@ -47,7 +47,10 @@ executed evidence and required work are distinguishable. OTP remains default.
 - [x] Resolve internal managed buffer and explicit buffer/tos/tclass/priority values
       without silently dropping options or changing protocol safety bounds
       (driver support tested; enabling managed ExSSL remains a P3 gate).
-- [ ] Resolve verify_none and advanced verification/client identity compatibility.
+- [x] Implement explicit TCP verify_none with verify_peer default, mandatory signature /
+      Finished / AEAD checks, protocol credential constraints and mode-partitioned tickets
+      (OTP/OpenSSL references; proxy/managed/package/runtime matrix remains open).
+- [ ] Resolve advanced verification callbacks, revocation and client identity compatibility.
 - [ ] Preserve trust precedence, system roots, DNS/IP origin identity, SNI separation,
       pinned dialing, CONNECT upgrade and mTLS redirect isolation.
 - [ ] Preserve explicit ordered wire profiles; reject real conflicts before I/O.
@@ -64,6 +67,8 @@ coverage; no supported endpoint class silently lost.
 - [x] Implement/test internal authority epochs, recipient/nonce/owner acknowledgment,
       lost-reply replay and controller monitor generations (runtime remains open).
 
+- [x] Implement/test private fixed atomic receipt and observer-aware finite reader
+      (storage/wait foundation only; real monitor/enrollment integration remains open).
 - [x] Read existing ex_ssl architecture/design/PRD/implementation docs before changes.
 - [ ] Public attempt handle exists before allocation, survives failed setup and transfer.
 - [ ] Provider enrolls/observes every connection, writer, TCP and setup worker without

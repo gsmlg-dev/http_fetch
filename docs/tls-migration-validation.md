@@ -528,3 +528,126 @@ allocation/use enforcement, immutable terminal seal, socket authority and duplex
 control-output handling remain open. Managed/completion gates and OTP default stay
 in place. Candidate/release/publication acceptance has not been executed for this
 implementation slice.
+
+## Private terminal storage and TCP verification policy (round 6)
+
+Added provider-internal Receipt and Reader, not SSL.Lifecycle or a runtime observer.
+Receipt stores eight unsigned atomic words, validates fixed setup/failure/mask/epoch
+metadata, restricts publication to its creating observer, and publishes once after
+all payload writes. It accepts only a settled, closed-admission ledger; the future
+observer must still establish/authenticate the real resource evidence. Terminal
+maps retain no TLS material, raw errors, PID/port lists or capability history.
+
+Reader requires observer absence plus a valid final seal for successful await.
+Sealed/live is pending; unsealed death is unconfirmed regardless of normal/killed
+exit. Late noproc establishes current absence only. A sealed resource-loss receipt
+remains readable but await returns unconfirmed. Finite waits retain their original
+absolute deadline, match exact monitor/type/PID, and flush their waiter monitor.
+
+Root-scoped lifecycle tests passed 38/38 (23 existing + 15 new) with seed101.
+New cases use actual process and port monitors/DOWN, a late identity after creator
+loss, adopted-port scope, wrong publisher, immutable repeated seal, invalid metadata,
+fixed native storage size, interrupted publication including ALL payload words
+written before death, sealed/live and late readers, unsealed normal/killed death,
+100 publication/monitor races, 32 waiters, expired deadlines and caller mailbox /
+monitor cleanup on timeout and fast terminal/loss/error returns. A read-only
+adversarial source review found no concrete defect; it did not execute tests.
+
+Actual observer supervision, inert TLS births, authenticated enrollment/owner ACKs,
+allocation-with-no-resource completion, bounded unknown-identity retention and public
+socket/HTTP integration remain open. No actual TLS cleanup claim follows from these
+private foundations alone.
+
+Explicit TCP `verify: :verify_none` now skips PKIX path/identity policy; omitted
+verification remains `:verify_peer`. It still decodes bounded presented credentials,
+preserves SPKI/PSS key restrictions, and verifies negotiated CertificateVerify or
+TLS1.2 signed ServerKeyExchange, Finished and AEAD. Existing-socket none mode permits
+absent SNI/reference without inventing an identity. Unused CA anchors need not be
+normalized or system-loaded; explicit CA file read errors remain errors. QUIC still
+rejects none mode and uses the shared core's peer-verification default.
+
+The protocol peer boundary checks digitalSignature when leaf keyUsage is present
+and rejects duplicate keyUsage in both trust modes. RFC9846 4.5.1.2 requires X.509v3
+for ALL presented TLS1.3 certificate entries: both modes and cached peers enforce it,
+including a transmitted root. Locally configured v1 anchors omitted from the wire
+remain allowed. TLS1.2 uses explicit protocol context and retains its certificate
+version policy; generic PKIX verify/decode primitives remain unchanged. Real
+OpenSSL TLS1.2 v1 none-mode traffic also passes with OTP as independent client.
+
+An independently constructed, valid TLS1.3 server flight forces a certificate-chain
+signature outside the client's actual advertised cert schemes, with offered CV
+scheme and valid CV/Finished/CCS. Both OTP and ExSSL none mode connect; peer mode
+rejects the chain policy. This distinguishes intentionally skipped PKIX chain policy
+from mandatory handshake authentication. RFC9846 4.5.1.2 permits fallback chains and
+signature-algorithm exemptions; 4.5.2 still requires offered CV schemes. Ticket
+policy partition v2 includes verification mode, and cached credentials revalidate
+under current mode/protocol. Actual OpenSSL full/resumed none sessions pass while
+default-peer crossover rejects the untrusted peer. Legacy VerifiedPeer is explicitly
+documented as a credential container, not a standalone proof of trust. An independent
+read-only security review checked mode propagation, default/QUIC trust, unconditional
+handshake/record authentication, SPKI restrictions and ticket isolation without
+finding a concrete introduced defect; that review ran no tests or network activity.
+
+Final policy-focused gate passed 45/45. Three-app regression executed every new
+scenario: ex_ssl 724/728 passed, core 408 passed/3 real opt-ins skipped, runtime149
+passed. ExSSL failures were the same three unavailable-127.0.0.2 identity cases and
+the KeyUpdate pending-input assertion. Isolated reproduction passed all eight
+backpressure cases but reproduced the three address timeouts, so scheduling-sensitive
+KeyUpdate acceptance remains open. A raw TCP wildcard-listener probe connected to
+127.0.0.1 but timed out on 127.0.0.2 without TLS; no OS network changes or weakened
+identity assertions were made. This scoped run is not full acceptance.
+
+Strict compilation and formatting passed. Configured Credo checked523 files /
+8695 modules-functions with54 checks and zero issues. Optional `credo --strict`
+reported200 style/design suggestions (158 design,30 readability,12 refactoring);
+that additional check is not reported green. First Dialyzer found one opaque-type
+contract error in Receipt.new: declared reference() did not preserve OTP's opaque
+atomics_ref(). Corrected the cell type to :atomics.atomics_ref() without runtime
+changes. Rerun passed with zero errors/skips and four preserved pre-existing ignore
+notices. No ignore-list entries were removed.
+
+Final full root regression used the pinned Python environment,
+`HTTP_QUIC_PHASE1_REAL=1` and `mix test --include integration --seed 101`:
+
+| App | Result |
+| --- | --- |
+| ex_ssl | 725/728 passed (20 properties executed); three failures |
+| elixir_quic | 249 passed |
+| http_core | 411 passed; all three real opt-ins executed |
+| elixir_quic_http3 | 113 passed |
+| http_runtime | 149 passed |
+| http_fetch | 1210/1226 passed; sixteen failures |
+| http_web_socket | 138 passed |
+| http_web_transport | 24 passed |
+| http_event_source | 75 passed |
+
+All3113 checks executed,3094 passed,19 failed; no excluded integration or skipped
+real opt-ins. New none/protocol/receipt tests passed. Existing43 H2 tests were
+included without failure. Connection's production diff is only forwarding the
+validated verify mode: TCP/closed/size/active/plaintext-drain layout is unchanged.
+Both test-only probes were re-audited and pinned to SHA256
+`96628c634cb07f924f54bc67d6f9e6e014092d65e47e88ed778c3519efa9d5b5`;
+coordinated app-version guards remain in place.
+
+The19 failures are16 unavailable-127.0.0.2 scenarios, the OTP reused-writer test's
+unobserved in-flight-send precondition, an early_data raw-stream listener/accept
+`:einval`, and one ExSSL streamed4000 upload peer still open after local cleanup.
+That peer reported recv_oct102032 / recbuf485936. Matching local Connection/writer
+DOWN and Port absence assertions passed before remote drain; remote closure is
+still failed evidence. The raw-stream einval category was seen in round4, absent
+in round5, and recurred here. KeyUpdate passed this full run but failed the earlier
+three-app run; it remains an ordering/scheduling acceptance issue until causally
+resolved. Other upload closure cases passing this run do not resolve earlier
+failures. No timing/buffer/identity assertions or two-second peer-drain limits were
+relaxed. Full source acceptance is not green.
+
+A read-only proxy contract audit confirmed HTTPS-proxy plus HTTPS-origin nested
+TLS is explicitly rejected today. Supported CONNECT and HTTPS-proxy forwarding
+have one TLS leg, targeting origin and proxy identity respectively. Corrected stale
+Fetch option documentation about supported ExSSL IP-origin CONNECT. The next P1
+slice needs provider-owned prepared upgrade policy before raw proxy dial, exact
+upgrade-context validation and zero-proxy-accept negatives; full trust/key/profile
+resolution must not independently change later in the same attempt. Existing bind
+option rejection and the nested-route rejection remain explicit. Public provider
+attempt/adoption, managed/completion, platform/runtime/package/performance/CI and
+release/publication gates remain open; OTP remains the default backend.
