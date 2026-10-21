@@ -94,14 +94,23 @@ coverage; no supported endpoint class silently lost.
       4MiB/90ms sustained wait/original350ms peer pause and1s budget, exact body,
       same worker/source unfinished, proper same-peer80ms negative control;
       18 focused +81 whole-file passes, corrected case also passed full round10.
-      Existing cancellation remote-close and length-mismatch fixture gates stay open.
+      Cancellation remote-close remains open; length-mismatch fixture is corrected below.
 - [x] Authenticate private pre-native constructor rejection without allocating a
       resource: exact permit/caller/parent generation, fixed role-use tombstone,
       no fabricated DOWN or loss clearing, closed-fence accounting and helper completion
       (round10 RED31/33 -> GREEN43/43; twelve added cases; not native-error cleanup).
-- [ ] Before public lifecycle acceptance, complete native constructor identity proof,
-      inert Connection/writer enrollment, then private real allocator/setup direct-dial
-      orchestration with original deadlines and acknowledged outcome publication.
+- [x] Privately enroll inert Connection/writer births after init returns, with exact
+      original Observer monitors and nonce-fenced writer readiness/release; reject
+      unsupported private contexts before process construction and all legacy attach.
+      One original control/setup minimum covers even blocked enrollment calls;
+      first missing-entry RED ->15 GREEN, shorter-setup RED15/17 -> final17 GREEN.
+      This proves private process births, not TCP adoption or public lifecycle.
+- [x] Replace fixed-length mismatch fixture timing with actual peer header/prefix
+      receipts: controlled old3/3 accept:eINVAL while listener owned/open, corrected
+      27 focused +62 whole-file passes; exact errors/abc/abc/empty bytes unchanged.
+- [ ] Before public lifecycle acceptance, complete native constructor identity proof
+      and private real allocator/setup direct-dial orchestration with original
+      deadlines and acknowledged outcome publication.
       Native connect error/helper DOWN is not native cleanup proof; unresolved identity
       coverage remains unconfirmed. Public upgrade/transfer stay gated separately.
 - [ ] Public attempt handle exists before allocation, survives failed setup and transfer.

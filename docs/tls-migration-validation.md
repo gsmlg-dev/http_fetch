@@ -1107,3 +1107,121 @@ full umbrella/default/public/managed gates remain OPEN. Next ordered private wor
 inert Connection/writer births BEFORE any timer/writer/TLS/native work (Task17),
 then realallocator/setup/directfacade with actualnativeidentity proof. Native
 errors/helperDOWN remain unconfirmed; no default switch/public lifecycle admission.
+
+## Round11 — inert process births and peer-fenced length mismatch
+
+Task17 adds a private tagged Connection constructor under the existing temporary
+DynamicSupervisor. Init returns before Observer RPC, with no writer, handshake
+timer, record/TLS state or TCP port. It enrolls itself, reserves/enrolls a writer,
+then matches recorded PIDs/separate nonce/original Observer before release/readiness.
+Both actors monitor the original Observer; already-born late actors attempt
+accounting after parent loss. Unknown/replayed/missing/expired authority cannot
+authorize readiness or invent resource absence. Private attach/data calls remain
+rejected even after readiness. Classic tuple5 startup, native writer operation,
+plaintext drainage and buffer/active/closed probe fields remain unchanged.
+
+Actual firstRED: one valid setup/permit and suspended Observer, old tagged init
+returned function_clause; /tmp/http-fetch-task17-old-inert-red.log. Initial15 cases
+then passed. Lead review found Observer call waits used the longer control budget
+even when setup expired earlier: two new suspended-Observer exact-DOWN tests RED
+15/17 (no DOWN within373/377ms). Clip min(original control,original setup) ONCE
+before the first RPC and carry unchanged across enrollment/reservation/readiness/
+release; original setup remains the later handshake timer anchor. Corrected17/17
+passed. Logs/tmp/http-fetch-task17-setup-deadline-{red,green}.log.
+
+A second review moved unsupported context validation BEFORE process construction,
+rather than interpreting an init error as no child. Precise private context types
+and defensive init validation retained; other constructor failures still unknown.
+Final17/17 seed101 in8.6s/no exclusions/skips after entry guards;
+/tmp/http-fetch-task17-final-entry-green.log. Tests include actual supervisor/
+Observer barriers, finite/expired original budgets, dead Observer, parent loss,
+independent suspended writer exactDOWN, queued/rejected attach with no bytes or
+ownership change, wrong PID/nonce/Observer release and real post-release bytes.
+Those raw sockets are test-owned: role14 process receipts do NOT attest TCP adoption.
+
+Task18 unchanged natural baseline33/33 passed, but a controlled schedule reproduced
+ALL3 accept:eINVAL AFTER public content_length_mismatch, with the listener still
+owned by a live test and [:listen,:open]. /tmp/http-fetch-task18-old-controlled.log.
+Fixed trio gates the actual lazy producer BEFORE first yield on verified PUT/CL4/
+no-TE/header-only peer receipt; abc cases also require exact peer abc receipt BEFORE
+releasing EOF or def. Exact mismatch, abc/abc/empty bytes and source/peer normalDOWN
+plus exact producer absence retained; no native-error allowances/Task13 changes.
+First3+8x3 focused=27GREEN; two full31-test runs=62GREEN, zero full-file exclusions/
+skips. /tmp/http-fetch-task18-{first-green,focused-repeat,final-whole}.log.
+
+Lead reviewed all17 tests/runtime branches and repins BOTH private source guards
+to 0f0ad762fed7bb6307e374ea7e83d0699bd45cb21309cdb5140a1c74e2220e98 after auditing the unchanged classic paths.
+Initial root strictcompile/wholeformat/Credo passed; Dialyzer found ONE actual
+call_without_opaque at Connection.init Receipt.observer because the untyped
+callback narrowed receipt to a local struct. A one-line flow correction removes
+that narrowing; prebirth validation/opaque type/specs/ignore entries unchanged.
+Original RED/tmp/http-fetch-tls-round11-dialyzer.log preserved. Final strictcompile/
+wholeformat/Credo532files54checks0issues/Dialyzer0errors0skips passed; four intentional
+unnecessary-ignore notices retained. Final logs/tmp/http-fetch-tls-round11-final-
+{compile,format,credo,dialyzer}.log. No production TLS protocol/crypto change.
+
+Final root-scoped88/88 lifecycle+inert (71+17), coreTLS27/27 and FetchH2 43/43 =
+158/158 PASS after opacity correction and BOTH exact SHA guard updates;
+/tmp/http-fetch-tls-round11-scoped.log. This checks classic options/peer-close
+plaintext buffer drainage as well as the new private actor boundary.
+All-nine source outcome pending below.
+
+Read-only Task14 review FALSIFIED the idle-send-gap hypothesis: successful owner-
+authenticated abandon_send unconditionally sets the sticky flag even with write:nil.
+HTTP abandons before joining upload writer/source, then closes provider; public
+:aborted is published before cleanup. Thus wire writer/source DOWN alone cannot
+establish provider/Port retirement. Native send_timeout_close:true may retire a
+port before final linger; this remains UNPROVEN, not a reason to change policy.
+Future mixed-suite capture must correlate actual failing native tuple/actors,
+abandon result/caller-owner identity, writer/output/timeouts, pre-linger Portalive,
+setopts result/readback and actual close outcome/Portnil. No new raw campaign,
+production instrumentation or causal remote-close fix was performed this round.
+
+A separate read-only review of official current OTP29.1.2 socket docs identifies
+a possible future split open -> known opaque socket -> original socket monitor
+enrollment ACK -> connect seam. It improves ordinary dial-error identity coverage,
+but open failure/killed opener before identity publication still cannot prove
+absence; owner/helper DOWN and operation-abort/connect errors are not socket DOWN.
+Current v1 is port-only; no backend/contract revision was made. Supporting socket
+resources needs explicit monitor-kind/owner/I-O/select/STARTTLS/buffer/performance
+review; no equivalence to inet active-once/buffer/send-timeout is assumed.
+Sources: [socket open](https://www.erlang.org/doc/apps/kernel/socket.html#open/4),
+[original monitor](https://www.erlang.org/doc/apps/kernel/socket.html#monitor/1),
+[connect uncertainty](https://www.erlang.org/doc/apps/kernel/socket.html#connect/3).
+This was documentation research, not installed OTP29.0.2 runtime proof.
+
+### Round11 full source result: NOT accepted
+
+Actual root command used isolated existing build/venv, integration included,
+HTTP_QUIC_PHASE1_REAL=1 andseed101. All9apps ran:3185/3186 passed, EXIT2 confirmed
+by ROUND11_FINAL_ACCEPTANCE_EXIT=2 AND shell prompt; inferred_idle was not exit
+evidence. /tmp/http-fetch-tls-round11-source.log; no exclusions/opt-in skips.
+
+| App | Actual result |
+| --- | --- |
+| ex_ssl | 788/788 (20 properties +768 tests) |
+| elixir_quic | 249/249 |
+| http_core | 418/418 |
+| elixir_quic_http3 | 113/113 |
+| http_runtime | 149/149 |
+| http_fetch | 1231/1232 (20/20 doctests) |
+| http_web_socket | 138/138 |
+| http_web_transport | 24/24 |
+| http_event_source | 75/75 |
+
+The ONE failure remains the unchanged ex_ssl/http1/streamed/4000 HTTPS blocked-
+write case (log1058–1080). Exact provider Connection/writer DOWN and Portnil passed
+before the existing peer read; peer recv still timed out at its original2s. Public
+metadata: recv_oct103056/send_oct1461/send_pend0; active99/buffer9216/recbuf484912;
+receiver/sender waiting in gen_statem.loop with empty mailboxes. No exact failed
+native4tuple/abandon/linger/close branch captured yet, so no causal claim.
+Corrected length-mismatch trio and unchanged wire-cancellation case passed this
+full run; the latter passing once does not resolve its prior intermittent history.
+All17 new inert cases passed inside full ex_ssl788 as well as scoped88.
+
+Private Task17 and fixture Task18 are accepted in their stated scopes; full source/
+P0 remote closure remain OPEN. Actual native constructor identity, real allocator/
+setup/TCP adoption, public facade/managed completion/transfer, performance/soak,
+backend default/removing productionOTPssl, package/CI/publication/cold consumer
+gates are not admitted by these private proofs. Goal remains active. No source
+instrumentation, timeout widening, forcedGC, skipped failures or default change.

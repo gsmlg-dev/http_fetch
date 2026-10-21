@@ -235,12 +235,34 @@ and receiver-side original deadline checks prevent late authorization. Timers ar
 reference-fenced. Live snapshots expose finite enum/mask/epoch state, no resource or
 capability identities; Reader alone establishes terminal evidence after actor absence.
 
-These are private cooperative runtime components. Public lifecycle, actual inert
-allocator/setup/Connection/writer births, adoption, owner ACK/authority transfer and
-socket/facade integration remain unimplemented. Upgrade observers reject new TCP
-allocation with adoption_not_implemented; this slice does not attest real STARTTLS
-adoption or certify current TLS cleanup. The current Connection still starts work
-before enrollment. Private `reject_before_native/4` now accounts for a provider
+These are private cooperative runtime components. The tagged private Connection
+constructor now returns from init before its enrollment RPC, without a writer,
+handshake timer, record/TLS state or native socket. After its original Observer
+acknowledges enrollment it reserves a writer; that writer self-enrolls and waits
+for release. Readiness/release match recorded PIDs, a separate fresh nonce and the
+original Observer identity. This is a trusted bearer-capability protocol, not
+independent message-sender or spawn-ancestry authentication. Both actors monitor
+the original Observer. Already-born late actors attempt accounting after parent
+loss; unavailable/expired accounting stays conservative, never no-resource proof.
+
+Unsupported private context shapes/budgets are rejected before invoking process
+construction. An init error after birth is not no-resource evidence; all other
+constructor failures retain conservative accounting.
+
+One supplied finite absolute control deadline, clipped once to the original setup
+deadline, covers every enrollment/reservation/readiness/release wait, including a
+suspended Observer RPC. The original setup deadline remains the handshake timer
+anchor, armed only after writer enrollment acknowledgment. Private ready actors
+reject legacy attach/data calls: actual TCP identity enrollment and ownership ACK
+remain separate work. Tests using caller-owned raw sockets exercise writer gates
+only; their receipts do not attest TCP adoption. The classic public constructor
+still starts its ordinary writer/timer directly.
+
+Actual allocator/setup births, TCP attachment/dial failure proof, public lifecycle,
+adoption, owner ACK/authority transfer and socket/facade integration remain open.
+Upgrade observers reject new TCP allocation with adoption_not_implemented; this
+slice does not attest STARTTLS adoption or certify current TLS cleanup.
+Private `reject_before_native/4` now accounts for a provider
 constructor that rejects BEFORE entering native allocation and fences all future
 allocation first. Exact permit/caller/live parent monitor generation are required;
 root permits use the bound owner's recorded monitor. A private five-bit role-use
