@@ -4,7 +4,7 @@ defmodule SSL.ReferenceIdentityInteropTest do
   alias ExSSL.TestSupport.{ClientAuthFixtures, LocalTLSPeer, OpenSSLPeer}
 
   @moduletag :integration
-  @dial_address {127, 0, 0, 2}
+  @dial_address {127, 0, 0, 1}
 
   setup_all do
     directory =
@@ -14,17 +14,23 @@ defmodule SSL.ReferenceIdentityInteropTest do
       )
 
     on_exit(fn -> File.rm_rf!(directory) end)
-    {:ok, fixtures: ClientAuthFixtures.create(directory)}
+
+    {:ok,
+     fixtures: ClientAuthFixtures.create(Path.join(directory, "normal")),
+     independent:
+       ClientAuthFixtures.create(Path.join(directory, "independent"),
+         server_sans: "DNS:exssl.test,IP:127.0.0.2,IP:::2"
+       )}
   end
 
   test "direct and upgraded sockets authenticate IPv4 and IPv6 SANs independently of dial IP and SNI",
-       %{fixtures: fixtures} do
+       %{independent: fixtures} do
     for mode <- [:direct, :upgrade],
         reference <- [
-          {:ip, "127.0.0.1"},
-          {:ip, {127, 0, 0, 1}},
-          {:ip, "::1"},
-          {:ip, {0, 0, 0, 0, 0, 0, 0, 1}}
+          {:ip, "127.0.0.2"},
+          {:ip, {127, 0, 0, 2}},
+          {:ip, "::2"},
+          {:ip, {0, 0, 0, 0, 0, 0, 0, 2}}
         ],
         sni <- [nil, :disable, ~c"routing.exssl.test"] do
       exchange(fixtures, mode, reference, sni)
@@ -32,7 +38,7 @@ defmodule SSL.ReferenceIdentityInteropTest do
   end
 
   test "explicit DNS certificate identity does not require matching or present SNI", %{
-    fixtures: fixtures
+    independent: fixtures
   } do
     for mode <- [:direct, :upgrade], sni <- [:disable, ~c"routing.exssl.test"] do
       exchange(fixtures, mode, {:dns_id, "exssl.test"}, sni)
@@ -54,15 +60,33 @@ defmodule SSL.ReferenceIdentityInteropTest do
     end
   end
 
+  test "trusted independent certificate rejects the actual dial IP as reference", %{
+    independent: fixtures
+  } do
+    for mode <- [:direct, :upgrade], sni <- [:disable, ~c"exssl.test"] do
+      {:ok, peer} = peer(fixtures, fn _ -> flunk("wrong dial reference reached application") end)
+
+      assert {:error, {:tls_alert, {:certificate_unknown, _}}} =
+               connect(
+                 mode,
+                 @dial_address,
+                 peer.port,
+                 options(fixtures, {:ip, @dial_address}, sni)
+               )
+
+      assert {:handshake_error, _} = LocalTLSPeer.stop(peer)
+    end
+  end
+
   test "explicit identity still rejects a certificate outside the configured trust", %{
-    fixtures: fixtures
+    independent: fixtures
   } do
     for mode <- [:direct, :upgrade] do
       {:ok, peer} = peer(fixtures, fn _ -> flunk("untrusted application callback") end)
 
       options =
         fixtures
-        |> options({:ip, "127.0.0.1"}, :disable)
+        |> options({:ip, "127.0.0.2"}, :disable)
         |> Keyword.put(:cacerts, [fixtures.wrong.der])
 
       assert {:error, {:tls_alert, {:unknown_ca, _}}} =
@@ -73,9 +97,9 @@ defmodule SSL.ReferenceIdentityInteropTest do
   end
 
   test "OpenSSL TLS1.2 direct and upgraded sockets verify an independent IP reference", %{
-    fixtures: fixtures
+    independent: fixtures
   } do
-    for mode <- [:direct, :upgrade], reference <- [{:ip, "127.0.0.1"}, {:ip, "::1"}] do
+    for mode <- [:direct, :upgrade], reference <- [{:ip, "127.0.0.2"}, {:ip, "::2"}] do
       {:ok, peer} = openssl_peer(fixtures)
 
       try do
@@ -85,6 +109,8 @@ defmodule SSL.ReferenceIdentityInteropTest do
           |> Keyword.put(:versions, [:"tlsv1.2"])
 
         assert {:ok, socket} = connect(mode, {127, 0, 0, 1}, peer.port, options)
+        assert {:ok, certificate} = SSL.peercert(socket)
+        assert certificate == fixtures.server.der
         assert {:ok, %{"version" => "TLSv1.2"}} = OpenSSLPeer.event(peer, "handshake", 5_000)
         assert :ok = SSL.send(socket, <<4::32, "ping">>)
         assert {:ok, <<4::32, "ping">>} = SSL.recv(socket, 8, 5_000)
@@ -175,6 +201,7 @@ defmodule SSL.ReferenceIdentityInteropTest do
   defp peer(fixtures, handler) do
     LocalTLSPeer.start(handler,
       ssl_options: [
+        ip: @dial_address,
         certfile: String.to_charlist(fixtures.server.certificate),
         keyfile: String.to_charlist(fixtures.server.key)
       ]

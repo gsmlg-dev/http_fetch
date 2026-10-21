@@ -48,11 +48,11 @@ defmodule HTTP.ProxyCompositionTest do
   end
 
   test "HTTP/1 reuse separates pinned destinations while preserving the origin Host" do
-    {port, server} = peer(:http, ip: {0, 0, 0, 0})
+    {port, server, other_server} = paired_peers()
     url = "http://pinned.example:#{port}/private?q=1"
     opts = Keyword.put(reuse_options(), :redirect, :manual)
     first = Keyword.put(opts, :connect_address, {127, 0, 0, 1})
-    second = Keyword.put(opts, :connect_address, {127, 0, 0, 2})
+    second = Keyword.put(opts, :connect_address, {0, 0, 0, 0, 0, 0, 0, 1})
 
     assert fetch(url, first).body == "ok"
     assert_receive {:accepted, ^server, first_connection, {127, 0, 0, 1}}, 2_000
@@ -61,13 +61,15 @@ defmodule HTTP.ProxyCompositionTest do
     assert_pinned_request(server, first_connection, 2, port)
 
     assert fetch(url, second).body == "ok"
-    assert_receive {:accepted, ^server, second_connection, {127, 0, 0, 2}}, 2_000
+    assert_receive {:accepted, ^other_server, second_connection, {0, 0, 0, 0, 0, 0, 0, 1}}, 2_000
     refute first_connection == second_connection
-    assert_pinned_request(server, second_connection, 1, port)
+    assert_pinned_request(other_server, second_connection, 1, port)
     assert fetch(url, second).body == "ok"
-    assert_pinned_request(server, second_connection, 2, port)
+    assert_pinned_request(other_server, second_connection, 2, port)
     assert fetch(url, first).body == "ok"
     assert_pinned_request(server, first_connection, 3, port)
+    refute_receive {:accepted, ^server, _, _}, 0
+    refute_receive {:accepted, ^other_server, _, _}, 0
   end
 
   test "proxy-mode GET entities compose with header-first response streaming" do
@@ -143,16 +145,51 @@ defmodule HTTP.ProxyCompositionTest do
     assert head =~ "Host: pinned.example:#{port}\r\n"
   end
 
+  defp paired_peers(attempts \\ 10) do
+    {:ok, first} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, {_, port}} = :inet.sockname(first)
+
+    case :gen_tcp.listen(port, [
+           :inet6,
+           :binary,
+           active: false,
+           ipv6_v6only: true,
+           ip: {0, 0, 0, 0, 0, 0, 0, 1}
+         ]) do
+      {:ok, second} ->
+        {^port, first_peer} = peer(:http, listener: first)
+        {^port, second_peer} = peer(:http, listener: second)
+        {port, first_peer, second_peer}
+
+      {:error, :eaddrinuse} when attempts > 1 ->
+        :gen_tcp.close(first)
+        paired_peers(attempts - 1)
+
+      {:error, reason} ->
+        :gen_tcp.close(first)
+        flunk("could not bind paired HTTP peers: #{inspect(reason)}")
+    end
+  end
+
   defp peer(scheme, opts \\ []) do
     parent = self()
 
-    {:ok, listener} =
-      :gen_tcp.listen(0, [
-        :binary,
-        active: false,
-        reuseaddr: true,
-        ip: Keyword.get(opts, :ip, {127, 0, 0, 1})
-      ])
+    listener =
+      case Keyword.fetch(opts, :listener) do
+        {:ok, listener} ->
+          listener
+
+        :error ->
+          {:ok, listener} =
+            :gen_tcp.listen(0, [
+              :binary,
+              active: false,
+              reuseaddr: true,
+              ip: Keyword.get(opts, :ip, {127, 0, 0, 1})
+            ])
+
+          listener
+      end
 
     {:ok, {_, port}} = :inet.sockname(listener)
     server = spawn_link(fn -> accept_loop(listener, parent, scheme, opts) end)

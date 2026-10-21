@@ -114,13 +114,14 @@ defmodule HTTP.HTTPSProxyWireTest do
   end
 
   test "unreachable TLS proxy never falls back to the origin" do
-    {:ok, origin} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
-    {:ok, {_, port}} = :inet.sockname(origin)
+    {origin, port, proxy_port} = origin_with_refused_proxy()
     on_exit(fn -> :gen_tcp.close(origin) end)
 
+    # Proxy endpoint ports are independent of the origin URL. Keeping both
+    # endpoints IPv4 preserves a reachable fallback control with default options.
     assert {:error, :econnrefused} =
              HTTP.fetch("http://127.0.0.1:#{port}/",
-               proxy: {:https, "127.0.0.2", port, []},
+               proxy: {:https, "127.0.0.1", proxy_port, []},
                redirect: :manual,
                timeout: 500
              )
@@ -186,6 +187,16 @@ defmodule HTTP.HTTPSProxyWireTest do
 
   defp assert_handshake_stop(:deadline, reason),
     do: assert(reason in [:request_timeout, :connect_timeout, :timeout])
+
+  defp origin_with_refused_proxy do
+    {:ok, origin} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, {_, port}} = :inet.sockname(origin)
+    {:ok, proxy} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, {_, proxy_port}} = :inet.sockname(proxy)
+    refute port == proxy_port
+    :ok = :gen_tcp.close(proxy)
+    {origin, port, proxy_port}
+  end
 
   defp proxy_peer(certificate \\ "localhost") do
     {:ok, listener} =

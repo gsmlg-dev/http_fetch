@@ -4,7 +4,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
   test "certificate rejection after ServerHello proves no HTTP and cleanup observes TLS processes" do
-    {listener, port} = listener()
+    {listener, second, port} = paired_listeners()
     parent = self()
 
     peer =
@@ -56,9 +56,9 @@ defmodule HTTP.TLSSetupEvidenceTest do
     assert_receive {:DOWN, ^upload_monitor, :process, ^upload, _}, 3_000
     refute Process.alive?(upload)
 
-    # A caller may now try a separately validated literal pin with a fresh body.
-    {:ok, second} = :gen_tcp.listen(port, [:binary, active: false, ip: {127, 0, 0, 2}])
-    on_exit(fn -> :gen_tcp.close(second) end)
+    # A caller may now try the separately validated, already reserved IPv6 pin
+    # with a fresh body. No automatic fallback may have queued a connection.
+    assert {:error, :timeout} = :gen_tcp.accept(second, 0)
 
     fallback =
       Task.async(fn ->
@@ -84,7 +84,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
 
     fallback_opts =
       Keyword.merge(attempt_options,
-        connect_address: {127, 0, 0, 2},
+        connect_address: {0, 0, 0, 0, 0, 0, 0, 1},
         timeout: remaining,
         method: :post,
         body: fresh_upload,
@@ -101,6 +101,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
 
     Task.await(fallback)
     assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
+    assert {:error, :timeout} = :gen_tcp.accept(second, 0)
   end
 
   test "fatal alert before ServerHello remains unknown and cleanup unconfirmed" do
@@ -420,6 +421,35 @@ defmodule HTTP.TLSSetupEvidenceTest do
       timeout: 4_000,
       ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")] ++ extra
     ]
+  end
+
+  defp paired_listeners(attempts \\ 10) do
+    {:ok, first} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, {_, port}} = :inet.sockname(first)
+
+    case :gen_tcp.listen(port, [
+           :inet6,
+           :binary,
+           active: false,
+           ipv6_v6only: true,
+           ip: {0, 0, 0, 0, 0, 0, 0, 1}
+         ]) do
+      {:ok, second} ->
+        on_exit(fn ->
+          :gen_tcp.close(first)
+          :gen_tcp.close(second)
+        end)
+
+        {first, second, port}
+
+      {:error, :eaddrinuse} when attempts > 1 ->
+        :gen_tcp.close(first)
+        paired_listeners(attempts - 1)
+
+      {:error, reason} ->
+        :gen_tcp.close(first)
+        flunk("could not reserve TLS pin pair: #{inspect(reason)}")
+    end
   end
 
   defp listener do

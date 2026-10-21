@@ -2,14 +2,17 @@ defmodule ExSSL.TestSupport.ClientAuthFixtures do
   @moduledoc false
   alias ExSSL.TestSupport.SignatureFixtures
 
-  def create(directory) do
+  @default_sans "DNS:exssl.test,IP:127.0.0.1,IP:::1"
+
+  def create(directory, options \\ []) do
+    server_sans = Keyword.get(options, :server_sans, @default_sans)
     File.mkdir_p!(directory)
     ca = root(directory, "ca")
     wrong_ca = root(directory, "wrong-ca")
     rsa = leaf(directory, "rsa-client", :rsa, ca, "clientAuth")
     ec = leaf(directory, "ec-client", :ec, ca, "clientAuth")
-    server = leaf(directory, "server", :rsa, ca, "serverAuth")
-    ec_server = leaf(directory, "ec-server", :ec, ca, "serverAuth")
+    server = leaf(directory, "server", :rsa, ca, "serverAuth", false, server_sans)
+    ec_server = leaf(directory, "ec-server", :ec, ca, "serverAuth", false, server_sans)
     wrong = leaf(directory, "wrong-client", :ec, wrong_ca, "clientAuth")
     large = leaf(directory, "large-client", {:key, rsa.key}, ca, "clientAuth", true)
     expired = expired(directory, ca, rsa)
@@ -54,7 +57,7 @@ defmodule ExSSL.TestSupport.ClientAuthFixtures do
     %{key: key, certificate: certificate, der: certificate_der(certificate)}
   end
 
-  defp leaf(directory, name, algorithm, ca, usage, large? \\ false) do
+  defp leaf(directory, name, algorithm, ca, usage, large? \\ false, sans \\ @default_sans) do
     key =
       case algorithm do
         {:key, path} ->
@@ -84,7 +87,7 @@ defmodule ExSSL.TestSupport.ClientAuthFixtures do
 
     File.write!(
       extensions,
-      "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=#{usage}\nsubjectAltName=DNS:exssl.test,IP:127.0.0.1,IP:::1\n" <>
+      "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=#{usage}\nsubjectAltName=#{sans}\n" <>
         padding
     )
 

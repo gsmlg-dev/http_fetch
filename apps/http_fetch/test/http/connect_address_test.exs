@@ -200,23 +200,42 @@ defmodule HTTP.ConnectAddressTest do
     end
   end
 
-  for address <- [{127, 0, 0, 2}, @ipv6], identity <- [nil, {:ip, @ipv4}, {:ip, "127.0.0.1"}] do
-    test "ExSSL original IP #{inspect(identity)} survives dialing a distinct pin #{inspect(address)}" do
+  # pinned-ip.pem / pinned-ip-ca.pem were generated for this test on 2026-10-21;
+  # both expire 2036-10-18 14:09:43 UTC. The leaf SAN is ONLY 127.0.0.2,
+  # excluding the routable dial 127.0.0.1. Its CA private key is not retained.
+  for {origin, address, fixture} <- [
+        {{127, 0, 0, 2}, @ipv4, "pinned-ip"},
+        {@ipv4, @ipv6, "localhost"}
+      ],
+      form <- [:implicit, :tuple, :string] do
+    test "ExSSL original IP #{inspect(origin)} (#{form}) survives distinct pin #{inspect(address)}" do
+      origin = unquote(Macro.escape(origin))
+      address = unquote(Macro.escape(address))
+      fixture = unquote(fixture)
+      host = origin |> :inet.ntoa() |> List.to_string()
+      dial_host = address |> :inet.ntoa() |> List.to_string()
+      refute host == dial_host
       parent = self()
 
       {port, _} =
         tls_peer(
-          unquote(Macro.escape(address)),
+          address,
           fn socket ->
             assert {:ok, info} = :ssl.connection_information(socket, [:sni_hostname])
             send(parent, {:ip_request, info[:sni_hostname], recv_head(:ssl, socket)})
             :ok = :ssl.send(socket, response("ip verified"))
           end,
-          "localhost"
+          fixture
         )
 
-      identity = unquote(Macro.escape(identity))
-      ssl = [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
+      identity =
+        case unquote(form) do
+          :implicit -> nil
+          :tuple -> {:ip, origin}
+          :string -> {:ip, host}
+        end
+
+      ssl = [cacertfile: Path.join(@fixtures, fixture <> "-ca.pem")]
 
       ssl =
         if identity,
@@ -224,8 +243,8 @@ defmodule HTTP.ConnectAddressTest do
           else: ssl
 
       result =
-        HTTP.fetch("https://127.0.0.1:#{port}/verified",
-          connect_address: unquote(Macro.escape(address)),
+        HTTP.fetch("https://#{host}:#{port}/verified",
+          connect_address: address,
           redirect: :manual,
           tls_backend: :ex_ssl,
           ssl: ssl
@@ -235,7 +254,7 @@ defmodule HTTP.ConnectAddressTest do
       assert %HTTP.Response{status: 200} = result
       assert HTTP.Response.read_all(result) == "ip verified"
       assert_receive {:ip_request, nil, request}, @timeout
-      assert request =~ "Host: 127.0.0.1:#{port}\r\n"
+      assert request =~ "Host: #{host}:#{port}\r\n"
     end
   end
 
@@ -248,7 +267,7 @@ defmodule HTTP.ConnectAddressTest do
           "localhost"
         )
 
-      assert {:error, _} =
+      assert {:error, {:tls_alert, {:certificate_unknown, _}}} =
                HTTP.fetch("https://#{unquote(host)}:#{port}/",
                  connect_address: @ipv4,
                  redirect: :manual,
@@ -261,14 +280,29 @@ defmodule HTTP.ConnectAddressTest do
     end
   end
 
+  test "independent IP certificate cannot authenticate the routable dial address" do
+    {port, peer} =
+      tls_peer(@ipv4, fn _ -> flunk("dial identity reached HTTP") end, "pinned-ip")
+
+    assert {:error, {:tls_alert, {:certificate_unknown, _}}} =
+             HTTP.fetch("https://127.0.0.1:#{port}/",
+               connect_address: @ipv4,
+               redirect: :manual,
+               tls_backend: :ex_ssl,
+               ssl: [cacertfile: Path.join(@fixtures, "pinned-ip-ca.pem")]
+             )
+             |> HTTP.Promise.await(@timeout)
+
+    assert_receive {:tls_handshake, ^peer, {:error, _}}, @timeout
+  end
+
   test "refused pin never falls back to DNS or repeats a mutation after peer failure" do
-    {:ok, listener} = listen(@ipv4)
-    on_exit(fn -> :gen_tcp.close(listener) end)
-    {:ok, {_, port}} = :inet.sockname(listener)
+    {listener, refused, port} = paired_listeners()
+    :ok = :gen_tcp.close(refused)
 
     assert {:error, :econnrefused} =
              HTTP.fetch("http://localhost:#{port}/",
-               connect_address: {127, 0, 0, 2},
+               connect_address: @ipv6,
                redirect: :manual,
                method: :post,
                body: "mutation"
@@ -278,16 +312,20 @@ defmodule HTTP.ConnectAddressTest do
     assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
     parent = self()
 
-    {port, peer} =
-      tcp_peer(@ipv4, fn socket ->
-        request = recv_head(:gen_tcp, socket)
+    {:ok, mutation_listener} = listen(@ipv4)
+    on_exit(fn -> :gen_tcp.close(mutation_listener) end)
+    {:ok, {_, mutation_port}} = :inet.sockname(mutation_listener)
+
+    peer =
+      Task.async(fn ->
+        {:ok, socket} = :gen_tcp.accept(mutation_listener, @timeout)
+        request = recv_mutation(socket)
         send(parent, {:mutation, request})
         :ok = :gen_tcp.close(socket)
-        receive do: (:stop -> :ok)
       end)
 
     assert {:error, _} =
-             HTTP.fetch("http://pinned.invalid:#{port}/",
+             HTTP.fetch("http://pinned.invalid:#{mutation_port}/",
                connect_address: @ipv4,
                redirect: :manual,
                method: :post,
@@ -297,8 +335,10 @@ defmodule HTTP.ConnectAddressTest do
 
     assert_receive {:mutation, request}, @timeout
     assert request =~ "POST / HTTP/1.1"
+    assert request =~ "Host: pinned.invalid:#{mutation_port}\r\n"
+    Task.await(peer, @timeout)
+    assert {:error, :timeout} = :gen_tcp.accept(mutation_listener, 0)
     refute_receive {:mutation, _}, 0
-    send(peer, :stop)
   end
 
   test "a permitted redirect is returned and the next hop needs a new caller pin" do
@@ -357,60 +397,72 @@ defmodule HTTP.ConnectAddressTest do
 
   test "HTTP2 pools cannot reuse a live connection established for a different pin" do
     parent = self()
-    {:ok, listener} = listen({0, 0, 0, 0})
-    {:ok, {_, port}} = :inet.sockname(listener)
+    {first, second, port} = paired_listeners()
 
-    peer =
-      spawn(fn ->
-        for _ <- 1..2 do
+    peers =
+      for {listener, body, count} <- [{first, "first", 2}, {second, "second", 1}] do
+        Task.async(fn ->
           {:ok, socket} = :gen_tcp.accept(listener, @timeout)
           {:ok, {address, _}} = :inet.sockname(socket)
-          body = if address == @ipv4, do: "first", else: "second"
-          spawn_link(fn -> h2_peer(parent, body, address).(socket) end)
-        end
 
-        receive do: (:stop -> :ok)
-      end)
-
-    on_exit(fn ->
-      Process.exit(peer, :kill)
-      :gen_tcp.close(listener)
-    end)
+          try do
+            h2_peer(parent, body, address, count).(socket)
+          after
+            :gen_tcp.close(socket)
+          end
+        end)
+      end
 
     scope = "pin-#{System.unique_integer([:positive])}"
 
-    for {pin, body} <- [{@ipv4, "first"}, {{127, 0, 0, 2}, "second"}] do
-      result =
-        HTTP.fetch("http://pool-pin.invalid:#{port}/",
-          connect_address: pin,
-          redirect: :manual,
-          http_version: :h2c,
-          http2_scope: scope
-        )
-        |> HTTP.Promise.await(@timeout)
+    connections =
+      for {pin, body} <- [{@ipv4, "first"}, {@ipv6, "second"}, {@ipv4, "first"}] do
+        result =
+          HTTP.fetch("http://pool-pin.invalid:#{port}/",
+            connect_address: pin,
+            redirect: :manual,
+            http_version: :h2c,
+            http2_scope: scope
+          )
+          |> HTTP.Promise.await(@timeout)
 
-      assert %HTTP.Response{status: 200} = result
-      assert HTTP.Response.read_all(result) == body
-      assert_receive {:h2_request, ^body, ^pin, headers}, @timeout
-      assert {":authority", "pool-pin.invalid:#{port}"} in headers
-    end
+        assert %HTTP.Response{status: 200} = result
+        assert HTTP.Response.read_all(result) == body
+        assert_receive {:h2_request, connection, ^body, ^pin, headers}, @timeout
+        assert {":authority", "pool-pin.invalid:#{port}"} in headers
+        connection
+      end
+
+    assert [first_connection, second_connection, reused_connection] = connections
+    assert first_connection == reused_connection
+    refute first_connection == second_connection
+    assert {:error, :timeout} = :gen_tcp.accept(first, 0)
+    assert {:error, :timeout} = :gen_tcp.accept(second, 0)
+    for peer <- peers, do: send(peer.pid, :stop)
+    for peer <- peers, do: Task.await(peer, @timeout)
   end
 
-  defp h2_peer(parent, body, address) do
+  defp h2_peer(parent, body, address, count) do
     fn socket ->
       preface = HTTP.HTTP2.connection_preface()
       assert {:ok, ^preface} = :gen_tcp.recv(socket, byte_size(preface), @timeout)
       :ok = :gen_tcp.send(socket, HTTP.HTTP2.Frame.encode(:settings, 0, 0, <<>>))
-      {id, block} = h2_headers(socket)
-      assert {:ok, _, headers} = HTTP.HTTP2.HPACK.decode(HTTP.HTTP2.HPACK.new_decoder(), block)
 
-      :ok =
-        :gen_tcp.send(socket, [
-          HTTP.HTTP2.Frame.encode(:headers, 4, id, <<0x88>>),
-          HTTP.HTTP2.Frame.encode(:data, 1, id, body)
-        ])
+      _decoder =
+        Enum.reduce(1..count, HTTP.HTTP2.HPACK.new_decoder(), fn _, decoder ->
+          {id, block} = h2_headers(socket)
+          assert {:ok, decoder, headers} = HTTP.HTTP2.HPACK.decode(decoder, block)
 
-      send(parent, {:h2_request, body, address, headers})
+          :ok =
+            :gen_tcp.send(socket, [
+              HTTP.HTTP2.Frame.encode(:headers, 4, id, <<0x88>>),
+              HTTP.HTTP2.Frame.encode(:data, 1, id, body)
+            ])
+
+          send(parent, {:h2_request, self(), body, address, headers})
+          decoder
+        end)
+
       receive do: (:stop -> :ok)
     end
   end
@@ -480,9 +532,32 @@ defmodule HTTP.ConnectAddressTest do
   defp assert_tls_alerts(<<21, 3, _minor, size::16, _alert::binary-size(size), rest::binary>>),
     do: assert_tls_alerts(rest)
 
-  defp listen(address) do
-    family = if tuple_size(address) == 8, do: :inet6, else: :inet
-    :gen_tcp.listen(0, [family, :binary, active: false, reuseaddr: true, ip: address])
+  defp paired_listeners(attempts \\ 10) do
+    {:ok, first} = listen(@ipv4)
+    {:ok, {_, port}} = :inet.sockname(first)
+
+    case listen(@ipv6, port) do
+      {:ok, second} ->
+        on_exit(fn ->
+          :gen_tcp.close(first)
+          :gen_tcp.close(second)
+        end)
+
+        {first, second, port}
+
+      {:error, :eaddrinuse} when attempts > 1 ->
+        :gen_tcp.close(first)
+        paired_listeners(attempts - 1)
+
+      {:error, reason} ->
+        :gen_tcp.close(first)
+        flunk("could not bind same-port loopback pair: #{inspect(reason)}")
+    end
+  end
+
+  defp listen(address, port \\ 0) do
+    family = if tuple_size(address) == 8, do: [:inet6, ipv6_v6only: true], else: [:inet]
+    :gen_tcp.listen(port, family ++ [:binary, active: false, reuseaddr: true, ip: address])
   end
 
   defp tcp_peer(address, handler) do
@@ -512,19 +587,22 @@ defmodule HTTP.ConnectAddressTest do
   end
 
   defp tls_peer(address, handler, fixture \\ "pinned") do
-    family = if tuple_size(address) == 8, do: :inet6, else: :inet
+    family = if tuple_size(address) == 8, do: [:inet6, ipv6_v6only: true], else: [:inet]
 
     {:ok, listener} =
-      :ssl.listen(0, [
-        family,
-        :binary,
-        active: false,
-        reuseaddr: true,
-        ip: address,
-        versions: [:"tlsv1.3"],
-        certfile: Path.join(@fixtures, fixture <> ".pem"),
-        keyfile: Path.join(@fixtures, fixture <> ".key")
-      ])
+      :ssl.listen(
+        0,
+        family ++
+          [
+            :binary,
+            active: false,
+            reuseaddr: true,
+            ip: address,
+            versions: [:"tlsv1.3"],
+            certfile: Path.join(@fixtures, fixture <> ".pem"),
+            keyfile: Path.join(@fixtures, fixture <> ".key")
+          ]
+      )
 
     {:ok, {_, port}} = :ssl.sockname(listener)
     parent = self()
@@ -559,6 +637,24 @@ defmodule HTTP.ConnectAddressTest do
       recv_head(transport, socket, buffer <> data)
     else
       buffer
+    end
+  end
+
+  defp recv_mutation(socket, buffer \\ <<>>) do
+    assert byte_size(buffer) <= 65_536
+
+    case :binary.split(buffer, "\r\n\r\n") do
+      [head, body] when byte_size(body) >= 8 ->
+        assert body == "mutation"
+
+        assert String.downcase(head) =~ "content-length: 8\r\n" or
+                 String.ends_with?(String.downcase(head), "content-length: 8")
+
+        buffer
+
+      _ ->
+        assert {:ok, bytes} = :gen_tcp.recv(socket, 0, @timeout)
+        recv_mutation(socket, buffer <> bytes)
     end
   end
 
