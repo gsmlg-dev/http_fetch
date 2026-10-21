@@ -316,6 +316,42 @@ plaintext bounds remain independently enforced. No traffic secrets, private
 keys, or application payloads are exposed through public metadata or ordinary
 inspection.
 
+## Prepared upgrade configuration
+
+The project extensions `SSL.prepare_upgrade(options)` and
+`SSL.connect_prepared(tcp, prepared, timeout \\ :infinity)` separate configuration
+resolution from an existing-socket upgrade. They are not OTP `:ssl` APIs.
+Preparation uses the same **upgrade** option context, including rejection of bind
+IP/port and address-family options. It loads the effective trust source and client
+certificate/key, validates the concrete profile, reference identity, SNI, versions
+and ALPN, and returns an opaque, ordinarily redacted `SSL.PreparedUpgrade` snapshot.
+A profile requiring connection SNI must have it; actual SNI bytes count toward the
+existing extension-vector bound. Preparation allocates no socket, TLS connection
+process or ephemeral keys.
+
+Consumption uses that resolved snapshot without rereading files or resolving a
+new profile. Later source-file replacement/deletion does not change the prepared
+policy; call `prepare_upgrade` again to obtain a new snapshot. Deliberate snapshot
+reuse is supported. Random ClientHello/session-ID values, ephemeral key pairs,
+session-ticket selection and binders remain connection-dependent. Supported
+explicit fixed session-ID/profile policies retain their existing meaning.
+Deferred PSK material and runtime/handshake failures remain checked at attach.
+Ownership, pending-plaintext rejection, timeout and owned-socket close-on-failure
+semantics match ordinary existing-socket `connect`.
+
+ExSSL HTTP CONNECT prepares after merging `defaults < ssl < socket_opts` and
+applying the origin reference/SNI, before allocating the raw proxy TCP socket.
+The CONNECT deadline starts before preparation. The same snapshot is consumed
+only after the proxy response and plaintext boundary are validated. Supported
+one-TLS-leg routes remain HTTPS origin through an HTTP proxy and HTTP origin
+through an HTTPS proxy. Nested HTTPS-proxy plus HTTPS-origin routes remain
+explicitly rejected before dialing.
+
+A configuration snapshot is not a durable connection-attempt/adoption or cleanup
+receipt. It does not enable managed/completion paths, establish cancellation or
+resource-cleanup guarantees, or resolve the separate proxy-origin-port ticket
+partitioning gate. Those lifecycle and acceptance gates remain open.
+
 ## Remaining limitations
 
 The experimental `SSL.QUIC` record-free TLS integration has its own

@@ -6,7 +6,7 @@ defmodule SSL.ClientHello.Profile do
   extension ID in the optional `:raw_extensions` capability allowlist.
   """
 
-  alias SSL.ClientHello.{GreasePolicy, RecordPolicy, WireProfile}
+  alias SSL.ClientHello.{Extension, GreasePolicy, RecordPolicy, WireProfile}
   alias SSL.Capabilities
 
   @extension_ids %{
@@ -63,6 +63,42 @@ defmodule SSL.ClientHello.Profile do
   end
 
   def validate(_profile, _capabilities), do: {:error, {:invalid_profile, :structure}}
+
+  @doc """
+  Validates a profile with its frozen connection SNI, without materialization.
+
+  Uses the same extension limits and SNI encoder as ordinary materialization.
+  Deferred PSK selection remains connection-dependent and is checked at attach.
+  """
+  @spec validate_context(WireProfile.t(), capabilities(), map()) ::
+          {:ok, WireProfile.t()} | {:error, term()}
+  def validate_context(%WireProfile{} = profile, capabilities, context) when is_map(context) do
+    with {:ok, _} <- validate(profile, capabilities),
+         {:ok, dynamic_bytes} <- context_payload_bytes(profile.extensions, context),
+         :ok <- validate_extensions_length(profile.extensions, capabilities, dynamic_bytes) do
+      {:ok, profile}
+    end
+  end
+
+  def validate_context(_, _, _), do: {:error, {:invalid_profile, :context}}
+
+  defp context_payload_bytes(extensions, context) do
+    if {:server_name, :from_connection} in extensions do
+      case Map.fetch(context, :server_name) do
+        {:ok, name} when is_binary(name) and byte_size(name) > 0 ->
+          with {:ok, {0, payload}} <- Extension.encode({:server_name, name}),
+               do: {:ok, byte_size(payload)}
+
+        {:ok, _} ->
+          {:error, {:invalid_material, :server_name}}
+
+        :error ->
+          {:error, {:missing_material, :server_name}}
+      end
+    else
+      {:ok, 0}
+    end
+  end
 
   defp validate_capabilities(capabilities) when is_map(capabilities) do
     with :ok <- require_capability_list(capabilities, :versions),
@@ -521,9 +557,9 @@ defmodule SSL.ClientHello.Profile do
     end
   end
 
-  defp validate_extensions_length(extensions, capabilities) do
+  defp validate_extensions_length(extensions, capabilities, dynamic_bytes \\ 0) do
     extensions
-    |> Enum.reduce_while(0, fn extension, total ->
+    |> Enum.reduce_while(dynamic_bytes, fn extension, total ->
       next_total = total + 4 + extension_payload_length(extension, capabilities)
 
       if next_total <= 0xFFFF do

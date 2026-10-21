@@ -180,7 +180,10 @@ defmodule HTTP.ProxyWireTest do
           ssl: [
             cacertfile: Path.join(@fixtures, "localhost-ca.pem"),
             server_name_indication: ~c"localhost",
-            ex_ssl: [reference_identity: {:ip, unquote(String.trim(host, "[]"))}]
+            ex_ssl: [
+              reference_identity:
+                {:ip, unquote(host |> String.trim_leading("[") |> String.trim_trailing("]"))}
+            ]
           ],
           proxy: {:http, "127.0.0.1", proxy_port, []},
           timeout: 5_000
@@ -339,6 +342,126 @@ defmodule HTTP.ProxyWireTest do
     assert {:error, :proxy_not_supported_for_quic} = HTTP.SocketClient.request(request)
     assert {:error, :timeout} = :gen_tcp.accept(proxy, 100)
     assert {:error, :timeout} = :gen_udp.recv(origin, 0, 100)
+  end
+
+  for {leg, scheme, proxy_scheme, protocol} <- [
+        {:origin, "https", :http, :http1},
+        {:origin, "https", :http, :http2},
+        {:proxy, "http", :https, :http1}
+      ] do
+    test "explicit ExSSL verify_none supports the #{leg} TLS leg with #{protocol}" do
+      {origin, origin_port} = listener()
+      {proxy, proxy_port} = listener()
+      parent = self()
+
+      peer =
+        spawn_link(fn ->
+          {:ok, tcp} = :gen_tcp.accept(proxy, 5_000)
+
+          if unquote(leg) == :origin do
+            connect = recv_head(tcp, :gen_tcp)
+            assert connect =~ "CONNECT localhost:#{origin_port} HTTP/1.1\r\n"
+            :ok = :gen_tcp.send(tcp, "HTTP/1.1 200 OK\r\n\r\n")
+          end
+
+          {:ok, socket} =
+            :ssl.handshake(
+              tcp,
+              [
+                certfile: Path.join(@fixtures, "pinned.pem"),
+                keyfile: Path.join(@fixtures, "pinned.key"),
+                active: false,
+                mode: :binary,
+                alpn_preferred_protocols:
+                  unquote(if protocol == :http2, do: ["h2"], else: ["http/1.1"])
+              ],
+              5_000
+            )
+
+          serve_tls(socket, unquote(protocol), parent)
+          send(parent, {:peer_done, self()})
+          receive do: (:close -> :ssl.close(socket))
+        end)
+
+      on_exit(fn -> if Process.alive?(peer), do: Process.exit(peer, :kill) end)
+
+      response =
+        HTTP.fetch("#{unquote(scheme)}://localhost:#{origin_port}/private",
+          tls_backend: :ex_ssl,
+          http_version: unquote(protocol),
+          ssl: [verify: :verify_none],
+          proxy:
+            {unquote(proxy_scheme), "127.0.0.1", proxy_port,
+             [headers: [{"Proxy-Authorization", "Basic proxy-secret"}]]},
+          headers: [{"Authorization", "Bearer origin-secret"}],
+          timeout: 5_000
+        )
+        |> HTTP.Promise.await(7_000)
+
+      assert %HTTP.Response{status: 200} = response
+      assert HTTP.Response.read_all(response) == "ok"
+
+      if unquote(leg) == :origin do
+        assert_tunnel_request(unquote(protocol))
+      else
+        assert_receive {:origin_head, head}, 2_000
+        assert head =~ "GET http://localhost:#{origin_port}/private HTTP/1.1\r\n"
+        assert head =~ "Proxy-Authorization: Basic proxy-secret"
+      end
+
+      assert_receive {:peer_done, ^peer}, 2_000
+      send(peer, :close)
+      assert {:error, :timeout} = :gen_tcp.accept(origin, 100)
+    end
+  end
+
+  @tag :tmp_dir
+  test "public ExSSL CONNECT TLS errors precede both proxy and origin accepts", %{
+    tmp_dir: directory
+  } do
+    {origin, origin_port} = listener()
+    {proxy, proxy_port} = listener()
+    missing = Path.join(directory, "missing.pem")
+
+    for ssl <- [
+          [unsupported_tls_option: true],
+          [versions: [:"tlsv1.1"]],
+          [cacertfile: missing],
+          [certfile: Path.join(@fixtures, "localhost.pem"), keyfile: missing],
+          [ex_ssl: [profile: %SSL.ClientHello.WireProfile{}]],
+          [server_name_indication: ~c"localhost", ex_ssl: [reference_identity: {:ip, "[::1]"}]]
+        ] do
+      assert {:error, _} =
+               HTTP.fetch("https://localhost:#{origin_port}/private",
+                 tls_backend: :ex_ssl,
+                 http_version: :http1,
+                 ssl: ssl,
+                 proxy: {:http, "127.0.0.1", proxy_port, []},
+                 timeout: 500
+               )
+               |> HTTP.Promise.await(2_000)
+
+      assert {:error, :timeout} = :gen_tcp.accept(proxy, 20)
+      assert {:error, :timeout} = :gen_tcp.accept(origin, 20)
+    end
+  end
+
+  test "HTTPS proxy plus HTTPS origin is rejected before either endpoint accepts" do
+    {origin, origin_port} = listener()
+    {proxy, proxy_port} = listener()
+
+    for backend <- [:ssl, :ex_ssl] do
+      assert {:error, :https_proxy_requires_http_origin} =
+               HTTP.fetch("https://localhost:#{origin_port}/private",
+                 tls_backend: backend,
+                 proxy: {:https, "127.0.0.1", proxy_port, []},
+                 timeout: 500
+               )
+               |> HTTP.Promise.await(2_000)
+
+      assert {:error, :timeout} = :gen_tcp.accept(proxy, 20)
+      assert {:error, :timeout} = :gen_tcp.accept(origin, 20)
+    end
   end
 
   defp serve_tls(socket, :http1, parent) do

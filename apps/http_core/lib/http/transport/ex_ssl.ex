@@ -24,6 +24,16 @@ defmodule HTTP.Transport.ExSSL do
          do: SSL.connect(tcp, origin_identity(host, ssl_opts, :upgrade), timeout)
   end
 
+  @doc false
+  def prepare_upgrade(host, opts) do
+    with {:ok, ssl_opts} <- tls_options(opts),
+         do: SSL.prepare_upgrade(origin_identity(host, ssl_opts, :upgrade))
+  end
+
+  @doc false
+  def upgrade_prepared(tcp, prepared, timeout),
+    do: SSL.connect_prepared(tcp, prepared, timeout)
+
   @impl true
   def controlling_process(socket, pid), do: SSL.controlling_process(socket, pid)
 

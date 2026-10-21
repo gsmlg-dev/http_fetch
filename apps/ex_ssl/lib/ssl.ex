@@ -4,7 +4,7 @@ defmodule SSL do
 
   This experimental client supports TLS 1.3 and explicit bounded TLS 1.2, binary raw sockets, passive and
   active-once delivery, application ownership transfer, authenticated ALPN,
-  bounded streaming writes, and mandatory peer verification. These restricted
+  bounded streaming writes, and peer verification by default. These restricted
   defaults differ from OTP. Unsupported options return explicit
   `{:error, {:options, reason}}` errors.
 
@@ -17,7 +17,7 @@ defmodule SSL do
   never resume. A socket belonging to another process is left untouched.
   """
   import Kernel, except: [send: 2]
-  alias SSL.{Connection, IodataCursor, Options, Socket}
+  alias SSL.{Connection, IodataCursor, Options, PreparedUpgrade, Socket}
 
   @spec connect(:gen_tcp.socket(), list()) :: {:ok, Socket.t()} | {:error, term()}
   def connect(tcp_socket, options), do: connect(tcp_socket, options, :infinity)
@@ -26,17 +26,8 @@ defmodule SSL do
   def connect(host, port, options) when is_integer(port),
     do: connect(host, port, options, :infinity)
 
-  def connect(tcp_socket, options, timeout) do
-    with :ok <- owned_socket(tcp_socket) do
-      result =
-        with {:ok, deadline} <- Options.deadline(timeout),
-             {:ok, options} <- Options.normalize(:upgrade, options),
-             :ok <- upgrade_boundary(tcp_socket),
-             do: handoff(tcp_socket, options, deadline)
-
-      close_on_error(result, tcp_socket)
-    end
-  end
+  def connect(tcp_socket, options, timeout),
+    do: upgrade_socket(tcp_socket, {:options, options}, timeout)
 
   @spec connect(term(), :inet.port_number(), list(), timeout()) ::
           {:ok, Socket.t()} | {:error, term()}
@@ -66,6 +57,35 @@ defmodule SSL do
   end
 
   def connect(_, _, _, _), do: {:error, :badarg}
+
+  @doc """
+  Resolves and validates TLS configuration for a later TCP upgrade.
+
+  Loads trust and client credentials and freezes the upgrade reference, SNI and
+  concrete wire profile. No socket, connection process or ephemeral keys are
+  allocated. The returned opaque snapshot can be reused deliberately; connection
+  randomness, ephemeral keys and session-ticket binders are generated at attach.
+  This configuration snapshot is not an attempt/adoption or cleanup receipt.
+  """
+  @spec prepare_upgrade(term()) :: {:ok, PreparedUpgrade.t()} | {:error, term()}
+  def prepare_upgrade(options) do
+    with {:ok, normalized} <- Options.normalize(:upgrade, options),
+         :ok <- upgrade_profile_context(normalized) do
+      {:ok, PreparedUpgrade.new(normalized)}
+    end
+  end
+
+  @doc """
+  Upgrades an owned passive binary/raw TCP socket with a prepared snapshot.
+
+  Uses the resolved policy without rereading files or resolving options/profiles.
+  Ownership, pending-plaintext rejection, timeout and close-on-failure semantics
+  are the same as `connect/3`. Future runtime or handshake failures remain possible.
+  """
+  @spec connect_prepared(:gen_tcp.socket(), PreparedUpgrade.t(), timeout()) ::
+          {:ok, Socket.t()} | {:error, term()}
+  def connect_prepared(tcp_socket, prepared, timeout \\ :infinity),
+    do: upgrade_socket(tcp_socket, {:prepared, prepared}, timeout)
 
   @doc "Writes iodata as one ordered logical write. Concurrent writes return `:busy`."
   @spec send(Socket.t(), iodata()) :: :ok | {:error, term()}
@@ -169,6 +189,32 @@ defmodule SSL do
   end
 
   def close(_), do: {:error, :badarg}
+
+  defp upgrade_profile_context(options) do
+    case SSL.ClientHello.Profile.validate_context(
+           options.profile,
+           Options.capabilities(),
+           options.context
+         ) do
+      {:ok, _} -> :ok
+      {:error, _} -> {:error, {:options, {:ex_ssl, :unsupported_profile}}}
+    end
+  end
+
+  defp upgrade_socket(tcp_socket, source, timeout) do
+    with :ok <- owned_socket(tcp_socket) do
+      result =
+        with {:ok, deadline} <- Options.deadline(timeout),
+             {:ok, options} <- upgrade_options(source),
+             :ok <- upgrade_boundary(tcp_socket),
+             do: handoff(tcp_socket, options, deadline)
+
+      close_on_error(result, tcp_socket)
+    end
+  end
+
+  defp upgrade_options({:options, options}), do: Options.normalize(:upgrade, options)
+  defp upgrade_options({:prepared, prepared}), do: PreparedUpgrade.fetch_options(prepared)
 
   defp call(%Socket{pid: pid, ref: ref} = socket, request) do
     :gen_statem.call(pid, {ref, request}, :infinity)

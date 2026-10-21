@@ -112,22 +112,15 @@ defmodule HTTP.Proxy do
   def connect(transport, host, port, opts, timeout, proxy) do
     deadline = System.monotonic_time(:millisecond) + min(timeout, proxy.timeout)
 
-    socket_opts =
-      opts |> Keyword.get(:socket_opts, []) |> Keyword.delete(:active) |> Keyword.delete(:packet)
-
-    tcp_opts = [
-      socket_opts: socket_opts,
-      request_lifecycle: Keyword.get(opts, :request_lifecycle)
-    ]
-
-    with {:ok, tcp} <-
-           HTTP.Transport.TCP.connect(proxy.host, proxy.port, tcp_opts, remaining(deadline)) do
+    with {:ok, upgrade} <- prepare_tunnel_upgrade(transport, host, opts),
+         {:ok, tcp} <-
+           connect_proxy_tcp(proxy, opts, deadline) do
       result =
         if transport == HTTP.Transport.TCP do
           {:ok, tcp}
         else
           with :ok <- establish_tunnel(tcp, host, port, proxy, deadline),
-               do: transport.upgrade(tcp, host, opts, remaining(deadline))
+               do: upgrade_tunnel(upgrade, tcp, remaining(deadline))
         end
 
       case result do
@@ -139,6 +132,36 @@ defmodule HTTP.Proxy do
           result
       end
     end
+  end
+
+  defp prepare_tunnel_upgrade(HTTP.Transport.ExSSL, host, opts) do
+    with {:ok, prepared} <- HTTP.Transport.ExSSL.prepare_upgrade(host, opts),
+         do: {:ok, {:ex_ssl, prepared}}
+  end
+
+  defp prepare_tunnel_upgrade(transport, host, opts),
+    do: {:ok, {:legacy, transport, host, opts}}
+
+  defp upgrade_tunnel({:ex_ssl, prepared}, tcp, timeout),
+    do: HTTP.Transport.ExSSL.upgrade_prepared(tcp, prepared, timeout)
+
+  defp upgrade_tunnel({:legacy, transport, host, opts}, tcp, timeout),
+    do: transport.upgrade(tcp, host, opts, timeout)
+
+  defp connect_proxy_tcp(proxy, opts, deadline) do
+    tcp_opts = proxy_tcp_options(opts)
+
+    case remaining(deadline) do
+      0 -> {:error, :timeout}
+      timeout -> HTTP.Transport.TCP.connect(proxy.host, proxy.port, tcp_opts, timeout)
+    end
+  end
+
+  defp proxy_tcp_options(opts) do
+    socket_opts =
+      opts |> Keyword.get(:socket_opts, []) |> Keyword.delete(:active) |> Keyword.delete(:packet)
+
+    [socket_opts: socket_opts, request_lifecycle: Keyword.get(opts, :request_lifecycle)]
   end
 
   defp establish_tunnel(tcp, host, port, proxy, deadline) do
