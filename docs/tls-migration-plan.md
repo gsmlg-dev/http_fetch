@@ -84,13 +84,22 @@ coverage; no supported endpoint class silently lost.
       (storage/wait foundation only; actual TLS enrollment integration remains open).
 - [x] Implement/test private temporary observer, bounded supervisor bootstrap,
       authenticated fixed-role admission, independent DOWN and nonextendable retirement
-      (59 lifecycle checks; native births/adoption/transfer/public facade remain open).
+      (round7 baseline59/current71 lifecycle checks; actual native births/adoption/transfer/public facade remain open).
 - [x] Read existing ex_ssl architecture/design/PRD/implementation docs before changes.
 - [x] Retain explicit upload-abandonment abort intent after the retained native job
       finishes: matched ordinary FIN vs abandoned RESET, authenticated response reads,
       exact local DOWN/Port absence before bounded independent-peer drain
       (round9 deterministic old-source RED ->2/2 GREEN; no actor/layout changes).
-- [ ] Before public lifecycle acceptance, implement authenticated constructor completion,
+- [x] Measure finite ordinary-reuse upload pressure instead of assuming 1MiB blocks:
+      4MiB/90ms sustained wait/original350ms peer pause and1s budget, exact body,
+      same worker/source unfinished, proper same-peer80ms negative control;
+      18 focused +81 whole-file passes, corrected case also passed full round10.
+      Existing cancellation remote-close and length-mismatch fixture gates stay open.
+- [x] Authenticate private pre-native constructor rejection without allocating a
+      resource: exact permit/caller/parent generation, fixed role-use tombstone,
+      no fabricated DOWN or loss clearing, closed-fence accounting and helper completion
+      (round10 RED31/33 -> GREEN43/43; twelve added cases; not native-error cleanup).
+- [ ] Before public lifecycle acceptance, complete native constructor identity proof,
       inert Connection/writer enrollment, then private real allocator/setup direct-dial
       orchestration with original deadlines and acknowledged outcome publication.
       Native connect error/helper DOWN is not native cleanup proof; unresolved identity

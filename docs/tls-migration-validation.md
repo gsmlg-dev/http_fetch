@@ -995,3 +995,115 @@ not tracing completeness; port-stream barrier, DNS/multiple-attempt coverage,
 backend compatibility, event authentication and mailbox bounds remain unproved.
 No tracing/provider implementation was added. Native error or helper DOWN still
 cannot substitute for exact native-resource proof; missing evidence stays unconfirmed.
+
+## Round10 — pre-native constructor settlement and measured pressure
+
+Task15 adds private ResourceLedger/Observer.reject_before_native/4. A trusted
+provider constructor asserts it rejected BEFORE entering native allocation and
+fenced all future allocation. This is not an interpretation of a native connect
+error/timeout/helper DOWN. The exact permit/role/creator and live enrolled parent
+monitor generation with done:false are authenticated; root permits match bound
+owner/recorded owner monitor. Consuming a genuine permit sets a private fixed5bit
+role-use tombstone: no reuse/late enrollment, fabricated resource/DOWN, reopened
+admission or erased own/other sticky loss. Accounting may settle after admission
+closed. Snapshot/Receipt dimensions, Reader rules and immutable grace stay unchanged.
+
+Initial test-first shared-build RED:31/33 passed, exactly TWO missing-API
+UndefinedFunctionErrors; log/tmp/http-fetch-task15-old-lifecycle-red.log. Final
+2file focused GREEN:43/43 seed101 in3.9s, log/tmp/http-fetch-tls-round10-lifecycle-green.log.
+Twelve added tests cover caller/token/role/attempt/generation, replay, closed fence,
+forbidden role reuse/late enrollment, own/other sticky loss, helper_done and real
+setup-helper options failure. Root setup rejection deliberately leaves setup pending
+until explicit cancellation; constructor-owner outcome needs later driver integration.
+It does not invent failure.
+Lead reviewed both runtime files and all12 added cases. Actual native births/inert
+Connection/writer/adoption/transfer/public lifecycle remain absent. All71 lifecycle tests passed in3.9s. Strictcompile/wholeformat passed;
+configuredCredo54checks/531files/8844mods-funs found0issues; Dialyzer0errors/
+0skips/four intentional unnecessary-ignore notices retained. Logs/tmp/http-fetch-
+tls-round10-{all-lifecycle,compile,format,credo,dialyzer}.log.
+
+Task16 reproduced the unchanged OTP SSL ordinary-reuse blocked-send prerequisite
+failure on the second repeated trial. Public classification then established the
+old fixed1MiB pressure FITS: all64 chunks produced, source exact DOWN:normal,
+source info:nil, public request still awaiting peer response; peer public SSL
+recv_oct1,052,147/recv_cnt64. Once authorized, peer read EXACT1,048,576 application
+bytes, then HTTP200 and completion:ok. ExSSL control stopped at35/64 produced and
+TCP25/64 with stable blocked workers across350ms. Thus this observed OTP failure
+was neither a missed existing worker nor a stale-send-limit error: no unfinished
+send remained. Log/tmp/http-fetch-write-idle-old-pressure-evidence.log8-39.
+The2MiB candidate also fit OTP buffers. Final finite4MiB (256x16384) uses one
+immutable1s observation budget: continuously poll5ms for the same waiting upload
+worker/production counter for>=90ms, then keep the peer paused350ms total since
+that observation. Source and the same monitored worker must still be alive, with
+produced<256. The original peer/native defaults are restored; attempted post-TLS
+receive buffer controls did not impose a fixed cap because OS autotuning persisted.
+Exact4MiB/HTTP200/sourceDOWNnormal/backend-specific completion remain required.
+Six focused3-backend repetitions:18/18 passed; log/tmp/http-fetch-write-idle-pressure-
+256-stable90.log. Proper controlled native80 negative uses identical socket_opts
+on BOTH requests to preserve pool identity: ALL3 received the second header on
+SAME peer, sourceDOWNnormal and publicTask {:ok,{:error,:timeout}} before90ms
+observation could settle; log/tmp/http-fetch-write-idle-final-native80-negative.log.
+A prior second-request-only socket_opts control changed pool identity and is INVALID,
+not negative proof. All pressure/env/rescue/stats diagnostics were removed before
+final acceptance; only the finite workload/counter and bounded observer remain.
+Final CLEAN whole-file3x27=81/81 passed, zero exclusions/skips; log/tmp/http-fetch-
+write-idle-final-whole.log. Scoped formatter/diff checks passed. No production write
+policy/native buffers/completion expectations/other24 wire cases changed. Final
+umbrella results follow below.
+
+Task14 separate bounded OTP29 native control used true prim_inet.send/4 WAITING,
+pending16592–16800 bytes before/after17 reverse bytes, verified linger setopts:ok
+and getopts{true,0}, exact owner+writer DOWN/Portnil within1s BEFORE peer2s drain.
+Four cases: warmup0/65536 times Port.close/gen_tcp.close, reset mask true; another
+four same cases reset mask false. All8 passed: local0ms, remoteECONNRESET/CLOSED
+0–1ms after180224–326712 bytes drained. Logs/tmp/http-fetch-tls-round10-native-close-
+control.log and native-close-default-mask.log. This demotes GENERIC backlog/API/
+reset-mask failure, not every TLS-native configuration.
+
+Approved temporary payload-free Connection and HTTPS fixture diagnostics correlated
+actor/owner/native4tuple/monotonic time, close flag/output kind/write?/driverpending,
+actual linger result and public getopts/getstat, exact local retirement, peer receive
+byte/chunk counts and terminal. Peer metadata workers were asynchronous/bounded50ms;
+original gates/assertions/ssl.recv(...,2000) were unchanged. Bounded two44-case
+matrices seed101+102:88/88 passed (19.3s+17.6s), logs/tmp/http-fetch-tls-round10-
+https-diag-{1,2}.log. No timeout/failing4tuple was captured; NO causal fix claimed.
+All44 ExSSL close events used successful/effective zero linger via existing flag
+or active output/driver-pending branch. Formerly failing auto/streamed/infinity
+positive example: actor2716,tuple56361->56360,abandonedtrue,pending13378,linger:ok,
+Port absent1ms,peerclosed after98313 bytes/6chunks <=1ms. Passed-case evidence
+cannot establish the branch used by a historical failed case.
+
+Material configuration gap: actual TLS client native sndbuf1024/buffer16640;
+initial raw controls auto-tuned to sndbuf65328/buffer9216 despite the requested
+small buffers. Eight ADDITIONAL exact-effective controls reapplied sndbuf1024/buffer16640/client
+activeonce AFTERconnect and matched readbacks BOTH before write and close:4passive
++4active100, warmup0/65536 x bothcloseAPIs. Real16406byteprim_inetsend4job/pending
+8346–15470 survived17 reverse bytes; linger:ok/effectivezero, exactlocalDOWN/Portnil
+0ms BEFOREdrain and allremoteCLOSED0ms. Logs/tmp/http-fetch-tls-round10-native-
+exact-{passive,active100}.log. ALL16 nativecontrols pass, also demoting generic
+effective-small-buffer/active100 failure. No TLS failure was captured; no causal
+fix/universal native claim follows.
+Temporary Connection+HTTPS changes were removed before next Mix owner; exact
+Connection source hash restored371201570752d6d090d78bd8760547998e9bff25640d4b436c45719fa4cf98a0,
+and both files diff-identical to HEAD. Original local1s/remote2s bounds unchanged.
+
+Final ALL-NINE source run (integration included, HTTP_QUIC_PHASE1_REAL=1, seed101)
+EXIT2:3166/3169passed, ZERO exclusions/opt-in skips. ExSSL771/771(20props),
+QUIC249,core418,H3comp113,runtime149,Fetch1229/1232(20/20doctests),WS138,WT24,SSE75.
+Log/tmp/http-fetch-tls-round10-source.log. THREE failures remain:
+
+- UNCHANGED fixedlength mismatch abc/def fixture accept:eINVAL at RequestStream165;
+  listener/abort ordering needs controlled proof (Task18); no error allowance added.
+- UNCHANGED ExSSL cancellation wirecase119: publicaborted/uploadworkerDOWN/source
+  DOWNnormal passed; finish peer_closed8s timed out. This is NOT separate proof that
+  providerConnection/writer/nativePort had retired; Task14 must correlate those.
+- ExSSL http1/streamed/4000 HTTPS peer2s timeout AFTER exactlocalretirement; recv_oct
+  102032/send_oct1461/send_pend0,active99/buffer9216/recbuf485936; sender/receiver
+  idle with empty mailboxes. Actual failing close tuple/branch still uncaptured.
+
+Corrected ordinaryreuse case passed in the full run; no causal remote-close fix
+claimed. Private pre-native settlement is accepted at71 lifecycle checks, while
+full umbrella/default/public/managed gates remain OPEN. Next ordered private work:
+inert Connection/writer births BEFORE any timer/writer/TLS/native work (Task17),
+then realallocator/setup/directfacade with actualnativeidentity proof. Native
+errors/helperDOWN remain unconfirmed; no default switch/public lifecycle admission.
