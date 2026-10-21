@@ -1890,3 +1890,83 @@ ROUND17_RESTORED_CHECK_EXIT=0+prompt. Only this evidence document remains
 changed; no additional compile/Credo/Dial run was warranted after byte-exact
 restoration of every app file (R16 checks remain applicable, not rerun totals).
 Full-nine R13 gate remains3190/3192 EXIT2. No P0 completion claim.
+
+## Round18 — first correlated actual ExSSL failure
+
+Base5f6ca78 clean apps verified. Sole temporary HTTPS change extends frozen
+R17 prepared baseline/native-peer coverage to BOTH normal backends, preserving
+all original pressure/1s local/2s recv/3s parent assertions. Original private
+provider checks stay ExSSL-only. Six small diff hunks reviewed; helpers and
+original blocked-writer/pending/Python-timeout/peer-state blocks unchanged.
+Success summary only after original peer-closed assertion, receiveafter0,
+scalar booleans/backend; no IO before target assertions. Root read changed
+regions then formatted fixture and ran entry preflight before ONE campaign.
+
+Actual ROUND18_HTTPS_EXIT=2+prompt, seed101/warnings-as-errors/max-failures1,
+18.3s,26/27executed passed; FIRSTfailure ex_ssl/http1/buffered/4000.
+Remaining cases aborted, no rerun. The failure is the ORIGINAL recv2s timeout.
+
+BEAM69211/UID502/start1792619431.864333, client61885->peer61884. Before trigger
+validated original prepared worker receipt: FD50/generation8226334/ESTABLISHED4,
+54FDs6queries, queues0/0, rcv_hiwat407040/snd_hiwat1024, Cportion8.683ms.
+Completed proof at BEAMmono-576460733953, before drain snapshot-576460733927.
+Same PID/start/tuple POST:53FDs4queries, Cportion8.814ms, no match observed.
+Both receipts observed/within_deadline/child_reaped/helper0/wrapper0/exact
+diagnostic PortDOWN. baseline_correlated and post_process_correlated TRUE,
+original_fd_observed_in_sample FALSE. This is the first actual failing tuple
+with original FD/generation baseline; no-match remains NOT physical absence
+proof. Sampling intervals are not atomic, and postscan occurs after timeout.
+Original ExSSL Connection/Writer DOWN+Portnil/local cleanup assertions passed;
+R12 actual-linger/readback/Port.close hooks must NOT be projected onto this tuple.
+
+Peer original captured owner0.843 remained alive/connected, no exact owner or
+Port DOWN, driver states connected/open, packet0/exit_on_close true. BEFORE
+drain at-576460733927: activefalse, recv_cnt100 EXACT, recv_oct98960, max1024.
+At original timeout at-576460731925: active99, recv_cnt101, recv_oct101008,
+max2048. Only ONE2048-byte native read was added across2002ms; send_oct1416/
+pend0 unchanged. These are DRIVER observations, not kernel TCP state or queue
+occupancy. Reference Rx/Tx waiting gen_statem:loop/3/mailbox0, buffer9216 and
+recbuf486960 CAPACITY. No original peer Port retirement observed.
+
+Success logs establish real Source pretrigger ready+valid for11successful
+ExSSL cases (plus this failing ExSSL), and2successful OTP cases. Eight other
+OTP successes logged readyfalse/validfalse, so prepared control is NOT a
+uniform readiness guarantee. Five executed raw-timeout-peer cases have no
+summary; total successful normal summaries21. Baseline timing coverage for
+fast OTP paths remains incomplete, no new waits are authorized by these data.
+
+Source qualification: Darwin FD_CLOSE=0; passive-to-active-N SETOPTS performs
+synchronous tcp_recv BEFORE registering read selection. ONE2048 delivery can
+come from immediate retained/raw input; it does NOT prove a subsequent poll
+callback occurred. Default TLS internal window100 fits the observed transition;
+no source rule intentionally suppresses EOF at credit99. R13 RAW already used
+active100/reactivation and drained101chunks104448B/econnreset in0ms, weakening
+generic active-N failure. It did NOT verify an exhausted/passive checkpoint
+BEFORE client close. These are falsifiable hypotheses, not root-cause findings.
+
+OTP blocked-upload cleanup aborts retained raw TCP with zero linger/close,
+bypassing ssl.close; HTTP owner DOWN alone cannot prove TLS actors retired.
+ExSSL abandoned branch calls close_transport BEFORE stop_and_reply(:ok);
+the separate graceful waiter ordering must not be applied to this branch.
+
+Next targeted observation: reverse the ONE postscan to original public peer
+endpoints while original peer Port/actor still live, before timeout cleanup.
+Same PID/start/UID; positive peer FD/gen and kernel tcp_state/rcv_cc distinguish
+kernel state from driver-open. CLOSED0/CLOSE_WAIT5 differ from ESTABLISHED4;
+rcv_cc positive with flat native counters supports further delivery investigation.
+Negative remains no absence proof. Include launch/report/reap in remaining
+ORIGINAL parent3sD, skip/inconclusive if insufficient; no added200ms outside D.
+A separate RAW control can assert native credit delta100+tcp_passive BEFORE
+close, hold passive while abandoning/zero-linger/readback/close original client,
+then rearm100 ONCE under one absolute3s drain D. R13 has no such pre-close
+checkpoint. Neither proposal has been executed or granted implementation yet.
+
+Original HTTPS fixture restored BYTEEXACT b4f4f8b375d72aadf9799f8261199c478e4f85dd34bfdd601c3e873e0429c9d3
+from /tmp/http-fetch-round18-https-original.exs. Formatted prototype retained at
+/tmp/http-fetch-round18-https-instrumented.exs. Actual full metadata/error log
+/tmp/http-fetch-round18-https.log and source-entry.log retained. Immutable
+R15–17 helpers unchanged. No new runtime/TLS policy/default/public API shipped.
+Whole restored format/diffcheck/apps-diff actualROUND18_RESTORED_CHECK_EXIT=0
+plus prompt. Runtime/pins checked unchanged; last full-nine remains R13 red.
+No additional compile/Credo/Dial totals after byte-exact restoration.
+P0 remains OPEN; actual source identity correlation is progress, not a fix.
