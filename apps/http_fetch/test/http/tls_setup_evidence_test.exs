@@ -171,7 +171,6 @@ defmodule HTTP.TLSSetupEvidenceTest do
         {:pooled, [http1_reuse: true], []},
         {:http2, [http_version: :http2], []},
         {:custom_handshake, [], [handshake: :full]},
-        {:early_data, [], [early_data: <<"must not transmit">>]},
         {:raw, [error_mode: :raw], []}
       ] do
     test "#{name} does not expose confirmed TLS setup evidence" do
@@ -202,6 +201,27 @@ defmodule HTTP.TLSSetupEvidenceTest do
 
       Task.await(peer, 4_000)
     end
+  end
+
+  test "early_data does not expose confirmed TLS setup evidence" do
+    {_listener, port} = listener()
+    request_opts = Keyword.put(options(), :ssl, cacerts: [], early_data: <<"must not transmit">>)
+
+    # OTP rejects early_data with disabled session tickets before starting TLS.
+    # The raw TCP connect may already have been aborted when a peer accepts it;
+    # requiring a successful accept/handshake here races that option rejection.
+    # No peer task is needed: keep the listener owned until the public result,
+    # and assert this option failure never grants caller-managed replay evidence.
+    promise = HTTP.fetch("https://pinned.invalid:#{port}/", request_opts)
+
+    assert {:error,
+            %HTTP.RequestError{
+              reason: {:options, :incompatible, [:early_data, {:session_tickets, :disabled}]},
+              phase: :unknown,
+              request_started: :unknown
+            } = error} = HTTP.Promise.await(promise, 3_000)
+
+    refute HTTP.RequestError.pre_send?(error)
   end
 
   test "a continuation alert accepted after the absolute connect deadline stays unknown" do
