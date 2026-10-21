@@ -1970,3 +1970,60 @@ Whole restored format/diffcheck/apps-diff actualROUND18_RESTORED_CHECK_EXIT=0
 plus prompt. Runtime/pins checked unchanged; last full-nine remains R13 red.
 No additional compile/Credo/Dial totals after byte-exact restoration.
 P0 remains OPEN; actual source identity correlation is progress, not a fix.
+
+## Round19 — peer kernel remained established with empty queues
+
+Base8b4a954 clean verified. One temporary fd_timeout observation change only:
+reverse the single postscan to peer endpoints; preserve all R18 baseline and
+assertion/pressure/success-summary code. Root read changed region before
+format/preflight/ONE44-case campaign seed101/warnings-as-errors/maxfail1.
+Probe D=min(now+200,parentD-50), >50 launch guard, reserved final owned50ms
+inside original parent3sD. Stored original peer-live driver witness gates
+launch; no new native queries/modes/recv waits. Roles baseline_client/post_peer
+are explicit, client post NOT_SAMPLED and original peer FD baseline NOT_CAPTURED.
+
+Actual ROUND19_HTTPS_EXIT=2+prompt,20.5s31/32executedpassed, FIRSTfailure
+ex_ssl/http1/streamed/4000. Remaining tests aborted, no rerun. Initial terminal
+inferred_idle was NOT treated as exit; actual marker/prompt were collected.
+
+BEAM71482 UID502/start1792620642.508763, client62923->peer62922. Pretrigger
+CLIENT baseline valid FD50/gen8235782/ESTABLISHED4,54FD6queries, queues0/0,
+snd_hiwat1024, Cportion7.407ms/fullproof beforetrigger. Peer post reversed
+62922->62923 positively observed CURRENTFD51/gen8235784, ESTABLISHED4,
+rcv_cc0/snd_cc0, rcv_hiwat484000/snd_hiwat146988,53FD5queries,Cportion7.341ms.
+Same PID/start/UID and reversedtuple correlated, childreaped/helper0/wrapper0/
+exactdiagnosticPortDOWN/withinD. These elapsed values exclude Python bootstrap;
+full delivery is bounded by probe D, not claimed7ms. Client post NOT_SAMPLED;
+no original peer FD/gen baseline. Do NOT import R18 client-no-match here.
+
+Original peer Port/owner0.932 alive connected/open throughout driver snapshots.
+Before drain-576460731844 activefalse/count100/100889B; timeout2001mslater
+active99/count101/103961B, ONE3072-byte added delivery. Post-kernel-sample
+error counters still103961B/send1461/pend0; Rx/Txwaiting/empty, buffer9216,
+recbuf484000 CAPACITY. Original ExSSLactor/Portnil assertions passed locally.
+
+At sampled interval, kernel ESTABLISHED with empty queues does NOT support
+already-kernel-closed-but-driver-open or queued-unread explanations. It leaves
+transport termination unresolved; no causal fix claimed. Snapshots are not
+atomic/continuous, original P0 case differs from R18 and earlier examples.
+
+R13 RAW ALREADY used CLIENTactiveonce, rearmed after synthetic reverse bytes,
+verified effective once at close, and separate blocked writer. Server ENV mode
+active100 is different from client mode. None of those generic conditions is
+a new control. Missing checkpoint: peer had not consumed+acknowledged EXACT
+100native messages+tcp_passive/recv-countDELTA100+activefalse BEFOREclose.
+Next one-control extension retains R13 everything else: prepare C baselines
+BEFOREpressure; finish original writer-blocked/reverse-byte/client-once checks
+BEFORE final peer-passive acknowledgement, then close immediately with no
+extra scan/wait. Since passive event is consumed, explicitly rearm100 ONCE at
+original drain authorization, observe under one original absolute deadline.
+This is only a proposed RAW synthetic control, not implemented/executed yet.
+
+Original fixture restored BYTEEXACT b4f4f8b375d72aadf9799f8261199c478e4f85dd34bfdd601c3e873e0429c9d3
+from /tmp/http-fetch-round19-https-original.exs. Root-formatted prototype
+/tmp/http-fetch-round19-https-instrumented.exs and full source-entry/https logs
+retained. All immutable native/helpers remain unchanged. Runtime Connection
+SHA and strict pins verified unchanged, no source hooks left. Actual restored
+wholeformat/diffcheck/apps-diff ROUND19_RESTORED_CHECK_EXIT=0+prompt. Only
+this evidence document changed; no repeated compile/Credo/Dial totals.
+Last full-nine R13 gate still red; P0/public/default/package/publication OPEN.
