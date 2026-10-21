@@ -1,7 +1,7 @@
 defmodule SSL.TCPOptions do
   @moduledoc false
 
-  @mutable [:nodelay, :keepalive, :sndbuf, :recbuf]
+  @mutable [:nodelay, :keepalive, :sndbuf, :recbuf, :buffer, :tos, :tclass, :priority]
   @bind [:ip, :port]
 
   @spec extract(term(), term()) :: {:ok, list(), list()} | {:error, {:options, term()}}
@@ -69,6 +69,11 @@ defmodule SSL.TCPOptions do
 
   defp valid?(key, value) when key in [:sndbuf, :recbuf],
     do: is_integer(value) and value in 1..0x7FFFFFFF
+
+  # Driver buffer size is independent of the TLS record/plaintext limits.
+  # Traffic option ranges and support remain the OS driver's responsibility.
+  defp valid?(key, value) when key in [:buffer, :tos, :tclass, :priority],
+    do: is_integer(value) and value >= 0
 
   defp valid?(:port, value), do: is_integer(value) and value in 0..65_535
   defp valid?(:ip, value), do: is_tuple(value) and address_family(value) in [:inet, :inet6]

@@ -119,9 +119,9 @@ defmodule SSL.Connection do
                  packet: :raw,
                  active: false,
                  send_timeout: state.send_timeout,
-                 send_timeout_close: state.send_timeout_close,
-                 buffer: 16_640
-               ] ++ TCPOptions.mutable(state.options.tcp_options)
+                 send_timeout_close: state.send_timeout_close
+               ] ++
+                 TCPOptions.mutable(state.options.tcp_options)
              ),
            {:ok, options, ticket, ticket_key} <- prepare_resumption(state.options, tcp),
            {:ok, materialized} <-

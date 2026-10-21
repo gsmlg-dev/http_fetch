@@ -163,23 +163,39 @@ validation and is never inferred from the first advertisement.
 
 `nodelay` and `keepalive` accept booleans. `sndbuf` and `recbuf` accept positive
 signed-32-bit integers; the operating system may clamp or round their values.
+`buffer`, `tos`, `tclass` and `priority` accept nonnegative integers and are passed
+to the native driver. Actual ranges, rounding and family/platform support are
+established by that driver, not silently emulated by ex_ssl. On the current
+macOS/OTP29 reference, buffer values 0, 65536 and 2^31 read back as 1, 65536 and 1;
+IPv4 tos and IPv6 tclass apply, while priority returns :ok but reads zero. This is
+not a claim of effective packet scheduling support on that platform.
 `ip` accepts a local IPv4/IPv6 address tuple and `port` accepts 0..65535. Direct
 `SSL.connect` accepts one bare `:inet` or `:inet6` family flag; literal remote or
 local bind addresses infer the family when absent. Conflicting families reject.
 DNS references and IP SAN references remain distinct; inferred IP literals do
 not send SNI. Both textual and tuple IPv6 literals are supported.
 
-Only `nodelay`, `keepalive`, `sndbuf` and `recbuf` are mutable. A complete
-`SSL.setopts` request validates before I/O. Driver errors propagate; no stronger
-rollback guarantee is made for partially applied driver settings. Virtual TLS
-options and buffered delivery remain usable after raw TCP shutdown. STARTTLS
-allows mutable options after ownership handoff but rejects local bind/family
-requests, which cannot change an existing connection.
+All eight listed non-binding options are mutable. A complete `SSL.setopts`
+request validates before I/O. Driver errors propagate; no stronger rollback
+guarantee is made for partially applied driver settings. Virtual TLS options and
+buffered delivery remain usable after raw TCP shutdown. Raw dial supplies a
+16640-byte driver buffer only when the caller omitted it. STARTTLS preserves the
+existing raw buffer when no replacement is supplied; explicit mutable options
+are applied after ownership handoff. This retains existing ExSSL behavior. The
+OTP29 reference ignores TCP replacements passed to existing-socket SSL.connect;
+its explicit SSL.setopts applies them afterward. Bind/family requests cannot
+change an existing connection and remain rejected during upgrade.
 
-Raw `buffer`, active/packet ownership controls, arbitrary socket backends and
-unsafe linger are unsupported. Driver buffer tuning cannot change the TLS record,
-handshake or plaintext bounds. The private binary/raw/active-once configuration
-remains controlled by the connection process.
+A driver rejection that exits initial gen_tcp.connect with :badarg becomes
+`{:error, :badarg}`. OTP returns the same error class inside a formatted detail
+tuple; that OTP-specific charlist is not synthesized. Other failures retain their
+existing mapping. Live OS errors (including wrong-family :einval on this macOS
+reference) propagate without committing virtual active-mode changes.
+
+Raw active/packet ownership controls, arbitrary socket backends and unsafe linger
+are unsupported. Driver buffer tuning cannot change the TLS record, handshake or
+plaintext bounds. The private binary/raw/active-once configuration remains
+controlled by the connection process.
 
 ## Send deadlines, ordering, and cleanup
 

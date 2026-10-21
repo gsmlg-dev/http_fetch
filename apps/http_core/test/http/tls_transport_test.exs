@@ -244,6 +244,87 @@ defmodule HTTP.TLSTransportTest do
     assert :ok = ExSSL.close(socket)
   end
 
+  test "ex_ssl driver buffer and traffic socket options override matching ssl entries" do
+    port = peer(fn socket -> :ssl.recv(socket, 0, 5_000) end)
+
+    assert {:ok, socket} =
+             ExSSL.connect(
+               "localhost",
+               port,
+               [
+                 ssl: [cacertfile: @ca, buffer: -1, tos: :invalid, priority: :invalid],
+                 socket_opts: [buffer: 65_536, tos: 16, priority: 6]
+               ],
+               5_000
+             )
+
+    try do
+      # Test-only driver probe; re-audited after the native attach buffer fix.
+      # Production HTTP consumes only the transport API.
+      source = SSL.Connection.module_info(:compile)[:source] |> List.to_string()
+
+      assert :crypto.hash(:sha256, File.read!(source)) |> Base.encode16(case: :lower) ==
+               "e3a397587a5b137236afed3210b775f30590a067f3963ffdf4a9410e8964aac2"
+
+      assert Application.spec(:ex_ssl, :vsn) == Application.spec(:http_core, :vsn)
+      {:connected, state} = :sys.get_state(socket.pid)
+      assert {:ok, [buffer: 65_536, tos: 16]} = :inet.getopts(state.tcp, [:buffer, :tos])
+      assert :ok = ExSSL.setopts(socket, buffer: 32_768, tos: 32)
+      assert {:ok, [buffer: 32_768, tos: 32]} = :inet.getopts(state.tcp, [:buffer, :tos])
+      assert {:ok, [priority: priority]} = :inet.getopts(state.tcp, [:priority])
+      IO.puts("HTTP ExSSL priority requested6, observed #{priority} on #{inspect(:os.type())}")
+    after
+      ExSSL.close(socket)
+    end
+  end
+
+  test "ex_ssl upgrade retains socket option precedence and caller driver buffer" do
+    port = peer(fn socket -> :ssl.recv(socket, 0, 5_000) end)
+    {:ok, tcp} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 5_000)
+
+    assert {:ok, socket} =
+             ExSSL.upgrade(
+               tcp,
+               "localhost",
+               [
+                 ssl: [cacertfile: @ca, buffer: -1, tos: :invalid],
+                 socket_opts: [buffer: 65_536, tos: 16]
+               ],
+               5_000
+             )
+
+    try do
+      assert {:ok, [buffer: 65_536, tos: 16]} = :inet.getopts(tcp, [:buffer, :tos])
+    after
+      ExSSL.close(socket)
+    end
+  end
+
+  test "ex_ssl reports invalid admitted options and native family errors explicitly" do
+    for key <- [:buffer, :tos, :tclass, :priority] do
+      assert {:error, {:options, {^key, :unsupported_or_invalid}}} =
+               ExSSL.connect("localhost", 0, [socket_opts: [{key, -1}]], 100)
+    end
+
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    on_exit(fn -> :gen_tcp.close(listener) end)
+    {:ok, {_, invalid_port}} = :inet.sockname(listener)
+
+    assert {:error, :badarg} =
+             ExSSL.connect("127.0.0.1", invalid_port, [socket_opts: [tclass: 16]], 100)
+
+    assert {:error, :timeout} = :gen_tcp.accept(listener, 30)
+
+    port = peer(fn socket -> :ssl.recv(socket, 0, 5_000) end)
+    assert {:ok, socket} = ExSSL.connect("localhost", port, [ssl: [cacertfile: @ca]], 5_000)
+
+    try do
+      assert {:error, :einval} = ExSSL.setopts(socket, tclass: 16)
+    after
+      ExSSL.close(socket)
+    end
+  end
+
   test "ex_ssl explicit TLS 1.3 rejects TLS 1.2-only peers without backend fallback" do
     port = peer(fn _socket -> :ok end, versions: [:"tlsv1.2"])
 

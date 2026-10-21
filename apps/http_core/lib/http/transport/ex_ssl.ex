@@ -137,6 +137,10 @@ defmodule HTTP.Transport.ExSSL do
       :keepalive,
       :sndbuf,
       :recbuf,
+      :buffer,
+      :tos,
+      :tclass,
+      :priority,
       :ip,
       :port
     ]

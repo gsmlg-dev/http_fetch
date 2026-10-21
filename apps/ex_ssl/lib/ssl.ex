@@ -53,14 +53,14 @@ defmodule SSL do
                active: false,
                packet: :raw,
                send_timeout: options.send_timeout,
-               send_timeout_close: options.send_timeout_close,
-               buffer: 16_640
-             ] ++ options.tcp_options,
+               send_timeout_close: options.send_timeout_close
+             ] ++ Keyword.put_new(options.tcp_options, :buffer, 16_640),
              Options.remaining(deadline)
            ) do
       close_on_error(handoff(tcp_socket, options, deadline), tcp_socket)
     end
   catch
+    :exit, :badarg -> {:error, :badarg}
     :exit, _ -> {:error, :closed}
     :error, :badarg -> {:error, :badarg}
   end
