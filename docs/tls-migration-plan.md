@@ -128,6 +128,11 @@ coverage; no supported endpoint class silently lost.
       cancels/ref-fences that timer, never imposes a connection lifetime cap.
       Lost ACK stays acceptance-unknown. No actual TLS actor attach/readiness/public
       lifecycle/adoption claim; task20 hard-edge race coverage remains OPEN.
+- [x] Centralize private literal-IPv4 TCP allocation for already enrolled allocators:
+      reserve before native entry, keep one caller-clipped absolute deadline, return
+      the exact Port only after original Observer enrollment; close known late Ports.
+      Native errors keep unresolved permits and unconfirmed retirement. Actual
+      allocator birth, TLS integration and all-path failure identity remain open.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
       and private real allocator/setup direct-dial orchestration with original
       deadlines and acknowledged outcome publication.

@@ -2184,3 +2184,153 @@ Actual restored compilewarningsErrors/wholeformat/configuredCredo/Dialyzer/
 diffcheck/apps-diff ROUND21_RESTORED_STATIC_EXIT=0+prompt. Credo535files/
 noissues; Dial0errors0skipped/4unchanged ignore notices. Build artifacts now
 originalsource. LastfullnineR13 red remains; P0/public/default/packages OPEN.
+
+## Round22 — reduced after-call-only observer did not reproduce
+
+Base896dc39 clean verified. Root read current close_transport and frozen R21
+hook, backed up FOURoriginal files before installing exact R21formatted HTTPS.
+Reduced ONLYnativeCloseobserver: removed preclose persistent lookup, preclose
+clock and EXTRAlinger readback. Original pending lookup/stickydecision/native
+setopts/Port.close order unchanged. Actual result variables are captured; only
+AFTERPort.close lookup perConnection test pin, boundedsend<=2KiB with original
+Port/Conn/abandoned/outputBool/pending/actualLingerSet/actualCloseReturn/post
+monotime. readback:not_sampled/observer:after_native_call_only explicit.
+No nativequery added, no IO/helper/sleep/wait or wholeTLSstate.
+
+Root readback+formatted hook; strictpins temporarily coordinated to
+2014a43a6f4a4e7ee2bf6822cd74c0ec9b51529ee85cf9a2365a1237aad5aec8.
+CompilewarningsErrors0 then entrypreflight before ONEsourcecampaign. Actual
+ROUND22_HTTPS_EXIT=0+prompt,21.2s44/44 seed101/warnings-as-errors/maxfail1.
+No firstfailure, so NOactualclose-receipt output or failingbothrolecapture.
+SuccesssummaryCLIENTONLY; no uniformpeerReady/completion/cause claim.
+
+R21hooked44pass/R21unhooked16of17fail/R22postonly44pass are differentVM
+observations. These do NOT establish causality or a repair. Removing extra
+readback did not make failure reappear this time; readback is not established
+as necessary for the observed passes. After-call send and broader diagnostic
+scheduling remain possible perturbations. No repeatedmatrix/passmining.
+
+Read-only upstream XNU audit (NOThost-build-pinned): kern_descrip
+fp_close_and_unlock runs knote_fdclose/fileproc_drain before fdrelse, then
+fg_drop calls fo_close only on final fileglob reference. FDtable removal MAY
+precede close completion; no specific alias/knote/callback holder established.
+soclose_locked initiates protocol disconnect/detach before final socket-ref
+release, so retained memory ALONE does not explain retainedESTABLISHED.
+Sources: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_descrip.c
+and https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/uipc_socket.c
+Actual host kernel stage/duration/holder UNKNOWN. Not a pollset-hidden-FD claim.
+
+Future runtime inventory can record public erlang:system_info(check_io) and
+(kernel_poll), implementation-dependent, no socket-specific proof. OTP29 flags
++IOt pollthread count/+IOp pollsets both default1 with platform qualifiers:
+https://github.com/erlang/otp/blob/OTP-29.0.2/erts/doc/references/erl_cmd.md
+Do NOTassume +IOt1 changes current runtime; inventory REQUIREDbeforeany
+changed-runtime control. No runtime flag/control executed this round.
+
+Next measurement proposal: independent NEWoriginalFD-slot helper mode, query
+client-original numeric FD regardless tuple and return only type/gen/state.
+Current immutable tuple-scan helper cannot discriminate a filtered-out original
+slot. Newsource/control must be read before native exec; negative notsocket
+destruction/callbackproof. No source/helper implementation grant issued yet.
+
+All FOUR files BYTEEXACTrestored: Connection original0f0ad762..e2220e98,
+HTTPSb4f4f8b3..429c9d3, both strictpins originalfullsourceSHA. Freshsnapshot
+/tmp/http-fetch-round22-{connection,tls-pin,h2-pin,https}-{original,instrumented}.exs;
+fragment22-receipt-fragment.txt/diag-compile/source-entry/https/restored-static
+logs retained, all priorhelpers unchanged. Actual restored
+ROUND22_RESTORED_STATIC_EXIT=0+prompt compilewarningsErrors/wholeformat/
+configuredCredo/Dial/diffcheck/apps-diff. Credo535filesnoissues, Dial0errors/
+0skipped/4unchangedignorenotices. Runtimebuild noworiginalsource. Lastwhole9
+R13red3190of3192 unchanged, P0/public/default/perf/packagepublication OPEN.
+
+### Independent private native allocation foundation
+
+Fresh task24 scope TWOnewfiles only, coordinated task20owner ACK beforewrite.
+Lead+worker read ALLfive ex_ssl architecture docs/currentObserver+Receipt+
+manualhandofffixture+P1/P2plan. NativeTCP is private P2 transport allocation,
+not public lifecycle/P1compatibility acceptance. Alreadyenrolled trusted
+allocator supplies original ABSdeadline alreadyclipped to setup. Validate
+literalIPv4/port/ABS BEFOREpermit; reserveTCPbefore nativeentry, recalculate
+SAMEremainingtime beforedial; force inet_backend:inet/inet/binary/passive/raw.
+NoDNS/newactor/newprotocol/adoption/transfer/TLS/publicAPI/default changes.
+
+ReturnexactnativePort ONLYafterObserverenroll_port:use+postD/alivecheck.
+Observer records ORIGINAL typed Portmonitor+creatorgeneration beforeexposure.
+Knownlate/rejectedPortsclose; attempt is not physicalretirementproof. Native
+errno/exception afterentry NEVERreject_before_native or releaseunknownpermit.
+Hiddenobjectinterval ofgen_tcp remainsunproved; allocatorbirth/failed-dial
+identity/TLSactorattach/setupoutcome/publicfacade integrations stayOPEN.
+Before opaque-boundary correction: NativeTCP67lines/test136lines. IndependentREADONLYreview
+foundnoblockingdefect, scopedtrustedcaller/provenance limits explicit. Four
+tests do NOT directlyforce late-success or lost-enrollment-ACK cleanup branch.
+
+Rootactualcompilewarnings0 +ALLlifecycle91/91 seed1019.6s actual
+ROUND22_NATIVE_FOCUSED_EXIT=0+prompt. Fournew async tests: original allocator
+Portownership/passive/raw/binary/roles17alloc0 thenEXACToriginalPort+allocator
+DOWN andReaderconfirmedroles/down17 AFTERObserverabsence; unauthorizedNOdial
+accept0; invalidIPv4/IPv6/DNS/port/infinite/expiredD NOreservation+NOdial;
+realclosedloopbacknativeREFUSED retainsalloc16/roles1/down0/loss0, allocator
+kill thenoriginalfixed1000ms grace exitsUNSEALED+Readerunconfirmed.
+No syntheticDOWN/proof from mere nativeerrno/helperdeath. Fixture2sReader
+wait leavesfixedobservergrace unchanged; no P0timeouts/assertions changed.
+
+NewlibrarySource justifiesONE fresh whole-nine run rather than repeatedly
+mining the HTTPS case: HTTP_QUIC_PHASE1_REAL=1 unbuffer mix test
+--include integration --warnings-as-errors --seed101 (no maxfail/no exclusions
+beyond repository-authored defaults). OriginalHTTPS/Connection/strictpins are
+restored; noR22nativeFDdiagnostic instrumentation present. WholeExSSL portion
+808/808 (20properties788tests)82.7s; QUIC249/2498.5s, finalsource result below.
+
+FRESHWHOLE9 actualROUND22_FULL_SOURCE_EXIT=1+prompt, all nine executed:
+ExSSL808/808,QUIC249/249,Core418/418,H3companion113/113,Runtime149/149,
+Fetch1228/1232,WebSocket137/138,WebTransport24/24,EventSource75/75.
+Sum3201/3206, FIVEactual assertion failures, NOTa greenumbrella. ExSSL four
+new tests passbothfocused+fullgate. Fetch200.4s/WebSocket10.3s.
+--warnings-as-errors also reports existing bitstring-size pin warnings in
+unchanged test sources; finalERRORabortedduetowarnings, explainsEXIT1 instead
+ofordinaryassertionEXIT2. Productioncompile/newmodule warnings0 separate.
+No rerun droppingflags, no warning hiding/source exclusions.
+
+Five failures retained verbatim in /tmp/http-fetch-round22-full-source.log:
+1. Fetch trailer-wire: undeclared upload trailers, peer accept202 returned
+   {:error,:einval}, linked peer MatchError; unchanged test61. Cause unresolved.
+2. Fetch Wire119 ExSSL blocked-upload cancel: missingpeer_closed8s.
+3. Original HTTPS ExSSL/auto/buffered/infinity peer2s stillopen, recv101026B,
+   send1416/pend0/active99/buffer9216/recbuf486944(capacity),RxTxwaitingempty.
+4. Original HTTPS ExSSL/auto/streamed/infinity peer2s stillopen, recv104098B,
+   send1461/pend0/active99/buffer9216/recbuf483872(capacity),RxTxwaitingempty.
+5. WebSocket verifiedWSSslowpeer ExSSL cancellation proxy_boundary200/222:
+   WSSsocketnotclosed. No per-tuple nativeFDmetadata/hook in this whole run.
+
+First post-feature static actualROUND22_NATIVE_STATIC_EXIT=2: compile/format/
+Credo537filesnoissues PASSED; Dial1NEWcall_without_opaque atNativeTCP20.
+Head destructured Receipt.cell/observer and passed structurally refined map
+to Observer.reserve_child expecting opaqueReceipt.t. No ignore added. Lead
+fix keeps opaque struct identity and uses existing Receipt.observer accessor,
+then localPID/nodevalidation; no cell-field introspection outsideReceipt owner.
+Original validReceipt contract/trustedprovenance/port/deadline/order unchanged.
+Forged internalReceipt.cell authentication is NOTclaimed by this private helper.
+Focused regression +finalstatic below; no whole-nine repeat/passmining.
+
+First opaque fix stillRED2: empty %Receipt{} head also peeled opaqueness at
+Receipt.observer; redundant is_pid on the accessor-returnPID created unreachable
+false-pattern. Final69line constructor keeps opaqueReceipt argument untouched
+through its accessor, node-onlylocal check; no internalcell/typepeek. Valid
+Receipt.t is a trusted programmer precondition. Malformed internal Receipts
+mayraise ataccessor; publicdrivercontext validation remainsfuturework.
+Ordinary badtargets/port/ABS still return invalid_arguments. No observer/receipt
+API or ignore changes. ActualROUND22_NATIVE_OPAQUE2_EXIT=0+prompt, compile0
+Dial0errors0skipped4unchangedignores/18.8s. Worker reviewedfinalfixread-only.
+
+FINALacceptedcode actualROUND22_NATIVE_FINAL_EXIT=0+prompt: production
+compilewarningsErrors0, ALLlifecycle91/91 again8.6s, wholeformat0, configured
+Credo537files/8943mods-funs/noissues0, diffcheck0. FinalDial0 fromopaque2
+checks same accepted69line source. Whole9/ExSSL808 above precedes this type
+boundary correction; finalfocused/type/static gates coveracceptedcode. No new
+full-nine repeat because publicruntime/validReceipt resourcepath unchanged.
+
+Acceptedtask24increment is nativeentry/enrollment foundation, NOT actual
+allocator/setup birth, hidden-error object proof, TLS attach/readiness/public
+lifecycle/default/managed/completion support. P0fivecurrentfailures+oldtest
+warnings stayreleasegates. Next independentfoundation: inertallocatorbirth
+withoriginalpermit beforecallingNativeTCP, separatefuturegrant/review needed.

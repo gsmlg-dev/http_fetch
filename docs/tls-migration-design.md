@@ -286,6 +286,13 @@ perform TLS attach/release/I/O, or publish setup success. Original VM port DOWN 
 independent evidence from actor death; it does not additionally prove Unix physical
 FD close or remote terminal receipt. Those default/completion gates remain open.
 
+A private [NativeTCP](../apps/ex_ssl/lib/ssl/lifecycle/native_tcp.ex) transport constructor now centralizes literal IPv4 dial for
+already enrolled allocators. The trusted caller supplies one original absolute
+deadline, clipped to setup before entry. It reserves TCP before the native call,
+forces passive/raw inet Port semantics, and exposes the returned Port only after
+original Observer enrollment. Known late/rejected Ports are closed; native errors
+retain unknown allocation. This does not establish allocator birth or TLS readiness.
+
 Actual allocator/setup births, TLS actor attachment/dial failure proof, public
 lifecycle, STARTTLS adoption, application owner ACK/authority transfer and socket/
 facade integration remain open.
