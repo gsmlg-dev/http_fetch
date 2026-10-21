@@ -164,7 +164,14 @@ defmodule HTTP.HTTP3RequestTrailersTest do
         ]
       ])
 
-    on_exit(fn -> if Port.info(peer), do: Port.close(peer) end)
+    on_exit(fn ->
+      try do
+        Port.close(peer)
+      rescue
+        ArgumentError -> :ok
+      end
+    end)
+
     {peer, "https://127.0.0.1:#{event(peer, "ready")["port"]}/echo"}
   end
 
