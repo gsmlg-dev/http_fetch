@@ -10,9 +10,10 @@ defmodule HTTP.HTTPSEarlyUploadTest do
       timeout <- [4_000, :infinity],
       not (outcome == :deadline and timeout == :infinity) do
     if backend == :ssl and outcome == :buffered, do: @tag(:tls_repro)
+    @tag tls_outcome: outcome
 
     test "#{backend} #{version} #{outcome} #{timeout} cleans up a verified HTTPS upload blocked in TLS send" do
-      {url, peer} = peer()
+      {url, peer} = if unquote(outcome) == :send_timeout, do: timeout_peer(), else: peer()
 
       {:ok, upload} =
         HTTP.Stream.from_enumerable(Stream.repeatedly(fn -> :binary.copy("x", 65_536) end))
@@ -23,7 +24,9 @@ defmodule HTTP.HTTPSEarlyUploadTest do
 
       socket_opts =
         if unquote(outcome) == :send_timeout,
-          do: [sndbuf: 1_024, send_timeout: 600],
+          # Each public send is bounded separately. Keep its deadline below the
+          # ~200–500 ms loopback write progress observed with small BSD buffers.
+          do: [sndbuf: 1_024, send_timeout: 150],
           else: [sndbuf: 1_024]
 
       promise =
@@ -200,6 +203,68 @@ defmodule HTTP.HTTPSEarlyUploadTest do
       after
         1 -> pending_tls_output(owner, deadline)
       end
+    end
+  end
+
+  defp timeout_peer do
+    parent = self()
+
+    peer =
+      spawn_link(fn ->
+        executable = System.find_executable("python3") || raise "python3 is required"
+        script = Path.expand("../../../../scripts/https_early_upload_peer.py", __DIR__)
+
+        port =
+          Port.open({:spawn_executable, executable}, [
+            :binary,
+            :exit_status,
+            :stderr_to_stdout,
+            {:line, 16_384},
+            {:args,
+             [
+               "-u",
+               script,
+               "--cert",
+               Path.join(@fixtures, "localhost.pem"),
+               "--key",
+               Path.join(@fixtures, "localhost.key")
+             ]}
+          ])
+
+        %{"kind" => "listen", "port" => number} = peer_event(port)
+        send(parent, {:peer_port, self(), number})
+        %{"kind" => "ready"} = peer_event(port)
+        send(parent, {:peer_ready, self()})
+
+        receive do
+          :drain ->
+            true = Port.command(port, "drain\n")
+            %{"kind" => "closed"} = peer_event(port)
+
+            receive do
+              {^port, {:exit_status, 0}} -> :ok
+              {^port, {:exit_status, status}} -> flunk("timeout peer exited with #{status}")
+            after
+              1_000 -> flunk("timeout peer did not terminate after closure")
+            end
+
+            send(parent, {:peer_closed, self()})
+        after
+          @timeout -> flunk("timeout peer was never permitted to drain")
+        end
+      end)
+
+    assert_receive {:peer_port, ^peer, number}, @timeout
+    {"https://localhost:#{number}/upload", peer}
+  end
+
+  defp peer_event(port) do
+    receive do
+      {^port, {:data, {:eol, line}}} -> JSON.decode!(line)
+      {^port, {:data, {:noeol, _}}} -> flunk("oversized timeout peer event")
+      {^port, {:exit_status, status}} -> flunk("timeout peer exited with #{status}")
+    after
+      @timeout -> flunk("timeout peer event deadline")
     end
   end
 

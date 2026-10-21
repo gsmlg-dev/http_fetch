@@ -133,7 +133,7 @@ defmodule HTTP.RequestLifecycle do
   end
 
   def track_socket(opts, socket) do
-    register(Keyword.get(opts, :request_lifecycle), socket_resource(socket), :socket)
+    register(Keyword.get(opts, :request_lifecycle), socket, :socket)
     socket
   end
 
@@ -187,7 +187,7 @@ defmodule HTTP.RequestLifecycle do
     end
   end
 
-  defp connection_resources(socket), do: {:ok, [socket_resource(socket)]}
+  defp connection_resources(socket), do: {:ok, [socket]}
 
   defp handoff(tracker, resources) do
     GenServer.call(tracker, {:handoff, resources}, :infinity)
@@ -196,9 +196,6 @@ defmodule HTTP.RequestLifecycle do
     # crash the pool, which may own unrelated idle connections.
     :exit, _ -> :ok
   end
-
-  defp socket_resource({:cancellable_ssl, _ssl, tcp}), do: tcp
-  defp socket_resource(socket), do: socket
 
   def attach_stream(nil, _stream), do: :ok
 

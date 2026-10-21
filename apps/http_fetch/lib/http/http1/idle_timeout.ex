@@ -19,7 +19,7 @@ defmodule HTTP.HTTP1.IdleTimeout do
 
   defp send_vectors(transport, socket, [data | rest], options, timeout) do
     size = min(byte_size(data), @write_bytes)
-    <<chunk::binary-size(size), tail::binary>> = data
+    <<chunk::binary-size(^size), tail::binary>> = data
     started = System.monotonic_time(:millisecond)
     remaining = remaining(options[:deadline_at])
     configured = Keyword.get(options[:socket_opts] || [], :send_timeout, :infinity)
