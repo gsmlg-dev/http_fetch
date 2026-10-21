@@ -12,6 +12,23 @@ defmodule SSL.Lifecycle.ResourceLedger do
   @type role :: :allocator | :setup | :connection | :writer | :tcp
   @type identity :: {reference(), :process | :port, pid() | port()}
   @type creator :: :observer | {role(), reference()}
+  @type scope :: :dial | :upgrade
+  @type role_mask :: 0..31
+  @type snapshot :: %{
+          scope: scope(),
+          admission: :open | :closed,
+          roles: role_mask(),
+          observed_down: role_mask(),
+          allocations: role_mask(),
+          losses: role_mask()
+        }
+  @type proof :: %{
+          scope: scope(),
+          roles: role_mask(),
+          observed_down: role_mask(),
+          losses: role_mask(),
+          cleanup: :confirmed | :unconfirmed
+        }
   @opaque t :: %__MODULE__{}
 
   @spec new(:dial | :upgrade) :: t()
@@ -61,7 +78,7 @@ defmodule SSL.Lifecycle.ResourceLedger do
     end
   end
 
-  @spec snapshot(t()) :: map()
+  @spec snapshot(t()) :: snapshot()
   def snapshot(%__MODULE__{} = ledger) do
     %{
       scope: ledger.scope,
@@ -75,7 +92,7 @@ defmodule SSL.Lifecycle.ResourceLedger do
 
   # This bounded proof fragment excludes setup/authority and observer termination.
   # Known resources still need matching DOWN after unknown allocation causes loss.
-  @spec proof(t()) :: {:pending, map()} | {:ok, map()}
+  @spec proof(t()) :: {:pending, snapshot()} | {:ok, proof()}
   def proof(%__MODULE__{} = ledger) do
     snapshot = snapshot(ledger)
 
