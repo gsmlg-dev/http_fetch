@@ -395,6 +395,28 @@ prevent transfer. Delayed acknowledgments cannot let an old owner close an alrea
 accepted connection. H2 request cancellation remains stream-scoped; connection
 control stays with the pool/owner, and retirement retains the provider dependency.
 
+## Abandoned-upload terminal policy
+
+`SSL.abandon_send/1` remains a one-way owner operation: discard the logical cursor,
+settle its caller once, retain at most the original bounded protected output, and
+allow authenticated response reads. Its existing `write_abandoned?` flag also owns
+the final transport policy. Completion of that output or `send_pend == 0` does not
+acknowledge the logical upload or establish an empty kernel queue. Final close,
+owner death or peer closure therefore skips orderly close_notify and uses the
+existing zero-linger abort path when that flag is set. Ordinary complete writes
+retain graceful close. No new state field, actor, timer, re-encryption or replay is
+introduced, and authenticated buffered response bytes retain their drainage rules.
+
+The regression distinguishes first-hop FIN/RST before any relay cleanup, matched
+complete/abandoned one-record output, exact local Connection/writer DOWN and Port
+absence within1s BEFORE authorizing the peer's2s drain. A test-owned FIFO gate keeps
+final bytes/terminal propagation behind independent OTP authentication of the
+retained prefix. This proves persistent abort policy without assuming driver ACK
+is remote TLS ACK or claiming kernel-queue emptiness. Original HTTP remote-close
+failures still require their own reruns; this semantic proof alone cannot establish
+all historical timeout causes. Public lifecycle/native birth integration remains
+separate and incomplete.
+
 ## Source/dependency inventory and evidence boundaries
 
 Run `python3 scripts/tls_migration_inventory.py` for a bounded JSON inventory of

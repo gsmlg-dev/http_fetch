@@ -1104,6 +1104,8 @@ defmodule SSL.Connection do
 
   defp begin_shutdown(%{machine: nil} = state, _kind, _waiters), do: {:abort, state}
 
+  defp begin_shutdown(%{write_abandoned?: true} = state, _kind, _waiters), do: {:abort, state}
+
   defp begin_shutdown(%{output: output} = state, _kind, _waiters) when not is_nil(output),
     do: {:abort, state}
 
@@ -1150,13 +1152,15 @@ defmodule SSL.Connection do
     _ = if state.output, do: cancel_timer(state.output.timer)
 
     # Port.close does not block the callback, but inet can retain the port
-    # while flushing. Discard pending output at this terminal boundary;
+    # while flushing. Driver completion does not acknowledge an abandoned
+    # logical upload. Preserve that abort intent at this terminal boundary;
     # leave ordinary, acknowledged empty-queue closes graceful.
     if is_port(state.tcp) do
       pending = :inet.getstat(state.tcp, [:send_pend])
 
       _ =
-        if state.output != nil or match?({:ok, [{:send_pend, size}]} when size > 0, pending) do
+        if state.write_abandoned? or state.output != nil or
+             match?({:ok, [{:send_pend, size}]} when size > 0, pending) do
           _ = :inet.setopts(state.tcp, linger: {true, 0})
         end
 

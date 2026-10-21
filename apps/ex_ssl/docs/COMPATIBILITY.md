@@ -263,7 +263,9 @@ its caller monitor/timer, and rejects future application sends. Only the existin
 bounded protected job (up to 16,384 application plaintext bytes plus TLS and
 optional KeyUpdate overhead) and already-buffered TCP bytes may remain. Reads
 retain their bounds and may finish before that job; `SSL.close/1` aborts remaining
-uncertain output. Abandonment rejects a pending job without a finite output timer.
+uncertain output. That abort intent survives completion of the retained native
+job: final close skips close_notify and uses zero linger even when both the job
+and inet driver queue are empty. Abandonment rejects a pending job without a finite output timer.
 HTTP/1 streamed Fetch uploads use these operations under their original request
 deadline; confirmed logical upload/source death is distinct from the surviving
 bounded transport job.
@@ -292,9 +294,10 @@ shutdown deadline, allowing graceful completion when possible. Expiry or an
 explicit local close aborts remaining output through the supported inet port
 backend. Final termination never waits for TCP output to drain: it cancels
 retained timers, releases monitors and the writer, and closes the port directly.
-Pending writer output or a nonempty inet send queue uses zero linger so the
-driver cannot retain a flushing port after the connection exits. Empty-queue,
-acknowledged shutdowns retain ordinary graceful transport closure.
+An explicitly abandoned upload, pending writer output or a nonempty inet send
+queue uses zero linger so the driver cannot retain a flushing port after the
+connection exits. Empty-queue shutdowns after complete, unabandoned logical sends
+retain ordinary graceful transport closure.
 Passive reads and active-once delivery need not wait for reciprocal shutdown
 before consuming authenticated response bytes.
 
