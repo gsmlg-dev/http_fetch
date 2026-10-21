@@ -2089,3 +2089,98 @@ Verified apps-diff empty, runtime/strict pins unchanged, frozen R20 hash exact.
 Documentation-only boundary: no new Mix/compile/Credo/Dial runs justified;
 R19 restored wholeformat check and historical test results remain applicable,
 not new totals. P0/public/default/native lifecycle/package/publication OPEN.
+
+## Round21 — same-instance executed close and dual endpoint observations
+
+Base3dd7dab clean verified. Root read current close_transport, R12 preserved
+patch139ff and original strict-pin regions before exact backup. Temporary
+Root-owned hook only at native terminal boundary: per-Connection persistent
+parent/tag pin, existing pending lookup and unchanged sticky abort decision,
+actual linger-set result, pinned-only ONEpublic linger readback, actual
+Port.close return/ArgumentError class, original VMPort/selfPID/before-after
+monotonic microseconds. One2KiB-bounded receipt asynchronously sent AFTER call.
+No IO/helpers/waits/whole TLS-state/key inspection in Connection; missing
+receipt remains unconfirmed. Port.close=true/VMDown still not kernel proof.
+
+Root formatted that temporary source and coordinated both strict test hashes
+to074b93f8d0496210595025e42bd4b4a211113fc118e0cf0308e9cc8ddcb6b1b9.
+Original source and pins backed up separately before changes, all to restore.
+
+Temporary diagnostic compile actualROUND21_DIAG_COMPILE_EXIT=0+prompt.
+Source audit qualification: desc_close invalidates driver fields/drops
+ERL_DRV_USE, inet_stop_select later performs sock_close. This permits VM/kernel
+ordering gap but does NOT hide a still-open OS descriptor from proc_pidinfo.
+R15 same_socket stabilizes FOUND rows only; equal FD-number/type lists cannot
+make unobserved contents atomic or prove no other holder. If same-instance
+client-no-match/peer-original-EST4 occurs, current validated public observers
+will not establish callback-stage completion or alias ownership. Positive
+original FD-slot/generation evidence would be a possible later discriminator;
+no helper/native instrumentation is changed or authorized in this slice.
+
+Root read changed HTTPS sections before format: shared200ms preparation for
+TWOworkers BEFOREfetch, async client+peer at accept/shared200D, each baseline
+ONLYafter0 beforetrigger. ExactConn/tag/Port close receipt ONLYafter0 after
+original local assertions, same-parent FIFOcontext beforedrain. Original2s
+timeout launches ONEclientpost THENONEpeerpost each within
+min(now+200,parent3sD-50), >50guard/ownedcleanupreserve. SAMEroleFD/gen only;
+PIDepochUID/tuples validated. FiveFDlogs2KiB+boundedclose/nativeINSPECT<16KiB.
+
+FIRST instrumented campaign actualROUND21_HTTPS_EXIT=0+prompt,20.0s44/44.
+No failing close/bothrole capture; success logs cover CLIENT only. No uniform
+peer readiness or actual close result claim from scalar success logs.
+
+Fresh explicit counterfactual: restored ONLYConnection+both source pins,
+kept EXACT same formatted dual-role HTTPS diagnostic including pin registry.
+This changes actual close hook, not pressure/assertions/timeouts. ONEcampaign
+seed101/warnings-as-errors/maxfail1, no repeats/pass mining. Actual
+ROUND21_NO_CLOSE_HOOK_EXIT=2+prompt,14.7s16/17executedpassed, FIRST
+ex_ssl/http1/streamed/infinity original2s timeout. Rest aborted, no rerun.
+
+Same-instance BEAM76829 UID502/start1792622875.910589/client64732->peer64731:
+PRE clientFD49/gen8253198 EST4 queues0/0 sndhi1024; PRE peerFD51/gen8253200
+EST4 queues0/0 rcvhi279008. Both ORIGINAL workers already received before
+trigger: completed BEAMmono-576460736155/-576460736154. Cportions7.466/8.723ms
+exclude full startup. Same PID/start/UID/role tuple POSTclient completeNoMatch
+53FD4query/C5.686ms; POSTpeer SAMEORIGINALFD51/gen8253200 ESTABLISHED4,
+queues0/0 rcvhi485936,53FD5query/C7.107ms. All four full receipts observed/
+withinD/childreaped/helper0/wrapper0/exactdiagnosticPortDOWN. Both-role
+baseline/process/tuple validated. Client original observedfalse (NOTabsence
+proof); peer original observedTRUE first same-instance positive correlation.
+
+Original peerowner0.751/Port live/openconnected, BEFOREcnt100/98960B/active
+false at-576460736126; timeout2001ms later cnt101/102032B/active99, ONE3072B.
+After BOTHpostscans counters102032/1461/pend0 unchanged, RxTxwaitingempty,
+buffer9216 recbuf485936 CAPACITY. Originallocalactor/Portnilassertionspassed.
+CLOSEreceipt UNAVAILABLE is EXPECTED because this counterfactual removedhook.
+Cannot project actual calls from R12 or successful hooked campaign onto this
+failing instance. Hooked44pass versus restored-hookfailure suggests observer
+perturbation, TWO runs do NOT establish cause or readback as repair.
+
+No further Source campaign21. Both endpoint correlation gap is now narrowed;
+executed-close-plus-failure correlation is still missing. No native primitive
+fix or P0 completion inferred. Snapshots remain non-atomic/negative-limited.
+
+Source audit rules out shutdown(read_write) as guaranteed pre-close barrier
+when driver_sizeq>0: inet_drv12356 setsPENDING_SHUT_RDWR and returnsOKWITHOUT
+kernelshutdown; 14216/13878 trigger onlyafteroutputempty. ZeroLinger discards
+queue onlyatflush12622. Empty queue inside12364 permitsimmediatekernelcall
+but priorpublicsend_pend snapshot is not atomic. No swap justified.
+
+Next proposal: reduce ONLYthe actual-close observer (no readback/extra native
+queries), retain original-call return/event before-after scalars, same dual
+baseline/timeout capture; no callback-stage proof from VMDown/negativeFD.
+If failure persists, original client FD-SLOT query regardlesstuple would
+narrow positive-current-generation versus reuse, but needs independently
+reviewed NEWhelper/controlledtest; immutable existingC cannot report that.
+No next source/helper grant issued here. No hidden-pollset-FD explanation.
+
+All FOUR files restored BYTEEXACT: Connection+2strictpins+HTTPSoriginal,
+sourceSHA0f0ad762fed7bb6307e374ea7e83d0699bd45cb21309cdb5140a1c74e2220e98
+andHTTPSb4f4f8b375d72aadf9799f8261199c478e4f85dd34bfdd601c3e873e0429c9d3.
+Original/Rootformatted snapshots at/tmp/http-fetch-round21-{connection,tls-pin,
+h2-pin,https}-{original,instrumented}.exs. Full diagcompile/https/counterfactual/
+entry/restored-static logs retained; immutable older artifacts untouched.
+Actual restored compilewarningsErrors/wholeformat/configuredCredo/Dialyzer/
+diffcheck/apps-diff ROUND21_RESTORED_STATIC_EXIT=0+prompt. Credo535files/
+noissues; Dial0errors0skipped/4unchanged ignore notices. Build artifacts now
+originalsource. LastfullnineR13 red remains; P0/public/default/packages OPEN.
