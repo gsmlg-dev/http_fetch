@@ -1705,3 +1705,93 @@ approvalprompt. Writesmovedtoownedterminalwithoutsuchfield. Anoversized
 terminaldraftleftanopenquote; grepverifiedNOdocmutation, SIGINTclearedit.
 Shortboundedappendcommands thenwroteactualrecords. DoNOTuseedit/write/
 bashtool schemasrequiringforbiddenfields; useownedterminalforwrites.
+
+## Round16 — public peer correlation and original Wire resource monitors
+
+Base HEAD9626135 was clean. Production runtime and strict pins stay unchanged.
+Lead owns Mix and docs; Wire worker owns only its test; diagnostic worker owns
+new temporary helpers and the temporary HTTPS fixture. No sandbox fields used.
+The original HTTPS fixture was saved before edits as
+/tmp/http-fetch-round16-https-original.exs, SHA256
+b4f4f8b375d72aadf9799f8261199c478e4f85dd34bfdd601c3e873e0429c9d3.
+
+Ranked predictions: same original FD/generation after failure supports delayed
+physical retirement; no-match with valid baseline only narrows that hypothesis;
+Wire original resource DOWN versus missing peer receipt distinguishes local
+VM retirement from remote observation. Neither Port DOWN nor no-match proves
+physical FD absence or remote reset delivery. No P0 fix is claimed.
+
+Temporary FD supervisor72lines/preflight9/Elixir runner64 were read in full
+before execution. Python owns C-child kill/reap and bounded stage/output;
+runner monitors caller and recipient, requires child-reap receipt + wrapper
+exit status + exact original diagnostic Port DOWN. The caller gets at most
+200ms absolute budget; final cleanup never adds time to that caller budget.
+Missing confirmation stays unconfirmed; Port.close is only disconnection.
+
+First end-to-end RAW control passed actual ROUND16_RUNNER_CONTROL_EXIT=0.
+Entry before VM: expected helper2/EO12.486ms/no PID inspected. TargetBEAM61680
+client58957->peer58956, PRE FD44/generation8199621/ESTABLISHED4, POST no-match
+with same PID/start1792616018.583976. C-wrapper elapses8.568/8.805ms; both
+within caller deadline/child_reaped/helper0/wrapper0/diagnostic PortDOWN.
+Original RAW Port.close/DOWN/Portnil + all fixture ports closed confirmed.
+Logs /tmp/http-fetch-round16-{control-entry,runner-control}.log.
+
+### Accepted Wire resource evidence
+
+Only existing ExSSL cancellation adds public accepted-peer endpoints and a
+unique reversed-tuple TCP-port discovery (one snapshot, cap2048, tcp_inet
+filter before queries). Original client Port and connected owner PID are
+monitored and rechecked live BEFORE abort. The exact two DOWN events plus
+peer receipt share the ORIGINAL single8s finish window, with no added wait
+before drain. Original peer recv8s-reset, pressure, source/writer assertions,
+completion and other backends remain unchanged. VM resource evidence only,
+not physical FD, RST or OTP sender proof. Task22 verified.
+
+Whole Wire27/27 in20.2s, actual ROUND16_WIRE_EXIT=0. Two generated-constant
+comparison warnings were fixed by function-head backend dispatch; focused
+three cancellation variants passed3/3 in3.0s with warnings-as-errors, actual
+ROUND16_WIRE_FINAL_EXIT=0. No repetition to mine a pass.
+
+### First actual HTTPS failure with bounded postscan
+
+Temporary fixture adds only public ssl peername/sockname baseline arming
+after handshake/before headers, asynchronous/no added wait. Main accepts
+only baseline already received before the trigger. At the ORIGINAL recv2s
+timeout, one postscan is limited to min(now+200ms, original parent3s D).
+Original local1s/peer2s/parent3s assertions and failure message unchanged.
+Warm entry preflight ran before the Source VM, not a cold-launch proof.
+Lead read all helper and changed fixture regions before one campaign.
+
+Actual ROUND16_HTTPS_EXIT=2: seed101/max-failures1,11.8s,4/5executed passed,
+aborted at FIRST failure, not a44-test gate. Case ex_ssl/auto/streamed/4000.
+Target BEAM63146/client59360->peer59359, UID502/start1792616401.962086.
+Baseline UNAVAILABLE before trigger: no original FD/generation correlation.
+
+Postscan was observed/within_deadline: child_reaped/helper0/wrapper0/exact
+diagnostic PortDOWN,9.459ms,53FDs4queries/EBLSLBO. Complete-scan no-match
+for recorded tuple; NOT original-FD correlation or physical absence proof.
+Original provider Connection/Writer DOWN and Portnil/local cleanup assertion
+had passed before drain. Do NOT project R12 linger/Port.close hooks onto this
+new tuple. Peer native counters105003/1461/send_pend0; active99/buffer9216/
+recbuf482960; receiver/sender waiting gen_statem:loop/3, empty mailboxes.
+The failure remains the original peer2s timeout, not a helper timeout.
+
+Logs /tmp/http-fetch-round16-https.log and source-entry.log. Formatted
+diagnostic source preserved /tmp/http-fetch-round16-https-instrumented.exs;
+original371-line fixture restored BYTE EXACT before static gates. No rerun
+after first meaningful failure; no production TLS hooks or hash-pin changes.
+
+Required restored-tree compilewarningsErrors/wholeformat/configuredCredo/
+Dial all actual ROUND16_STATIC_EXIT=0 +prompt;535files, Dial0errors0skipped,
+4unchanged unnecessary-ignore notices. No strict-Credo/full9-green claim.
+The last full9 R13 gate remains3190/3192 EXIT2; focused Wire acceptance and
+actual HTTPS metadata do not resolve P0 or public lifecycle/default gates.
+
+Next discriminator (read-only plan): installed OTP29 ssl public peername and
+sockname dispatch transport metadata without established-state requirement;
+transport_accept docs still warn most APIs need TLS. Before changing arming,
+validate public tuple APIs on accepted TCP before handshake in ONE standalone
+control. Launch baseline then allow normal handshake/readiness; consume only
+already-ready data, no delay. Earlier natural TLS latency may help, never
+guarantees baseline readiness. No custom-transport/DTLS/portable API claim.
+All temporary artifacts retained as debug evidence; Source hooks removed.

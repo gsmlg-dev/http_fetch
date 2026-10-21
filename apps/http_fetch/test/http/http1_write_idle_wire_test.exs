@@ -131,14 +131,15 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
           signal: controller
         )
 
-      assert_request(peer)
+      endpoints = assert_request(peer)
       writer = await_blocked_writer(source)
       writer_monitor = Process.monitor(writer)
+      provider = observe_provider(backend, endpoints)
       HTTP.AbortController.abort(controller)
       assert {:error, :aborted} = Promise.await(promise, @wait)
       assert_receive {:DOWN, ^writer_monitor, :process, ^writer, _}, @wait
       assert_receive {:DOWN, ^source_monitor, :process, ^source, :normal}, @wait
-      finish(peer, promise, backend)
+      finish_provider(peer, promise, backend, provider)
     end
 
     test "#{backend} the overall deadline interrupts an observed in-flight blocked upload" do
@@ -267,8 +268,11 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
     task =
       Task.async(fn ->
         {:ok, tcp} = :gen_tcp.accept(listener, @wait)
+        {:ok, local} = :inet.sockname(tcp)
+        {:ok, remote} = :inet.peername(tcp)
+        endpoints = {local, remote}
         {transport, socket} = handshake(backend, tcp)
-        request(transport, socket, test)
+        request(transport, socket, test, endpoints)
       end)
 
     on_exit(fn ->
@@ -298,10 +302,10 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
     {:ssl, tls}
   end
 
-  defp request(transport, socket, test) do
+  defp request(transport, socket, test, endpoints) do
     assert recv_headers(transport, socket, "") =~ "POST /write-idle HTTP/1.1\r\n"
-    send(test, {:request_received, self()})
-    serve(transport, socket, test)
+    send(test, {:request_received, self(), endpoints})
+    serve(transport, socket, test, endpoints)
   end
 
   defp recv_headers(transport, socket, bytes) do
@@ -313,12 +317,12 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
     end
   end
 
-  defp serve(transport, socket, test) do
+  defp serve(transport, socket, test, endpoints) do
     receive do
       {:read_exact, size} ->
         assert {:ok, bytes} = transport.recv(socket, size, @wait)
         send(test, {:body, bytes})
-        serve(transport, socket, test)
+        serve(transport, socket, test, endpoints)
 
       :respond ->
         :ok =
@@ -327,19 +331,19 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
             "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
           )
 
-        serve(transport, socket, test)
+        serve(transport, socket, test, endpoints)
 
       :keepalive ->
         :ok = transport.send(socket, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-        serve(transport, socket, test)
+        serve(transport, socket, test, endpoints)
 
       :next_request ->
-        request(transport, socket, test)
+        request(transport, socket, test, endpoints)
 
       {:send, ref, bytes} ->
         :ok = transport.send(socket, bytes)
         send(test, {:sent, ref})
-        serve(transport, socket, test)
+        serve(transport, socket, test, endpoints)
 
       :close ->
         transport.close(socket)
@@ -363,7 +367,8 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
   end
 
   defp assert_request(%Task{pid: peer}) do
-    assert_receive {:request_received, ^peer}, @wait
+    assert_receive {:request_received, ^peer, endpoints}, @wait
+    endpoints
   end
 
   defp await_stalled_reuse_writer(source, produced) do
@@ -450,6 +455,100 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
     ref = make_ref()
     send(peer.pid, {:send, ref, bytes})
     assert_receive {:sent, ^ref}, @wait
+  end
+
+  # Observe the original native owner independently of the HTTP upload worker.
+  defp observe_provider(:ex_ssl, endpoints) do
+    ports = Port.list()
+    assert length(ports) < 2_048, "client-port discovery reached the 2048-port limit"
+    candidates = Enum.filter(ports, &client_port?(&1, endpoints))
+    assert [port] = candidates
+    assert {:connected, owner} = Port.info(port, :connected)
+    assert is_pid(owner)
+    port_monitor = :erlang.monitor(:port, port)
+    owner_monitor = Process.monitor(owner)
+
+    assert client_port?(port, endpoints)
+    assert Port.info(port, :connected) == {:connected, owner}
+    assert Process.alive?(owner)
+    %{port: port, owner: owner, port_monitor: port_monitor, owner_monitor: owner_monitor}
+  end
+
+  defp observe_provider(_other, _endpoints), do: nil
+
+  defp client_port?(port, {server, client}) do
+    Port.info(port, :name) == {:name, ~c"tcp_inet"} and
+      :inet.sockname(port) == {:ok, client} and :inet.peername(port) == {:ok, server}
+  rescue
+    ArgumentError -> false
+  catch
+    :exit, {:noproc, _} -> false
+    :exit, :noproc -> false
+  end
+
+  defp finish_provider(task, promise, backend, nil), do: finish(task, promise, backend)
+
+  defp finish_provider(%Task{pid: peer} = task, promise, backend, provider) do
+    deadline = System.monotonic_time(:millisecond) + @wait
+    send(peer, :await_close)
+
+    try do
+      await_provider_close(peer, provider, deadline, %{
+        port_down: false,
+        owner_down: false,
+        peer_closed: false
+      })
+
+      assert :ok = Task.await(task, @wait)
+      assert_completion(promise, backend)
+    after
+      Process.demonitor(provider.port_monitor, [:flush])
+      Process.demonitor(provider.owner_monitor, [:flush])
+    end
+  end
+
+  defp await_provider_close(peer, provider, deadline, observed) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    cond do
+      remaining <= 0 ->
+        provider_close_timeout(provider, observed)
+
+      observed.port_down and observed.owner_down and observed.peer_closed ->
+        :ok
+
+      true ->
+        %{port: port, owner: owner, port_monitor: port_monitor, owner_monitor: owner_monitor} =
+          provider
+
+        receive do
+          {:DOWN, ^port_monitor, :port, ^port, _reason} ->
+            await_provider_close(peer, provider, deadline, %{observed | port_down: true})
+
+          {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+            await_provider_close(peer, provider, deadline, %{observed | owner_down: true})
+
+          {:peer_closed, ^peer} ->
+            await_provider_close(peer, provider, deadline, %{observed | peer_closed: true})
+        after
+          remaining -> provider_close_timeout(provider, observed)
+        end
+    end
+  end
+
+  defp provider_close_timeout(provider, observed) do
+    metadata = %{
+      observed: observed,
+      port: provider.port,
+      owner: provider.owner,
+      port_driver: Port.info(provider.port, :name),
+      port_owner: Port.info(provider.port, :connected),
+      owner_alive: Process.alive?(provider.owner)
+    }
+
+    flunk(
+      "original ex_ssl provider/peer closure exceeded the finish window: #{inspect(metadata)}"
+    )
   end
 
   defp finish(%Task{pid: peer} = task, promise, backend) do
