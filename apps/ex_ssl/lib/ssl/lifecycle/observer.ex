@@ -58,6 +58,18 @@ defmodule SSL.Lifecycle.Observer do
   def enroll_port(receipt, token, port, deadline),
     do: call(receipt, {:enroll, :tcp, token, port}, deadline)
 
+  # Only a trusted constructor that has permanently rejected BEFORE native entry
+  # may call this. Ordinary native errors, timeouts and DOWN are not this proof.
+  @spec reject_before_native(
+          Receipt.t(),
+          ResourceLedger.role(),
+          reference(),
+          {:abs_ms, integer()}
+        ) ::
+          :ok | {:error, atom()}
+  def reject_before_native(receipt, role, token, deadline),
+    do: call(receipt, {:reject_before_native, role, token}, deadline)
+
   @spec helper_done(Receipt.t(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
   def helper_done(receipt, deadline), do: call(receipt, :helper_done, deadline)
 
@@ -222,6 +234,17 @@ defmodule SSL.Lifecycle.Observer do
     end
   end
 
+  defp operate({:reject_before_native, role, token}, caller, state) do
+    with {:ok, permit} <- permit(state, role, token),
+         :ok <- constructor_creator(state, permit, caller),
+         {:ok, ledger} <-
+           ResourceLedger.reject_before_native(state.ledger, role, token, permit.parent) do
+      {:ok, %{state | ledger: ledger, permits: Map.delete(state.permits, role)}}
+    else
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
   defp operate(:helper_done, caller, state) do
     case creator(state, caller) do
       {:setup, _resource} when state.setup == :pending ->
@@ -253,7 +276,8 @@ defmodule SSL.Lifecycle.Observer do
 
     with true <- open?(state),
          {:ok, ledger} <- ResourceLedger.reserve(state.ledger, role, creator, token) do
-      permit = %{token: token, creator: caller}
+      ref = if creator == :observer, do: state.owner_monitor, else: elem(creator, 1)
+      permit = %{token: token, creator: caller, parent: creator, creator_monitor: ref}
       {{:ok, token}, %{state | ledger: ledger, permits: Map.put(state.permits, role, permit)}}
     else
       false -> {{:error, :admission_closed}, state}
@@ -267,6 +291,34 @@ defmodule SSL.Lifecycle.Observer do
       _ -> {:error, :unknown_permit}
     end
   end
+
+  defp constructor_creator(
+         state,
+         %{creator: expected, parent: :observer, creator_monitor: ref},
+         caller
+       )
+       when caller == expected do
+    if caller == state.owner and ref == state.owner_monitor and Process.alive?(caller),
+      do: :ok,
+      else: {:error, :unauthorized_creator}
+  end
+
+  defp constructor_creator(
+         state,
+         %{creator: expected, parent: {parent, ref}, creator_monitor: monitor},
+         caller
+       )
+       when caller == expected and ref == monitor do
+    case creator(state, caller) do
+      {^parent, %{identity: {^ref, :process, ^caller}, done: false}} ->
+        if Process.alive?(caller), do: :ok, else: {:error, :unauthorized_creator}
+
+      _ ->
+        {:error, :unauthorized_creator}
+    end
+  end
+
+  defp constructor_creator(_state, _permit, _caller), do: {:error, :unauthorized_creator}
 
   defp enrollment(state, :tcp, permit, caller, port) when is_port(port) do
     if caller == permit.creator and Port.info(port, :connected) == {:connected, caller} and

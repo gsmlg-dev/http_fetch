@@ -388,6 +388,215 @@ defmodule SSL.Lifecycle.ObserverTest do
     empty_reservations(baseline, deadline())
   end
 
+  test "a pre-native rejection lets its allocator finish without inventing a TCP resource" do
+    {receipt, lease} = bound()
+    {:ok, token} = Observer.reserve_root(receipt, lease, :allocator, deadline())
+    parent = self()
+
+    actor(fn ->
+      :use = Observer.enroll_self(receipt, :allocator, token, deadline())
+      {:ok, tcp_token} = Observer.reserve_child(receipt, :tcp, deadline())
+      assert {:error, :allocations_pending} = Observer.helper_done(receipt, deadline())
+      :ok = Observer.reject_before_native(receipt, :tcp, tcp_token, deadline())
+      :ok = Observer.helper_done(receipt, deadline())
+      send(parent, {:rejected_before_native, Observer.reserve_child(receipt, :tcp, deadline())})
+      wait()
+    end)
+
+    assert_receive {:rejected_before_native, {:error, :unauthorized_creator}}
+
+    assert {:ok, %{roles: 1, allocations: 0, losses: 0, observed_down: 0}} =
+             Observer.snapshot(receipt, deadline())
+
+    assert :ok = Observer.cancel(receipt, lease, deadline())
+
+    assert {:ok, %{cleanup: :confirmed, roles: 1, observed_down: 1}} =
+             Reader.await(receipt, deadline())
+  end
+
+  test "constructor rejection authenticates caller, attempt, role, token and finite budget" do
+    {receipt, lease} = bound()
+    {other, other_lease} = bound()
+    {:ok, token} = Observer.reserve_root(receipt, lease, :allocator, deadline())
+    parent = self()
+
+    allocator =
+      actor(fn ->
+        :use = Observer.enroll_self(receipt, :allocator, token, deadline())
+        {:ok, tcp_token} = Observer.reserve_child(receipt, :tcp, deadline())
+        send(parent, {:constructor_token, tcp_token})
+
+        receive do
+          :reject ->
+            :ok = Observer.reject_before_native(receipt, :tcp, tcp_token, deadline())
+
+            assert {:error, :unknown_permit} =
+                     Observer.reject_before_native(receipt, :tcp, tcp_token, deadline())
+
+            assert {:error, :role_used} = Observer.reserve_child(receipt, :tcp, deadline())
+            :ok = Observer.helper_done(receipt, deadline())
+            send(parent, :constructor_settled)
+            wait()
+        end
+      end)
+
+    assert_receive {:constructor_token, tcp_token}
+
+    assert {:error, :unauthorized_creator} =
+             Observer.reject_before_native(receipt, :tcp, tcp_token, deadline())
+
+    assert {:error, :unknown_permit} =
+             Observer.reject_before_native(receipt, :tcp, make_ref(), deadline())
+
+    assert {:error, :unknown_permit} =
+             Observer.reject_before_native(receipt, :writer, tcp_token, deadline())
+
+    assert {:error, :unknown_permit} =
+             Observer.reject_before_native(other, :tcp, tcp_token, deadline())
+
+    assert {:error, :deadline_exceeded} =
+             Observer.reject_before_native(receipt, :tcp, tcp_token, deadline(-1))
+
+    assert {:error, :invalid_deadline} =
+             Observer.reject_before_native(receipt, :tcp, tcp_token, :infinity)
+
+    assert {:ok, %{allocations: 16, roles: 1, losses: 0}} = Observer.snapshot(receipt, deadline())
+    send(allocator, :reject)
+    assert_receive :constructor_settled
+    assert :ok = Observer.cancel(receipt, lease, deadline())
+
+    assert {:ok, %{cleanup: :confirmed, roles: 1, observed_down: 1}} =
+             Reader.await(receipt, deadline())
+
+    assert :ok = Observer.cancel(other, other_lease, deadline())
+    assert {:ok, %{roles: 0}} = Reader.await(other, deadline())
+  end
+
+  test "root constructor rejection leaves roles empty, forbids reuse and does not invent setup failure" do
+    {receipt, lease} = bound()
+
+    for role <- [:allocator, :setup] do
+      {:ok, token} = Observer.reserve_root(receipt, lease, role, deadline())
+      parent = self()
+
+      actor(fn ->
+        send(
+          parent,
+          {:foreign_constructor, Observer.reject_before_native(receipt, role, token, deadline())}
+        )
+      end)
+
+      assert_receive {:foreign_constructor, {:error, :unauthorized_creator}}
+      :ok = Observer.reject_before_native(receipt, role, token, deadline())
+
+      assert {:error, :unknown_permit} =
+               Observer.reject_before_native(receipt, role, token, deadline())
+
+      assert {:error, :role_used} = Observer.reserve_root(receipt, lease, role, deadline())
+      parent = self()
+
+      actor(fn ->
+        send(
+          parent,
+          {:late_rejected_birth, Observer.enroll_self(receipt, role, token, deadline())}
+        )
+      end)
+
+      assert_receive {:late_rejected_birth, {:error, :unknown_permit}}
+    end
+
+    assert {:ok, %{roles: 0, allocations: 0, observed_down: 0, setup: :pending}} =
+             Observer.snapshot(receipt, deadline())
+
+    assert :ok = Observer.cancel(receipt, lease, deadline())
+
+    assert {:ok, %{cleanup: :confirmed, setup: :cancelled, setup_failure: :cancelled, roles: 0}} =
+             Reader.await(receipt, deadline())
+  end
+
+  test "a genuine root rejection can account after cancellation without opening admission" do
+    {receipt, lease} = bound()
+    {:ok, token} = Observer.reserve_root(receipt, lease, :setup, deadline())
+    assert :ok = Observer.cancel(receipt, lease, deadline())
+
+    assert {:ok, %{admission: :closed, allocations: 2, setup: :cancelled}} =
+             Observer.snapshot(receipt, deadline())
+
+    assert {:error, :admission_closed} =
+             Observer.reserve_root(receipt, lease, :allocator, deadline())
+
+    assert :ok = Observer.reject_before_native(receipt, :setup, token, deadline())
+
+    assert {:ok, %{cleanup: :confirmed, roles: 0, observed_down: 0, setup: :cancelled}} =
+             Reader.await(receipt, deadline())
+  end
+
+  test "creator DOWN is not a constructor rejection and the lost permit remains sticky" do
+    {receipt, lease} = bound()
+    {:ok, token} = Observer.reserve_root(receipt, lease, :setup, deadline())
+    parent = self()
+
+    setup =
+      actor(fn ->
+        :use = Observer.enroll_self(receipt, :setup, token, deadline())
+        {:ok, child_token} = Observer.reserve_child(receipt, :connection, deadline())
+        send(parent, {:unresolved_constructor, child_token})
+        wait()
+      end)
+
+    assert_receive {:unresolved_constructor, child_token}
+    Process.exit(setup, :kill)
+    assert %{losses: 4, allocations: 4, observed_down: 2} = closed_snapshot(receipt, deadline())
+
+    assert {:error, :unauthorized_creator} =
+             Observer.reject_before_native(receipt, :connection, child_token, deadline())
+
+    assert {:ok, %{losses: 4, allocations: 4}} = Observer.snapshot(receipt, deadline())
+    actor(fn -> Observer.enroll_self(receipt, :connection, child_token, deadline()) end)
+    assert {:unconfirmed, :resource_evidence_lost} = Reader.await(receipt, deadline())
+    assert {:terminal, %{losses: 4, roles: 6, observed_down: 6}} = Reader.status(receipt)
+  end
+
+  test "an actual setup helper can publish failure after allocator pre-native completion" do
+    {receipt, lease} = bound()
+    {:ok, allocator_token} = Observer.reserve_root(receipt, lease, :allocator, deadline())
+    {:ok, setup_token} = Observer.reserve_root(receipt, lease, :setup, deadline())
+    parent = self()
+
+    setup =
+      actor(fn ->
+        :use = Observer.enroll_self(receipt, :setup, setup_token, deadline())
+        send(parent, :setup_enrolled)
+
+        receive do
+          :fail_setup -> Observer.publish_setup(receipt, {:failed, :options}, deadline())
+        end
+      end)
+
+    assert_receive :setup_enrolled
+
+    actor(fn ->
+      :use = Observer.enroll_self(receipt, :allocator, allocator_token, deadline())
+      {:ok, tcp_token} = Observer.reserve_child(receipt, :tcp, deadline())
+      :ok = Observer.reject_before_native(receipt, :tcp, tcp_token, deadline())
+      :ok = Observer.helper_done(receipt, deadline())
+      send(parent, :allocator_completed_without_native_entry)
+    end)
+
+    assert_receive :allocator_completed_without_native_entry
+    send(setup, :fail_setup)
+
+    assert {:ok,
+            %{
+              cleanup: :confirmed,
+              setup: :failed,
+              setup_failure: :options,
+              roles: 3,
+              observed_down: 3
+            }} =
+             Reader.await(receipt, deadline())
+  end
+
   defp empty_reservations(count, {:abs_ms, expiry} = budget) do
     assert System.monotonic_time(:millisecond) < expiry
 

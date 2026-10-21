@@ -7,7 +7,7 @@ defmodule SSL.Lifecycle.ResourceLedger do
 
   @roles %{allocator: 1, setup: 2, connection: 4, writer: 8, tcp: 16}
   @derive {Inspect, only: [:scope, :admission, :losses]}
-  defstruct scope: :dial, admission: :open, resources: %{}, permits: %{}, losses: 0
+  defstruct scope: :dial, admission: :open, resources: %{}, permits: %{}, losses: 0, rejected: 0
 
   @type role :: :allocator | :setup | :connection | :writer | :tcp
   @type identity :: {reference(), :process | :port, pid() | port()}
@@ -51,6 +51,37 @@ defmodule SSL.Lifecycle.ResourceLedger do
     case Map.fetch(ledger.permits, role) do
       {:ok, {^token, _creator}} -> register(ledger, role, identity)
       _ -> {:error, :unknown_permit}
+    end
+  end
+
+  # Trusted provider assertion: the constructor rejected before entering native
+  # allocation and cannot allocate later. A connect error, timeout or creator DOWN
+  # is never this event. The observer authenticates the actual caller/attempt.
+  @spec reject_before_native(t(), role(), reference(), creator()) ::
+          {:ok, t()} | {:error, atom()}
+  def reject_before_native(%__MODULE__{} = ledger, role, token, creator) do
+    case Map.fetch(ledger.permits, role) do
+      {:ok, {^token, ^creator}} -> reject_reserved(ledger, role, creator)
+      {:ok, {^token, _other}} -> {:error, :unauthorized_creator}
+      _ -> {:error, :unknown_permit}
+    end
+  end
+
+  defp reject_reserved(ledger, role, creator) do
+    cond do
+      not creator_live?(ledger, creator) ->
+        {:error, :creator_not_observed}
+
+      (ledger.losses &&& Map.fetch!(@roles, role)) != 0 ->
+        {:error, :allocation_evidence_lost}
+
+      true ->
+        {:ok,
+         %{
+           ledger
+           | permits: Map.delete(ledger.permits, role),
+             rejected: ledger.rejected ||| Map.fetch!(@roles, role)
+         }}
     end
   end
 
@@ -151,7 +182,7 @@ defmodule SSL.Lifecycle.ResourceLedger do
   defp occupied?(ledger, role),
     do:
       Map.has_key?(ledger.resources, role) or Map.has_key?(ledger.permits, role) or
-        (ledger.losses &&& Map.fetch!(@roles, role)) != 0
+        ((ledger.losses ||| ledger.rejected) &&& Map.fetch!(@roles, role)) != 0
 
   defp creator_live?(_ledger, :observer), do: true
 

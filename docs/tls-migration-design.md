@@ -240,18 +240,31 @@ allocator/setup/Connection/writer births, adoption, owner ACK/authority transfer
 socket/facade integration remain unimplemented. Upgrade observers reject new TCP
 allocation with adoption_not_implemented; this slice does not attest real STARTTLS
 adoption or certify current TLS cleanup. The current Connection still starts work
-before enrollment. Constructor errors still cannot retire unknown permits; an
-authenticated no-future-allocation completion protocol remains required.
+before enrollment. Private `reject_before_native/4` now accounts for a provider
+constructor that rejects BEFORE entering native allocation and fences all future
+allocation first. Exact permit/caller/live parent monitor generation are required;
+root permits use the bound owner's recorded monitor. A private five-bit role-use
+tombstone prevents reuse and late enrollment without inventing a resource or DOWN.
+Closed admission may accept this accounting acknowledgment but never authorizes new
+work. Existing loss stays sticky, and public snapshot/receipt dimensions and grace
+remain unchanged. For process roles this must precede attempting spawn/start_child,
+not merely the first TCP call; a failed constructor after entry is not a no-resource
+proof. This is a trusted provider assertion, not a native-error mapping:
+ordinary native connect errors/timeouts/helper DOWN still cannot retire an unknown
+permit. Root setup rejection does not invent a setup outcome; until driver integration
+it remains pending until explicit cancellation. Actual setup-helper failure publication
+is separate. No public lifecycle/default/managed capability is admitted by this API.
 
 Source review identified these runtime integration gates before the public facade:
 
 - Connection.init currently starts writer/timer immediately; make births inert.
   A blocking supervisor start and a child's synchronous observer-enrollment call
   must not create an observer/supervisor/child call cycle.
-- The ledger lacks authenticated allocation completion without a returned resource.
-  Resolve permit retirement for normal start/dial failure explicitly. An error
-  result is not by itself proof that no internal port was ever born; creator death
-  or call timeout must never substitute for a no-future-allocation acknowledgment.
+- General native start/dial failure still lacks authenticated allocation completion
+  without a returned resource. The private pre-native rejection above covers only
+  the path that never entered allocation. An error result after entry is not by itself
+  proof that no internal port was ever born; creator death or call timeout must never
+  substitute for exact native identity/DOWN or a valid no-future-allocation acknowledgment.
 - Unknown-identity permits intentionally do not settle proof. Bound observer
   retention with conservative unconfirmed evidence/absence handling, never an
   invented successful proof. Late inert children must stop if observer is absent.

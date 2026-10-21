@@ -175,6 +175,142 @@ defmodule SSL.Lifecycle.ResourceLedgerTest do
     end
   end
 
+  test "pre-native rejection consumes one permit without fabricating resource DOWN or recycling its role" do
+    {ledger, allocator} = observed(:allocator)
+    token = make_ref()
+    creator = {:allocator, allocator}
+    assert {:ok, ledger} = Ledger.reserve(ledger, :tcp, creator, token)
+    assert {:ok, ledger} = Ledger.reject_before_native(ledger, :tcp, token, creator)
+    assert %{roles: 1, observed_down: 0, allocations: 0, losses: 0} = Ledger.snapshot(ledger)
+    assert {:error, :role_used} = Ledger.reserve(ledger, :tcp, creator, make_ref())
+    assert {:error, :unknown_permit} = Ledger.reject_before_native(ledger, :tcp, token, creator)
+
+    assert {:error, :unknown_permit} =
+             Ledger.enroll(ledger, :tcp, token, {make_ref(), :port, :not_allocated})
+
+    ledger = Ledger.close_admission(ledger)
+    assert {:pending, %{roles: 1, observed_down: 0, allocations: 0}} = Ledger.proof(ledger)
+    ledger = Ledger.down(ledger, {:DOWN, allocator, :process, self(), :normal})
+    assert {:ok, %{cleanup: :confirmed, roles: 1, observed_down: 1}} = Ledger.proof(ledger)
+  end
+
+  test "pre-native rejection requires the exact permit, role and creator monitor generation" do
+    {ledger, allocator} = observed(:allocator)
+    token = make_ref()
+    creator = {:allocator, allocator}
+    assert {:ok, ledger} = Ledger.reserve(ledger, :tcp, creator, token)
+    original = Ledger.snapshot(ledger)
+
+    assert {:error, :unknown_permit} =
+             Ledger.reject_before_native(ledger, :tcp, make_ref(), creator)
+
+    assert {:error, :unknown_permit} =
+             Ledger.reject_before_native(ledger, :writer, token, creator)
+
+    assert {:error, :unknown_permit} =
+             Ledger.reject_before_native(Ledger.new(), :tcp, token, creator)
+
+    assert {:error, :unauthorized_creator} =
+             Ledger.reject_before_native(ledger, :tcp, token, {:allocator, make_ref()})
+
+    assert {:error, :unauthorized_creator} =
+             Ledger.reject_before_native(ledger, :tcp, token, {:setup, allocator})
+
+    assert {:error, :unauthorized_creator} =
+             Ledger.reject_before_native(ledger, :tcp, token, :observer)
+
+    assert Ledger.snapshot(ledger) == original
+    assert {:ok, _} = Ledger.reject_before_native(ledger, :tcp, token, creator)
+  end
+
+  test "settlement after a closed fence performs accounting without admitting a birth" do
+    {ledger, setup} = observed(:setup)
+    creator = {:setup, setup}
+    token = make_ref()
+    assert {:ok, ledger} = Ledger.reserve(ledger, :connection, creator, token)
+    ledger = Ledger.close_admission(ledger)
+    assert {:ok, ledger} = Ledger.reject_before_native(ledger, :connection, token, creator)
+
+    assert %{admission: :closed, allocations: 0, roles: 2, observed_down: 0} =
+             Ledger.snapshot(ledger)
+
+    assert {:error, :admission_closed} =
+             Ledger.reserve(ledger, :writer, creator, make_ref())
+
+    assert {:error, :unknown_permit} =
+             Ledger.enroll(ledger, :connection, token, {make_ref(), :process, self()})
+
+    assert {:pending, %{roles: 2, observed_down: 0}} = Ledger.proof(ledger)
+    ledger = Ledger.down(ledger, {:DOWN, setup, :process, self(), :normal})
+    assert {:ok, %{cleanup: :confirmed, roles: 2, observed_down: 2}} = Ledger.proof(ledger)
+  end
+
+  test "all five rejected roles remain single use without fabricated enrolled roles" do
+    for role <- [:allocator, :setup, :connection, :writer, :tcp] do
+      token = make_ref()
+      assert {:ok, ledger} = Ledger.reserve(Ledger.new(), role, :observer, token)
+      assert {:ok, ledger} = Ledger.reject_before_native(ledger, role, token, :observer)
+      assert %{roles: 0, observed_down: 0, allocations: 0, losses: 0} = Ledger.snapshot(ledger)
+      assert {:error, :role_used} = Ledger.reserve(ledger, role, :observer, make_ref())
+
+      assert {:ok, %{roles: 0, observed_down: 0, cleanup: :confirmed}} =
+               ledger |> Ledger.close_admission() |> Ledger.proof()
+    end
+  end
+
+  test "creator loss cannot be settled by a later rejection and its late child still stops" do
+    {ledger, setup} = observed(:setup)
+    creator = {:setup, setup}
+    token = make_ref()
+    assert {:ok, ledger} = Ledger.reserve(ledger, :connection, creator, token)
+    ledger = Ledger.down(ledger, {:DOWN, setup, :process, self(), :normal})
+    ledger = Ledger.close_admission(ledger)
+
+    assert {:error, :creator_not_observed} =
+             Ledger.reject_before_native(ledger, :connection, token, creator)
+
+    assert {:pending, %{allocations: 4, losses: 4, roles: 2, observed_down: 2}} =
+             Ledger.proof(ledger)
+
+    child = make_ref()
+
+    assert {:ok, ledger, :stop} =
+             Ledger.enroll(ledger, :connection, token, {child, :process, self()})
+
+    ledger = Ledger.down(ledger, {:DOWN, child, :process, self(), :normal})
+
+    assert {:ok, %{cleanup: :unconfirmed, losses: 4, roles: 6, observed_down: 6}} =
+             Ledger.proof(ledger)
+  end
+
+  test "settling another constructor cannot erase an unknown lost permit" do
+    {ledger, setup} = observed(:setup)
+    {ledger, allocator} = observed(:allocator, ledger)
+    connection_token = make_ref()
+    tcp_token = make_ref()
+    assert {:ok, ledger} = Ledger.reserve(ledger, :connection, {:setup, setup}, connection_token)
+    assert {:ok, ledger} = Ledger.reserve(ledger, :tcp, {:allocator, allocator}, tcp_token)
+    ledger = Ledger.down(ledger, {:DOWN, setup, :process, self(), :normal})
+    ledger = Ledger.close_admission(ledger)
+
+    assert {:ok, ledger} =
+             Ledger.reject_before_native(ledger, :tcp, tcp_token, {:allocator, allocator})
+
+    assert {:pending, %{allocations: 4, losses: 4, roles: 3, observed_down: 2}} =
+             Ledger.proof(ledger)
+
+    child = make_ref()
+
+    assert {:ok, ledger, :stop} =
+             Ledger.enroll(ledger, :connection, connection_token, {child, :process, self()})
+
+    ledger = Ledger.down(ledger, {:DOWN, child, :process, self(), :normal})
+    ledger = Ledger.down(ledger, {:DOWN, allocator, :process, self(), :normal})
+
+    assert {:ok, %{cleanup: :unconfirmed, losses: 4, roles: 7, observed_down: 7}} =
+             Ledger.proof(ledger)
+  end
+
   defp observed(role, ledger \\ Ledger.new()) do
     token = make_ref()
     monitor = make_ref()
