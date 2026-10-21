@@ -221,12 +221,24 @@ defmodule HTTP.RequestStreamTest do
   for method <- [:post, :get, :delete] do
     test "abort stops a fixed-length upload and its source (#{method})" do
       test_pid = self()
+      prefix_ref = make_ref()
 
       url =
         start_raw_http_server!(fn listener ->
-          {:ok, socket} = :gen_tcp.accept(listener)
-          {_headers, body} = recv_header_block(socket, "")
-          send(test_pid, {:aborted_body, recv_closed_body(socket, body)})
+          {:ok, socket} = :gen_tcp.accept(listener, 5_000)
+          {headers, body} = recv_header_block(socket, "")
+          [request_line | fields] = String.split(headers, "\r\n")
+          assert request_line == String.upcase(to_string(unquote(method))) <> " /test HTTP/1.1"
+          assert "Content-Length: 6" in fields
+          refute headers =~ "Transfer-Encoding"
+
+          # Preserve every byte already received with the headers before using
+          # the exact-length reader, which otherwise truncates excess input.
+          assert byte_size(body) <= 3
+          prefix = recv_body(socket, body, 3)
+          assert prefix == "abc"
+          send(test_pid, {:upload_prefix_received, prefix_ref, self(), prefix})
+          send(test_pid, {:aborted_body, prefix_ref, recv_closed_body(socket, prefix)})
         end)
 
       {:ok, stream} = HTTP.Stream.start_link(6)
@@ -244,10 +256,17 @@ defmodule HTTP.RequestStreamTest do
         )
 
       assert :ok = HTTP.Stream.chunk(stream, "abc")
+      # Stream.chunk acknowledges transport acceptance, not peer receipt. Abort
+      # only after the peer has observed the prefix; leave the final three bytes
+      # unproduced so this exercises cancellation of an established partial body.
+      assert_receive {:upload_prefix_received, ^prefix_ref, peer, "abc"}, 5_000
+      peer_monitor = Process.monitor(peer)
+      assert Process.alive?(stream)
       HTTP.AbortController.abort(controller)
       assert {:error, :aborted} = HTTP.Promise.await(promise)
       assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 5_000
-      assert_receive {:aborted_body, "abc"}, 5_000
+      assert_receive {:aborted_body, ^prefix_ref, "abc"}, 5_000
+      assert_receive {:DOWN, ^peer_monitor, :process, ^peer, :normal}, 5_000
     end
   end
 
