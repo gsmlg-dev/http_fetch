@@ -118,17 +118,7 @@ defmodule SSL.Protocol.HandshakeMachine do
           {:ok, %{state | framer: framer}, [], []}
 
         {[handshake | _] = handshakes, _buffered} ->
-          case TLS12Codec.decode(handshake) do
-            {:ok, %{type: :server_hello, cipher_suite: suite}} ->
-              if match?(%{version: 0x0303}, SSL.Capabilities.resolve(:cipher_suite, suite)) do
-                accept_initial_tls12(state, suite, handshakes, framer)
-              else
-                accept_initial_tls13(state, handshakes, framer)
-              end
-
-            _ ->
-              accept_initial_tls13(state, handshakes, framer)
-          end
+          accept_initial_handshakes(state, handshake, handshakes, framer)
       end
     else
       {:error, {:record_length_exceeded, _, _} = reason} -> fatal(:record_overflow, reason)
@@ -159,6 +149,20 @@ defmodule SSL.Protocol.HandshakeMachine do
   def feed(%__MODULE__{phase: :closed}, _record), do: {:error, :closed}
 
   def feed(_, _), do: fatal(:decode_error, :invalid_record)
+
+  defp accept_initial_handshakes(state, handshake, handshakes, framer) do
+    case TLS12Codec.decode(handshake) do
+      {:ok, %{type: :server_hello, cipher_suite: suite}} ->
+        if match?(%{version: 0x0303}, SSL.Capabilities.resolve(:cipher_suite, suite)) do
+          accept_initial_tls12(state, suite, handshakes, framer)
+        else
+          accept_initial_tls13(state, handshakes, framer)
+        end
+
+      _ ->
+        accept_initial_tls13(state, handshakes, framer)
+    end
+  end
 
   defp accept_initial_tls13(state, [handshake], framer) do
     if HandshakeFramer.buffered_size(framer) == 0 do

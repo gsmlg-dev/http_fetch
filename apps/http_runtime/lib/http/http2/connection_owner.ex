@@ -1476,16 +1476,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
             with {:ok, state} <- write_effects(%{state | connection: connection}, effects) do
               state = finish_upload_stall(state, id, :resumed)
 
-              if rest == "" do
-                send(bridge, {:body_ack, ack_ref})
-                {:ok, put_in(state.streams[id].pending_body, nil)}
-              else
-                state =
-                  put_in(state.streams[id].pending_body, {bridge, :binary.copy(rest), ack_ref})
-
-                send(self(), :drain_bodies)
-                {:ok, state}
-              end
+              finish_pending_body(state, id, bridge, rest, ack_ref)
             end
 
           {:error, :flow_control_blocked} ->
@@ -1498,6 +1489,18 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
       _ ->
         drain_pending_write(state, id)
+    end
+  end
+
+  defp finish_pending_body(state, id, bridge, rest, ack_ref) do
+    if rest == "" do
+      send(bridge, {:body_ack, ack_ref})
+      {:ok, put_in(state.streams[id].pending_body, nil)}
+    else
+      state = put_in(state.streams[id].pending_body, {bridge, :binary.copy(rest), ack_ref})
+
+      send(self(), :drain_bodies)
+      {:ok, state}
     end
   end
 
@@ -1538,17 +1541,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         case Connection.send_data_prefix(state.connection, id, data, end_stream?, quantum) do
           {:ok, connection, sent, rest, effects} ->
             with {:ok, state} <- write_effects(%{state | connection: connection}, effects) do
-              if sent > 0, do: notify_stream(state, id, {:write, ref, {:progress, sent}})
-
-              if rest == "" do
-                notify_stream(state, id, {:write, ref, :done})
-                {:ok, put_in(state.streams[id].pending_write, nil)}
-              else
-                send(self(), :drain_bodies)
-
-                {:ok,
-                 put_in(state.streams[id].pending_write, {ref, :binary.copy(rest), end_stream?})}
-              end
+              finish_pending_write(state, id, ref, sent, rest, end_stream?)
             end
 
           {:error, :flow_control_blocked} ->
@@ -1561,6 +1554,19 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
       nil ->
         {:ok, state}
+    end
+  end
+
+  defp finish_pending_write(state, id, ref, sent, rest, end_stream?) do
+    if sent > 0, do: notify_stream(state, id, {:write, ref, {:progress, sent}})
+
+    if rest == "" do
+      notify_stream(state, id, {:write, ref, :done})
+      {:ok, put_in(state.streams[id].pending_write, nil)}
+    else
+      send(self(), :drain_bodies)
+
+      {:ok, put_in(state.streams[id].pending_write, {ref, :binary.copy(rest), end_stream?})}
     end
   end
 

@@ -664,12 +664,7 @@ defmodule HTTP.SocketClient do
           })
 
         {:error, reason} ->
-          if is_pid(pool) and is_reference(reservation),
-            do: confirm_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
-
-          if not is_pid(pool),
-            do: safe_http2_cleanup(fn -> GenServer.stop(owner, :normal) end)
-
+          cleanup_failed_http2_owner(owner, pool, key, reservation)
           send_error(parent, ref, reason)
       end
     else
@@ -681,6 +676,14 @@ defmodule HTTP.SocketClient do
         transport.close(socket)
         send_error(parent, ref, reason)
     end
+  end
+
+  defp cleanup_failed_http2_owner(owner, pool, key, reservation) do
+    if is_pid(pool) and is_reference(reservation),
+      do: confirm_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
+
+    if not is_pid(pool),
+      do: safe_http2_cleanup(fn -> GenServer.stop(owner, :normal) end)
   end
 
   defp run_http2_reused_owner(context, owner, {pool, reservation}, key) do
@@ -779,21 +782,25 @@ defmodule HTTP.SocketClient do
                request_lifecycle: HTTP.RequestLifecycle.current(),
                socket: socket
              ) do
-        case await_http2_reservation(pool, key, deadline_at, owner, parent_monitor) do
-          {:ok, ^owner, reservation} ->
-            {:ok, pool, reservation, key}
-
-          {:ok, _other_owner, reservation} ->
-            confirm_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
-            {:error, :owner_mismatch, :registered}
-
-          {:error, reason} ->
-            {:error, reason, :registered}
-        end
+        reserve_registered_http2_owner(pool, key, deadline_at, owner, parent_monitor)
       else
         {:error, reason} -> {:error, reason}
         _ -> {:ok, nil, nil, nil}
       end
+    end
+  end
+
+  defp reserve_registered_http2_owner(pool, key, deadline_at, owner, parent_monitor) do
+    case await_http2_reservation(pool, key, deadline_at, owner, parent_monitor) do
+      {:ok, ^owner, reservation} ->
+        {:ok, pool, reservation, key}
+
+      {:ok, _other_owner, reservation} ->
+        confirm_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
+        {:error, :owner_mismatch, :registered}
+
+      {:error, reason} ->
+        {:error, reason, :registered}
     end
   end
 
@@ -881,27 +888,31 @@ defmodule HTTP.SocketClient do
 
       case opened do
         {:ok, %{id: id}} ->
-          sent =
-            try do
-              send_http2_body(owner, id, body, bridge)
-            catch
-              :exit, _ -> {:error, :body_bridge_down}
-            end
-
-          case sent do
-            :ok ->
-              {:ok, id, bridge}
-
-            {:error, reason} ->
-              discard_http2_bridge(bridge, internal_stream)
-              confirm_http2_cleanup(fn -> ConnectionOwner.release_stream(owner, id) end)
-              {:error, reason}
-          end
+          send_opened_http2_body(owner, id, body, bridge, internal_stream)
 
         {:error, reason} ->
           discard_http2_bridge(bridge, internal_stream)
           {:error, reason}
       end
+    end
+  end
+
+  defp send_opened_http2_body(owner, id, body, bridge, internal_stream) do
+    sent =
+      try do
+        send_http2_body(owner, id, body, bridge)
+      catch
+        :exit, _ -> {:error, :body_bridge_down}
+      end
+
+    case sent do
+      :ok ->
+        {:ok, id, bridge}
+
+      {:error, reason} ->
+        discard_http2_bridge(bridge, internal_stream)
+        confirm_http2_cleanup(fn -> ConnectionOwner.release_stream(owner, id) end)
+        {:error, reason}
     end
   end
 

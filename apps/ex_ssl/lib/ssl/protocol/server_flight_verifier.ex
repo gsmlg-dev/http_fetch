@@ -192,19 +192,23 @@ defmodule SSL.Protocol.ServerFlightVerifier do
         record, {:ok, messages, framer, current_state} ->
           case decrypt_record(record, current_state, framer, config) do
             {:ok, decoded, next_framer, next_state} ->
-              updated_messages = Enum.reverse(decoded, messages)
-
-              if length(updated_messages) > 4 do
-                {:halt, alert(:unexpected_message, {:trailing_handshake_messages, 5})}
-              else
-                {:cont, {:ok, updated_messages, next_framer, next_state}}
-              end
+              accumulate_handshake_messages(decoded, messages, next_framer, next_state)
 
             {:error, {_alert, _reason}} = error ->
               {:halt, error}
           end
       end)
       |> complete_handshake_stream()
+    end
+  end
+
+  defp accumulate_handshake_messages(decoded, messages, framer, state) do
+    updated_messages = Enum.reverse(decoded, messages)
+
+    if length(updated_messages) > 4 do
+      {:halt, alert(:unexpected_message, {:trailing_handshake_messages, 5})}
+    else
+      {:cont, {:ok, updated_messages, framer, state}}
     end
   end
 

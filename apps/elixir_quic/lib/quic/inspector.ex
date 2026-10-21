@@ -66,12 +66,14 @@ defmodule Quic.Inspector do
   defp metadata(_), do: {:error, :invalid_datagram}
 
   defp packet_bounds(<<first, version::32, rest::binary>> = bytes) do
-    if (first &&& 0x80) == 0 do
-      {:error, :not_long_header}
-    else
-      if (first &&& 0x40) == 0 or (first >>> 4 &&& 3) != 0 do
+    cond do
+      (first &&& 0x80) == 0 ->
+        {:error, :not_long_header}
+
+      (first &&& 0x40) == 0 or (first >>> 4 &&& 3) != 0 ->
         {:error, :not_initial}
-      else
+
+      true ->
         with :ok <- if(version == 1, do: :ok, else: {:error, :unsupported_version}),
              {:ok, _dcid, rest} <- take_cid(rest),
              {:ok, _scid, rest} <- take_cid(rest),
@@ -83,21 +85,24 @@ defmodule Quic.Inspector do
              true <- length >= 1 do
           packet_len = byte_size(bytes) - byte_size(rest) + length
 
-          if packet_len <= byte_size(bytes) do
-            {:ok, binary_part(bytes, 0, packet_len),
-             binary_part(bytes, packet_len, byte_size(bytes) - packet_len)}
-          else
-            {:error, :truncated_payload}
-          end
+          split_packet(bytes, packet_len)
         else
           {:error, _} = error -> error
           _ -> {:error, :malformed_initial}
         end
-      end
     end
   end
 
   defp packet_bounds(_), do: {:error, :truncated_header}
+
+  defp split_packet(bytes, packet_len) do
+    if packet_len <= byte_size(bytes) do
+      {:ok, binary_part(bytes, 0, packet_len),
+       binary_part(bytes, packet_len, byte_size(bytes) - packet_len)}
+    else
+      {:error, :truncated_payload}
+    end
+  end
 
   defp decode_packet(state, packet, flow, generation, at) do
     <<_first, _version::32, rest::binary>> = packet

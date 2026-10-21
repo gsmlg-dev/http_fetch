@@ -52,23 +52,7 @@ defmodule Quic.CryptoReassembly do
           new_bytes = uncovered_bytes(state.intervals, offset, offset + byte_size(bytes))
           intervals = insert_and_merge(state.intervals, offset, bytes)
 
-          cond do
-            state.buffered_bytes + new_bytes > state.max_bytes ->
-              {:error, :crypto_buffer_limit}
-
-            length(intervals) > state.max_intervals ->
-              {:error, :crypto_interval_limit}
-
-            true ->
-              next_state = %{
-                state
-                | intervals: intervals,
-                  buffered_bytes: state.buffered_bytes + new_bytes
-              }
-
-              {next_state, contiguous} = take_contiguous(next_state, <<>>)
-              {:ok, next_state, contiguous}
-          end
+          admit_intervals(state, intervals, new_bytes)
         end
       end
     end
@@ -84,6 +68,26 @@ defmodule Quic.CryptoReassembly do
 
   @spec intervals(t()) :: [{non_neg_integer(), binary()}]
   def intervals(%__MODULE__{intervals: intervals}), do: intervals
+
+  defp admit_intervals(state, intervals, new_bytes) do
+    cond do
+      state.buffered_bytes + new_bytes > state.max_bytes ->
+        {:error, :crypto_buffer_limit}
+
+      length(intervals) > state.max_intervals ->
+        {:error, :crypto_interval_limit}
+
+      true ->
+        next_state = %{
+          state
+          | intervals: intervals,
+            buffered_bytes: state.buffered_bytes + new_bytes
+        }
+
+        {next_state, contiguous} = take_contiguous(next_state, <<>>)
+        {:ok, next_state, contiguous}
+    end
+  end
 
   defp validate_overlaps(intervals, offset, bytes) do
     Enum.reduce_while(intervals, :ok, fn {start, existing}, :ok ->

@@ -276,16 +276,7 @@ defmodule Quic.Streams do
              {:ok, stream, events} <- consume_chunks(stream, id) do
           next = %{state | streams: Map.put(state.streams, id, stream)}
 
-          case retain_events(next, id, events) do
-            {:ok, next, delivered} ->
-              next = replenish_credit(next, id, emitted_bytes(delivered))
-
-              {:ok, %{next | data_delivered: next.data_delivered + emitted_bytes(delivered)},
-               delivered}
-
-            {:error, _} = error ->
-              error
-          end
+          deliver_received_events(next, id, events)
         else
           {:error, _} = error -> error
         end
@@ -294,6 +285,18 @@ defmodule Quic.Streams do
   end
 
   def receive(_, _), do: {:error, :invalid_stream_frame}
+
+  defp deliver_received_events(next, id, events) do
+    case retain_events(next, id, events) do
+      {:ok, next, delivered} ->
+        next = replenish_credit(next, id, emitted_bytes(delivered))
+
+        {:ok, %{next | data_delivered: next.data_delivered + emitted_bytes(delivered)}, delivered}
+
+      {:error, _} = error ->
+        error
+    end
+  end
 
   @doc "Consume queued stream events when `delivery: :manual` is configured."
   def consume(%__MODULE__{delivery: :manual} = state, id, max_bytes)
@@ -402,10 +405,7 @@ defmodule Quic.Streams do
               |> clear_ready_stream(id)
               |> Map.put(:streams, Map.put(state.streams, id, stream))
 
-            case retain_events(next, id, [{:reset, id, error_code, final_size}]) do
-              {:ok, next, events} -> {:ok, next, events}
-              {:error, _} = error -> error
-            end
+            retain_reset_event(next, id, error_code, final_size)
           end
 
         {_, ^error_code} when stream.recv_final == final_size ->
@@ -414,6 +414,13 @@ defmodule Quic.Streams do
         _ ->
           {:error, :final_size_error}
       end
+    end
+  end
+
+  defp retain_reset_event(next, id, error_code, final_size) do
+    case retain_events(next, id, [{:reset, id, error_code, final_size}]) do
+      {:ok, next, events} -> {:ok, next, events}
+      {:error, _} = error -> error
     end
   end
 

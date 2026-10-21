@@ -82,23 +82,27 @@ defmodule Quic.Endpoint do
         if role == :server or not Keyword.has_key?(opts, :remote) do
           {:ok, data}
         else
-          case admit(
-                 data,
-                 Keyword.fetch!(opts, :remote),
-                 :crypto.strong_rand_bytes(@cid_length),
-                 nil
-               ) do
-            {:ok, data, _entry} ->
-              {:ok, data}
-
-            {:error, reason} ->
-              close_io(io)
-              {:stop, reason}
-          end
+          admit_initial_remote(data, opts, io)
         end
       end
     else
       {:stop, :invalid_endpoint_options}
+    end
+  end
+
+  defp admit_initial_remote(data, opts, io) do
+    case admit(
+           data,
+           Keyword.fetch!(opts, :remote),
+           :crypto.strong_rand_bytes(@cid_length),
+           nil
+         ) do
+      {:ok, data, _entry} ->
+        {:ok, data}
+
+      {:error, reason} ->
+        close_io(io)
+        {:stop, reason}
     end
   end
 

@@ -2301,13 +2301,14 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   defp assert_tls_buffered_after_peer_close(tls_pid, expected_size) do
-    # The imported connection source matches the reviewed source used to
-    # validate this closed/size/active probe. Revalidate on any source change.
+    # Reviewed after continue_records/3 extraction: closed/size/active fields,
+    # application-data buffering and peer-close/drain ordering are unchanged.
+    # This is a test-only probe. Revalidate on any source change.
     source = SSL.Connection.module_info(:compile)[:source] |> List.to_string()
     assert File.regular?(source), "connection source is unavailable for private buffer probe"
 
     assert :crypto.hash(:sha256, File.read!(source)) |> Base.encode16(case: :lower) ==
-             "780578f278f92ff93a4d95f5300f3f63a3d8df620be105ad5d6899c100439f1e",
+             "7c891a11c6ea595fcaff9d99767b4d1294a7ec0e876675422c86eff93e6342ae",
            "revalidate this private buffer probe after changing SSL.Connection source"
 
     assert Application.spec(:ex_ssl, :vsn) == Application.spec(:http_fetch, :vsn),

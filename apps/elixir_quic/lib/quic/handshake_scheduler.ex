@@ -706,9 +706,7 @@ defmodule Quic.HandshakeScheduler do
               | pending: state.pending ++ [%{level: level, offset: offset, bytes: bytes}]
             }
 
-            with {:ok, recovery} <- handoff_lost_packet(next.recovery, space, number) do
-              schedule(%{next | recovery: recovery})
-            end
+            schedule_retry(next, space, number)
           end
         end
 
@@ -727,6 +725,18 @@ defmodule Quic.HandshakeScheduler do
 
       _ ->
         {:error, :not_retransmittable}
+    end
+  end
+
+  defp clear_empty_application_control(next, []) do
+    %{next | pending_control: Map.delete(next.pending_control, :application)}
+  end
+
+  defp clear_empty_application_control(next, _control), do: next
+
+  defp schedule_retry(next, space, number) do
+    with {:ok, recovery} <- handoff_lost_packet(next.recovery, space, number) do
+      schedule(%{next | recovery: recovery})
     end
   end
 
@@ -1642,10 +1652,7 @@ defmodule Quic.HandshakeScheduler do
               pending_control: Map.put(state.pending_control, :application, control)
           }
 
-          next =
-            if control == [],
-              do: %{next | pending_control: Map.delete(next.pending_control, :application)},
-              else: next
+          next = clear_empty_application_control(next, control)
 
           dispatch_frames(next, level, space, number, rest, at, [frame | events])
         else

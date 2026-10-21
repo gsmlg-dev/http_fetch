@@ -146,10 +146,7 @@ defmodule Quic.Protection do
         else
           <<pn::binary-size(^pn_len), tail::binary>> = rest
 
-          unmasked =
-            for {byte, index} <- Enum.with_index(:binary.bin_to_list(pn)), into: <<>> do
-              <<bxor(byte, :binary.at(mask, index + 1))>>
-            end
+          unmasked = unmask_packet_number(pn, mask)
 
           {:ok, <<first, header_rest::binary, unmasked::binary, tail::binary>>, pn_len}
         end
@@ -160,6 +157,12 @@ defmodule Quic.Protection do
   end
 
   def remove_header_protection(_, _, _, _), do: {:error, :invalid_header_protection_input}
+
+  defp unmask_packet_number(pn, mask) do
+    for {byte, index} <- Enum.with_index(:binary.bin_to_list(pn)), into: <<>> do
+      <<bxor(byte, :binary.at(mask, index + 1))>>
+    end
+  end
 
   @spec retry_tag(binary(), binary()) :: {:ok, binary()} | {:error, atom()}
   def retry_tag(original_dcid, retry_packet)

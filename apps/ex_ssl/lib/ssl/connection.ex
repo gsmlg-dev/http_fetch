@@ -687,9 +687,7 @@ defmodule SSL.Connection do
 
         if outbound == [] do
           with {:ok, phase, state} <- apply_events(phase, events, state) do
-            if state.closed and rest != [],
-              do: {:error, :closed, state},
-              else: process_records(phase, rest, state)
+            continue_records(phase, rest, state)
           end
         else
           deadline = if phase == :handshaking, do: state.deadline, else: :infinity
@@ -712,6 +710,12 @@ defmodule SSL.Connection do
       {:error, reason} ->
         {:error, reason, state}
     end
+  end
+
+  defp continue_records(phase, rest, state) do
+    if state.closed and rest != [],
+      do: {:error, :closed, state},
+      else: process_records(phase, rest, state)
   end
 
   defp prepare_resumption(%{session_tickets: :disabled} = options, _tcp),

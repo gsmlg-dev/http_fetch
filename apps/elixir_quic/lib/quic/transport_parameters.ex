@@ -131,39 +131,40 @@ defmodule Quic.TransportParameters do
          {:ok, length, rest} <- Quic.Codec.decode_varint(rest),
          true <- length <= @max_parameter_bytes,
          true <- byte_size(rest) >= length,
-         <<value::binary-size(^length), tail::binary>> <- rest do
-      if Map.has_key?(seen, id) do
-        {:error, :duplicate_transport_parameter}
-      else
-        case Map.get(@known, id) do
-          {key, kind} ->
-            with {:ok, semantic} <- decode_value(kind, value) do
-              decode_entries(
-                tail,
-                [%{id: id, value: value} | ordered],
-                Map.put(values, key, semantic),
-                unknown,
-                Map.put(seen, id, true),
-                limit - 1
-              )
-            end
-
-          nil ->
+         <<value::binary-size(^length), tail::binary>> <- rest,
+         :ok <- unique_parameter(seen, id) do
+      case Map.get(@known, id) do
+        {key, kind} ->
+          with {:ok, semantic} <- decode_value(kind, value) do
             decode_entries(
               tail,
               [%{id: id, value: value} | ordered],
-              values,
-              [{id, value} | unknown],
+              Map.put(values, key, semantic),
+              unknown,
               Map.put(seen, id, true),
               limit - 1
             )
-        end
+          end
+
+        nil ->
+          decode_entries(
+            tail,
+            [%{id: id, value: value} | ordered],
+            values,
+            [{id, value} | unknown],
+            Map.put(seen, id, true),
+            limit - 1
+          )
       end
     else
       false -> {:error, :truncated_transport_parameter}
       {:error, _} = error -> error
       _ -> {:error, :truncated_transport_parameter}
     end
+  end
+
+  defp unique_parameter(seen, id) do
+    if Map.has_key?(seen, id), do: {:error, :duplicate_transport_parameter}, else: :ok
   end
 
   defp decode_value(:varint, value) do

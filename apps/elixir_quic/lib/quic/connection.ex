@@ -763,26 +763,30 @@ defmodule Quic.Connection do
         timeout = effective_idle_timeout(data.idle_timeout, scheduler.peer_idle_timeout)
         data = %{data | scheduler: scheduler, idle_timeout: timeout}
 
-        if data.role == :server do
-          case HandshakeScheduler.handshake_done(HandshakeScheduler.confirm_handshake(scheduler)) do
-            {:ok, scheduler, effects} ->
-              {:ok, %{data | scheduler: scheduler, ready: true, parameters_valid: true}, effects}
-
-            {:error, reason, _} ->
-              {:error, reason}
-
-            {:error, reason} ->
-              {:error, reason}
-          end
-        else
-          {:ok, %{data | ready: true, parameters_valid: true}, []}
-        end
+        finish_readiness(data)
       else
         false -> {:error, :incomplete_authentication}
         {:error, reason} -> {:error, {:transport_parameters, reason}}
       end
     else
       {:ok, data, []}
+    end
+  end
+
+  defp finish_readiness(data) do
+    if data.role == :server do
+      case HandshakeScheduler.handshake_done(HandshakeScheduler.confirm_handshake(data.scheduler)) do
+        {:ok, scheduler, effects} ->
+          {:ok, %{data | scheduler: scheduler, ready: true, parameters_valid: true}, effects}
+
+        {:error, reason, _} ->
+          {:error, reason}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:ok, %{data | ready: true, parameters_valid: true}, []}
     end
   end
 

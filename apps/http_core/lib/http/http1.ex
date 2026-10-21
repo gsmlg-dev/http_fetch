@@ -307,17 +307,21 @@ defmodule HTTP.HTTP1 do
           {:ok, %{conn | state: :chunk_size}}
 
         :identity ->
-          if content_lengths != [] do
-            with {:ok, length} <- parse_content_lengths(content_lengths) do
-              {:ok, set_content_length_framing(conn, length)}
-            end
-          else
-            {:ok, %{conn | state: :body_eof}}
-          end
+          set_identity_body_framing(conn, content_lengths)
 
         {:error, reason} ->
           {:error, reason}
       end
+    end
+  end
+
+  defp set_identity_body_framing(conn, content_lengths) do
+    if content_lengths != [] do
+      with {:ok, length} <- parse_content_lengths(content_lengths) do
+        {:ok, set_content_length_framing(conn, length)}
+      end
+    else
+      {:ok, %{conn | state: :body_eof}}
     end
   end
 

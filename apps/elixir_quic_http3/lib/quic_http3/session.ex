@@ -1011,13 +1011,17 @@ defmodule QuicHttp3.Session do
           {:ok, put_in(session.peer_streams[stream].buffer, :binary.copy(data)), []}
 
         {:ok, type, rest} ->
-          with {:ok, next} <- identify_peer_stream(session, stream, type) do
-            payload = if type == :control, do: data, else: rest
-            receive_peer_payload(next, stream, type, payload)
-          end
+          identify_peer_payload(session, stream, type, data, rest)
       end
     else
       receive_peer_payload(session, stream, peer.type, bytes)
+    end
+  end
+
+  defp identify_peer_payload(session, stream, type, data, rest) do
+    with {:ok, next} <- identify_peer_stream(session, stream, type) do
+      payload = if type == :control, do: data, else: rest
+      receive_peer_payload(next, stream, type, payload)
     end
   end
 
