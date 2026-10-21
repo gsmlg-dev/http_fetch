@@ -2301,7 +2301,7 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   defp assert_tls_buffered_after_peer_close(tls_pid, expected_size) do
-    # Reviewed after persistent abandonment abort policy:
+    # Reviewed after private inert Connection/writer births (classic path unchanged):
     # closed/size/active fields and unabandoned peer-close drainage are unchanged.
     # Native chunk sizing may vary; this probe checks the TLS plaintext buffer.
     # This is a test-only probe. Revalidate on any source change.
@@ -2309,7 +2309,7 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert File.regular?(source), "connection source is unavailable for private buffer probe"
 
     assert :crypto.hash(:sha256, File.read!(source)) |> Base.encode16(case: :lower) ==
-             "371201570752d6d090d78bd8760547998e9bff25640d4b436c45719fa4cf98a0",
+             "0f0ad762fed7bb6307e374ea7e83d0699bd45cb21309cdb5140a1c74e2220e98",
            "revalidate this private buffer probe after changing SSL.Connection source"
 
     assert Application.spec(:ex_ssl, :vsn) == Application.spec(:http_fetch, :vsn),

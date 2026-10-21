@@ -283,12 +283,12 @@ defmodule HTTP.TLSTransportTest do
 
     try do
       # Test-only driver probe; buffer attach and verify-mode forwarding audited.
-      # Abandonment-only shutdown decisions leave this unabandoned option path unchanged.
+      # Private inert births leave classic tuple5 buffer and verify-mode forwarding unchanged.
       # Production HTTP consumes only the transport API.
       source = SSL.Connection.module_info(:compile)[:source] |> List.to_string()
 
       assert :crypto.hash(:sha256, File.read!(source)) |> Base.encode16(case: :lower) ==
-               "371201570752d6d090d78bd8760547998e9bff25640d4b436c45719fa4cf98a0"
+               "0f0ad762fed7bb6307e374ea7e83d0699bd45cb21309cdb5140a1c74e2220e98"
 
       assert Application.spec(:ex_ssl, :vsn) == Application.spec(:http_core, :vsn)
       {:connected, state} = :sys.get_state(socket.pid)

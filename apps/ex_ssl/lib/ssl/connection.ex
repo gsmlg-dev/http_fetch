@@ -3,6 +3,7 @@ defmodule SSL.Connection do
   @behaviour :gen_statem
   alias SSL.{ConnectionWriter, Diagnostics, IodataCursor, Options, Socket, TCPOptions}
   alias SSL.ClientHello.Materializer
+  alias SSL.Lifecycle.{Observer, Receipt}
   alias SSL.Protocol.{HandshakeMachine, RecordFramer}
 
   @max_plaintext 1_048_576
@@ -46,6 +47,7 @@ defmodule SSL.Connection do
       :write,
       :writer,
       :writer_monitor,
+      :lifecycle,
       :handshake_timer,
       :active,
       :send_timeout,
@@ -71,12 +73,85 @@ defmodule SSL.Connection do
   def child_spec(args),
     do: %{id: __MODULE__, start: {__MODULE__, :start_link, [args]}, restart: :temporary}
 
+  @typep classic_init ::
+           {pid(), reference(), :atomics.atomics_ref(), Options.t(), integer() | :infinity}
+  @typep inert_context :: %{
+           receipt: Receipt.t(),
+           permit: reference(),
+           control_deadline: {:abs_ms, integer()},
+           ready: {pid(), reference()}
+         }
+
+  @spec start_link(classic_init() | {:inert, classic_init(), inert_context()}) ::
+          {:ok, pid()} | :ignore | {:error, term()}
+  # This audited rejection branch precedes process creation. Other constructor
+  # errors must still be treated as unknown births, never inferred resource absence.
+  def start_link(
+        {:inert, _classic,
+         %{
+           receipt: %Receipt{observer: observer, cell: cell},
+           permit: permit,
+           control_deadline: {:abs_ms, control},
+           ready: {recipient, nonce}
+         }} = args
+      )
+      when is_pid(observer) and is_reference(cell) and is_reference(permit) and
+             is_integer(control) and is_pid(recipient) and is_reference(nonce),
+      do: :gen_statem.start_link(__MODULE__, args, [])
+
+  def start_link({:inert, _classic, _context}), do: {:error, :invalid_lifecycle_context}
   def start_link(args), do: :gen_statem.start_link(__MODULE__, args, [])
 
   @impl true
   def callback_mode, do: :handle_event_function
 
   @impl true
+  def init({:inert, {owner, ref, status, options, deadline}, context}) do
+    Process.flag(:sensitive, true)
+
+    case context do
+      %{
+        receipt: receipt,
+        permit: permit,
+        control_deadline: {:abs_ms, control},
+        ready: {recipient, nonce}
+      }
+      when is_reference(permit) and is_integer(control) and is_pid(recipient) and
+             is_reference(nonce) ->
+        observer = Receipt.observer(receipt)
+        # One absolute admission deadline covers even a suspended Observer call.
+        # Keep the original setup deadline separately for the later handshake timer.
+        control = if deadline == :infinity, do: control, else: min(control, deadline)
+
+        state = %State{
+          socket: %Socket{pid: self(), ref: ref, status: status},
+          owner: owner,
+          owner_monitor: Process.monitor(owner),
+          options: options,
+          deadline: deadline,
+          active: options.active,
+          send_timeout: options.send_timeout,
+          send_timeout_close: options.send_timeout_close,
+          lifecycle: %{
+            receipt: receipt,
+            permit: permit,
+            observer: observer,
+            observer_monitor: Process.monitor(observer),
+            control_deadline: {:abs_ms, control},
+            ready: {recipient, nonce},
+            writer_nonce: make_ref()
+          }
+        }
+
+        # Returning first breaks the ConnectionSupervisor -> init -> Observer cycle.
+        # No writer, timer, record/TLS state or port exists at this boundary.
+        {:ok, :inert_enrolling, state, [{:next_event, :internal, :lifecycle_enroll}]}
+
+      _ ->
+        {:stop, :invalid_lifecycle_context}
+    end
+  end
+
   def init({owner, ref, status, options, deadline}) do
     Process.flag(:sensitive, true)
     {writer, writer_monitor} = ConnectionWriter.start(self())
@@ -101,9 +176,87 @@ defmodule SSL.Connection do
   end
 
   @impl true
+  def handle_event(:internal, :lifecycle_enroll, :inert_enrolling, state) do
+    lifecycle = state.lifecycle
+
+    # Account this already-born process even after parent loss. No-resource
+    # settlement is never valid here. An absent observer cannot account a birth.
+    with true <- Process.alive?(lifecycle.observer),
+         :use <-
+           Observer.enroll_self(
+             lifecycle.receipt,
+             :connection,
+             lifecycle.permit,
+             lifecycle.control_deadline
+           ),
+         true <- birth_live?(state) and birth_remaining(state) > 0,
+         {:ok, permit} <-
+           Observer.reserve_child(lifecycle.receipt, :writer, lifecycle.control_deadline) do
+      context = %{
+        receipt: lifecycle.receipt,
+        permit: permit,
+        control_deadline: lifecycle.control_deadline,
+        setup_deadline: state.deadline,
+        nonce: lifecycle.writer_nonce
+      }
+
+      {writer, monitor} = ConnectionWriter.start(self(), context)
+
+      state = %{
+        state
+        | writer: writer,
+          writer_monitor: monitor,
+          lifecycle: %{lifecycle | permit: nil}
+      }
+
+      {:next_state, :inert_writer, state,
+       [{:state_timeout, birth_remaining(state), :birth_expired}]}
+    else
+      _ -> {:stop, :normal, state}
+    end
+  end
+
+  def handle_event(:state_timeout, :birth_expired, :inert_writer, state),
+    do: {:stop, :normal, state}
+
+  def handle_event(
+        :info,
+        {:lifecycle_writer_ready, writer, nonce, observer},
+        :inert_writer,
+        %{writer: writer, lifecycle: %{writer_nonce: nonce, observer: observer}} = state
+      ) do
+    if birth_live?(state) and Process.alive?(writer) and birth_remaining(state) > 0 do
+      send(writer, {:lifecycle_writer_release, self(), nonce, observer})
+      {recipient, ready_nonce} = state.lifecycle.ready
+      state = %{state | handshake_timer: timer(state.deadline, :handshake_timeout)}
+      send(recipient, {:lifecycle_ready, self(), ready_nonce})
+      {:next_state, :inert_ready, state}
+    else
+      {:stop, :normal, state}
+    end
+  end
+
+  def handle_event(
+        :info,
+        {:DOWN, ref, :process, observer, _reason},
+        _phase,
+        %{lifecycle: %{observer: observer, observer_monitor: ref}} = state
+      ),
+      do: {:stop, :normal, state}
+
   def handle_event({:call, from}, {ref, _request}, _phase, %{socket: %{ref: actual}})
       when ref != actual,
       do: {:keep_state_and_data, [{:reply, from, {:error, :badarg}}]}
+
+  # This slice only accounts actor births. A future driver must authenticate the
+  # exact TCP identity/ownership ACK; a role mask cannot authorize legacy attach.
+  def handle_event({:call, from}, {_ref, {:attach, _tcp}}, _phase, %{lifecycle: lifecycle})
+      when not is_nil(lifecycle),
+      do: reply(from, {:error, :lifecycle_attach_not_implemented})
+
+  def handle_event({:call, from}, {_ref, _request}, _phase, %{lifecycle: lifecycle})
+      when not is_nil(lifecycle),
+      do: reply(from, {:error, :closed})
 
   def handle_event({:call, from}, {_ref, {:attach, tcp}}, :handoff, state) do
     state = %{state | tcp: tcp, connect_from: from}
@@ -670,6 +823,7 @@ defmodule SSL.Connection do
     if state.writer, do: Process.exit(state.writer, :kill)
     if state.writer_monitor, do: Process.demonitor(state.writer_monitor, [:flush])
     if state.owner_monitor, do: Process.demonitor(state.owner_monitor, [:flush])
+    if state.lifecycle, do: Process.demonitor(state.lifecycle.observer_monitor, [:flush])
     _ = close_transport(state)
     :ok
   end
@@ -1176,6 +1330,14 @@ defmodule SSL.Connection do
 
   defp diagnostic_result({:error, _}), do: {:error, :closed}
   defp diagnostic_result(result), do: result
+
+  defp birth_live?(state),
+    do: Process.alive?(state.lifecycle.observer) and Process.alive?(state.owner)
+
+  defp birth_remaining(state) do
+    {:abs_ms, control} = state.lifecycle.control_deadline
+    Options.remaining(control)
+  end
 
   defp public_error({:fatal_alert, alert, _}), do: {:tls_alert, {alert, ~c"TLS protocol error"}}
   defp public_error({:peer_alert, _, _} = alert), do: alert
