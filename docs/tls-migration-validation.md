@@ -1647,3 +1647,61 @@ pre-main/entry/PID-info/FD-list/socket-info phases withboundedscalarstage
 markers, thenreviewbeforeanyfreshcontrol; firstfailedartifactsstayunchanged.
 ObserverNOTYETvalidatedforactualfailingTLSconnections. Csource/SDKcompile
 isnotFDvisibilityproof. Metadata-controlwork staysinprogress alongsideP0.
+
+## Round15 — creator provenance and bounded FD stage discrimination
+
+BaseHEADf048d9c verified; production runtime/P0budgets/pins unchanged.
+Scoped31/31: completedallocatorhelper_done BEFOREready forbids prepare
+(handoff_resources_pending), actualTCPstaysallocatorowned; cancel31/31.
+PureLedger.view retainsconsumedcreatorref+childidentity through unrelated
+andoriginalDOWN; puredata NOTactualmonitorproof. Task21verified.
+Setup->Writer alreadyrejectedATreservation invalid_role_edge; newrole6
+casealloc0 thenlegitimateConn->Writer/privateReady+ConnACK/closed14/14.
+Finalscoped32/32 actualROUND15_ROLE_EDGE_EXIT=0. No forgedunreachablestate.
+
+C240lines/Python148lines stageobservercompiled0/publicSDK26.2; Parent
+READALLinpages BEFOREonecontrol. Independentnonblockingpipe max16
+constant E/B/L/S/R/O bytes/noFDvalues/handles/otherrows; JSONunchanged.
+100mscoop/150msdecision50mscleanup unchanged. ActualR15controlEXIT2:
+BEAM56257client56668->56667, NOJSON/NOstagebyteby150.005ms, killed/reaped
+150.451ms. Fixtureportsclosed/watchdogDOWN/directchildrenreaped[0,-9].
+NOPREmetadata/closeinstruction/POST. No-entryreceipt NOTpre-mainproof:
+pipevalidation/write/delivery/schedulingalsomatter. Nolibprocstageobserved.
+OriginalR14/R15failedartifacts preserved. Stage timestampsRECEIPTonly.
+Separate44linewrapperreviewedBEFOREoneconditionalcontrol: ENTRYpreflight
+PID0mustreturnexpectedexit2/invalid_arguments/EO withsamebudget, ONLYthen
+freshnetworkfixture. Changedprecondition NOTcoldcauseproof. Resultbelow.
+
+### Round15 final gates and changed-precondition visibility control
+
+ACTUALROOT32/32 role-edge scoped exit0; requiredcompilewarningsErrors/
+wholeformat/configuredCredo/Dial EXIT0 (535files/noCredopriorityissues,
+Dial0errors/0skipped/4unchangedunnecessaryignore). WHOLEExSSLintegration
+seed101:804/804 (20properties784tests),87.0s, ROUND15_FINAL_EXIT=0+prompt.
+Logs /tmp/http-fetch-round15-{creator,role-edge,static,exssl-source}.log.
+Runtime/publicAPI/sourceConnection andbothstrictpins unchanged. Lastall9
+sourceR13 3190/3192 EXIT2 remainsP0OPEN; no rerunto minepass/defaultflip.
+
+EXACTONE reviewedpreflightconditionalcontrol EXIT0 log
+/tmp/http-fetch-round15-fd-preflight-control.log. ENTRYrejectPID0 expected
+helperexit2/EO15.453ms BEFOREanyVM/network; uid0UNPOPULATEDnotprivilege.
+FreshBEAM58214/client57867->peer57866/UID502/start1792614661.669483. PRE
+5.993ms/exactFD44/generation8189179/TCPstateESTABLISHED4/queues0/0/
+hiwats408300,146988/46fds5queries. EBLSRLBO observedbeforedecision.
+PubliczeroLingerreadback+actualPort.close+exactoriginalPortDOWN+Portnil.
+POST6.060ms/45fds3queries/EBLSLBO/complete_scan_no_match_observed,
+NOTabsencecertificate. IdentitysamePID/start; no opaquehandlesprinted.
+Allfixtureportsclosed/watchdogDOWN, allPYTHONdirectchildrenREAPED
+[2,0,0,0], outcome pass_local_metadata_control, actual_p0_cause_proven:false.
+Cold_stall_cause_proven:false; warmth/preflightchangedconditionEXPLICIT.
+Original150msfailedcontrols stillinconclusive; no relabel/retrymining.
+Thisvalidatesmetadata visibility ONLYunderobservedpreflightcondition,
+notactualfailingTLSconnection/FDclosure/RST/cause. Nextpublic-peer
+sockname/peername armingplan underread-onlyreview; NOproductionhooks.
+
+Proceduralrecord: TWOdocedittoolcalls mistakenlysuppliedforbiddenSandbox
+field, bothREJECTEDbyargumentvalidation BEFOREfilesystemoperation/no
+approvalprompt. Writesmovedtoownedterminalwithoutsuchfield. Anoversized
+terminaldraftleftanopenquote; grepverifiedNOdocmutation, SIGINTclearedit.
+Shortboundedappendcommands thenwroteactualrecords. DoNOTuseedit/write/
+bashtool schemasrequiringforbiddenfields; useownedterminalforwrites.

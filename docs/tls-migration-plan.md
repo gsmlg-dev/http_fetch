@@ -121,6 +121,9 @@ coverage; no supported endpoint class silently lost.
       plus one unknown-permit process fixture and two pure identity cases pass.
       Added precommit cancel, queued Writer/TCP DOWN, genuine wrong native owner
       with same-grant recovery, and sticky unknown-permit cancellation coverage.
+      Round15 adds completed-allocator rejection, valid role-edge reservation
+      after rejected Setup-to-Writer allocation, and pure retained-creator view
+      coverage: 13 Observer cases +2 pure handoff cases +ledger-view regression.
       First finite readiness deadline bounds PENDING phases only; successful commit
       cancels/ref-fences that timer, never imposes a connection lifetime cap.
       Lost ACK stays acceptance-unknown. No actual TLS actor attach/readiness/public

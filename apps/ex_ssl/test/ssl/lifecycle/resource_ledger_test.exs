@@ -3,6 +3,31 @@ defmodule SSL.Lifecycle.ResourceLedgerTest do
 
   alias SSL.Lifecycle.ResourceLedger, as: Ledger
 
+  test "enrollment view retains consumed creator generation through child DOWN" do
+    # Pure event data only; these references are not runtime monitor evidence.
+    {ledger, parent_ref} = observed(:setup)
+    creator = {:setup, parent_ref}
+    token = make_ref()
+    child_ref = make_ref()
+    identity = {child_ref, :process, self()}
+    assert {:ok, ledger} = Ledger.reserve(ledger, :connection, creator, token)
+    assert {:ok, ledger, :use} = Ledger.enroll(ledger, :connection, token, identity)
+
+    assert {:ok, %{identity: ^identity, creator: ^creator, state: :live}} =
+             Ledger.enrollment_view(ledger, :connection)
+
+    assert :error = Ledger.enrollment_view(ledger, :writer)
+    unrelated = Ledger.down(ledger, {:DOWN, make_ref(), :process, self(), :normal})
+
+    assert {:ok, %{identity: ^identity, creator: ^creator, state: :live}} =
+             Ledger.enrollment_view(unrelated, :connection)
+
+    down = Ledger.down(ledger, {:DOWN, child_ref, :process, self(), :normal})
+
+    assert {:ok, %{identity: ^identity, creator: ^creator, state: :down}} =
+             Ledger.enrollment_view(down, :connection)
+  end
+
   test "empty observations cannot settle while creation remains admitted" do
     ledger = Ledger.new()
     assert {:pending, %{roles: 0}} = Ledger.proof(ledger)

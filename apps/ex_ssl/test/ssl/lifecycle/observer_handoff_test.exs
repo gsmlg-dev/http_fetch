@@ -753,6 +753,142 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
     assert elapsed < 2_000
   end
 
+  test "allocator completion before readiness prevents a fresh handoff grant" do
+    %{
+      receipt: receipt,
+      lease: lease,
+      allocator: allocator,
+      setup: setup,
+      connection: connection,
+      writer: writer,
+      tcp: tcp,
+      peer: peer,
+      tcp_monitor: tcp_monitor
+    } = enrolled_attempt()
+
+    budget = deadline()
+    assert :ok = in_actor(allocator, fn -> Observer.helper_done(receipt, budget) end)
+    assert Port.info(tcp, :connected) == {:connected, allocator}
+
+    assert {:ok, ready_nonce} =
+             in_actor(writer, fn -> Observer.writer_ready(receipt, budget) end)
+
+    assert :ok =
+             in_actor(connection, fn ->
+               Observer.connection_ready(receipt, ready_nonce, budget)
+             end)
+
+    assert {:error, :handoff_resources_pending} =
+             in_actor(allocator, fn ->
+               Observer.prepare_handoff(receipt, tcp, connection, budget)
+             end)
+
+    assert Port.info(tcp, :connected) == {:connected, allocator}
+    assert Process.alive?(allocator)
+    assert Process.alive?(setup)
+    assert Process.alive?(connection)
+    assert Process.alive?(writer)
+    assert {:error, :timeout} = :gen_tcp.recv(peer, 0, 20)
+
+    assert {:ok,
+            %{
+              admission: :open,
+              roles: 31,
+              observed_down: 0,
+              allocations: 0,
+              losses: 0,
+              setup: :pending
+            }} = Observer.snapshot(receipt, budget)
+
+    assert :ok = Observer.cancel(receipt, lease, deadline())
+    assert_receive {:DOWN, ^tcp_monitor, :port, ^tcp, _}, 1_000
+
+    assert {:ok,
+            %{
+              roles: 31,
+              observed_down: 31,
+              cleanup: :confirmed,
+              setup: :cancelled,
+              setup_failure: :cancelled
+            }} = Reader.await(receipt, deadline())
+  end
+
+  test "writer reservation rejects Setup parent without consuming the legitimate Connection edge" do
+    enrollment_deadline = deadline(5_000)
+    {:ok, receipt, lease} = Observer.start(self(), :infinity)
+    observer = Receipt.observer(receipt)
+    on_exit(fn -> if Process.alive?(observer), do: Process.exit(observer, :kill) end)
+    assert :ok = Observer.bind(receipt, lease, enrollment_deadline)
+    {:ok, setup_permit} = Observer.reserve_root(receipt, lease, :setup, enrollment_deadline)
+    setup = enrolled_actor(receipt, :setup, setup_permit, enrollment_deadline)
+
+    {:ok, connection_permit} =
+      in_actor(setup, fn -> Observer.reserve_child(receipt, :connection, enrollment_deadline) end)
+
+    connection = enrolled_actor(receipt, :connection, connection_permit, enrollment_deadline)
+
+    assert {:error, :invalid_role_edge} =
+             in_actor(setup, fn ->
+               Observer.reserve_child(receipt, :writer, enrollment_deadline)
+             end)
+
+    assert {:ok,
+            %{
+              admission: :open,
+              roles: 6,
+              observed_down: 0,
+              allocations: 0,
+              losses: 0,
+              setup: :pending
+            }} = Observer.snapshot(receipt, enrollment_deadline)
+
+    assert {:ok, writer_permit} =
+             in_actor(connection, fn ->
+               Observer.reserve_child(receipt, :writer, enrollment_deadline)
+             end)
+
+    writer = enrolled_actor(receipt, :writer, writer_permit, enrollment_deadline)
+
+    assert {:ok,
+            %{
+              admission: :open,
+              roles: 14,
+              observed_down: 0,
+              allocations: 0,
+              losses: 0,
+              setup: :pending
+            }} = Observer.snapshot(receipt, enrollment_deadline)
+
+    # Role-14 readiness is cooperative bookkeeping, without TCP or TLS actors.
+    handoff_deadline = deadline(5_000)
+
+    assert {:ok, ready_nonce} =
+             in_actor(writer, fn -> Observer.writer_ready(receipt, handoff_deadline) end)
+
+    assert :ok =
+             in_actor(connection, fn ->
+               Observer.connection_ready(receipt, ready_nonce, handoff_deadline)
+             end)
+
+    assert :ok = Observer.cancel(receipt, lease, deadline())
+
+    assert {:ok,
+            %{
+              logical: :closed,
+              roles: 14,
+              observed_down: 14,
+              losses: 0,
+              cleanup: :confirmed,
+              setup: :cancelled,
+              setup_failure: :cancelled
+            }} =
+             Reader.await(receipt, deadline())
+
+    refute Process.alive?(setup)
+    refute Process.alive?(connection)
+    refute Process.alive?(writer)
+  end
+
   defp unknown_tcp_attempt do
     enrollment_deadline = deadline(5_000)
     {:ok, receipt, lease} = Observer.start(self(), :infinity)
