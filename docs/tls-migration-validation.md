@@ -2027,3 +2027,65 @@ SHA and strict pins verified unchanged, no source hooks left. Actual restored
 wholeformat/diffcheck/apps-diff ROUND19_RESTORED_CHECK_EXIT=0+prompt. Only
 this evidence document changed; no repeated compile/Credo/Dial totals.
 Last full-nine R13 gate still red; P0/public/default/package/publication OPEN.
+
+## Round20 — RAW pre-close passive checkpoint control
+
+Base7c52843 clean verified. Root read complete frozen R13 control218lines.
+R13 already has clientactiveonce, reverse17-byte read/rearm, separate native
+blocked writer and active100 peer drain; these conditions are NOT novel.
+Fresh source-only scope is one NEW /tmp RAW clone with verified100-message
+plus tcp_passive/activefalse/recv_cntDELTA100 checkpoint BEFORE close, after
+original writer/reverse-byte checks. Close follows checkpoint ACK immediately,
+no inserted scan/wait. Drain explicitly rearms100 once because checkpoint
+consumed passive event, retains ORIGINAL2s absolute deadline/2.1s reporting.
+
+FD integration deferred explicitly: two helper start/receipt/worker-retirement
+paths plus prepressure gating would expand focused clone beyond100newlines.
+No kernel FD/generation proof will be claimed from this VM-only control.
+Original socket options/payload/zero-linger readback/public Port.close then
+writer-kill order retained. Strict result oracle separates terminal timeout
+from setup/checkpoint/cleanup inconclusive; exit0 must not mask rescued error.
+
+Root read ALL311newlines before ONE execution with explicit active100/infinity/
+show_reset=true; old218line R13 unchanged. Actual
+ROUND20_NATIVE_PASSIVE_CONTROL_EXIT=0+prompt. Client63786->peer63785.
+Checkpoint100messages/102400B and originaltcp_passive; recv_cnt1->101 EXACT
+delta100, activefalse, original client owner/Portlive. Existing writer blocked
+in prim_inet:send4 with send_pend10482; effective clientactiveonce. Checkpoint,
+actualclose and terminal metadata share BEAMmono-576460750497 (ms resolution;
+not atomic). ZeroLinger setoptsOK/readbacktrue0, actualPort.closeTRUE,
+matching_optionsTRUE. Local original owner/writer/clientPort DOWN0ms. One
+explicit peer rearm delivered ONE2048B then econnreset0ms under original2sD.
+Original peer/peerPort DOWN confirmed before report D, captured6object cleanup
+VMretiredtrue, watchdog retired; no OS-FD absence claim.
+
+Conclusion limited to this control: verified pre-close credit exhaustion plus
+clientonce/blockedwriter/zeroLinger was NOT sufficient to reproduce missing
+terminal. TLS/P0 still red; no framework/default/native primitive fix inferred.
+No pass mining/matrix/repeated control executed. Newsource frozen at
+/tmp/http-fetch-round20-native-passive-control.exs SHA256
+16d87caa9c9fab89c08bc5b97024bb02b9c957c5c99446cff370ffeb15fa366f;
+full log samebasename.log. Original R13 SHA256
+722943427221d857dce118c84430d0ff0d0b1b5d29154a3d44dd9b1f9b9870fe unchanged.
+All preexisting debug helpers/logs/source snapshots immutable. No production
+or test source changes in this round, only this evidence document.
+
+Next discriminator proposal (NOT implemented): actual same-instance close
+receipt plus both endpoint baselines/postscans. R12 close-diagnostics-v2.patch
+exists:139 actual linger/readback/Port.close and39 abandon ack; do NOT reapply
+its broad IO.inspect hooks. A pinned parent/tag can receive one bounded scalar
+receipt after native close: original VM Port/Connection PID, abandoned/output
+booleans, existing pending result, actual linger set/readback and close return/
+error class, monotonic call bounds. No IO/helper/waits or whole TLS state.
+Strict source pins require temporary Root-owned coordination/restoration.
+Client+peer FD baselines before pressure, postscans at original timeout before
+peer cleanup within SAME original parent3sD including cleanup reserves.
+Timestamp/interval boundaries non-atomic; negative scans not absence proof.
+This would close the current instance-correlation gap rather than combine
+R12 actual calls, R18 client negative and R19 peer established across instances.
+No implementation or execution grant was issued for this proposal.
+
+Verified apps-diff empty, runtime/strict pins unchanged, frozen R20 hash exact.
+Documentation-only boundary: no new Mix/compile/Credo/Dial runs justified;
+R19 restored wholeformat check and historical test results remain applicable,
+not new totals. P0/public/default/native lifecycle/package/publication OPEN.
