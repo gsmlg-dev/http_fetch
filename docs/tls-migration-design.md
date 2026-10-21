@@ -200,8 +200,48 @@ unconfirmed regardless of exit reason. Await preserves one absolute deadline,
 selectively receives the exact ref/type/PID DOWN and removes its waiter monitor.
 A sealed loss attestation is readable as terminal status but returns unconfirmed
 from await; only confirmed evidence plus observer absence yields successful await.
-The real attempt observer, resource admission and socket/public-facade integration
-remain unimplemented; these private components do not certify actual TLS cleanup.
+The private [Observer](../apps/ex_ssl/lib/ssl/lifecycle/observer.ex) now composes
+these foundations under a sibling DynamicSupervisor with `restart: :temporary`.
+It creates its own receipt, monitors controller before reservation reply, clips
+unbound lifetime to30 seconds/earlier setup deadline, and binds once to the calling
+application owner with an independent monitor. Finite bound setup keeps its original
+deadline; infinite bound setup is not capped by the reservation TTL. A disposable
+[Bootstrap](../apps/ex_ssl/lib/ssl/lifecycle/bootstrap.ex) bounds public supervisor
+admission using one original absolute control budget, an independent kill timer,
+reply alias and exact worker DOWN before publishing successful startup. This is a
+control proxy only: no TLS/data allocation is allowed before reservation binding.
+A lost bootstrap reply is unknown acceptance; a late unbound observer expires under
+its original deadline without acquiring data resources.
+
+New permits require bound/open authority and ledger admission. Root allocation is
+limited to the bound owner and exact lease; child issuance authenticates an enrolled
+live creator and fixed role edge. Inert process enrollment derives the PID from the
+call, with a delegated single-use permit; this proves bearer authority within trusted
+provider code, not independent spawn ancestry. Runtime rejects repeated PID/port
+objects and observer/controller/app-owner/static supervisor identities. Native port
+enrollment requires its recorded creator as caller and current connected owner before
+monitoring; a foreign/vanished port remains untouched and its permit unresolved.
+No ownership transfer may race this enrollment acknowledgment.
+
+Retirement closes both authority and ledger admission before killing known provider
+processes. Observer never blocks in native close: port absence needs its separate
+exact DOWN, even after its known provider owner dies. The grace deadline is fixed
+once at 1000ms; repeated cancellation/status/enrollment cannot extend it. Unknown
+permits or live identities at expiry cause UNSEALED exit. A settled ledger seals once
+and exits; sticky loss stays unconfirmed through Reader. Expected helper completion
+requires consumed child permits and forbids further issuance; setup cannot complete
+while its outcome is pending. Timed-out control requests have unknown acceptance,
+and receiver-side original deadline checks prevent late authorization. Timers are
+reference-fenced. Live snapshots expose finite enum/mask/epoch state, no resource or
+capability identities; Reader alone establishes terminal evidence after actor absence.
+
+These are private cooperative runtime components. Public lifecycle, actual inert
+allocator/setup/Connection/writer births, adoption, owner ACK/authority transfer and
+socket/facade integration remain unimplemented. Upgrade observers reject new TCP
+allocation with adoption_not_implemented; this slice does not attest real STARTTLS
+adoption or certify current TLS cleanup. The current Connection still starts work
+before enrollment. Constructor errors still cannot retire unknown permits; an
+authenticated no-future-allocation completion protocol remains required.
 
 Source review identified these runtime integration gates before the public facade:
 

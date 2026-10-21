@@ -49,7 +49,12 @@ executed evidence and required work are distinguishable. OTP remains default.
       (driver support tested; enabling managed ExSSL remains a P3 gate).
 - [x] Implement explicit TCP verify_none with verify_peer default, mandatory signature /
       Finished / AEAD checks, protocol credential constraints and mode-partitioned tickets
-      (OTP/OpenSSL references; proxy/managed/package/runtime matrix remains open).
+      (OTP/OpenSSL references; explicit sole-TLS proxy routes also covered in round7;
+      managed/package/runtime matrix remains open).
+- [x] Prepare provider-owned immutable upgrade configuration before CONNECT proxy dial;
+      consume the same loaded trust/client credentials/profile/reference/SNI/options,
+      with fresh connection keys/randomness and live session-ticket binders
+      (133 focused checks including59 lifecycle; adoption/cleanup integration remains open).
 - [ ] Resolve advanced verification callbacks, revocation and client identity compatibility.
 - [ ] Preserve trust precedence, system roots, DNS/IP origin identity, SNI separation,
       pinned dialing, CONNECT upgrade and mTLS redirect isolation.
@@ -68,7 +73,10 @@ coverage; no supported endpoint class silently lost.
       lost-reply replay and controller monitor generations (runtime remains open).
 
 - [x] Implement/test private fixed atomic receipt and observer-aware finite reader
-      (storage/wait foundation only; real monitor/enrollment integration remains open).
+      (storage/wait foundation only; actual TLS enrollment integration remains open).
+- [x] Implement/test private temporary observer, bounded supervisor bootstrap,
+      authenticated fixed-role admission, independent DOWN and nonextendable retirement
+      (59 lifecycle checks; native births/adoption/transfer/public facade remain open).
 - [x] Read existing ex_ssl architecture/design/PRD/implementation docs before changes.
 - [ ] Public attempt handle exists before allocation, survives failed setup and transfer.
 - [ ] Provider enrolls/observes every connection, writer, TCP and setup worker without

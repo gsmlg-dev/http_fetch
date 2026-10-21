@@ -651,3 +651,103 @@ resolution must not independently change later in the same attempt. Existing bin
 option rejection and the nested-route rejection remain explicit. Public provider
 attempt/adoption, managed/completion, platform/runtime/package/performance/CI and
 release/publication gates remain open; OTP remains the default backend.
+
+## Round7 — private observer and prepared CONNECT policy
+
+Private observer/runtime foundation now executes under a separate DynamicSupervisor
+with temporary children. Isolated all-lifecycle run passed58 checks; root focused
+run after the final bootstrap corrections passed59 (38 prior +21 observer cases).
+Actual helper processes and native owned ports cover foreign-port preservation,
+independent exact DOWN, late delegated identity/creator loss, duplicate objects,
+replayed permits, fixed role graph, distinct controller/owner death, original finite
+deadlines, infinite setup, large native timers, unknown call acceptance and
+nonextendable1000ms grace. Unknown permits leave unsealed evidence rather than
+inferred cleanup. No native TLS Connection or public lifecycle integration is claimed.
+
+Independent source review found and corrected two initial runtime defects: setup
+helper completion could leave pending infinite setup without a result producer;
+and synchronous public DynamicSupervisor admission could exceed the start budget.
+Setup completion now rejects pending outcome and its actual unexpected DOWN retires
+failed/internal. A disposable monitored control proxy bounds admission, preserves
+the original finite budget, uses reply aliases, waits actual normal worker DOWN
+before successful publication, and leaves late unbound reservations with their
+original expiry. Follow-up review identified a parent-death window before caller
+installed the proxy kill timer, plus budget origin sampled after validation. Timer
+installation/cancellation moved inside the worker BEFORE blocking admission, and
+control budget origin moved to API entry. Regression suspends the supervisor and
+kills the caller after public process-spawn tracing identifies its actual proxy;
+three trials observe independent bounded proxy death. Tests use no private OTP
+supervisor messages or fabricated data-resource DOWN.
+
+Initial standalone harness exited its linked supervisor before ExUnit autorun;
+fixed the harness to run ExUnit while its parent is alive. The one subsequent race
+was a test assuming kill implied the observer had already processed creator DOWN;
+changed the test barrier to wait real snapshot evidence with one original deadline.
+Production evidence requirements were not weakened.
+
+Prepared-policy work is under exact nine-file scope: public provider-owned immutable
+configuration snapshot before raw CONNECT allocation, consume the same snapshot at
+upgrade, preserve fresh per-connection keys/randomness/binders and upgrade-context
+option rejection. Current focused run passed lifecycle, fresh ClientHello,
+context bounds and actual full+two-resumed prepared-upgrade references. The two
+TLS1.2 failures were isolated with public legacy-upgrade/prepared/direct comparisons,
+combined and explicit TLS1.2 offers: all six fail identically. Public ServerHello
+wire contains renegotiation/EC-point-format/ALPN extensions but no EMS(23); OTP29
+client accepts that peer, while ExSSL correctly enforces its documented bounded
+ECDHE/EMS subset. This is a fixture mismatch, not a prepared-snapshot regression.
+The new positive CONNECT fixtures are being changed to the existing independent
+OpenSSL EMS-capable peer behind a byte bridge, preserving combined client versions,
+CA/identity/ALPN/option-precedence assertions and mandatory integration execution.
+No production certificate/CV/version/EMS checks are relaxed. Final combined focused
+run passed133/133 with ZERO exclusions/skips, --include integration and pinned Python
+PATH: ex_ssl66 (59 lifecycle +7 prepared), http_core34 (27 existing transport +7 proxy),
+Fetch33. Both mandatory new OpenSSL TLS1.2 positives executed with combined offers;
+real IPv6 SAN negative, malformed reference zero-accept, source-file replacement/
+deletion, wire freshness and full+two-resumed policy reuse passed. Strict root compile
+and scoped formatting13 code paths passed. Configured Credo ran54 checks over530
+files /8811 modules-functions with no issues. Initial Dialyzer reported two discarded
+timer-cancellation return values in Observer; explicit `_ =` acknowledgments preserve
+behavior. Final Dialyzer:0 errors,0 skipped; four prior unnecessary-ignore notices
+remain untouched. Full source regression used pinned Python PATH and
+HTTP_QUIC_PHASE1_REAL=1, --include integration, seed101. Exit2:3153 checks,
+3131 passed,22 failed, no exclusions/opt-in skips. The40 new checks all passed.
+
+| App | Full source result |
+| --- | --- |
+| ex_ssl | 752/756, including20/20 properties |
+| elixir_quic | 249/249 |
+| http_core | 418/418, all three real opt-ins included |
+| elixir_quic_http3 | 113/113 |
+| http_runtime | 149/149 |
+| http_fetch | 1213/1231, including20/20 doctests |
+| http_web_socket | 138/138 |
+| http_web_transport | 24/24 |
+| http_event_source | 75/75 |
+
+All16 unroutable127.0.0.2 scenarios remain (3ExSSL +13 Fetch). Six other failures:
+ExSSL requested KeyUpdate was not observed queued behind output (seen in prior
+round6 scoped run too); OTP reuse could not establish in-flight bounded send;
+a raw request-stream length-mismatch listener accept returned :einval; and THREE
+ExSSL remote peers remained open after proven local cleanup (auto/buffered/infinity,
+http1/cancel/infinity, http1/buffered/infinity). Remote counters were103979/101008
+bytes, recbuf483984/486960. Exact local Connection/writer DOWN and native Port absence
+passed BEFORE remote drain; those observations do not prove remote closure. The
+prior early_data fixture and streamed4000 case passing this run do not causally
+resolve their earlier failures. Additional failure isolation ran the backpressure file plus request-stream line160:
+7/8 backpressure cases passed, queued-KeyUpdate failure reproduced; all3 selected
+length-mismatch cases passed (28 other stream cases deliberately excluded by line
+filter). That rerun does not resolve the full-run raw-accept :einval. Final configured
+Credo again found0 issues; whole-root `mix format --check-formatted` passed.
+
+No full acceptance is claimed. Read-only task-9 portability design keeps identity
+proof nonvacuous by dialing routable127.0.0.1 with a dedicated certificate that has
+SAN127.0.0.2/::2 but excludes actual dial1. True destination-isolation/refusal/
+saturation cases require separate127.0.0.1 and IPv6-only::1 listeners at the SAME
+port, reserved before clients. Preserve Host/:authority/pool scope/first-connection
+reuse, exact refusal, independently proven saturation and no-fallback/no-replay
+accept queues. No OS aliases, skips or weaker negative assertions are proposed.
+ Pre-existing auto-ticket partition for CONNECT uses
+proxy peer IP:port plus origin identity/profile/trust, lacking target origin port;
+this remains a separate explicit P1 cache-isolation gate, with tickets disabled by
+default. Preparation does not establish adoption or cleanup and does not enable
+managed/completion/default promotion.
