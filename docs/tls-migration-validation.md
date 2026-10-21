@@ -1550,3 +1550,100 @@ are not a teardown fix, actualnativebirth/adoption/publicfacade/default/
 managed/performance/package/publication admission. Task14 andTask20 remain
 inprogress; nextprivateacceptance focuspendingcancel/death/actualportloss
 andunknownpermits, nextP0focusACTUALfailingtuplekernel/physicalFDmetadata.
+
+## Round14 — private handoff race coverage and physical-FD discriminator
+
+Base1846fca/clean verified atroot; SourceConnection/runtime unchanged. All
+implementation guards already existed: these are incremental negative coverage,
+not fabricated REDs or a claimed new public feature. Parent owns new pure
+handoff_test.exs; worker owns only observer_handoff_test.exs; Lead soleMix.
+
+IncrementalROOT seed101: pendingcancelafterREALtransferbeforecommit plusONE
+pureoriginalObserveridentitycase8/8 EXIT0; secondpurecase unchangedPID with
+substitutedmonitorref rejected2/2 EXIT0; queuedWriterDOWN10/10 EXIT0; genuine
+originalPortunexpectedowner11/11 EXIT0; queuedoriginalTCPDOWN12/12 EXIT0.
+Logs /tmp/http-fetch-round14-{pending-cancel,pure-generation,queued-writer,
+actual-owner,original-tcp-down}.log; actualexitmarkers+promptscollected.
+Pure references are input facts, NOT actual monitor evidence. Initial local
+Pythonfile-writing heredoc had SyntaxError before creating any test/native
+resource; correctedwritercommand, no runtime workaround or hidden test failure.
+
+Prepared/nativeConnection-ownedport cancel: originalcontrollerACK thenexact
+ORIGINALportmonitorDOWN andReaderclosed31/down31/loss0/confirmed/cancelled.
+QueuedWriterdeath: PUBLICsys.suspend Observer, killoriginalWriter/independent
+exactDOWN whilePortstillConn-owned/Connlive, ALWAYSresume; thenoriginalPort
+DOWN and31/31 confirmed failed/internal beforefirstD5000ms. No commit
+rejection is inferred from cleanup. Genuinewrongowner: SAMEenrolledport
+Conn->testPID, samevalidgrantcommitEXACTport_not_owned/open31/down0; actual
+currentownerrestore->originalConn, SAMEgrantcommitsOK thennormalcancelproof.
+OriginalTCPdeath: suspendObserver, originalowningConn Port.close(SAMEport),
+exactoriginalPortDOWN/Portnil WHILEConn+Writerstillalive, ALWAYSresume then
+31/31 confirmed failed/internal. This is nativeVMobject evidence independent
+of actor death, not physical UnixFD or remote terminal receipt. Original
+helper fixtures and P0 local1s/peer2s/parent3s/wire1s350ms8s unchanged.
+
+PUBLICSDK26.2 headers read directly: libproc.h/proc_info.h declarations for
+proc_pidinfo(PROC_PIDLISTFDS/PROC_PIDTBSDINFO),proc_pidfdinfo
+(PROC_PIDFDSOCKETINFO), realstructsocket_fdinfo/in_sockinfo. Standalone
+/tmp/http-fetch-round14-fd-snapshot.c218lines compiled-Wall-Wextra-Werror/
+C11/-lproc EXIT0. ParentREADALL218lines plusSDKtypes. ChelpermetadataONLY: UID
+checks/nonroot/noelevation, explicitoriginalBEAMPIDstartidentity andrequested
+127.0.0.1clientlocalport->peerremoteport, nootherrows/payload/kernelhandles.
+8192FDentries/list/512socketqueriesTOTAL/4matches/2KiBJSON/100mscooperative
+budget; parent150msdecision+50mscleanup NOTkernelcall/reaphardguarantees.
+Exactreturnedstructuresizes/truncation/races/errors=>inconclusive+emptymatches.
+RepeatmatchedFD resamples generation/opaquehandles internally; comparePID
+start and sortedFDlistsbefore/after. Positive observed ONLYwithinsample
+readinterval; crossinvocationoriginalidentity stillrequires parentbaseline.
+Negative alwayscomplete_scan_no_match_observed/negative_is_absence_proof:false;
+no atomicFD+socketmetadatasnapshot, equalcompleteFDlists cannot excludeABA.
+Compiledbinary notexecuted atthis checkpoint; onecontrolledpublicRAWpositive
+fixture is being prepared for separate review BEFOREexecution. No native/TLS
+Sourcehooks/diagnosticstrictpinchangesinstalled; actualP0physicalFDunproven.
+
+### Round14 final private acceptance and control results
+
+UnknownTCPpermit/readinesscaseGREEN: realroles15/open/alloc16/loss0; after
+controllercancel allknownrolesDOWN15/admissionclosed/alloc16/LOSS16. NoTCP
+identitywasreported, noNativeconstructorrejectionasserted. Fixedoriginal
+1000msgrace thenoriginalObserverDOWNnormal; ReaderEXACTunconfirmed/
+observer_unsealed, neverfalseconfirmed. Scopedpair13/13actualROOT
+ROUND14_UNKNOWN_EXIT=0 /tmp/http-fetch-round14-unknown-permit.log.
+
+FINALROOTcompilewarningsErrors+WHOLEformat+configuredCredo+Dialyzer EXIT0,
+actualROUND14_STATIC_EXIT=0 /tmp/http-fetch-round14-static.log:535files/
+noCredopriorityissues, Dial0errors/0skipped/4unchangedunnecessaryignores.
+EntireROOTscoped apps/ex_ssl/test --include integration --seed101:801/801
+(20properties781tests),83.3s; ROUND14_FINAL_EXIT=0+prompt,
+/tmp/http-fetch-round14-exssl-source.log. This includesall13handoffcases.
+Onlytestcode/documentationchanges; no publicSSL/production/runtime changes.
+No newall9campaign to mine a pass: lastactualfullSource3190/3192 EXIT2 at
+R13 remains the OPENP0gate. NoFixturepressure/deadline/error/strictpinchanges.
+Selfauditofall11Observercases foundnoconcretefalseproof/unboundedwait;
+finiteunknownsnapshotwithin1sgrace and500msprivateDcasesremain scheduler
+headroom-sensitive. DirectqueuedcommitvsDOWN/doneallocator/wrongcreator
+parent/morepreparationphaseedges stillOPEN; task20notmarkedcomplete.
+
+FDcontrolscripts /tmp/http-fetch-round14-fd-control.exs53lines + .py125lines
+were readfully beforeONEactualpublicRAWpositivecontrol. FreshBEAM46564,
+client127.0.0.1:55619->55618. InitialPRE snapshot producedNOJSONby150ms;
+helperkilled/reaped at152.763ms. ActualROUND14_FD_CONTROL_EXIT=2,
+/tmp/http-fetch-round14-fd-control.log outcomeinconclusive/read_deadline,
+actual_p0_cause_proven:false. No preFDmetadata/closecommand/postsample exists!
+Fixturestoppednormally: allownedportsclosed/watchdogDOWN, allPYTHONdirect
+childrenreaped, exitcodes[0,-9]. DoNOTcallpositivecontrolpassed, orinterpret
+timeoutasFDpresence/absence/permission/APIcause. No actualP0hooksinstalled.
+
+SeparateONE no-network/no-libproc ENTRYnegativecounterpart,
+/tmp/http-fetch-round14-fd-entry-control.py/log: samebinary invalidPID0
+rejectsbeforeprocqueries,150msdecision+50mscleanupunchanged. Actual
+ROUND14_FD_ENTRY_EXIT=0; helperEXPECTEDexit2 invalid_arguments,fd_count0/
+socket_queries0/emptymatches, reaped;9.475msparentelapsed. Itsuid0fieldis
+unpopulatedidentitybecauseNO PIDwasinspected, NOTprivilegedexecution.
+Thisdemotesa PERSISTENTgenericentry/argumentpathblockeratthatlaterinstant;
+DOESNOTdistinguishinitialcoldlaunch frominitiallibproccall/socketquerydelay.
+No positive rerun/pressure/budget widening. Next discriminator must separate
+pre-main/entry/PID-info/FD-list/socket-info phases withboundedscalarstage
+markers, thenreviewbeforeanyfreshcontrol; firstfailedartifactsstayunchanged.
+ObserverNOTYETvalidatedforactualfailingTLSconnections. Csource/SDKcompile
+isnotFDvisibilityproof. Metadata-controlwork staysinprogress alongsideP0.

@@ -117,7 +117,10 @@ coverage; no supported endpoint class silently lost.
 - [x] Implement the private cooperative TCP ownership protocol core: retain consumed
       creator generations; writer/Connection challenge; allocator prepare and original
       Connection commit after actual native ownership transfer, one-use attempt-bound
-      grant. Six manually enrolled REAL passive-TCP cases pass incrementally.
+      grant. Round13 six REAL passive-TCP cases; round14 ten REAL TCP cases
+      plus one unknown-permit process fixture and two pure identity cases pass.
+      Added precommit cancel, queued Writer/TCP DOWN, genuine wrong native owner
+      with same-grant recovery, and sticky unknown-permit cancellation coverage.
       First finite readiness deadline bounds PENDING phases only; successful commit
       cancels/ref-fences that timer, never imposes a connection lifetime cap.
       Lost ACK stays acceptance-unknown. No actual TLS actor attach/readiness/public

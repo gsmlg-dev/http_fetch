@@ -434,6 +434,363 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
              Reader.await(b.receipt, deadline())
   end
 
+  test "controller cancellation retires a transferred TCP port before handoff commit" do
+    %{
+      receipt: receipt,
+      lease: lease,
+      allocator: allocator,
+      setup: setup,
+      connection: connection,
+      writer: writer,
+      tcp: tcp,
+      peer: peer,
+      tcp_monitor: tcp_monitor
+    } = enrolled_attempt()
+
+    budget = deadline()
+
+    assert {:ok, ready_nonce} =
+             in_actor(writer, fn -> Observer.writer_ready(receipt, budget) end)
+
+    assert :ok =
+             in_actor(connection, fn ->
+               Observer.connection_ready(receipt, ready_nonce, budget)
+             end)
+
+    assert {:ok, _grant_nonce} =
+             in_actor(allocator, fn ->
+               Observer.prepare_handoff(receipt, tcp, connection, budget)
+             end)
+
+    assert :ok = in_actor(allocator, fn -> :gen_tcp.controlling_process(tcp, connection) end)
+    assert Port.info(tcp, :connected) == {:connected, connection}
+
+    # Ownership has moved, but no commit, TLS I/O or setup-success claim occurs.
+    assert {:error, :timeout} = :gen_tcp.recv(peer, 0, 20)
+
+    assert {:ok,
+            %{
+              admission: :open,
+              roles: 31,
+              observed_down: 0,
+              allocations: 0,
+              losses: 0,
+              setup: :pending
+            }} = Observer.snapshot(receipt, budget)
+
+    assert :ok = Observer.cancel(receipt, lease, deadline())
+    assert_receive {:DOWN, ^tcp_monitor, :port, ^tcp, _}, 1_000
+
+    assert {:ok,
+            %{
+              logical: :closed,
+              roles: 31,
+              observed_down: 31,
+              losses: 0,
+              cleanup: :confirmed,
+              setup: :cancelled,
+              setup_failure: :cancelled
+            }} =
+             Reader.await(receipt, deadline())
+
+    refute Process.alive?(allocator)
+    refute Process.alive?(setup)
+    refute Process.alive?(connection)
+    refute Process.alive?(writer)
+  end
+
+  test "queued original writer DOWN retires a prepared Connection-owned TCP port" do
+    %{
+      receipt: receipt,
+      observer: observer,
+      allocator: allocator,
+      setup: setup,
+      connection: connection,
+      writer: writer,
+      tcp: tcp,
+      tcp_monitor: tcp_monitor
+    } = enrolled_attempt()
+
+    writer_monitor = Process.monitor(writer)
+    {:abs_ms, expiry} = budget = deadline(5_000)
+
+    assert {:ok, ready_nonce} =
+             in_actor(writer, fn -> Observer.writer_ready(receipt, budget) end)
+
+    assert :ok =
+             in_actor(connection, fn ->
+               Observer.connection_ready(receipt, ready_nonce, budget)
+             end)
+
+    assert {:ok, _grant_nonce} =
+             in_actor(allocator, fn ->
+               Observer.prepare_handoff(receipt, tcp, connection, budget)
+             end)
+
+    assert :ok = in_actor(allocator, fn -> :gen_tcp.controlling_process(tcp, connection) end)
+    assert Port.info(tcp, :connected) == {:connected, connection}
+
+    assert :ok = :sys.suspend(observer, 1_000)
+
+    try do
+      assert Process.exit(writer, :kill)
+      assert_receive {:DOWN, ^writer_monitor, :process, ^writer, :killed}, 1_000
+      refute Process.alive?(writer)
+      assert Process.alive?(connection)
+      assert Port.info(tcp, :connected) == {:connected, connection}
+    after
+      assert :ok = :sys.resume(observer, 1_000)
+    end
+
+    # Only the resumed Observer consumes its own queued monitor event and retires.
+    assert_receive {:DOWN, ^tcp_monitor, :port, ^tcp, _}, 1_000
+    assert System.monotonic_time(:millisecond) < expiry
+
+    assert {:ok,
+            %{
+              logical: :closed,
+              roles: 31,
+              observed_down: 31,
+              losses: 0,
+              cleanup: :confirmed,
+              setup: :failed,
+              setup_failure: :internal
+            }} =
+             Reader.await(receipt, deadline())
+
+    refute Process.alive?(allocator)
+    refute Process.alive?(setup)
+    refute Process.alive?(connection)
+  end
+
+  test "unexpected ownership of the original TCP port rejects commit without consuming its grant" do
+    %{
+      receipt: receipt,
+      lease: lease,
+      allocator: allocator,
+      setup: setup,
+      connection: connection,
+      writer: writer,
+      tcp: tcp,
+      peer: peer,
+      tcp_monitor: tcp_monitor
+    } = enrolled_attempt()
+
+    target = self()
+    budget = deadline()
+
+    assert {:ok, ready_nonce} =
+             in_actor(writer, fn -> Observer.writer_ready(receipt, budget) end)
+
+    assert :ok =
+             in_actor(connection, fn ->
+               Observer.connection_ready(receipt, ready_nonce, budget)
+             end)
+
+    assert {:ok, grant_nonce} =
+             in_actor(allocator, fn ->
+               Observer.prepare_handoff(receipt, tcp, connection, budget)
+             end)
+
+    assert :ok = in_actor(allocator, fn -> :gen_tcp.controlling_process(tcp, connection) end)
+    assert Port.info(tcp, :connected) == {:connected, connection}
+
+    assert :ok = in_actor(connection, fn -> :gen_tcp.controlling_process(tcp, target) end)
+    assert Port.info(tcp, :connected) == {:connected, target}
+
+    assert {:error, :port_not_owned} =
+             in_actor(connection, fn -> Observer.commit_handoff(receipt, grant_nonce, budget) end)
+
+    assert Port.info(tcp, :connected) == {:connected, target}
+    assert Process.alive?(allocator)
+    assert Process.alive?(setup)
+    assert Process.alive?(connection)
+    assert Process.alive?(writer)
+    assert {:error, :timeout} = :gen_tcp.recv(peer, 0, 20)
+
+    assert {:ok,
+            %{
+              admission: :open,
+              roles: 31,
+              observed_down: 0,
+              allocations: 0,
+              losses: 0,
+              setup: :pending
+            }} = Observer.snapshot(receipt, budget)
+
+    # Restore the same native port before cancellation; the original grant is intact.
+    assert :ok = :gen_tcp.controlling_process(tcp, connection)
+    assert Port.info(tcp, :connected) == {:connected, connection}
+
+    assert :ok =
+             in_actor(connection, fn -> Observer.commit_handoff(receipt, grant_nonce, budget) end)
+
+    assert :ok = Observer.cancel(receipt, lease, deadline())
+    assert_receive {:DOWN, ^tcp_monitor, :port, ^tcp, _}, 1_000
+
+    assert {:ok, %{roles: 31, observed_down: 31, cleanup: :confirmed, setup: :cancelled}} =
+             Reader.await(receipt, deadline())
+  end
+
+  test "queued original TCP port DOWN retires prepared actors that remained alive after port close" do
+    %{
+      receipt: receipt,
+      observer: observer,
+      allocator: allocator,
+      setup: setup,
+      connection: connection,
+      writer: writer,
+      tcp: tcp,
+      tcp_monitor: tcp_monitor
+    } = enrolled_attempt()
+
+    {:abs_ms, expiry} = budget = deadline(5_000)
+
+    assert {:ok, ready_nonce} =
+             in_actor(writer, fn -> Observer.writer_ready(receipt, budget) end)
+
+    assert :ok =
+             in_actor(connection, fn ->
+               Observer.connection_ready(receipt, ready_nonce, budget)
+             end)
+
+    assert {:ok, _grant_nonce} =
+             in_actor(allocator, fn ->
+               Observer.prepare_handoff(receipt, tcp, connection, budget)
+             end)
+
+    assert :ok = in_actor(allocator, fn -> :gen_tcp.controlling_process(tcp, connection) end)
+    assert Port.info(tcp, :connected) == {:connected, connection}
+
+    assert :ok = :sys.suspend(observer, 1_000)
+
+    try do
+      assert true == in_actor(connection, fn -> Port.close(tcp) end)
+      assert_receive {:DOWN, ^tcp_monitor, :port, ^tcp, _}, 1_000
+      assert Port.info(tcp) == nil
+      assert Process.alive?(connection)
+      assert Process.alive?(writer)
+    after
+      assert :ok = :sys.resume(observer, 1_000)
+    end
+
+    # Native VM port absence was observed independently before actor retirement.
+    assert {:ok,
+            %{
+              logical: :closed,
+              roles: 31,
+              observed_down: 31,
+              losses: 0,
+              cleanup: :confirmed,
+              setup: :failed,
+              setup_failure: :internal
+            }} =
+             Reader.await(receipt, deadline())
+
+    assert System.monotonic_time(:millisecond) < expiry
+    refute Process.alive?(allocator)
+    refute Process.alive?(setup)
+    refute Process.alive?(connection)
+    refute Process.alive?(writer)
+  end
+
+  test "pending readiness retains unknown TCP allocation and loss through fixed cancellation grace" do
+    %{
+      receipt: receipt,
+      lease: lease,
+      observer: observer,
+      allocator: allocator,
+      setup: setup,
+      connection: connection,
+      writer: writer
+    } = unknown_tcp_attempt()
+
+    observer_monitor = Process.monitor(observer)
+    budget = deadline(5_000)
+
+    assert {:ok, ready_nonce} =
+             in_actor(writer, fn -> Observer.writer_ready(receipt, budget) end)
+
+    assert :ok =
+             in_actor(connection, fn ->
+               Observer.connection_ready(receipt, ready_nonce, budget)
+             end)
+
+    assert {:ok,
+            %{
+              admission: :open,
+              roles: 15,
+              observed_down: 0,
+              allocations: 16,
+              losses: 0,
+              setup: :pending
+            }} = Observer.snapshot(receipt, budget)
+
+    started = System.monotonic_time(:millisecond)
+    assert :ok = Observer.cancel(receipt, lease, deadline())
+
+    assert %{
+             admission: :closed,
+             roles: 15,
+             observed_down: 15,
+             allocations: 16,
+             losses: 16,
+             setup: :cancelled,
+             setup_failure: :cancelled
+           } =
+             await_down_mask(receipt, 15, deadline())
+
+    refute Process.alive?(allocator)
+    refute Process.alive?(setup)
+    refute Process.alive?(connection)
+    refute Process.alive?(writer)
+
+    # No TCP identity was reported, so actor DOWN cannot settle native allocation.
+    assert {:unconfirmed, :observer_unsealed} = Reader.await(receipt, deadline(2_000))
+    assert_receive {:DOWN, ^observer_monitor, :process, ^observer, :normal}, 1_000
+    elapsed = System.monotonic_time(:millisecond) - started
+    assert elapsed >= 1_000
+    assert elapsed < 2_000
+  end
+
+  defp unknown_tcp_attempt do
+    enrollment_deadline = deadline(5_000)
+    {:ok, receipt, lease} = Observer.start(self(), :infinity)
+    observer = Receipt.observer(receipt)
+    on_exit(fn -> if Process.alive?(observer), do: Process.exit(observer, :kill) end)
+    assert :ok = Observer.bind(receipt, lease, enrollment_deadline)
+
+    {:ok, allocator_permit} =
+      Observer.reserve_root(receipt, lease, :allocator, enrollment_deadline)
+
+    {:ok, setup_permit} = Observer.reserve_root(receipt, lease, :setup, enrollment_deadline)
+    allocator = enrolled_actor(receipt, :allocator, allocator_permit, enrollment_deadline)
+    setup = enrolled_actor(receipt, :setup, setup_permit, enrollment_deadline)
+
+    {:ok, connection_permit} =
+      in_actor(setup, fn -> Observer.reserve_child(receipt, :connection, enrollment_deadline) end)
+
+    connection = enrolled_actor(receipt, :connection, connection_permit, enrollment_deadline)
+
+    {:ok, writer_permit} =
+      in_actor(connection, fn -> Observer.reserve_child(receipt, :writer, enrollment_deadline) end)
+
+    writer = enrolled_actor(receipt, :writer, writer_permit, enrollment_deadline)
+
+    {:ok, _tcp_permit} =
+      in_actor(allocator, fn -> Observer.reserve_child(receipt, :tcp, enrollment_deadline) end)
+
+    %{
+      receipt: receipt,
+      lease: lease,
+      observer: observer,
+      allocator: allocator,
+      setup: setup,
+      connection: connection,
+      writer: writer
+    }
+  end
+
   defp enrolled_attempt do
     enrollment_deadline = deadline(5_000)
     {:ok, receipt, lease} = Observer.start(self(), :infinity)
