@@ -12,6 +12,7 @@ defmodule SSL.Options do
     :client_identity,
     :alpn_advertised_protocols,
     session_tickets: :disabled,
+    verify: :verify_peer,
     tcp_options: [],
     active: false,
     depth: 10,
@@ -79,10 +80,11 @@ defmodule SSL.Options do
          {:ok, options} <- option_list(options),
          :ok <- validate_options(options),
          {:ok, identity, context} <-
-           identity(
+           verification_identity(
              host,
              Keyword.get(options, :server_name_indication),
-             get_in(options, [:ex_ssl, :reference_identity])
+             get_in(options, [:ex_ssl, :reference_identity]),
+             Keyword.get(options, :verify, :verify_peer)
            ),
          {:ok, trust} <- trust_source(options),
          {:ok, profile} <- profile(options, context),
@@ -94,6 +96,7 @@ defmodule SSL.Options do
          profile: profile,
          endpoint: host,
          session_tickets: Keyword.get(options, :session_tickets, :disabled),
+         verify: Keyword.get(options, :verify, :verify_peer),
          identity: identity,
          context: context,
          trust_source: trust,
@@ -182,7 +185,7 @@ defmodule SSL.Options do
   defp valid_option?(:send_timeout, _value), do: false
 
   defp valid_option?(:send_timeout_close, value), do: value == true
-  defp valid_option?(:verify, value), do: value == :verify_peer
+  defp valid_option?(:verify, value), do: value in [:verify_peer, :verify_none]
 
   defp valid_option?(:versions, value),
     do: value in [[:"tlsv1.3"], [:"tlsv1.2"], [:"tlsv1.3", :"tlsv1.2"], [:"tlsv1.2", :"tlsv1.3"]]
@@ -192,7 +195,7 @@ defmodule SSL.Options do
        do: is_list(value) and value != [] and proper_list?(value)
 
   defp valid_option?(:alpn_advertised_protocols, value), do: valid_alpn_protocols?(value)
-  defp valid_option?(:cacerts, value), do: is_list(value) and value != []
+  defp valid_option?(:cacerts, value), do: is_list(value) and proper_list?(value)
 
   # The identity loader owns shape, size, source-conflict and key matching checks.
   defp valid_option?(key, _value) when key in [:cert, :certfile, :key, :keyfile], do: true
@@ -217,6 +220,11 @@ defmodule SSL.Options do
         _ -> false
       end)
   end
+
+  defp verification_identity(:upgrade, sni, nil, :verify_none) when sni in [nil, :disable],
+    do: {:ok, nil, %{}}
+
+  defp verification_identity(host, sni, reference, _verify), do: identity(host, sni, reference)
 
   defp identity(host, sni, nil), do: identity(host, sni)
 
@@ -349,20 +357,25 @@ defmodule SSL.Options do
   defp trust_source(options) do
     case {Keyword.fetch(options, :cacerts), Keyword.fetch(options, :cacertfile)} do
       {{:ok, certificates}, _} ->
-        validate_trust(certificates)
+        validate_trust(certificates, Keyword.get(options, :verify, :verify_peer))
 
       {:error, {:ok, path}} ->
         case File.read(path) do
-          {:ok, pem} -> validate_trust(pem)
+          {:ok, pem} -> validate_trust(pem, Keyword.get(options, :verify, :verify_peer))
           {:error, _} -> option_error({:cacertfile, :unreadable})
         end
 
       {:error, :error} ->
-        validate_trust(:public_key.cacerts_get())
+        if Keyword.get(options, :verify, :verify_peer) == :verify_none,
+          do: {:ok, nil},
+          else: validate_trust(:public_key.cacerts_get())
     end
   rescue
     _ -> option_error({:cacerts, :invalid})
   end
+
+  defp validate_trust(source, :verify_none), do: {:ok, source}
+  defp validate_trust(source, :verify_peer), do: validate_trust(source)
 
   defp validate_trust(source) do
     case SSL.PKIX.normalize_trust(source) do

@@ -1,6 +1,54 @@
 defmodule SSL.OptionsTest do
   use ExUnit.Case, async: true
 
+  test "explicit none carries policy without system trust or an invented upgrade identity" do
+    assert {:ok, %{verify: :verify_none, trust_source: nil, identity: {:dns_id, "example.test"}}} =
+             SSL.Options.normalize("example.test", verify: :verify_none)
+
+    assert {:ok, %{verify: :verify_none, trust_source: nil, identity: nil, context: %{}}} =
+             SSL.Options.normalize(:upgrade, verify: :verify_none)
+
+    assert {:ok, %{verify: :verify_peer}} = SSL.Options.normalize("example.test", [])
+    assert {:error, {:options, _}} = SSL.Options.normalize(:upgrade, [])
+
+    for cacerts <- [[], [<<1, 2, 3>>]] do
+      assert {:ok, %{verify: :verify_none, trust_source: ^cacerts}} =
+               SSL.Options.normalize("example.test", verify: :verify_none, cacerts: cacerts)
+
+      assert {:error, {:options, _}} =
+               SSL.Options.normalize("example.test", verify: :verify_peer, cacerts: cacerts)
+    end
+
+    for option <- [
+          verify_fun: {fn _, _, _ -> raise "must not run" end, :state},
+          partial_chain: fn _ -> :unknown_ca end
+        ] do
+      assert {:error, {:options, _}} =
+               SSL.Options.normalize("example.test", [verify: :verify_none] ++ [option])
+    end
+  end
+
+  @tag :tmp_dir
+  test "none still reads explicit CA files and preserves CA-list precedence", %{tmp_dir: dir} do
+    path = Path.join(dir, "unused-ca.pem")
+    File.write!(path, "not a PEM certificate")
+
+    assert {:ok, %{verify: :verify_none, trust_source: "not a PEM certificate"}} =
+             SSL.Options.normalize("example.test", verify: :verify_none, cacertfile: path)
+
+    missing = Path.join(dir, "missing.pem")
+
+    assert {:error, {:options, {:cacertfile, :unreadable}}} =
+             SSL.Options.normalize("example.test", verify: :verify_none, cacertfile: missing)
+
+    assert {:ok, %{trust_source: []}} =
+             SSL.Options.normalize("example.test",
+               verify: :verify_none,
+               cacerts: [],
+               cacertfile: missing
+             )
+  end
+
   test "TLS12 rejects an effective signature list with no supported cipher authentication" do
     assert {:error, {:options, {:signature_algs, :unsupported_or_invalid}}} =
              SSL.Options.normalize("example.com",
@@ -31,7 +79,7 @@ defmodule SSL.OptionsTest do
           active: true,
           packet: :line,
           mode: :list,
-          verify: :verify_none,
+          verify: :invalid,
           customize_hostname_check: [fail_callback: fn _ -> true end]
         ] do
       assert {:error, {:options, _}} = SSL.Options.normalize(~c"mail.example", [option])
@@ -343,10 +391,10 @@ defmodule SSL.OptionsTest do
     end
   end
 
-  test "explicit identity cannot weaken verification or bypass endpoint validation" do
+  test "explicit identity cannot override invalid verification or endpoint options" do
     assert {:error, {:options, {:verify, :unsupported_or_invalid}}} =
              SSL.Options.normalize(:upgrade,
-               verify: :verify_none,
+               verify: :invalid,
                ex_ssl: [reference_identity: {:ip, "127.0.0.1"}]
              )
 

@@ -23,6 +23,33 @@ defmodule SSL.Protocol.ServerFlightVerifierTest do
   @rsa_leaf_path Path.join(@fixture_dir, "leaf-rsa.pem")
   @rsa_leaf_key_path Path.join(@fixture_dir, "leaf-rsa-key.pem")
 
+  test "verify_none bypasses only PKIX trust and identity, retaining signature Finished and AEAD checks" do
+    attrs = input(trust_source: nil, identity: nil)
+    assert {:ok, %Result{}} = ServerFlightVerifier.verify(attrs, verify: :verify_none)
+    assert {:error, {:fatal_alert, _, _}} = ServerFlightVerifier.verify(attrs)
+
+    messages = captured_messages()
+    invalid_signature = List.update_at(messages, 2, &flip_last_bit/1)
+    invalid_finished = List.update_at(messages, 3, &flip_last_bit/1)
+
+    assert {:error, {:fatal_alert, :decrypt_error, :invalid_certificate_verify}} =
+             ServerFlightVerifier.verify(%{attrs | records: encrypt_messages(invalid_signature)},
+               verify: :verify_none
+             )
+
+    assert {:error, {:fatal_alert, :decrypt_error, :invalid_finished}} =
+             ServerFlightVerifier.verify(%{attrs | records: encrypt_messages(invalid_finished)},
+               verify: :verify_none
+             )
+
+    [first | rest] = capture_records()
+
+    assert {:error, {:fatal_alert, :bad_record_mac, :authentication_failed}} =
+             ServerFlightVerifier.verify(%{attrs | records: [flip_last_bit(first) | rest]},
+               verify: :verify_none
+             )
+  end
+
   test "verifies the constructed fragmented and coalesced server flight" do
     assert {:ok,
             %Result{
@@ -80,6 +107,22 @@ defmodule SSL.Protocol.ServerFlightVerifierTest do
     assert {:ok, record, _} = Record.encrypt(write, :handshake, client_finished)
     assert record == @capture.client_finished_record
     refute inspect(result) =~ inspect(result.client_application_secret)
+  end
+
+  test "incremental verify_none cannot complete with a bad CertificateVerify or Finished" do
+    attrs = input(trust_source: nil, identity: nil) |> Map.from_struct() |> Map.delete(:records)
+    assert {:ok, core} = SSL.Protocol.HandshakeCore.start_client(attrs, verify: :verify_none)
+    [ee, cert, cv, finished] = captured_messages()
+    assert {:ok, core} = SSL.Protocol.HandshakeCore.process_message(core, ee)
+    assert {:ok, core} = SSL.Protocol.HandshakeCore.process_message(core, cert)
+
+    assert {:error, {:fatal_alert, :decrypt_error, :invalid_certificate_verify}} =
+             SSL.Protocol.HandshakeCore.process_message(core, flip_last_bit(cv))
+
+    assert {:ok, core} = SSL.Protocol.HandshakeCore.process_message(core, cv)
+
+    assert {:error, {:fatal_alert, :decrypt_error, :invalid_finished}} =
+             SSL.Protocol.HandshakeCore.process_message(core, flip_last_bit(finished))
   end
 
   test "record-free core rejects altered signatures and Finished before returning secrets" do

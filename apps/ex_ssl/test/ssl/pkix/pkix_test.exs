@@ -17,6 +17,123 @@ defmodule SSL.PKIXTest do
   @identity_root_pem File.read!(Path.join(@identity_fixture_dir, "root.pem"))
   @invalid_sans_root_pem File.read!(Path.join(@identity_fixture_dir, "invalid_sans_root.pem"))
 
+  test "explicit none extracts the same peer key without claiming trust or identity validation" do
+    assert {:ok, verified} = PKIX.verify([@leaf_der], @root_pem, {:dns_id, "example.test"})
+    assert {:ok, decoded} = PKIX.peer([@leaf_der], nil, nil, :verify_none, [])
+    assert decoded == verified
+
+    assert {:ok, ^decoded} =
+             PKIX.peer(
+               [@leaf_der],
+               @wrong_root_pem,
+               {:dns_id, "wrong.example.test"},
+               :verify_none,
+               []
+             )
+
+    assert {:error, {:path_validation_failed, _}} =
+             PKIX.peer([@leaf_der], @wrong_root_pem, {:dns_id, "example.test"}, :verify_peer, [])
+
+    assert {:error, :hostname_mismatch} =
+             PKIX.peer([@leaf_der], @root_pem, {:dns_id, "wrong.example.test"}, :verify_peer, [])
+  end
+
+  test "none skips certificate-chain signature policy while peer retains it" do
+    options = [certificate_signature_schemes: [0x0804]]
+
+    assert {:ok, %VerifiedPeer{}} =
+             PKIX.peer([@leaf_der], nil, nil, :verify_none, options)
+
+    assert {:error, {:certificate_signature_scheme_not_allowed, [0x0804]}} =
+             PKIX.peer([@leaf_der], @root_pem, {:dns_id, "example.test"}, :verify_peer, options)
+  end
+
+  test "runtime peer policy requires digitalSignature only when leaf KeyUsage is present" do
+    key = :public_key.generate_key({:rsa, 2048, 65_537})
+    root = :public_key.pkix_test_root_cert(~c"key-usage-test-ca", key: key, digest: :sha256)
+
+    for usage <- [:absent, [:digitalSignature], [:keyEncipherment]] do
+      key_usage = if usage == :absent, do: [], else: [{:Extension, {2, 5, 29, 15}, true, usage}]
+
+      extensions = [
+        {:Extension, {2, 5, 29, 17}, false, [{:dNSName, ~c"example.test"}]} | key_usage
+      ]
+
+      config =
+        :public_key.pkix_test_data(%{
+          root: root,
+          peer: [key: key, digest: :sha256, extensions: extensions]
+        })
+
+      chain = [Keyword.fetch!(config, :cert)]
+      anchors = Keyword.fetch!(config, :cacerts)
+      assert {:ok, %VerifiedPeer{}} = PKIX.verify(chain, anchors, {:dns_id, "example.test"})
+
+      for mode <- [:verify_peer, :verify_none] do
+        result = PKIX.peer(chain, anchors, {:dns_id, "example.test"}, mode, [])
+
+        if usage == [:keyEncipherment] do
+          assert {:error, :invalid_peer_key_usage} = result
+        else
+          assert {:ok, %VerifiedPeer{}} = result
+        end
+      end
+    end
+  end
+
+  test "TLS13 requires v3 presented certificates but does not version-gate omitted trust anchors" do
+    key = :public_key.generate_key({:rsa, 2048, 65_537})
+    root = :public_key.pkix_test_root_cert(~c"example.test", key: key, digest: :sha256)
+    legacy_root = v1_der(root.cert, key)
+
+    config =
+      :public_key.pkix_test_data(%{
+        root: root,
+        peer: [
+          key: key,
+          digest: :sha256,
+          extensions: [{:Extension, {2, 5, 29, 17}, false, [{:dNSName, ~c"example.test"}]}]
+        ]
+      })
+
+    leaf = Keyword.fetch!(config, :cert)
+    options = []
+    identity = {:dns_id, "example.test"}
+
+    for mode <- [:verify_peer, :verify_none] do
+      # The v1 trust anchor is local configuration and absent from the TLS chain.
+      assert {:ok, %VerifiedPeer{}} = PKIX.peer([leaf], [legacy_root], identity, mode, options)
+
+      for {chain, index} <- [{[legacy_root], 0}, {[leaf, legacy_root], 1}] do
+        generic = PKIX.verify(chain, [legacy_root], identity, options)
+
+        if index == 0,
+          do: assert(generic == {:error, :hostname_mismatch}),
+          else: assert(match?({:ok, %VerifiedPeer{}}, generic))
+
+        assert {:error, {:invalid_peer_certificate_version, ^index}} =
+                 PKIX.peer(chain, [legacy_root], identity, mode, options)
+
+        legacy = PKIX.peer(chain, [legacy_root], identity, mode, options, :tls12)
+
+        if mode == :verify_peer and index == 0,
+          do: assert(legacy == {:error, :hostname_mismatch}),
+          else: assert(match?({:ok, %VerifiedPeer{}}, legacy))
+      end
+    end
+  end
+
+  test "untrusted decoding still rejects malformed, empty and oversized certificate input" do
+    assert {:error, :empty_certificate_chain} = PKIX.decode_peer([])
+    assert {:error, {:invalid_certificate, 0}} = PKIX.decode_peer([<<1, 2, 3>>])
+
+    assert {:error, {:certificate_count_limit_exceeded, 2, 1}} =
+             PKIX.decode_peer([@leaf_der, @root_der], max_certificates: 1)
+
+    assert {:error, {:certificate_der_limit_exceeded, 0, _, 1}} =
+             PKIX.decode_peer([@leaf_der], max_der_bytes: 1)
+  end
+
   test "decodes an ordered leaf-first DER chain without discarding exact bytes" do
     assert {:ok, [%Certificate{der: @leaf_der}, %Certificate{der: @root_der}]} =
              PKIX.decode_chain([@leaf_der, @root_der])
@@ -344,6 +461,13 @@ defmodule SSL.PKIXTest do
         assert match?({:ok, _value}, result) or match?({:error, _reason}, result)
       end
     end
+  end
+
+  defp v1_der(der, issuer_key) do
+    {:OTPCertificate, tbs, _, _} = :public_key.pkix_decode_cert(der, :otp)
+    # OTP TBS fields: version at1, extensions at10. V1 omits extensions.
+    tbs = tbs |> put_elem(1, :v1) |> put_elem(10, :asn1_NOVALUE)
+    :public_key.pkix_sign(tbs, issuer_key)
   end
 
   defp flip_last_bit(der) do

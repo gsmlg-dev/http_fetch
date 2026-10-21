@@ -26,7 +26,7 @@ defmodule SSL.ResumptionContext do
     :crypto.hash(
       :sha256,
       :erlang.term_to_binary(
-        {:ex_ssl_ticket_policy, 1, options.endpoint, endpoint, options.identity,
+        {:ex_ssl_ticket_policy, 2, options.verify, options.endpoint, endpoint, options.identity,
          Map.get(options.context, :server_name), options.trust_source, options.profile,
          options.depth, options.hostname_check}
       )
@@ -55,7 +55,11 @@ defmodule SSL.ResumptionContext do
              )
            end),
          {:ok, peer} <-
-           SSL.PKIX.verify(candidate.peer.chain, options.trust_source, options.identity,
+           SSL.PKIX.peer(
+             candidate.peer.chain,
+             options.trust_source,
+             options.identity,
+             options.verify,
              depth: options.depth,
              customize_hostname_check: options.hostname_check,
              certificate_signature_schemes: policy

@@ -29,7 +29,7 @@ defmodule SSL.Protocol.ServerFlightVerifier do
             client_key_pair: KeyPair.t(),
             records: [binary()],
             trust_source: term(),
-            identity: SSL.PKIX.identity(),
+            identity: SSL.PKIX.identity() | nil,
             client_identity: SSL.ClientIdentity.t() | nil
           }
   end

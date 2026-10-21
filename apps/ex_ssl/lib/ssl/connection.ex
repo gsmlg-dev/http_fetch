@@ -135,6 +135,7 @@ defmodule SSL.Connection do
                materialized,
                options.trust_source,
                options.identity,
+               verify: options.verify,
                customize_hostname_check: options.hostname_check,
                depth: options.depth,
                client_identity: options.client_identity,

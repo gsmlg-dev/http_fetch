@@ -167,7 +167,14 @@ defmodule SSL.Protocol.TLS12 do
       Keyword.take(state.options, [:depth, :customize_hostname_check]) ++
         [certificate_signature_schemes: state.offer.certificate_signature_schemes]
 
-    case SSL.PKIX.verify(chain, state.trust, state.identity, options) do
+    case SSL.PKIX.peer(
+           chain,
+           state.trust,
+           state.identity,
+           Keyword.get(state.options, :verify, :verify_peer),
+           options,
+           :tls12
+         ) do
       {:ok, peer} ->
         {:ok, append(%{state | peer: peer, phase: :await_server_key_exchange}, message.encoded),
          [], []}

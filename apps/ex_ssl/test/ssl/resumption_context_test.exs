@@ -10,6 +10,38 @@ defmodule SSL.ResumptionContextTest do
     %{fixtures: ClientAuthFixtures.create(dir), dir: dir}
   end
 
+  test "none-mode cache entries are partitioned and cannot satisfy peer validation", %{
+    fixtures: f
+  } do
+    none = normalized(f, verify: :verify_none, server_name_indication: ~c"wrong.example.test")
+    peer = %{none | verify: :verify_peer}
+    endpoint = {@host, 443}
+    none_key = ResumptionContext.partition(none, endpoint)
+    peer_key = ResumptionContext.partition(peer, endpoint)
+    refute none_key == peer_key
+    cached = ticket([f.server.der])
+    assert :ok = TicketCache.put(none_key, cached)
+    assert {:ok, _, selected, ^none_key} = ResumptionContext.prepare(none, endpoint)
+    assert selected.peer.leaf_der == f.server.der
+    assert {:ok, _, nil, ^peer_key} = ResumptionContext.prepare(peer, endpoint)
+
+    # Even a deliberately misplaced cache entry still faces the current peer policy.
+    assert :ok = TicketCache.put(peer_key, cached)
+    assert {:ok, _, nil, ^peer_key} = ResumptionContext.prepare(peer, endpoint)
+    assert :ok = TicketCache.put(none_key, ticket([<<1, 2, 3>>]))
+    assert {:ok, _, nil, ^none_key} = ResumptionContext.prepare(none, endpoint)
+
+    [entry] = :public_key.pem_decode(File.read!(f.ca.key))
+    issuer_key = :public_key.pem_entry_decode(entry)
+    {:OTPCertificate, tbs, _, _} = :public_key.pkix_decode_cert(f.ca.der, :otp)
+
+    legacy_root =
+      :public_key.pkix_sign(tbs |> put_elem(1, :v1) |> put_elem(10, :asn1_NOVALUE), issuer_key)
+
+    assert :ok = TicketCache.put(none_key, ticket([f.server.der, legacy_root]))
+    assert {:ok, _, nil, ^none_key} = ResumptionContext.prepare(none, endpoint)
+  end
+
   test "every authentication context participates in partition identity", %{fixtures: f} do
     options = normalized(f)
     endpoint = {@host, 443}

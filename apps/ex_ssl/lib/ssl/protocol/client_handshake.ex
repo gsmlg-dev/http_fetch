@@ -6,7 +6,7 @@ defmodule SSL.Protocol.ClientHandshake do
   alias SSL.Crypto.KeyExchange.KeyPair
   alias SSL.Protocol.{ClientOffer, Resumption, ServerHello, Transcript}
 
-  @spec prepare(Materialized.t(), term(), SSL.PKIX.identity(), keyword()) ::
+  @spec prepare(Materialized.t(), term(), SSL.PKIX.identity() | nil, keyword()) ::
           {:ok, map(), binary()} | {:error, term()}
   def prepare(%Materialized{} = materialized, trust_source, identity, opts) when is_list(opts) do
     {client_identity, verifier_opts} = Keyword.pop(opts, :client_identity)
@@ -17,7 +17,7 @@ defmodule SSL.Protocol.ClientHandshake do
          {:ok, client_hello} <- bind_hello(unsigned, ticket, <<>>),
          {:ok, offer} <- ClientOffer.from_client_hello(client_hello),
          {:ok, key_pairs} <- matching_key_pairs(materialized.key_pairs, offer),
-         :ok <- validate_identity(identity) do
+         :ok <- validate_identity(identity, Keyword.get(verifier_opts, :verify, :verify_peer)) do
       state = %{
         client_hello: client_hello,
         client_ast: materialized.client_hello,
@@ -293,9 +293,10 @@ defmodule SSL.Protocol.ClientHandshake do
 
   defp group_id(group), do: SSL.Capabilities.resolve(:group, group).id
 
-  defp validate_identity({:dns_id, name}) when is_binary(name), do: :ok
-  defp validate_identity({:ip, _}), do: :ok
-  defp validate_identity(_), do: {:error, :invalid_identity}
+  defp validate_identity(nil, :verify_none), do: :ok
+  defp validate_identity({:dns_id, name}, _) when is_binary(name), do: :ok
+  defp validate_identity({:ip, _}, _), do: :ok
+  defp validate_identity(_, _), do: {:error, :invalid_identity}
 
   defp fatal(alert, reason), do: {:error, {:fatal_alert, alert, reason}}
 end

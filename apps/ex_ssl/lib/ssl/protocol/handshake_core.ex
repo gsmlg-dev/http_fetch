@@ -85,7 +85,12 @@ defmodule SSL.Protocol.HandshakeCore do
     :offered_extension_ids,
     :allowed_signature_schemes
   ]
-  @option_keys [:max_records, :depth, :customize_hostname_check | @server_flight_option_keys]
+  @option_keys [
+    :verify,
+    :max_records,
+    :depth,
+    :customize_hostname_check | @server_flight_option_keys
+  ]
 
   @type fatal_alert ::
           :bad_record_mac
@@ -725,7 +730,7 @@ defmodule SSL.Protocol.HandshakeCore do
   defp verify_peer(%Certificate{entries: entries}, input, config) do
     chain = Enum.map(entries, & &1.der)
 
-    case PKIX.verify(chain, input.trust_source, input.identity,
+    case PKIX.peer(chain, input.trust_source, input.identity, config.verify,
            customize_hostname_check: config.hostname_check,
            depth: config.depth,
            certificate_signature_schemes: config.certificate_signature_schemes
@@ -880,14 +885,16 @@ defmodule SSL.Protocol.HandshakeCore do
       case Keyword.get(options, :max_records, @default_max_records) do
         maximum when is_integer(maximum) and maximum > 0 ->
           server_flight_options =
-            Keyword.drop(options, [:max_records, :depth, :customize_hostname_check])
+            Keyword.drop(options, [:verify, :max_records, :depth, :customize_hostname_check])
 
           with :ok <- validate_signature_policy_option(server_flight_options),
                :ok <- validate_hostname_check_option(options),
-               :ok <- validate_depth_option(options) do
+               :ok <- validate_depth_option(options),
+               :ok <- validate_verify_option(options) do
             {:ok,
              %{
                max_records: maximum,
+               verify: Keyword.get(options, :verify, :verify_peer),
                depth: Keyword.get(options, :depth, 10),
                hostname_check: Keyword.get(options, :customize_hostname_check, []),
                max_handshake_length:
@@ -924,6 +931,12 @@ defmodule SSL.Protocol.HandshakeCore do
       [match_fun: fun] when is_function(fun, 2) -> :ok
       _other -> alert(:decode_error, {:invalid_options, :customize_hostname_check})
     end
+  end
+
+  defp validate_verify_option(options) do
+    if Keyword.get(options, :verify, :verify_peer) in [:verify_peer, :verify_none],
+      do: :ok,
+      else: alert(:decode_error, {:invalid_options, :verify})
   end
 
   defp validate_depth_option(options) do

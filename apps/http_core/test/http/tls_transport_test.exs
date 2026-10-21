@@ -72,6 +72,29 @@ defmodule HTTP.TLSTransportTest do
         assert :ok = @transport.close(socket)
       end
 
+      test "explicit verify_none permits untrusted wrong-host traffic" do
+        port =
+          peer(fn socket ->
+            assert {:ok, "ping"} = :ssl.recv(socket, 4, 5_000)
+            :ok = :ssl.send(socket, "pong")
+          end)
+
+        assert {:ok, socket} =
+                 @transport.connect(
+                   "localhost",
+                   port,
+                   [ssl: [verify: :verify_none, server_name_indication: ~c"wrong.example"]],
+                   5_000
+                 )
+
+        try do
+          assert :ok = @transport.send(socket, "ping")
+          assert {:ok, "pong"} = @transport.recv(socket, 4, 5_000)
+        after
+          @transport.close(socket)
+        end
+      end
+
       test "rejects an untrusted peer" do
         port = peer(fn _socket -> :ok end)
         assert {:error, _} = @transport.connect("localhost", port, [], 5_000)
@@ -175,7 +198,7 @@ defmodule HTTP.TLSTransportTest do
 
   test "ex_ssl rejects unsupported TLS and TCP options before connecting" do
     for ssl <- [
-          [verify: :verify_none],
+          [verify: :invalid],
           [versions: [:"tlsv1.1"]],
           [certfile: @cert]
         ] do
@@ -259,12 +282,12 @@ defmodule HTTP.TLSTransportTest do
              )
 
     try do
-      # Test-only driver probe; re-audited after the native attach buffer fix.
+      # Test-only driver probe; buffer attach and verify-mode forwarding audited.
       # Production HTTP consumes only the transport API.
       source = SSL.Connection.module_info(:compile)[:source] |> List.to_string()
 
       assert :crypto.hash(:sha256, File.read!(source)) |> Base.encode16(case: :lower) ==
-               "e3a397587a5b137236afed3210b775f30590a067f3963ffdf4a9410e8964aac2"
+               "96628c634cb07f924f54bc67d6f9e6e014092d65e47e88ed778c3519efa9d5b5"
 
       assert Application.spec(:ex_ssl, :vsn) == Application.spec(:http_core, :vsn)
       {:connected, state} = :sys.get_state(socket.pid)

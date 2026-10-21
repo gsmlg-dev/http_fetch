@@ -67,7 +67,7 @@ defmodule SSL.Protocol.HandshakeMachine do
           {:connected, binary() | nil} | {:application_data, binary()} | :closed
   @type t :: %__MODULE__{} | TLS12.t()
 
-  @spec init(Materialized.t(), term(), SSL.PKIX.identity(), keyword()) ::
+  @spec init(Materialized.t(), term(), SSL.PKIX.identity() | nil, keyword()) ::
           {:ok, t(), [binary()]} | {:error, term()}
   def init(materialized, trust_source, identity, opts \\ [])
 
@@ -511,6 +511,7 @@ defmodule SSL.Protocol.HandshakeMachine do
   defp verifier_options(options),
     do:
       Keyword.take(options, [
+        :verify,
         :customize_hostname_check,
         :depth,
         :max_handshake_length,

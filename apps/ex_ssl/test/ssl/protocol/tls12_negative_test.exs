@@ -158,6 +158,83 @@ defmodule SSL.Protocol.TLS12NegativeTest do
              TLS12.feed(initial, plain(<<12, byte_size(badbody)::24, badbody::binary>>))
   end
 
+  test "verify_none still authenticates the signed ECDHE exchange after decoding an untrusted leaf" do
+    base = Path.expand("../../fixtures/server_flight", __DIR__)
+
+    [{:Certificate, der, :not_encrypted}] =
+      :public_key.pem_decode(File.read!(Path.join(base, "leaf-rsa.pem")))
+
+    [key_entry] = :public_key.pem_decode(File.read!(Path.join(base, "leaf-rsa-key.pem")))
+    private = :public_key.pem_entry_decode(key_entry)
+    initial = %{state([0x0303]) | options: [verify: :verify_none], trust: nil, identity: nil}
+
+    assert {:ok, initial, [], []} =
+             TLS12.feed(initial, server_hello([{23, <<>>}, {0xFF01, <<0>>}], 0xC02F))
+
+    chain = <<byte_size(der)::24, der::binary>>
+    cert = <<byte_size(chain)::24, chain::binary>>
+
+    assert {:ok, initial, [], []} =
+             TLS12.feed(initial, plain(<<11, byte_size(cert)::24, cert::binary>>))
+
+    assert initial.peer.leaf_der == der
+
+    initial = %{
+      initial
+      | offer: %{initial.offer | supported_groups: [0x0017], signature_schemes: [0x0804]}
+    }
+
+    {:ok, pair} = SSL.Crypto.KeyExchange.generate(:secp256r1)
+    params = <<3, 0x0017::16, byte_size(pair.public_key), pair.public_key::binary>>
+
+    {:ok, signature} =
+      SSL.Crypto.Signature.sign_message(
+        0x0804,
+        private,
+        <<initial.client_random::binary, initial.server_random::binary, params::binary>>
+      )
+
+    body = <<params::binary, 0x0804::16, byte_size(signature)::16, signature::binary>>
+
+    assert {:ok, %{phase: :await_request_or_done}, [], []} =
+             TLS12.feed(initial, plain(<<12, byte_size(body)::24, body::binary>>))
+
+    <<first, rest::binary>> = signature
+
+    bad =
+      <<params::binary, 0x0804::16, byte_size(signature)::16, Bitwise.bxor(first, 1),
+        rest::binary>>
+
+    assert {:error, {:fatal_alert, :decrypt_error, :invalid_server_key_exchange}} =
+             TLS12.feed(initial, plain(<<12, byte_size(bad)::24, bad::binary>>))
+  end
+
+  test "verify_none cannot complete with invalid Finished data or an invalid record tag" do
+    initial = %{finished_state() | options: [verify: :verify_none]}
+
+    {:ok, verify_data} =
+      TLS12KeySchedule.finished(0xC02F, initial.master_secret, :server, "transcript")
+
+    {:ok, valid, _} =
+      TLS12Record.encrypt(initial.read_state, :handshake, <<20, 12::24, verify_data::binary>>)
+
+    assert {:ok, %{phase: :connected}, [], [{:connected, nil}]} = TLS12.feed(initial, valid)
+
+    {:ok, bad_finished, _} =
+      TLS12Record.encrypt(initial.read_state, :handshake, <<20, 12::24, 0::96>>)
+
+    assert {:error, {:fatal_alert, :decrypt_error, :invalid_finished}} =
+             TLS12.feed(initial, bad_finished)
+
+    size = byte_size(valid) - 1
+    <<head::binary-size(^size), last>> = valid
+
+    assert {:error, {:fatal_alert, :bad_record_mac, _}} =
+             TLS12.feed(initial, head <> <<Bitwise.bxor(last, 1)>>)
+
+    assert initial.read_state.sequence == 0
+  end
+
   defp finished_state do
     {:ok, read} = TLS12Record.new(:aes_128_gcm, <<0::128>>, <<0::32>>)
     {:ok, suite} = TLS12KeySchedule.suite(0xC02F)

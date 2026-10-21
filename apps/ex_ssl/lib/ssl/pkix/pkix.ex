@@ -5,6 +5,11 @@ defmodule SSL.PKIX do
   Certificate chains are accepted in TLS leaf-first order. Trust sources are
   supplied in memory as a DER list or PEM bundle; this module performs no file,
   network, or operating-system trust lookup.
+
+  `peer/5` and `decode_peer/2` retain the legacy `VerifiedPeer` container for
+  handshake key material. Under `verify_none` it contains decoded, untrusted
+  credentials; the struct name is not proof of trust, identity, or possession.
+  The protocol must still verify CertificateVerify/ServerKeyExchange and Finished.
   """
 
   alias SSL.PKIX.Certificate
@@ -67,6 +72,9 @@ defmodule SSL.PKIX do
           :empty_certificate_chain
           | :empty_trust_anchors
           | :hostname_mismatch
+          | :unsupported_certificate_key
+          | :invalid_peer_key_usage
+          | {:invalid_peer_certificate_version, non_neg_integer()}
           | :malformed_pem
           | {:invalid_input, :certificate_chain | :trust_source | :options}
           | {:invalid_identity, term()}
@@ -122,6 +130,115 @@ defmodule SSL.PKIX do
          public_key: public_key,
          chain: Enum.map(chain, & &1.der)
        }}
+    end
+  end
+
+  @doc false
+  @spec peer(term(), term(), term(), :verify_peer | :verify_none, [option()]) ::
+          {:ok, VerifiedPeer.t()} | {:error, error_reason()}
+  @spec peer(term(), term(), term(), :verify_peer | :verify_none, [option()], :tls12 | :tls13) ::
+          {:ok, VerifiedPeer.t()} | {:error, error_reason()}
+  def peer(chain, trust_source, identity, mode, options, protocol \\ :tls13)
+
+  def peer(chain, trust_source, identity, mode, options, protocol)
+      when mode in [:verify_peer, :verify_none] do
+    with :ok <- protocol_chain(chain, protocol, options) do
+      result =
+        case mode do
+          :verify_peer -> verify(chain, trust_source, identity, options)
+          :verify_none -> decode_peer(chain, options)
+        end
+
+      signing_peer(result)
+    end
+  end
+
+  defp protocol_chain(chain, :tls13, options) do
+    # RFC9846 4.5.1.2 applies to all certificates supplied, including entries
+    # outside the selected trust path. Generic PKIX and TLS12 keep their policy.
+    with {:ok, certificates} <- decode_chain(chain, options) do
+      case Enum.find_index(certificates, fn certificate ->
+             certificate.decoded
+             |> otp_certificate(:tbsCertificate)
+             |> otp_tbs_certificate(:version) != :v3
+           end) do
+        nil -> :ok
+        index -> {:error, {:invalid_peer_certificate_version, index}}
+      end
+    end
+  end
+
+  defp protocol_chain(_chain, :tls12, _options), do: :ok
+
+  defp signing_peer({:ok, %VerifiedPeer{leaf: certificate} = peer}) do
+    usages =
+      case certificate |> otp_certificate(:tbsCertificate) |> otp_tbs_certificate(:extensions) do
+        :asn1_NOVALUE ->
+          []
+
+        extensions when is_list(extensions) ->
+          for extension <- extensions,
+              certificate_extension(extension, :extnID) == {2, 5, 29, 15},
+              do: certificate_extension(extension, :extnValue)
+
+        _ ->
+          [:invalid]
+      end
+
+    case usages do
+      [] ->
+        {:ok, peer}
+
+      [usage] when is_list(usage) ->
+        if :digitalSignature in usage, do: {:ok, peer}, else: {:error, :invalid_peer_key_usage}
+
+      _ ->
+        {:error, :invalid_peer_key_usage}
+    end
+  end
+
+  defp signing_peer({:error, _} = error), do: error
+
+  @doc false
+  @spec decode_peer(term(), [option()]) :: {:ok, VerifiedPeer.t()} | {:error, error_reason()}
+  def decode_peer(chain, options \\ []) do
+    with {:ok, [leaf | _] = certificates} <- decode_chain(chain, options),
+         {:ok, public_key} <- untrusted_public_key(leaf.decoded) do
+      {:ok,
+       %VerifiedPeer{
+         leaf_der: leaf.der,
+         leaf: leaf.decoded,
+         public_key: public_key,
+         chain: Enum.map(certificates, & &1.der)
+       }}
+    end
+  end
+
+  defp untrusted_public_key(certificate) do
+    info =
+      certificate
+      |> otp_certificate(:tbsCertificate)
+      |> otp_tbs_certificate(:subjectPublicKeyInfo)
+
+    case info do
+      {:OTPSubjectPublicKeyInfo, {:PublicKeyAlgorithm, @rsa_encryption_oid, params},
+       {:RSAPublicKey, _, _} = key} ->
+        {:ok, certificate_verify_key({@rsa_encryption_oid, key, params})}
+
+      {:OTPSubjectPublicKeyInfo, {:PublicKeyAlgorithm, @rsa_pss_oid, params},
+       {:RSAPublicKey, _, _} = key} ->
+        {:ok, certificate_verify_key({@rsa_pss_oid, key, params})}
+
+      {:OTPSubjectPublicKeyInfo, {:PublicKeyAlgorithm, @ec_public_key_oid, params},
+       {:ECPoint, _} = key} ->
+        {:ok, certificate_verify_key({@ec_public_key_oid, key, params})}
+
+      {:OTPSubjectPublicKeyInfo, {:PublicKeyAlgorithm, @ed25519_oid, :asn1_NOVALUE},
+       {:ECPoint, _} = key} ->
+        {:ok, certificate_verify_key({@ed25519_oid, key, {:namedCurve, @ed25519_oid}})}
+
+      _ ->
+        {:error, :unsupported_certificate_key}
     end
   end
 

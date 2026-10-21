@@ -15,7 +15,7 @@ certification, and OTP `:ssl` remains the recommended default.
 | `SSL.controlling_process/2` | Transfers the application owner and monitor. The connection process remains the TCP owner and sole owner of TLS state. Only the current application owner may transfer. |
 | `SSL.negotiated_protocol/1` | Returns authenticated ALPN as `{:ok, binary}` or `{:error, :protocol_not_negotiated}`. |
 | `SSL.connection_information/1,2` | Only `:protocol`, `:selected_cipher_suite`, and `:session_resumption`; explicit ordered key lists reject unknown/duplicate keys. No secret-bearing OTP keys. |
-| `SSL.peercert/1` | Authenticated leaf DER, including the revalidated cached chain for resumption. |
+| `SSL.peercert/1` | Leaf DER from the completed peer handshake, including cached DER on resumption. Chain trust/identity is revalidated only in `verify_peer`; `verify_none` does not make a certificate trust claim. |
 | `SSL.peername/1`, `SSL.sockname/1` | Live peer/local TCP address and port. |
 | `SSL.close/1` | Idempotent local close. Sends close_notify when no application write is uncertain and wakes admitted calls. |
 
@@ -64,7 +64,7 @@ Supported connection options are:
 - `:binary` or `mode: :binary`;
 - `packet: :raw | 0`;
 - `active: false | :once` (default `false`);
-- `verify: :verify_peer`;
+- `verify: :verify_peer | :verify_none` (default `:verify_peer`);
 - `cacerts` or `cacertfile`;
 - one initial-handshake client identity through `cert`/`certfile` and `key`/`keyfile` (forms and bounds below);
 - DNS `server_name_indication`;
@@ -78,7 +78,22 @@ Supported connection options are:
 - `alpn_advertised_protocols: [nonempty_binary, ...]`;
 - `ex_ssl: [profile: :default | %SSL.ClientHello.WireProfile{}, reference_identity: {:ip, address} | {:dns_id, name}]` (either key may be supplied).
 
-Verification cannot be disabled. Packet modes, list mode, active true/active-N, arbitrary TCP
+Explicit TCP `verify_none` skips certificate path/trust, validity and hostname
+verification. It still bounds and decodes the peer certificate chain, extracts the
+leaf public key with its key parameters, and requires valid CertificateVerify (TLS
+1.3) or signed ECDHE ServerKeyExchange (TLS 1.2), Finished and record AEAD. A
+successful handshake under this option does not establish the peer's identity or
+certificate trust. `SSL.QUIC` rejects the `verify` option and always requires its
+existing trust and identity checks.
+
+With explicit `verify_none`, omitted CA options do not load system trust. Empty
+`cacerts`, unused malformed CA entries and readable non-PEM CA files are admitted,
+as in the executed OTP 29 references. An explicit unreadable CA file still fails;
+`cacerts` retains precedence over `cacertfile`. Unsupported verification callbacks
+remain explicit option errors. Supplied reference/SNI values retain their shape
+validation even when hostname verification is disabled.
+
+Packet modes, list mode, active true/active-N, arbitrary TCP
 options outside the allowlist and `send_timeout_close: false` remain
 unsupported. Unsupported or malformed options return a redacted
 `{:error, {:options, reason}}`; supplied option data is not echoed.
@@ -124,14 +139,28 @@ Certificate-chain signature policy is separate from the leaf's TLS
 CertificateVerify scheme. An explicit `signature_algs_cert` option or
 `signature_algorithms_cert` profile extension restricts the signatures on the
 validated chain, using the chosen trust anchor and issuer key type/curve/PSS
-parameters. Trust-anchor and self-signed signatures are exempt, but normal PKIX
-trust/path/identity validation still runs. RSA PKCS1 SHA256/384/512 is supported
+parameters. With `verify_peer`, trust-anchor and self-signed signatures are
+exempt, but normal PKIX trust/path/identity validation still runs. Explicit
+`verify_none` skips this validated-chain policy as in the executed OTP 29
+reference: a valid forced fallback chain outside `signature_algs_cert` completed
+only in none mode. The advertised wire policy is preserved. This follows the
+fallback-chain allowance in [RFC 9846 §4.5.1.2](https://www.rfc-editor.org/rfc/rfc9846.html#section-4.5.1.2);
+CertificateVerify still must use an offered scheme and a compatible leaf key.
+Both modes require the leaf's `digitalSignature` usage when KeyUsage is present.
+TLS 1.3 also requires X.509v3 for every presented Certificate entry, including a
+transmitted root and cached peer chains. This check does not reject a locally
+configured v1 trust anchor omitted from the wire. TLS 1.2 keeps its existing
+certificate-version behavior; an independent OTP/OpenSSL v1 none-mode exchange is
+covered by the compatibility test. A certificate failing the signing/v3 checks
+requires a corrected or reissued signing-capable v3 credential. A locally trusted
+v1 root can instead be omitted from the presented chain.
+RSA PKCS1 SHA256/384/512 is supported
 for certificate signatures only, with the required runtime padding primitive.
 It is never accepted as a TLS 1.3 CertificateVerify signature.
 
 The default profile and trust behavior remain unchanged when no certificate
 signature policy is supplied. `signature_algs` restricts CertificateVerify;
-use `signature_algs_cert` to impose a chain restriction. This explicit-policy
+use `signature_algs_cert` to impose a validated-chain restriction in `verify_peer`. This explicit-policy
 boundary is a documented difference from OTP's default option derivation.
 
 | TLS policy option | Supported forms |
@@ -271,13 +300,14 @@ before consuming authenticated response bytes.
 
 ## STARTTLS and security boundaries
 
-STARTTLS callers must own a connected binary/passive/raw `:gen_tcp` socket,
-fully consume and validate the positive upgrade reply, reject plaintext held in
-their own parser, and supply a DNS reference identity through
-`server_name_indication` or an explicit IP/DNS identity through
+STARTTLS callers must own a connected binary/passive/raw `:gen_tcp` socket and
+fully consume and validate the positive upgrade reply, including plaintext held in
+their own parser. With default `verify_peer`, they must also supply a DNS reference
+through `server_name_indication` or an explicit IP/DNS reference through
 `ex_ssl: [reference_identity: ...]`. Explicit IP and DNS references work without
-SNI; a peer must still present a trusted certificate matching that reference.
-Queued or delivered TCP plaintext causes explicit
+SNI and require a trusted certificate matching that reference. Explicit
+`verify_none` permits an upgrade without SNI or a reference identity and makes no
+trust/identity claim. Queued or delivered TCP plaintext causes explicit
 failure and owned-socket closure. A non-owner's TCP socket is not closed.
 
 Profiles affect offered wire capabilities only. They cannot replace trust or
@@ -434,10 +464,13 @@ derived from its nonce. Retained entries are limited to 128 partitions, 4 MiB
 aggregate, 256 KiB each, 16 KiB ticket bytes and seven days lifetime. Atomic
 one-use checkout and a single expiry timer bound cache lifetime and concurrency.
 Cache calls fail closed after 25 ms; a cache failure takes the full-handshake
-path. There is no persistent state. Each checkout revalidates the saved chain
-against current time, reference identity, loaded CA content, depth and certificate
-signature policy. Partition digests also cover the concrete endpoint, hostname,
-ALPN and ordered version/cipher/group/signature/profile policies.
+path. There is no persistent state. Each `verify_peer` checkout revalidates the
+saved chain against current time, reference identity, loaded CA content, depth and
+certificate signature policy. Explicit `verify_none` checkout still performs
+bounded certificate/key decoding but skips those trust/identity checks. Partition
+digests include verification mode, so tickets admitted under `verify_none` cannot
+cross into `verify_peer`, as well as the concrete endpoint, hostname, ALPN and
+ordered version/cipher/group/signature/profile policies.
 
 Resumption requires fresh ECDHE, a valid binder, selected identity zero with a
 compatible hash, unchanged selected ALPN, and authenticated Finished. HRR uses
