@@ -18,6 +18,16 @@ versions and counts. Current migration checks are tracked in
 [migration validation](migration-validation.md). This inventory does not claim
 full OTP compatibility or completed independent human security review.
 
+## Complete provider migration (2026-10-21)
+
+The current migration baseline is umbrella `main@6b69bde` (`0.21.14`).
+The [migration design and compatibility table](tls-migration-design.md) and
+[staged checklist](tls-migration-plan.md) track the remaining work to make
+ExSSL the sole production TLS provider. [Execution evidence](tls-migration-validation.md)
+records checks performed against this baseline, separately from the historical
+standalone release evidence below. P0 is in progress: no default promotion,
+managed ExSSL support, completion support or production OTP SSL removal is claimed.
+
 | Requirement | Status | Production boundary | Executable coverage |
 | --- | --- | --- | --- |
 | Connect, ownership, send, passive recv, active-once, ALPN, close | implemented | `http_core` transport behaviour and SSL/ExSSL adapters | `apps/http_core/test/http/tls_transport_test.exs` |

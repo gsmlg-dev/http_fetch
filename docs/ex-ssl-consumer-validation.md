@@ -1,5 +1,11 @@
 # Published ex_ssl consumer validation
 
+For the current `0.21.14` umbrella provider migration, see the
+[TLS migration execution ledger](tls-migration-validation.md). The standalone
+package versions, checksums, scenarios and counts below remain historical evidence
+at their stated source/runtime boundaries; they do not establish current migration
+acceptance or production OTP SSL removal.
+
 Validation date: 2026-09-23. Implementation baseline: `http_fetch` commit `b4ad2f5` (0.13.0 release metadata),
 following reviewed commit `6a6c93e`. Work is isolated on
 `codex/ex-ssl-consumer-validation`. This document records local consumer evidence;
