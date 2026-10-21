@@ -38,7 +38,7 @@ Test paths below are relative to the repository root.
 | TLS 1.2 endpoint profile | OTP policy | ECDHE AES-GCM, EMS, initial secure renegotiation | Independent peer coverage; decide PKCS1 SHA256+ handshake support separately from TLS1.3 (decision) | ex_ssl | `apps/ex_ssl/test/ssl/tls12_interop_test.exs` | Yes |
 | CA precedence / reference identity | System roots unless explicit CA; origin verification | Explicit cacerts, then file, then roots; DNS/IP identity and SNI | Preserve system/custom trust, pinned and tunnel-origin identity (supported subset) | core, ex_ssl | `tls_transport_test.exs`, `reference_identity_interop_test.exs` under respective app tests | Additional route matrix |
 | `verify_none` | Public adapter passes through; managed allows | Rejects | Faithful implementation or explicit versioned compatibility change (decision); keep verify_peer default | ex_ssl, core | `tls_transport_test.exs`, `apps/ex_ssl/test/ssl/certificate_policy_options_test.exs` | Yes |
-| Verification callbacks, partial chain, CRL/OCSP, encrypted keys, identities | OTP public options available | Bounded verified subset, explicit unsupported errors | Inventory actual required contract and decide each incompatibility; no whole-OTP claim (decision) | ex_ssl | `certificate_policy_options_test.exs`, mTLS candidate groups | Yes until classified |
+| Verification callbacks, partial chain, CRL/OCSP, encrypted keys, identities | Ordinary OTP backend accepts backend-specific options; managed policy explicitly excludes callbacks/revocation/encrypted keys | Bounded verified subset, explicit unsupported errors | Classify ordinary escape hatches separately; verify_fun has actual HTTP tests and special pool treatment; no whole-OTP claim (decision) | ex_ssl | `certificate_policy_options_test.exs`, `apps/http_fetch/test/http/tls_setup_evidence_test.exs`, mTLS candidate groups | Yes until individually resolved |
 | Safe TCP/send options | OTP options | Adapter allowlist; defaults < ssl < socket options | Preserve explicit precedence and mutation/binding rules (supported) | core, ex_ssl | `scripts/ex_ssl_options_test.exs` | Required matrix |
 | Managed H1/H2 | OTP only | Rejected before dial | Enable after provider lifecycle and policy are complete (required) | runtime, core | `apps/http_fetch/test/http/managed_otp_tls_lifecycle_test.exs` adapted to ExSSL | Yes |
 | Managed internal `buffer: 65_536` | Injected into socket options | Adapter and engine reject | Implement faithful driver buffer support or document/test equivalent bounded internal policy; never discard caller value (required) | runtime, core, ex_ssl | `apps/ex_ssl/test/ssl/tcp_options_test.exs` plus managed tests | Yes |
@@ -51,6 +51,38 @@ Test paths below are relative to the repository root.
 | Fetch / SSE / WSS | Existing supported H1/H2 APIs | Explicit ExSSL ordinary paths exist | Preserve streaming, reconnect pinning, Upgrade, timeouts, abort and proxies (supported subset) | clients, runtime | Existing client suites + feature candidate groups | Full integrated acceptance |
 | Explicit H3 / QUIC | Separate path | Public SSL.QUIC path | Preserve current explicit static/literal QPACK beta; no new support claim | ex_ssl, QUIC, H3 | Existing QUIC/H3 source and candidate gates | Shared-core regression |
 | Production dependency closure | Five HTTP manifests include ssl | Independent engine itself needs crypto/public_key | Remove adapter/dispatch/private assumptions and five app dependencies in P6; isolate test peers (required) | all, release tooling | New actual production release + BEAM/boot/closure gate | Yes |
+
+## Compatibility decision direction (source-reviewed; implementation gates remain)
+
+- Preserve explicit `verify_none` for TCP HTTP as an implementation requirement,
+  keeping verify_peer default and all handshake signature/Finished/AEAD checks.
+  Fetch's real self-signed success test and the managed validator establish this
+  public behavior; current optional ExSSL rejection does not preserve it globally.
+- Preserve explicit driver buffer/tos/tclass/priority semantics through actual inet
+  options where the OS supports them. Check driver values, precedence, upgrade and
+  mutation phases against OTP; never equate driver buffer with TLS parser limits.
+- Keep concrete explicit WireProfile versions authoritative when caller versions are
+  absent. Preserve existing explicit auto-ticket callers as TLS1.3-only when versions
+  are absent; ordinary unprofiled/disabled-ticket defaults can become mixed. Explicit
+  conflicting versions/profile and explicit mixed+auto remain errors until implemented.
+  This contextual-default proposal needs positive and negative adapter/candidate tests;
+  an existing H2 resumption fixture omits versions and must continue working.
+- Implement TLS1.2 PKCS1 SHA256/384/512 with version-specific scheme resolution and
+  independent forced-scheme peers, never by widening TLS1.3 CertificateVerify.
+- Resolve managed controls individually. Client honor_cipher_order may be inert only
+  after differential OTP evidence. middlebox_comp_mode affects actual wire behavior.
+  reuse_sessions is TLS1.2 resumption, distinct from H1 pooling/TLS1.3 tickets. Manual
+  ticket enum acceptance is public policy but does not imply HTTP ticket socket APIs.
+- Ordinary OTP verify_fun has real setup/cancellation tests and a non-reusable pool
+  key rule; preserve its behavior or explicitly version its removal. Managed policy
+  already excludes it. CRL/OCSP/partial_chain/encrypted-key/multiple-identity escape
+  hatches have no equivalent independent engine implementation: removal must be a
+  named versioned incompatibility with actionable errors and migration notes, not a
+  quiet claim that current optional ExSSL rejection settles the overall contract.
+
+These directions do not accept a breaking removal or establish completed support.
+Any narrowed ordinary OTP escape hatch remains a release blocker until its exact
+boundary and migration behavior are resolved and documented.
 
 ### Effective configuration facts
 

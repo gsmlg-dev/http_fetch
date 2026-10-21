@@ -3,8 +3,11 @@
 ## Execution identity and limits
 
 Date: 2026-10-21 (Asia/Shanghai). Source: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`,
-all nine packages `0.21.14`, initially clean worktree. P0 adds documentation and a
-bounded source inventory only; production code/defaults remain unchanged.
+all nine packages `0.21.14`, initially clean worktree. The first P0 checkpoint
+(`d7442ef`) added documentation and a bounded source inventory. Subsequent local
+changes remove compiler warnings and add diagnostic peers/benchmarks; TLS defaults
+and provider behavior remain unchanged. An unsuccessful shutdown experiment was
+reverted, as recorded below.
 Runtime: Elixir 1.20.1 / OTP 29 / ERTS 17.0.2, macOS Intel. OpenSSL 3.6.5.
 This does not establish the configured Elixir 1.18/OTP28 or 1.19/OTP28 results.
 
@@ -26,13 +29,13 @@ MIX_ENV=test MIX_BUILD_PATH=/tmp/http-fetch-tls-migration-p0-build unbuffer mix 
 | --- | --- | --- |
 | HEAD, worktree, versions | Baseline confirmed; initially clean | New P0 changes uncommitted |
 | Isolated dependency preparation | Exit 0, locked versions unchanged | Stale default build cache avoided |
-| Strict test compilation | Exit 1 | Existing unreachable `socket_resource/1` clause at `apps/http_core/lib/http/request_lifecycle.ex:200` on Elixir 1.20; subsequent non-strict compilation also reports bitstring-size warning in `apps/http_fetch/lib/http/http1/idle_timeout.ex:22` |
+| Strict test compilation | Initial exit 1; after two narrow repairs exit 0 | Inline the identity-only socket_resource callers after wrapper-specific clauses; pin the outer bitstring size. No provider behavior/default change |
 | Default umbrella test suite, seed 36 | Stopped with SIGTERM after failures were captured | Missing h2 prerequisite caused repeated startup failures; no final aggregate success claimed. Loopback and ExSSL upload cleanup failures also observed |
 | Focused H2 trailers + HTTPS early upload, pinned peer environment | Exit 2: 55/61 passed, 6 failed | All six failures belong to ExSSL early upload timeout/cleanup cases; H2 trailer startup failures disappear with the pinned Python dependencies |
 | Nine candidate archives + metadata | Passed | Built from unchanged production source, all nine identities/internal exact requirements validated |
 | Isolated external candidate consumer | Passed, `external consumer smoke passed` | Existing fixture includes OTP SSL; not production removal evidence |
 | Direct candidate feature invocation | Failed before test execution: EX_SSL_FIXTURE_DIR missing | Invocation did not prepare fixtures; use the existing wrapper below |
-| Candidate feature wrapper | Initial attempt exit 127: timeout executable absent | Install required coreutils and rerun unchanged wrapper; not acceptance |
+| Candidate feature wrapper | Initial exit 127 resolved; rerun exit 0, 68 tests passed in nine groups | coreutils gnubin + pinned venv; Hex.SCM source archives, not published or OTP-free proof |
 | Source inventory | Exit 0 | 35 production files matched; category counts: 15 OTP calls/types, 20 private socket matches, 90 backend selections, 7 dynamic-dispatch candidates, 9 application declaration lines; overlapping categories and comments/types are included |
 | Existing engine benchmark | Exit 0, 24 exchanges | Preliminary TLS-only evidence below, not HTTP/managed performance acceptance |
 | `git diff --check` | Passed for changes so far | Repeat before stage commit |
@@ -46,8 +49,9 @@ not a full successful gate. Mandatory independent coverage still needs explicit 
 Observed source-suite failures include `:eaddrnotavail` for second loopback bindings,
 pinned-address/refusal timeouts, write-idle/trailer and H2 scripted peer timing,
 and Python H2 peer startup failure (`ModuleNotFoundError: h2`). Distinguish actual
-platform assumptions from product failures with focused reproduction. No production
-fix, assertion weakening or skip was applied. The pinned HTTP2 peer requirements were
+platform assumptions from product failures with focused reproduction. At that first
+checkpoint no production fix, assertion change or skip was applied. The pinned HTTP2
+peer requirements were
 successfully installed in `/tmp/http-fetch-tls-migration-p0-venv` (h2 4.2.0,
 hpack 4.1.0, hyperframe 6.1.0, wsproto 1.2.0, h11 0.16.0). This changes test
 prerequisites, not runtime package dependencies.
@@ -68,9 +72,59 @@ assertions report `HTTPS socket remained open after confirmed request cleanup`
 the missing H2 dependency and need lifecycle/writer diagnosis; do not dismiss them
 as missing prerequisites or claim their root cause is already proven.
 
-`brew install coreutils` was started to provide the standard feature wrapper's
-required `timeout`. It is building from source on this Intel macOS host; installation
-and candidate wrapper rerun are pending at this checkpoint.
+`brew install coreutils` completed successfully (9.12_1). With its gnubin path
+and the pinned peer venv available, the unchanged candidate feature wrapper exited 0.
+The report at `/tmp/http-fetch-tls-migration-p0-feature-results/ex_ssl_feature_gate-candidate.txt`
+records Hex.SCM, runtime `hex-candidate/0.21.14`, fixture 0.7.2 at
+`fb47051355c9d0a29caee046fa060a745ad0ce5b`, seed 36, all nine discovered groups,
+and 68 passed tests (12/5/2/11/9/6/8/8/7 respectively), with no skips or zero-test
+groups. These archives still contain the original production baseline, not subsequent
+local repairs, and the fixture includes OTP SSL. This is candidate feature evidence,
+not published package or OTP-free production release evidence.
+
+## Follow-up timeout diagnosis and compiler repairs
+
+A bounded non-secret probe captured explicit send_timeout=600 and changing logical
+write tokens with fresh original deadlines every approximately 200–500 ms. The
+previous 20 ms stable output token did not prove a single logical write remained
+blocked for 600 ms. Forwarding was intact; no timeout-forwarding production change
+was made. The temporary probe and logging were removed.
+
+For native send-timeout cases only, the upload matrix now uses an independent
+Python/OpenSSL peer with no background reads after request headers. Listener and
+accepted sockets both receive the small receive-buffer policy. A 150 ms per-send
+deadline fits the observed blocked interval rather than allowing each progressing
+64 KiB logical send to complete under the old 600 ms deadline. Existing two-second
+Promise wait, error classification, one-second request/source/writer cleanup bound,
+and peer EOF/reset assertions remain. `tls_outcome` permits focused execution; the
+external peer must report actual closure and exit successfully before acknowledgment.
+All eight backend × H1/auto × finite/infinite send-timeout cases passed after the
+shutdown experiment was reverted, including final peer-exit acknowledgment.
+
+The earlier combined follow-up run passed all 469 ExSSL base checks (194 integration
+checks excluded), and 78/81 selected Fetch checks. Three ExSSL peer-open failures
+remained: H1 buffered/4000, auto cancel/4000, H1 streamed/infinity. Adding
+write_abandoned? to zero-linger selection did not eliminate them and was reverted;
+this is not a proven root cause or shipped fix. Next probes must distinguish provider
+connection/writer termination, raw port disappearance, and remote TLS receiver state.
+
+Strict compilation now exits 0 after removing the unreachable socket helper branch
+without changing either identity path and pinning the external binary size in
+HTTP1.IdleTimeout. A separate final run of completion, pooled completion and H2
+trailers passed all 54 checks with the pinned peer PATH (see command). Existing H2 test-source
+bitstring pin warning remains; it is distinct from production strict compilation.
+
+```bash
+PATH=/tmp/http-fetch-tls-migration-p0-venv/bin:$PATH \
+  MIX_ENV=test MIX_BUILD_PATH=/tmp/http-fetch-tls-migration-p0-build \
+  unbuffer mix test apps/http_fetch/test/http/request_completion_test.exs \
+  apps/http_fetch/test/http/pooled_request_completion_test.exs \
+  apps/http_fetch/test/http/http2_request_trailers_test.exs --seed 36
+PATH=/tmp/http-fetch-tls-migration-p0-venv/bin:$PATH \
+  MIX_ENV=test MIX_BUILD_PATH=/tmp/http-fetch-tls-migration-p0-build \
+  unbuffer mix test apps/http_fetch/test/http/https_early_upload_test.exs \
+  --only tls_outcome:send_timeout --seed 36
+```
 
 ## Reproducible candidate commands
 
@@ -86,7 +140,8 @@ elixir scripts/release/archives.exs 0.21.14 \
   /tmp/http-fetch-tls-migration-p0-candidate-20261021/archives
 python3 scripts/release/consumer_gate.py 0.21.14 \
   /tmp/http-fetch-tls-migration-p0-candidate-20261021/archives --mode external
-EX_SSL_DEP_MODE=candidate \
+PATH=/usr/local/opt/coreutils/libexec/gnubin:/tmp/http-fetch-tls-migration-p0-venv/bin:$PATH \
+  PYTHONDONTWRITEBYTECODE=1 EX_SSL_DEP_MODE=candidate \
   EX_SSL_CANDIDATE_ARCHIVE_DIR=/tmp/http-fetch-tls-migration-p0-candidate-20261021/archives \
   EX_SSL_RESULTS_DIR=/tmp/http-fetch-tls-migration-p0-feature-results \
   EX_SSL_TEST_SEED=36 bash scripts/ex_ssl_source_smoke.sh
@@ -123,6 +178,80 @@ Other baseline jobs were active, sample count is small, and transfers combine up
 and download. These values are diagnostic only: no tail latency, resource/cleanup
 budget, independent throughput budget or production readiness claim follows.
 Run isolated comparable HTTP workloads and set promotion budgets before P5.
+
+## HTTP baseline measurements
+
+The public-API benchmark and independent control peer are
+`scripts/tls_migration_benchmark.exs` and `scripts/tls_migration_benchmark_peer.py`.
+Full samples, 213 runtime-source/manifest hashes, tracked-patch digest, script/cert
+hashes, runtime settings, peer exchanges and resource observations are retained in
+[tls-migration-p0-http-baseline.json](tls-migration-p0-http-baseline.json).
+The raw stdout SHA256 is included; only redundant intermediate handshake histories
+were replaced with counts, with the full final history retained.
+
+```bash
+MIX_ENV=test MIX_BUILD_PATH=/tmp/http-fetch-tls-migration-p0-build \
+  unbuffer mix run --no-compile scripts/tls_migration_benchmark.exs
+```
+
+Actual run exited 0, with no concurrent project tests. Source `d7442ef` plus the
+recorded local compiler repairs and scripts. Python 3.15.0 / Python-linked OpenSSL
+4.0.3 (the earlier standalone benchmark used OpenSSL CLI 3.6.5). Both providers
+negotiated verified TLS1.3, AES256-GCM, ALPN http/1.1, disabled peer tickets, no
+resumption; client nodelay enabled. Each workload used three warmups and 30 measured
+samples, concurrency one, OTP then ExSSL. Cold requests used distinct connections;
+upload/download/reuse each proved the same connection ID through an explicit final
+close response. All payloads and lengths were checked. Peer totals: 270 requests,
+72 accepted/closed connections, zero active connections, zero peer errors,
+69,206,016 uploaded bytes including warmups.
+
+| Backend / workload | Request p50 / p95 / p99 (µs) | Measured goodput (MiB/s) |
+| --- | --- | --- |
+| OTP / cold small | 12,768 / 21,867 / 22,147 | — |
+| ExSSL / cold small | 12,027 / 22,171 / 25,751 | — |
+| OTP / 1 MiB upload | 13,048 / 25,758 / 29,224 | 60.77 |
+| ExSSL / 1 MiB upload | 22,558 / 54,714 / 63,151 | 39.93 |
+| OTP / 1 MiB download | 12,026 / 25,977 / 30,061 | 66.49 |
+| ExSSL / 1 MiB download | 15,311 / 44,483 / 83,746 | 41.81 |
+| OTP / paced reused small | 16,141 / 23,253 / 25,461 | — |
+| ExSSL / paced reused small | 5,296 / 20,133 / 20,855 | — |
+
+Cold server handshake p50/p95/p99 µs: OTP 8,969/18,266/18,486; ExSSL
+7,320/10,969/21,181. This measures the peer's wrap_socket duration including client
+scheduling, not isolated client handshake latency. Cold request timing includes
+connect/TLS/HTTP/body verification. Goodput is sequential application transfer,
+including response/body checks; it is not raw TLS bandwidth.
+
+At post-workload observations approximately 304–387 ms after final close, both
+providers had 165 VM processes, four ports including the still-live external peer,
+and zero peer connections. During reused workloads OTP had 168 processes/five ports,
+ExSSL 167/five. Download live binary allocations were approximately 5.10 MB OTP and
+9.40 MB ExSSL, returning to approximately 3.72 MB and 3.65 MB respectively in these
+observations. These are noisy global BEAM allocations, not RSS or provider cleanup
+receipts; no forced global GC or plateau/leak proof is claimed.
+
+Every OTP request's public completion returned :ok; every ExSSL request returned
+`{:error, {:unsupported_completion, :tls_backend}}`. OTP measured completion wait
+p50/p95/p99 µs: cold 29/49/99, upload 27/73/94, download 30/72/88, reuse 28/45/53.
+The ExSSL unsupported-return duration is recorded but does not establish cleanup.
+The paced reuse interval was one second, not a production long-duration soak.
+
+Thirty observations make the reported nearest-rank p99 equal to the maximum; these
+are reproducible diagnostic baselines, not stable tail acceptance. Other supported
+runtimes, TLS1.2, resumption, H2/H3, concurrent loads, managed completion, long soaks
+and promotion budgets remain pending. Do not derive a passing budget from these
+ExSSL results or present the run as P5 acceptance.
+
+## Formatting and static-analysis checkpoint
+
+Root `mix format --check-formatted` exited 0. Root `mix credo` then exited 1 while
+checking 513 files: pinned Credo 1.7.13 crashes in Credo.Code.Token.position/1 on
+Elixir 1.20 sigil tokens. The installed matcher for seven-element sigil tuples
+requires `{line, column, nil}` metadata; actual tokens contain an ending-position
+tuple instead. Failures occur in unchanged HTTP3/options/response/setup-test files,
+not a lint finding in the migration edits. No dependency code was patched and no
+check was disabled. Compatible supported-toolchain execution or a verified upstream
+tooling update remains required; this is not a successful Credo gate.
 
 ## Open P0 work and release blockers
 
