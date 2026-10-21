@@ -2,7 +2,7 @@ defmodule SSL.Lifecycle.Observer do
   @moduledoc false
   use GenServer, restart: :temporary
 
-  alias SSL.Lifecycle.{Authority, ObserverSupervisor, Receipt, ResourceLedger}
+  alias SSL.Lifecycle.{Authority, Handoff, ObserverSupervisor, Receipt, ResourceLedger}
 
   # Private cooperative provider protocol, not the public lifecycle API. Possession
   # of a permit delegates self-enrollment; it does not attest spawn ancestry.
@@ -70,6 +70,23 @@ defmodule SSL.Lifecycle.Observer do
   def reject_before_native(receipt, role, token, deadline),
     do: call(receipt, {:reject_before_native, role, token}, deadline)
 
+  # Private cooperative ownership protocol; no TLS readiness or native birth proof.
+  @spec writer_ready(Receipt.t(), {:abs_ms, integer()}) :: {:ok, reference()} | {:error, atom()}
+  def writer_ready(receipt, deadline), do: call(receipt, :writer_ready, deadline)
+
+  @spec connection_ready(Receipt.t(), reference(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
+  def connection_ready(receipt, nonce, deadline),
+    do: call(receipt, {:connection_ready, nonce}, deadline)
+
+  @spec prepare_handoff(Receipt.t(), port(), pid(), {:abs_ms, integer()}) ::
+          {:ok, reference()} | {:error, atom()}
+  def prepare_handoff(receipt, port, connection, deadline),
+    do: call(receipt, {:prepare_handoff, port, connection}, deadline)
+
+  @spec commit_handoff(Receipt.t(), reference(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
+  def commit_handoff(receipt, nonce, deadline),
+    do: call(receipt, {:commit_handoff, nonce}, deadline)
+
   @spec helper_done(Receipt.t(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
   def helper_done(receipt, deadline), do: call(receipt, :helper_done, deadline)
 
@@ -96,6 +113,8 @@ defmodule SSL.Lifecycle.Observer do
        ledger: ResourceLedger.new(scope),
        permits: %{},
        resources: %{},
+       handoff: Handoff.new(self()),
+       handoff_timer: nil,
        setup: :not_started,
        failure: :none,
        deadline: deadline,
@@ -114,8 +133,23 @@ defmodule SSL.Lifecycle.Observer do
     if now() < deadline do
       operation =
         case operation do
-          {:cancel, lease} -> {:cancel, lease, deadline}
-          other -> other
+          {:cancel, lease} ->
+            {:cancel, lease, deadline}
+
+          :writer_ready ->
+            {:writer_ready, {:abs_ms, deadline}}
+
+          {:connection_ready, nonce} ->
+            {:connection_ready, nonce, {:abs_ms, deadline}}
+
+          {:prepare_handoff, port, connection} ->
+            {:prepare_handoff, port, connection, {:abs_ms, deadline}}
+
+          {:commit_handoff, nonce} ->
+            {:commit_handoff, nonce, {:abs_ms, deadline}}
+
+          other ->
+            other
         end
 
       {reply, next} = operate(operation, elem(from, 0), state)
@@ -137,6 +171,17 @@ defmodule SSL.Lifecycle.Observer do
 
     if next.grace == nil do
       {:noreply, %{next | timer: schedule_deadline(next.expires)}}
+    else
+      settle_info(next)
+    end
+  end
+
+  def handle_info({:timeout, ref, :handoff}, %{handoff_timer: ref} = state)
+      when is_reference(ref) do
+    next = expire(state)
+
+    if next.grace == nil and Handoff.pending?(next.handoff) do
+      {:noreply, %{next | handoff_timer: schedule_handoff(Handoff.deadline(next.handoff))}}
     else
       settle_info(next)
     end
@@ -213,7 +258,14 @@ defmodule SSL.Lifecycle.Observer do
 
       case ResourceLedger.enroll(state.ledger, role, token, {ref, type, object}) do
         {:ok, ledger, action} ->
-          resource = %{identity: {ref, type, object}, live: true, done: false}
+          resource = %{
+            identity: {ref, type, object},
+            live: true,
+            done: false,
+            creator: permit.parent,
+            creator_pid: permit.creator,
+            creator_monitor: permit.creator_monitor
+          }
 
           next = %{
             state
@@ -245,16 +297,71 @@ defmodule SSL.Lifecycle.Observer do
     end
   end
 
+  defp operate({:writer_ready, {:abs_ms, deadline}}, caller, state) do
+    nonce = make_ref()
+
+    with {:ok, context} <-
+           handoff_context(state, caller, :writer, [:setup, :connection, :writer], deadline),
+         {:ok, handoff} <- Handoff.writer_ready(state.handoff, %{context | now: now()}, nonce) do
+      {{:ok, nonce}, update_handoff(state, handoff)}
+    else
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp operate({:connection_ready, nonce, {:abs_ms, deadline}}, caller, state) do
+    with {:ok, context} <-
+           handoff_context(state, caller, :connection, [:setup, :connection, :writer], deadline),
+         {:ok, handoff} <- Handoff.connection_ready(state.handoff, %{context | now: now()}, nonce) do
+      {:ok, update_handoff(state, handoff)}
+    else
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp operate({:prepare_handoff, port, connection, {:abs_ms, deadline}}, caller, state) do
+    nonce = make_ref()
+
+    with {:ok, context} <-
+           handoff_context(state, caller, :allocator, @process_roles ++ [:tcp], deadline),
+         true <-
+           elem(context.identities.tcp, 2) == port and
+             elem(context.identities.connection, 2) == connection,
+         :ok <- handoff_owner(context, :allocator),
+         {:ok, handoff} <- Handoff.prepare(state.handoff, %{context | now: now()}, nonce) do
+      {{:ok, nonce}, update_handoff(state, handoff)}
+    else
+      false -> {{:error, :foreign_handoff_resource}, state}
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp operate({:commit_handoff, nonce, {:abs_ms, deadline}}, caller, state) do
+    with {:ok, context} <-
+           handoff_context(state, caller, :connection, @process_roles ++ [:tcp], deadline),
+         :ok <- handoff_owner(context, :connection),
+         {:ok, handoff} <- Handoff.commit(state.handoff, %{context | now: now()}, nonce) do
+      {:ok, update_handoff(state, handoff)}
+    else
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
   defp operate(:helper_done, caller, state) do
     case creator(state, caller) do
       {:setup, _resource} when state.setup == :pending ->
         {{:error, :setup_outcome_pending}, state}
 
       {role, resource} when role in [:allocator, :setup] ->
-        if Enum.any?(state.permits, fn {_, permit} -> permit.creator == caller end) do
-          {{:error, :allocations_pending}, state}
-        else
-          {:ok, %{state | resources: Map.put(state.resources, role, %{resource | done: true})}}
+        cond do
+          Handoff.pending?(state.handoff) ->
+            {{:error, :handoff_pending}, state}
+
+          Enum.any?(state.permits, fn {_, permit} -> permit.creator == caller end) ->
+            {{:error, :allocations_pending}, state}
+
+          true ->
+            {:ok, %{state | resources: Map.put(state.resources, role, %{resource | done: true})}}
         end
 
       _ ->
@@ -267,6 +374,101 @@ defmodule SSL.Lifecycle.Observer do
       do: publish(state, result),
       else: {{:error, :setup_not_permitted}, state}
   end
+
+  defp handoff_context(state, caller, role, roles, deadline) do
+    with true <- state.scope == :dial and open?(state),
+         true <- handoff_process_live?(state.owner) and handoff_process_live?(state.controller),
+         {:ok, identities} <- handoff_resources(state, roles),
+         true <- elem(Map.fetch!(identities, role), 2) == caller do
+      identities =
+        Map.merge(identities, %{
+          owner: {state.owner_monitor, :process, state.owner},
+          controller: {state.controller_monitor, :process, state.controller}
+        })
+
+      {:ok, %{observer: self(), identities: identities, deadline: deadline, now: now()}}
+    else
+      false -> {:error, :unauthorized_handoff_caller}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp handoff_resources(state, roles) do
+    Enum.reduce_while(roles, {:ok, %{}}, fn role, {:ok, identities} ->
+      case handoff_resource(state, role) do
+        {:ok, identity} -> {:cont, {:ok, Map.put(identities, role, identity)}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp handoff_resource(state, role) do
+    with %{live: true, done: false, identity: identity, creator: creator} = resource <-
+           Map.get(state.resources, role),
+         {:ok, %{state: :live, identity: ^identity, creator: ^creator}} <-
+           ResourceLedger.enrollment_view(state.ledger, role),
+         true <- handoff_identity_live?(identity),
+         true <- handoff_parent_live?(state, role, resource) do
+      {:ok, identity}
+    else
+      _ -> {:error, :handoff_resources_pending}
+    end
+  end
+
+  defp handoff_parent_live?(state, role, %{creator: :observer} = resource)
+       when role in [:allocator, :setup] do
+    resource.creator_pid == state.owner and resource.creator_monitor == state.owner_monitor
+  end
+
+  defp handoff_parent_live?(state, role, %{creator: {parent, ref}} = resource) do
+    expected = %{connection: :setup, writer: :connection, tcp: :allocator}
+
+    case Map.get(state.resources, parent) do
+      %{live: true, done: false, identity: {^ref, :process, pid}} ->
+        Map.get(expected, role) == parent and resource.creator_pid == pid and
+          resource.creator_monitor == ref and handoff_process_live?(pid)
+
+      _ ->
+        false
+    end
+  end
+
+  defp handoff_parent_live?(_state, _role, _resource), do: false
+
+  defp handoff_process_live?(pid),
+    do: is_pid(pid) and node(pid) == node() and Process.alive?(pid)
+
+  defp handoff_identity_live?({_ref, :process, pid}), do: handoff_process_live?(pid)
+  defp handoff_identity_live?({_ref, :port, port}), do: Port.info(port) != nil
+
+  defp handoff_owner(context, role) do
+    port = elem(context.identities.tcp, 2)
+    owner = elem(Map.fetch!(context.identities, role), 2)
+
+    if Port.info(port, :connected) == {:connected, owner},
+      do: :ok,
+      else: {:error, :port_not_owned}
+  end
+
+  defp update_handoff(state, handoff) do
+    timer =
+      cond do
+        not Handoff.pending?(handoff) ->
+          _ = if state.handoff_timer, do: Process.cancel_timer(state.handoff_timer)
+          nil
+
+        state.handoff_timer != nil ->
+          state.handoff_timer
+
+        true ->
+          schedule_handoff(Handoff.deadline(handoff))
+      end
+
+    %{state | handoff: handoff, handoff_timer: timer}
+  end
+
+  defp schedule_handoff(deadline),
+    do: :erlang.start_timer(min(max(0, deadline - now()), 0xFFFFFFFF), self(), :handoff)
 
   defp reserve(%{scope: :upgrade} = state, :tcp, _creator, _caller),
     do: {{:error, :adoption_not_implemented}, state}
@@ -397,17 +599,24 @@ defmodule SSL.Lifecycle.Observer do
             resources: Map.put(state.resources, role, %{resource | live: false})
         }
 
-        if role in [:allocator, :setup] and resource.done, do: next, else: retire(next, :internal)
+        if role in [:allocator, :setup] and resource.done and
+             not Handoff.involves?(state.handoff, identity),
+           do: next,
+           else: retire(next, :internal)
     end
   end
 
-  defp expire(%{grace: nil, expires: expires} = state) when is_integer(expires) do
-    if now() >= expires, do: retire(state, :timeout), else: state
+  defp expire(%{grace: nil} = state) do
+    instant = now()
+
+    if (is_integer(state.expires) and instant >= state.expires) or
+         Handoff.expired?(state.handoff, instant), do: retire(state, :timeout), else: state
   end
 
   defp expire(state), do: state
 
   defp retire(%{grace: nil} = state, reason) do
+    state = update_handoff(state, Handoff.invalidate(state.handoff))
     instant = now()
 
     {:ok, authority} =

@@ -114,6 +114,14 @@ coverage; no supported endpoint class silently lost.
 - [x] Replace fixed-length mismatch fixture timing with actual peer header/prefix
       receipts: controlled old3/3 accept:eINVAL while listener owned/open, corrected
       27 focused +62 whole-file passes; exact errors/abc/abc/empty bytes unchanged.
+- [x] Implement the private cooperative TCP ownership protocol core: retain consumed
+      creator generations; writer/Connection challenge; allocator prepare and original
+      Connection commit after actual native ownership transfer, one-use attempt-bound
+      grant. Six manually enrolled REAL passive-TCP cases pass incrementally.
+      First finite readiness deadline bounds PENDING phases only; successful commit
+      cancels/ref-fences that timer, never imposes a connection lifetime cap.
+      Lost ACK stays acceptance-unknown. No actual TLS actor attach/readiness/public
+      lifecycle/adoption claim; task20 hard-edge race coverage remains OPEN.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
       and private real allocator/setup direct-dial orchestration with original
       deadlines and acknowledged outcome publication.

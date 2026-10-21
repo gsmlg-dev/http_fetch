@@ -253,13 +253,42 @@ One supplied finite absolute control deadline, clipped once to the original setu
 deadline, covers every enrollment/reservation/readiness/release wait, including a
 suspended Observer RPC. The original setup deadline remains the handshake timer
 anchor, armed only after writer enrollment acknowledgment. Private ready actors
-reject legacy attach/data calls: actual TCP identity enrollment and ownership ACK
-remain separate work. Tests using caller-owned raw sockets exercise writer gates
+reject legacy attach/data calls: attachment of a TCP port to the actual TLS actors
+remains separate work. Tests using caller-owned raw sockets exercise writer gates
 only; their receipts do not attest TCP adoption. The classic public constructor
 still starts its ordinary writer/timer directly.
 
-Actual allocator/setup births, TCP attachment/dial failure proof, public lifecycle,
-adoption, owner ACK/authority transfer and socket/facade integration remain open.
+A separate private cooperative Observer ownership protocol now retains the original
+consumed creator PID/monitor generation in its enrolled records and the ledger.
+A typed ledger view supplies provenance without remonitoring or exposing opaque
+ledger internals. The fixed-size pure Handoff state binds one writer challenge to
+the original live Connection generation; that Connection acknowledges it before
+the allocator can prepare a fresh single-use grant for the exact enrolled port.
+Prepare verifies its current native owner is the original allocator; commit by
+the recorded Connection verifies actual native ownership after controlling_process.
+Original Observer, parent generations, controller/owner, admission and actor
+liveness are checked; a role mask alone is never readiness or ownership evidence.
+These are trusted provider attestations using GenServer caller conventions and
+capabilities, not independent message-sender/spawn-ancestry authentication.
+
+The first finite absolute readiness deadline bounds pending readiness/prepare/
+commit, and cannot be extended or reminted. Pending handoff blocks helper completion.
+Relevant death, cancellation or pending expiry retires through the existing fixed
+grace, keeping unknown allocation and sticky loss. Successful commit consumes its
+grant, retains a spent state and cancels/reference-fences the pending timer: this
+short control deadline MUST NOT become a connection lifetime cap. The independent
+original setup deadline still applies. Lost control ACK is acceptance unknown,
+never rollback or no-resource evidence. Receipt dimensions and role bits stay fixed.
+
+This protocol is tested with manually enrolled cooperative actors and real passive
+TCP ownership transfer. It does not attest the inert TLS constructors readiness,
+perform TLS attach/release/I/O, or publish setup success. Original VM port DOWN is
+independent evidence from actor death; it does not additionally prove Unix physical
+FD close or remote terminal receipt. Those default/completion gates remain open.
+
+Actual allocator/setup births, TLS actor attachment/dial failure proof, public
+lifecycle, STARTTLS adoption, application owner ACK/authority transfer and socket/
+facade integration remain open.
 Upgrade observers reject new TCP allocation with adoption_not_implemented; this
 slice does not attest STARTTLS adoption or certify current TLS cleanup.
 Private `reject_before_native/4` now accounts for a provider

@@ -1362,3 +1362,191 @@ AND prompt verified. /tmp/http-fetch-round12-final-{compile,format,credo,
 dialyzer,scoped}.log. These are final restored-source checks; the3186 full run
 above used explicitly described temporary diagnostics, and its green outcome
 is not a production remote-close fix. git diff --check PASS.
+
+## Round13 — finite native counterpart and private ownership protocol
+
+Fresh HEADa050c62 clean before work; no round12 instrumentation installed.
+Matched native control /tmp/http-fetch-round13-finite-native-close.exs runs
+EXACTLYone active100/65536warmup/Port.close case per fresh VM, with native
+client sndbuf1024/buffer16640/active:once; peer buffer9216/recbuf requested1024.
+Both cases enable send_timeout_close:true, comparing ONLY client send_timeout
+infinity vs120000. Both effective option sets checked BEFORE write AND close;
+writer prim_inet.send/4 stably waiting with positive send_pend before/after
+reverse17B, successful live zero-linger readback, original independent Port
+monitor DOWN and owner/writer DOWN within original1s, then original2s peer drain.
+Wire write units16406B are raw bytes here, not TLS records. No TLS or keys.
+
+Initial control setup failed before native entry due module-attribute case
+parentheses syntax; corrected without touching repository production code.
+Actual paired logs /tmp/http-fetch-round13-native-{infinity,120000}-v2.log:
+BOTH peer:econnreset in0ms, local retirement0ms, matching_options:true, Portnil;
+ROUND13_NATIVE_EXIT=0 and prompt. Finite case native preclose send_pend10482
+(client62661 -> peer62660), actual send_timeout120000/closeTRUE. Requested
+recbuf is not effective recbuf (peer522416 at ready). This demonstrates that
+finite-timeout mode alone is insufficient in this raw counterpart; it does NOT
+falsify every TLS/OS interaction, identify cause, or resolve actual P0 failures.
+
+ONE independent OTP public TLS pair using exact current HTTPS fixture listener
+options and verified OTP client completed EXIT0, original monitors/cleanup:
+/tmp/http-fetch-round13-otp-peer-opts.{exs,log}. Native peer tuple62975<-62976:
+AFTERhandshake packet0/active98/buffer9216/recbuf325016/sndbuf146988/
+exit_on_closeTRUE; AFTERcontrolledheader packet0/active97/recbuf324936, other
+options same. Native mode is RAW at both observed stages; no framed-packet
+control is justified or executed from this fixture. Public recv calls remain
+distinct from TCP messages/TLS records. Test-only existing eight-field SSL
+socket extraction yielded only native Port; no private TLS state was accessed.
+
+Task20 private protocol tracer tests valid bound Observer, actual enrolled
+allocator/setup/Connection/writer, allocator-owned REAL passive TCP with
+acknowledged enrollment and roles31/allocations0/losses0/open before first new
+API. Root meaningful missing-feature RED0/1: UndefinedFunctionError at
+Observer.writer_ready/2, actual ROUND13_HANDOFF_RED_EXIT=2, no fixture error.
+/tmp/http-fetch-round13-handoff-first-red.log. Runtime phase follows this one
+vertical tracer, not a bulk imagined test suite. All implementation/negative
+behavior results will be recorded below; no public/default capability admitted.
+
+### Filtered terminal-message trace baseline and FD-close source audit
+
+OTP29 isolated public :trace sessions can install receive match specification
+BEFORE flags. RECEIVE head is [Node,Sender,Message]; the filter accepts ONLY
+{:tcp_closed,exact_token} or {:tcp_error,exact_token,ATOMreason}, all other
+messages suppressed in VM. Local artificial reference-token verification is
+NOT native terminal visibility/origin, TLS handler processing, wire RST or a
+privacy conclusion for sensitive TLS processes. No privacy flag was disabled.
+
+First /tmp/http-fetch-round13-filtered-trace.{exs,log} executes once EXIT2: all
+filter/disable/delivery/owned-actor checks passed, but harness incorrectly
+compared session_destroy to:ok. Keep failed source/log unchanged. Corrected
+v2 standalone source/log runs once EXIT0:2allowed/no unexpected, verified MS
+before receive enable, flags[] after disable+delivery barrier, no postdisable
+event, RAWsession_destroy:true, weak identity obtained via PUBLICsession_info
+all/absent afterdestroy, receiver/tracer/watchdog original DOWN alltrue. No
+opaque handle decomposition in v2; no network, native/TLS positive control,
+repository trace hooks or shared root-VM flag changes. Tool baseline only.
+
+Exact OTP-29.0.2 PUBLIC C networking/port source (not private SSL) was audited.
+Parent read the relevant cached excerpts. inet_drv.c7382 sets
+TCP_ADDF_LINGER_ZERO. [tcp_inet_flush12622](https://github.com/erlang/otp/blob/OTP-29.0.2/erts/emulator/drivers/common/inet_drv.c#L12622)
+ORs this flag into discard_output and clears the ENTIRE queued output via
+tcp_clear_output11713. Thus wait-for-driver-queue-flush DESPITE successful
+zero-linger is not supported by this source branch. No full-window/kill-port
+control was executed and no blind abort API change is justified.
+
+[io.c3923](https://github.com/erlang/otp/blob/OTP-29.0.2/erts/emulator/beam/io.c#L3923)
+issues monitor notifications BEFORE flush/terminate. The TCP stop path onUnix
+reaches [desc_close5053](https://github.com/erlang/otp/blob/OTP-29.0.2/erts/emulator/drivers/common/inet_drv.c#L5053),
+which hands the FD to driver_select(ERL_DRV_USE,0), invalidates its descriptor,
+and actual sock_close occurs at [inet_stop_select12687](https://github.com/erlang/otp/blob/OTP-29.0.2/erts/emulator/drivers/common/inet_drv.c#L12687).
+The [exact-tag callback contract](https://github.com/erlang/otp/blob/OTP-29.0.2/erts/doc/references/driver_entry.md)
+permits stop_select after the port is closed (or inline). Logical Portnil/DOWN
+therefore DOES NOT by itself attest physical FD absence. This supports a
+possible handoff gap, NOT an actual2s delay or cause in the failed R12 tuple.
+Runtime-specific kernel/FD observation still missing; version-tag source alone
+is not instrumentation of the installed binary.
+
+Public exit(Port,kill) is supported; its generic port-exit branch bypasses
+flush, while Port.close uses normal. With successful zero linger normal flush
+already discards output; both reach the SAME TCP stop/select-FD handoff. No
+source evidence establishes that kill fixes this gap, so no substitution made.
+Private role31 receipts attest original VM resource monitors only, not an
+additional OS-FD/peer-receipt guarantee; public completion/default admission
+remains gated on the original supported contracts and separate survivor/wire
+evidence. No frozen v1 word, role bit, deadline or cleanup policy was changed.
+
+A current upstream search found [OTPissue11319](https://github.com/erlang/otp/issues/11319):
+it describes a triggered send-timeout with FD closed but Port still open, and
+missing active-owner notification. The actual R12 client has ~119961ms
+remaining, no matching native timeout and an explicitly closed/gone Port.
+Those observations are NOT the same failure shape; no attribution or runtime
+upgrade recommendation follows from that report. Its issue status alone is
+not proof of a relevant fix. No upstream reproduction was executed.
+
+### Private cooperative TCP ownership core — incremental acceptance
+
+ROOTtracermeaningfulRED0/1 missingwriter_ready/2 then minimalruntimeGREEN1/1.
+ONEbehavioratatime followups pass2/2,3/3,4/4,5/5,6/6 withactualexit0+prompt;
+logs /tmp/http-fetch-round13-handoff-{first-green,owner-grant,pending-deadline,
+committed-deadline,lost-commit-ack,six}.log. Lastsix run3.6s seed101.
+ALLfixturesREALpassiveTCP created/ownedallocator,enrolledACK beforehandoff,
+originalindependentportmonitor; noTLSactorattach/handshake/successpublication.
+Reader31/31confirmed refersoriginalVMresourceobservations, notextraOSFDproof.
+
+PrivateHandoffpurestate fixedroleidentities/originalObserver/challenge/grant/
+spentphase; typedLedger.enrollment_view retains originalconsumedcreator tags,
+Observer keepscreatorPID/monitor and verifiesmirror/liveoriginalparents.
+Prepare requiresoriginalallocator-ownedexactenrolledPort andacknowledgedlive
+Connection/writer; commitrequiresoriginalConnection actualNativeownership.
+CooperativeGenServercaller convention+capability, notindependentSender/spawn
+authentication. Originalrolebits/atomics/snapshots/ledgerproofstayfixed.
+
+Sixbehaviors: genuineownershiptransfer/commit/cancel/exactoriginalPortDOWN;
+wrongcaller/substitutedpeerPort/Connection/earlycommit/wrongnonce/replay/remint;
+firstD500ms expiry despite later3000ms callerbudgets, helper_doneblocked;
+COMMITTEDportoutlivesD500ms, freshbudgetreplay/remintdenied, helper_doneACK
+thenoriginalallocatorDOWNnormalwhileportstillConn-owned/open/downmask1;
+LOSTCOMMITACK viaPUBLICsys.suspend/resume: originalcallcap1000ms returns
+EXACTacceptance_unconfirmed withinoriginalD5000ms (setupinfinity), native
+ownershipunchanged, SAMEConn FIFOretryrejectsconsumedgrant, thenrealcleanup;
+twoindependentattemptscrossready/grantsdenied, correctbothcommit, cancelA
+withoutaffectingliveB/open31/down0 thenB independentcleanup. Ownelapsedtimer
+only inpostcommitcase; nooriginaltimerprivateinspection/injectionclaimed.
+
+Task20 REMAINSIN_PROGRESS: pendingactor/parentdeath/queuedDOWN, explicit
+pendingcancel/latecommit, actualoriginalTCPclose orunexpectedthirdpartyowner,
+purecreator/ref/Observermismatch/doneparent/wrongwriterparent, andpending
+unknownpermit/stickyloss combinations stillneeddirectcases. Existingfoundation
+regressions arenotindependentcoverageofallnewcombinations. Nopublic/default/
+managed/completion/adoption gateisclosedbythiscore. Nativeconstructorfailure
+identity remains a separate architecture gate.
+
+OptionalEXTRAGLOBALmixcredo--strict EXIT14 (165design,30readability,16refactor
+suggestions), includingfournewinitialtracerapplycalls. Existingbaseline
+styleelsewhereuntouched; changedthosefourtoDIRECTtypedAPIafterGREEN. Required
+configuredmixcredo reportsnoissues. InitialconfiguredpipelineDialyzerEXIT2
+newObserver.update_handoff intentionallyignoredcancel_timerreturn; fixedwith
+explicitdiscard matchingexistingObserverstyle. No ignoring/suppressingnew
+warning. Failedlogs preserved /tmp/http-fetch-round13-static.log and
+/tmp/http-fetch-round13-configured-static.log; finalchecksrecordbelow.
+
+Independentread-onlyreviewfoundnoconcreteintroducedlogicbugs; noadditional
+testswereclaimedbyreviewer. FirstCodexreviewproductfailedbeforeresult; fresh
+reviewcompleted. Proceduraldeviation: reviewerthreeREADONLYshellcallsincluded
+forbiddensandbox_permissionsparameterdespiteexplicitconstraint, noapprovalor
+mutation. Lead stoppedthatcallpath; ownwritescontinueownedterminalwithout
+thatparameter. Parentfinalsource/inert/publiccompatchecksremaingates.
+
+### Round13 final source gates — P0 remains OPEN
+
+Afterexplicitdiscardfix, ROOTcompile--warnings-as-errors +WHOLEformatcheck
++configuredCredo+Dialyzer allEXIT0. ActualROUND13_FINAL_STATIC_EXIT=0.
+/tmp/http-fetch-round13-final-static.log:534files/noCredopriorityissues;
+Dialyzer0errors/0skipped/4UNCHANGEDunnecessary-ignore notices. Noignore
+entriesremovedornewwarninghidden. Fourdirecttracercallsandfinaldiscard
+change ARE included in subsequentfullsourceExSSL794passed.
+
+FinalrootpinnedPATH/MIX_ENVtest/sharedMIX_BUILD_PATH,
+HTTP_QUIC_PHASE1_REAL=1 mix test --include integration --seed101:
+3190/3192, actualROUND13_SOURCE_EXIT=2+prompt. No diagnostic hooks/pinchanges
+installed, noexclusions. Appcounts794/794ExSSL (20properties774tests),
+249QUIC,418Core,113H3companion,149Runtime,1230/1232Fetch,138WebSocket,
+24WebTransport,75EventSource. Source log /tmp/http-fetch-round13-source.log.
+
+TwoP0failures: log862-871 HTTP1WriteIdleWireTest:119 cancellationinterrupts
+observedblockedupload, no {:peer_closed,peer} atORIGINAL8000ms finish/3:457.
+Log1073-1080 HTTPSEarlyUploadTest:15 ex_ssl/http1/buffered/4000, peerstillopen
+afterlocalcleanup atORIGINALsole2srecv; native countersrecv_oct103056/
+send_oct1416/send_pend0, active99/buffer9216/recbuf484912, receiver/sender
+waiting/gen_statemloop3/mailbox0. These are the historical failure shapes.
+This run has NOcorrelatednativeclosehooks/kernel/FDsnapshot, so doNOT
+projecttheearlierR12tuplelinger/closefactsontoit orclaimnewcausalevidence.
+Wirecase stillneedsOWNproviderretirementproof. No re-run to minepassing
+evidence, no deadline/error/pressure changes orproductionabortAPI swap.
+
+CurrentConnectionSHA0f0ad762fed7bb6307e374ea7e83d0699bd45cb21309cdb5140a1c74e2220e98
+andBOTHexistingstrictguards checkedunchanged; classicpublicConnection/writer/
+HTTPfixturebodiesuntouched. NewprivateObservercode is not wired to classic
+constructor paths. SourceP0gateNOTGREEN; sixprivatecorepasses/ExSSL794
+are not a teardown fix, actualnativebirth/adoption/publicfacade/default/
+managed/performance/package/publication admission. Task14 andTask20 remain
+inprogress; nextprivateacceptance focuspendingcancel/death/actualportloss
+andunknownpermits, nextP0focusACTUALfailingtuplekernel/physicalFDmetadata.

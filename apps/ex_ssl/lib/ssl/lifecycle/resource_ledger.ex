@@ -29,7 +29,11 @@ defmodule SSL.Lifecycle.ResourceLedger do
           losses: role_mask(),
           cleanup: :confirmed | :unconfirmed
         }
+  @type enrollment :: %{identity: identity(), state: :live | :down, creator: creator()}
   @opaque t :: %__MODULE__{}
+
+  @spec enrollment_view(t(), role()) :: {:ok, enrollment()} | :error
+  def enrollment_view(%__MODULE__{} = ledger, role), do: Map.fetch(ledger.resources, role)
 
   @spec new(:dial | :upgrade) :: t()
   def new(scope \\ :dial) when scope in [:dial, :upgrade], do: %__MODULE__{scope: scope}
@@ -49,7 +53,7 @@ defmodule SSL.Lifecycle.ResourceLedger do
           {:ok, t(), :use | :stop} | {:error, atom()}
   def enroll(%__MODULE__{} = ledger, role, token, identity) do
     case Map.fetch(ledger.permits, role) do
-      {:ok, {^token, _creator}} -> register(ledger, role, identity)
+      {:ok, {^token, creator}} -> register(ledger, role, identity, creator)
       _ -> {:error, :unknown_permit}
     end
   end
@@ -91,7 +95,7 @@ defmodule SSL.Lifecycle.ResourceLedger do
   def adopt_tcp(%__MODULE__{scope: :upgrade, admission: :open} = ledger, identity) do
     if occupied?(ledger, :tcp),
       do: {:error, :role_used},
-      else: register(ledger, :tcp, identity)
+      else: register(ledger, :tcp, identity, :observer)
   end
 
   def adopt_tcp(%__MODULE__{}, _identity), do: {:error, :adoption_not_permitted}
@@ -142,7 +146,7 @@ defmodule SSL.Lifecycle.ResourceLedger do
     end
   end
 
-  defp register(ledger, role, identity) do
+  defp register(ledger, role, identity, creator) do
     cond do
       not valid_identity?(role, identity) ->
         {:error, :invalid_monitor_identity}
@@ -151,7 +155,7 @@ defmodule SSL.Lifecycle.ResourceLedger do
         {:error, :monitor_used}
 
       true ->
-        resource = %{identity: identity, state: :live}
+        resource = %{identity: identity, state: :live, creator: creator}
 
         next = %{
           ledger
