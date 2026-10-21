@@ -1225,3 +1225,140 @@ setup/TCP adoption, public facade/managed completion/transfer, performance/soak,
 backend default/removing productionOTPssl, package/CI/publication/cold consumer
 gates are not admitted by these private proofs. Goal remains active. No source
 instrumentation, timeout widening, forcedGC, skipped failures or default change.
+
+## Round12 — actual correlated remote-close failure
+
+Temporary diagnostics only: Connection SHA
+aea15e04e3b385b89775be4bde0163c6f427d4883a03c09ebd45ed0ec10a0953,
+both strict guards repinned without removing assertions; TLS_P0_CLOSE_DIAG=1
+arms only the selected provider PID. Scalar events capped64 per Connection;
+no keys, plaintext, native message dumps, extra peer readers or changed timeouts.
+Original recv2s/local retirement1s/parent peer3s remain. Compile strict0, then
+root all9/include integration/HTTP_QUIC_PHASE1_REAL=1/seed101:3183/3186, EXIT2
+verified by ROUND12_DIAG_EXIT=2 and prompt, no exclusions. Log
+/tmp/http-fetch-round12-diag-source.log. This instrumented run is diagnostic,
+not final-source acceptance. ex_ssl788, QUIC249, core418, H3comp113, runtime149,
+Fetch1229/1232, WS138, WT24, SSE75.
+
+Three failures: H3 field-section budget fixture on_exit Port.close ArgumentError
+(log950–956); OTP ssl/auto/buffered/4000 peer2s timeout (log2122); and ExSSL
+auto/buffered/infinity peer2s timeout (log3346–3607). The historical ExSSL
+http1/streamed/4000 case passed THIS run; its prior failure is not resolved.
+
+### Exact failed ExSSL connection, not a nearby successful tuple
+
+TestPID23368, peer23371, HTTPowner23376, HTTPwriter23383, source23372,
+Connection23378, nativewriter23379, Port5240 (full PIDs/Port in the log).
+Client127.0.0.1:56781 -> server127.0.0.1:56780; live public peer endpoints
+reverse exactly. Original Connection/writer monitors were established before
+stimulus; case metadata ties all identities before the response.
+
+- abandon entry caller IS controlling owner; application output pending, finite
+  timer, write remaining119961ms; write owner is the HTTP upload worker.
+- abandon succeeds and preserves sticky flag TRUE, drops write cursor, retains
+  exactly the same immutable application output token.
+- local close enters connected with flag TRUE and that pending output.
+- BEFORE linger: Port alive, send_pend13378; linger{false,0}, send_timeout120000,
+  send_timeout_close:true, buffer16640, sndbuf1024.
+- linger setopts returns :ok; readback is {true,0}; Port STILL alive.
+- Port.close returns true; Port.info subsequently nil; exact Connection/writer
+  DOWN and HTTPwriter/source/owner DOWN pass BEFORE existing peer drain.
+- peer drains98313 public plaintext bytes across6 recv calls, then original2s
+  recv times out; recv_oct102050/send_oct1416/send_pend0, active99/buffer9216/
+  recbuf485920; OTP receiver/sender waiting gen_statem.loop, empty mailboxes.
+
+No matching writer error/output timeout/write timeout precedes this close.
+For THIS actual failure, forgotten abandonment, native port retirement BEFORE
+linger and failed zero-linger application are falsified. Port absence is not
+a peer receipt, and this trace does not establish kernel TCP state/RST emission
+or where native terminal delivery stalls. Six public recv calls are NOT six
+TLS records; header collection may consume an accompanying body prefix, and
+recv_oct includes TLS overhead. Do not infer missing ciphertext length by
+subtracting drained plaintext from native counters.
+
+Independent OTP client tuple127.0.0.1:56763 ->56762 also times out after48 recv
+calls/786540 plaintext bytes. This weakens an ExSSL-only crypto explanation;
+it does not prove a shared cause. Earlier16 native controls used infinite
+send_timeout and did not enable send_timeout_close; finite120000/close:true
+is an untested driver dimension, not a newly established cause.
+
+Installed OTP29.0.2 public TCP close path was read directly (kernel11.0.2 and
+erts17.0.2 source): inet.tcp_close -> prim_inet.close; zero-linger branch175–179
+uses close_port;270–275 invokes erlang.port_close. A blind Port.close ->
+gen_tcp.close substitution would reach the SAME primitive for this trace and
+is not justified. No production behavior change made from that hypothesis.
+
+### Accepted independent fixture correction
+
+H3 test on_exit used Port.info(peer) followed by Port.close(peer), racing the
+locally-created external peer natural exit. Task19 changes ONLY this cleanup
+to close directly and tolerate ArgumentError for the already-closed known Port;
+all test bodies/assertions/bounds/native error policy unchanged. Root wholefile
+HTTP_QUIC_PHASE1_REAL=1/include integration/seed101:10/10 in6.5s, actual
+ROUND12_H3_EXIT=0 + prompt. /tmp/http-fetch-round12-h3-cleanup.log.
+
+### Next discriminator and remaining scope
+
+First correlated-failure campaign STOPPED. A separate failure-only kernel
+snapshot campaign is being prepared: exact bidirectional tuple after original
+peer_timeout and before unconditional flunk, no extra network read. An initial
+requirement for hard200ms spawn/read/reap was rejected as unsupported by public
+Port.close external-child semantics; no misleading implementation was run.
+Revised diagnostic-only authorization uses supervised Python kill/wait, bounded
+output/collection and explicit elapsed/cleanup/inconclusive reporting; no hard
+real-time OS guarantee, no weakened TLS assertion or production cleanup claim.
+Final kernel campaign outcome is recorded below; restored-source checks follow.
+
+### Kernel campaign: green run, discriminator NOT triggered
+
+The bounded helper preflight used a dummy loopback tuple1<->2, not an actual
+failed connection:32.444ms,83478bytes scanned, no matched rows, EOF/exit0 and
+child12590 REAPED. Header layout recognized; no full host connection list logged.
+/tmp/http-fetch-round12-kernel-preflight.log. This validates collection mechanics,
+not any TLS or native-close hypothesis.
+
+ONE fresh mixed full source run with failure-only helper, original assertions and
+all previous scalar hooks:3186/3186, EXIT0 verified by ROUND12_KERNEL_EXIT=0 and
+prompt; all9apps ran/integration+realQUIC optins/noexclusions. Log
+/tmp/http-fetch-round12-kernel-source.log. ex_ssl788, QUIC249, core418, H3comp113,
+runtime149, Fetch1232(including20doctests), WS138, WT24, SSE75. NO peer_timeout
+or peer_kernel event occurred, so there is NO actual failing kernel snapshot.
+No extra campaign launched to manufacture one. H3 cleanup passed this full run.
+This green instrumented run does NOT resolve historical remote-close failures,
+prove that H3 cleanup fixes TLS, or establish driver-vs-kernel-vs-OTP causality.
+
+Temporary Source Connection hooks, HTTPS test hooks/helper invocation, and BOTH
+strict guards were restored exactly from reviewed HEAD; four-file diff matched
+the archived patch byte-for-byte before restoration. Original ConnectionSHA
+0f0ad762fed7bb6307e374ea7e83d0699bd45cb21309cdb5140a1c74e2220e98 restored.
+Diagnostic-only patch /tmp/http-fetch-round12-close-diagnostics-v2.patch (19823B)
+and /tmp/http-fetch-round12-kernel-probe.py retained as audit/next-probe artifacts;
+neither is an installed production path. Only the accepted H3 cleanup and docs
+remain in the repository diff. No helper child was launched during the mixed
+run; the preflight child was reaped. No changed public defaults or native policy.
+
+Private direct-dial success orchestration was reviewed read-only: authentic
+allocator/Connection/port enrollment+ownership-commit ACK before TLS, helper
+done/outcome ACK before normal exit, exact original deadlines, all unpublished
+native failure/creator-loss gaps remain unknown/unconfirmed. Current inert ready
+attach/writer dispatch cannot support it unchanged. No new prototype or public
+admission, no v1 revision, and no permission to silently clip a public infinite
+setup with a short control budget was inferred from this design review.
+
+Goal remains active. Task14 still needs a failing kernel/terminal-delivery
+discriminator before a justified production fix; source/default/performance/
+package/publication gates retain their explicit prior open conditions. AgentNote
+search timed out again; repository execution evidence remains authoritative.
+
+### Restored final source verification
+
+Strict compile, whole-root format, Credo and Dialyzer all PASS (zeroerrors, zero
+skips, same4 intentional unnecessary-ignore notices). Credo532files/54checks/
+8876mods-funs, noissues. Root scoped lifecycle/inert+coreTLS+FetchH2+H3trailers
+with integration/realQUIC/seed101:168/168 (88+27+53), noexclusions/opt-in skips.
+Both exact final0f0 SHA guards pass; ordinary classic option forwarding and
+peer-close plaintext drainage assertions retained. Actual ROUND12_FINAL_EXIT=0
+AND prompt verified. /tmp/http-fetch-round12-final-{compile,format,credo,
+dialyzer,scoped}.log. These are final restored-source checks; the3186 full run
+above used explicitly described temporary diagnostics, and its green outcome
+is not a production remote-close fix. git diff --check PASS.

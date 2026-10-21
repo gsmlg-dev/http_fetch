@@ -18,6 +18,9 @@ reviewed acceptance, not merely a test file or implementation exists.
 - [x] Complete baseline source tests including required integration/independent peers;
       classify exclusions/skips/failures (full root run, all 663 TLS checks, real QUIC;
       known failures remain implementation/host gates, not accepted behavior).
+- [x] Remove the observed H3 fixture cleanup check/close race against natural
+      external peer exit: known-port-only idempotent cleanup, unchanged assertions
+      and timeouts (round12 actual on_exit RED; root whole file10/10 GREEN).
 - [x] Make pin fixtures portable without vacuous identity checks: distinct certificate
       SAN vs real dial, same-port IPv4/IPv6 pool/refusal/retry controls, independently
       proven saturation, complete mutation and no-fallback/replay accept queues
@@ -95,6 +98,9 @@ coverage; no supported endpoint class silently lost.
       same worker/source unfinished, proper same-peer80ms negative control;
       18 focused +81 whole-file passes, corrected case also passed full round10.
       Cancellation remote-close remains open; length-mismatch fixture is corrected below.
+      Round12 captured one actual ExSSL failure with successful abandonment, live
+      zero-linger readback and successful Port.close before exact local retirement;
+      peer still timed out2s. Kernel/terminal-delivery cause remains unproven.
 - [x] Authenticate private pre-native constructor rejection without allocating a
       resource: exact permit/caller/parent generation, fixed role-use tombstone,
       no fabricated DOWN or loss clearing, closed-fence accounting and helper completion
