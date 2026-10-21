@@ -36,7 +36,7 @@ defmodule HTTP.RequestCompletion do
           | {:error, :cleanup_pending | :cleanup_unconfirmed | {:unsupported_completion, atom()}}
 
   @doc false
-  @spec new(HTTP.FetchOptions.t(), HTTP.Request.t() | nil) :: %__MODULE__{}
+  @spec new(HTTP.FetchOptions.t(), HTTP.Request.t() | nil) :: t()
   def new(options, request \\ nil) do
     cond do
       options.http_version not in [:http1, :http2, :h2c] ->
@@ -59,6 +59,10 @@ defmodule HTTP.RequestCompletion do
         %__MODULE__{tracker: tracker, latch: latch}
     end
   end
+
+  @doc false
+  @spec tracker(t()) :: pid() | nil
+  def tracker(%__MODULE__{tracker: tracker}), do: tracker
 
   defp supported_proxy?(options, %HTTP.Request{} = request) do
     case HTTP.Proxy.route(request, options.unix_socket) do

@@ -324,7 +324,7 @@ defmodule HTTP do
           IO.inspect reason, label: "Docker Request Error"
       end
   """
-  @spec fetch(String.t() | URI.t(), Keyword.t() | map()) :: %HTTP.Promise{}
+  @spec fetch(String.t() | URI.t(), Keyword.t() | map()) :: HTTP.Promise.t()
   def fetch(url, init \\ []) do
     uri = if is_binary(url), do: URI.parse(url), else: url
     options = HTTP.FetchOptions.new(init)
@@ -366,7 +366,7 @@ defmodule HTTP do
     }
 
     completion = HTTP.RequestCompletion.new(options, request)
-    tracker = completion.tracker
+    tracker = HTTP.RequestCompletion.tracker(completion)
 
     association =
       case preparation do

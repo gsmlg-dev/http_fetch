@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.15] - 2026-10-22
+
+### Fixed
+- Preserve opaque request-completion types across the public Fetch and Promise
+  APIs so consumer Fetch/await composition passes Dialyzer without suppressing
+  opacity checks (#139).
+
 ## [0.21.14] - 2026-10-19
 
 ### Added
