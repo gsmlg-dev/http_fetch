@@ -18,6 +18,14 @@ reviewed acceptance, not merely a test file or implementation exists.
 - [x] Complete baseline source tests including required integration/independent peers;
       classify exclusions/skips/failures (full root run, all 663 TLS checks, real QUIC;
       known failures remain implementation/host gates, not accepted behavior).
+- [x] Make pin fixtures portable without vacuous identity checks: distinct certificate
+      SAN vs real dial, same-port IPv4/IPv6 pool/refusal/retry controls, independently
+      proven saturation, complete mutation and no-fallback/replay accept queues
+      (round8:85 focused checks; overall full-source gate remains separately reported).
+- [x] Qualify requested KeyUpdate progress across native output-job transitions:
+      queued or authenticated epoch change while the logical write remains blocked,
+      exact16MiB/no replay and an independent peer accepting new-epoch client traffic
+      (round8:48 ordering/lifecycle/abandon/backpressure checks; no engine change).
 - [x] Build current nine candidate archives and validate identity/internal requirements.
 - [x] Run isolated candidate external consumer smoke.
 - [x] Run the current candidate TLS feature gate with all required fixtures/peers

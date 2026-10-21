@@ -751,3 +751,107 @@ proxy peer IP:port plus origin identity/profile/trust, lacking target origin por
 this remains a separate explicit P1 cache-isolation gate, with tickets disabled by
 default. Preparation does not establish adoption or cleanup and does not enable
 managed/completion/default promotion.
+
+## Round8 — portable pin fixtures and authenticated KeyUpdate progress
+
+Task9 changed seven existing test/support paths and three explicit Fetch PEM/key
+fixtures. Physical test endpoints use127.0.0.1 and IPv6-only::1; logical certificate
+references127.0.0.2/::2 remain. Optional ClientAuthFixtures server_sans defaults are
+unchanged and the original mTLS suite still executes. Dedicated ExSSL certificates
+have SANexssl.test,127.0.0.2,::2 and EXCLUDE actual dial1; direct/upgrade, IP tuple/
+string, DNS, disabled/unrelated SNI, exact peercert, wrong CA and trusted wrong-dial
+reference tests are retained. Independent TLS1.2 positives/negatives use the
+mandatory EMS-capable OpenSSL peer. Fetch's new test leaf has ONLY SAN127.0.0.2,
+excludes127.0.0.1/::1, matches its private key and serverAuth purpose, and expires
+2036-10-18T14:09:43Z. Only public test CA/server cert and server key enter the repo;
+the generating CA private key stayed in a disposable external directory.
+
+Pin H1/H2 isolation/reuse/refusal/retry tests reserve both actual families at the
+SAMEport before dialing. Preserve identical URL/Host/:authority/pool scope; prove
+first-v4 ->second-v6 ->first-v4 connection reuse, exact refused pin, complete
+mutation body and empty extra/fallback accept queues. Native saturation initially
+failed honestly: backlog0 accepted64 bounded probes on this kernel, while backlog1
+accepted1 then timed out. Fixture uses explicit backlog1 and requires TWO native
+timeout probes with fill sockets still alive before HTTP's unchanged100ms connect
+budget/overall deadline and explicit caller retry. No OS alias, skips or relaxed
+negative assertions. String-host raw/proxy/redirect refusal controls instead use
+separately reserved/closed IPv4 ports, retaining the live origin/first mutation and
+original1271 Host. This is endpoint refusal evidence, not same-port pool isolation.
+
+Focused85/85 (ExSSL17 +Fetch68) passed with --include integration, seed101 and pinned
+Python PATH, zero exclusions/skips. Includes all six changed test modules plus the
+unchanged-default ClientAuthInterop suite. Worker strict compile and scoped format
+passed. Separate observed gap: literal IPv6 string hosts without explicit family
+options can return:nxdomain through the existing TCP/OTP adapters; tuple-pin tests
+infer family. Adding inet6 to a shared option set made literal IPv4 controls fail,
+so the tests do not silently adopt such an invalid fallback control. Production
+IPv6 string-family resolution is not fixed or claimed here.
+
+KeyUpdate original line9 repro failed on current production source. Three metadata
+probes also failed. Public OTP send_oct1386->1413 immediately after update_keys
+proved27 update bytes emitted; an application marker raised it to1452. Client
+recv_oct matched but raw input_size stayed0, nativeactive:once/packet0 and correct
+controller remained. A public raw inet record-sized blocked-writer control still
+delivered5 reverse bytes with send_pend16644; optional socket-backend counter
+inspection stalled and was stopped, with no socket-backend support claim. Finally,
+the ORIGINAL marker-free failure showed read_generation1/write_generation1 despite
+input_size0 and a still-blocked application writer. The update had already been
+authenticated between native output jobs of the SAME logical write. Waiting only
+for a transient raw-input queue was an incorrect test oracle, not an engine failure.
+
+The corrected oracle accepts queued bytes OR both epochs incremented, reasserts
+real TCP writer blockage BEFORE resuming the proxy, retains exact16MiB payload/no
+replay, asserts final read/write generation+1, and makes the independent OTP peer
+authenticate a distinct12-byte client marker AFTER the complete payload/update ACK
+before returning its recovery response under the new server key. This strengthens
+end-to-end update evidence. Backpressure/input-ordering/lifecycle/abandonment:
+48/48 passed, integration included, zero exclusions/skips. Independent read-only
+review found no blocker to the broad recovery/no-replay contract. Raw queued bytes
+alone do not authenticate KeyUpdate identity or prove deferral behind the SAME
+immutable native job; final epoch/independent-marker assertions establish actual
+update/ACK, and separate gated ordering tests cover exact job deferral. All DEBUG-ku8 diagnostics
+were removed; production Connection/Writer, private-layout pins and policy/defaults
+are unchanged. Strict compile and whole-root formatting passed. Initial configured
+Credo found one unused final HPACK decoder return in the new repeated H2 fixture;
+explicit `_decoder = Enum.reduce(...)` preserves decoder threading and acknowledges
+the final state. Final configured Credo:54 checks,530 files,8819 mods/functions,
+zero issues. Dialyzer:0 errors,0 skipped; four existing unnecessary-ignore notices
+remain unchanged.
+
+Final full source used pinned Python PATH, HTTP_QUIC_PHASE1_REAL=1,
+--include integration, seed101. Exit2:3155 checks,3153 passed,TWO failed,
+zero exclusions/opt-in skips. All16 formerly unroutable address cases and the
+corrected requested-KeyUpdate case passed. Both newly added trusted wrong-dial
+reference negatives passed. These are executed improvements, not a full gate pass.
+
+| App | Full source result |
+| --- | --- |
+| ex_ssl | 757/757, including20/20 properties |
+| elixir_quic | 249/249 |
+| http_core | 418/418, including all three real opt-ins |
+| elixir_quic_http3 | 113/113 |
+| http_runtime | 149/149 |
+| http_fetch | 1230/1232, including20/20 doctests |
+| http_web_socket | 138/138 |
+| http_web_transport | 24/24 |
+| http_event_source | 75/75 |
+
+Remaining actual failures:
+- TLSSetupEvidenceTest early_data negative: raw listener accept returned:einval
+  (line182); linked task MatchError, previously observed full-suite fixture race.
+- HTTP1WriteIdleWireTest ExSSL cancellation after an OBSERVED blocked upload:
+  `finish/3` did not receive peer_closed within its EXISTING8000ms bound. This is
+  remote-close observation, NOT failure to establish the blocked-send precondition.
+
+The prior three HTTPS-early-upload remote2s failures, OTP in-flight-send
+precondition failure and request-stream raw-accept race passed this run without
+production changes; they are NOT causally fixed by fixture portability or the
+KeyUpdate oracle. Keep them as unresolved regression history. Read-only analysis
+found an abort-intent boundary to test next: begin_shutdown/close_transport inspect
+current output/driver send_pend but ignore retained write_abandoned?. Driver queue
+empty does not prove kernel queue empty or remote acknowledgement. Pending task10
+requires a deterministic abandoned-vs-completed first-hop RST/FIN test, retained
+response reads, exact local DOWN/Port absence <=1s BEFORE remote2s drain, and original
+failure reruns before any remote-failure fix claim. No production fix is made here.
+Full P0–P7, public/native lifecycle integration, managed completion, default
+promotion, production OTP dependency removal and package publication remain open.
