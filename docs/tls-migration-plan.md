@@ -2,7 +2,8 @@
 
 Execution checklist derived from the accepted 2026-10-21 HTTP Fetch migration plan.
 Baseline: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, nine packages at `0.21.14`.
-Status: P0 active. No production default or dependency removal has been made.
+Status: P0 baseline/interfaces recorded with explicit failing gates; P1/P2 implementation
+is next. No production default or dependency removal has been made.
 
 See [design and compatibility table](tls-migration-design.md) and
 [execution evidence](tls-migration-validation.md). A checkbox means executed and
@@ -14,17 +15,24 @@ reviewed acceptance, not merely a test file or implementation exists.
 - [x] Read root and nested repository instructions.
 - [x] Inventory production calls, selectors, private socket assumptions and manifests.
 - [x] Record effective TLS/managed defaults and compatibility differences with owners.
-- [ ] Complete baseline source tests including required integration/independent peers;
-      classify existing exclusions, skips and failures rather than changing assertions.
+- [x] Complete baseline source tests including required integration/independent peers;
+      classify exclusions/skips/failures (full root run, all 663 TLS checks, real QUIC;
+      known failures remain implementation/host gates, not accepted behavior).
 - [x] Build current nine candidate archives and validate identity/internal requirements.
 - [x] Run isolated candidate external consumer smoke.
-- [ ] Run the current candidate TLS feature gate with all required fixtures/peers.
-- [ ] Complete trace of public entry points, proxy/Unix routes and cancellation/handoff.
-- [ ] Finalize public lifecycle enrollment, closure, receipt and transfer interface.
-- [ ] Resolve public policy decisions or keep each explicitly release-blocking.
-- [ ] Measure OTP and explicit ExSSL HTTP workloads: handshake/request p95/p99,
-      upload/download throughput, process/port counts, long-lived memory and cleanup.
-- [ ] Record numeric regression budgets from measurements before default promotion.
+- [x] Run the current candidate TLS feature gate with all required fixtures/peers
+      (baseline nine groups, 68 tests; not an integrated migration candidate).
+- [x] Complete trace of public entry points, proxy/Unix routes and cancellation/handoff
+      (route matrix distinguishes actual TLS peers and newly identified blockers).
+- [x] Finalize public lifecycle enrollment, closure, receipt and transfer interface
+      (v1 design target; no public API implementation claimed).
+- [x] Resolve public policy decisions or keep each explicitly release-blocking.
+- [x] Measure OTP and explicit ExSSL HTTP workloads: handshake/request p95/p99,
+      upload/download throughput, process/port counts, 60-second reuse memory and
+      cleanup observations; unsupported public evidence remains explicit.
+      Full load/30-minute soak and stable tail acceptance remain P4/P5 gates.
+- [x] Record numeric regression budgets before default promotion
+      (v1 targets in design; full load/soak validator remains required).
 
 Exit: every blocker has an owner and acceptance test; current implementation,
 executed evidence and required work are distinguishable. OTP remains default.

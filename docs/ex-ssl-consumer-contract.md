@@ -25,8 +25,22 @@ The [migration design and compatibility table](tls-migration-design.md) and
 [staged checklist](tls-migration-plan.md) track the remaining work to make
 ExSSL the sole production TLS provider. [Execution evidence](tls-migration-validation.md)
 records checks performed against this baseline, separately from the historical
-standalone release evidence below. P0 is in progress: no default promotion,
+standalone release evidence below. P0 baseline/interfaces are recorded with named
+remaining gates: no default promotion,
 managed ExSSL support, completion support or production OTP SSL removal is claimed.
+The v1 attempt Handle, revocable Lease and acknowledged Transfer are implementation
+contracts in the design, not current public APIs. Backend pinning through redirects
+or reconnects does not freeze raw CA/identity files or system roots for an ordinary
+fresh dial; managed policy snapshots have that stronger contract.
+
+The completed route audit also retains explicit migration blockers: secure-scheme
+Unix selection currently uses plaintext, CONNECT validates some TLS conflicts after
+proxy I/O, and Fetch's OTP cross-origin client-identity forwarding differs from
+ExSSL/H3 isolation. The design records required negative tests and the need for a
+named/versioned redirect compatibility decision. Fetch supports the documented HTTP
+proxy routes; SSE/WS do not inherit that forwarding support. HTTPS-proxy TLS protects
+the connection to the proxy for an HTTP origin; nested HTTPS-over-HTTPS is unsupported.
+No encrypted Unix or functioning default WebTransport session is claimed.
 
 | Requirement | Status | Production boundary | Executable coverage |
 | --- | --- | --- | --- |
@@ -62,7 +76,8 @@ is dropped to make a connection succeed.
 The cross-record fixture suspends the HTTP owner after it enters its receive
 loop, proves its sole first plaintext delivery, releases later peer output, and
 checks authenticated closure with retained plaintext before resuming. Its private
-ex_ssl state probe is test-only, revalidated and guarded to version 0.7.2, and checks exact byte
+ex_ssl state probe is test-only, revalidated and guarded by a reviewed connection
+source hash and matching umbrella package versions, and checks exact byte
 count plus passive mode. Larger streaming responses drain incrementally through
 flow control before the final gated records; they do not require an oversized
 passive TLS buffer.

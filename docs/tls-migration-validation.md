@@ -239,8 +239,8 @@ The paced reuse interval was one second, not a production long-duration soak.
 Thirty observations make the reported nearest-rank p99 equal to the maximum; these
 are reproducible diagnostic baselines, not stable tail acceptance. Other supported
 runtimes, TLS1.2, resumption, H2/H3, concurrent loads, managed completion, long soaks
-and promotion budgets remain pending. Do not derive a passing budget from these
-ExSSL results or present the run as P5 acceptance.
+and performance acceptance remain pending. See the later v1 engineering targets;
+do not infer acceptance from these ExSSL results or present the run as P5 evidence.
 
 ## Formatting and static-analysis checkpoint
 
@@ -253,12 +253,133 @@ not a lint finding in the migration edits. No dependency code was patched and no
 check was disabled. Compatible supported-toolchain execution or a verified upstream
 tooling update remains required; this is not a successful Credo gate.
 
-## Open P0 work and release blockers
+## Expanded source, tooling and route checkpoint
 
-- Finalize baseline results, supply pinned independent peer dependencies and rerun
-  affected scenarios; retain strict-compilation and platform failures visibly.
-- Execute required integration, H2/H3 and candidate feature gates with prerequisites.
-- Finalize lifecycle interface and public option decisions listed in the design.
-- Record HTTP workload/resource baselines and numeric promotion budgets.
-- No P1–P7 acceptance, changed default, OTP removal, remote CI or publication is
-  established by this ledger. Historical validation remains historically scoped.
+Credo was upgraded alone in the lockfile from 1.7.13 to 1.7.19; existing manifest
+ranges already permit it and no transitive dependency changed. The tagged upstream
+[changelog](https://github.com/rrrene/credo/blob/v1.7.19/CHANGELOG.md) records final
+Elixir 1.20 compatibility. Complete analysis exposed 20 existing depth-4 nesting
+findings. Small helper extractions/ordered rejection checks preserve original error,
+transcript/record, stream accounting and ownership-effect order. No check, threshold,
+protocol policy or default was disabled/changed. Lead reviewed both disjoint worker
+diffs. Final root formatting, warnings-as-errors compilation, Credo (513 files,
+54 checks, no issues), and git diff --check all exit 0.
+
+The first full post-extraction umbrella run completed, exit 2:
+
+| App | Passed | Failed | Excluded / skipped |
+| --- | ---: | ---: | --- |
+| ex_ssl | 469 (including 20 properties) | 0 | 194 integration excluded by default |
+| elixir_quic | 249 | 0 | 0 |
+| http_core | 381 | 0 | 3 opt-in real QUIC adapter scenarios |
+| elixir_quic_http3 | 113 | 0 | 0 |
+| http_runtime | 149 | 0 | 0 |
+| http_fetch | 1,193 (including 20 doctests) | 33 | 0 |
+| http_web_socket | 138 | 0 | 0 |
+| http_web_transport | 24 | 0 | 0 |
+| http_event_source | 75 | 0 | 0 |
+
+The three initially skipped real QUIC adapter scenarios were then explicitly run
+with HTTP_QUIC_PHASE1_REAL=1: all three passed, exit 0 (35.2 seconds). This exercises
+authenticated raw streams and negative readiness through the public adapter; it is
+not independent H3 interoperability or a new capability claim. A test-only bitstring
+pin warning remains visible.
+
+Fetch failures were retained and classified: 13 depended on unavailable 127.0.0.2
+binding/refusal semantics on this macOS host; 13 intentionally hit the private
+buffer-probe source-hash guard after Connection source changed; six failed remote
+upload closure observation; one failed cleanup while observing an earlier timed-out
+request Task still present in the shared supervisor. Noninteractive sudo permission
+is unavailable, so no loopback alias was installed. These platform cases are not
+successful acceptance and still require a prepared host/CI run.
+
+The Connection extraction was reviewed against unchanged closed/size/active fields,
+application-data buffering, peer-close and drain transitions. The hash guard remains
+enabled and now pins reviewed SHA256
+7c891a11c6ea595fcaff9d99767b4d1294a7ec0e876675422c86eff93e6342ae.
+All 45 SocketClient H2 plus failed-open cleanup scenarios then passed in a fresh VM,
+exit 0. Test-only bitstring pin warnings remain visible; they are distinct from
+passing strict production compilation. This targeted result does not turn the
+previous complete umbrella run into a green run.
+
+With integration explicitly included, all 663 ex_ssl checks ran: 659 passed, four
+failed, exit 2. Three reference-identity scenarios dial unavailable 127.0.0.2. The
+remaining connection_backpressure scenario could not establish its expected
+KeyUpdate queued-behind-output state. Keep this as an ex_ssl/P2 blocker; the result
+proves neither correct occupied-writer control ordering nor a protocol regression
+introduced by extraction. The same invocation ran all 24 WebTransport checks
+successfully. Its module documentation now correctly describes the unsupported
+default network backend. Independent TLS1.2 Python/OpenSSL 4.0.3 RSA/ECDSA AES-GCM
+and mTLS exchanges executed in the integration suite; no blanket endpoint claim.
+
+## Local teardown versus remote closure
+
+The upload test now captures exact Connection/writer monitors and raw TCP identity
+during the existing test-only stable-output probe. After request/source/upload
+termination it requires matching Connection and writer DOWN plus absent raw port
+before permitting peer drain. These local checks passed even in scenarios failing
+remote closure. No HTTP production code gained private ExSSL inspection or public
+cleanup claims.
+
+Repeated seed-36 whole-upload runs yielded 41/44 and 43/44, including an OTP remote
+closure failure. Bounded peer diagnostics showed no receiver/sender mailbox backlog,
+no server send queue, and receive buffers around 420–485 KiB despite the intended
+1 KiB listener setting. Setting accepted-socket recbuf explicitly did not stabilize
+the result and was reverted. A temporary close probe observed selected zero linger
+returning :ok with pending output, but its eight streamed scenarios did not reproduce
+the failure; the probe was removed. No close-predicate change is retained or proved.
+
+The independent no-background-reader peer now has a two-second absolute drain
+budget inside the parent's three-second observation. Timeout emits a distinct
+bounded drain_timeout event with byte count/receive-buffer size and exits nonzero;
+it cannot count as closure. Final native send-timeout selection passed all eight
+scenarios, exit 0, with 36 unrelated upload cases excluded. Remote closure remains a
+release blocker even when local resources are gone; neither observation is a public
+provider receipt and kernel/peer termination is outside a local receipt's proof.
+
+## One-minute reuse observation and v1 acceptance targets
+
+The extended bounded H1 runner preserves default one-second pacing but permits up
+to 60 seconds, requiring request intervals at most two seconds. Both providers
+completed a separate approximately 60-second fixed-connection reuse interval,
+three warmup plus 30 measured requests, concurrency one. Full samples, source hashes,
+settings and counters are in [reuse evidence](tls-migration-p0-http-reuse-baseline.json).
+As in the original artifact, only repeated intermediate handshake arrays are replaced
+by counts; final history and raw-stdout SHA256 remain.
+
+| Observation | OTP | ExSSL |
+| --- | --- | --- |
+| Reuse duration | 60.272 s | 60.143 s |
+| One connection ID across all 33 requests | 36 | 72 |
+| Live processes / ports | 168 / 5 throughout | 167 / 5 throughout |
+| Live binary allocation range | 3,719,104–3,757,232 bytes | 3,640,072–3,665,216 bytes |
+| Reused request p50/p95/p99 | 2,332 / 23,409 / 41,633 µs | 2,145 / 10,870 / 22,993 µs |
+| After all workloads, processes / ports | 165 / 4 | 165 / 4 |
+
+Across all rerun workloads the peer verified 270 requests and 69,206,016 upload
+bytes, accepted/closed all 72 connections, and reported zero active/errors. Every
+OTP public completion returned :ok; every ExSSL completion remained unsupported.
+These are BEAM allocation observations without forced GC, not RSS, local receipt
+proof, stable tails or the required 30-minute load/soak gate. Numeric v1 promotion
+budgets are now recorded in the design before provider implementation/promotion;
+they are engineering targets, not acceptance inferred from 30 samples.
+
+Source review completed the public route matrix in the design: origin/proxy TLS
+identity, plaintext CONNECT versus unsupported TLS nesting, secure-scheme Unix
+plaintext selection, SSE/WS forwarding-option gaps, backend pinning versus trust
+snapshots, explicit QUIC/H3, unsupported WebTransport, and provider-dependent Fetch
+client-identity redirects. Each remaining difference has an owner/acceptance target.
+The reviewed lifecycle v1 API separates stable evidence, revocable control and
+recipient-bound handoff; lost unreported allocation must be unconfirmed. None of
+those APIs or topology guarantees is implemented by documenting the contract.
+
+## Remaining implementation and release gates
+
+- ex_ssl/P2 owns occupied-writer KeyUpdate, cancellation/teardown, allocation fences,
+  durable public evidence and stale-owner authority; retain current failing cases.
+- Core/runtime/clients own the version/option, CONNECT preflight, secure Unix,
+  redirect/proxy identity and managed/completion boundaries in the design.
+- Prepared-host full regression, independent H3/package acceptance, stable tails,
+  30-minute load/soak, other supported runtimes, Dialyzer and remote CI remain gates.
+- No P1–P7 acceptance, changed default, production OTP removal or publication is
+  established. Historical validation remains scoped to its original execution.

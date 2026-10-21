@@ -2,13 +2,14 @@ defmodule HTTP.WebTransport do
   @moduledoc """
   Browser-like WebTransport client API for Elixir.
 
-  This module implements the public API shape and lifecycle management for
-  WebTransport sessions. The default backend speaks WebTransport extended
-  CONNECT over HTTP/3 using the shared QUIC transport in `:http_core`.
+  This module provides the public API shape and lifecycle management for
+  WebTransport sessions. The default backend currently returns
+  `{:error, :webtransport_not_supported_by_elixir_quic_http3}`; network
+  WebTransport sessions over HTTP/3 are not implemented.
 
-  QUIC uses its own TLS implementation. The shared `:http_core, :tls_backend`
-  configuration does not apply here; an explicit non-nil `tls_backend` option
-  returns `{:error, :tls_backend_not_supported_for_quic}`.
+  QUIC TLS configuration is separate from TCP TLS. The shared
+  `:http_core, :tls_backend` configuration does not apply here; an explicit
+  non-nil `tls_backend` option returns `{:error, :tls_backend_not_supported_for_quic}`.
   """
 
   alias HTTP.WebTransport.CloseInfo
