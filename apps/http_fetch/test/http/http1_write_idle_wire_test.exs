@@ -183,27 +183,50 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
       assert %Response{body: "ok"} = Promise.await(first, @wait)
       assert_completion(first, backend)
       send(peer.pid, :next_request)
-      {:ok, source} = HTTP.Stream.from_enumerable(List.duplicate(@chunk, 64))
+      # The original 1 MiB body can fit OTP TLS/native buffers without blocking.
+      # Keep the workload finite while proving that the peer pause stalls a send.
+      pressure_chunks = 256
+      produced = :atomics.new(1, [])
+
+      chunks =
+        Stream.map(1..pressure_chunks, fn _ ->
+          :atomics.add_get(produced, 1, 1)
+          @chunk
+        end)
+
+      {:ok, source} = HTTP.Stream.from_enumerable(chunks)
+      source_monitor = Process.monitor(source)
 
       second =
         fetch(url, backend,
           body: source,
           duplex: "half",
-          headers: [{"content-length", Integer.to_string(byte_size(@chunk) * 64)}],
+          headers: [{"content-length", Integer.to_string(byte_size(@chunk) * pressure_chunks)}],
           http1_reuse: true,
           http1_scope: scope
         )
 
       assert_request(peer)
-      await_blocked_writer(source)
-      # The same peer socket is paused longer than the previous send/read limits.
-      # Restoring the next request's policy must allow its bounded upload to finish.
-      tick(350)
-      send(peer.pid, {:read_exact, byte_size(@chunk) * 64})
+
+      {blocked, stalled_since} = await_stalled_reuse_writer(source, produced)
+
+      # Observe sustained upload write wait beyond 80 ms, then keep the peer
+      # paused for 350 ms total, beyond both previous send/read limits.
+      elapsed = System.monotonic_time(:millisecond) - stalled_since
+      tick(max(350 - elapsed, 0))
+
+      assert Process.alive?(source)
+      assert Process.alive?(blocked)
+      assert {:monitors, monitors} = Process.info(source, :monitors)
+      assert {:process, blocked} in monitors
+      assert :atomics.get(produced, 1) < pressure_chunks
+
+      send(peer.pid, {:read_exact, byte_size(@chunk) * pressure_chunks})
       assert_receive {:body, body}, @wait
-      assert body == :binary.copy(@chunk, 64)
+      assert body == :binary.copy(@chunk, pressure_chunks)
       send(peer.pid, :respond)
       assert %Response{body: "ok"} = Promise.await(second, @wait)
+      assert_receive {:DOWN, ^source_monitor, :process, ^source, :normal}, @wait
       finish(peer, second, backend)
     end
   end
@@ -341,6 +364,33 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
 
   defp assert_request(%Task{pid: peer}) do
     assert_receive {:request_received, ^peer}, @wait
+  end
+
+  defp await_stalled_reuse_writer(source, produced) do
+    deadline = System.monotonic_time(:millisecond) + 1_000
+    await_stalled_reuse_writer(source, produced, deadline, nil)
+  end
+
+  defp await_stalled_reuse_writer(source, produced, deadline, candidate) do
+    if System.monotonic_time(:millisecond) >= deadline,
+      do: flunk("no sustained in-flight send observed")
+
+    writer = await_blocked_writer(source, deadline)
+    count = :atomics.get(produced, 1)
+    now = System.monotonic_time(:millisecond)
+
+    since =
+      case candidate do
+        {^writer, ^count, since} -> since
+        _ -> now
+      end
+
+    if now - since >= 90 do
+      {writer, since}
+    else
+      tick(5)
+      await_stalled_reuse_writer(source, produced, deadline, {writer, count, since})
+    end
   end
 
   defp await_blocked_writer(source) do
