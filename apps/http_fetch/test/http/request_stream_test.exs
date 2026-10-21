@@ -159,29 +159,76 @@ defmodule HTTP.RequestStreamTest do
   for chunks <- [["abc"], ["abc", "def"], ["abcdef"]] do
     test "rejects HTTP/1 length mismatch for #{inspect(chunks)} before extra bytes are sent" do
       test_pid = self()
+      gate = make_ref()
+      expected = if unquote(chunks) == ["abcdef"], do: "", else: "abc"
 
       url =
         start_raw_http_server!(fn listener ->
-          {:ok, socket} = :gen_tcp.accept(listener)
+          {:ok, socket} = :gen_tcp.accept(listener, 5_000)
           {headers, body} = recv_header_block(socket, "")
+          assert String.starts_with?(headers, "PUT /test HTTP/1.1\r\n")
           assert "Content-Length: 4" in String.split(headers, "\r\n")
           refute headers =~ "Transfer-Encoding"
-          send(test_pid, {:partial_upload, recv_closed_body(socket, body)})
+          assert body == ""
+          send(test_pid, {:mismatch_headers_received, gate, self()})
+
+          body =
+            if expected == "" do
+              body
+            else
+              prefix = recv_body(socket, body, 3)
+              assert prefix == "abc"
+              send(test_pid, {:mismatch_prefix_received, gate, self(), prefix})
+              prefix
+            end
+
+          send(test_pid, {:partial_upload, gate, self(), recv_closed_body(socket, body)})
         end)
 
-      {:ok, stream} = HTTP.Stream.from_enumerable(unquote(chunks))
+      # from_enumerable prefetches its first item. Gate that actual producer
+      # before yielding, then gate EOF or the next chunk after the valid prefix.
+      source =
+        Stream.resource(
+          fn -> {unquote(chunks), :headers} end,
+          fn {remaining, stage} ->
+            mismatch_source_gate(test_pid, gate, stage)
 
-      assert {:error, :content_length_mismatch} =
-               HTTP.fetch(url,
-                 method: :put,
-                 headers: [{"content-length", "4"}],
-                 body: stream,
-                 duplex: :half
-               )
-               |> HTTP.Promise.await()
+            case remaining do
+              [] -> {:halt, {[], stage}}
+              [chunk | rest] -> {[chunk], {rest, :tail}}
+            end
+          end,
+          fn _ -> :ok end
+        )
 
-      expected = if unquote(chunks) == ["abcdef"], do: "", else: "abc"
-      assert_receive {:partial_upload, ^expected}, 5_000
+      {:ok, stream} = HTTP.Stream.from_enumerable(source)
+      source_monitor = Process.monitor(stream)
+      assert_receive {:mismatch_source_ready, ^gate, producer, :headers}, 5_000
+      producer_monitor = Process.monitor(producer)
+
+      promise =
+        HTTP.fetch(url,
+          method: :put,
+          headers: [{"content-length", "4"}],
+          body: stream,
+          duplex: :half
+        )
+
+      assert_receive {:mismatch_headers_received, ^gate, peer}, 5_000
+      peer_monitor = Process.monitor(peer)
+      send(producer, {:release_mismatch_source, gate, self(), :headers})
+
+      if expected == "abc" do
+        assert_receive {:mismatch_prefix_received, ^gate, ^peer, "abc"}, 5_000
+        assert_receive {:mismatch_source_ready, ^gate, ^producer, :tail}, 5_000
+        send(producer, {:release_mismatch_source, gate, self(), :tail})
+      end
+
+      assert {:error, :content_length_mismatch} = HTTP.Promise.await(promise)
+      assert_receive {:partial_upload, ^gate, ^peer, ^expected}, 5_000
+      assert_receive {:DOWN, ^source_monitor, :process, ^stream, :normal}, 5_000
+      assert_receive {:DOWN, ^peer_monitor, :process, ^peer, :normal}, 5_000
+      assert_receive {:DOWN, ^producer_monitor, :process, ^producer, _producer_reason}, 5_000
     end
   end
 
@@ -621,6 +668,16 @@ defmodule HTTP.RequestStreamTest do
       {:ok, _header_bytes} -> drain_until_closed(socket)
       {:error, :closed} -> :ok
       other -> flunk("expected header socket closure, got #{inspect(other)}")
+    end
+  end
+
+  defp mismatch_source_gate(owner, ref, stage) do
+    send(owner, {:mismatch_source_ready, ref, self(), stage})
+
+    receive do
+      {:release_mismatch_source, ^ref, ^owner, ^stage} -> :ok
+    after
+      5_000 -> flunk("mismatch source gate #{inspect(stage)} was not released")
     end
   end
 
