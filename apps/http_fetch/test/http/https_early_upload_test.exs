@@ -48,9 +48,10 @@ defmodule HTTP.HTTPSEarlyUploadTest do
       owner_monitor = Process.monitor(owner)
       writer = blocked_writer(owner, System.monotonic_time(:millisecond) + 1_000)
 
-      if unquote(backend) == :ex_ssl do
-        pending_tls_output(owner, System.monotonic_time(:millisecond) + 1_000)
-      end
+      provider =
+        if unquote(backend) == :ex_ssl do
+          pending_tls_output(owner, System.monotonic_time(:millisecond) + 1_000)
+        end
 
       writer_monitor = Process.monitor(writer)
       started = System.monotonic_time(:millisecond)
@@ -105,6 +106,19 @@ defmodule HTTP.HTTPSEarlyUploadTest do
       assert_receive {:DOWN, ^writer_monitor, :process, ^writer, _}, 1_000
       assert_receive {:DOWN, ^source_monitor, :process, ^upload, :normal}, 1_000
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _}, 1_000
+
+      if provider do
+        assert_receive {:DOWN, monitor, :process, connection, _}
+                       when monitor == provider.connection_monitor and
+                              connection == provider.connection,
+                       1_000
+
+        assert_receive {:DOWN, monitor, :process, writer, _}
+                       when monitor == provider.writer_monitor and writer == provider.writer,
+                       1_000
+
+        assert Port.info(provider.tcp) == nil
+      end
 
       if unquote(backend) == :ssl and unquote(version) == :http1 do
         completion = HTTP.Promise.completion(promise)
@@ -188,8 +202,17 @@ defmodule HTTP.HTTPSEarlyUploadTest do
           end
 
           case :sys.get_state(candidate.socket.pid, 100) do
-            {:connected, %{output: %{token: ^token}}} -> :ok
-            _ -> pending_tls_output(owner, deadline)
+            {:connected, %{output: %{token: ^token}}} ->
+              %{
+                connection: candidate.socket.pid,
+                connection_monitor: Process.monitor(candidate.socket.pid),
+                writer: candidate.writer,
+                writer_monitor: Process.monitor(candidate.writer),
+                tcp: candidate.tcp
+              }
+
+            _ ->
+              pending_tls_output(owner, deadline)
           end
 
         _ ->
@@ -321,11 +344,28 @@ defmodule HTTP.HTTPSEarlyUploadTest do
     end
   end
 
+  # Test-only OTP reference introspection; never inspect keys, buffers or messages.
+  defp peer_state({:sslsocket, tcp, receiver, sender, :gen_tcp, _, _, _}) do
+    %{
+      socket: :inet.getopts(tcp, [:active, :buffer, :recbuf]),
+      counters: :inet.getstat(tcp, [:recv_oct, :send_oct, :send_pend]),
+      receiver: Process.info(receiver, [:status, :current_function, :message_queue_len]),
+      sender: Process.info(sender, [:status, :current_function, :message_queue_len])
+    }
+  end
+
+  defp peer_state(_), do: :unsupported_reference_layout
+
   defp drain(socket) do
     case :ssl.recv(socket, 0, 2_000) do
-      {:ok, _} -> drain(socket)
-      {:error, :timeout} -> flunk("HTTPS socket remained open after confirmed request cleanup")
-      {:error, _} -> :ok
+      {:ok, _} ->
+        drain(socket)
+
+      {:error, :timeout} ->
+        flunk("HTTPS peer still open after local cleanup: #{inspect(peer_state(socket))}")
+
+      {:error, _} ->
+        :ok
     end
   end
 end

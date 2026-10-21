@@ -12,10 +12,14 @@ defmodule TLSMigrationBenchmark do
     settings = %{
       warmup: setting("WARMUP", 3, 1, 10),
       samples: setting("SAMPLES", 30, 10, 100),
-      reuse_ms: setting("REUSE_MS", 1_000, 200, 5_000),
+      reuse_ms: setting("REUSE_MS", 1_000, 200, 60_000),
       timeout_ms: setting("TIMEOUT_MS", 3_000, 500, 5_000),
       cleanup_ms: setting("CLEANUP_MS", 300, 50, 1_000)
     }
+
+    if div(settings.reuse_ms, settings.warmup + settings.samples) > 2_000 do
+      raise "increase TLS_BENCH_SAMPLES so reuse request intervals stay at most 2 seconds"
+    end
 
     python =
       System.find_executable(System.get_env("TLS_BENCH_PYTHON", "python3")) ||

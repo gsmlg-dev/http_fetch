@@ -10,6 +10,7 @@ import json
 import socket
 import ssl
 import sys
+import time
 
 
 def event(kind, **fields):
@@ -55,9 +56,18 @@ def main():
             if command != "drain\n":
                 raise ValueError("unexpected control command")
             total = 0
+            deadline = time.monotonic() + 2
             while total <= 16 * 1024 * 1024:
                 try:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError
+                    connection.settimeout(remaining)
                     data = connection.recv(65536)
+                except TimeoutError:
+                    event("drain_timeout", drained_bytes=total,
+                          receive_buffer=connection.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF))
+                    raise SystemExit(1)
                 except (ConnectionResetError, ssl.SSLError):
                     event("closed", drained_bytes=total)
                     return
