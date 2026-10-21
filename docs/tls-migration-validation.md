@@ -445,3 +445,86 @@ umbrella acceptance. No assertion/deadline was relaxed to hide it.
 
 The global backend is still OTP; managed and public ExSSL completion remain guarded.
 No P1/P2 exit, P4 acceptance, default promotion or publication is claimed.
+
+## P1 native TCP options and P2 authority core (round 5)
+
+Added buffer/tos/tclass/priority to the engine and HTTP adapter allowlists. Real
+OTP/raw inet references distinguish effective driver behavior from acceptance:
+on this macOS/OTP29, buffer 0/65536/2^31 reads 1/65536/1; IPv4 tos and IPv6 tclass
+apply; priority accepts but reads zero. Initial duplicate buffer defaults actually
+overrode the caller's 65536 with 16640. Fixed raw dial to supply its default only
+when absent, and removed the attach default so STARTTLS preserves existing TCP
+buffer state. Explicit ExSSL mutable upgrade settings still apply; OTP instead
+retains the old raw settings and requires subsequent setopts. Both paths are
+covered, with the distinction documented rather than reported equivalent.
+
+Native wrong-family live setopts returns einval here. The test compares the
+actual platform reference, including platforms that permit a setting, and checks
+virtual active mode remains unchanged on driver failure. Initial raw connect
+exits badarg; a narrow exit clause now returns ExSSL {:error, :badarg}. OTP adds a
+formatted detail tuple; ex_ssl does not synthesize that implementation text.
+All 16 mandatory TCP tests executed, no skip. Worker root-scoped core/runtime
+acceptance passed 406 and 149 tests respectively (three real-QUIC opt-ins were
+still skipped in that particular invocation). Core tests include exact buffer
+precedence at direct and upgrade boundaries.
+
+Added internal Authority with single-use binding, exact attempt/epoch/capability
+validation, cancel/accept serialization, named recipients, exact owner ack,
+monitor generations, bounded latest-nonce recovery and idempotent committed replay.
+A read-only review caught missing nonce correlation in live snapshots; corrected
+and covered pending/accepted/cancelled/expired/replaced outcomes. Thirteen authority
+and ten resource-ledger tests passed together. These remain pure models, not a
+public API or proof that real monitors/socket ownership were established.
+
+Reviewed Connection diff (only native attach buffer defaults) and renewed the
+existing test-only H2 source guard to SHA256
+`e3a397587a5b137236afed3210b775f30590a067f3963ffdf4a9410e8964aac2`.
+Plaintext closed/size/active state and drain ordering are unchanged; native chunk
+sizes can differ. All 43 targeted H2 tests passed without bypassing the guard.
+The new core driver probe also pins that audited source and coordinated app
+versions; its final transport file passed all 25 tests. Final Credo remained clean.
+
+Strict compilation and Credo passed: 518 files, 54 checks, 8629 modules/functions,
+zero issues. Added full umbrella Dialyzer: its first run found one contract_supertype
+warning on ResourceLedger.proof's broad map return. Added explicit finite snapshot
+and proof types (scope/admission/cleanup enums and 0..31 role masks), without runtime
+behavior changes or ignore-list edits. All 23 lifecycle tests passed again and the
+second Dialyzer run passed: zero errors/skips; four existing unnecessary-ignore
+notices retained per repository instruction.
+
+Full root `mix test --include integration --seed 101` with the pinned
+Python environment and HTTP_QUIC_PHASE1_REAL=1 exited 2:
+
+| App | Result |
+| --- | --- |
+| ex_ssl | 688/692 passed, including all 20 properties; four failed |
+| elixir_quic | 249 passed |
+| http_core | 409 passed; three real QUIC opt-ins executed, no skips |
+| elixir_quic_http3 | 113 passed |
+| http_runtime | 149 passed |
+| http_fetch | 1208/1226 passed; 18 failed |
+| http_web_socket | 138 passed |
+| http_web_transport | 24 passed |
+| http_event_source | 75 passed |
+
+All 3075 checks executed, 3053 passed and 22 failed; no excluded integration or
+skipped opt-ins in this run. The existing real QUIC tests are self-implementation
+coverage and do not replace an independent H3 peer/package gate.
+
+The four ExSSL failures remain three unavailable-127.0.0.2 identity scenarios and
+the existing KeyUpdate/backpressure pending-input queue assertion. Fetch failures
+were 13 unavailable-address cases, the OTP reuse blocked-writer precondition, and
+four remote upload closure observations. Local matching Connection/writer DOWN
+and Port absence checks passed before those remote failures. One was the Python
+native-timeout peer's explicit drain_timeout (16384 bytes, receive buffer491904);
+three were OTP peers still waiting after local cleanup. This is failed remote
+observation, not a successful closure result. Assertions, two-second Python drain
+budget and public deadlines were not relaxed. No newly observed assertion category
+is attributed to the option patch without causal evidence; all remain acceptance
+blockers. Raw-stream listener einval from round4 did not recur.
+
+P1 verification/signature/advanced-policy decisions and P2 runtime observer,
+allocation/use enforcement, immutable terminal seal, socket authority and duplex
+control-output handling remain open. Managed/completion gates and OTP default stay
+in place. Candidate/release/publication acceptance has not been executed for this
+implementation slice.

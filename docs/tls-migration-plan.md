@@ -44,8 +44,9 @@ executed evidence and required work are distinguishable. OTP remains default.
       (22 contextual policy scenarios; broad P1 option/peer compatibility stays open).
 - [ ] Validate bounded TLS1.2 ECDHE/AES-GCM, EMS, secure renegotiation and needed
       version-specific signature support. Never enable TLS1.3 PKCS1 CertificateVerify.
-- [ ] Resolve internal managed buffer and explicit buffer/tos/tclass/priority values
-      without silently dropping options or changing protocol safety bounds.
+- [x] Resolve internal managed buffer and explicit buffer/tos/tclass/priority values
+      without silently dropping options or changing protocol safety bounds
+      (driver support tested; enabling managed ExSSL remains a P3 gate).
 - [ ] Resolve verify_none and advanced verification/client identity compatibility.
 - [ ] Preserve trust precedence, system roots, DNS/IP origin identity, SNI separation,
       pinned dialing, CONNECT upgrade and mTLS redirect isolation.
@@ -60,8 +61,10 @@ coverage; no supported endpoint class silently lost.
 
 - [x] Implement/test internal fixed-role resource ledger, allocation fences, creator loss
       and late enrollment (pure foundation only; public/runtime proof remains open).
+- [x] Implement/test internal authority epochs, recipient/nonce/owner acknowledgment,
+      lost-reply replay and controller monitor generations (runtime remains open).
 
-- [ ] Read existing ex_ssl architecture/design/PRD/implementation docs before changes.
+- [x] Read existing ex_ssl architecture/design/PRD/implementation docs before changes.
 - [ ] Public attempt handle exists before allocation, survives failed setup and transfer.
 - [ ] Provider enrolls/observes every connection, writer, TCP and setup worker without
       a cancellation gap; completion requires closed enrollment and observed DOWN.
@@ -73,7 +76,8 @@ coverage; no supported endpoint class silently lost.
 - [ ] Cover abort/setup/handoff races, wrong trust/identity/options, killed writers,
       KeyUpdate/upload, early response, close_notify/truncation, owner death,
       abandonment, stale acknowledgments, repeated close/await and evidence loss.
-- [ ] Shared QUIC TLS-core regressions pass.
+- [x] Shared QUIC TLS-core regressions pass (round5 source: QUIC249, H3 companion113,
+      and three real opt-ins; independent H3/package gates remain P4).
 
 Exit: HTTP obtains truthful cleanup evidence with no private TLS field inspection;
 resources return to baseline after deterministic failures/cancellation.

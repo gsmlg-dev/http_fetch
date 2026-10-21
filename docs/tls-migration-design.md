@@ -42,8 +42,9 @@ Test paths below are relative to the repository root.
 | Verification callbacks, partial chain, CRL/OCSP, encrypted keys, identities | Ordinary OTP backend accepts backend-specific options; managed policy explicitly excludes callbacks/revocation/encrypted keys | Bounded verified subset, explicit unsupported errors | Classify ordinary escape hatches separately; verify_fun has actual HTTP tests and special pool treatment; no whole-OTP claim (decision) | ex_ssl | `certificate_policy_options_test.exs`, `apps/http_fetch/test/http/tls_setup_evidence_test.exs`, mTLS candidate groups | Yes until individually resolved |
 | Safe TCP/send options | OTP options | Adapter allowlist; defaults < ssl < socket options | Preserve explicit precedence and mutation/binding rules (supported) | core, ex_ssl | `scripts/ex_ssl_options_test.exs` | Required matrix |
 | Managed H1/H2 | OTP only | Rejected before dial | Enable after provider lifecycle and policy are complete (required) | runtime, core | `apps/http_fetch/test/http/managed_otp_tls_lifecycle_test.exs` adapted to ExSSL | Yes |
-| Managed internal `buffer: 65_536` | Injected into socket options | Adapter and engine reject | Implement faithful driver buffer support or document/test equivalent bounded internal policy; never discard caller value (required) | runtime, core, ex_ssl | `apps/ex_ssl/test/ssl/tcp_options_test.exs` plus managed tests | Yes |
-| Explicit tos/tclass/priority/reuse_sessions/middlebox_comp_mode/honor_cipher_order/manual tickets | Managed policy accepts | Unsupported controls rejected | Per-option implementation or versioned compatibility decision (decision) | runtime, ex_ssl | Add independent positive/negative option matrix | Yes |
+| Managed internal `buffer: 65_536` | Injected into socket options | Adapter/engine now preserve explicit driver value | Native driver support implemented; managed enablement still needs lifecycle integration | runtime, core, ex_ssl | [TCP option references](../apps/ex_ssl/test/ssl/tcp_options_test.exs), core direct/upgrade precedence tests | P3 managed gate remains |
+| Explicit tos/tclass/priority | Platform-dependent driver semantics | Passed to driver with validation; platform errors/rounding retained | Actual IPv4/IPv6 + OTP references; macOS priority :ok/read0 is not effective QoS support | core, ex_ssl | TCP option references above | Supported-platform CI still required |
+| Explicit reuse_sessions/middlebox_comp_mode/honor_cipher_order/manual tickets | Managed policy accepts | Unsupported controls rejected | Per-option implementation or versioned compatibility decision (decision) | runtime, ex_ssl | Add independent positive/negative option matrix | Yes |
 | Ordered ClientHello profiles | Backend-specific | Exact version/ALPN/policy matching | Preserve wire order; resolve TLS1.3 profiles against future mixed HTTP default without silently rewriting them (decision) | core, ex_ssl | `scripts/ex_ssl_options_test.exs`, engine options/profile golden tests | Yes |
 | Tickets / resumption | OTP behavior | Disabled default; auto only TLS1.3 and no identity | Preserve explicit TLS1.3 opt-in; do not ignore auto under mixed default (decision) | core, ex_ssl | `scripts/ex_ssl_resumption*_test.exs` | Yes |
 | Completion / failed setup cleanup | Current barrier, conservative unconfirmed setup failures | Explicitly unsupported | Public provider evidence before allocation; preserve pending/unconfirmed semantics (required) | ex_ssl, core, Fetch | `apps/http_fetch/test/http/*request_completion_test.exs` | Yes |
@@ -172,6 +173,35 @@ remain pending until exact DOWN; identity loss stays sticky. An unresolved lost
 permit cannot settle a proof. This is pure bookkeeping, not real monitor evidence,
 a public receipt, a Lease/Transfer authority reducer or an observer seal. It is
 not wired into SSL.connect or HTTP completion yet.
+
+The internal [Authority](../apps/ex_ssl/lib/ssl/lifecycle/authority.ex) reducer now
+models single-use binding, current Lease validation, cancellation/accept ordering,
+latest recipient-bound offers, acknowledged owner changes, epoch/capability rotation
+and exact controller-monitor generation matching. Live snapshots retain one latest
+nonce/outcome for lost-reply reconciliation; committed replay from the named
+recipient is idempotent and cannot reopen cancelled admission. The runtime must
+supply fresh references, authenticated owner acknowledgments and real monitors;
+this pure model performs none of those operations. Observer, receipt sealing,
+resource teardown and destructive socket-call enforcement are still required.
+
+Source review identified these runtime integration gates before the public facade:
+
+- Connection.init currently starts writer/timer immediately; make births inert.
+  A blocking supervisor start and a child's synchronous observer-enrollment call
+  must not create an observer/supervisor/child call cycle.
+- The ledger lacks authenticated allocation completion without a returned resource.
+  Resolve permit retirement for normal start/dial failure explicitly. An error
+  result is not by itself proof that no internal port was ever born; creator death
+  or call timeout must never substitute for a no-future-allocation acknowledgment.
+- Unknown-identity permits intentionally do not settle proof. Bound observer
+  retention with conservative unconfirmed evidence/absence handling, never an
+  invented successful proof. Late inert children must stop if observer is absent.
+- Current controlling_process changes owner immediately. Nonce-bound prepare/freeze,
+  authenticated owner ACK, authority commit and release must fence old owner DOWN
+  and destructive calls throughout; no unsafe publication between these steps.
+- Bind/offer/start/adoption/owner-update timeouts need bounded operation-specific
+  reconciliation, as acceptance is unknown. Record setup outcome before publishing
+  connect success/error; fast Connection death must not lose its classification.
 
 The current `HTTP.RequestLifecycle` extracts two private OTP socket layouts.
 `HTTP.RequestCompletion` rejects ExSSL. ExSSL's opaque socket and connection
