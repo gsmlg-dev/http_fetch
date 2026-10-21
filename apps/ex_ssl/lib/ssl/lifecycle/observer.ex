@@ -1,0 +1,465 @@
+defmodule SSL.Lifecycle.Observer do
+  @moduledoc false
+  use GenServer, restart: :temporary
+
+  alias SSL.Lifecycle.{Authority, ObserverSupervisor, Receipt, ResourceLedger}
+
+  # Private cooperative provider protocol, not the public lifecycle API. Possession
+  # of a permit delegates self-enrollment; it does not attest spawn ancestry.
+  # No native allocation/close or synchronous child/supervisor calls occur here.
+  @reservation_ms 30_000
+  @grace_ms 1_000
+  @call_ms 1_000
+  @children %{allocator: [:tcp], setup: [:connection], connection: [:writer]}
+  @process_roles [:allocator, :setup, :connection, :writer]
+  @failures [:options, :connect, :tls, :timeout, :internal]
+
+  @spec start(pid(), :infinity | {:abs_ms, integer()}, ResourceLedger.scope()) ::
+          {:ok, Receipt.t(), Authority.lease()} | {:error, atom()}
+  def start(controller, deadline, scope \\ :dial) do
+    entered = now()
+
+    with :ok <- validate(controller, deadline, scope) do
+      expiry = min_deadline(entered + @call_ms, deadline)
+
+      with {:ok, pid} <- SSL.Lifecycle.Bootstrap.start(controller, deadline, scope, expiry) do
+        request(pid, :reservation, {:abs_ms, expiry})
+      end
+    end
+  end
+
+  def start_link(options), do: GenServer.start_link(__MODULE__, options)
+
+  @spec bind(Receipt.t(), Authority.lease(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
+  def bind(receipt, lease, deadline), do: call(receipt, {:bind, lease}, deadline)
+
+  @spec cancel(Receipt.t(), Authority.lease(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
+  def cancel(receipt, lease, deadline), do: call(receipt, {:cancel, lease}, deadline)
+
+  @spec snapshot(Receipt.t(), {:abs_ms, integer()}) :: {:ok, map()} | {:error, atom()}
+  def snapshot(receipt, deadline), do: call(receipt, :snapshot, deadline)
+
+  @spec reserve_root(Receipt.t(), Authority.lease(), :allocator | :setup, {:abs_ms, integer()}) ::
+          {:ok, reference()} | {:error, atom()}
+  def reserve_root(receipt, lease, role, deadline),
+    do: call(receipt, {:reserve_root, lease, role}, deadline)
+
+  @spec reserve_child(Receipt.t(), ResourceLedger.role(), {:abs_ms, integer()}) ::
+          {:ok, reference()} | {:error, atom()}
+  def reserve_child(receipt, role, deadline), do: call(receipt, {:reserve_child, role}, deadline)
+
+  @spec enroll_self(Receipt.t(), ResourceLedger.role(), reference(), {:abs_ms, integer()}) ::
+          :use | :stop | {:error, atom()}
+  def enroll_self(receipt, role, token, deadline),
+    do: call(receipt, {:enroll, role, token, self()}, deadline)
+
+  @spec enroll_port(Receipt.t(), reference(), port(), {:abs_ms, integer()}) ::
+          :use | :stop | {:error, atom()}
+  def enroll_port(receipt, token, port, deadline),
+    do: call(receipt, {:enroll, :tcp, token, port}, deadline)
+
+  @spec helper_done(Receipt.t(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
+  def helper_done(receipt, deadline), do: call(receipt, :helper_done, deadline)
+
+  @spec publish_setup(Receipt.t(), :connected | {:failed, atom()}, {:abs_ms, integer()}) ::
+          :ok | {:error, atom()}
+  def publish_setup(receipt, result, deadline),
+    do: call(receipt, {:publish_setup, result}, deadline)
+
+  @impl true
+  def init({controller, deadline, scope}) do
+    monitor = Process.monitor(controller)
+    authority = Authority.new(make_ref(), controller, monitor, make_ref())
+    expires = min_deadline(now() + @reservation_ms, deadline)
+    timer = schedule_deadline(expires)
+
+    {:ok,
+     %{
+       receipt: Receipt.new(),
+       authority: authority,
+       controller: controller,
+       controller_monitor: monitor,
+       owner: nil,
+       owner_monitor: nil,
+       ledger: ResourceLedger.new(scope),
+       permits: %{},
+       resources: %{},
+       setup: :not_started,
+       failure: :none,
+       deadline: deadline,
+       scope: scope,
+       expires: expires,
+       timer: timer,
+       grace: nil,
+       grace_timer: nil
+     }}
+  end
+
+  @impl true
+  def handle_call({operation, {:abs_ms, deadline}}, from, state) do
+    state = expire(state)
+
+    if now() < deadline do
+      operation =
+        case operation do
+          {:cancel, lease} -> {:cancel, lease, deadline}
+          other -> other
+        end
+
+      {reply, next} = operate(operation, elem(from, 0), state)
+      settle(reply, next)
+    else
+      settle({:error, :deadline_exceeded}, state)
+    end
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, type, object, _reason} = event, state) do
+    state = expire(state)
+    next = record_down(state, {ref, type, object}, event)
+    settle_info(next)
+  end
+
+  def handle_info({:timeout, ref, :deadline}, %{timer: ref} = state) do
+    next = expire(state)
+
+    if next.grace == nil do
+      {:noreply, %{next | timer: schedule_deadline(next.expires)}}
+    else
+      settle_info(next)
+    end
+  end
+
+  def handle_info({:timeout, ref, :grace}, %{grace_timer: ref} = state), do: settle_info(state)
+  def handle_info(_message, state), do: {:noreply, state}
+
+  defp operate(:reservation, _caller, state),
+    do: {{:ok, state.receipt, Authority.lease(state.authority)}, state}
+
+  defp operate(:snapshot, _caller, state) do
+    authority =
+      Map.take(Authority.snapshot(state.authority, now()), [:epoch, :phase, :bound?, :transfer])
+
+    snapshot = Map.merge(ResourceLedger.snapshot(state.ledger), authority)
+    {{:ok, Map.merge(snapshot, %{setup: state.setup, setup_failure: state.failure})}, state}
+  end
+
+  defp operate({:bind, lease}, caller, state) do
+    case Authority.bind(state.authority, lease, caller) do
+      {:ok, authority} ->
+        _ = Process.cancel_timer(state.timer)
+        expires = min_deadline(:infinity, state.deadline)
+        timer = schedule_deadline(expires)
+
+        {:ok,
+         %{
+           state
+           | authority: authority,
+             owner: caller,
+             owner_monitor: Process.monitor(caller),
+             setup: :pending,
+             expires: expires,
+             timer: timer
+         }}
+
+      {:error, reason} ->
+        {{:error, reason}, state}
+    end
+  end
+
+  defp operate({:cancel, lease, deadline}, _caller, state) do
+    case Authority.cancel(state.authority, lease, now(), deadline) do
+      {:ok, authority} -> {:ok, retire(%{state | authority: authority}, :cancelled)}
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp operate({:reserve_root, lease, role}, caller, state) do
+    if caller == state.owner and lease === Authority.lease(state.authority) and
+         role in [:allocator, :setup],
+       do: reserve(state, role, :observer, caller),
+       else: {{:error, :unauthorized_creator}, state}
+  end
+
+  defp operate({:reserve_child, role}, caller, state) do
+    case creator(state, caller) do
+      {parent, %{identity: {ref, :process, ^caller}, done: false}} ->
+        if role in Map.get(@children, parent, []),
+          do: reserve(state, role, {parent, ref}, caller),
+          else: {{:error, :invalid_role_edge}, state}
+
+      _ ->
+        {{:error, :unauthorized_creator}, state}
+    end
+  end
+
+  defp operate({:enroll, role, token, object}, caller, state) do
+    with {:ok, permit} <- permit(state, role, token),
+         :ok <- enrollment(state, role, permit, caller, object) do
+      type = if role == :tcp, do: :port, else: :process
+      ref = :erlang.monitor(type, object)
+
+      case ResourceLedger.enroll(state.ledger, role, token, {ref, type, object}) do
+        {:ok, ledger, action} ->
+          resource = %{identity: {ref, type, object}, live: true, done: false}
+
+          next = %{
+            state
+            | ledger: ledger,
+              permits: Map.delete(state.permits, role),
+              resources: Map.put(state.resources, role, resource)
+          }
+
+          if action == :stop, do: stop_process(resource)
+          {action, next}
+
+        {:error, reason} ->
+          Process.demonitor(ref, [:flush])
+          {{:error, reason}, state}
+      end
+    else
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp operate(:helper_done, caller, state) do
+    case creator(state, caller) do
+      {:setup, _resource} when state.setup == :pending ->
+        {{:error, :setup_outcome_pending}, state}
+
+      {role, resource} when role in [:allocator, :setup] ->
+        if Enum.any?(state.permits, fn {_, permit} -> permit.creator == caller end) do
+          {{:error, :allocations_pending}, state}
+        else
+          {:ok, %{state | resources: Map.put(state.resources, role, %{resource | done: true})}}
+        end
+
+      _ ->
+        {{:error, :unauthorized_creator}, state}
+    end
+  end
+
+  defp operate({:publish_setup, result}, caller, state) do
+    if state.setup == :pending and open?(state) and match?({:setup, _}, creator(state, caller)),
+      do: publish(state, result),
+      else: {{:error, :setup_not_permitted}, state}
+  end
+
+  defp reserve(%{scope: :upgrade} = state, :tcp, _creator, _caller),
+    do: {{:error, :adoption_not_implemented}, state}
+
+  defp reserve(state, role, creator, caller) do
+    token = make_ref()
+
+    with true <- open?(state),
+         {:ok, ledger} <- ResourceLedger.reserve(state.ledger, role, creator, token) do
+      permit = %{token: token, creator: caller}
+      {{:ok, token}, %{state | ledger: ledger, permits: Map.put(state.permits, role, permit)}}
+    else
+      false -> {{:error, :admission_closed}, state}
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp permit(state, role, token) do
+    case Map.get(state.permits, role) do
+      %{token: ^token} = permit -> {:ok, permit}
+      _ -> {:error, :unknown_permit}
+    end
+  end
+
+  defp enrollment(state, :tcp, permit, caller, port) when is_port(port) do
+    if caller == permit.creator and Port.info(port, :connected) == {:connected, caller} and
+         not duplicate?(state, port), do: :ok, else: {:error, :foreign_or_duplicate_resource}
+  end
+
+  defp enrollment(state, role, _permit, caller, object) when role in @process_roles do
+    if object == caller and node(caller) == node() and not prohibited?(state, caller) and
+         not duplicate?(state, caller), do: :ok, else: {:error, :foreign_or_duplicate_resource}
+  end
+
+  defp enrollment(_, _, _, _, _), do: {:error, :invalid_resource}
+
+  defp prohibited?(state, pid) do
+    pid in [self(), state.controller, state.owner] or
+      Enum.any?(
+        [SSL.Supervisor, SSL.ConnectionSupervisor, ObserverSupervisor, SSL.TicketCache],
+        fn name -> Process.whereis(name) == pid end
+      )
+  end
+
+  defp duplicate?(state, object),
+    do: Enum.any?(state.resources, fn {_, resource} -> elem(resource.identity, 2) == object end)
+
+  defp creator(state, pid),
+    do:
+      Enum.find(state.resources, fn {_, resource} ->
+        resource.live and elem(resource.identity, 2) == pid
+      end)
+
+  defp authority_view(state), do: Authority.snapshot(state.authority, now())
+
+  defp open?(state),
+    do: match?(%{bound?: true, phase: :open}, authority_view(state)) and state.grace == nil
+
+  defp publish(state, :connected) do
+    if Enum.all?([:connection, :writer, :tcp], fn role ->
+         match?(%{live: true}, Map.get(state.resources, role))
+       end) do
+      _ = if state.timer, do: Process.cancel_timer(state.timer)
+      {:ok, %{state | setup: :connected, failure: :none, expires: :infinity, timer: nil}}
+    else
+      {{:error, :resources_pending}, state}
+    end
+  end
+
+  defp publish(state, {:failed, failure}) when failure in @failures,
+    do: {:ok, retire(%{state | setup: :failed, failure: failure}, :internal)}
+
+  defp publish(state, _), do: {{:error, :invalid_outcome}, state}
+
+  defp record_down(state, identity, event) do
+    cond do
+      identity == {state.controller_monitor, :process, state.controller} ->
+        retire(state, :owner_down)
+
+      identity == {state.owner_monitor, :process, state.owner} ->
+        retire(state, :owner_down)
+
+      true ->
+        resource_down(state, identity, event)
+    end
+  end
+
+  defp resource_down(state, identity, event) do
+    case Enum.find(state.resources, fn {_, resource} ->
+           resource.identity == identity and resource.live
+         end) do
+      nil ->
+        state
+
+      {role, resource} ->
+        next = %{
+          state
+          | ledger: ResourceLedger.down(state.ledger, event),
+            resources: Map.put(state.resources, role, %{resource | live: false})
+        }
+
+        if role in [:allocator, :setup] and resource.done, do: next, else: retire(next, :internal)
+    end
+  end
+
+  defp expire(%{grace: nil, expires: expires} = state) when is_integer(expires) do
+    if now() >= expires, do: retire(state, :timeout), else: state
+  end
+
+  defp expire(state), do: state
+
+  defp retire(%{grace: nil} = state, reason) do
+    instant = now()
+
+    {:ok, authority} =
+      Authority.cancel(state.authority, Authority.lease(state.authority), instant, instant + 1)
+
+    ledger = ResourceLedger.close_admission(state.ledger)
+    grace = now() + @grace_ms
+    grace_timer = :erlang.start_timer(@grace_ms, self(), :grace)
+    next = %{state | authority: authority, ledger: ledger, grace: grace, grace_timer: grace_timer}
+    Enum.each(next.resources, fn {_, resource} -> stop_process(resource) end)
+    outcome(next, reason)
+  end
+
+  defp retire(state, _reason), do: state
+
+  defp outcome(%{setup: setup} = state, _reason) when setup in [:connected, :failed], do: state
+
+  defp outcome(state, reason) when reason in [:cancelled, :timeout, :owner_down],
+    do: %{state | setup: :cancelled, failure: reason}
+
+  defp outcome(state, _reason), do: %{state | setup: :failed, failure: :internal}
+
+  defp stop_process(%{identity: {_, :process, pid}, live: true}), do: Process.exit(pid, :kill)
+  # Its enrolled provider creator/owner exits independently. Never block this
+  # observer in native close or infer port DOWN from the owner's death.
+  defp stop_process(_resource), do: :ok
+
+  defp settle(reply, state) do
+    case terminal(state) do
+      :stop -> {:stop, :normal, reply, state}
+      :pending -> {:reply, reply, state}
+    end
+  end
+
+  defp settle_info(state) do
+    case terminal(state) do
+      :stop -> {:stop, :normal, state}
+      :pending -> {:noreply, state}
+    end
+  end
+
+  defp terminal(%{grace: nil}), do: :pending
+
+  defp terminal(state) do
+    case ResourceLedger.proof(state.ledger) do
+      {:ok, _} ->
+        :ok =
+          Receipt.seal(state.receipt, state.ledger, %{
+            setup: state.setup,
+            failure: state.failure,
+            epoch: authority_view(state).epoch
+          })
+
+        :stop
+
+      {:pending, _} ->
+        if now() >= state.grace, do: :stop, else: :pending
+    end
+  end
+
+  defp call(receipt, operation, deadline),
+    do: request(Receipt.observer(receipt), operation, deadline)
+
+  defp request(pid, operation, {:abs_ms, deadline}) when is_integer(deadline) do
+    remaining = deadline - now()
+
+    if remaining > 0,
+      do: GenServer.call(pid, {operation, {:abs_ms, deadline}}, min(remaining, @call_ms)),
+      else: {:error, :deadline_exceeded}
+  catch
+    :exit, _ -> {:error, :acceptance_unconfirmed}
+  end
+
+  defp request(_, _, _), do: {:error, :invalid_deadline}
+
+  defp validate(controller, deadline, scope) do
+    cond do
+      not is_pid(controller) ->
+        {:error, :invalid_controller}
+
+      node(controller) != node() ->
+        {:error, :invalid_controller}
+
+      scope not in [:dial, :upgrade] ->
+        {:error, :invalid_scope}
+
+      deadline == :infinity ->
+        :ok
+
+      match?({:abs_ms, value} when is_integer(value), deadline) ->
+        if elem(deadline, 1) > now(), do: :ok, else: {:error, :deadline_exceeded}
+
+      true ->
+        {:error, :invalid_deadline}
+    end
+  end
+
+  defp min_deadline(value, :infinity), do: value
+  defp min_deadline(:infinity, {:abs_ms, value}), do: value
+  defp min_deadline(value, {:abs_ms, deadline}), do: min(value, deadline)
+  defp schedule_deadline(:infinity), do: nil
+
+  defp schedule_deadline(deadline),
+    do: :erlang.start_timer(min(max(0, deadline - now()), 0xFFFFFFFF), self(), :deadline)
+
+  defp now, do: System.monotonic_time(:millisecond)
+end
