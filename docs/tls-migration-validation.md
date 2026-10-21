@@ -1795,3 +1795,98 @@ control. Launch baseline then allow normal handshake/readiness; consume only
 already-ready data, no delay. Earlier natural TLS latency may help, never
 guarantees baseline readiness. No custom-transport/DTLS/portable API claim.
 All temporary artifacts retained as debug evidence; Source hooks removed.
+
+## Round17 — prehandshake public metadata and startup latency
+
+Base1962618 verified clean. No production/default/API/pin change. Read exact
+OTP29 ssl peername2838/sockname3432 dispatch and transport_accept2384 warning:
+current TCP implementation supports direct address queries, without a general
+prehandshake/custom-transport/DTLS promise. Root read99-line standalone control
+before one native run. Raw owner sent ZERO TLS bytes before address validation.
+
+Actual ROUND17_PREHANDSHAKE_CONTROL_EXIT=0, targetBEAM65224/client60288->60287,
+valid FD44/gen8211582/ESTABLISHED4. Entry EO13.52ms before VM. Public tuple
+queries passed before handshake; client/server public closes, original raw
+Port monitor, client actor, FD worker and watchdog cleanup all confirmed.
+
+The baseline was NOT already ready at the handshake boundary:76ms boundary,
+120ms full receipt delivery, versus6.115ms inside the Python C-probe interval.
+Pending collection used only the original200ms probe deadline AFTER the zero-
+wait boundary observation. Valid late receipt is not a ready-before-trigger
+receipt. No earlier-arm-only Source campaign was run to repeat this gap.
+A prepared diagnostic process before HTTP.fetch is now under source review;
+changed preparation condition must be explicit, never production performance
+or root-cause proof. Original R17 control/logs and all R14–16 failures retained.
+
+Secondary source analysis: incomplete ciphertext can delay plaintext, but raw
+recv0 delivers available plaintext; missing close_notify alone cannot explain
+an outstanding2s recv timeout after transport termination is handled. Passive
+close deferral between receives differs from an outstanding receive. Active99
+excludes credit exhaustion at that snapshot, not read readiness. No new cause
+established. Capacity recbuf is not kernel queue occupancy.
+
+PeerNativeProbe62lines was read before ONE owned RAW public-metadata control.
+Actual ROUND17_PEER_CONTROL_EXIT=0; captured exactly the original accepted
+peer Port, open/connected/activefalse/packet0/exit_on_close true, zero counters.
+After actual Port.close plus an independent original Port DOWN, observeafter0
+consumed its own exact monitor DOWN: statesclosed, native APIseinval,
+Portinfo nil; port_downtrue while original owner remained alive. All owned
+fixture ports closed. This validates monitor discrimination, not kernel FD
+absence. Same actor must capture/observe. The pre-TLS captured owner may be
+the peer actor and is NOT the later OTP receiver; current connected PID is
+separate metadata. No private TLS state or payload inspected.
+
+Prepared bootstrap: Root read Python33/Elixir95/control104 lines before ONE
+run. Python emits exact READY before any C entry, waits one bounded target
+frame/5sTTL, then reuses immutable R16 probe once. Combined output2KiB and
+metadata1KiB caps stay unchanged. Elixir enforces preparation200ms, observes
+only once with independent original200ms absolute D, and requires C-child
+reap + wrapper exit + exact diagnostic Port DOWN. Final owned50ms is outside
+caller D. Caller/recipient/peer death cancels; no production supervisor or
+TLS state inspection. Readiness is not a cleanup receipt.
+
+Actual ROUND17_PREPARED_CONTROL_EXIT=0, BEAM66816/client60810->60809,
+FD45/gen8216494/ESTABLISHED4. Prep67ms BEFORE any native client, completed
+observation22ms BEFORE normal handshake boundary53ms; receipt already ready,
+valid, all socket/actor/original raw Port/worker/watchdog cleanup confirmed.
+C-probe6.616ms is only part of22ms. Explicit PREPARED changed precondition,
+not performance or production-cause proof, not guaranteed ExSSL timing.
+
+### One Source campaign: first failure outside probe coverage
+
+Root read all changed fixture regions and immutable helpers, formatted only
+the temporary HTTPS fixture, ran entry preflight then ONE root-scoped seed101
+warnings-as-errors/max-failures1 campaign. Actual ROUND17_HTTPS_EXIT=2+prompt,
+17.0s,27/28executed passed; remaining cases aborted. FIRSTfailure was
+OTP ssl/auto/streamed/infinity, NOTExSSL. Original recv2s timeout persisted;
+peer counters789772/2565/send_pend0, active96/buffer9216/recbuf320936,
+receiver/sender waiting gen_statem:loop/3 with empty mailboxes.
+
+This slice armed ONLYExSSL, so NOFD/native-debug records exist for the failing
+OTP tuple. Success-case baselines were not logged either: cannot claim actual
+ExSSL source baseline readiness or associate a control FD with this failure.
+Same symptom across backends is NOT proof of one shared cause. No rerun after
+first failure. This result identifies observation coverage, not a TLS fix.
+
+Temporary Source prototype (+169lines before formatting) saved formatted at
+/tmp/http-fetch-round17-https-instrumented.exs; original fixture restored
+BYTE EXACT b4f4f8b375d72aadf9799f8261199c478e4f85dd34bfdd601c3e873e0429c9d3.
+All diagnostics remain under clearly named /tmp debug artifacts. Runtime,
+strict pins, public/default behavior unchanged; no production source shipped.
+Logs /tmp/http-fetch-round17-{control-entry,prehandshake-control,peer-control,
+prepared-entry,prepared-control,source-entry,https}.log retained.
+
+Next fresh scope: prepare/capture BOTH original TCP TLS backends so the first
+failure is observable. Keep all44 cases, first-failure stop, no skipped failing
+OTP reference case, same1s/2s/3s bounds/pressure. A success-only summary after
+original peer-closed assertion can record baseline-ready validity without IO
+before trigger; timeout retains full original-identity observations. No new
+control required merely to include OTP client: the prepared control already
+uses that client. Do not repeat ExSSL-only observation hoping for a new order.
+P0/default/public lifecycle/performance/package/publication gates remain open.
+
+Restored-tree wholeformat/diffcheck/apps-diff actual
+ROUND17_RESTORED_CHECK_EXIT=0+prompt. Only this evidence document remains
+changed; no additional compile/Credo/Dial run was warranted after byte-exact
+restoration of every app file (R16 checks remain applicable, not rerun totals).
+Full-nine R13 gate remains3190/3192 EXIT2. No P0 completion claim.
