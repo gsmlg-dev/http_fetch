@@ -86,6 +86,15 @@ coverage; no supported endpoint class silently lost.
       authenticated fixed-role admission, independent DOWN and nonextendable retirement
       (59 lifecycle checks; native births/adoption/transfer/public facade remain open).
 - [x] Read existing ex_ssl architecture/design/PRD/implementation docs before changes.
+- [x] Retain explicit upload-abandonment abort intent after the retained native job
+      finishes: matched ordinary FIN vs abandoned RESET, authenticated response reads,
+      exact local DOWN/Port absence before bounded independent-peer drain
+      (round9 deterministic old-source RED ->2/2 GREEN; no actor/layout changes).
+- [ ] Before public lifecycle acceptance, implement authenticated constructor completion,
+      inert Connection/writer enrollment, then private real allocator/setup direct-dial
+      orchestration with original deadlines and acknowledged outcome publication.
+      Native connect error/helper DOWN is not native cleanup proof; unresolved identity
+      coverage remains unconfirmed. Public upgrade/transfer stay gated separately.
 - [ ] Public attempt handle exists before allocation, survives failed setup and transfer.
 - [ ] Provider enrolls/observes every connection, writer, TCP and setup worker without
       a cancellation gap; completion requires closed enrollment and observed DOWN.

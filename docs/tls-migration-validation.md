@@ -855,3 +855,143 @@ response reads, exact local DOWN/Port absence <=1s BEFORE remote2s drain, and or
 failure reruns before any remote-failure fix claim. No production fix is made here.
 Full P0–P7, public/native lifecycle integration, managed completion, default
 promotion, production OTP dependency removal and package publication remain open.
+
+## Round9 — exact early-data rejection and persistent upload abort
+
+Task11 old whole-file14 checks plus30 extra filtered repetitions passed. That did
+not reproduce the intermittent natural root failure. Controlled public/native late
+accept AFTER HTTP.Promise.await did:100/100 late accept attempts returned:einval while
+the SAME listener retained its owner and public [:listen,:open] states. A fresh
+native control connected/accepted on that same listener afterward. Exact public
+error100/100 was RequestError reason `{:options,:incompatible,
+[:early_data,{:session_tickets,:disabled}]}`, phase/request_started:unknown. OTP
+rejects this option combination BEFORE TLS; expecting a CA-alert handshake helper
+was invalid. Listener retirement/foreign-port capture was not the cause at this seam.
+An actual gated OLD ExUnit run retained original2s accept/3s handshake/4s Task.await:
+4/5 passed, early_data alone failed MatchError:einval. Diagnostic gate was removed.
+
+The final single-file patch removes early_data from the handshake matrix and adds
+a dedicated exact public option-rejection test with its live owned listener and
+NO handshake helper. It retains unknown phase/request_started and pre_send?false;
+no native errors are swallowed, no timeout/error set is broadened, no skip or
+production change. Other four matrix cases retain real peers. Final repeat flag10
+ran11 whole-file rounds:154 passed, zero exclusions/skips. Scoped format passed.
+The old default-build dependency/version failure encountered by another worker was
+setup-only, NOT a regression RED; all accepted tests use the shared /tmp build.
+
+Task10 added a separate private test-owned FIFO TCP relay and independent OTP peer.
+Original logical upload16MiB; only the original <=16384-byte application record
+survives public abandonment. Both matched ordinary/abandoned cases authenticate an
+early response while the real immutable native writer job is held. After release,
+require output=nil/write=nil/driverpending0 and sticky abandonment flag; this does
+NOT assert kernel queue empty. The relay records FIRST client FIN/RST before any
+cleanup/propagation can manufacture it. Test first observes exact Connection/writer
+DOWN +Port absence within1s, then authorizes the peer's2s drain. The retained prefix
+is authenticated through public OTP recv BEFORE the relay releases gated final
+bytes/terminal FIFO, avoiding an assumption that a native send ACK is a peer TLS ACK.
+Ordinary prefix16384 bytes == the abandoned case's committed prefix; the remaining
+16,760,832-byte logical tail cannot be replayed. No machine/keys/cursors are returned by scalar snapshots.
+
+Correct old-source shared-build test:1/2 passed; ordinary FIN PASS, abandoned ONLY
+failed final semantic comparison actual:fin vs expected:reset. Both cases had already
+passed every precondition/local cleanup/prefix/drain assertion; no fixture timeout.
+Production fix changes TWO decisions only: write_abandoned? short-circuits
+begin_shutdown before close_notify, and close_transport retains zero-linger abort
+when that flag survives output completion/driverpending0. Existing single actor,
+writer, timers, state fields, key epochs and bytes are unchanged. Same tests2/2 GREEN.
+Independent read-only review confirms authenticated plaintext buffer/size/recv/active
+are retained by close_transport and drained normally; flagfalse keeps exact old
+orderly-close behavior. COMPATIBILITY and root design record the narrow policy.
+
+Connection exact SHA256 is now
+371201570752d6d090d78bd8760547998e9bff25640d4b436c45719fa4cf98a0.
+Both cross-app private probes were explicitly re-audited and repinned; no private
+field/layout, threshold or equality/version check was weakened. Unabandoned raw
+option forwarding and plaintext peer-close drainage paths remain unchanged.
+
+Combined focused integration seed101:208/210 passed, zero exclusions/skips:
+ExSSL55/55 (new2 plus backpressure/ordering/lifecycle/abandon/closure), core27/27,
+Fetch126/128 (setup evidence, original HTTPS early uploads/write idle and H2).
+Original ExSSL cancellation/early-upload cases and all source guards passed.
+Remaining actual focus failures are BOTH OTP reference paths: ordinary reuse could
+not establish an observed in-flight bounded send; SSL auto/buffered4000 peer remained
+open after proven local cleanup, with public recv_oct247546/send_pend0/recbuf340472.
+The respective1s observation/2s remote bounds are unchanged. These are not claimed
+fixed by an ExSSL-only terminal decision patch. Strict compile/whole-root format
+passed. Configured Credo54 checks/531 files/8835 mods-functions found0 issues;
+Dialyzer0 errors/0 skipped, four existing unnecessary-ignore notices retained.
+First round9 full source with pinned Python/real QUIC/integration/seed101 exited2:
+3157 checks,3154 passed,THREE failed, zero exclusions/opt-in skips. ExSSL759/759
+(20 properties), QUIC249, core418, H3 companion113, runtime149, WS138, WebTransport24,
+SSE75 passed; Fetch1229/1232 (20/20 doctests). Failures: fixed-length upload abort
+GET and DELETE raw accept:einval at227, plus ExSSL http1/streamed/infinity HTTPS
+peer2s timeout after local proof (recv_oct103961/send_oct1461/send_pend0/recbuf484000).
+Thus the persistent-abort semantic fix does NOT causally resolve every remote-close
+failure; task14 preserves the remaining local/native/remote diagnosis and all bounds.
+
+Task13 then reproduced the UNCHANGED abort test naturally: POST failed on16th
+focused repeat after15 rounds passed. Valid late-accept gating reproduced old
+ExUnit3/3 failed for POST/GET/DELETE, same live parent-owned/open listeners. Source
+review corrects an important distinction: HTTP1.Upload acknowledges read_chunk ONLY
+after send_data:ok. HTTP.Stream.chunk therefore confirms TRANSPORT ACCEPTANCE, not
+mere source admission and not peer receipt. Plain-TCP abort's existing zero linger
+can discard bytes before peer acceptance. The fixture expected an observed partial
+body without establishing that prerequisite; no production method/framing bug found.
+
+Only those three generated tests now use bounded5s accept, assert exact wire method,
+Content-Length6/no Transfer-Encoding, preserve header-rest bytes, read exactlyabc,
+and send a unique ref/PID peer receipt BEFORE parent abort. Exact-length native
+reads preserve later bytes for the final EOF reader; no body truncation hides replay.
+The source is still alive and final three bytes remain unproduced when abort occurs.
+Original public:aborted, source DOWN:normal, exact final bodyabc/EOF remain; normal
+peer DOWN is now also required before test exit. No errors swallowed/broadened,
+no finite timeout widened, no helpers/global raw-server semantics or production
+changed. Existing already-aborted-controller/no-dial coverage stays separate.
+Old natural/gated diagnostics were removed. Final303 focused checks across101 runs
+passed (28 deliberate location exclusions per run); six whole-file rounds186/186
+passed with ZERO exclusions/skips. Source frozen before final root below.
+
+Final whole-root format/Credo after the last fixture change passed again:54 checks,
+531 files,8835 mods/functions, zero issues. Production source did not change after
+the strict compile and successful Dialyzer above. Final full source with pinned
+Python PATH, real QUIC flag, integration included and seed101:exit2,3157 checks,
+3155 passed,TWO failed, zero exclusions/opt-in skips. App counts match the first
+root except Fetch improved to1230/1232 (20/20 doctests). ExSSL759/759 again passed,
+including both FIN/RST regression cases; early_data and all three fixed-length
+partial-upload cancellation cases passed in the complete suite.
+
+Remaining final-root failures:
+- OTP SSL ordinary reuse at HTTP1WriteIdleWireTest167 could not establish its
+  observed bounded-send prerequisite within the unchanged1s (line198). Task16
+  distinguishes pressure/capacity, real stale-policy failure and sampling before
+  changing either fixture or runtime; no cause claimed yet.
+- ExSSL AUTO/streamed/infinity HTTPS early upload still timed out on peer2s drain
+  AFTER exact local cleanup:recv_oct103074/send_oct1461/send_pend0/recbuf484896,
+  receiver/sender idle. The first root'sHTTP1 variant happened to pass final run;
+  that is not causal resolution. Task14 retains native-close/linger/4tuple/reference
+  investigation with unchanged local1s/remote2s bounds. Do not infer remote terminal
+  delivery from local DOWN/Port absence or from the deterministic semantic RST test.
+
+Round9 accepts only the narrow abort-intent fix and the two causally established
+fixture corrections. Full acceptance remains failed. No default/managed/completion
+promotion, native lifecycle/public facade enablement, production OTP removal,
+package publication or full P0–P7 completion is claimed.
+
+Read-only next-P2 architecture review identifies ordered work: constructor no-resource
+settlement BEFORE entering native allocation, inert Connection/writer enrollment,
+real allocator->TCP/setup->Connection/Connection->writer orchestration, then public
+facade admission. Setup outcome must be acknowledged before result/normal failure
+exit; unexpected Connection DOWN can retire the current observer before later setup
+publication. Public upgrade/authority transfer remain separate. All source runtime
+integration is still absent; private observer/plan is not exposed as cleanup support.
+
+A bounded separate-VM OTP29 tracing probe investigated hidden ports on native refusal.
+Allocator-only ports tracing produced no open events; procs tracing exposed link/
+unlink identities but complete native coverage is unproved. Session-wide NEWport
+tracing exposed exact open/closed identity and matching monitor DOWN:noproc after
+close, a valid current absence for THAT identity. Global new-port scope is not local
+allocator scope. Public trace_delivered/delivered guarantees messages 'to be delivered',
+not tracing completeness; port-stream barrier, DNS/multiple-attempt coverage,
+backend compatibility, event authentication and mailbox bounds remain unproved.
+No tracing/provider implementation was added. Native error or helper DOWN still
+cannot substitute for exact native-resource proof; missing evidence stays unconfirmed.
