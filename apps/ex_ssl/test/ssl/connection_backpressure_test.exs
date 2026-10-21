@@ -24,6 +24,7 @@ defmodule SSL.ConnectionBackpressureTest do
         send(parent, {:backpressure_key_update, update_result})
         result = :ssl.recv(socket, byte_size(payload), 30_000)
         send(parent, {:backpressure_payload, result})
+        assert {:ok, "after-update"} = :ssl.recv(socket, 12, 5_000)
         assert :ok = :ssl.send(socket, "recovered")
         assert {:error, :closed} = :ssl.recv(socket, 0, 5_000)
         :ok
@@ -44,15 +45,26 @@ defmodule SSL.ConnectionBackpressureTest do
       assert held > 0
       assert_writer_is_socket_blocked(socket, sender)
 
+      {:connected, initial} = :sys.get_state(socket.pid)
       send(peer.task.pid, :request_update)
       assert_receive :backpressure_key_update_started, 5_000
-      wait_for_pending_input(socket.pid)
+
+      wait_for_key_update_progress(
+        socket.pid,
+        {initial.machine.read_state.generation, initial.machine.write_state.generation}
+      )
+
+      assert_writer_is_socket_blocked(socket, sender)
       assert :ok = Peer.resume_client_to_server(proxy, self())
       assert_receive {:backpressure_proxy, ^proxy_ref, :resumed}, 1_000
 
       assert :ok = Task.await(sender, 30_000)
       assert_receive {:backpressure_key_update, :ok}, 5_000
       assert_receive {:backpressure_payload, {:ok, ^payload}}, 30_000
+      {:connected, updated} = :sys.get_state(socket.pid)
+      assert updated.machine.read_state.generation == initial.machine.read_state.generation + 1
+      assert updated.machine.write_state.generation == initial.machine.write_state.generation + 1
+      assert :ok = SSL.send(socket, "after-update")
       assert {:ok, "recovered"} = SSL.recv(socket, 9, 5_000)
       assert :ok = SSL.close(socket)
       assert :ok = Peer.stop(peer)
@@ -267,17 +279,28 @@ defmodule SSL.ConnectionBackpressureTest do
     end
   end
 
-  defp wait_for_pending_input(pid, attempts \\ 1_000)
-  defp wait_for_pending_input(_pid, 0), do: flunk("KeyUpdate was not queued behind output")
+  # A native write can finish between the stable-backpressure observation and
+  # delivery of the peer's update. The connection may then authenticate it before
+  # blocking on the next record of the same logical write. Both outcomes make
+  # progress; an empty raw-input queue does not imply a missing KeyUpdate.
+  defp wait_for_key_update_progress(pid, generations, attempts \\ 1_000)
 
-  defp wait_for_pending_input(pid, attempts) do
+  defp wait_for_key_update_progress(_pid, _generations, 0),
+    do: flunk("requested KeyUpdate made no progress during the blocked logical write")
+
+  defp wait_for_key_update_progress(pid, {read, write} = generations, attempts) do
     case :sys.get_state(pid) do
       {:connected, %{input_size: size}} when size > 0 ->
         :ok
 
+      {:connected,
+       %{machine: %{read_state: %{generation: next_read}, write_state: %{generation: next_write}}}}
+      when next_read == read + 1 and next_write == write + 1 ->
+        :ok
+
       _ ->
         Process.sleep(1)
-        wait_for_pending_input(pid, attempts - 1)
+        wait_for_key_update_progress(pid, generations, attempts - 1)
     end
   end
 
