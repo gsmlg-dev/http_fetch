@@ -383,3 +383,65 @@ those APIs or topology guarantees is implemented by documenting the contract.
   30-minute load/soak, other supported runtimes, Dialyzer and remote CI remain gates.
 - No P1–P7 acceptance, changed default, production OTP removal or publication is
   established. Historical validation remains scoped to its original execution.
+
+## P1 contextual versions and P2 resource foundation (round 4)
+
+The HTTP ExSSL adapter now offers TLS1.3 plus bounded TLS1.2 in one ordinary
+handshake. Explicit versions remain exact; concrete WireProfile versions retain
+order and GREASE handling. Auto tickets retain TLS1.3 when versions are absent.
+An initial mixed-default patch exposed a real regression for explicit TLS1.3-only
+ciphers: the unchanged cipher policy worked through OTP and through explicit
+ExSSL TLS1.3 but failed when versions were omitted. The regression was retained,
+then fixed by preserving the previous ExSSL TLS1.3 context for explicit cipher
+policies absent versions/profile. No inference from cipher spellings or mutation
+of caller policy was introduced. Broader OTP cipher-option parity remains open.
+
+All 22 [version-policy scenarios](../apps/http_core/test/http/ex_ssl_version_policy_test.exs)
+passed, including independent OTP TLS1.3 and Python/OpenSSL TLS1.2 byte exchanges,
+direct/upgrade paths, profile/ticket conflicts before direct TCP accepts and an
+explicit TLS1.3 rejection against the same EMS-capable OpenSSL TLS1.2-only peer.
+The unchanged reverse-order mixed profile works against OpenSSL TLS1.2 and 1.3;
+local OTP TLS1.3 rejected that hello with illegal_parameter. OTP28/29 TLS1.2 without
+EMS is separately rejected, consistent with the existing bounded engine profile.
+Neither peer distinction is fixed or hidden by rewriting profiles/weakening EMS.
+
+The internal ResourceLedger is the first P2 slice, not a public lifecycle API.
+Its ten tests cover fixed resource bounds, permit fences, exact ref/type/object
+DOWN matching, idempotence, stale tokens, late enrollment, adoption scope and
+bounded evidence without arbitrary reasons. Independent read-only review found
+that deleting permits on creator death lost late identities. The correction keeps
+bounded original tokens, requires late enrollment to stop, keeps proof pending
+until exact resource DOWN, and retains irreversible loss. An unresolved lost permit
+cannot settle; no matching allocator DOWN substitutes for unknown TCP identity.
+Actual monitors, allocator/runtime topology, authority epochs, transfer, terminal
+seal and observer exit remain unimplemented.
+
+Final shared formatting, strict compilation and Credo passed (516 source files,
+54 checks, 8,594 modules/functions at that invocation). The complete seed-101 root
+run then executed all nine apps, exit 2:
+
+| App | Result |
+| --- | --- |
+| ex_ssl | 479 passed including 20 properties; 194 integration excluded |
+| elixir_quic | 249 passed |
+| http_core | 402 passed; three real-QUIC opt-ins skipped |
+| elixir_quic_http3 | 113 passed |
+| http_runtime | 149 passed |
+| http_fetch | 1,210/1,226 passed; 16 failed |
+| http_web_socket | 138 passed |
+| http_web_transport | 24 passed |
+| http_event_source | 75 passed |
+
+This full run contains the first 21 policy tests; the additional independent
+explicit-version negative was then included in the separate 22-pass run. Fetch
+failures were 13 unavailable-127.0.0.2 scenarios, one known remote-upload closure
+observation, one raw-stream listener accept returning einval, and one OTP ordinary
+reuse fixture unable to observe its expected in-flight send. All source-hash H2
+buffer probes passed. A fresh targeted rerun of the two newly failing Fetch files
+passed 57/58: stream mismatch passed, OTP reuse again could not establish the
+blocked-writer precondition. Keep that reproducible fixture/result open for P2
+investigation; this does not establish a production policy regression or green
+umbrella acceptance. No assertion/deadline was relaxed to hide it.
+
+The global backend is still OTP; managed and public ExSSL completion remain guarded.
+No P1/P2 exit, P4 acceptance, default promotion or publication is claimed.

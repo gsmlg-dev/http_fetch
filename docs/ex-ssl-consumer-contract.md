@@ -42,6 +42,13 @@ proxy routes; SSE/WS do not inherit that forwarding support. HTTPS-proxy TLS pro
 the connection to the proxy for an HTTP origin; nested HTTPS-over-HTTPS is unsupported.
 No encrypted Unix or functioning default WebTransport session is claimed.
 
+The P1 HTTP ExSSL adapter now offers TLS1.3 plus bounded TLS1.2 for ordinary
+calls. Explicit versions and concrete profile order remain authoritative;
+auto tickets and explicit cipher policies retain the prior TLS1.3 context when
+versions are omitted. Independent policy scenarios are recorded in the execution
+ledger. Broader option/peer compatibility and the public lifecycle runtime are
+still implementation gates, so this does not establish sole-provider acceptance.
+
 | Requirement | Status | Production boundary | Executable coverage |
 | --- | --- | --- | --- |
 | Connect, ownership, send, passive recv, active-once, ALPN, close | implemented | `http_core` transport behaviour and SSL/ExSSL adapters | `apps/http_core/test/http/tls_transport_test.exs` |

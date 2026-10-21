@@ -3,7 +3,7 @@
 Execution checklist derived from the accepted 2026-10-21 HTTP Fetch migration plan.
 Baseline: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, nine packages at `0.21.14`.
 Status: P0 baseline/interfaces recorded with explicit failing gates; P1/P2 implementation
-is next. No production default or dependency removal has been made.
+is active. No production default or dependency removal has been made.
 
 See [design and compatibility table](tls-migration-design.md) and
 [execution evidence](tls-migration-validation.md). A checkbox means executed and
@@ -39,8 +39,9 @@ executed evidence and required work are distinguishable. OTP remains default.
 
 ## P1 — TLS policy and compatibility (after P0)
 
-- [ ] Default HTTP ExSSL policy offers TLS1.3 + supported TLS1.2 in one handshake;
-      explicit TLS1.3-only still works and has an independent negative peer test.
+- [x] Default HTTP ExSSL policy offers TLS1.3 + supported TLS1.2 in one handshake;
+      explicit TLS1.3-only still works and has an independent negative peer test
+      (22 contextual policy scenarios; broad P1 option/peer compatibility stays open).
 - [ ] Validate bounded TLS1.2 ECDHE/AES-GCM, EMS, secure renegotiation and needed
       version-specific signature support. Never enable TLS1.3 PKCS1 CertificateVerify.
 - [ ] Resolve internal managed buffer and explicit buffer/tos/tclass/priority values
@@ -56,6 +57,9 @@ Exit: required option/default table resolved with independent positive/negative
 coverage; no supported endpoint class silently lost.
 
 ## P2 — Provider lifecycle and duplex correctness (after P0; parallel with P1)
+
+- [x] Implement/test internal fixed-role resource ledger, allocation fences, creator loss
+      and late enrollment (pure foundation only; public/runtime proof remains open).
 
 - [ ] Read existing ex_ssl architecture/design/PRD/implementation docs before changes.
 - [ ] Public attempt handle exists before allocation, survives failed setup and transfer.

@@ -35,7 +35,7 @@ Test paths below are relative to the repository root.
 | Public operation / option | Current OTP behavior | Current ExSSL behavior | Required target / classification | Owner | Acceptance source | Release blocker |
 | --- | --- | --- | --- | --- | --- | --- |
 | Unspecified backend | OTP default | Explicit selector works | Preserve OTP until P4 passes; consistent ExSSL default only in P5 (required) | core, clients | `apps/http_core/test/http/tls_backend_test.exs` | P5 gate |
-| Default TLS versions | 1.3 + 1.2 | HTTP adapter and engine default 1.3 | HTTP default 1.3 + supported 1.2 in one ClientHello; explicit 1.3 remains (required) | core | `apps/http_core/test/http/tls_transport_test.exs`, `scripts/ex_ssl_tls12_test.exs` | Yes |
+| Default TLS versions | 1.3 + 1.2 | HTTP ordinary default now mixed; raw engine default 1.3 | One ClientHello; explicit versions and concrete profile order retained, auto tickets/explicit cipher policy keep existing 1.3 context absent versions (implemented adapter slice) | core | [version-policy tests](../apps/http_core/test/http/ex_ssl_version_policy_test.exs) | Broader P1 compatibility/consumer gates remain |
 | TLS 1.2 endpoint profile | OTP policy | ECDHE AES-GCM, EMS, initial secure renegotiation | Independent peer coverage; decide PKCS1 SHA256+ handshake support separately from TLS1.3 (decision) | ex_ssl | `apps/ex_ssl/test/ssl/tls12_interop_test.exs` | Yes |
 | CA precedence / reference identity | System roots unless explicit CA; origin verification | Explicit cacerts, then file, then roots; DNS/IP identity and SNI | Preserve system/custom trust, pinned and tunnel-origin identity (supported subset) | core, ex_ssl | `tls_transport_test.exs`, `reference_identity_interop_test.exs` under respective app tests | Additional route matrix |
 | `verify_none` | Public adapter passes through; managed allows | Rejects | Faithful implementation or explicit versioned compatibility change (decision); keep verify_peer default | ex_ssl, core | `tls_transport_test.exs`, `apps/ex_ssl/test/ssl/certificate_policy_options_test.exs` | Yes |
@@ -88,7 +88,12 @@ boundary and migration behavior are resolved and documented.
 ### Effective configuration facts
 
 `HTTP.Transport.SSL` supplies mixed TLS versions and default trust. The ExSSL
-adapter supplies TLS1.3-only and lets the engine resolve trust. The runtime also
+adapter now supplies mixed versions for ordinary calls and lets the engine resolve
+trust. Explicit versions win; a concrete profile supplies its own version order.
+Auto tickets and explicit cipher policies retain the previous TLS1.3 context when
+versions are absent. This preserves existing ExSSL cipher callers without guessing
+versions from cipher spellings; broader OTP cipher-policy parity still needs a
+separate acceptance decision. The raw SSL facade default remains TLS1.3. The runtime also
 injects send timeout/close behavior and ALPN; comparisons must use these effective
 options, not raw engine defaults. Managed policy freezes CA/client identity
 snapshots, policy hash and generation pools and currently freezes OTP backend.
@@ -157,7 +162,16 @@ excludes ExSSL, automatic protocol/redirect, Unix and H3 today. H1 prepare/owner
 activate and H2 handoff-before-registration are existing publication points; the
 provider authority commit below must join them rather than infer transfer from a cast.
 
-## Provider lifecycle boundary (v1 implementation contract; not implemented)
+## Provider lifecycle boundary (v1 implementation contract; runtime not implemented)
+
+The internal [ResourceLedger](../apps/ex_ssl/lib/ssl/lifecycle/resource_ledger.ex)
+now models five fixed resource roles, acknowledged allocation permits, exact
+monitor identity matching, adoption scope and bounded proof masks. Lost creators
+leave their permit tokens registered: late identities must enroll with stop and
+remain pending until exact DOWN; identity loss stays sticky. An unresolved lost
+permit cannot settle a proof. This is pure bookkeeping, not real monitor evidence,
+a public receipt, a Lease/Transfer authority reducer or an observer seal. It is
+not wired into SSL.connect or HTTP completion yet.
 
 The current `HTTP.RequestLifecycle` extracts two private OTP socket layouts.
 `HTTP.RequestCompletion` rejects ExSSL. ExSSL's opaque socket and connection
