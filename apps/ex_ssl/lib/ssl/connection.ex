@@ -370,6 +370,28 @@ defmodule SSL.Connection do
     end
   end
 
+  def handle_event(
+        {:call, from},
+        {_ref, {:lifecycle_attach, nonce, observer, attach, {:abs_ms, requested}}},
+        phase,
+        %{lifecycle: %{ready: {setup, expected}, observer: original}} = state
+      )
+      when is_reference(attach) and is_integer(requested) do
+    cond do
+      elem(from, 0) != setup or nonce != expected or observer != original ->
+        reply(from, {:error, :unauthorized_attach})
+
+      phase != :inert_owned ->
+        reply(from, {:error, :attach_spent})
+
+      state.options.active != false ->
+        reply(from, {:error, :private_active_mode_not_supported})
+
+      true ->
+        start_private_tls(from, attach, requested, state)
+    end
+  end
+
   # Private readiness alone cannot authorize transport attachment. A future driver
   # must authenticate the exact TCP identity/ownership ACK before enabling TLS.
   def handle_event({:call, from}, {_ref, {:attach, _tcp}}, _phase, %{lifecycle: lifecycle})
@@ -380,57 +402,8 @@ defmodule SSL.Connection do
       when not is_nil(lifecycle),
       do: reply(from, {:error, :closed})
 
-  def handle_event({:call, from}, {_ref, {:attach, tcp}}, :handoff, state) do
-    state = %{state | tcp: tcp, connect_from: from}
-
-    if Options.remaining(state.deadline) == 0 do
-      fail(state, :timeout)
-    else
-      with :ok <-
-             :inet.setopts(
-               tcp,
-               [
-                 :binary,
-                 packet: :raw,
-                 active: false,
-                 send_timeout: state.send_timeout,
-                 send_timeout_close: state.send_timeout_close
-               ] ++
-                 TCPOptions.mutable(state.options.tcp_options)
-             ),
-           {:ok, options, ticket, ticket_key} <- prepare_resumption(state.options, tcp),
-           {:ok, materialized} <-
-             Materializer.materialize(
-               options.profile,
-               Options.capabilities(),
-               options.context
-             ),
-           {:ok, machine, outbound} <-
-             HandshakeMachine.init(
-               materialized,
-               options.trust_source,
-               options.identity,
-               verify: options.verify,
-               customize_hostname_check: options.hostname_check,
-               depth: options.depth,
-               client_identity: options.client_identity,
-               ticket: ticket,
-               enable_tickets: options.session_tickets == :auto
-             ),
-           {:ok, state} <-
-             start_output(
-               %{state | machine: machine, options: nil, ticket_key: ticket_key},
-               outbound,
-               :handshake,
-               :handshake_start,
-               state.deadline
-             ) do
-        {:next_state, :handshaking, state}
-      else
-        {:error, reason} -> fail(state, public_error(reason))
-      end
-    end
-  end
+  def handle_event({:call, from}, {_ref, {:attach, tcp}}, :handoff, state),
+    do: start_tls(from, tcp, state)
 
   def handle_event({:call, from}, {_ref, :close}, _phase, state) do
     if match?(%{kind: :local}, state.closing) do
@@ -1014,7 +987,7 @@ defmodule SSL.Connection do
     if Options.remaining(state.deadline) == 0 do
       {:error, :timeout, state}
     else
-      :gen_statem.reply(state.connect_from, {:ok, state.socket})
+      notify_connected(state)
       _ = cancel_timer(state.handshake_timer)
 
       apply_events(:connected, rest, %{
@@ -1318,19 +1291,20 @@ defmodule SSL.Connection do
       true ->
         token = make_ref()
         shutdown? = kind in [:close_notify, :fatal_alert]
-        send(writer, {:send, token, tcp, bytes, shutdown?})
 
-        {:ok,
-         %{
-           state
-           | output: %{
-               token: token,
-               kind: kind,
-               continuation: continuation,
-               size: size,
-               timer: timer(deadline, {:output_timeout, token})
-             }
-         }}
+        with {:ok, state} <- send_output(state, token, tcp, bytes, shutdown?) do
+          {:ok,
+           %{
+             state
+             | output: %{
+                 token: token,
+                 kind: kind,
+                 continuation: continuation,
+                 size: size,
+                 timer: timer(deadline, {:output_timeout, token})
+               }
+           }}
+        end
     end
   end
 
@@ -1452,6 +1426,130 @@ defmodule SSL.Connection do
 
   defp diagnostic_result({:error, _}), do: {:error, :closed}
   defp diagnostic_result(result), do: result
+
+  defp send_output(%{lifecycle: nil, writer: writer} = state, token, tcp, bytes, shutdown?) do
+    send(writer, {:send, token, tcp, bytes, shutdown?})
+    {:ok, state}
+  end
+
+  defp send_output(%{lifecycle: %{tls: %{initial: true}}} = state, token, _tcp, bytes, shutdown?) do
+    if private_tls_live?(state) do
+      enqueue_lifecycle(put_in(state.lifecycle.tls.initial, false), token, bytes, shutdown?)
+    else
+      {:error, :timeout}
+    end
+  end
+
+  defp send_output(state, token, _tcp, bytes, shutdown?),
+    do: enqueue_lifecycle(state, token, bytes, shutdown?)
+
+  defp enqueue_lifecycle(state, token, bytes, shutdown?) do
+    # Later control output retains the original capability, not admission E or Setup life.
+    send(
+      state.writer,
+      {:lifecycle_send, state.lifecycle.writer_nonce, token, state.tcp, bytes, shutdown?}
+    )
+
+    {:ok, state}
+  end
+
+  defp start_private_tls(from, attach, requested, state) do
+    {setup, _nonce} = state.lifecycle.ready
+    {:abs_ms, original} = state.lifecycle.control_deadline
+    tls = %{recipient: setup, nonce: attach, deadline: min(requested, original), initial: true}
+    state = %{state | lifecycle: Map.put(state.lifecycle, :tls, tls)}
+
+    if private_tls_live?(state) do
+      state = %{state | records: RecordFramer.new(), active_terminal: false}
+      private_tls_started(start_tls(from, state.tcp, state), from, attach)
+    else
+      reply(from, {:error, :deadline_exceeded})
+    end
+  end
+
+  defp private_tls_started({:next_state, :handshaking, state}, from, attach) do
+    result =
+      if private_tls_live?(state),
+        do: {:ok, attach},
+        else: {:error, :acceptance_unconfirmed}
+
+    {:next_state, :handshaking, %{state | connect_from: nil}, [{:reply, from, result}]}
+  end
+
+  defp private_tls_started(failure, _from, _attach), do: failure
+
+  defp private_tls_live?(state) do
+    tls = state.lifecycle.tls
+
+    birth_live?(state) and Process.alive?(tls.recipient) and Process.alive?(state.writer) and
+      Options.remaining(tls.deadline) > 0 and
+      Port.info(state.tcp, :connected) == {:connected, self()}
+  end
+
+  defp notify_connected(
+         %{lifecycle: %{tls: tls, ready: {_setup, nonce}, observer: observer}} = state
+       ) do
+    send(
+      tls.recipient,
+      {:lifecycle_tls_connected, self(), nonce, observer, tls.nonce, state.socket}
+    )
+
+    :ok
+  end
+
+  defp notify_connected(state), do: :gen_statem.reply(state.connect_from, {:ok, state.socket})
+
+  defp start_tls(from, tcp, state) do
+    state = %{state | tcp: tcp, connect_from: from}
+
+    if Options.remaining(state.deadline) == 0 do
+      fail(state, :timeout)
+    else
+      with :ok <-
+             :inet.setopts(
+               tcp,
+               [
+                 :binary,
+                 packet: :raw,
+                 active: false,
+                 send_timeout: state.send_timeout,
+                 send_timeout_close: state.send_timeout_close
+               ] ++
+                 TCPOptions.mutable(state.options.tcp_options)
+             ),
+           {:ok, options, ticket, ticket_key} <- prepare_resumption(state.options, tcp),
+           {:ok, materialized} <-
+             Materializer.materialize(
+               options.profile,
+               Options.capabilities(),
+               options.context
+             ),
+           {:ok, machine, outbound} <-
+             HandshakeMachine.init(
+               materialized,
+               options.trust_source,
+               options.identity,
+               verify: options.verify,
+               customize_hostname_check: options.hostname_check,
+               depth: options.depth,
+               client_identity: options.client_identity,
+               ticket: ticket,
+               enable_tickets: options.session_tickets == :auto
+             ),
+           {:ok, state} <-
+             start_output(
+               %{state | machine: machine, options: nil, ticket_key: ticket_key},
+               outbound,
+               :handshake,
+               :handshake_start,
+               state.deadline
+             ) do
+        {:next_state, :handshaking, state}
+      else
+        {:error, reason} -> fail(state, public_error(reason))
+      end
+    end
+  end
 
   defp commit_handoff(from, allocator, tcp, grant, requested, state) do
     {:abs_ms, original} = state.lifecycle.preparation.deadline

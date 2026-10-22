@@ -333,10 +333,25 @@ accounting. Public/supervised constructors retain their existing path.
 Setup preparation and handoff requests are asynchronous and retain original actor
 identities, nonces, Observer, socket reference and budget. A definitive native ACK
 and normal allocator retirement permit a private native-owned candidate notice.
-It leaves setup pending; Setup keeps its original timer until a future real TLS
-outcome. Unknown construction/acceptance holds bounded uncertainty without
+For native-only operation it leaves setup pending with the original admission
+timer armed. NativeReady alone never permits cancelling that timer. An explicit
+ROOT-authorized private TLS command may advance phases only after the actual
+Connection acknowledges attachment within the unchanged admission budget; the
+handshake then retains its original classic absolute deadline, including infinity.
+Unknown construction/acceptance holds bounded uncertainty without
 rollback, fresh deadlines or premature helper retirement. No post-entry error
 proves absent resources. Setup termination never closes a Connection-owned Port.
+
+Private TLS attachment is passive and explicitly opted in by the captured ROOT.
+Connection authenticates the actual Setup, its original readiness nonce/Observer
+and already adopted TCP; no completed allocator is revalidated as live. A single
+SDK admission ACK is separate from the nonce-bound real TLS completion notice,
+which follows the actual Finished writer acknowledgment. Neither alone is setup
+success. A distinct settlement budget P=min(originalClassicD, successNow+1000ms)
+is captured once for acknowledged connected publication and helper completion.
+Only both ACKs permit a private ROOT candidate and normal Setup retirement.
+This budget is not a surviving connection lifetime. Failure/alert cleanup keeps
+its existing behavior; exact failed-outcome publication remains a separate gate.
 
 Full allocator/setup orchestration and constructor-error identity proof, public
 lifecycle, STARTTLS adoption, application owner ACK/authority transfer and socket/

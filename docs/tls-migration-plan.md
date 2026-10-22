@@ -160,9 +160,16 @@ coverage; no supported endpoint class silently lost.
       Definitive handoff ACK plus normal Allocator DOWN precede one native candidate;
       Setup stays pending with original timer armed. Six actual-Setup cases and
       lifecycle+birth130/130/static gates pass; no TLS outcome/public acceptance.
+- [x] Opt in to private passive TLS through the actual Setup/Connection/Writer.
+      Authenticate admission before unchanged NativeE, then preserve original classic
+      handshakeD including infinity; real Finished Writer ACK precedes TLS completion.
+      ACK connected publication plus helper completion under one finite settlement P
+      before private ROOT readiness/normal Setup retirement. Round27 eight independent
+      OTP/OpenSSL cases, lifecycle+birth138/138, provider1548/1548 and static gates pass.
+      Public I/O/owner acceptance remain closed; precise failure publication is open.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
-      and private real allocator/setup direct-dial orchestration with original
-      deadlines and acknowledged outcome publication.
+      and acknowledged failure publication for real allocator/setup orchestration
+      under original deadlines. Success-only private attachment is verified above.
       Native connect error/helper DOWN is not native cleanup proof; unresolved identity
       coverage remains unconfirmed. Public upgrade/transfer stay gated separately.
 - [ ] Public attempt handle exists before allocation, survives failed setup and transfer.

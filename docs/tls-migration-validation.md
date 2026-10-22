@@ -2891,3 +2891,123 @@ Next implement actualTLSattach and acknowledged realsetupoutcome/constructor
 identity before public integration. Goal stays active. Future diagnostics MUST
 fresh-snapshot accepted HEAD: /tmp/http-fetch-round26-originals predates this
 Setup/unlinked-constructor feature and cannot restore over it.
+
+## Round27 — private TLS attach and acknowledged successful setup
+
+Entry main d45816b3a6db4867a59d6c4ec2b3f31ecd4a7611 clean, actualpwd/HEAD/status
+EXIT0, goalactive/armed27/100. Five prior fully-read architecture documents
+remain byte-exact847556a. Fresh CURRENT6file snapshots /tmp/http-fetch-round27-originals.
+Root retained formatter/Mix/native/network/strictpins/docs/commit ownership.
+Task32 follows31; task20owner explicitly acknowledged EXACT3sourcepaths:
+Connection, Setup, NEWsetup_tls_test; NOObserver/Writer/oldtests/purecore changes.
+Worker sourceonly/NEWtestsfirst; independent design review readonly/noexec.
+
+Design evidence: enrolledWriter accepts nonce-fenced lifecycle_send, not classic
+send; inertConn.records nil must become RecordFramer.new at explicitattach.
+Alreadycommitted Allocator may be helperDone/DOWN; re-runningliveallocator
+handoff-context would incorrectlyreject valid adoptedTCP. Use storedcanonical
+Conn-owned Port and originalSetupPID/nonce/Observer/socketRef/oneattachRef.
+Private passive-only policy rejected BEFOREspending; publiccall gate remains
+closed to prevent active/application delivery before future Root-publicACK.
+Classic materialize/machine/startup body is factored mechanically, send-envelope
+and connected-notify are the ONLY existing runtime dispatch sites changed.
+
+Authoritative variant SDKadmissionACK + SEPARATE connectednotice: Connrequest
+repliesONCE {:ok,attachRef} afterstartupdispatch andpostlive/E checks; private
+connect_from=nil. ActualclientFinished WriterACK later reachesapply_events
+connected and sends independently fencedcanonicalTLScompletion. Botharrivalorders
+may beheld, butcompletionalone cannotreplace admissionACK/advancephase/publish.
+NativeE checked beforefirstWriterENQUEUE andagainbeforeACK; nohard-realtime
+claim for scheduling/nativeBIFwalltime. Invalidframes cannotspendgenuineentry.
+AfterSetupexactSDKACK/postgatesbeforeE, ref-fencetimer andretainORIGINALclassicD
+(infinity->nil), notnewhandshakeTTL. Connection originaltimeralreadyarmed.
+
+OnlyrealTLSsuccess+admissionACK begin ONCE P=min(originalClassicD,successNow+1000).
+P shares connectedpublish/helperDone/unknownhold; no per-RPCrefresh, expiredEreuse
+or connection-lifetime cap. Setupfenceshandshaketimer; ObserveroriginalD can still
+beatpublication. ACKedconnected+ACKedhelperDone+P/live/canonicalpostgates required
+beforeprivateROOTnotice+normalSetupretirement. No publicRootadoption/deliveryACK.
+Source-onlysuccessscope: classic fail_now replies/close/stop andfatalalert paths
+can triggeroriginaltypedretirement beforeSetup publishesfailed; publishfailed
+itselfretires/killsSetup beforeitsreply. Preserve alert/close behavior; precise
+failedclassification/failedpublicationACK remainOPEN, never inferred fromDOWN.
+
+Test-first SOURCE boundary: NEWtest204lines completed while FULLConn1538 AND
+Setup355 still byte-exactacceptedHEAD (worker guard); noRED execution claimed.
+Root readall204 andidentified weak nonpassive noCHoracle: absence ofcompleted
+peerhandshake did not establishbyteabsence. CorrectedONLYNEWtest toownedrawTCP
+listener/acceptedpeer recv0timeoutafterrepeatreject. Existingfixturesunchanged.
+Root requested8thcase delaysactualoriginalWriter afterCH/ownedrecordgate, waits
+owned200msABStimer, assertsnoRootTLSready/nopeerconnected/setupPending while
+Writerheld, alwaysresumes thenactualsuccess/cancel31. Thisisdelay, NOTACKloss.
+
+Rootfreeze/finalreviews: worker noexec/TTY77closed/nojobs. PRE-FMTRootindependent
+reverse-reconstruction restoresFULLacceptedConn1538exact, includingnewCtor44 and
+ALLP0fail/close/drain/app/timeout. RootformatterEXIT0; privatehandler/newhelpers
+plus3legacydispatchsites fullyread. WholeSetup523/newTest291 fullyread byRoot
+andindependentreviewer; no blocker in success-onlyscope. Reviewerlimits: early
+completion-before-SDKACK cachebranch source-inspected, notforced; suspendedObs is
+unansweredpublication, NOTlostACKafterpersistedconnected/helperDone. No dedicated
+newhandshake-phasecancelcase; sourceP0/constructoridentity/publicACKstillopen.
+
+Initial Root compile-WAE+focus138/138 GREEN,28.3s(7async/21.3sync),seed101/max24;
+explicit --include integration (test_helper normallyexcludesintegration).
+ActualROUND27_TLS_FOCUSED_EXIT=0 plusprompt, jobcollected.
+/tmp/http-fetch-round27-tls-focused.log. Eightnewcasesreallyexecuted.
+Initialstatic RED actualEXIT2: compile/format/Credo544files9089mods-funs clean;
+Dialyzer1 unmatched_return Setup.arm cancel_timer result ignored,18.62s.
+Rootminimalexplicit _=discard onNEWcancel-expressionONLY; formatter525lines
+(upfrom523). No logic/config/ignorechanges. LaterFULLproviderincludesall138.
+/tmp/http-fetch-round27-tls-static.log preservesinitialfailure.
+
+Final Root static actualROUND27_TLS_STATIC_FIXED_EXIT=0 plusprompt/jobcollected:
+formatter, compilewarnings-as-errors, rootformatcheck, configuredCredo544files/
+9089mods-funs NOissues(17.1s), Dialyzer0errors/0skips/fourUNCHANGEDunnecessary
+ignore notices(20.38s), gitdiffcheck0. No suppressions/stricterbaselinecleanup.
+/tmp/http-fetch-round27-tls-static-fixed.log. Rootfullformattedreview ofnew
+armdiscard completesfinal525Setup; original523review otherwiseidentical.
+
+Standard ROOTseparate-app provider regression (sameold deadlines/peerpressure):
+```bash
+HTTP_QUIC_PHASE1_REAL=1 unbuffer mix test apps/ex_ssl/test apps/elixir_quic/test apps/http_core/test apps/http_fetch/test/http/socket_client_http2_test.exs --include integration --seed 101
+```
+
+ActualROUND27_PROVIDER_REGRESSION_EXIT=0 plusprompt, jobcollected.
+ExSSL838/838(20properties818tests),106.0s(24.5async/81.4sync);
+QUIC249/249,9.5s; Core418/418,29.4s; FetchH2file43/43,8.9s:
+TOTAL1548/1548. /tmp/http-fetch-round27-provider-regression.log.
+Existing test-only bitstring+Request.put_body_headers typewarnings remain asR24-26;
+no tests-WAEclaim/suppressions. No trace/helperhooks loaded, noGC/primitivechanges.
+Whole-nine latest remainsR22 RED3201/3206 plus test-WAE; this selected1548 gate
+does NOTsupersede it. No performance/candidate/CI/publication/cold-consumer acceptance.
+
+Final Root scope guards: trackedapps789; EXACT4changed (Conn/Setup/twostrictpins),
+785othersbyte-exact; ONLYuntrackedappfileNEWsetup_tls_test. Worker787others
+baseline beforeRootpins alsoexact. RootfirstHEADblobguard naivelydereferenced
+3trackedhttp_fetch symlinks andfailed; correctedtarget-bytecomparison identifies
+EXACT4expectedchanges, no source repairneeded. Final formattedConn reconstruct
+firstdiff wasONLYone formatter-added blank beforetoucheddispatch; normalizeONLY
+thatblank plusreverse3authorizedsites/remove2newregions => FULL1538accepted
+Connbyteexact AGAIN. NewCtor44/allP0fail-close-drain-app-timeouts preserved.
+
+Bothstrictprobes normalize EXACTLYONE64char SHA eachbacktocurrentpre-round
+snapshots; no assertions/pressure/fallbackchange. HTTPS371sourceSHAunchanged:
+b4f4f8b375d72aadf9799f8261199c478e4f85dd34bfdd601c3e873e0429c9d3.
+Fivefullyreadarchitecturefilesremainbyteexact847556a. Purecore/Profile/Writer/
+Allocator/Observer/Handoff/NativeTCP/oldbirth-readiness-nativeSetup testsunchanged.
+FinalformattedSHA256:
+- Conn1636:835f39f40059f0b14b3d402f74c241d56724f9492ee70e55ea9fa864eb10f9e1
+- Setup525:b1378257963ceb7754c5e8e0d526b4dbd008f6d0dce0c9cc719c9e13e107ca81
+- NEWtest291:b14026d00b6f433509d8f51e00ec7ae1769ddd2ee53c418c4fbe9d5cc4a9cbb4
+
+Eightdeliverables:2runtime+1newtest+2strictliterals+3Rootdocs. No publicSSL/API/
+lifecycle/managed/I-O/ROOTpublicadoptionACK/default/dependency/versionchange.
+NativeReady remainsnativeonly unlessexplicitauthenticatedprivateattach. RealTLS
+verifiedprivatecandidate is NOT publicapplicationacceptance/delivery.
+Classifiedfailed-outcomeACK/all-errorconstructoridentity/actualdroppedACKs/R23
+bootstrapcause/P0physicalFD/remoteFIN-RST remainOPEN. Typed31/Portnil/ownerDOWN
+nevercertifyphysicaldescriptorclosure. No olddeadlinewidening/GC/nativeprimitive
+change. Wholegoalcontinues; nextacknowledgedrealTLSfailurepublication preserving
+boundedbest-effortalert/typedcleanup, thenconstructoridentity/publicintegration.
+FutureworkMUSTfreshsnapshotacceptedcurrentHEAD; oldround27originalspredateTLS
+attach andcannotrestoreoverthisfeature.
