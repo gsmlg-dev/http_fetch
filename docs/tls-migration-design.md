@@ -297,15 +297,30 @@ A separate private Allocator.start now returns an unlinked inert process before
 self-enrollment and native dial. Original parent, recipient and Observer monitors
 and one clipped absolute expiry bound pending allocation. Only enrolled TCP
 produces a nonce-bound allocation notification; it is not a delivery ACK or TLS
-readiness. Native errors retain unknown permits. Handoff remains unsupported;
-this pending-helper expiry is not a TLS connection lifetime deadline.
+readiness. Native errors retain unknown permits. Its original expiry bounds pending helper
+work; a live TLS connection retains its own deadline semantics.
 
 An explicit private preparation request after actor birth authenticates the original
 ready-recipient, ready nonce and socket reference. Actual Writer/Connection actors
 perform the Observer readiness challenge and acknowledgment. Its separate finite
 absolute budget is clipped to the original setup deadline and spent once; replay
 cannot extend it. Birth-only paths keep their original startup/lifetime semantics.
-Readiness preparation grants no TCP transfer, TLS attach or public lifecycle support.
+Readiness preparation alone grants no TCP transfer, TLS attach or public lifecycle support.
+
+Actual Allocator can explicitly transfer its enrolled passive TCP Port to the
+prepared Connection. Bounded prepare returns the earlier original deadline;
+the allocator tightens its reference-fenced timer before native transfer. The
+asynchronous offer authenticates the captured recipient, ready nonce, socket
+reference, Observer and actual caller. Exact commit checks both canonical TCP
+and Allocator identities before native ownership and grant consumption. Only
+its ACK and a second liveness/ownership/deadline gate permit Port adoption.
+
+Allocator helper completion follows the actual Connection ACK and rechecked
+native ownership. Its termination closes only a still-self-owned Port. Lost
+helper-completion acceptance can leave committed resources under the original
+authority; an unknown reply authorizes no rollback or recipient-owned close.
+Success acknowledges this private ownership protocol, not delivery, setup
+outcome, TLS attachment or public lifecycle readiness.
 
 Full allocator/setup orchestration and constructor-error identity proof, public
 lifecycle, STARTTLS adoption, application owner ACK/authority transfer and socket/

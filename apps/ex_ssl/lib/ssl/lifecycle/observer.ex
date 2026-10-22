@@ -83,6 +83,16 @@ defmodule SSL.Lifecycle.Observer do
   def prepare_handoff(receipt, port, connection, deadline),
     do: call(receipt, {:prepare_handoff, port, connection}, deadline)
 
+  @spec prepare_handoff_bounded(Receipt.t(), port(), pid(), {:abs_ms, integer()}) ::
+          {:ok, reference(), {:abs_ms, integer()}} | {:error, atom()}
+  def prepare_handoff_bounded(receipt, port, connection, deadline),
+    do: call(receipt, {:prepare_handoff_bounded, port, connection}, deadline)
+
+  @spec commit_handoff(Receipt.t(), port(), pid(), reference(), {:abs_ms, integer()}) ::
+          :ok | {:error, atom()}
+  def commit_handoff(receipt, port, allocator, nonce, deadline),
+    do: call(receipt, {:commit_handoff, port, allocator, nonce}, deadline)
+
   @spec commit_handoff(Receipt.t(), reference(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
   def commit_handoff(receipt, nonce, deadline),
     do: call(receipt, {:commit_handoff, nonce}, deadline)
@@ -144,6 +154,12 @@ defmodule SSL.Lifecycle.Observer do
 
           {:prepare_handoff, port, connection} ->
             {:prepare_handoff, port, connection, {:abs_ms, deadline}}
+
+          {:prepare_handoff_bounded, port, connection} ->
+            {:prepare_handoff_bounded, port, connection, {:abs_ms, deadline}}
+
+          {:commit_handoff, port, allocator, nonce} ->
+            {:commit_handoff, port, allocator, nonce, {:abs_ms, deadline}}
 
           {:commit_handoff, nonce} ->
             {:commit_handoff, nonce, {:abs_ms, deadline}}
@@ -330,6 +346,31 @@ defmodule SSL.Lifecycle.Observer do
          :ok <- handoff_owner(context, :allocator),
          {:ok, handoff} <- Handoff.prepare(state.handoff, %{context | now: now()}, nonce) do
       {{:ok, nonce}, update_handoff(state, handoff)}
+    else
+      false -> {{:error, :foreign_handoff_resource}, state}
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp operate({:prepare_handoff_bounded, port, connection, {:abs_ms, deadline}}, caller, state) do
+    case operate({:prepare_handoff, port, connection, {:abs_ms, deadline}}, caller, state) do
+      {{:ok, grant}, next} ->
+        {{:ok, grant, {:abs_ms, min(deadline, Handoff.deadline(next.handoff))}}, next}
+
+      {{:error, _reason}, _next} = error ->
+        error
+    end
+  end
+
+  defp operate({:commit_handoff, port, allocator, nonce, {:abs_ms, deadline}}, caller, state) do
+    with {:ok, context} <-
+           handoff_context(state, caller, :connection, @process_roles ++ [:tcp], deadline),
+         true <-
+           elem(context.identities.tcp, 2) == port and
+             elem(context.identities.allocator, 2) == allocator,
+         :ok <- handoff_owner(context, :connection),
+         {:ok, handoff} <- Handoff.commit(state.handoff, %{context | now: now()}, nonce) do
+      {:ok, update_handoff(state, handoff)}
     else
       false -> {{:error, :foreign_handoff_resource}, state}
       {:error, reason} -> {{:error, reason}, state}

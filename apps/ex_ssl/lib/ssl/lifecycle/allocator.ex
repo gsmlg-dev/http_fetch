@@ -44,6 +44,24 @@ defmodule SSL.Lifecycle.Allocator do
 
   def start(_), do: {:error, :invalid_lifecycle_context}
 
+  @spec handoff(pid(), reference(), {pid(), reference(), reference()}, {:abs_ms, integer()}) ::
+          :ok | {:error, atom()}
+  def handoff(allocator, nonce, target, {:abs_ms, deadline})
+      when is_pid(allocator) and node(allocator) == node() and is_integer(deadline) do
+    try do
+      GenServer.call(
+        allocator,
+        {:handoff, nonce, target, deadline},
+        min(max(1, deadline - now()), 0xFFFFFFFF)
+      )
+    catch
+      :exit, _reason -> {:error, :acceptance_unconfirmed}
+    end
+  end
+
+  def handoff(_allocator, _nonce, _target, _deadline),
+    do: {:error, :invalid_handoff_context}
+
   @impl true
   def init({context, parent, observer}) do
     monitors =
@@ -57,7 +75,8 @@ defmodule SSL.Lifecycle.Allocator do
       observer: observer,
       monitors: monitors,
       timer: timer,
-      tcp: nil
+      tcp: nil,
+      transfer: %{from: nil, connection: nil, request: nil, deadline: context.deadline}
     }
 
     {:ok, state, {:continue, :enroll}}
@@ -94,20 +113,137 @@ defmodule SSL.Lifecycle.Allocator do
   end
 
   @impl true
-  def handle_info({:timeout, timer, :expiry}, %{timer: timer} = state),
-    do: {:stop, :normal, state}
+  def handle_call({:handoff, nonce, target, deadline}, from, state) do
+    cond do
+      elem(from, 0) != state.context.recipient or nonce != state.context.nonce ->
+        {:reply, {:error, :unauthorized_handoff}, state}
 
-  def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
-    if Map.fetch(state.monitors, ref) == {:ok, pid},
-      do: {:stop, :normal, state},
-      else: {:noreply, state}
+      state.transfer.from != nil ->
+        {:reply, {:error, :handoff_spent}, state}
+
+      not valid_target?(target, deadline) ->
+        {:reply, {:error, :invalid_handoff_context}, state}
+
+      true ->
+        begin_handoff(from, target, deadline, state)
+    end
   end
 
-  def handle_info(_message, state), do: {:noreply, state}
+  @impl true
+  def handle_info({:timeout, timer, :expiry}, %{timer: timer} = state),
+    do: stop_handoff(state)
+
+  def handle_info({:DOWN, ref, :process, pid, _reason} = message, state) do
+    if Map.fetch(state.monitors, ref) == {:ok, pid},
+      do: stop_handoff(state),
+      else: response(message, state)
+  end
+
+  def handle_info(message, state), do: response(message, state)
 
   @impl true
-  def terminate(_reason, %{tcp: tcp}) when is_port(tcp), do: :gen_tcp.close(tcp)
+  def terminate(_reason, %{tcp: tcp}) when is_port(tcp) do
+    if Port.info(tcp, :connected) == {:connected, self()}, do: :gen_tcp.close(tcp)
+    :ok
+  end
+
   def terminate(_reason, _state), do: :ok
+
+  defp valid_target?({connection, socket_ref, ready_nonce}, deadline),
+    do:
+      is_pid(connection) and node(connection) == node() and
+        is_reference(socket_ref) and is_reference(ready_nonce) and is_integer(deadline)
+
+  defp valid_target?(_target, _deadline), do: false
+
+  defp begin_handoff(from, {connection, socket_ref, ready_nonce}, requested, state) do
+    deadline = min(requested, elem(state.context.deadline, 1))
+    transfer = %{from: from, connection: connection, request: nil, deadline: {:abs_ms, deadline}}
+    admitted = arm_handoff(%{state | transfer: transfer}, deadline)
+    prepare_transfer(socket_ref, ready_nonce, admitted)
+  end
+
+  defp prepare_transfer(socket_ref, ready_nonce, state) do
+    with true <- handoff_live?(state),
+         {:ok, grant, {:abs_ms, bound}} <-
+           Observer.prepare_handoff_bounded(
+             state.context.receipt,
+             state.tcp,
+             state.transfer.connection,
+             state.transfer.deadline
+           ) do
+      deadline = min(elem(state.transfer.deadline, 1), bound)
+      offer_transfer(socket_ref, ready_nonce, grant, arm_handoff(state, deadline))
+    else
+      _ -> stop_handoff(state)
+    end
+  end
+
+  defp offer_transfer(socket_ref, ready_nonce, grant, state) do
+    connection = state.transfer.connection
+
+    with true <- handoff_live?(state),
+         {:connected, owner} when owner == self() <- Port.info(state.tcp, :connected),
+         :ok <- :gen_tcp.controlling_process(state.tcp, connection),
+         true <- handoff_live?(state),
+         {:connected, ^connection} <- Port.info(state.tcp, :connected) do
+      offer =
+        {socket_ref,
+         {:commit_handoff, self(), state.context.recipient, ready_nonce, state.observer,
+          state.tcp, grant, state.transfer.deadline}}
+
+      request = :gen_statem.send_request(connection, offer)
+      {:noreply, %{state | transfer: %{state.transfer | request: request}}}
+    else
+      _ -> stop_handoff(state)
+    end
+  end
+
+  defp arm_handoff(state, deadline) do
+    _ = Process.cancel_timer(state.timer)
+    transfer = %{state.transfer | deadline: {:abs_ms, deadline}}
+    timer = :erlang.start_timer(deadline, self(), :expiry, abs: true)
+    %{state | timer: timer, transfer: transfer}
+  end
+
+  defp handoff_live?(state),
+    do:
+      live?(state) and now() < elem(state.transfer.deadline, 1) and
+        Process.alive?(state.transfer.connection)
+
+  defp response(message, %{transfer: %{request: request}} = state) when request != nil do
+    case :gen_statem.check_response(message, request) do
+      {:reply, :ok} -> complete_handoff(state)
+      :no_reply -> {:noreply, state}
+      _ -> stop_handoff(state)
+    end
+  end
+
+  defp response(_message, state), do: {:noreply, state}
+
+  defp complete_handoff(state) do
+    with true <- transferred_live?(state),
+         :ok <- Observer.helper_done(state.context.receipt, state.transfer.deadline),
+         true <- transferred_live?(state) do
+      GenServer.reply(state.transfer.from, :ok)
+      {:stop, :normal, state}
+    else
+      _ -> stop_handoff(state)
+    end
+  end
+
+  defp transferred_live?(state),
+    do:
+      handoff_live?(state) and
+        Port.info(state.tcp, :connected) == {:connected, state.transfer.connection}
+
+  # Unknown control acceptance never authorizes rollback or foreign-owner close.
+  defp stop_handoff(state) do
+    if state.transfer.from != nil,
+      do: GenServer.reply(state.transfer.from, {:error, :acceptance_unconfirmed})
+
+    {:stop, :normal, state}
+  end
 
   defp live?(state) do
     now() < elem(state.context.deadline, 1) and

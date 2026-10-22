@@ -889,6 +889,49 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
     refute Process.alive?(writer)
   end
 
+  test "commit arguments bind canonical TCP and allocator even with two Connection-owned ports" do
+    a = enrolled_attempt()
+    budget = deadline()
+    assert {:ok, ready} = in_actor(a.writer, fn -> Observer.writer_ready(a.receipt, budget) end)
+
+    assert :ok =
+             in_actor(a.connection, fn ->
+               Observer.connection_ready(a.receipt, ready, budget)
+             end)
+
+    assert {:ok, grant} =
+             in_actor(a.allocator, fn ->
+               Observer.prepare_handoff(a.receipt, a.tcp, a.connection, budget)
+             end)
+
+    assert :ok =
+             in_actor(a.allocator, fn -> :gen_tcp.controlling_process(a.tcp, a.connection) end)
+
+    assert :ok = :gen_tcp.controlling_process(a.peer, a.connection)
+    assert Port.info(a.tcp, :connected) == {:connected, a.connection}
+    assert Port.info(a.peer, :connected) == {:connected, a.connection}
+
+    for {offered, allocator} <- [{a.peer, a.allocator}, {a.tcp, a.setup}] do
+      assert {:error, :foreign_handoff_resource} =
+               in_actor(a.connection, fn ->
+                 Observer.commit_handoff(a.receipt, offered, allocator, grant, budget)
+               end)
+    end
+
+    assert :ok =
+             in_actor(a.connection, fn ->
+               Observer.commit_handoff(a.receipt, a.tcp, a.allocator, grant, budget)
+             end)
+
+    assert :ok = Observer.cancel(a.receipt, a.lease, deadline())
+    tcp = a.tcp
+    monitor = a.tcp_monitor
+    assert_receive {:DOWN, ^monitor, :port, ^tcp, _}, 1_000
+
+    assert {:ok, %{roles: 31, observed_down: 31, cleanup: :confirmed}} =
+             Reader.await(a.receipt, deadline())
+  end
+
   defp unknown_tcp_attempt do
     enrollment_deadline = deadline(5_000)
     {:ok, receipt, lease} = Observer.start(self(), :infinity)

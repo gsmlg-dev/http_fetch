@@ -144,8 +144,16 @@ coverage; no supported endpoint class silently lost.
       authenticate the original recipient, nonce and socket reference; consume one
       setup-clipped pending budget and acknowledge the Observer challenge. Birth-only
       lifetime behavior stays unchanged. Five actual-actor cases, lifecycle+birth117/117
-      and restored three-provider+Fetch-H2 scope1527/1527 pass. Native ownership
-      transfer/TLS attach and public readiness remain open.
+      and Round24 restored three-provider+Fetch-H2 scope1527/1527 pass.
+      TLS attachment and public readiness remain open.
+- [x] Transfer actual allocator-owned passive TCP to the prepared Connection:
+      bounded prepare, reference-fenced earlier deadline, asynchronous original
+      endpoint offer and canonical TCP/Allocator commit before adoption.
+      Helper completion follows actual commit ACK; termination closes only a
+      still-self-owned Port. Six actual-constructor cases plus one canonical
+      parameter case pass; lifecycle+birth124/124 and configured static gates pass.
+      Actual-actor ACK-loss is source-reviewed, not directly forced by these cases.
+      TLS attachment, setup outcome and public readiness remain open.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
       and private real allocator/setup direct-dial orchestration with original
       deadlines and acknowledged outcome publication.

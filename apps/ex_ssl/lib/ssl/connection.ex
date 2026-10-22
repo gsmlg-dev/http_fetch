@@ -304,6 +304,28 @@ defmodule SSL.Connection do
     end
   end
 
+  def handle_event(
+        {:call, from},
+        {_ref,
+         {:commit_handoff, allocator, recipient, nonce, observer, tcp, grant, {:abs_ms, deadline}}},
+        phase,
+        %{lifecycle: %{ready: {expected_recipient, expected_nonce}}} = state
+      )
+      when is_pid(allocator) and node(allocator) == node() and is_port(tcp) and
+             is_reference(grant) and is_integer(deadline) do
+    cond do
+      elem(from, 0) != allocator or recipient != expected_recipient or
+        nonce != expected_nonce or observer != state.lifecycle.observer ->
+        reply(from, {:error, :unauthorized_handoff})
+
+      phase != :inert_prepared ->
+        reply(from, {:error, :handoff_spent})
+
+      true ->
+        commit_handoff(from, allocator, tcp, grant, deadline, state)
+    end
+  end
+
   # Private readiness alone cannot authorize transport attachment. A future driver
   # must authenticate the exact TCP identity/ownership ACK before enabling TLS.
   def handle_event({:call, from}, {_ref, {:attach, _tcp}}, _phase, %{lifecycle: lifecycle})
@@ -1386,6 +1408,31 @@ defmodule SSL.Connection do
 
   defp diagnostic_result({:error, _}), do: {:error, :closed}
   defp diagnostic_result(result), do: result
+
+  defp commit_handoff(from, allocator, tcp, grant, requested, state) do
+    {:abs_ms, original} = state.lifecycle.preparation.deadline
+    deadline = min(requested, original)
+
+    with true <- native_handoff_live?(state, allocator, tcp, deadline),
+         :ok <-
+           Observer.commit_handoff(
+             state.lifecycle.receipt,
+             tcp,
+             allocator,
+             grant,
+             {:abs_ms, deadline}
+           ),
+         true <- native_handoff_live?(state, allocator, tcp, deadline) do
+      {:next_state, :inert_owned, %{state | tcp: tcp}, [{:reply, from, :ok}]}
+    else
+      _ -> {:stop_and_reply, :normal, [{:reply, from, {:error, :acceptance_unconfirmed}}], state}
+    end
+  end
+
+  defp native_handoff_live?(state, allocator, tcp, deadline),
+    do:
+      preparation_live?(state) and Process.alive?(allocator) and
+        Options.remaining(deadline) > 0 and Port.info(tcp, :connected) == {:connected, self()}
 
   defp prepare_handoff(from, requested, state) do
     deadline = if state.deadline == :infinity, do: requested, else: min(requested, state.deadline)

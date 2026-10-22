@@ -2638,3 +2638,130 @@ All executed jobs collected with actual exit markers and prompts, not inferred
 idle. Runtime sources/five actor tests were fully reviewed after formatter;
 final diffcheck0. Only three app implementation/test files, two exact probe-hash
 literals and three root design/plan/validation documents belong to this change.
+
+## Round25 — actual passive TCP handoff and exact commit
+
+Entry: main a51b4db, worktree clean, goal active/armed25/100. Root used fresh
+CURRENT-HEAD snapshots of three runtime files, old handoff test and six strict
+probe/classic fixtures in /tmp/http-fetch-round25-originals. Historical R22/R23
+and pre-feature R24 Connection snapshots must not overwrite accepted readiness
+code. Root owns all formatting, Mix/build/native/network, probe hashes and commit.
+Task29 reviewed the actual protocol; task20 owner explicitly coordinated the
+five-path task30 grant before edits. No runtime execution by either worker.
+
+Contract: actual Allocator authenticates its captured recipient/allocation nonce,
+prepares the original stored Port through Observer, transfers passive ownership,
+and asynchronously calls the actual prepared Connection. That receiver checks
+original socket reference, ready recipient/nonce, Observer and actual caller, then
+uses a new private exact-identity commit variant. Both offered TCP and Allocator
+must match the canonical typed identities before owner verification and commit.
+The original commit/3 remains intact; a role mask or two Conn-owned Ports cannot
+substitute for this exact match. No offered Port is adopted before commit ACK.
+
+A bounded-prepare variant delegates to the original prepare operation exactly
+once and derives min(request D, original Handoff deadline) from its successful
+next state. Old prepare/4 and commit/3 stay intact. Allocator tightens its original
+reference-fenced absolute timer to this returned bound BEFORE native gates and
+transfer; an ACK arriving after the bound cannot revive it. Connection clamps
+again. No snapshot dimension, constructor-context field or receipt capability is added.
+Own-Observer suspension after a FIFO replay/ownership fact isolates allocator
+expiry from Observer cleanup; both earlier-request and earlier-readiness orders
+require separate actual-constructor cases. No sleeps, polling or global suspension.
+
+Allocator uses an asynchronous original-Connection request; its mailbox remains
+responsive to replay and original typed DOWN/expiry while awaiting commit. Only
+the actual commit ACK plus still-recorded native owner and helper_done ACK permit
+normal retirement. Termination may close only a Port STILL self-owned. It must
+never roll back or reclose a recipient-owned Port after a lost acknowledgment.
+Persisted helper_done can make allocator DOWN benign even if its caller sees an
+unknown result: committed Connection/TCP may remain under original authority until
+setup deadline/death/cancel. A caller reply is not delivery, setup success, TLS
+readiness or cleanup proof. Public lifecycle and TLS attachment stay unsupported.
+
+### Source review and compiler boundary
+
+Worker froze224 Allocator/1480 Connection/764 Observer lines plus158 new fixture
+lines and one30-line additive manual case. Root read all new runtime/test code.
+Initial focused attempt exited1 in compilation: Elixir1.20 inferred transfer-map
+input while the callback supplied transfer:nil. No tests ran. Splitting admission,
+prepare and native offer alone still exited1 with the same warning; no test retry
+was involved. A separate eight-line single-update control compiled with WAE exit0,
+so this does not establish a general compiler bug. Both failed logs are retained.
+
+Root kept the three phase functions and made transfer a uniform internal record
+from init, using from:nil for unspent state. The immutable seven-field constructor
+context is unchanged. No cast, compiler suppression, deadline or test weakening.
+Root also made the bounded wrapper error branch explicit. Final formatted source
+is Allocator254/Connection1494/Observer767, new actual-constructor fixture237 and
+manual suite1089 lines. Separate full formatted review found no blocking defect.
+Actual-actor commit/helper_done ACK loss remains unforced; existing manual protocol
+coverage and source review are not newly measured dropped-ACK proof.
+
+### Actual verification
+
+ROUND25_HANDOFF_FOCUSED_V3_EXIT=0 plus shell prompt: warning-free compile, then
+124/124 in15.4s (4.1async/11.2sync), seed101/max_cases24. Six actual-constructor
+cases and one added real-TCP canonical-parameter case pass. The success case keeps
+Connection/TCP past the original2s allocation bound and native handoff budget, with no
+TLS bytes and setup still pending, then explicitly cancels/observes typed31 cleanup.
+Both200ms timer cases keep Connection and its Port alive after original normal
+Allocator DOWN while own Observer is still suspended, then resume/confirm31.
+
+ROUND25_HANDOFF_STATIC_EXIT=0 plus prompt: warning-free compilation, umbrella
+format check, configured Credo541 files/9002 mods-funs/no issues, Dialyzer0 errors/
+0 skips/four unchanged unnecessary-ignore notices, diffcheck0. No strict-mode
+baseline changes or ignore edits.
+
+One standard root umbrella regression, without any trace helper or instrumentation:
+
+```bash
+HTTP_QUIC_PHASE1_REAL=1 unbuffer mix test apps/ex_ssl/test apps/elixir_quic/test apps/http_core/test apps/http_fetch/test/http/socket_client_http2_test.exs --include integration --seed 101
+```
+
+Actual ROUND25_PROVIDER_REGRESSION_EXIT=0 plus prompt: ExSSL824/824 (20 properties,
+804 tests)95.4s; QUIC249/24915.6s; Core418/41828.3s; Fetch H2-file43/436.4s.
+Total1534/1534. This is the current selected provider/consumer gate, not whole-nine
+acceptance. Existing Elixir1.20 test bitstring warnings AND Request.put_body_headers
+test type warning remain; the same warnings occur in Round24 restored log. They
+were neither suppressed nor edited. The test command has no WAE, as in Round24;
+application compile WAE passes. No R23 bootstrap failing instance captured/repaired.
+
+### Scope and remaining gates
+
+Final Root scope guard exits0: subtracting only the two new private Connection
+regions reproduces ALL original1494-minus47=1447 lines byte-exact; similarly
+subtracting new Observer APIs/normalization/handlers restores ALL726 original
+lines, including old prepare4/commit3/timers/authority. Removing the ONE added
+manual case restores all1046 lines exactly. Allocator public constructor/start,
+original native enrollment/allocation path and liveness tail remain byte-exact.
+Writer, pure Handoff, NativeTCP, old545 birth/113 allocator/167 readiness fixtures
+and all five architecture documents match their frozen baselines.
+
+Both strict probes differ from their fresh baseline ONLY by one exact64-character
+Connection hash each; all assertions/pressure remain. HTTPS is byte-exact. No
+trace hooks, private TLS-state inspection, test drop hooks, backend/default switch,
+public options or support claims were added. Loopback Port ownership/typed DOWN
+do not certify physical Unix FD destruction or general P0 terminal delivery.
+
+Latest whole-nine remains R22 RED3201/3206 plus existing test WAE failure, not
+superseded here. Full setup orchestration/all-error constructor identity, TLS
+attach and handshake outcome, public lifecycle/STARTTLS/owner transfer, managed
+H1/H2, P0 closure, performance/candidate/CI/publication/cold consumer remain open.
+
+Final source SHA256:
+
+```text
+apps/ex_ssl/lib/ssl/connection.ex 8500194db0331490b0e30bdc4ca82ea754b20146ad8058d6531f047922e186fd
+apps/ex_ssl/lib/ssl/lifecycle/allocator.ex 955b4e7e0a226bfd6f10f4ba1fedb04bb565110489388a7883f79bc2360db8c7
+apps/ex_ssl/lib/ssl/lifecycle/observer.ex d2fbae9b1155f0ce87698016ea5a5cf20e7ba6b0384a0113d0eca9d1f6d3cf75
+apps/ex_ssl/test/ssl/lifecycle/native_handoff_test.exs 7548c24c2d68b079fde90c04f48ab02300b6b85a8c504be07fe178fbbfd79ae1
+apps/ex_ssl/test/ssl/lifecycle/observer_handoff_test.exs 3bb8ceb12f7090c0273b80aa1c2c5de2e9c0611473b080d86699b6d0482e9ead
+```
+
+All executed jobs collected and actual exit markers/prompts checked, including
+both compile-only failures; inferred idle never treated as command exit. Runtime
+diff and all new fixture lines fully reviewed after formatter; separate read-only
+review found no blocking issue. Ten intended deliverables only: three runtime
+files, two handoff tests, two exact probe literals, three root documents.
+Next diagnostics MUST snapshot the new accepted HEAD; Round25-original snapshots
+precede this native-handoff feature and cannot restore over it. Goal stays active.
