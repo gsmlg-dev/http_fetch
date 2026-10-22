@@ -180,6 +180,13 @@ coverage; no supported endpoint class silently lost.
       gates pass; fresh-build provider1565/1565. Two earlier warm-build startup
       failures remain recorded and unexplained. This is live attribution only;
       unknown native identity still prevents durable cleanup receipt sealing.
+- [x] Verify the public OTP29 retained-socket identity route with four throwaway
+      plain-loopback experiments: refusal, close, owner death, controller transfer.
+      Original socket monitor survives transfer; separate inet peer observes data
+      and EOF. Primitive feasibility only; no TLS/lifecycle/physical-FD acceptance.
+- [ ] Add private pre-connect opaque-socket enrollment with exact original monitor,
+      unchanged unresolved permits and loss semantics; then adapt the full native
+      transport lifetime and authenticated known-socket connect-failure settlement.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
       and acknowledged failure publication for real allocator/setup orchestration
       under original deadlines. Private success and TLS/connect attribution above

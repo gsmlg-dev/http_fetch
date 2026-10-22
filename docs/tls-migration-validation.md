@@ -3274,3 +3274,72 @@ actual persisted-then-lost ACK delivery or public lifecycle/socket acceptance.
 Latest whole-nine remains R22 RED3201/3206+test-WAE; R21/R23 physical FD evidence
 remains unresolved. No new FD/native diagnostic campaign or descriptor bridge.
 Goal remains active; P0--P7/default switch/nine publication/cold consumer open.
+
+
+## Round30 — public socket identity prototype
+
+Entry clean main17f85c98d439fae7b513990960ca619bf5b1426d. Human continue;
+goal re-read confirms revision2/armed, engine roundsStarted29 (work slice30).
+Repeated resume calls wrongly retained edit-only fields; stopped repeating and
+re-read actual state. No further resume calls or goal completion/blocking.
+Root TTY84 uses accepted fresh R29 build, MIX_ENV=test, existing Python venv.
+Five previously FULL-read architecture docs freshly byte-exact847556a.
+Task37 Root temporary prototype/docs only; production/tests/default frozen.
+
+Readonly independent source review: five-module patch insufficient. Ledger TCP
+accepts Port only; Observer monitors/owner facts, Allocator transfer/close, Setup
+allocation/ownership/second monitor, Connection attach/commit/close/active-once,
+Writer send/shutdown all need deliberate opaque-socket transport support.
+Pure Handoff compares canonical identities but inherits their restricted type.
+R29 connect recording requires pending permit with NO enrolled TCP: do not reuse
+it for a known pre-enrolled socket or infer phase from errno. Keep open failures
+and successful-open/interrupted-enrollment gap conservative. Review no execution,
+edits, native/network/hash/TTY; all source locations returned to Root.
+
+Installed runtime Elixir1.20.1/OTP29.0.2/ERTS17.0.2. Root Code.fetch_docs(:socket)
+reads installed PUBLIC open3/connect3/close1/monitor1 docs; actual EXIT0. Readable
+118line log FULL-read. Unversioned web page now29.1.2 is not runtime version.
+Connect timeout/cancel leaves uncertain platform connection state: close known
+socket; never infer native absence. Public monitor produces exact DOWN/ref/socket/
+opaqueObject/Info; missing object may report nosock. Close is no peer-delivery ACK.
+Root temporary207line script formatted/fully read. Memory-only interactive TUI
+uses pure record reducer + explicit I/O; no tests/deps/runtime hooks added.
+
+One batch supplies r/c/k/t/q to the same interactive interface through root mix run.
+Actual ROUND30_SOCKET_PROTOTYPE_EXIT=0 AND prompt; job collected.453line log:
+all four final snapshots reviewed plus event search, not a full-log-read claim.
+Each scenario native/control operations share original entry+1000ms, observation
+parent entry+3000ms, independent inet peer entry+2000ms including accept/read.
+No sleeps/forcedGC/rawFD/lsof/BPF/nativeC/SSL internals/descriptor bridge. Native
+open/close themselves expose no timeout argument; observed completion here does
+not establish a universal bounded syscall or cleanup guarantee under load.
+
+Observed original public identities and events (manual prototype, NOT test suite):
+- Refusal: opened owner338; original monitor194890 captured BEFORE connect;
+  econnrefused with owner338 still queryable; explicit close then matching
+  original monitor closed.9ms observed whole scenario, no peer connection.
+- Connected close: owner341/monitor194892, non-owner caller101 sends ping; inet
+  peer reads exact ping; owner close OK; matching socket DOWN closed; separately
+  peer recv error closed.6ms. Close return alone was not used as terminal proof.
+- Owner kill: owner344/monitor186168, peer exact ping; original owner DOWN killed,
+  original socket DOWN closed, separately peer recv closed.3ms.
+- Transfer: owner347 ->348 via public setopt otp controlling_process. Original
+  socket monitor186221 retained;347 DOWN killed before non-owner101 sends pong;
+  inet peer reads exact pingpong.348 closes; SAME original monitor closed and
+  separate peer recv closed.3ms. No monitor replacement or former-owner close.
+All printed opaque socket terms are kept whole, never parsed as a private shape.
+Only exact original monitor/ref/socket accepted by receive. These measurements
+are single observations, NOT latency distribution/performance/FD reclamation.
+No unreachable/timeout/cancel/blocked output/TLS/STARTTLS/public owner-ACK matrix.
+
+Answer: pre-connect canonical identity and monitor continuity are viable for
+successful open and ordinary loopback lifetime. First runtime step must be a
+separate private enrollment path for actual opaque socket; preserve inet Port
+behavior and exact monitor identity, sticky unknown permits and original leases.
+A known enrolled connect error needs a separate authenticated phase transition.
+The open-to-enrollment gap/open errors remain unknown, NOT pre-native rejection.
+Prototype removed after literal absolute target check. A REPL archive attempt
+had a compound-statement syntax error and created NO archive; its combined
+archive/removal marker was NOT archive proof. Full207line source is captured
+in session and453line result log remains; durable findings retained here. No production capability promoted. R29
+warm-build failures and latest R22 whole-nine RED/FD21+23 remain unresolved.

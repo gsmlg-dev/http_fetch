@@ -391,6 +391,21 @@ The unknown TCP permit/losses remain untouched. This supplies live attribution,
 not durable failure evidence: an unresolved permit still prevents receipt seal.
 Neither errno, call ACK nor helper DOWN proves native absence or cleanup.
 
+The R30 public socket prototype establishes a possible retained-identity route:
+successful socket.open exposes one opaque socket before connect; the original
+public socket.monitor survives connect refusal and controller transfer. Separate
+inet peers observed payload and EOF for close/owner-death/transfer scenarios.
+These are plain-loopback observations, not TLS or physical-FD acceptance.
+
+The first implementation step is private opaque-socket enrollment, acknowledged
+before connect/use/transfer, retaining exact socket plus original monitor. Keep
+all pending permits and loss sticky when open/enrollment identity is unknown;
+constructor/open failure is not trusted pre-native rejection. A known enrolled
+connect failure needs its own authenticated phase transition because the R29
+unresolved-permit API explicitly rejects already-enrolled TCP. Whole-lifetime
+Setup/Connection/Writer transport adaptation and independent blocked-I/O/cleanup
+verification must follow before public acceptance. No fd bridge is assumed.
+
 Full allocator/setup orchestration and constructor-error identity proof, public
 lifecycle, STARTTLS adoption, application owner ACK/authority transfer and socket/
 facade integration remain open.
