@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.16] - 2026-10-22
+
+### Added
+- Document the role-neutral `HTTP.HTTP2.HPACK` public codec API, including
+  stateful contexts, encoding policies, complete-block decoding limits and
+  SETTINGS table-size coordination for client and server consumers (#141).
+
 ## [0.21.15] - 2026-10-22
 
 ### Fixed
