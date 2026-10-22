@@ -322,6 +322,22 @@ authority; an unknown reply authorizes no rollback or recipient-owned close.
 Success acknowledges this private ownership protocol, not delivery, setup
 outcome, TLS attachment or public lifecycle readiness.
 
+The private Setup contract composes these actors under one setup-clipped absolute
+pending budget. ROOT creates the classic socket identity and reserves both root
+permits. Setup self-enrolls and creates the Connection child; allocator provenance
+remains the delegated ROOT permit. Connection keeps ROOT as application owner and
+reports birth/readiness to Setup. The private unlinked Connection constructor uses
+public gen_statem.start with a bounded initial wait; Observer owns its lifecycle
+accounting. Public/supervised constructors retain their existing path.
+
+Setup preparation and handoff requests are asynchronous and retain original actor
+identities, nonces, Observer, socket reference and budget. A definitive native ACK
+and normal allocator retirement permit a private native-owned candidate notice.
+It leaves setup pending; Setup keeps its original timer until a future real TLS
+outcome. Unknown construction/acceptance holds bounded uncertainty without
+rollback, fresh deadlines or premature helper retirement. No post-entry error
+proves absent resources. Setup termination never closes a Connection-owned Port.
+
 Full allocator/setup orchestration and constructor-error identity proof, public
 lifecycle, STARTTLS adoption, application owner ACK/authority transfer and socket/
 facade integration remain open.

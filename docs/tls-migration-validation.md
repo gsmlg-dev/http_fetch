@@ -2765,3 +2765,129 @@ review found no blocking issue. Ten intended deliverables only: three runtime
 files, two handoff tests, two exact probe literals, three root documents.
 Next diagnostics MUST snapshot the new accepted HEAD; Round25-original snapshots
 precede this native-handoff feature and cannot restore over it. Goal stays active.
+
+## Round26 — actual Setup orchestration and bounded inert construction
+
+Entry main d79472e5395988e6a1bc9e4fec0160a6cd2fe97d, clean, goal active/armed26/100.
+Root checked actual working directory/HEAD, prior five full architecture reads
+remain byte-exact847556a, fresh CURRENT HEAD Connection/two-probe snapshots in
+/tmp/http-fetch-round26-originals. Task31 follows completed task30. Task20 owner
+explicitly coordinated EXACT3source paths: additive private Connection constructor,
+new Setup and new actual-Setup tests. No worker formatter/build/native execution.
+Root retains all execution, hashes, documentation and commit authority.
+
+Design review: DynamicSupervisor.start_child has no caller timeout parameter;
+waiting on that supervisor inside Setup cannot enforce its own pending budget.
+The private bounded alternative uses public gen_statem.start/3, unlinked and
+without automatic restart, only for inert lifecycle actors. Existing supervised/
+classic start_link paths stay intact. Its timeout covers initial acknowledgment
+ONLY, not enrollment/readiness. Post-entry failure is unknown; late {:ok,pid}
+MUST retain/store/monitor that identity before a post-return deadline gate.
+No helper/proxy, private supervisor protocol, role or receipt dimension is added.
+
+Contract: ROOT binds/reserves setup AND allocator permits. Setup uses exactly
+seven trusted context fields: receipt, permit, allocator_permit, endpoint, classic,
+control_deadline, ready. Classic owner and ready recipient equal the actual ROOT
+caller. Effective E=min(controlD, original classic setupD), fixed once. Actual
+Setup self-enrolls/reserves Connection; Connection keeps ROOT as application owner,
+sends readiness to Setup and creates actual Writer. Actual Allocator has unchanged seven fields,
+recipient/constructor-parent Setup, logical root-permit creator ROOT. This is
+cooperative bearer/provenance accounting, not process-ancestry attestation.
+
+Preparation and Allocator handoff use public asynchronous request/check_response
+APIs from the actual Setup PID under SAME E. Original typed monitors and request
+IDs stay distinct; normal Allocator DOWN alone cannot substitute for its commit/
+helper-completion ACK. Both observations plus ownership/live/E gates permit ONE
+nonce/Observer/PID/socket-fenced native-owned candidate message to ROOT.
+Setup remains alive with setup:pending and E STILL ARMED. NativeReady cannot
+publish connected/helper_done or cancel/renew this pending budget. Unknown
+acceptance alone holds bounded uncertainty; it cannot cause rollback/early
+Setup exit/cancellation, retry or no-resource rejection.
+
+Independent timer oracle: actual Conn/Observer original setup budget is LATER
+(e.g.2s) than Setup pendingE(200ms). Suspend OWN Observer only AFTER actual native
+notification and ONE original Portowner fact; Setup normalDOWN atE must leave
+Conn/Port still live/Connowned BEFORE Observer resume. Equal Conn/setup E could
+confound this with Conn handshake expiry and is not this oracle. On resume,
+existing not-done SetupDOWN retires authority; its reason may be internal rather
+than timeout. ROOT keeps original receipt/lease cancellation throughout.
+Public docs: [gen_statem.start/3](https://www.erlang.org/doc/apps/stdlib/gen_statem.html#start/3).
+
+Initial Root execution: formatter EXIT0; compile warnings-as-errors and
+lifecycle+birth focus EXIT0,130/13018.1s(6.8async/11.2sync),seed101/max_cases24.
+Actual terminal exit marker and prompt checked after collecting inferred-idle job.
+Static first EXIT8: compile/format passed; configured Credo543files9044mods/funs
+reported ONLY two new admission functions cyclomatic18>max15. Dialyzer was NOT
+run because the chain stopped. Source reopened only to extract admission helpers
+without dropping checks/raising limits/suppression or changing old bodies.
+
+Independent full formatted review (Setup339/tests222/newCtor34 lines) found no
+FSM blocker, but found a NEW fixture gap: requested controlD is made AFTER root
+bootstrap while classic/Observer2s starts BEFORE it, so slow admission could clip
+E earlier than the assertion used. Correction normalizes fixtures to actual minE;
+ONLY the SDK-soft-timeout case gets a separate original4s horizon and explicit
+remainingE>1250ms precondition. Its pendingE1500/probeE-250/closed-call200ms and
+original Setup control-D assertions stay fixed. IndependentE200/classic2s and every old
+fixture/peer deadline remain unchanged. This isolates the earlier pending timer.
+
+Final Root refactor/fixture validation EXIT0 plus terminal prompt:
+formatter-v2, compile warnings-as-errors, lifecycle+birth130/13017.9s
+(6.6async/11.2sync), seed101/max_cases24; root format check; configured Credo
+543files9048mods/funs NO issues; Dialyzer0errors/0skips/fourunchanged unnecessary
+ignore notices17.55s; git diff --check0. /tmp/http-fetch-round26-setup-validated.log.
+No checks removed/ignored, no Credo or Dialyzer config changes. All entry/initial
+failures and final jobs collected; actual markers/prompts checked, inferred idle
+never substituted for foreground completion. Standard provider gate follows.
+
+Standard restored ROOT separate-app provider/consumer command:
+
+```bash
+HTTP_QUIC_PHASE1_REAL=1 unbuffer mix test apps/ex_ssl/test apps/elixir_quic/test apps/http_core/test apps/http_fetch/test/http/socket_client_http2_test.exs --include integration --seed 101
+```
+
+Actual ROUND26_PROVIDER_REGRESSION_EXIT=0 plus terminal prompt, job collected.
+ExSSL 830/830 (20 properties,810 tests),78.5s; QUIC249/249,9.3s;
+Core418/418,24.0s; Fetch H2 file43/43,5.7s: TOTAL1540/1540.
+/tmp/http-fetch-round26-provider-regression.log. No trace/helper hooks loaded.
+Existing test-only bitstring and Request.put_body_headers type warnings remain
+(as recorded R24/R25); no suppressions, no test-WAE claim. Application WAE clean.
+
+Six actual-Setup cases execute: real chain/passive/no TLS bytes/pending+explicit
+cancel/typed31; wrong caller/expired-before-entry ctor/foreign queued frames/
+replay cannot spend or duplicate the genuine candidate; nativeE200/classic2s
+own-Observer suspension isolates Setup normalDOWN while Conn/Writer/Port remain
+live/Connowned BEFOREresume; precancel birth leaves unissuedROOTallocatorpermit
+unknown/unsealed; ONE closed-owned-listener refusal leaves TCPidentityunknown/
+unsealed; suspended own Observer produces SDK1s unknown, closed probeE-250 sees
+responsive Setup, originalE1500 ends it normally, later explicitcancel/unsealed.
+No actual native commit/helper_done ACK loss was injected; do not claim that proof.
+
+Final source guards: subtract ONLY new44line Connection constructor/helper block
+to recover ALL1494 original lines byte-exact. All201 other tracked ExSSL lib/test
+files and five prior fully-read architecture documents are byte-exact; Writer,
+Allocator, Observer, ledger, pure Handoff, NativeTCP and priorbirth/readiness/native
+handoff tests unchanged. Both strict probes differ from CURRENTpre-round snapshots
+by EXACTLY ONE64char SHA literal each; no pressure/assertion/fallback changes.
+HTTPS371 exact SHA b4f4f8b375d72aadf9799f8261199c478e4f85dd34bfdd601c3e873e0429c9d3.
+Separate final fullformatted review Setup355/Test228/newCtor44 found no blockers;
+fixture timing caveat closed. Root fully reviewed newruntime/tests/final diff.
+
+Final formatted SHA256:
+- Connection1538:10ade3e28f6c024841e30406864226971a520fad325fcd1d8e5b62a3af38ab18
+- Setup355:851c8669a64fe719168954c497d1a4e0224802ea4d1888a1150237a0a8571aec
+- NewTest228:7b2d2826a1d996b1fbcf1373068c34bbf399b0971a81b257227f1a64cd4bf725
+
+Eight deliverables only: two runtime files, one new test, two exact strict-probe
+literals and three root documents. No TLS attach/machine/I/O/outcome/public lifecycle
+or Root-publicACK/default change. Private native candidate is NOT TLS readiness.
+
+Whole-nine remains R22 RED3201/3206 plus test-WAE; selected1540 pass does not
+supersede it. Native constructor all-error identity, hidden/late births, actual
+ACK loss, R23bootstrapcause, P0physicalFD/remote terminal delivery remain OPEN.
+Port/ownerDOWN and typed31 do not certify physicalFD destruction/peerFIN-RST.
+No new diagnostic attach, primitive change, trace, GC, deadline widening of old
+fixtures, candidate/CI/release/performance or published-consumer acceptance.
+Next implement actualTLSattach and acknowledged realsetupoutcome/constructor
+identity before public integration. Goal stays active. Future diagnostics MUST
+fresh-snapshot accepted HEAD: /tmp/http-fetch-round26-originals predates this
+Setup/unlinked-constructor feature and cannot restore over it.

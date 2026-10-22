@@ -82,6 +82,50 @@ defmodule SSL.Connection do
            ready: {pid(), reference()}
          }
 
+  # Private unlinked birth only; every post-entry failure keeps allocation unknown.
+  @spec start_inert({:inert, classic_init(), inert_context()}) ::
+          {:ok, pid()} | {:error, term()}
+  def start_inert(
+        {:inert, {owner, ref, status, %Options{}, setup},
+         %{
+           receipt: %Receipt{observer: observer, cell: cell},
+           permit: permit,
+           control_deadline: {:abs_ms, control},
+           ready: {recipient, nonce}
+         }} = args
+      )
+      when is_pid(owner) and is_reference(ref) and
+             is_reference(status) and is_pid(observer) and
+             is_reference(cell) and is_reference(permit) and is_integer(control) and
+             is_pid(recipient) and is_reference(nonce) and
+             (is_integer(setup) or setup == :infinity) do
+    admit_inert(args, owner, observer, recipient, setup, control)
+  end
+
+  def start_inert(_), do: {:error, :invalid_lifecycle_context}
+
+  defp admit_inert(args, owner, observer, recipient, setup, control) do
+    if node(owner) == node() and node(observer) == node() and node(recipient) == node(),
+      do: start_inert_before_deadline(args, setup, control),
+      else: {:error, :invalid_lifecycle_context}
+  end
+
+  defp start_inert_before_deadline(args, setup, control) do
+    deadline = if setup == :infinity, do: control, else: min(control, setup)
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    if remaining > 0 do
+      case :gen_statem.start(__MODULE__, args, timeout: min(remaining, 0xFFFFFFFF)) do
+        {:ok, pid} -> {:ok, pid}
+        _ -> {:error, :acceptance_unconfirmed}
+      end
+    else
+      {:error, :deadline_exceeded}
+    end
+  catch
+    _kind, _reason -> {:error, :acceptance_unconfirmed}
+  end
+
   @spec start_link(classic_init() | {:inert, classic_init(), inert_context()}) ::
           {:ok, pid()} | :ignore | {:error, term()}
   # This audited rejection branch precedes process creation. Other constructor

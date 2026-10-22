@@ -154,6 +154,12 @@ coverage; no supported endpoint class silently lost.
       parameter case pass; lifecycle+birth124/124 and configured static gates pass.
       Actual-actor ACK-loss is source-reviewed, not directly forced by these cases.
       TLS attachment, setup outcome and public readiness remain open.
+- [x] Compose private actual Setup/Connection/Writer/Allocator births and native
+      handoff under one absolute pending budget. Bound unlinked inert construction
+      avoids an unbounded supervisor wait; ROOT remains application owner.
+      Definitive handoff ACK plus normal Allocator DOWN precede one native candidate;
+      Setup stays pending with original timer armed. Six actual-Setup cases and
+      lifecycle+birth130/130/static gates pass; no TLS outcome/public acceptance.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
       and private real allocator/setup direct-dial orchestration with original
       deadlines and acknowledged outcome publication.
