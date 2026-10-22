@@ -1,5 +1,57 @@
 defmodule HTTP.HTTP2.HPACK do
-  @moduledoc false
+  @moduledoc """
+  Stateful HPACK header compression for HTTP/2 clients and servers (RFC 7541).
+
+  The codec operates on ordered lists of `{name, value}` binary pairs. It does
+  not own a connection, start processes, frame HTTP/2 messages, or validate HTTP
+  header semantics. The caller handles pseudo-header ordering, lowercase names,
+  SETTINGS exchange, and connection errors.
+
+  Keep one encoder for outgoing blocks and a separate decoder for incoming
+  blocks on each connection, regardless of whether the application is a client
+  or server. Retain the returned contexts across blocks and across streams, in
+  the order blocks are sent or received. Do not share contexts between directions
+  or connections, or change their struct fields directly.
+
+  `encode_headers/2` and `encode_headers/3` return `{encoder, block}` with a binary
+  block. `decode/2` takes a complete binary block and returns
+  `{:ok, decoder, headers}` or `{:error, reason}`. Assemble HEADERS/PUSH_PROMISE
+  and CONTINUATION fragments before decoding; the codec has no incremental
+  input or partial-result interface. `encode_headers/1` is a stateless literal
+  encoder returning iodata instead of a context.
+
+  ## Stateful example
+
+  The two contexts below represent opposite ends of one sending direction.
+  Incremental indexing allows the second block to refer to the first block's
+  dynamic table entry:
+
+      alias HTTP.HTTP2.HPACK
+
+      encoder = HPACK.new_encoder()
+      decoder = HPACK.new_decoder()
+      headers = [{"x-example", "one"}]
+
+      {encoder, first} = HPACK.encode_headers(encoder, headers, indexing: :incremental)
+      {:ok, decoder, ^headers} = HPACK.decode(decoder, first)
+      {_encoder, second} = HPACK.encode_headers(encoder, headers, indexing: :incremental)
+      {:ok, _decoder, ^headers} = HPACK.decode(decoder, second)
+      true = byte_size(second) < byte_size(first)
+
+  ## Table capacity and SETTINGS
+
+  Both initial contexts use a 4096-byte dynamic table. Apply a received peer
+  `SETTINGS_HEADER_TABLE_SIZE` to the outgoing encoder with
+  `set_max_dynamic_size/2`. It evicts entries immediately and queues the required
+  size update at the beginning of the next encoded block, even an empty block.
+  Several changes before that block emit the smallest and final sizes as needed.
+
+  Apply your own advertised `SETTINGS_HEADER_TABLE_SIZE` to the incoming decoder
+  with `acknowledge_max_dynamic_size/2` when the peer acknowledges it. The decoder
+  then enforces the acknowledged limit and any required leading shrink update.
+  The caller coordinates SETTINGS and ACK ordering; these functions do not send
+  frames. See `new_decoder/1` for independent decoding resource limits.
+  """
 
   import Bitwise
 
@@ -17,6 +69,12 @@ defmodule HTTP.HTTP2.HPACK do
             max_field_bytes: 65_536,
             max_fields: 256
 
+  @doc """
+  Creates an outgoing encoder with an empty 4096-byte dynamic table.
+
+  Pass the returned context to `encode_headers/2` or `encode_headers/3`, and keep
+  each returned encoder for the next block on the same connection direction.
+  """
   def new_encoder, do: %__MODULE__{}
 
   @type header :: {String.t(), String.t()}
@@ -362,6 +420,27 @@ defmodule HTTP.HTTP2.HPACK do
     {256, 0x3FFFFFFF, 30}
   ]
 
+  @doc """
+  Creates an incoming decoder with an empty dynamic table and resource limits.
+
+  Options are a keyword list:
+
+    * `:max_dynamic_size` - initial table capacity and allowed maximum in bytes;
+      defaults to `4096`. Must be a non-negative integer. Table entries cost the
+      name and value byte lengths plus 32 bytes each (RFC 7541).
+    * `:max_block_bytes` - maximum compressed bytes per complete block;
+      defaults to `65_536`.
+    * `:max_decoded_bytes` - maximum sum of name and value bytes in a block,
+      including indexed fields and Huffman expansion; defaults to `65_536`.
+    * `:max_field_bytes` - maximum name plus value bytes for one field;
+      defaults to `65_536`.
+    * `:max_fields` - maximum number of fields in a block; defaults to `256`.
+
+  The four per-block limits must be positive integers. They do not include the
+  dynamic table's 32-byte entry overhead. Options are not validated by the
+  constructor; callers must supply values in these domains. There is no
+  `:infinity` option. Retain each successful `decode/2` result for the next block.
+  """
   def new_decoder(opts \\ []) do
     max_dynamic_size = Keyword.get(opts, :max_dynamic_size, 4096)
 
@@ -376,7 +455,18 @@ defmodule HTTP.HTTP2.HPACK do
     }
   end
 
-  @doc "Sets the peer-advertised maximum dynamic table capacity and evicts as needed."
+  @doc """
+  Applies a dynamic table size limit and returns the updated context.
+
+  For an encoder, `size` is the peer-advertised `SETTINGS_HEADER_TABLE_SIZE`.
+  It sets the encoder's capacity, evicts entries as needed, and queues leading
+  HPACK table size updates for its next `encode_headers/2` or
+  `encode_headers/3` call. An unchanged limit queues no update.
+
+  For a decoder, this is an alias for `acknowledge_max_dynamic_size/2`; call it
+  only at the corresponding local SETTINGS acknowledgement boundary. `size`
+  must be a non-negative integer, including zero to disable table storage.
+  """
   @spec set_max_dynamic_size(t(), non_neg_integer()) :: t()
   def set_max_dynamic_size(%__MODULE__{role: :encoder} = encoder, size)
       when is_integer(size) and size >= 0 do
@@ -400,7 +490,19 @@ defmodule HTTP.HTTP2.HPACK do
     acknowledge_max_dynamic_size(decoder, size)
   end
 
-  @doc "Applies an acknowledged local HEADER_TABLE_SIZE to the decoder."
+  @doc """
+  Applies an acknowledged local `SETTINGS_HEADER_TABLE_SIZE` to a decoder.
+
+  Returns the updated decoder with the allowed maximum set to `size`, evicting
+  entries if its current capacity exceeds that maximum. A decrease below the
+  current capacity requires the next block to start with a table size update no
+  larger than the smallest required shrink. A later increase does not cancel
+  that requirement. Increasing the maximum alone does not increase the current
+  capacity; the peer chooses its capacity through a leading HPACK size update.
+
+  Accepts only a decoder context and a non-negative integer `size`. This
+  function neither sends a SETTINGS ACK nor applies an unacknowledged setting.
+  """
   @spec acknowledge_max_dynamic_size(t(), non_neg_integer()) :: t()
   def acknowledge_max_dynamic_size(%__MODULE__{role: :decoder} = decoder, size)
       when is_integer(size) and size >= 0 do
@@ -422,6 +524,15 @@ defmodule HTTP.HTTP2.HPACK do
     |> evict_dynamic()
   end
 
+  @doc """
+  Encodes an ordered header list as stateless, uncompressed literal iodata.
+
+  Every `{name, value}` binary pair uses a literal without indexing and a literal
+  name; the result has type `[iodata()]`. Convert it with
+  `IO.iodata_to_binary/1` before passing it to `decode/2`. This form does not use
+  or update a dynamic table, emit size updates, or mark fields as never indexed.
+  Use `encode_headers/3` to select indexing, sensitivity, or Huffman policies.
+  """
   @spec encode_headers([header()]) :: [iodata()]
   def encode_headers(headers) when is_list(headers) do
     Enum.map(headers, fn {name, value} ->
@@ -429,13 +540,40 @@ defmodule HTTP.HTTP2.HPACK do
     end)
   end
 
-  @doc "Encodes with the connection encoder and returns its updated state."
+  @doc """
+  Encodes an ordered header list with the default policies.
+
+  Takes an encoder context followed by a list of `{name, value}` binary pairs
+  and returns `{updated_encoder, binary_block}`. Equivalent to
+  `encode_headers(encoder, headers, [])`: literal without indexing, no sensitive
+  names, and no Huffman encoding. Keep the updated encoder for subsequent blocks.
+  """
   @spec encode_headers(t(), [header()]) :: {t(), binary()}
   def encode_headers(%__MODULE__{} = encoder, headers) when is_list(headers) do
     encode_headers(encoder, headers, [])
   end
 
-  @doc "Encodes headers using an explicit indexing, sensitivity, and Huffman policy."
+  @doc """
+  Encodes headers with explicit policies, returning `{updated_encoder, binary_block}`.
+
+  Arguments are an encoder context, an ordered list of `{name, value}` binary
+  pairs, and a keyword list or map with these options:
+
+    * `:indexing` - `:literal` (default) emits literals without indexing;
+      `:incremental` uses matching static/dynamic entries or adds literals to the
+      dynamic table; `:never` emits literals marked never indexed.
+    * `:sensitive` - a list of header name binaries, default `[]`. Exact,
+      case-sensitive name matches override `:indexing` with `:never`. There is no
+      built-in sensitive-name list or callback form.
+    * `:huffman` - `:never` (default) emits plain strings; `:always` Huffman-encodes
+      literal names and values, even when their encoding is larger.
+
+  Names and values are preserved without normalization. Pending table size
+  updates precede fields, including when `headers` is empty. The options select
+  policies for this call; retain the returned encoder's table state for the next
+  block. Supply the documented option values: the codec does not validate them
+  or return tagged encoding errors. Invalid argument shapes may raise.
+  """
   @spec encode_headers(t(), [header()], keyword() | map()) :: {t(), binary()}
   def encode_headers(%__MODULE__{} = encoder, headers, options) when is_list(headers) do
     options = Map.new(options)
@@ -529,6 +667,24 @@ defmodule HTTP.HTTP2.HPACK do
     end
   end
 
+  @doc """
+  Decodes one complete binary HPACK block using the incoming decoder context.
+
+  Returns `{:ok, updated_decoder, headers}`, preserving field order and duplicate
+  names as `{name, value}` binary pairs, or `{:error, reason}`. Never-indexed
+  markers are not included in the returned pairs. No partial state or headers
+  are returned on error; do not retry a truncated fragment as a new block or
+  continue a connection with an unsynchronized compression context.
+
+  Limit failures are `:hpack_block_too_large`, `:hpack_decoded_bytes_exceeded`
+  (also used for the per-field limit), and `:hpack_field_count_exceeded`.
+  Malformed input can return `:invalid_hpack_index`,
+  `:truncated_hpack_integer`, `:hpack_integer_too_large`,
+  `:truncated_hpack_string`, `:invalid_huffman_code`, `:invalid_huffman_eos`,
+  `:invalid_huffman_padding`, `:missing_dynamic_table_size_update`, or
+  `:invalid_dynamic_table_size_update`. HTTP/2 connection-level error handling
+  and header semantic validation remain the caller's responsibility.
+  """
   @spec decode(t(), binary()) :: {:ok, t(), [header()]} | {:error, term()}
   def decode(%__MODULE__{} = decoder, block) when is_binary(block) do
     if byte_size(block) > decoder.max_block_bytes do
@@ -538,6 +694,12 @@ defmodule HTTP.HTTP2.HPACK do
     end
   end
 
+  @doc """
+  Encodes an HPACK integer with a 1-to-8-bit prefix and first-byte high bits.
+
+  `value` is non-negative. `high_bits` must fit one byte and leave the prefix
+  bits clear. Returns a binary; most callers should use `encode_headers/3`.
+  """
   @spec encode_integer(non_neg_integer(), 1..8, non_neg_integer()) :: binary()
   def encode_integer(value, prefix_bits, high_bits)
       when value >= 0 and prefix_bits >= 1 and prefix_bits <= 8 do
@@ -557,6 +719,11 @@ defmodule HTTP.HTTP2.HPACK do
 
   defp encode_integer_tail(value), do: <<value>>
 
+  @doc """
+  Encodes a binary as an HPACK string literal without Huffman encoding.
+
+  Returns a binary containing the length prefix and the unchanged value bytes.
+  """
   @spec encode_string(String.t()) :: binary()
   def encode_string(value) when is_binary(value) do
     encode_string(value, :never)
