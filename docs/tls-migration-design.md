@@ -223,6 +223,12 @@ enrollment requires its recorded creator as caller and current connected owner b
 monitoring; a foreign/vanished port remains untouched and its permit unresolved.
 No ownership transfer may race this enrollment acknowledgment.
 
+The private pure ledger also accepts opaque socket-monitor identity for dial TCP.
+Trusted runtime code must validate the object and establish its real monitor;
+the pure ledger checks exact reference/kind/object termination correlation.
+Port/process bookkeeping and upgrade socket rejection stay unchanged. Observer
+still exposes only Port enrollment; socket runtime enrollment/transport is pending.
+
 Retirement closes both authority and ledger admission before killing known provider
 processes. Observer never blocks in native close: port absence needs its separate
 exact DOWN, even after its known provider owner dies. The grace deadline is fixed

@@ -3343,3 +3343,72 @@ had a compound-statement syntax error and created NO archive; its combined
 archive/removal marker was NOT archive proof. Full207line source is captured
 in session and453line result log remains; durable findings retained here. No production capability promoted. R29
 warm-build failures and latest R22 whole-nine RED/FD21+23 remain unresolved.
+
+
+### Round30 continuation — dial-only typed socket ledger
+
+Entry accepted6873138. Task38 initially source-only; required-field write schema
+conflicted with forbidden sandbox fields. Worker attempts were REJECTED before
+FS changes; no approval/escalation or worker execution. Stopped retries, reassigned
+to Root; Root authored via TTY84 from readonly proposal. Quic/task20 scope ACK:
+all old scopes frozen, no conflict. Fresh8originals at687 before first source edit.
+Root initial86line case with actual public socket/original kernel monitors:
+existing Ledger.enroll BEFOREconnect expects use; actual RED invalid_monitor_identity
+at23 in0.1s,21line log FULL-read, actual EXIT2 AND prompt, before runtime edits.
+
+Only runtime file ResourceLedger223->231: public identity union adds socket;
+valid_identity gets scope and admits socket ONLY dial/TCP. Opaque object validity
+and actual monitor establishment belong to trusted runtime, not pure attestation.
+No native calls/opaque-shape guessing. Upgrade adopt/direct-enroll socket and
+process-role socket still reject; old Port/process any-scope guards preserved.
+Existing exact ref/type/object/live DOWN matcher, unique monitors, masks, unknown
+permits, late stop, loss and proof body unchanged. First actual GREEN1/1 in0.1s,
+27line log FULL-read, actual EXIT0+prompt. Then focused3/3 in0.5s EXIT0+prompt.
+
+New actual native three-case file: kernel original process/socket monitors and
+public opaque objects retained, no runtime/private-state hooks or VM sender spoof.
+Wrong ref/kind/object are DIRECT PURE event data; cannot advance; real socket DOWN
+settles bit16 only, replay idempotent, actual owner DOWN completes17. Negative
+role/upgrade acceptance checked. In loss case actual opened owner dies BEFORE TCP
+identity enrollment: actual socket DOWN alone cannot resolve pending16. Explicit
+admission OPEN/loss16 assertion, late enrollment MUSTstop BEFORE closing admission;
+original socket DOWN finally settles17/17 with LOSS16 still UNCONFIRMED.
+
+Standard provider command (HTTP_QUIC_PHASE1_REAL=1, root, includeintegration,
+seed101/max24, same accepted fresh R29 build) actual EXIT0 AND prompt, jobcollected:
+ExSSL858(20properties838tests)116.8s(34.4async82.4sync); QUIC249/8.5s;
+Core418/23.2s; H2file43/5.7s. TOTAL1568/1568 applies INITIAL195line fixture.
+Existing bitstring/Request test warnings persist; not test-WAE/full-nine proof.
+Readonly review suggested canonical permit ordering. AFTER provider EXIT, Root
+refined ONLY new test: Allocator permit BEFORE inert spawn, original process
+enrollment/TCP permit BEFORE :open, socket monitor BEFORE TCP enroll/connect.
+Original absolute native entry+1s and parent entry+3s passed unchanged, timer
+created once, inert owner checks original native E before open. All3samecases
+final211lines, no extra case/oldtest/async flag changes. Final refined3/3 in0.3s,
+actual EXIT0+prompt,8line log FULL-read, jobcollected. Runtime ledger unchanged
+since1568green; scoped final fixture rerun is separate evidence. No broad repeat.
+Root/independent reviewer FULLfinal211+231 read, no blockers, no further edits.
+
+Static: root compile WAE0; root format check0. Root mistakenly selected EXTRA
+credo --strict: EXIT14 stops chain BEFORE Dialyzer.547files/66checks found212
+suggestions (12refactor/35readability/165design); no entries in two changed files.
+No strict-baseline cleanup authorized/performed. Preserve failed extra log.
+Configured mix credo:547files/54checks/9162mods-funs/noissues13.0s. Then Dialyzer
+0errors/0skips/4unchanged unnecessary ignores16.45s. Combined actualEXIT0+prompt,
+jobcollected. No config/ignore suppression edits. Source boundaries rechecked:
+HEAD687 trackedapps792; all791 OTHER files byte-exact, including symlink target
+bytes. Ledger original223 reverse-exact after removing new branch/type/scope-arity
+changes. Connection61b2fa41... and HTTPSpressureb4f4f8b3... fullSHA match unchanged.
+Alloldtests/roles/flags/budgets/pins/Setup/Allocator/NativeTCP/Writer/Reader/Receipt
+and Observer remain frozen; docs3 updated with actual narrow compatibility.
+
+Boundary: pure ledger fragment only. Kernel/socket DOWN proves its defined local
+termination fact, not physical FD/kernel reclamation, peer EOF, Observer absence
+or receipt seal. Real Observer has NO socket enrollment/ownership API yet; no
+transport/facade/default change, no durable all-error settlement or STARTTLS.
+Next separate scope must authenticate original creator/owner, establish original
+public socket monitor and preserve late known accounting without :use after
+expired admission/request deadline. Public monitor1 has no timeout argument:
+receiver needs fresh checks after monitor establishment as well as before entry.
+Known-socket connect attribution remains separate from R29 pending-permit path.
+R22whole-nineRED/FD21+23/R29warm startup failures remain unresolved; goal ongoing.

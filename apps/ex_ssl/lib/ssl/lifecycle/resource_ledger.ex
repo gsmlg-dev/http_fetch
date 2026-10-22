@@ -10,7 +10,10 @@ defmodule SSL.Lifecycle.ResourceLedger do
   defstruct scope: :dial, admission: :open, resources: %{}, permits: %{}, losses: 0, rejected: 0
 
   @type role :: :allocator | :setup | :connection | :writer | :tcp
-  @type identity :: {reference(), :process | :port, pid() | port()}
+  @type identity ::
+          {reference(), :process, pid()}
+          | {reference(), :port, port()}
+          | {reference(), :socket, :socket.socket()}
   @type creator :: :observer | {role(), reference()}
   @type scope :: :dial | :upgrade
   @type role_mask :: 0..31
@@ -103,7 +106,7 @@ defmodule SSL.Lifecycle.ResourceLedger do
   @spec close_admission(t()) :: t()
   def close_admission(%__MODULE__{} = ledger), do: %{ledger | admission: :closed}
 
-  @spec down(t(), {:DOWN, reference(), :process | :port, term(), term()}) :: t()
+  @spec down(t(), {:DOWN, reference(), :process | :port | :socket, term(), term()}) :: t()
   def down(%__MODULE__{} = ledger, {:DOWN, ref, type, object, _reason}) do
     case Enum.find(ledger.resources, fn {_role, resource} ->
            resource.identity == {ref, type, object} and resource.state == :live
@@ -148,7 +151,7 @@ defmodule SSL.Lifecycle.ResourceLedger do
 
   defp register(ledger, role, identity, creator) do
     cond do
-      not valid_identity?(role, identity) ->
+      not valid_identity?(ledger.scope, role, identity) ->
         {:error, :invalid_monitor_identity}
 
       duplicate_monitor?(ledger, identity) ->
@@ -199,13 +202,18 @@ defmodule SSL.Lifecycle.ResourceLedger do
 
   defp creator_live?(_ledger, _creator), do: false
 
-  defp valid_identity?(:tcp, {ref, :port, object}), do: is_reference(ref) and is_port(object)
+  defp valid_identity?(_scope, :tcp, {ref, :port, object}),
+    do: is_reference(ref) and is_port(object)
 
-  defp valid_identity?(role, {ref, :process, object})
+  # The runtime validates the opaque socket and establishes its real monitor.
+  # Restrict this new identity kind to dial; existing-socket adoption stays Port-only.
+  defp valid_identity?(:dial, :tcp, {ref, :socket, _socket}), do: is_reference(ref)
+
+  defp valid_identity?(_scope, role, {ref, :process, object})
        when role in [:allocator, :setup, :connection, :writer],
        do: is_reference(ref) and is_pid(object)
 
-  defp valid_identity?(_role, _identity), do: false
+  defp valid_identity?(_scope, _role, _identity), do: false
 
   defp duplicate_monitor?(ledger, {ref, _type, _object}) do
     Enum.any?(ledger.resources, fn {_role, resource} -> elem(resource.identity, 0) == ref end)

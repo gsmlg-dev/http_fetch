@@ -184,6 +184,11 @@ coverage; no supported endpoint class silently lost.
       plain-loopback experiments: refusal, close, owner death, controller transfer.
       Original socket monitor survives transfer; separate inet peer observes data
       and EOF. Primitive feasibility only; no TLS/lifecycle/physical-FD acceptance.
+- [x] Add dial-only TCP opaque socket monitor identities to the pure ledger.
+      Three actual monitor cases cover exact DOWN correlation, scope rejection and
+      late known stop with sticky loss. Round30 provider1568/1568(initial fixture),
+      refined fixture3/3 and configured static gates pass. Runtime enrollment below
+      remains pending; pure accounting is not a constructor/FD/socket support claim.
 - [ ] Add private pre-connect opaque-socket enrollment with exact original monitor,
       unchanged unresolved permits and loss semantics; then adapt the full native
       transport lifetime and authenticated known-socket connect-failure settlement.
