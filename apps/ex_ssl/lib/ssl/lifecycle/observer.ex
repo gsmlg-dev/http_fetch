@@ -39,6 +39,20 @@ defmodule SSL.Lifecycle.Observer do
   @spec snapshot(Receipt.t(), {:abs_ms, integer()}) :: {:ok, map()} | {:error, atom()}
   def snapshot(receipt, deadline), do: call(receipt, :snapshot, deadline)
 
+  # Record metadata before the existing failure path; this is not cleanup or Setup ACK.
+  @spec record_tls_failure(Receipt.t(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
+  def record_tls_failure(receipt, {:abs_ms, publication}) when is_integer(publication) do
+    entered = now()
+    request_deadline = min(publication - 250, entered + 250)
+
+    if entered < request_deadline,
+      do:
+        call(receipt, {:record_tls_failure, {:abs_ms, publication}}, {:abs_ms, request_deadline}),
+      else: {:error, :deadline_exceeded}
+  end
+
+  def record_tls_failure(_, _), do: {:error, :invalid_deadline}
+
   @spec reserve_root(Receipt.t(), Authority.lease(), :allocator | :setup, {:abs_ms, integer()}) ::
           {:ok, reference()} | {:error, atom()}
   def reserve_root(receipt, lease, role, deadline),
@@ -163,6 +177,9 @@ defmodule SSL.Lifecycle.Observer do
 
           {:commit_handoff, nonce} ->
             {:commit_handoff, nonce, {:abs_ms, deadline}}
+
+          {:record_tls_failure, {:abs_ms, publication}} ->
+            {:record_tls_failure, publication, deadline}
 
           other ->
             other
@@ -410,10 +427,107 @@ defmodule SSL.Lifecycle.Observer do
     end
   end
 
+  defp operate({:record_tls_failure, publication, requested}, caller, state)
+       when is_integer(publication) and is_integer(requested) do
+    with true <- failure_window?(publication, requested),
+         :ok <- failure_caller(state, caller),
+         entered = now(),
+         true <-
+           entered < requested and entered < publication and
+             (state.expires == :infinity or entered < state.expires),
+         {:ok, authority} <-
+           Authority.cancel(state.authority, Authority.lease(state.authority), entered, requested) do
+      {:ok, record_failure(state, authority, min(publication, entered + 1_000))}
+    else
+      _ -> {{:error, :unauthorized_tls_failure}, state}
+    end
+  end
+
+  defp operate({:record_tls_failure, _publication, _requested}, _caller, state),
+    do: {{:error, :invalid_deadline}, state}
+
   defp operate({:publish_setup, result}, caller, state) do
     if state.setup == :pending and open?(state) and match?({:setup, _}, creator(state, caller)),
       do: publish(state, result),
       else: {{:error, :setup_not_permitted}, state}
+  end
+
+  defp failure_window?(publication, requested) do
+    instant = now()
+    instant < requested and requested <= instant + 250 and requested <= publication - 250
+  end
+
+  defp failure_caller(state, caller) do
+    with true <- state.scope == :dial and state.setup == :pending and open?(state),
+         true <- Handoff.committed?(state.handoff),
+         true <- handoff_process_live?(state.owner) and handoff_process_live?(state.controller),
+         {:ok, _setup} <- handoff_resource(state, :setup),
+         {:ok, {_ref, :process, ^caller}} <- handoff_resource(state, :connection),
+         {:ok, _writer} <- handoff_resource(state, :writer),
+         :ok <- failure_tcp(state, caller) do
+      :ok
+    else
+      _ -> {:error, :unauthorized_tls_failure}
+    end
+  end
+
+  defp failure_tcp(state, caller) do
+    with %{
+           live: true,
+           done: false,
+           identity: {_monitor, :port, port} = identity,
+           creator: {:allocator, allocation} = creator,
+           creator_pid: allocator,
+           creator_monitor: creator_monitor
+         } <- Map.get(state.resources, :tcp),
+         true <- allocation == creator_monitor,
+         {:ok, %{state: :live, identity: ^identity, creator: ^creator}} <-
+           ResourceLedger.enrollment_view(state.ledger, :tcp),
+         :ok <- failure_allocator(state, allocation, allocator),
+         true <- Port.info(port, :connected) == {:connected, caller} do
+      :ok
+    else
+      _ -> {:error, :foreign_tls_resource}
+    end
+  end
+
+  # Committed ownership retains the allocator generation after its normal done-DOWN.
+  defp failure_allocator(state, monitor, pid) do
+    with %{identity: {^monitor, :process, ^pid} = identity, creator: :observer} = resource <-
+           Map.get(state.resources, :allocator),
+         true <- handoff_parent_live?(state, :allocator, resource),
+         {:ok, %{identity: ^identity, creator: :observer} = view} <-
+           ResourceLedger.enrollment_view(state.ledger, :allocator),
+         true <- failure_allocator_live?(resource, view, pid) do
+      :ok
+    else
+      _ -> {:error, :foreign_tls_creator}
+    end
+  end
+
+  defp failure_allocator_live?(%{done: true}, _view, _pid), do: true
+
+  defp failure_allocator_live?(%{live: true}, %{state: :live}, pid),
+    do: handoff_process_live?(pid)
+
+  defp failure_allocator_live?(_resource, _view, _pid), do: false
+
+  defp record_failure(state, authority, publication) do
+    expiry = if state.expires == :infinity, do: publication, else: min(state.expires, publication)
+
+    _ =
+      if is_reference(state.timer),
+        do: Process.cancel_timer(state.timer, async: false, info: false)
+
+    %{
+      state
+      | authority: authority,
+        ledger: ResourceLedger.close_admission(state.ledger),
+        setup: :failed,
+        failure: :tls,
+        expires: expiry,
+        timer: schedule_deadline(expiry)
+    }
   end
 
   defp handoff_context(state, caller, role, roles, deadline) do

@@ -147,6 +147,7 @@ defmodule SSL.Lifecycle.SetupTLSTest do
         end
 
         success(a)
+        assert_receive {:peer_connected, _}, 1_000
         cancel(a)
       end)
     end)

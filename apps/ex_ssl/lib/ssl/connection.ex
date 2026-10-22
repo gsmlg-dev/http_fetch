@@ -987,7 +987,7 @@ defmodule SSL.Connection do
     if Options.remaining(state.deadline) == 0 do
       {:error, :timeout, state}
     else
-      notify_connected(state)
+      state = notify_connected(state)
       _ = cancel_timer(state.handshake_timer)
 
       apply_events(:connected, rest, %{
@@ -1157,7 +1157,9 @@ defmodule SSL.Connection do
     end
   end
 
-  defp fail(state, {:peer_alert, _level, description}) do
+  defp fail(state, reason), do: do_fail(record_private_failure(state, reason), reason)
+
+  defp do_fail(state, {:peer_alert, _level, description}) do
     category =
       Enum.find_value(@alert_codes, :handshake_failure, fn {name, code} ->
         if code == description, do: name
@@ -1168,7 +1170,7 @@ defmodule SSL.Connection do
     {:stop, :normal, close_transport(state)}
   end
 
-  defp fail(state, reason) do
+  defp do_fail(state, reason) do
     if match?({:tls_alert, {_alert, _description}}, reason) and state.output == nil do
       case begin_fatal_alert(state, reason) do
         {:ok, state} -> {:next_state, :closing, state}
@@ -1208,7 +1210,9 @@ defmodule SSL.Connection do
     end
   end
 
-  defp fail_now(state, reason) do
+  defp fail_now(state, reason), do: do_fail_now(record_private_failure(state, reason), reason)
+
+  defp do_fail_now(state, reason) do
     notify_pending(state, {:error, reason})
     state = notify_active_terminal(state, reason)
     {:stop, :normal, close_transport(state)}
@@ -1427,6 +1431,36 @@ defmodule SSL.Connection do
   defp diagnostic_result({:error, _}), do: {:error, :closed}
   defp diagnostic_result(result), do: result
 
+  defp record_private_failure(
+         %{lifecycle: %{tls: %{initial: false, outcome_pending: true, failure_attempted: false}}} =
+           state,
+         reason
+       ) do
+    if tls_failure?(reason) do
+      record_tls_failure(put_in(state.lifecycle.tls.failure_attempted, true))
+    else
+      state
+    end
+  end
+
+  defp record_private_failure(state, _reason), do: state
+
+  defp tls_failure?({:tls_alert, {_, _}}), do: true
+  defp tls_failure?({:peer_alert, _, _}), do: true
+  defp tls_failure?(_reason), do: false
+
+  defp record_tls_failure(state) do
+    completion = System.monotonic_time(:millisecond) + 1_000
+
+    deadline =
+      if state.deadline == :infinity, do: completion, else: min(state.deadline, completion)
+
+    _ = Observer.record_tls_failure(state.lifecycle.receipt, {:abs_ms, deadline})
+    state
+  catch
+    _kind, _reason -> state
+  end
+
   defp send_output(%{lifecycle: nil, writer: writer} = state, token, tcp, bytes, shutdown?) do
     send(writer, {:send, token, tcp, bytes, shutdown?})
     {:ok, state}
@@ -1456,7 +1490,16 @@ defmodule SSL.Connection do
   defp start_private_tls(from, attach, requested, state) do
     {setup, _nonce} = state.lifecycle.ready
     {:abs_ms, original} = state.lifecycle.control_deadline
-    tls = %{recipient: setup, nonce: attach, deadline: min(requested, original), initial: true}
+
+    tls = %{
+      recipient: setup,
+      nonce: attach,
+      deadline: min(requested, original),
+      initial: true,
+      outcome_pending: true,
+      failure_attempted: false
+    }
+
     state = %{state | lifecycle: Map.put(state.lifecycle, :tls, tls)}
 
     if private_tls_live?(state) do
@@ -1489,15 +1532,20 @@ defmodule SSL.Connection do
   defp notify_connected(
          %{lifecycle: %{tls: tls, ready: {_setup, nonce}, observer: observer}} = state
        ) do
+    state = put_in(state.lifecycle.tls.outcome_pending, false)
+
     send(
       tls.recipient,
       {:lifecycle_tls_connected, self(), nonce, observer, tls.nonce, state.socket}
     )
 
-    :ok
+    state
   end
 
-  defp notify_connected(state), do: :gen_statem.reply(state.connect_from, {:ok, state.socket})
+  defp notify_connected(state) do
+    :gen_statem.reply(state.connect_from, {:ok, state.socket})
+    state
+  end
 
   defp start_tls(from, tcp, state) do
     state = %{state | tcp: tcp, connect_from: from}

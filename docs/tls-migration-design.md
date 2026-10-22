@@ -350,8 +350,30 @@ which follows the actual Finished writer acknowledgment. Neither alone is setup
 success. A distinct settlement budget P=min(originalClassicD, successNow+1000ms)
 is captured once for acknowledged connected publication and helper completion.
 Only both ACKs permit a private ROOT candidate and normal Setup retirement.
-This budget is not a surviving connection lifetime. Failure/alert cleanup keeps
-its existing behavior; exact failed-outcome publication remains a separate gate.
+This budget is not a surviving connection lifetime. Alert/drain/close bodies keep
+their existing behavior; Setup failure ACKs and all-error classification remain
+separate gates.
+
+Private TLS failure recording is a separate, bounded provider assertion. Only the
+original Connection may report a recognized TLS or peer-alert failure while its
+private TLS outcome is still pending. Actual Finished writer acknowledgment clears
+that marker before the success notice; a connected machine alone is insufficient.
+A once-only attempt flag prevents recursive fatal-output paths from retrying.
+
+Failure draining captures P=min(originalClassicD, failureNow+1000ms) once, including
+a finite P for an infinite handshake. Admission/RPC cutoff R=min(P-250ms, now+250ms)
+reserves time for the existing best-effort alert path. Former native admission E
+is not reused. Observer authenticates original typed identities, positive committed
+handoff and native ownership; completed allocator liveness is not required.
+An unfinished allocator must retain a live resource, ledger entry and actual PID.
+
+An accepted failure record fixes setup=failed/failure=tls, closes authority and
+ledger admission, and arms retirement no later than P. It acknowledges metadata
+without killing actors or sealing cleanup. Original typed DOWN, cancellation, owner
+loss or P then runs ordinary retirement; the original lease remains valid to cancel.
+The Connection continues its existing alert/close path after success, rejection or
+unknown RPC if still alive. Earlier expiry/death can win. This is no guarantee of
+alert delivery, public acceptance, exhaustive failure classification or cleanup.
 
 Full allocator/setup orchestration and constructor-error identity proof, public
 lifecycle, STARTTLS adoption, application owner ACK/authority transfer and socket/

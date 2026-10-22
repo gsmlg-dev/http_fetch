@@ -167,9 +167,16 @@ coverage; no supported endpoint class silently lost.
       before private ROOT readiness/normal Setup retirement. Round27 eight independent
       OTP/OpenSSL cases, lifecycle+birth138/138, provider1548/1548 and static gates pass.
       Public I/O/owner acceptance remain closed; precise failure publication is open.
+- [x] Record recognized private pre-success TLS/peer alerts once under fixed P and
+      shorter RPC cutoff R; authenticate committed typed ownership and close admission
+      before unchanged alert/close. Preserve original expiry, Root lease and category.
+      Round28 three actual OTP scenarios/five cooperative cases, provider1556/1556
+      and static gates pass. Earlier focused timing failures remain recorded; public
+      failure ACKs, all-error identity and physical FD cleanup remain open.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
       and acknowledged failure publication for real allocator/setup orchestration
-      under original deadlines. Success-only private attachment is verified above.
+      under original deadlines. Private success and TLS-only failure recording above
+      do not complete this all-error identity/publication gate.
       Native connect error/helper DOWN is not native cleanup proof; unresolved identity
       coverage remains unconfirmed. Public upgrade/transfer stay gated separately.
 - [ ] Public attempt handle exists before allocation, survives failed setup and transfer.

@@ -84,6 +84,9 @@ defmodule SSL.Lifecycle.Handoff do
 
   def commit(_handoff, _context, _nonce), do: {:error, :invalid_handoff_grant}
 
+  @spec committed?(t()) :: boolean()
+  def committed?(%__MODULE__{phase: phase}), do: phase == :committed
+
   @spec pending?(t()) :: boolean()
   def pending?(%__MODULE__{phase: phase}), do: phase in [:writer_ready, :ready, :prepared]
 

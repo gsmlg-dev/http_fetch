@@ -3011,3 +3011,151 @@ change. Wholegoalcontinues; nextacknowledgedrealTLSfailurepublication preserving
 boundedbest-effortalert/typedcleanup, thenconstructoridentity/publicintegration.
 FutureworkMUSTfreshsnapshotacceptedcurrentHEAD; oldround27originalspredateTLS
 attach andcannotrestoreoverthisfeature.
+
+
+## Round28 — bounded private TLS failure recording
+
+Entry main f612cd6f35c5b2b1296c0d6c7d19a81d90a7ca61, clean; actual pwd,
+HEAD and status EXIT0. Goal active/armed28/100. Five fully read architecture
+files remain byte-exact847556a. Fresh eight current snapshots are under
+/tmp/http-fetch-round28-originals; earlier snapshots predate accepted features.
+Root retains all formatter/Mix/native/network/strict-pin/docs/commit ownership.
+Task33 follows completed32. Task20 owner explicitly acknowledged Observer and
+Handoff overlap; all other task20 scopes remain frozen. Source grant is exactly
+Connection, Observer, additive Handoff.committed?/1, NEW setup_tls_failure_test.
+
+Design review chose a Connection-origin leaf record RPC before existing failure
+handling; a Setup barrier would add a distributed continuation protocol. Two
+independent reviewers agreed. Existing publish_setup({failed,...}) immediately
+retires its caller, so it cannot supply this acknowledgment. New private recording
+must close authority/admission without retirement or sealing, then preserve old
+typed DOWN/cancel/expiry retirement. Original Root lease remains valid.
+
+A full1000ms RPC wait against a1000ms drain budget could suppress the alert when
+an ACK is lost. Capture one P=min(originalClassicD,entry+1000); derive RPC cutoff
+R=min(P-250,entry+250), skip expiredR, send both R and unchanged P. Only shorten
+receiver expiry; no retry/renewal on acceptance unknown. Existing250ms alert
+logic remains best-effort under original deadline, cancellation and VM scheduling.
+
+Scope requires explicit local outcome-pending/attempted markers: the machine may
+be connected before Finished writer ACK, and an infinite handshake has no timer
+reference. Clear pending only at the actual existing connected event. Narrow
+structured TLS/peer alerts map to tls; other errors keep their existing paths.
+Old two fail heads and fail_now head may be mechanically renamed behind wrappers;
+all old failure/alert/close/drain bodies must reconstruct byte-exact. Public/classic
+connections pass through the helper unchanged. Setup/Writer/all old tests freeze.
+
+Positive Handoff.committed?/1 is required: !pending also admits idle state.
+TCP authentication retains the original allocator creator generation across normal
+helper completion/DOWN; it must not require a dead allocator to be live. This is
+a trusted provider assertion, not independent cryptographic or spawn provenance.
+ACK means persisted classification and closed admission, not TLS alert delivery,
+Root acceptance or cleanup. Original typed Reader proof remains the cleanup oracle;
+Port DOWN/owner DOWN do not establish physical descriptor destruction or peer FIN.
+Source tests must distinguish protocol actors held through P from actual TLS
+closing via its old250ms alert timer, and unaccepted expired RPC from lost ACK.
+
+Test-first checkpoint: worker wrote/full-read NEW319lines/seven cases while all
+eight snapshots and every other tracked app remained exact f612. Root requested
+a source freeze; no runtime implementation had begun. Root read all319 lines.
+Root then ran only NEWfile:9, --include integration --max-failures1 --seed101,
+against the unchanged runtime. Actual ROUND28_TLS_RED_EXIT=2 AND terminal prompt;
+job collected. /tmp/http-fetch-round28-tls-red.log63lines fully read. In2.1s the
+finite5s wrong-SNI handshake after native E sealed role/down masks31 and confirmed cleanup
+with setup=failed but setup_failure=internal instead of tls. Result0/1passed,
+5excluded and max-failures abort: a real contract failure, not a missing API error.
+
+Baseline peer independently logged Fatal Certificate Unknown; exact Peer.task
+result assertion follows failed_tls and was NOT reached on this red run. New SDK
+references elsewhere produce expected undefined-function warnings in the baseline,
+but the selected actual TLS case calls no new SDK. A new unused-default helper
+warning was also noted for removal without suppression. Root did not format or
+edit the new test during this checkpoint. Only after actual marker/prompt and
+log review did Root explicitly resume the exact four-path source grant.
+
+New oracle refinements requested before green: replay near original P and assert
+original Connection DOWN before a hypothetical extended P; add a250ms Connection
+DOWN bound after explicit old-lease cancellation, separate from P1000 expiry.
+Port/Reader typed cleanup bounds remain unchanged. Neither test claims physical
+FD destruction, actual dropped persisted ACK, or unconditional wire alert delivery.
+
+Root pre-format independent guards passed FULL Connection1636 reconstruction,
+Observer767 additive-only reconstruction and Handoff123 removal of three lines.
+Root authoritative format EXIT0/prompt. Formatted Connection1684 SHA256
+61b2fa41a60fb00d01335ea8486e698aecac8fc0a45a47e10d5adecb34cc3f91;
+both strict probes change exactly one64-character literal, independently normalized
+against current snapshots. Setup525/Writer/all remaining old tests/pure bodies freeze.
+Root final formatted Connection1636 and post-review Observer767 reconstructions
+also passed; Handoff123 remains exact. No native/crypto/alert/close primitive changed.
+
+First focused run: compile WAE passed;144/145 in30.7s(7.2async/23.4sync),
+new7/7 passed. Existing setup_tls_test128 linked peer Task failed at259 because
+ssl.send(private) returned closed. Single unchanged target passed1/1 in2.0s;
+its proxy also logged a post-teardown closed send. Unchanged target with
+--repeat-until-failure20 reproduced the linked peer failure on run3 (58line log,
+actual EXIT2/prompt). Reader/peer-send ordering inspection found no causal edge
+between client private readiness and server application send. Root readiness is
+not peer app delivery: immediate cancellation and proxy teardown may win.
+
+Root task34 explicit sole old-test exception: add existing peer_connected1000ms
+assert AFTER success and BEFORE cancel in Writer-ACK case. No held200ms absence
+check, timeout, helper or implementation changed. This adds server-send-ok before
+intentional cancellation/teardown. Latch-only repeat-until-failure20 executes21
+runs(remaining20..0): ALL21passed, no closed-send errors, actual EXIT0/prompt.
+Unmodified and synchronized logs remain separate; this repairs missing test
+ordering without making client TLS readiness wait for server application data.
+Exact closure chronology in the initial failure was not instrumented/proven.
+
+Independent review found NEW allocator-auth edge: exact lineage alone accepted
+an unfinished dead allocator while its DOWN was queued. Actual driver already
+requires allocator done+normalDOWN, but protocol gate must enforce DONE or live
+resource+live ledger+actual live PID. Root wrote negative first: own Observer
+suspended, actual cooperative Conn send_request queued; one public queue-length
+snapshot1 BEFORE allocator stop, actual DOWN and live-R precondition before resume.
+Old guard RED EXIT2/prompt in1.4s,0/1passed7excluded, sealed TLS versus required
+INTERNAL (39line log): admission witness, not expiration/timeout or mere source test.
+
+Root added only NEW failure_allocator_live? guard; exact original monitor/PID/
+Root lineage remains. Subsequent focus new8/8 green(5cooperative/3actual). Guard
+postfix Observer767 reverse exact. Formatted Observer881, new failure test440,
+old success test292(+one assert). Final tracked apps790: exactly6 authorized
+changed paths(Conn/Observer/Handoff/oldsuccess/2pins), all784 others byte-exact;
+only NEWfailure test untracked. Symlink targets compared with Git blob bytes.
+Old success full291 bytes reconstruct by removing that single added assertion.
+Independent final reviewer read all8 cases/newguard/latch: no source blocker.
+
+Review-fixed focused run: compile WAE passed;145/146 in32.4s(7.8async/24.5sync).
+All NEW8 passed; existing ObserverHandoffTest190 failed its OWN elapsed-time fence
+at231: target original500+100ms, receive1000ms reported matching message after
+timeout. No new recording operation is called. Unchanged recheck145/146 in33.4s
+(8.0async/25.3sync), all8 again passed; handoff case passed, but old ObserverTest363
+bootstrap-caller-dies case missed worker-killed DOWN within500ms. These are
+UNPROVEN transient timing causes, not fixed or waived by later green. Their
+source/budgets remain exact. Host load6.58/9.12/8.72 observed, not a cause proof;
+no unrelated process was stopped. Exact failing logs retained.
+
+Root static pipeline actual ROUND28_TLS_STATIC_EXIT=0 AND prompt: compile WAE,
+root format check, configured Credo, Dialyzer, git diff --check. Credo545files/
+9126mods-funs/noissues15.6s; Dialyzer0errors/0skips, four unchanged unnecessary
+ignore notices21.31s. No new suppression/shared config/dependency/runtime version
+change. Earlier explicit timer-discard fix prevents R27 unmatched-return recurrence.
+Five fully read ex_ssl architecture files remain exact847556a; root architecture
+contract carries the narrow new provider assertion, not public support promotion.
+
+Final standard provider gate actual ROUND28_PROVIDER_REGRESSION_EXIT=0 AND prompt;
+job collected. HTTP_QUIC_PHASE1_REAL=1 root Mix --include integration --seed101/
+max24: ExSSL846(20properties/826tests)101.2s; QUIC249/10.9s; Core418/24.4s;
+FetchH2file43/5.9s. TOTAL1556/1556. This full ExSSL run includes all146 lifecycle/
+birth cases, including both earlier legacy timing failures and new8. No separate
+focused146/146 claim: last focused result remains145/146; later broader green
+does not explain or fix earlier transients. Existing bitstring and Request
+put_body_headers test warnings remain; no test-WAE or whole-nine green claim.
+
+Acceptance is this narrow provider slice only. ACK does not prove peer delivery,
+ROOT acceptance or cleanup; actual persisted-then-lost ACK was not forced. No new
+actual post-Finished/pre-publication error-race proof, Setup failed ACK or all-error
+constructor identity proof. Broader timeout/options/native/write/internal outcomes
+retain existing behavior. Default OTP backend/public lifecycle remain unchanged.
+Latest whole-nine execution remains R22 RED3201/3206+test-WAE; this selected green
+does not supersede it. Original R21 physical-FD evidence and R23 ENOTSOCK result
+remain unresolved; no native primitive, new FD campaign or release promotion.
