@@ -2334,3 +2334,152 @@ allocator/setup birth, hidden-error object proof, TLS attach/readiness/public
 lifecycle/default/managed/completion support. P0fivecurrentfailures+oldtest
 warnings stayreleasegates. Next independentfoundation: inertallocatorbirth
 withoriginalpermit beforecallingNativeTCP, separatefuturegrant/review needed.
+
+## Round23 — actual allocator birth and isolated original-FD-slot control
+
+StartHEAD847556a/worktreeclean verified by Root. Task25 owns ONLYtwoNEW
+allocator module/test files; task26 owns ONLYthreeNEW/tmp FDslot diagnostic
+files. Allold provider/observer/receipt/nativeTCP/handoff/tests and R15–22
+helpers immutable. Root owns docs/format/build/native execution. Existingfive
+ExSSLarchitecture documents are unchanged from fullRound22read; worker freshly
+read five/currentP1-P2/task20/task24 before proposal, task20owner ACKed disjoint
+scopes beforewrite. No publicSSL/default/completion/managed acceptance implied.
+
+Allocator design correction: GenServer.start is UNLINKED so Observer killing
+allocator cannot kill original caller/controller. Inert init creates original
+parent/recipient/Observer monitors+fenced original expiry, returns BEFORE ANY
+ObserverRPC/native. Selfenroll precedesNativeTCP, publication is nonce-bound
+allocation only, NOT deliveryACK/TLSready/setupoutcome. Holds original TCP
+ownership while pending; no handoff support/lifetime-TLS deadline introduced.
+Startup/native errors do not reject/clear unresolved original permits. Valid
+opaqueReceipt is a trusted programmer precondition/accessors only.
+
+Late process identity nuance: Observer530 permits the original self-PID even
+after death and installs typed monitor, BUT handle_call130 first checks
+now<requestD. Thus RPCcap1000ms expiring before a longerD can still admit
+late PID if resumed BEFORE D. A testD200ms suspended until actorDOWN/AFTER D
+must reject its queued enrollment, retain unknown rootallocator1, and remain
+unsealed after original fixed grace. No TCPpermit/nativecall existed in this
+case. Separate precancel-then-construct with STILLvalidD may account actual
+late born PID, kill it and seal confirmed allocator/down1. These cases are
+distinct from native connect REFUSED, which leaves unknownTCP16 after birth.
+
+Readonly shutdown follow-up from Round22: queued-output test at inet_drv12356
+excludes SHUT_RD; public gen_tcp.shutdown(tcp,:read) goes directly to kernel
+shutdown even with pendingoutput. It sets no pending/write-done flags, clears
+no pendingflags and changes no selection/connected bookkeeping in this
+handler. Validation/errno still apply. It proves an immediate syscall attempt
+ONLY: local read shutdown proves neither peerFIN/RST, write termination, FD
+destruction nor peer protocol termination. Observer-sensitive passes do not
+justify swapping production abort primitives. No such source change executed.
+
+### Allocator actual source and execution
+
+Task25 worker froze76lib/88test lines with fullreadback/hash/guards and closed
+TTY63. Root reviewed ALLsource, replaced broad stop catchall with explicit
+:stop/false/error clauses (unexpected programmer failures stay visible), removed
+tautological alive(self) assertion; links check plus Reader aftercancel prove
+caller survival. Rootformat final118librarylines/113testlines. Readonly review
+confirmed original exactPID/ref monitor matching, absolute monotonic timer/ref
+fence, before-native enrollment and post-native gates; no blocking scope defect.
+
+ActualROUND23_ALLOCATOR_FOCUSED_EXIT=0+prompt: compilewarnings0 then ALL
+lifecycle95/95 seed1019.4s. Fournew actualconstructor async cases: role17
+alloc0/originalPort ownedbyactualallocator/unlinkedcaller survivescancel/
+EXACTprocess+PortDOWN/Readerconfirmedroles-down17; pre-enrollcancel accepts
+late original process thenDOWN/Readerconfirmed1/NODIAL; Observer suspended,
+inertstartreturns/D200ms boundsnormalactorDOWN/now>=D before resume/NOdial/
+queuedrequestexpired/unknownRootallocator1/unsealed+Readerunconfirmed; real
+REFUSED afteractualbirth retainsunknownTCP16 afteractorDOWN/fixedgrace.
+
+ONEproviderregression: HTTP_QUIC_PHASE1_REAL=1 unbuffer mix test
+apps/ex_ssl/test apps/elixir_quic/test apps/http_core/test --include integration
+--seed 101. ActualROUND23_PROVIDER_REGRESSION_EXIT=2+prompt. ExSSL811/812
+(20/20properties,791/792tests),90.4s; QUIC249/249,11.8s; Core418/418,23.6s; total
+1478/1479. NativeTCPTest6 fails attempt80 Observer.start with acceptance_unconfirmed
+BEFORE native/Allocator. Fournew cases pass. No retry/deadlinewiden/oldsourceedit.
+SharedprovidergateRED. Latestwhole-nine remainsRound22fiveassertions+testwarnings;
+not rerun and not superseded by this three-app provider scope.
+
+Readonlytriage ranks: shared1s budget (Observer20–26, Bootstrap51–65 and
+reservationRPC683–690); abnormal bootstrapworker death; globalmutation. None
+established. Known globalsupervisorsuspend/appstop tests async:false; new
+allocator test suspends only its own Observer. Plain start_child failure maps
+observer_start_failed, notthis tuple. Need exact original phase/workerDOWN
+reason before choosing a fix. No implicated provider source was changed.
+
+ActualROUND23_ALLOCATOR_STATIC_EXIT=0+prompt: compilewarnings0; root formatter
+check0; configuredCredo539files/8960mods-funs/NOissues; Dialyzer0errors/0skips
+and4unchangedunnecessary-ignore notices; diffcheck0. OpaqueReceipt remains
+intact through contextmap/accessor; no peeling/ignoredwarnings/newReceiptAPI.
+SourceCode unused by public dispatch, but changed cohort does NOT establish
+causal independence from the observed bootstrap admission failure. This is
+accepted private component coverage, never whole-provider/release acceptance.
+
+### Original FD-slot source prototype and bounded independent controls
+
+Task26SourceOnly: threeNEWfrozen/tmp/http-fetch-round23-fd-slot files: C113
+lines, supervisor.py67lines, control.exs134lines. RootREADALL3 plus imported
+immutableR15Python148lines/Child16–29/reap55–61 and R16runner64lines before
+execution. PublicSDKC: atmost2EXACT-FD socketqueries+2PIDepochchecks, NONE
+forzeroD, NOenumeration/retries/address/opaqueIDs/foreigngeneration output.
+Only stable originalTCPgeneration emits type/generation/state. EBADF remains
+intervalnegative, otherkind/API errors inconclusive. Cooperative100ms only.
+FixedbinaryPython strict512Bchild/1024Breceipt, explicitwait beforechild_reaped.
+
+OriginalC SHA0d5337d3bfd63563ed23be896a7ab883af5ade3632f8be1de6ffa72cc38ef354;
+supervisorSHAff712144e6b005225b812822c239e871b99c621bbafa162f77cbe94765fb9f50;
+controllerSHA5d3504ae72bceed681719d93ae47b97a3cb46a0372b0d710b48aa4596d48c955.
+WorkerSourceOnly/TTY64closed/nojobs; allR15–22helpers and app fixtures frozen.
+Rootclang -std=c11 -Wall -Wextra -Werror C -lproc to fixednewbinary plus Python
+ASTcheck: ROUND23_FD_SLOT_BUILD_EXIT=0+prompt. No targetexecutionbeforeRootread.
+Controller ONE4sABS and perprobe200ms INCLUDINGreserved50ms cancellation/reap;
+requiresCchildreaped+wrapperexit+originaltypeddiagnosticPortDOWN.
+
+ONEoriginalcontrol: ROUND23_FD_SLOT_CONTROL_EXIT=2+prompt, late/cleanup
+inconclusive before first acceptedprobe, measurements[]. CapturedVMobjects
+retiredtrue ONLY, noOSchild-reap/physicalabsence certificate fromthatfailure.
+RootdidNOTretryunchangedorwidenD. RootcreatedSEPARATEnewcontrol-v2.exs137lines:
+ONLYlatefailurebranch adds boundeddecodedpartial/after-decision-ms diagnostics.
+Allthreeoriginalsources immutable; RootREADALLv2 then ranONCEsame200ms/4s.
+ActualROUND23_FD_SLOT_V2_EXIT=2+prompt; open and reuse valid, closed unknown.
+No LATE23branch executed in v2; cannot retroactively explain v1 timing.
+
+V2 exacttarget: BEAM88651/UID502/start1792627160.842827/FD47/gen8314695.
+Open: original_socket/type2/gen8314695/TCPstate4,2queries,C18000ns, wrapper
+12.479ms/helper0. AFTER EXACToriginalowner+PortDOWN, closed-slot query:1query
+C12000ns/socket_info errno38/inconclusive, wrapper9.869ms/helper2. ONEreplacement
+allocation actuallyreusednumericFD47 withdifferentgeneration (independent
+secondfrozenbaseline); probe2queries/C18000ns/reason slot_reused_or_other/
+inconclusive, wrapper7.553ms/helper2, NOforeignmetadata. ALL3newprobes: actual
+Cchildreaped, wrapperexit0, ORIGINALtypeddiagPortDOWN and withinoriginalD.
+
+V2 finalcleanup capturedVMobjectsretiredtrue. OverallEXIT2 iscorrect: closed
+slot negative control is NOT validated. Darwin errno38=ENOTSOCK (publicSDK
+sys/errno.h135): failedsocketquery neither identifiescurrentFDkind nor proves
+socketdestruction/absence. DoNOTinferdiagnosticpipeownerorphysicalclose. Valid
+controls establishoriginal-open identity and real numeric-slot reuse only. No
+closednegativecertificate/Sourcefailurecapture/P0causality/default acceptance.
+ReadonlyTWOwebqueries found no matchingverifiedOTP29/macOSreport; not evidence
+that no upstreambug exists. No primitiveswap/runtimechange was executed.
+
+Artifacts: /tmp/http-fetch-round23-allocator-focused.log; provider-regression.log
+and allocator-static.log sharethe same http-fetch-round23- prefix. Native
+control.log/control-v2.log and control-v2.exs share fd-slot- prefix. ALLactual
+markers+prompts checked/PTYjobs collected. KnownlatePort/ACKloss cleanupbranches
+arenotdirectlyforcedbythese4cases. Newprivateallocator coversactualsuccessful
+constructor birth ONLY, notall-pathnativeidentity/sourcecleanup/lifecyclev1.
+Next: actualsetup/helper handoff orchestration plus ORIGINAL-phase bootstrap
+unknown diagnosis; any futureFDslotSourceattachment needs fresh exactscope and
+preparation/deadline proof. P0fiveRound22assertions/testwarnings and all release,
+performance/publicHex gates remainopen. Existingbackenddispatch/strictpins untouched.
+
+FinalRootartifactSHA256:
+apps/ex_ssl/lib/ssl/lifecycle/allocator.ex a5a324f954d32b83f52ce42b01e7685c2c5897321d65462be6ed2ee37a79e312
+apps/ex_ssl/test/ssl/lifecycle/allocator_test.exs caf03e2e831dde2386a4e2f8e3caae4eb474b230e1085db5221e53e34932c472
+/tmp/http-fetch-round23-fd-slot-control-v2.exs 7234347ddd4372eba62e6a396e91ab2374b3d723b564a761fd1b8d2816567fbd
+
+PrestagingexistingAPPSgitdiff0; allfourConnection/pins/HTTPS byte guards equal
+Round22original snapshots. Filteredexactnamed-diagnosticprocess check foundNONE
+now (pgrepEXIT1), NOT retrospective child-reap/absence proof for v1. Only
+twoNEWappfiles+threeRootdocs changed. No otherSource/backend/pins/hooks edits.

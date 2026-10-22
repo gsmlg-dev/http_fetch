@@ -293,7 +293,14 @@ forces passive/raw inet Port semantics, and exposes the returned Port only after
 original Observer enrollment. Known late/rejected Ports are closed; native errors
 retain unknown allocation. This does not establish allocator birth or TLS readiness.
 
-Actual allocator/setup births, TLS actor attachment/dial failure proof, public
+A separate private Allocator.start now returns an unlinked inert process before
+self-enrollment and native dial. Original parent, recipient and Observer monitors
+and one clipped absolute expiry bound pending allocation. Only enrolled TCP
+produces a nonce-bound allocation notification; it is not a delivery ACK or TLS
+readiness. Native errors retain unknown permits. Handoff remains unsupported;
+this pending-helper expiry is not a TLS connection lifetime deadline.
+
+Full allocator/setup orchestration and constructor-error identity proof, public
 lifecycle, STARTTLS adoption, application owner ACK/authority transfer and socket/
 facade integration remain open.
 Upgrade observers reject new TCP allocation with adoption_not_implemented; this

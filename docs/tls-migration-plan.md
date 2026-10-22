@@ -133,6 +133,12 @@ coverage; no supported endpoint class silently lost.
       the exact Port only after original Observer enrollment; close known late Ports.
       Native errors keep unresolved permits and unconfirmed retirement. Actual
       allocator birth, TLS integration and all-path failure identity remain open.
+- [x] Implement/test private unlinked allocator birth: inert init, original
+      parent/recipient/Observer monitors and clipped deadline, self-enrollment
+      before NativeTCP, nonce-bound allocation notification after Port enrollment.
+      Four actual-constructor cases pass; all lifecycle95/95. Setup orchestration,
+      handoff and public readiness remain open. Provider regression still has
+      one Observer-bootstrap admission failure before native allocation.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
       and private real allocator/setup direct-dial orchestration with original
       deadlines and acknowledged outcome publication.
