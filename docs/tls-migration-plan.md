@@ -173,9 +173,16 @@ coverage; no supported endpoint class silently lost.
       Round28 three actual OTP scenarios/five cooperative cases, provider1556/1556
       and static gates pass. Earlier focused timing failures remain recorded; public
       failure ACKs, all-error identity and physical FD cleanup remain open.
+- [x] Attribute recognized private native refusal/reachability once, clipped to the
+      original NativeE and a 250ms RPC. Require original live allocator/pending TCP
+      generation; retain unknown allocation and original Root cancellation lease.
+      Round29 two actual refusal/seven cooperative cases, focused155/155 and static
+      gates pass; fresh-build provider1565/1565. Two earlier warm-build startup
+      failures remain recorded and unexplained. This is live attribution only;
+      unknown native identity still prevents durable cleanup receipt sealing.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
       and acknowledged failure publication for real allocator/setup orchestration
-      under original deadlines. Private success and TLS-only failure recording above
+      under original deadlines. Private success and TLS/connect attribution above
       do not complete this all-error identity/publication gate.
       Native connect error/helper DOWN is not native cleanup proof; unresolved identity
       coverage remains unconfirmed. Public upgrade/transfer stay gated separately.

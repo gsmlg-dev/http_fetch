@@ -375,6 +375,22 @@ The Connection continues its existing alert/close path after success, rejection 
 unknown RPC if still alive. Earlier expiry/death can win. This is no guarantee of
 alert delivery, public acceptance, exhaustive failure classification or cleanup.
 
+Private native-connect failure attribution is separate from TLS settlement.
+This is a cooperative provider assertion, not independent native-phase
+attestation. Only econnrefused/enetunreach/ehostunreach enter this classification.
+The actual Allocator may report only recognized returned refusal/reachability
+errors as coarse connect, under R=min(existingNativeE, now+250ms). Original live
+root-allocator identity and its pending TCP creator permit are required; no
+TCP identity may already be enrolled. Writer readiness may legally race this
+report and is not a prerequisite or disqualifier.
+
+Acceptance closes admission and records failed/connect without killing the
+reporter. Expiry only shortens to min(existingExpiry, NativeE, now+1000ms);
+ordinary allocator DOWN drives retirement and the Root lease still cancels.
+The unknown TCP permit/losses remain untouched. This supplies live attribution,
+not durable failure evidence: an unresolved permit still prevents receipt seal.
+Neither errno, call ACK nor helper DOWN proves native absence or cleanup.
+
 Full allocator/setup orchestration and constructor-error identity proof, public
 lifecycle, STARTTLS adoption, application owner ACK/authority transfer and socket/
 facade integration remain open.

@@ -53,6 +53,28 @@ defmodule SSL.Lifecycle.Observer do
 
   def record_tls_failure(_, _), do: {:error, :invalid_deadline}
 
+  @spec record_connect_failure(
+          Receipt.t(),
+          :econnrefused | :enetunreach | :ehostunreach,
+          {:abs_ms, integer()}
+        ) :: :ok | {:error, atom()}
+  def record_connect_failure(receipt, reason, {:abs_ms, existing})
+      when is_integer(existing) and reason in [:econnrefused, :enetunreach, :ehostunreach] do
+    entered = now()
+    requested = min(existing, entered + 250)
+
+    if entered < requested,
+      do:
+        call(
+          receipt,
+          {:record_connect_failure, reason, {:abs_ms, existing}},
+          {:abs_ms, requested}
+        ),
+      else: {:error, :deadline_exceeded}
+  end
+
+  def record_connect_failure(_, _, _), do: {:error, :invalid_connect_failure}
+
   @spec reserve_root(Receipt.t(), Authority.lease(), :allocator | :setup, {:abs_ms, integer()}) ::
           {:ok, reference()} | {:error, atom()}
   def reserve_root(receipt, lease, role, deadline),
@@ -180,6 +202,9 @@ defmodule SSL.Lifecycle.Observer do
 
           {:record_tls_failure, {:abs_ms, publication}} ->
             {:record_tls_failure, publication, deadline}
+
+          {:record_connect_failure, reason, {:abs_ms, existing}} ->
+            {:record_connect_failure, reason, existing, deadline}
 
           other ->
             other
@@ -446,10 +471,80 @@ defmodule SSL.Lifecycle.Observer do
   defp operate({:record_tls_failure, _publication, _requested}, _caller, state),
     do: {{:error, :invalid_deadline}, state}
 
+  defp operate({:record_connect_failure, reason, existing, requested}, caller, state)
+       when is_integer(existing) and is_integer(requested) and
+              reason in [:econnrefused, :enetunreach, :ehostunreach] do
+    with true <- connect_window?(existing, requested),
+         :ok <- connect_caller(state, caller),
+         entered = now(),
+         true <-
+           entered < requested and entered < existing and
+             (state.expires == :infinity or entered < state.expires),
+         {:ok, authority} <-
+           Authority.cancel(state.authority, Authority.lease(state.authority), entered, requested) do
+      {:ok, record_connect_outcome(state, authority, min(existing, entered + 1_000))}
+    else
+      _ -> {{:error, :unauthorized_connect_failure}, state}
+    end
+  end
+
+  defp operate({:record_connect_failure, _reason, _existing, _requested}, _caller, state),
+    do: {{:error, :invalid_connect_failure}, state}
+
   defp operate({:publish_setup, result}, caller, state) do
     if state.setup == :pending and open?(state) and match?({:setup, _}, creator(state, caller)),
       do: publish(state, result),
       else: {{:error, :setup_not_permitted}, state}
+  end
+
+  defp connect_window?(existing, requested) do
+    instant = now()
+    instant < requested and requested <= existing and requested <= instant + 250
+  end
+
+  defp connect_caller(state, caller) do
+    with true <- state.scope == :dial and state.setup == :pending and open?(state),
+         true <- handoff_process_live?(state.owner) and handoff_process_live?(state.controller),
+         {:ok, {monitor, :process, ^caller}} <- handoff_resource(state, :allocator),
+         :ok <- connect_permit(state, caller, monitor) do
+      :ok
+    else
+      _ -> {:error, :unauthorized_connect_failure}
+    end
+  end
+
+  defp connect_permit(state, caller, monitor) do
+    with %{
+           token: token,
+           creator: ^caller,
+           parent: {:allocator, ^monitor},
+           creator_monitor: ^monitor
+         } <- Map.get(state.permits, :tcp),
+         true <- is_reference(token),
+         :error <- Map.fetch(state.resources, :tcp),
+         :error <- ResourceLedger.enrollment_view(state.ledger, :tcp) do
+      :ok
+    else
+      _ -> {:error, :unknown_tcp_allocation}
+    end
+  end
+
+  defp record_connect_outcome(state, authority, completion) do
+    expiry = if state.expires == :infinity, do: completion, else: min(state.expires, completion)
+
+    _ =
+      if is_reference(state.timer),
+        do: Process.cancel_timer(state.timer, async: false, info: false)
+
+    %{
+      state
+      | authority: authority,
+        ledger: ResourceLedger.close_admission(state.ledger),
+        setup: :failed,
+        failure: :connect,
+        expires: expiry,
+        timer: schedule_deadline(expiry)
+    }
   end
 
   defp failure_window?(publication, requested) do

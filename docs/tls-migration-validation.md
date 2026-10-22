@@ -3159,3 +3159,118 @@ retain existing behavior. Default OTP backend/public lifecycle remain unchanged.
 Latest whole-nine execution remains R22 RED3201/3206+test-WAE; this selected green
 does not supersede it. Original R21 physical-FD evidence and R23 ENOTSOCK result
 remain unresolved; no native primitive, new FD campaign or release promotion.
+
+
+## Round29 — bounded native connect-failure attribution
+
+Entry main983913dedd6d9b10b974c937728443b7f48b7d14 clean; goal active/armed29/100.
+Actual pwd/HEAD/status and six fresh accepted snapshots verified; prior FULL-read
+five ex_ssl architecture files byte-exact847556a. Root owns formatter/Mix/build/
+native/network/hash/pins/docs/commit. Task35 follows34; task20 owner explicitly
+ACKs Observer-only additive overlap. Exact worker source scope Allocator+Observer
++ONE NEW connect_failure_test. NativeTCP/Setup/Conn/Writer/Ledger/Handoff/oldtests
+and both strict source pins frozen. Test-first selected actual refusal must fail
+with INTERNAL instead of CONNECT before implementation; no new API in that case.
+
+Two independent READONLY reviews completed without commands/native execution.
+Public OTP29 gen_tcp connect creates and connects, exposing its Port only on
+success; no documented connect-existing-unconnected-Port or public fdopen route
+was established. FD ingress does not document atomic socket-to-inet ownership
+transfer, detach or close-on-failure continuity. A descriptor may be reused and
+is not a typed monitor identity. Do not assume either duplication or transfer.
+[gen_tcp connect docs](https://www.erlang.org/doc/apps/kernel/gen_tcp.html#connect/4).
+
+Public socket.open gives an opaque identity before socket.connect; socket.monitor
+delivers DOWN with type socket. Retaining that identity requires explicit ledger,
+monitor, owner-transfer and send/recv transport support. It is NOT a drop-in inet
+Port replacement or verified bridge. Allocation errors around open itself remain
+conservative. This is a future design route, not implemented/executed this round.
+[monitor](https://www.erlang.org/doc/apps/kernel/socket.html#monitor/1),
+[connect](https://www.erlang.org/doc/apps/kernel/socket.html#connect/3),
+[fd options](https://www.erlang.org/doc/apps/kernel/socket.html#t:otp_socket_option/0).
+
+Test-first checkpoint NEW124lines/two actual cases FULLread by worker and Root;
+all6current source snapshots exact; all789 other tracked apps exact983913d.
+Root selected NEWfile:7 --include integration --max-failures1 --seed101 before
+ANY runtime edit. Actual ROUND29_CONNECT_RED_EXIT=2 AND prompt; job collected,
+38line log FULLread.0.4s,0/1passed1excluded. Actual Allocator normal DOWN followed
+by snapshot roles1/allocations16/down1/losses16/closed/failed INTERNAL versus
+required CONNECT. No new API calls or warnings; Reader assertions follow failure
+and were not reached on RED. Only then Root explicitly resumed source grant.
+
+Ranked diagnosis shown before GREEN: (1) unfinished Allocator DOWN uses generic
+internal because no error attribution precedes stop: predicts CONNECT after new
+record while allocation16 stays pending; (2) original deadline wins: predicts
+timeout, inconsistent with0.4s versus5s budget/internal; (3) erroneous native
+absence mapping: predicts cleared allocation, contradicted by retained16.
+No debug instrumentation is needed for this deterministic interface witness.
+Trace starts with real Allocator refusal; manual protocol cases separately
+exercise trusted provider assertions, not independent native-phase attestation.
+
+Source delivery task35 completed SOURCEONLY; Root task36 owns acceptance. Worker
+TTY83 closed/nojobs/grant CLOSED. Root whole format, compile WAE and original
+selected actual:7 GREEN actual EXIT0+prompt:1passed8excluded/2.6s,9loglines.
+Then lifecycle+inert_birth focused actual EXIT0+prompt:155/155 in39.1s
+(9.2async/29.9sync), all NEW9 included. Logs collected/FULLread. No additional
+source fix was needed after the meaningful RED. Full new file is412formatted
+lines; runtime Allocator272/Observer976. Cleanup after these errors remains unconfirmed.
+
+Root static actual EXIT0+prompt: compile WAE/root format check/configured Credo/
+Dialyzer/git diff --check. Credo546files/9154mods-funs/noissues22.4s; Dial0errors/
+0skips/four unchanged unnecessary-ignore notices33.22s. No suppression change.
+Formatted whole Observer881 reconstructs by removing FOUR additive blocks only;
+whole Allocator254 reconstructs by replacing only continue/new-helper range.
+Root independent reverse guards PASS. Tracked apps791:exactly2authorizedchanged/
+all789others byte-exact983913d including symlink target bytes. ONLY NEWtest
+untracked. Conn61b2fa41... and frozen HTTPSpressureb4f4f8b3... unchanged.
+
+Required read-only final Quic review: full formatted Allocator272/NEWtest412
+and all95Observer additions plus reused predicates; no blocking source finding.
+Two actual tests prove loopback refusal only; reachability errors and direct SDK
+ACK are cooperative/source coverage. Actual snapshot CONNECT is not independent
+Allocator ACK-delivery evidence. No old tests, deadlines or source pins changed.
+
+First standard provider run actual EXIT2+prompt: ExSSL854/855 in127.6s
+(26.1async/101.5sync), QUIC249/18.2s, Core418/39.8s, FetchH2file43/9.4s.
+TOTAL1564/1565. Only failure: old NativeTCPTest:6 at attempt:81 BIND returns
+deadline_exceeded, budget captured BEFORE Observer.start; NOT a start failure.
+Observer.start had succeeded. No TCP allocation or new recorder at this seam.
+Initial commentary mistakenly named start, then corrected after source read.
+
+Ranked follow-up: inherited 1s budget consumed during concurrent startup; defect
+in unchanged startup/bind path; indirect new-code/build-context effect. Isolated
+unchanged NativeTCPTest:6 repeat5 means SIX executions:6/6,49lines FULLread,
+actual EXIT0+prompt. Same original provider command then reran unchanged: EXIT2
++prompt, ExSSL854/855 in126.1s(28.2async/97.8sync), QUIC249/14.7s, Core418/27.2s,
+FetchH2file43/9.9s, TOTAL1564/1565. This time same test fails at attempt:80 START
+with acceptance_unconfirmed. Neither run enters its TCP call. No widening,
+async-flag change, repeat-until-green loop or global concurrency knob was used.
+Two old warm-build failures are UNEXPLAINED; isolated green is not their repair.
+
+Isolated baseline control: detached /tmp/http-fetch-round29-baseline at exact
+983913d; own /tmp/http-fetch-round29-baseline-build and existing root deps.
+No current-worktree replacement or snapshot restoration. Full clean root compile
+WAE then baseline ExSSL846/846(20properties826tests) in107.9s(24.3async/83.6sync),
+actual EXIT0+prompt. Baseline logs also contain old LocalTLSPeer forward_records
+closed MatchError after a test; ExUnit reports allpassed, no claim it was fixed.
+Baseline did NOT reproduce startup failure, so preexistence is NOT established.
+
+Next one-variable build-context check: same CURRENT source and standard four-scope
+provider command/seed101/maxcases24 in NEW /tmp/http-fetch-round29-current-build.
+Clean root compile WAE and actual EXIT0+prompt: ExSSL855/855(20properties835tests)
+107.9s(22.2async85.6sync); QUIC249/12.4s; Core418/25.2s; FetchH2file43/8.0s.
+TOTAL1565/1565. No source/test/budget/config changed between provider runs.
+This supplies fresh-source regression evidence, not a diagnosis of cache damage,
+host load or a timing repair. Existing bitstring/Request test warnings remain;
+NOT test-WAE or full-nine evidence. No more broad repeats after this pass.
+
+Boundary: only cooperative LIVE failure attribution has advanced. NativeTCP69,
+Setup525, Connection1684, Writer, ledger, handoff, Reader/Receipt, all old tests,
+original budgets, both SHA pins, default backend and public capability stay fixed.
+Unknown TCP permit prevents seal; Reader observer_unsealed remains UNCONFIRMED.
+No original errno is durably stored, no native absence or physical FD closure
+is established; no complete all-error constructor identity, Setup failure ACK,
+actual persisted-then-lost ACK delivery or public lifecycle/socket acceptance.
+Latest whole-nine remains R22 RED3201/3206+test-WAE; R21/R23 physical FD evidence
+remains unresolved. No new FD/native diagnostic campaign or descriptor bridge.
+Goal remains active; P0--P7/default switch/nine publication/cold consumer open.

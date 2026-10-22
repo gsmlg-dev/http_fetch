@@ -88,15 +88,33 @@ defmodule SSL.Lifecycle.Allocator do
     # Already-born actors attempt accounting even after parent/recipient loss.
     with :use <-
            Observer.enroll_self(context.receipt, :allocator, context.permit, context.deadline),
-         true <- live?(state),
-         {:ok, tcp} <-
-           NativeTCP.connect(context.receipt, context.ip, context.port, context.deadline) do
-      allocated(%{state | tcp: tcp})
+         true <- live?(state) do
+      native_result(
+        NativeTCP.connect(context.receipt, context.ip, context.port, context.deadline),
+        state
+      )
     else
       :stop -> {:stop, :normal, state}
       false -> {:stop, :normal, state}
       {:error, _reason} -> {:stop, :normal, state}
     end
+  end
+
+  defp native_result({:ok, tcp}, state), do: allocated(%{state | tcp: tcp})
+
+  defp native_result({:error, reason}, state)
+       when reason in [:econnrefused, :enetunreach, :ehostunreach] do
+    record_connect_failure(state.context, reason)
+    {:stop, :normal, state}
+  end
+
+  defp native_result({:error, _reason}, state), do: {:stop, :normal, state}
+
+  defp record_connect_failure(context, reason) do
+    _ = Observer.record_connect_failure(context.receipt, reason, context.deadline)
+    :ok
+  catch
+    _kind, _reason -> :ok
   end
 
   defp allocated(state) do
