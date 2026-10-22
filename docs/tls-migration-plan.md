@@ -45,6 +45,12 @@ reviewed acceptance, not merely a test file or implementation exists.
 - [x] Record numeric regression budgets before default promotion
       (v1 targets in design; full load/soak validator remains required).
 
+- [ ] Separate unit, integration and end-to-end suites. Default mix test runs only
+      single-VM unit tests with external collaborators mocked; real external I/O
+      belongs to integration tests, and complete user flows to end-to-end tests.
+      Align test.yml with the unit-only default and keep explicit integration/E2E
+      gates mandatory. Existing mixed suites are evidence, not tiering acceptance.
+
 Exit: every blocker has an owner and acceptance test; current implementation,
 executed evidence and required work are distinguishable. OTP remains default.
 
@@ -194,15 +200,17 @@ coverage; no supported endpoint class silently lost.
       original and late monitor DOWN cannot reconstruct origin. Two new cases plus
       accepted ledger three pass5/5; no runtime/API change. Preserve closed-first
       unknown permits; pre-authenticated known identities need separate late handling.
-- [ ] Accept private pre-connect opaque-socket enrollment through source gates.
+- [x] Accept private pre-connect opaque-socket enrollment through source gates.
       R32 implements dedicated enroll_socket: original allocator/current owner,
       actual monitor, canonical integer outer deadline and fresh post-monitor use
       checks; unsupported Port handoff/connected publication explicitly reject.
       Closed-FIRST stays unknown even after collector DOWN; known late identities
       retain stop accounting/loss. Five new cases + accepted five pass10/10;
-      WAE/format/configuredCredo/Dial pass. BOTH four-scope runs1574/1575 fail the
-      original NativeTCP startup/bind case, so task40 integration acceptance remains
-      OPEN pending task41 diagnosis. A fresh build is not a demonstrated repair.
+      R32 source gates exposed an original startup/bind regression (1574/1575 twice).
+      R33 observes runtime code loading inside admission and loads known control code
+      before successful supervisor startup. Normal lifecycle148/four-scope1575,
+      WAE/format/configuredCredo/Dial and independent source review pass. Task40/41
+      are accepted for this private scope; native Socket transport lifetime is below.
 - [ ] Adapt the full native Socket transport lifetime and authenticated known-socket
       connect-failure settlement. R29 pending/no-TCP failure API is not this path.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
@@ -285,6 +293,9 @@ actual versions with repository tooling; no guessed reserved versions.
 ## P7 — Coordinated release and published verification (after P6)
 
 - [ ] Full umbrella regression, formatting, Credo, Dialyzer and required CI pass.
+- [ ] Commit the completed migration and push the reviewed source to GitHub before
+      releasing the next coordinated major version through existing version tooling;
+      all source, candidate, CI and release gates must pass first.
 - [ ] Use existing source/archive identity, immutable tags and release recovery tooling.
 - [ ] Publish in dependency order: ex_ssl → elixir_quic → http_core →
       elixir_quic_http3 → http_runtime → Fetch/SSE/WebSocket/WebTransport.

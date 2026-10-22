@@ -3568,3 +3568,147 @@ managedH1H2/completion/duplex/H3productscope/FD/perf/publicationstayUNACCEPTED.
 Latestwhole-nineR22RED3201/3206+testWAE andFD21/23 gaps remainunrepaired; selected
 Quic/Core/H2greens doNOTsupersedethem. No budget/assertion/pin/flag/cap weakening,
 GC/privateOTPSSL/NSS/keylog/BPF/lsof/rawFD/SIP/helperFDcampaign/publish/defaultflip.
+
+
+## R33 — control-code readiness before timed admission
+
+Baseline cf5ef51; task41 startup regression and task40 private enrollment acceptance.
+The production change is confined to ObserverSupervisor: load seven private control
+modules plus the directly called OTP :timer/:atomics modules before returning the
+original DynamicSupervisor flags. Code.ensure_loaded! errors fail startup. This
+loads code, without constructors, timer-service priming, key generation or native
+transport allocation. Successful supervisor/application startup is the readiness
+boundary; registration/name visibility alone is not. Original attempt, cleanup,
+native1s/peer2s/parent3s/Wire8s budgets and every old/new assertion remain unchanged.
+
+Minimization did not initially reproduce the failure: corrected owned-prefix30/30
+(6 sequential, then24 concurrent), five original async modules25/25 in6.1s,
+57 async files511/511 in9.1s, and all ExSSL files with --only async:true511/511,
+354 excluded,21.2s. Seed101/max24 throughout. The inventory has58 async module
+headers across57 files. Standalone mix-run script compilation can load referenced
+API modules before its first trial; retaining that trial is not an application-cold
+proof. The first diagnostic run's weak cleanup oracle is not upgraded by v2.
+
+V2 asserts cancellation and exact Reader role1/down1/confirmed cleanup before
+trial_done; success additionally requires normal controller DOWN. Each failure
+ends its fresh controller; no surviving caller retries. Stale watchdog messages
+must match a current trial. Output is deferred until the cohort ends. The3s
+coordinator watchdog is soft; metadata sampling is non-atomic. No listener/native
+connect occurs in this prefix. Public metadata is limited to status, queue length,
+MFA arities and, in the extended probe, initial_call/file/line and at most16 related
+PIDs. No messages, capability values, private state, tracing or FD campaign.
+
+A temporary public ExUnit formatter, loaded before Mix, launched one owned prefix
+when the first NativeTCP test started. Production Bootstrap and original tests were
+unchanged; diagnostics used --max-failures1, integration, seed101/max24/realQUIC1.
+The initial750ms probe reproduced original NativeTCPTest:81 bind deadline failure:
+138/139 passed,19.2s, actual exit2. At born+752ms the owned caller awaited Bootstrap,
+its actual monitored worker awaited the supervisor RPC, and the shared supervisor
+awaited proc_lib.sync_start with queue1. Owned start returned ok at1390ms, then bind
+rejected with original budget remaining -390ms.
+
+The separate extended750ms run passed865/865 in100.5s, exit0: owned start522ms,
+cancel523ms; at born+773ms its caller was in code.ensure_loaded/error_handler from
+the Reader.await call site, with the supervisor idle. Reader completed856ms.
+Moving ONLY the one-shot sample to250ms reproduced original NativeTCPTest:80
+acceptance_unconfirmed:132/133,19.0s, exit2. At born+251ms the owned caller was in
+code_server.call -> code.ensure_loaded -> error_handler.undefined_function ->
+Observer.start/3 line25 (the remote Bootstrap entry), with no monitored worker and
+an idle supervisor. Owned start later failed at1235ms.
+
+These are direct runtime autoload observations on a matching failing path, not a
+partition of the entire delay. The outer fixture clock precedes Observer.start's
+internal clock;1390ms does not prove an internal deadline violation. Supervisor
+relations do not identify the pending child or attach it to the owned request.
+The code-server occupant is unproved; the audited16MiB synchronous test module
+attribute is load work, not an established cause. The formatter's coordinator was
+unjoined, so incomplete output would be inconclusive; the recorded witnesses have
+complete outcomes. Six pre-Mix helper warnings reflect absent project code paths,
+not production compile failures or runtime undefined APIs.
+
+Paired control: same fresh-VM entry, formatter name, literal seven-module list,
+logging, full ExSSL selection, seed101/max24, integration, realQUIC1 and max-failures1.
+Only the Enum.each callback changed: Code.ensure_loaded! versus fn _ -> :ok end.
+No prefix sidecar, constructors or Bootstrap override ran in either control.
+Preloading passed865/865 (20 properties,845 tests),99.9s (18.6async/81.2sync), exit0.
+The no-op reproduced NativeTCPTest:80 acceptance_unconfirmed,144/145
+(5 properties,139/140 tests),23.3s, exit2. This supports preparing the code before
+operational readiness; the bundle does not isolate each module's necessity.
+
+The production list adds :timer and :atomics because Bootstrap calls kill_after/
+cancel and Receipt calls atomics.new directly. Loading a module does not call these
+operations. It does not pin code against later purges or cover all TLS/transport
+modules. The original registered name, start_link and supervisor strategy remain.
+Independent review read all28 source lines against the original10: SOURCE_ACCEPT.
+All795 tracked app/symlink bytes matched cf5ef51 before editing; all794 OTHER app
+files matched after normal gates, including the five previously read architecture
+files, Connection, Upload, strict pins and all old/new tests. Only the supervisor
+and these three canonical documents change.
+
+Normal source gates, using fresh Mix VMs and the current build, with no diagnostic
+require/formatter/preload flag/max-failure limit:
+
+| Gate | Actual result |
+| --- | --- |
+| Root nine-app compile --warnings-as-errors | Exit0 |
+| Entire lifecycle test directory | 148/148;32.2s;exit0 |
+| Entire ExSSL | 865/865;97.8s;17.6async/80.2sync |
+| Entire Quic | 249/249;9.7s |
+| Entire Core | 418/418;23.6s |
+| Existing Fetch H2 test file | 43/43;6.0s |
+| Original four-scope command | 1575/1575;exit0 |
+| Root format/configured Credo/Dialyzer | Exit0 throughout |
+
+Credo:549 files/9195 modules/functions,13.2s, no issues. Dialyzer:0 errors/0 skips,
+four existing unnecessary ignores unchanged,17.91s. All command chains have actual
+exit markers and returned prompts. No strict-Credo cleanup or source/test workaround.
+
+```bash
+HTTP_QUIC_PHASE1_REAL=1 unbuffer mix test apps/ex_ssl/test apps/elixir_quic/test apps/http_core/test apps/http_fetch/test/http/socket_client_http2_test.exs --include integration --seed 101
+```
+
+Retained local evidence (initial119-line probe was iterated in place; the current
+v2 standalone source applies only to the v2 log; first aggregate remains weaker):
+
+```text
+/tmp/http-fetch-round33-start-prefix.exs
+/tmp/http-fetch-round33-prefix.log
+/tmp/http-fetch-round33-prefix-v2.log
+/tmp/http-fetch-round33-five-module.log
+/tmp/http-fetch-round33-async-files.json
+/tmp/http-fetch-round33-async.log
+/tmp/http-fetch-round33-all-files-async.log
+/tmp/http-fetch-round33-prefix-lib.exs
+/tmp/http-fetch-round33-formatter.exs
+/tmp/http-fetch-round33-probed-suite.log
+/tmp/http-fetch-round33-prefix-links.exs
+/tmp/http-fetch-round33-formatter-links.exs
+/tmp/http-fetch-round33-probed-links-suite.log
+/tmp/http-fetch-round33-prefix-early.exs
+/tmp/http-fetch-round33-formatter-early.exs
+/tmp/http-fetch-round33-probed-early-suite.log
+/tmp/http-fetch-round33-preload-formatter.exs
+/tmp/http-fetch-round33-preload-suite.log
+/tmp/http-fetch-round33-noop-formatter.exs
+/tmp/http-fetch-round33-noop-suite.log
+/tmp/http-fetch-round33-observer-supervisor.original.ex
+/tmp/http-fetch-round33-source-compile.log
+/tmp/http-fetch-round33-lifecycle.log
+/tmp/http-fetch-round33-source-provider.log
+/tmp/http-fetch-round33-format.log
+/tmp/http-fetch-round33-credo.log
+/tmp/http-fetch-round33-dialyzer.log
+```
+
+Task41 startup correction and task40 private socket enrollment now pass their source
+integration acceptance. This does not implement Socket TLS byte I/O, handoff or
+known-socket connect-failure settlement, public lifecycle/completion/duplex,
+managed H1/H2, default-backend replacement or publication. Latest whole-nine R22
+3201/3206 plus test-WAE failures and FD21/23 evidence gaps remain unrepaired and
+are not superseded by these selected greens. No physical-FD/peer-terminal guarantee,
+capability promotion, timeout widening, forced GC or private OTP SSL/state access.
+Unit/integration/E2E separation (unit-only mix test/test.yml, external collaborators
+mocked in unit tests), final GitHub push and next-major coordinated release also
+remain required by the active goal and unaccepted here.
+The P0-P7 goal remains ACTIVE/ARMED and incomplete. Next: test-tier isolation and authenticated native Socket
+transport lifetime/failure settlement before public/default promotion.

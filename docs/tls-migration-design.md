@@ -248,10 +248,20 @@ liveness and original deadline checks precede use. Late authenticated identities
 retain actual-monitor accounting with stop, without resetting losses or grace.
 Native Socket TLS I/O, handoff, known-socket failure settlement and public lifecycle
 remain unsupported. Five new integration cases and five accepted ledger/reference
-cases pass (10/10). Broader source acceptance is pending: both R32 provider runs
-finished at 1574/1575, with NativeTCPTest failing during start/bind before native
-allocation. Fresh compilation did not resolve it; task41 tracks cause diagnosis.
-No Socket TLS readiness, historical-owner or physical-FD claim follows.
+cases pass (10/10). R33 source acceptance also passes the normal lifecycle suite
+(148) and original four-scope provider/consumer suite (1575), with configured
+static gates. R32 startup/bind failures and the R33 diagnosis remain recorded in
+the validation ledger. No Socket TLS readiness, historical-owner or physical-FD
+claim follows.
+
+The private ObserverSupervisor loads seven control modules (Bootstrap, Observer,
+Authority, Receipt, ResourceLedger, Handoff and Reader) and the directly called OTP
+:timer/:atomics modules before successful supervisor/application startup returns.
+Load failure fails startup. This loads code without calling constructors, priming
+the timer service, generating keys or allocating transport resources. Admission
+and cleanup deadlines remain unchanged. A registered name during initialization
+is not readiness; later code purges and other transport-module loads are outside
+this bounded preparation step.
 
 Retirement closes both authority and ledger admission before killing known provider
 processes. Observer never blocks in native close: port absence needs its separate
