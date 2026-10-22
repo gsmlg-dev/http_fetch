@@ -227,7 +227,11 @@ The private pure ledger also accepts opaque socket-monitor identity for dial TCP
 Trusted runtime code must validate the object and establish its real monitor;
 the pure ledger checks exact reference/kind/object termination correlation.
 Port/process bookkeeping and upgrade socket rejection stay unchanged. Observer
-still exposes only Port enrollment; socket runtime enrollment/transport is pending.
+now provides private enroll_socket for dial-only TCP stream inet/inet6 resources.
+It authenticates the original live unfinished Allocator generation and public
+current owner before establishing its own real socket monitor. Dedicated receiver
+dispatch accepts only the integer outer absolute deadline; malformed envelopes and
+injected inner-deadline frames reject without consuming the pending permit.
 
 OTP29.0.2 reference cases establish a further admission constraint: after explicit
 close (even with the creator alive), or actual owner death, info.owner is undefined
@@ -237,10 +241,17 @@ must reject and leave the unknown permit; a valid bearer permit is insufficient.
 A different case is current owner authentication completed BEFORE monitor creation:
 a known identity closing during that operation must remain accounted, without use
 after deadline/admission expiry. These public metadata calls lack a timeout argument;
-post-call checks bound authorization, not native execution. Before enabling Socket
-enrollment, fence Port-only handoff liveness/ownership and connected publication:
-current helpers lack a Socket clause, assume Port.info, or inspect live rows only.
-No Socket handoff, TLS readiness, historical-owner or physical-FD claim follows.
+post-call checks bound authorization, not native execution. Port-only handoff
+liveness/ownership and connected publication explicitly reject the new Socket kind.
+Fresh post-monitor ownership, authority, ledger admission, provider/controller/owner
+liveness and original deadline checks precede use. Late authenticated identities
+retain actual-monitor accounting with stop, without resetting losses or grace.
+Native Socket TLS I/O, handoff, known-socket failure settlement and public lifecycle
+remain unsupported. Five new integration cases and five accepted ledger/reference
+cases pass (10/10). Broader source acceptance is pending: both R32 provider runs
+finished at 1574/1575, with NativeTCPTest failing during start/bind before native
+allocation. Fresh compilation did not resolve it; task41 tracks cause diagnosis.
+No Socket TLS readiness, historical-owner or physical-FD claim follows.
 
 Retirement closes both authority and ledger admission before killing known provider
 processes. Observer never blocks in native close: port absence needs its separate

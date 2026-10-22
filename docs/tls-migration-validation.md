@@ -3470,3 +3470,101 @@ remains INPROGRESS: meaningful existingAPI actualSocket RED, authenticated origi
 liveAllocator generation/currentowner, realmonitor/postR checks/unsupportedkind
 fences/foreign-live+closed-first negatives still required before separate acceptance.
 Publicsockettransport/TLS/default/publiclifecycle/wholegoal not promoted.
+
+
+### Round32 — private socket enrollment implementation; source gate still RED
+
+Entry cleand29cab3/goal31-of100; Root86solewriter/formatter/Mix/native/hash/docs/
+commit. Task40implementation scope ObserverONLY +NEWtest +docs3, task20explicit
+advisoryACK/allotherappsfrozen. FreshCURRENT8snapshots/tmp/http-fetch-round32-originals,
+five priorFULLarchitectureDocs byteexact847556a before architecture changes.
+Newruntime1109lines (not interim1111 label), original976 reverseBYTEEXACT after
+removing only new socket blocks and restoring one typed Port ownership signature.
+
+First meaningful RED: original enrolled Allocator with real owned pre-connectSocket
+calls existing enroll_port, expected use got invalid_resource, actualEXIT2+prompt,
+0/1 in0.1s/log21FULLread BEFOREproductionedit. DedicatednewSDK/wire enroll_socket
+added; ONEfixtureSDKcall moved after RED, entire legacyPortSDK/errorprecedence
+retained. Sameownership/accountingoracle GREEN1/1 in0.1s +compileWAE0. Not an
+undefined-new-function RED. Publicinstalledsocket monitor/cancel_monitor docs10
+FULLread actual0: independent real monitors; cancel true/false semantics respected.
+
+Receiver review found an actual new bug: rawfourfield operation bypassed outerR
+normalization, and noninteger outerR passed Erlang term ordering. SECOND realRED:
+originalAllocator sends raw3outeratom, expected invalid_deadline got USE, EXIT2,
+1/2 in0.6s/maxfail1/log20FULLread. FIX dedicated Socket-onlyhandle_call BEFORElegacy:
+integerouter3 accepted; malformed3/allinjected4 reject; guardedoperate+fallback.
+Legacygeneric restored original bytes. Actual3/3 in0.2s/WAE0 then4/4 in0.3s.
+No flaky1ms/post-monitor-overrun repro or SDK-only validation claim.
+
+SDK scope: dial/TCPstreaminet/inet6 only; exact original live unfinishedAllocator/
+creator-monitor/Rootlineage +public currentowner BEFORE actualObserver socketmonitor.
+AFTERmonitor recheckowner, expiry, authority, Ledgeradmission, physicalprovider/
+controller/owner alive and fresh integerR before use. Already authenticated actual
+identities survive lateauthdenial asknownstop afterretire, withoutloss/grace reset.
+ClosedFIRSTrejects beforemonitor and leavesunknownpermit. Cancelabandonedmonitor
+withpublicsocket.cancel_monitor, NOTProcess.demonitor. NoNativeclose inObserver.
+Socketkind DENIEDbyPort-onlyhandoff andconnectedpublication; TLSfailurePorttyped,
+R29no-knownTCP guard preserved; actualtypedDOWN/Receipt/Reader bodies unchanged.
+
+NEW207line testcase5 +acceptedledger3+closedownerreference2 actual10/10 in1.4s,
+EXIT0+prompt, freshrootdeps.get/compileWAE0. Five behavioraloracles: ownedbefore-
+connect17/17actualDOWN; wrongPID/liveforeign/closedforeign pending16thenownuse;
+raw3outeratom/raw4inneratom rejectpending16thenownuse; FULLreal31rolegraph with
+processreadiness rejectsSocketprepare/connected andremainsalive/pendingthen31/31;
+ownclosedFIRST actualORIGINALcollectorDOWN whileAllocatorALIVE stillrejects,
+keepsroles1/alloc16/loss0, cancelactualOwnerDOWN thenReaderobserver_unsealed and
+Receiptunsealed. Realmonitors only/no spoofedDOWN/privatestate/timinghooks.
+
+Independenttls-http-static FULLreadfinalruntime1109/newtest207/base976/docs10:
+FINAL_SOURCE_ACCEPT/nofindings AFTERdeadlinefix; workerNOexec/native/write/hash/TTY.
+RootONLY actualsource reverse976 +all793othertrackedappfiles/symlinkbytes exactd29.
+OriginalConnection1684/upload371/strictpins503:291and2558:2312 untouched bythatguard.
+Originalnative1s/parent3s and legacyasyncflags/caps unchanged. Publicgetter/monitor
+lacknative timeout; fresh checks constrainAUTHORIZATION, not hardNifpreemption.
+Cooperative provenance only, notVMsender/constructorphase/physicalFDattestation.
+
+First four-scope provider EXACTR30command/seed101/max24/realQUIC1 under accepted
+R29-current-build EXIT2+prompt: ExSSL864/865(20/20props,844/845tests)115.2s,
+Quic249/24913.9s,Core418/41825.1s,H2file43/436.6s =>1574/1575.
+ONLYfailure oldNativeTCPTest:6 attempt:80 Observer.start ->acceptance_unconfirmed,
+BEFOREListener/Allocatorbirth/TCPpermit/nativeentry. Allnew5pass. FAILUREretained
+/tmp/http-fetch-round32-provider.log396lines, actualfailure7–16/statsall4read.
+SameSource freshMIXbuild32 (literalnewpath existenceguard) ALL9compileWAE0,
+compilelog54FULLread; SAMEseed101/max24/4scopes no source/deadlinechange.
+
+Freshprovider EXIT2+prompt: ExSSL864/865100.3s,Quic249/24910.3s,Core418/41823.6s,
+H2file43/435.7s =>1574/1575 AGAIN. SameoldNativeTCPTest:6 NOWattempt:81 BIND
+->deadline_exceeded, samefixturebudgetcapturedBEFOREstart. FAILURE396lineremains
+/tmp/http-fetch-round32-fresh-provider.log; actualfailure7–16/allstatsread.
+FreshartifactaloneNOTrepair; start/bind failuresdoNOTidentifyonecause. R29sameold
+case variants/R30greenhistory persist; no preexistence/cache/hostload diagnosis.
+Rootconfiguredstatic actualEXIT0+prompt: format0, Credo549files/9195mods14.5s0issues,
+Dial0errors0skips4unnecessary21.1s. ALLlogsretained; no strictCredo runthisround.
+
+Task41 READONLYaudit (claimedrev2) FULLBootstrap70/NativeTCP69/oldfixture136/
+ObserverSupervisor10/parent17: ONLYObserverTestdirectglobalObserverSupervisorpause,
+asyncFALSE; inertbirthpausesConnectionSupervisor, asyncFALSE; appstopsalsoFALSE.
+Directasyncoverlap theory WEAKENED, notproved. Bootstrap requiresDSlaunch, alias
+result, workerNORMAL-DOWN AFTERtimer.cancel, thenreservationRPC underSAMEentryR;
+unknown collapsesmultiplephases. SeparatefixtureB=entry+1000 BEFOREstart reused
+bind/reserve/enroll explainsdifferentfailurelocations, nottheunderlyingdelay.
+
+Next task41 Rootphasecapture: originalfixturePREFIXthroughAllocatorready, ORIGINAL
+1sB/parent3s/startinfinity, freshcontrolledcallerPERtrial/failureendscaller, firsttrial
+retained thenbounded24stress; ifnotrepro minimizeactualasynccompetitormoduleswith
+originalcase/seed/max24. One-shotpublicOWNprocessmetadata(~750ms)maydistinguish
+Bootstrapawait/await_down/workerarm/DSRPC/timercancel/reservationRPC; no polling/
+statehooks/trace/privateOTP. No synchronousDSenumerationoncriticalpath. Killing
+Bootstrapworker DOESNOTcancelalreadyqueuedDSstart; livinginfinite-deadlinecontroller
+canleavelateUNBOUND30sreservation(noNative); neverretryfromsamestilllivingcontroller.
+
+No task41instrumentation/loop/nativeexecution/write was performedthisround; cause
+UNPROVED, allruntimefrozen aftersourceacceptedSDK. Task40 remainsIN_PROGRESS/source
+integrationgateOPEN despitefocused10/staticgreen. GoalACTIVE/ARMED/notcomplete/
+notblocked. Task41needsactualphasefeedback BEFOREfix; no repeatedfreshbuildasrepair.
+SocketTLSbyteI/O/fullnativeLifetime/known-socketfailure/publiclifecycle/default/
+managedH1H2/completion/duplex/H3productscope/FD/perf/publicationstayUNACCEPTED.
+Latestwhole-nineR22RED3201/3206+testWAE andFD21/23 gaps remainunrepaired; selected
+Quic/Core/H2greens doNOTsupersedethem. No budget/assertion/pin/flag/cap weakening,
+GC/privateOTPSSL/NSS/keylog/BPF/lsof/rawFD/SIP/helperFDcampaign/publish/defaultflip.

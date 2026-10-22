@@ -194,9 +194,17 @@ coverage; no supported endpoint class silently lost.
       original and late monitor DOWN cannot reconstruct origin. Two new cases plus
       accepted ledger three pass5/5; no runtime/API change. Preserve closed-first
       unknown permits; pre-authenticated known identities need separate late handling.
-- [ ] Add private pre-connect opaque-socket enrollment with exact original monitor,
-      unchanged unresolved permits and loss semantics; then adapt the full native
-      transport lifetime and authenticated known-socket connect-failure settlement.
+- [ ] Accept private pre-connect opaque-socket enrollment through source gates.
+      R32 implements dedicated enroll_socket: original allocator/current owner,
+      actual monitor, canonical integer outer deadline and fresh post-monitor use
+      checks; unsupported Port handoff/connected publication explicitly reject.
+      Closed-FIRST stays unknown even after collector DOWN; known late identities
+      retain stop accounting/loss. Five new cases + accepted five pass10/10;
+      WAE/format/configuredCredo/Dial pass. BOTH four-scope runs1574/1575 fail the
+      original NativeTCP startup/bind case, so task40 integration acceptance remains
+      OPEN pending task41 diagnosis. A fresh build is not a demonstrated repair.
+- [ ] Adapt the full native Socket transport lifetime and authenticated known-socket
+      connect-failure settlement. R29 pending/no-TCP failure API is not this path.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
       and acknowledged failure publication for real allocator/setup orchestration
       under original deadlines. Private success and TLS/connect attribution above

@@ -94,6 +94,11 @@ defmodule SSL.Lifecycle.Observer do
   def enroll_port(receipt, token, port, deadline),
     do: call(receipt, {:enroll, :tcp, token, port}, deadline)
 
+  @spec enroll_socket(Receipt.t(), reference(), :socket.socket(), {:abs_ms, integer()}) ::
+          :use | :stop | {:error, atom()}
+  def enroll_socket(receipt, token, socket, deadline),
+    do: call(receipt, {:enroll_socket, token, socket}, deadline)
+
   # Only a trusted constructor that has permanently rejected BEFORE native entry
   # may call this. Ordinary native errors, timeouts and DOWN are not this proof.
   @spec reject_before_native(
@@ -173,6 +178,24 @@ defmodule SSL.Lifecycle.Observer do
   end
 
   @impl true
+  def handle_call({{:enroll_socket, token, socket}, {:abs_ms, deadline}}, from, state)
+      when is_integer(deadline) do
+    state = expire(state)
+
+    if now() < deadline do
+      {reply, next} = operate({:enroll_socket, token, socket, deadline}, elem(from, 0), state)
+      settle(reply, next)
+    else
+      settle({:error, :deadline_exceeded}, state)
+    end
+  end
+
+  def handle_call({{:enroll_socket, _, _}, _}, _from, state),
+    do: settle({:error, :invalid_deadline}, expire(state))
+
+  def handle_call({{:enroll_socket, _, _, _}, _}, _from, state),
+    do: settle({:error, :invalid_deadline}, expire(state))
+
   def handle_call({operation, {:abs_ms, deadline}}, from, state) do
     state = expire(state)
 
@@ -343,6 +366,23 @@ defmodule SSL.Lifecycle.Observer do
       {:error, reason} -> {{:error, reason}, state}
     end
   end
+
+  defp operate({:enroll_socket, token, socket, deadline}, caller, state)
+       when is_integer(deadline) do
+    with {:ok, permit} <- permit(state, :tcp, token),
+         :ok <- socket_creator(state, permit, caller),
+         :ok <- socket_candidate(state, socket, caller),
+         {:ok, ref} <- monitor_socket(socket) do
+      # Once the real monitor exists, retain accounting even if authorization expired.
+      next = socket_authorization(state, socket, caller, deadline)
+      enroll_socket_identity(next, permit, token, socket, ref)
+    else
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp operate({:enroll_socket, _, _, _}, _caller, state),
+    do: {{:error, :invalid_deadline}, state}
 
   defp operate({:reject_before_native, role, token}, caller, state) do
     with {:ok, permit} <- permit(state, role, token),
@@ -690,8 +730,9 @@ defmodule SSL.Lifecycle.Observer do
 
   defp handoff_identity_live?({_ref, :process, pid}), do: handoff_process_live?(pid)
   defp handoff_identity_live?({_ref, :port, port}), do: Port.info(port) != nil
+  defp handoff_identity_live?({_ref, :socket, _socket}), do: false
 
-  defp handoff_owner(context, role) do
+  defp handoff_owner(%{identities: %{tcp: {_ref, :port, _port}}} = context, role) do
     port = elem(context.identities.tcp, 2)
     owner = elem(Map.fetch!(context.identities, role), 2)
 
@@ -699,6 +740,8 @@ defmodule SSL.Lifecycle.Observer do
       do: :ok,
       else: {:error, :port_not_owned}
   end
+
+  defp handoff_owner(_context, _role), do: {:error, :port_not_owned}
 
   defp update_handoff(state, handoff) do
     timer =
@@ -772,6 +815,93 @@ defmodule SSL.Lifecycle.Observer do
 
   defp constructor_creator(_state, _permit, _caller), do: {:error, :unauthorized_creator}
 
+  defp socket_creator(state, %{parent: {:allocator, ref}, creator_monitor: ref} = permit, caller) do
+    with true <- state.scope == :dial,
+         :ok <- constructor_creator(state, permit, caller),
+         {:ok, {^ref, :process, ^caller}} <- handoff_resource(state, :allocator) do
+      :ok
+    else
+      _ -> {:error, :unauthorized_creator}
+    end
+  end
+
+  defp socket_creator(_state, _permit, _caller), do: {:error, :unauthorized_creator}
+
+  defp socket_candidate(state, socket, caller) do
+    with false <- duplicate?(state, socket),
+         {:ok, ^caller} <- :socket.getopt(socket, :otp, :controlling_process),
+         %{type: :stream, protocol: :tcp, domain: domain} <- :socket.info(socket),
+         true <- domain in [:inet, :inet6] do
+      :ok
+    else
+      _ -> {:error, :foreign_or_duplicate_resource}
+    end
+  catch
+    _, _ -> {:error, :invalid_resource}
+  end
+
+  defp monitor_socket(socket) do
+    {:ok, :socket.monitor(socket)}
+  catch
+    _, _ -> {:error, :monitor_unavailable}
+  end
+
+  defp socket_authorization(state, socket, caller, deadline) do
+    owned = socket_owned?(socket, caller)
+    state = expire(state)
+
+    eligible =
+      owned and open?(state) and ResourceLedger.snapshot(state.ledger).admission == :open and
+        handoff_process_live?(caller) and handoff_process_live?(state.owner) and
+        handoff_process_live?(state.controller)
+
+    instant = now()
+
+    if eligible and instant < deadline and
+         (state.expires == :infinity or instant < state.expires),
+       do: state,
+       else: retire(state, :internal)
+  end
+
+  defp socket_owned?(socket, caller) do
+    :socket.getopt(socket, :otp, :controlling_process) == {:ok, caller}
+  catch
+    _, _ -> false
+  end
+
+  defp enroll_socket_identity(state, permit, token, socket, ref) do
+    case ResourceLedger.enroll(state.ledger, :tcp, token, {ref, :socket, socket}) do
+      {:ok, ledger, action} ->
+        resource = %{
+          identity: {ref, :socket, socket},
+          live: true,
+          done: false,
+          creator: permit.parent,
+          creator_pid: permit.creator,
+          creator_monitor: permit.creator_monitor
+        }
+
+        next = %{
+          state
+          | ledger: ledger,
+            permits: Map.delete(state.permits, :tcp),
+            resources: Map.put(state.resources, :tcp, resource)
+        }
+
+        {action, next}
+
+      {:error, reason} ->
+        _ = cancel_socket_monitor(ref)
+        {{:error, reason}, state}
+    end
+  end
+
+  defp cancel_socket_monitor(ref) do
+    :socket.cancel_monitor(ref)
+  catch
+    _, _ -> :ok
+  end
+
   defp enrollment(state, :tcp, permit, caller, port) when is_port(port) do
     if caller == permit.creator and Port.info(port, :connected) == {:connected, caller} and
          not duplicate?(state, port), do: :ok, else: {:error, :foreign_or_duplicate_resource}
@@ -805,6 +935,9 @@ defmodule SSL.Lifecycle.Observer do
 
   defp open?(state),
     do: match?(%{bound?: true, phase: :open}, authority_view(state)) and state.grace == nil
+
+  defp publish(%{resources: %{tcp: %{identity: {_ref, :socket, _socket}}}} = state, :connected),
+    do: {{:error, :socket_transport_not_implemented}, state}
 
   defp publish(state, :connected) do
     if Enum.all?([:connection, :writer, :tcp], fn role ->
