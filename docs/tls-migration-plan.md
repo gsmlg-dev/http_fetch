@@ -50,6 +50,10 @@ reviewed acceptance, not merely a test file or implementation exists.
       belongs to integration tests, and complete user flows to end-to-end tests.
       Align test.yml with the unit-only default and keep explicit integration/E2E
       gates mandatory. Existing mixed suites are evidence, not tiering acceptance.
+      R34 pilot adds only tags in nine ExSSL lifecycle/inert-birth files: 165 cases
+      partition into 89 default VM units and 76 explicit integration cases. Whole
+      ExSSL/umbrella isolation, mock/input refactors and CI routing remain pending;
+      system trust and generated-fixture setup_all cannot hide inside unit runs.
 
 Exit: every blocker has an owner and acceptance test; current implementation,
 executed evidence and required work are distinguishable. OTP remains default.

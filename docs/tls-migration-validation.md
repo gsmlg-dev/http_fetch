@@ -3712,3 +3712,139 @@ mocked in unit tests), final GitHub push and next-major coordinated release also
 remain required by the active goal and unaccepted here.
 The P0-P7 goal remains ACTIVE/ARMED and incomplete. Next: test-tier isolation and authenticated native Socket
 transport lifetime/failure settlement before public/default promotion.
+
+
+## R34 — classify actual lifecycle I/O without losing VM-only cases
+
+Baseline cdc4c4a7b224d2c70d7692b688b296d3a587fbb4, Goal33/100 active/armed,
+task42 IN_PROGRESS. Root checked clean HEAD, root instructions and root Mix/CI entries; two read-only
+reviewers audited app helpers/support and classified100 ExSSL and
+213 other test files, including transitive fixture/normalizer effects. These are
+static behavior classes, not current default eligibility or executed case totals.
+U below includes VM actors/crypto and static runner fixtures; I includes actual
+external/environment/application-lifecycle work; M preserves mixed-case boundaries.
+
+| App | Whole U | Mixed | Whole I | Files |
+| --- | --- | --- | --- | --- |
+| ex_ssl | 47 (9 with static runner fixtures) | 10 | 43 | 100 |
+| elixir_quic | 30 | 3 | 5 | 38 |
+| elixir_quic_http3 | 10 | 0 | 1 | 11 |
+| http_core | 29 | 3 | 4 | 36 |
+| http_runtime | 9 | 5 | 2 | 16 |
+| http_fetch | 22 | 14 | 49 | 85 |
+| http_event_source | 3 | 1 | 3 | 7 |
+| http_web_socket | 5 | 4 | 6 | 15 |
+| http_web_transport | 5 | 0 | 0 | 5 |
+| Total | 160 | 40 | 113 | 313 |
+
+Fetch has85 files and86 top-level test modules: request_completion has a second
+VM-only BackendTest. The eight-app subtotal is213=113U+30M+70I. Counts include
+SUT file reads as integration, even when the transport itself is a VM fake.
+
+The first authorized implementation touches ONLY nine ExSSL test files: four whole
+native-I/O modules and five mixed files. Four module attributes plus21 case attributes
+add25 lines. Module tags cover Allocator4, NativeTCP4, NativeHandoff6 (generated
+cases included) and Setup6. Mixed native cases add17 inside lifecycle/ and4 in
+inert_lifecycle_birth, outside that directory.
+
+| Scope | Existing cases | Unit | Integration |
+| --- | --- | --- | --- |
+| Lifecycle directory | 148 | 76 | 72 |
+| Separate inert lifecycle birth file | 17 | 13 | 4 |
+| Combined pilot | 165 | 89 | 76 |
+
+Existing directory integration cases were35; new tags classify37 more, plus4 outside.
+Authority13, Handoff2, Reader8 and InertHandoffReady5 remain VM-only. Mixed files retain
+Observer25/27, ObserverHandoff2/14, ResourceLedger16/17, Receipt5/7 and InertBirth13/17
+as units. Real TCP/socket creation and ownership/monitor/peer facts stay integration.
+A model Ledger DOWN/proof, including the case that keeps its Port alive, remains
+model evidence rather than physical resource retirement proof.
+
+Actual baseline NativeTCP default command (no integration flag) ran all4 real-TCP
+cases:4 passed in1.2s, exit0. This exposed a classification policy gap, not a failing
+application assertion. After tags, the identical command selects0 with4 excluded,
+0.3s. No test was deleted or weakened. Actual combined normal commands, seed101,
+max24: default89 passed/76 excluded in10.1s (4.5async/5.6sync); --only integration
+76 passed/89 excluded in32.6s (7.8async/24.7sync). Both use the existing helper and
+no temporary formatter/probe; their chain returned actual exit0 and prompt.
+
+The original four-scope command, no probes/formatter/extra filters, still passes
+1575/1575: ExSSL865/865 in104.4s (20.4async/83.9sync), Quic249 in10.3s, Core418
+in24.8s and Fetch H2 file43 in6.3s. Same seed101/max24/real-QUIC flag/integration
+selection. Actual exit0 and prompt. Root test-environment deps/compile-WAE prep0;
+configured format0; Credo549 files/9195 modules-functions/no issues13.2s; Dialyzer
+0 errors/0 skips, four unchanged unnecessary ignores,17.84s. Static chain0+prompt.
+Global python lacked h2 (probe exit1); existing P0 venv restored on PATH, verified
+OpenSSL4.0.3/h2 4.2.0 exit0 before full regression. No dependency install or source
+change was used to fix an environment probe.
+
+Before editing, all795 tracked app/symlink bytes matched HEAD. After formatting,
+removing ONLY the25 inserted attribute lines reconstructs all nine original test
+files exactly; all786 other tracked app/symlink bytes match cdc4c4a, including all
+production code, strict pins and the R33 supervisor. Independent review read the
+full232-line diff and original contexts: SOURCE_ACCEPT/NOBLOCKER. No callback,
+helper, async flag, fixture, peer pin, assertion or deadline changed.
+
+Deferred boundaries are concrete. ExSSL Options.normalize resolves system trust
+before later offer/identity validation; cached cacerts_get is not deterministic
+fixture input. Options25 has only6 currently VM-only cases; PKIX has27 fixture units
+plus one live-trust case. Protocol resumption-HRR and TLS1.2 dispatch also use live
+trust. Existing tcp_options whole integration tag hides two VM-only parser cases.
+Generated certificate setup_all callbacks in signature_expansion, client_identity,
+client_authentication and quic_config must be separated from their7 pure bodies
+before those bodies can be selected as units. Preserve generated-cert negatives.
+
+Other apps preserve fake-transport units: QUIC external_endpoint/phase1_io_tls,
+HTTP3 Ops-based wp1/wp2/transport_quic and WebTransport FakeBackend/FakeOps do not
+open native sockets. Conversely Core quic/tls_options and Runtime HTTP3 pool-key
+watchdog/scope cases pass certificate paths into real SUT normalization: preload
+fixture bytes for their pure logic or retain file-I/O integration coverage. Runtime
+tunnel_stream validation also opens a peer. Mixed Fetch request_completion contains
+a second pure BackendTest; response and body-reader policy cases need case-level
+routing, not whole-file exclusion.
+
+Tags do not prevent module loading: the16MiB test attribute remains CPU/memory load,
+and eager static PEM inputs still read runner fixtures. Inspected support modules
+have no eager external constructor; HTTP3 transport_smoke.exs explicitly runs at
+top level and remains a separately selected script. Eight-app E2E inventory has14
+test files plus that script; two WebTransport E2E-labelled files are fake/capability
+checks, not successful wire acceptance. ExSSL's separate Caddy harness remains
+CI/release-only; its13-scenario aioquic TLS boundary script uses stdin/stdout,
+not actual UDP. Preserve independent interop and release checks separately.
+
+Exact pilot selections (from the umbrella root after test-environment preparation):
+
+```bash
+unbuffer mix test apps/ex_ssl/test/ssl/lifecycle apps/ex_ssl/test/ssl/inert_lifecycle_birth_test.exs --seed 101
+unbuffer mix test apps/ex_ssl/test/ssl/lifecycle apps/ex_ssl/test/ssl/inert_lifecycle_birth_test.exs --only integration --seed 101
+HTTP_QUIC_PHASE1_REAL=1 unbuffer mix test apps/ex_ssl/test apps/elixir_quic/test apps/http_core/test apps/http_fetch/test/http/socket_client_http2_test.exs --include integration --seed 101
+```
+
+Retained local evidence:
+
+```text
+/tmp/http-fetch-round34-prep.log
+/tmp/http-fetch-round34-native-default-before.log
+/tmp/http-fetch-round34-native-default-after.log
+/tmp/http-fetch-round34-unit.log
+/tmp/http-fetch-round34-integration.log
+/tmp/http-fetch-round34-provider.log
+/tmp/http-fetch-round34-format.log
+/tmp/http-fetch-round34-credo.log
+/tmp/http-fetch-round34-dialyzer.log
+/tmp/http-fetch-round34-tags.diff
+/tmp/http-fetch-round34-originals/
+```
+
+Task42 stays IN_PROGRESS. Default mix test over the whole umbrella or even all of
+ExSSL is NOT yet accepted as unit-only. Eight other helpers still have no default
+exclusions; test.yml, mandatory integration routing, fixture/mocking refactors and
+E2E alignment remain unchanged and required. Shared routing changes need full-nine
+regression and prescribed manual CI, not a claim based on this pilot.
+
+Whole-nine R22 3201/3206 plus test-WAE failures and FD21/23 gaps remain unaccepted.
+No public lifecycle, native Socket TLS/failure settlement, default backend change,
+physical-FD guarantee or publication follows. Final reviewed GitHub push and next
+coordinated major release remain after the whole migration's gates. Goal stays
+ACTIVE/ARMED and incomplete. Next: finish ExSSL fixture/trust eligibility while
+retaining pure bodies, then other app tags/helpers and explicit CI routing.

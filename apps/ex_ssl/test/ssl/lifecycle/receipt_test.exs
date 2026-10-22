@@ -78,6 +78,7 @@ defmodule SSL.Lifecycle.ReceiptTest do
     assert {:sealed, %{setup_failure: :timeout, epoch: 7}} = Receipt.read(receipt)
   end
 
+  @tag :integration
   test "creator loss remains unconfirmed after late port identity and exact DOWN" do
     receipt = Receipt.new()
     {pid, monitor} = idle_process()
@@ -110,6 +111,7 @@ defmodule SSL.Lifecycle.ReceiptTest do
              Receipt.read(receipt)
   end
 
+  @tag :integration
   test "STARTTLS scope preserves adoption semantics in terminal data" do
     receipt = Receipt.new()
     {:ok, tcp} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])

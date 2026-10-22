@@ -1,5 +1,6 @@
 defmodule SSL.Lifecycle.AllocatorTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
   alias SSL.Lifecycle.{Allocator, Observer, Reader, Receipt}
   @ip {127, 0, 0, 1}
 

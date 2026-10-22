@@ -1,5 +1,6 @@
 defmodule SSL.Lifecycle.SetupTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
   alias SSL.{Connection, Options, Socket}
   alias SSL.Lifecycle.{Observer, Reader, Receipt, Setup}
 

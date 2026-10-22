@@ -1,5 +1,6 @@
 defmodule SSL.Lifecycle.NativeTCPTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
   alias SSL.Lifecycle.{NativeTCP, Observer, Reader, Receipt}
   @ip {127, 0, 0, 1}
 

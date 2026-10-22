@@ -136,6 +136,7 @@ defmodule SSL.Lifecycle.ResourceLedgerTest do
              Ledger.enroll(ledger, :connection, token, {make_ref(), :process, self()})
   end
 
+  @tag :integration
   test "STARTTLS proof is explicitly adoption-scoped and only accepts ports" do
     {:ok, tcp} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     on_exit(fn -> :gen_tcp.close(tcp) end)

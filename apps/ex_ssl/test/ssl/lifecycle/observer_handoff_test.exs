@@ -3,6 +3,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
 
   alias SSL.Lifecycle.{Observer, Reader, Receipt}
 
+  @tag :integration
   test "cooperatively ready actors commit an enrolled real TCP port after ownership transfer" do
     %{
       receipt: receipt,
@@ -53,6 +54,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
              Reader.await(receipt, deadline())
   end
 
+  @tag :integration
   test "handoff succeeds only for recorded caller, native owner and unspent grant" do
     %{
       receipt: receipt,
@@ -137,6 +139,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
              Reader.await(receipt, deadline())
   end
 
+  @tag :integration
   test "first readiness deadline retires pending handoff despite later budgets and remint attempts" do
     %{
       receipt: receipt,
@@ -187,6 +190,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
             }} = Reader.await(receipt, deadline())
   end
 
+  @tag :integration
   test "committed handoff outlives its private deadline and permits normal allocator completion" do
     %{
       receipt: receipt,
@@ -265,6 +269,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
              Reader.await(receipt, deadline())
   end
 
+  @tag :integration
   test "lost commit acknowledgment is unknown and the original queued grant remains consumed" do
     %{
       receipt: receipt,
@@ -332,6 +337,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
              Reader.await(receipt, deadline())
   end
 
+  @tag :integration
   test "readiness and grants bind original actors and attempts through independent cancellation" do
     a = enrolled_attempt()
     b = enrolled_attempt()
@@ -434,6 +440,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
              Reader.await(b.receipt, deadline())
   end
 
+  @tag :integration
   test "controller cancellation retires a transferred TCP port before handoff commit" do
     %{
       receipt: receipt,
@@ -499,6 +506,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
     refute Process.alive?(writer)
   end
 
+  @tag :integration
   test "queued original writer DOWN retires a prepared Connection-owned TCP port" do
     %{
       receipt: receipt,
@@ -563,6 +571,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
     refute Process.alive?(connection)
   end
 
+  @tag :integration
   test "unexpected ownership of the original TCP port rejects commit without consuming its grant" do
     %{
       receipt: receipt,
@@ -632,6 +641,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
              Reader.await(receipt, deadline())
   end
 
+  @tag :integration
   test "queued original TCP port DOWN retires prepared actors that remained alive after port close" do
     %{
       receipt: receipt,
@@ -753,6 +763,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
     assert elapsed < 2_000
   end
 
+  @tag :integration
   test "allocator completion before readiness prevents a fresh handoff grant" do
     %{
       receipt: receipt,
@@ -889,6 +900,7 @@ defmodule SSL.Lifecycle.ObserverHandoffTest do
     refute Process.alive?(writer)
   end
 
+  @tag :integration
   test "commit arguments bind canonical TCP and allocator even with two Connection-owned ports" do
     a = enrolled_attempt()
     budget = deadline()

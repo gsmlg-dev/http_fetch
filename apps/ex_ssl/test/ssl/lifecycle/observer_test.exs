@@ -56,6 +56,7 @@ defmodule SSL.Lifecycle.ObserverTest do
     end
   end
 
+  @tag :integration
   test "native port absence is observed independently after its allocator dies" do
     {receipt, lease} = bound()
     {:ok, token} = Observer.reserve_root(receipt, lease, :allocator, deadline())
@@ -81,6 +82,7 @@ defmodule SSL.Lifecycle.ObserverTest do
     assert Port.info(tcp) == nil
   end
 
+  @tag :integration
   test "foreign native port is untouched and its unresolved permit is never cleaned by inference" do
     {receipt, lease} = bound()
     {:ok, token} = Observer.reserve_root(receipt, lease, :allocator, deadline())

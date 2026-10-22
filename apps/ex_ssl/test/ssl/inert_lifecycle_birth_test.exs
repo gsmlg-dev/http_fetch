@@ -70,6 +70,7 @@ defmodule SSL.InertLifecycleBirthTest do
              Reader.await(receipt, budget)
   end
 
+  @tag :integration
   test "queued and ready legacy attach cannot admit a port or emit native bytes" do
     attempt = attempt()
     {tcp, peer} = socket_pair()
@@ -246,6 +247,7 @@ defmodule SSL.InertLifecycleBirthTest do
     assert {:unconfirmed, :observer_unsealed} = Reader.await(attempt.receipt, deadline(1_500))
   end
 
+  @tag :integration
   test "Connection enrollment cannot outlive a shorter original setup deadline while Observer stays suspended" do
     setup_deadline = System.monotonic_time(:millisecond) + 150
     attempt = attempt(deadline(2_500), setup_deadline)
@@ -269,6 +271,7 @@ defmodule SSL.InertLifecycleBirthTest do
     assert {:unconfirmed, :observer_unsealed} = Reader.await(attempt.receipt, deadline(1_500))
   end
 
+  @tag :integration
   test "standalone writer enrollment cannot outlive its shorter original setup deadline while Observer stays suspended" do
     setup_deadline = System.monotonic_time(:millisecond) + 150
     attempt = attempt(deadline(2_500))
@@ -332,6 +335,7 @@ defmodule SSL.InertLifecycleBirthTest do
              Reader.status(attempt.receipt)
   end
 
+  @tag :integration
   test "writer enrollment alone cannot emit queued bytes before exact PID nonce and Observer release" do
     attempt = attempt()
     {connection, permit} = writer_constructor(attempt)

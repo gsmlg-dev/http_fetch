@@ -1,5 +1,6 @@
 defmodule SSL.Lifecycle.NativeHandoffTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
   alias SSL.{Connection, Options}
   alias SSL.Lifecycle.{Allocator, Observer, Reader, Receipt}
 

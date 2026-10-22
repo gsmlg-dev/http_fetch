@@ -641,6 +641,40 @@ failures still require their own reruns; this semantic proof alone cannot establ
 all historical timeout causes. Public lifecycle/native birth integration remains
 separate and incomplete.
 
+## Test boundaries and discovery
+
+Unit tests run in one BEAM VM. Pure transformations, local actors, process monitors,
+atomics and real :crypto/:public_key computation belong here when they need no
+external collaborator. Replace external transport, service and filesystem effects
+through explicit inputs or VM-local fake implementations. Do not mock cryptographic
+primitives or use fabricated monitor events as real ownership/cleanup evidence.
+Runner loading of source, dependencies and checked-in static fixture bytes is input
+preparation, distinct from filesystem interaction performed by the system under test.
+
+Integration tests exercise actual TCP/UDP/socket/OS Port resources, filesystem
+collaborators, system trust, external programs/services or application-wide runtime
+lifecycle. Localhost, cached host trust and a peer named MockServer do not turn these
+into isolated units. A setup_all callback that generates certificates or opens a
+listener makes every selected case external; retain pure cases by scoping/splitting
+that callback or supplying deterministic inputs, not merely tagging other bodies.
+End-to-end gates cover complete public client flows with real independent peers;
+fake-backend and unsupported-capability checks do not prove successful wire traffic.
+
+Use module-level integration tags only when every selected case shares external
+work, and case/describe tags for mixed files. Preserve filenames, fixture paths,
+assertions, peer pins and original deadlines. The target default excludes integration
+and E2E; CI must separately require both suites. Existing explicit --include integration
+continues to select all source cases. Tag filters still load test modules and static
+fixtures; eager external constructors need discovery isolation or deferred setup.
+This is a reviewed test boundary, not a VM security sandbox or code-loading budget.
+
+R34 implements only the lifecycle-directory plus inert-birth pilot: 165 existing
+cases partition into 89 default VM units and 76 explicitly selected integration cases.
+Only four module tags and 21 case tags were added across nine files. Test bodies,
+async settings and the R33 readiness fix remain unchanged. Whole-ExSSL/umbrella
+unit-only acceptance, mock/input refactors, eight other default helper policies and
+unit/integration/E2E CI alignment remain open in the plan and execution ledger.
+
 ## Source/dependency inventory and evidence boundaries
 
 Run `python3 scripts/tls_migration_inventory.py` for a bounded JSON inventory of
