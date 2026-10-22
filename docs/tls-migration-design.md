@@ -229,6 +229,19 @@ the pure ledger checks exact reference/kind/object termination correlation.
 Port/process bookkeeping and upgrade socket rejection stay unchanged. Observer
 still exposes only Port enrollment; socket runtime enrollment/transport is pending.
 
+OTP29.0.2 reference cases establish a further admission constraint: after explicit
+close (even with the creator alive), or actual owner death, info.owner is undefined
+and the public controlling_process getter returns closed. A late socket monitor
+still reports closed, but supplies no historical owner fact. Closed-at-first-entry
+must reject and leave the unknown permit; a valid bearer permit is insufficient.
+A different case is current owner authentication completed BEFORE monitor creation:
+a known identity closing during that operation must remain accounted, without use
+after deadline/admission expiry. These public metadata calls lack a timeout argument;
+post-call checks bound authorization, not native execution. Before enabling Socket
+enrollment, fence Port-only handoff liveness/ownership and connected publication:
+current helpers lack a Socket clause, assume Port.info, or inspect live rows only.
+No Socket handoff, TLS readiness, historical-owner or physical-FD claim follows.
+
 Retirement closes both authority and ledger admission before killing known provider
 processes. Observer never blocks in native close: port absence needs its separate
 exact DOWN, even after its known provider owner dies. The grace deadline is fixed

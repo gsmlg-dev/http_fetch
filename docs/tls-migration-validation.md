@@ -3412,3 +3412,61 @@ expired admission/request deadline. Public monitor1 has no timeout argument:
 receiver needs fresh checks after monitor establishment as well as before entry.
 Known-socket connect attribution remains separate from R29 pending-permit path.
 R22whole-nineRED/FD21+23/R29warm startup failures remain unresolved; goal ongoing.
+
+
+### Round31 — closed-owner reference prerequisite for Observer enrollment
+
+Entry clean1da5d6c, goal automatic30/100, task40 claimed then narrowed before SDK
+implementation after concrete public-API uncertainty. Fresh8current source snapshots
+/tmp/http-fetch-round31-originals; five previously FULL-read architecture docs
+freshbyte-exact847556a. Task20 advisory explicitACK/alloldscopesfrozen. Root85 sole
+writer/native executor; peers readonly. No sandbox fields/escalation or private
+OTP/socket registry state, forcedGC or FD campaign.
+
+Public OTP29.0.2 standalone37line scenario actual EXIT0+prompt/jobcollected,
+131line result FULL-read: open info.owner/current controlling_process matches
+actual creator; after explicit close ownerundefined/getopt errorclosed; NEW actual
+monitor stillDOWNclosed. Actual creatorKILL shows same ownerundefined/getoptclosed
+afteroriginal process/socket DOWN. This is current public-state evidence, NOT
+past-owner/constructor authentication or physicalFD reclamation. No peer/TLS claim.
+Source/result retained in /tmp/http-fetch-round31-socket-metadata.exs/.log.
+
+Durable NEWsocket_owner_reference_test77lines TWO independent reference cases:
+explicit self-close ACK while owner remains alive before AND after original socket
+DOWN; separate original processKILL/DOWN case. Both assert public positive owner
+beforeclose, ownerundefined/getoptclosed after; differentlateactualmonitor ref and
+itsown exact typedDOWNclosed. No manufactured VM DOWN or opaque shape parsing.
+Single originalnativeE1s/parent3s, remainingclipped, parenttimeronce, ownedcleanup.
+Root and independent reviewer FULL77 source accepted, no blockers/runtime change.
+
+Root depsget unchanged18lineFULLread +compileWAE actual0+prompt. New2 plus accepted
+SocketLedger3 scoped rootseed101/max24/includeintegration:5/5 in0.3s, actual0+prompt,
+8line logFULLread. Reference expected results are public OTP observations, not a
+provider implementation RED/GREEN claim. Rootformat/configuredCredo548files/9166
+mods/noissues11.9s/Dial0errors0skips4unchangedunnecessaryignores20.09s combined
+actual0+prompt; alljobscollected. All793OLDtrackedapps byteexact to1da including
+symlinktargetbytes, hence allruntime/oldtests/pins/flags/deadlines frozen.
+
+Architecture correction BEFORE SDK: CLOSED at FIRST enrollment cannot establish
+past creator/current owner. Even a valid original permit and lateDOWN must not
+consume unknownTCP from a closed-foreign object. Leave permit unknown. Distinct
+case: owner positively authenticated BEFORE real monitor creation, then closure
+or R/E/admission expiry DURING the operation: retain successfully established known
+monitor identity, preserve losses and deny use. Publicmetadata lacks timeout arg;
+fresh post-monitor checks constrain authorization, not native preemption.
+
+Readonly FULLObserver976/Handoff126 audit found latent integration hazards, NOT
+reachable newruntimefeatures today: handoff_identity_live?691-692 has no Socket
+clause; handoff_owner694-701 assumes Port.info; publishconnected809-817 liveflags
+alone could admit unsupported kind. Fence these BEFORE new enrollment. TLSfailure
+569-582 already requires Port; R29connect516-525 requiresNOknownTCP; preserve.
+writer/connectionready are process-only beforeTCPbirth; stop_process892-895 never
+nativecloses; actualtypedDOWN221/838 alreadyexact. NoLedger/Handoffeditneeded.
+
+No broadprovider/fullnine repeats for reference-only newtest with zero runtime
+changes. Prior R30selected1568/1568 not superseded; latestfullnineR22RED andFD21/23,
+R29warmstartup failures remain unresolved. Task40 actual SDK/Observer implementation
+remains INPROGRESS: meaningful existingAPI actualSocket RED, authenticated original
+liveAllocator generation/currentowner, realmonitor/postR checks/unsupportedkind
+fences/foreign-live+closed-first negatives still required before separate acceptance.
+Publicsockettransport/TLS/default/publiclifecycle/wholegoal not promoted.

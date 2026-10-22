@@ -189,6 +189,11 @@ coverage; no supported endpoint class silently lost.
       late known stop with sticky loss. Round30 provider1568/1568(initial fixture),
       refined fixture3/3 and configured static gates pass. Runtime enrollment below
       remains pending; pure accounting is not a constructor/FD/socket support claim.
+- [x] Establish independent OTP29 closed-owner reference evidence: explicit close
+      while owner remains alive and actual owner death both erase public owner facts;
+      original and late monitor DOWN cannot reconstruct origin. Two new cases plus
+      accepted ledger three pass5/5; no runtime/API change. Preserve closed-first
+      unknown permits; pre-authenticated known identities need separate late handling.
 - [ ] Add private pre-connect opaque-socket enrollment with exact original monitor,
       unchanged unresolved permits and loss semantics; then adapt the full native
       transport lifetime and authenticated known-socket connect-failure settlement.
