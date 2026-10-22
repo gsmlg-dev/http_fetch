@@ -248,8 +248,64 @@ defmodule SSL.Connection do
       when ref != actual,
       do: {:keep_state_and_data, [{:reply, from, {:error, :badarg}}]}
 
-  # This slice only accounts actor births. A future driver must authenticate the
-  # exact TCP identity/ownership ACK; a role mask cannot authorize legacy attach.
+  # Explicit opt-in after birth; the first admitted operation spends this phase.
+  def handle_event(
+        {:call, from},
+        {_ref, {:prepare_handoff, nonce, {:abs_ms, deadline}}},
+        phase,
+        %{lifecycle: %{ready: {recipient, expected}}} = state
+      )
+      when is_integer(deadline) do
+    cond do
+      elem(from, 0) != recipient or nonce != expected ->
+        reply(from, {:error, :unauthorized_handoff})
+
+      phase != :inert_ready ->
+        reply(from, {:error, :handoff_spent})
+
+      true ->
+        prepare_handoff(from, deadline, state)
+    end
+  end
+
+  def handle_event(
+        :state_timeout,
+        {:handoff_expired, request},
+        :inert_preparing,
+        %{lifecycle: %{preparation: %{request: request}}} = state
+      ),
+      do: stop_preparation(state)
+
+  def handle_event(
+        :info,
+        {:lifecycle_handoff_ready, writer, nonce, observer, request, result},
+        :inert_preparing,
+        %{
+          writer: writer,
+          lifecycle: %{
+            writer_nonce: nonce,
+            observer: observer,
+            preparation: %{request: request} = preparation
+          }
+        } = state
+      ) do
+    with {:ok, challenge} when is_reference(challenge) <- result,
+         true <- preparation_live?(state),
+         :ok <-
+           Observer.connection_ready(state.lifecycle.receipt, challenge, preparation.deadline),
+         true <- preparation_live?(state) do
+      lifecycle = %{state.lifecycle | preparation: %{preparation | from: nil}}
+
+      {:next_state, :inert_prepared, %{state | lifecycle: lifecycle},
+       [{:reply, preparation.from, :ok}]}
+    else
+      false -> stop_preparation(state)
+      {:error, _reason} -> stop_preparation(state)
+    end
+  end
+
+  # Private readiness alone cannot authorize transport attachment. A future driver
+  # must authenticate the exact TCP identity/ownership ACK before enabling TLS.
   def handle_event({:call, from}, {_ref, {:attach, _tcp}}, _phase, %{lifecycle: lifecycle})
       when not is_nil(lifecycle),
       do: reply(from, {:error, :lifecycle_attach_not_implemented})
@@ -1330,6 +1386,39 @@ defmodule SSL.Connection do
 
   defp diagnostic_result({:error, _}), do: {:error, :closed}
   defp diagnostic_result(result), do: result
+
+  defp prepare_handoff(from, requested, state) do
+    deadline = if state.deadline == :infinity, do: requested, else: min(requested, state.deadline)
+    preparation = %{from: from, request: make_ref(), deadline: {:abs_ms, deadline}}
+    lifecycle = Map.put(state.lifecycle, :preparation, preparation)
+    state = %{state | lifecycle: lifecycle}
+
+    if preparation_live?(state) do
+      send(
+        state.writer,
+        {:lifecycle_prepare, self(), lifecycle.writer_nonce, lifecycle.observer,
+         preparation.request, preparation.deadline}
+      )
+
+      {:next_state, :inert_preparing, state,
+       [{:state_timeout, Options.remaining(deadline), {:handoff_expired, preparation.request}}]}
+    else
+      stop_preparation(state)
+    end
+  end
+
+  defp preparation_live?(state) do
+    {:abs_ms, deadline} = state.lifecycle.preparation.deadline
+    {recipient, _nonce} = state.lifecycle.ready
+
+    birth_live?(state) and Process.alive?(recipient) and Process.alive?(state.writer) and
+      Options.remaining(deadline) > 0
+  end
+
+  defp stop_preparation(state),
+    do:
+      {:stop_and_reply, :normal,
+       [{:reply, state.lifecycle.preparation.from, {:error, :acceptance_unconfirmed}}], state}
 
   defp birth_live?(state),
     do: Process.alive?(state.lifecycle.observer) and Process.alive?(state.owner)

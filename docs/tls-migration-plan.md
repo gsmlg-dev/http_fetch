@@ -131,14 +131,21 @@ coverage; no supported endpoint class silently lost.
 - [x] Centralize private literal-IPv4 TCP allocation for already enrolled allocators:
       reserve before native entry, keep one caller-clipped absolute deadline, return
       the exact Port only after original Observer enrollment; close known late Ports.
-      Native errors keep unresolved permits and unconfirmed retirement. Actual
-      allocator birth, TLS integration and all-path failure identity remain open.
+      Native errors keep unresolved permits and unconfirmed retirement.
+      That transport constructor alone does not prove allocator birth;
+      TLS integration and all-path failure identity remain open.
 - [x] Implement/test private unlinked allocator birth: inert init, original
       parent/recipient/Observer monitors and clipped deadline, self-enrollment
       before NativeTCP, nonce-bound allocation notification after Port enrollment.
       Four actual-constructor cases pass; all lifecycle95/95. Setup orchestration,
-      handoff and public readiness remain open. Provider regression still has
-      one Observer-bootstrap admission failure before native allocation.
+      handoff and public readiness remain open. Round23 provider regression recorded
+      one Observer-bootstrap admission failure before native allocation; cause still unknown.
+- [x] Integrate explicit post-birth readiness through actual Writer and Connection:
+      authenticate the original recipient, nonce and socket reference; consume one
+      setup-clipped pending budget and acknowledge the Observer challenge. Birth-only
+      lifetime behavior stays unchanged. Five actual-actor cases, lifecycle+birth117/117
+      and restored three-provider+Fetch-H2 scope1527/1527 pass. Native ownership
+      transfer/TLS attach and public readiness remain open.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
       and private real allocator/setup direct-dial orchestration with original
       deadlines and acknowledged outcome publication.

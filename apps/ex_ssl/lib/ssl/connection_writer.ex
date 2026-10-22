@@ -75,7 +75,15 @@ defmodule SSL.ConnectionWriter do
     receive do
       {:lifecycle_writer_release, ^connection, ^nonce, ^observer} ->
         if live?(connection, observer) and remaining(context) > 0,
-          do: enrolled_loop(connection, connection_monitor, observer, observer_monitor, nonce)
+          do:
+            enrolled_loop(
+              connection,
+              connection_monitor,
+              observer,
+              observer_monitor,
+              context,
+              false
+            )
 
       {:DOWN, ^connection_monitor, :process, ^connection, _reason} ->
         :ok
@@ -87,15 +95,31 @@ defmodule SSL.ConnectionWriter do
     end
   end
 
-  defp enrolled_loop(connection, connection_monitor, observer, observer_monitor, nonce) do
+  defp enrolled_loop(connection, connection_monitor, observer, observer_monitor, context, spent) do
+    nonce = context.nonce
+
     receive do
       {:lifecycle_send, ^nonce, token, tcp, bytes, shutdown?}
       when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
              is_boolean(shutdown?) ->
         if live?(connection, observer) do
           send(connection, {:writer_result, self(), token, write(tcp, bytes, shutdown?)})
-          enrolled_loop(connection, connection_monitor, observer, observer_monitor, nonce)
+
+          enrolled_loop(
+            connection,
+            connection_monitor,
+            observer,
+            observer_monitor,
+            context,
+            spent
+          )
         end
+
+      {:lifecycle_prepare, ^connection, ^nonce, ^observer, request, {:abs_ms, deadline}}
+      when is_reference(request) and is_integer(deadline) ->
+        result = prepare(context, connection, observer, deadline, spent)
+        send(connection, {:lifecycle_handoff_ready, self(), nonce, observer, request, result})
+        enrolled_loop(connection, connection_monitor, observer, observer_monitor, context, true)
 
       {:DOWN, ^connection_monitor, :process, ^connection, _reason} ->
         :ok
@@ -103,6 +127,20 @@ defmodule SSL.ConnectionWriter do
       {:DOWN, ^observer_monitor, :process, ^observer, _reason} ->
         :ok
     end
+  end
+
+  defp prepare(_context, _connection, _observer, _deadline, true),
+    do: {:error, :handoff_spent}
+
+  defp prepare(context, connection, observer, requested, false) do
+    deadline =
+      if context.setup_deadline == :infinity,
+        do: requested,
+        else: min(requested, context.setup_deadline)
+
+    if live?(connection, observer) and SSL.Options.remaining(deadline) > 0,
+      do: Observer.writer_ready(context.receipt, {:abs_ms, deadline}),
+      else: {:error, :deadline_exceeded}
   end
 
   defp live?(connection, observer), do: Process.alive?(connection) and Process.alive?(observer)

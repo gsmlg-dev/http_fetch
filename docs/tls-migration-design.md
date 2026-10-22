@@ -281,7 +281,7 @@ original setup deadline still applies. Lost control ACK is acceptance unknown,
 never rollback or no-resource evidence. Receipt dimensions and role bits stay fixed.
 
 This protocol is tested with manually enrolled cooperative actors and real passive
-TCP ownership transfer. It does not attest the inert TLS constructors readiness,
+TCP ownership transfer. Those manual-actor tests do not attest constructor readiness,
 perform TLS attach/release/I/O, or publish setup success. Original VM port DOWN is
 independent evidence from actor death; it does not additionally prove Unix physical
 FD close or remote terminal receipt. Those default/completion gates remain open.
@@ -299,6 +299,13 @@ and one clipped absolute expiry bound pending allocation. Only enrolled TCP
 produces a nonce-bound allocation notification; it is not a delivery ACK or TLS
 readiness. Native errors retain unknown permits. Handoff remains unsupported;
 this pending-helper expiry is not a TLS connection lifetime deadline.
+
+An explicit private preparation request after actor birth authenticates the original
+ready-recipient, ready nonce and socket reference. Actual Writer/Connection actors
+perform the Observer readiness challenge and acknowledgment. Its separate finite
+absolute budget is clipped to the original setup deadline and spent once; replay
+cannot extend it. Birth-only paths keep their original startup/lifetime semantics.
+Readiness preparation grants no TCP transfer, TLS attach or public lifecycle support.
 
 Full allocator/setup orchestration and constructor-error identity proof, public
 lifecycle, STARTTLS adoption, application owner ACK/authority transfer and socket/

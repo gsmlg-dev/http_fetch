@@ -2483,3 +2483,158 @@ PrestagingexistingAPPSgitdiff0; allfourConnection/pins/HTTPS byte guards equal
 Round22original snapshots. Filteredexactnamed-diagnosticprocess check foundNONE
 now (pgrepEXIT1), NOT retrospective child-reap/absence proof for v1. Only
 twoNEWappfiles+threeRootdocs changed. No otherSource/backend/pins/hooks edits.
+
+## Round24 — explicit readiness through actual actors
+
+Entry: HEAD e984fe0, clean worktree, active goal round24. Task27 owns only
+Connection, ConnectionWriter and one new inert-handoff-ready test. Root owns
+format/build/tests, docs and commits. Task20 owner acknowledged the exact
+three-path prerequisite scope before edits. No allocator/Observer/Handoff or
+existing birth-test writes are granted. Five ExSSL architecture documents are
+byte-unchanged from the prior full read; worker reviewed complete touched
+source plus current P2 design and task25 before its source-only changes.
+
+The missing prerequisite is actual-actor readiness: prior Writer only sent a
+birth acknowledgment, and Connection released it without either Observer
+readiness operation. The selected change is explicit preparation after birth,
+not automatic readiness. It authenticates the captured ready-recipient PID,
+ready nonce and original socket reference. The first admitted request consumes
+one preparation and fixes D=min(request absolute D, original setup D). This
+is a separate pending-operation budget; it neither renews setup nor turns an
+expired startup control budget into a connection lifetime limit.
+
+The actual Writer must call Observer.writer_ready with its retained opaque
+Receipt. A separate Observer challenge returns to the exact Connection, fenced
+by writer identity, observer, birth nonce and request reference. Only the
+actual Connection acknowledgment can produce preparation success. Spent or
+in-flight requests cannot mint another challenge or extend D. Unknown/lost
+acknowledgments never restore ordinary birth-ready state. This slice does not
+transfer a TCP Port, attach TLS, report setup completion, admit public lifecycle
+v1, change the backend default, or establish a P0 cleanup repair.
+
+### Actual source and focused verification
+
+Worker froze 1419 Connection lines, 152 Writer lines and four tests/116 lines.
+Root reviewed all new branches and the complete test, then added a fifth case:
+with original setup D=400ms and requested preparation D=5s, suspend the actual
+Connection after its preparation ACK. Its own handshake callback cannot run;
+the Observer must still retire it and its actual Writer under the clipped D.
+Only this test fixture gained an optional original setup deadline.
+
+Root formatter is authoritative: final Connection1447/Writer172/new test167
+lines, five cases. Actual ROUND24_READINESS_FOCUSED_EXIT=0 plus shell prompt:
+warning-free compilation of two files, then 117/117 in14.5s (3.2async/11.2sync),
+seed101/max_cases24. Scope is lifecycle directory plus all17 unchanged original
+birth cases. The fifth case and the four new actor cases all pass. A separate
+full formatted-source review found no blocking defect. Original classic Writer
+loop/native write, TCP abort/close body and birth-only semantics stay unchanged.
+PID/nonce checks use the existing cooperative bearer model, not sender attestation.
+
+### Narrow bootstrap diagnostic contract and independent API control
+
+Task28 supplied only the [trace helper](</tmp/http-fetch-round24-bootstrap-trace.exs>) (125 lines).
+Root read every line before any execution. Fixed TTL1500ms/64 events/1024B event
+array/2000B total JSON; only exact caller and first spawned worker inherit trace
+flags. The Collector installs four Bootstrap local-MFA patterns plus reservation
+request CALL only. Arity mode suppresses arguments; guarded annotations expose
+only original numeric API expiry and awaited worker PID. No Observer reservation
+return, Receipt, lease, alias, closure arguments, TLS state or traffic is logged.
+
+Pinned public OTP29.0.2 API evidence: [trace arity, first-spawn and custom messages](https://github.com/erlang/otp/blob/OTP-29.0.2/lib/kernel/src/trace.erl#L401);
+[delivery fencing](https://github.com/erlang/otp/blob/OTP-29.0.2/erts/preloaded/src/erlang.erl#L6688).
+First-spawn is cleared in BOTH parent and child: no recursive tracing of timer
+service descendants. Session destruction removes settings. Only the Collector
+waits on typed caller/worker delivery fences. The original operation runs ONCE
+and returns its exact result immediately after an asynchronous sanitized stop;
+initial attach may cost100ms and is explicitly an observer perturbation.
+
+Root separately wrote/read all46 lines of the [bootstrap control](</tmp/http-fetch-round24-bootstrap-control.exs>). ONE root mix-run
+API control returned actual ROUND24_BOOTSTRAP_CONTROL_EXIT=0 plus prompt. Report
+correlated caller101 with original spawn/await worker341, original numeric
+expiry, launch/return/await_down/reservation phases, and actual normal worker exit.
+Both typed delivery fences completed, status=captured/cleanup_ack=true, no
+overflow/TTL expiry. IO proxy monitored the original Collector BEFORE replying
+to its IO request; actual normal Collector DOWN and original proxy DOWN followed.
+Observer cancellation/Reader confirmed cleanup also passed. No TLS/native dial.
+
+ONE diagnostic campaign temporarily wrapped ONLY NativeTCPTest attempt line80
+with Round24BootstrapTrace.run. Root invoked Mix.Tasks.Test.run directly under
+mix run -r; this bypassed normal umbrella task recursion and combined the three
+app corpora into ONE ExUnit run. That changed scheduling/helper context; it is
+NOT a normal provider acceptance gate. Actual BOOTSTRAP_PROVIDER_EXIT=2 plus
+prompt: 1483/1484 (20/20 properties,1463/1464 tests),105.1s (23.1async/82.0sync).
+Only failure: Core TLS270/290 still pinned previous whole Connection SHA.
+All NativeTCP cases passed here; no R23 startup failure instance was captured.
+
+The four diagnostic reports contain one consistent normal worker sample and
+three EMPTY/inconclusive reports; every report says session cleanup ACK, which
+is not worker absence or per-Collector DOWN proof. Empty results lose caught
+setup/capture error and partial state in helper43–56. Stop handling may overwrite
+attach_unknown with a later ok tag. Thus operation:ok is not attachment ACK.
+Ranked candidates: hidden setup/capture exception,100ms attach race, effective
+pattern/flag differences. None established. The successful API control/sample
+cannot promote the three failed captures or explain the R23 bootstrap failure.
+
+No second diagnostic campaign/prototype repair was attempted. A future narrow
+failure-only version should retain bounded partial identity/events and report
+sticky attach_status plus error_stage/caught_kind/reason_class enums only. No
+exception structs, stacks, arguments or capabilities. Original125-line helper
+remains frozen. Root preserved the one-line instrumented NativeTCP fixture in
+a NEW tmp snapshot and restored the original136-line file BYTE EXACT before
+normal acceptance. No Bootstrap/Observer production source was changed.
+
+### Restored source gate and strict probe revalidation
+
+Root revalidated private buffer/verify/peer-close probes against the reviewed
+Connection diff: new branches are private-lifecycle-only; all original code
+(including classic tuple5 attach, buffer/verify forwarding, drain/abort/close)
+is byte-exact after removing only the two new private regions and restoring the
+two-line scope comment. The two source guards now pin ONLY the reviewed current
+SHA092bd3893b4d7fc1a7e05b99cd69a8e78e75d8ac64ee995353131c7b92947fbb.
+No fallback hash, removed assertion, test-option change or relaxed comparison.
+
+One normal restored run:
+
+```bash
+HTTP_QUIC_PHASE1_REAL=1 unbuffer mix test apps/ex_ssl/test apps/elixir_quic/test apps/http_core/test apps/http_fetch/test/http/socket_client_http2_test.exs --include integration --seed 101
+```
+
+Actual ROUND24_RESTORED_PROVIDER_EXIT=0 plus prompt. Standard root
+umbrella recursion ran ExSSL817/817 (20properties797tests),78.2s; QUIC249/249,8.3s;
+Core418/418,23.3s; FetchH2-file43/43,5.7s. Total1527/1527. Original NativeTCP
+fixture is restored and trace helper is NOT loaded in this run. Both strict
+private source probes pass. This supersedes R23 red only for this selected scope.
+
+The prior admission failure remains unexplained, not repaired by this pass.
+Latest whole-nine gate is still R22 five assertions plus existing test warnings;
+these selected four-app paths do NOT supersede it. Existing Elixir1.20 test
+bitstring-size warnings were not hidden or edited; this test command has no
+WAE flag, same as R23 provider scope. Production compile with WAE is separate.
+Actual ROUND24_READINESS_STATIC_EXIT=0 plus prompt: compilewarnings0; root
+formatter check0; configured Credo540files/8974mods-funs/no issues; Dialyzer
+0errors/0skips/four unchanged unnecessary-ignore notices. No new suppression.
+
+Final Root guards: original Connection code exact after subtracting the admitted
+private addition/comment, Writer constructor/birth prefix and native/classic
+suffix exact, NativeTCP136 fixture byte-restored; Core/Fetch probe files differ
+from original ONLY by their one current SHA literal each; HTTPS fixture byte
+exact. No production trace hooks, new public options or backend switch. Existing
+birth545 test file and all Observer/Handoff/Allocator sources remain untouched.
+Next actual allocator/Connection TCP transfer and commit need new protocol
+integration, self-ownership-gated allocator cleanup and acknowledged helper
+retirement. P0 cleanup/whole-nine/performance/candidate/publication remain open.
+
+Final SHA256 artifacts (helper125/control46 are tmp-only):
+
+```text
+apps/ex_ssl/lib/ssl/connection.ex 092bd3893b4d7fc1a7e05b99cd69a8e78e75d8ac64ee995353131c7b92947fbb
+apps/ex_ssl/lib/ssl/connection_writer.ex 011cb4ff2eedc97d4b611dbf286d384b3cb49aff1b49f6d509cff36d112c743b
+apps/ex_ssl/test/ssl/lifecycle/inert_handoff_ready_test.exs ba1404ebb5c0a85dcc6f9ce9c0207d9613efb900a695c0956393c9ca35827d3b
+/tmp/http-fetch-round24-bootstrap-trace.exs 08a1b89a9e278e56ea68a2f4b9781e2c81eb5c800934abbede39f7711286143d
+/tmp/http-fetch-round24-bootstrap-control.exs 3faa66e7904fc007227a11dd9761b6d332878f77596a854e39566335994ce944
+```
+
+All executed jobs collected with actual exit markers and prompts, not inferred
+idle. Runtime sources/five actor tests were fully reviewed after formatter;
+final diffcheck0. Only three app implementation/test files, two exact probe-hash
+literals and three root design/plan/validation documents belong to this change.
