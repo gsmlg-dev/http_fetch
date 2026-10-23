@@ -75,6 +75,29 @@ defmodule SSL.Lifecycle.Observer do
 
   def record_connect_failure(_, _, _), do: {:error, :invalid_connect_failure}
 
+  @spec record_socket_connect_failure(
+          Receipt.t(),
+          :socket.socket(),
+          :econnrefused | :enetunreach | :ehostunreach,
+          {:abs_ms, integer()}
+        ) :: :ok | {:error, atom()}
+  def record_socket_connect_failure(receipt, socket, reason, {:abs_ms, existing})
+      when is_integer(existing) and reason in [:econnrefused, :enetunreach, :ehostunreach] do
+    entered = now()
+    requested = min(existing, entered + 250)
+
+    if entered < requested,
+      do:
+        call(
+          receipt,
+          {:record_socket_connect_failure, socket, reason, {:abs_ms, existing}},
+          {:abs_ms, requested}
+        ),
+      else: {:error, :deadline_exceeded}
+  end
+
+  def record_socket_connect_failure(_, _, _, _), do: {:error, :invalid_connect_failure}
+
   @spec reserve_root(Receipt.t(), Authority.lease(), :allocator | :setup, {:abs_ms, integer()}) ::
           {:ok, reference()} | {:error, atom()}
   def reserve_root(receipt, lease, role, deadline),
@@ -195,6 +218,30 @@ defmodule SSL.Lifecycle.Observer do
 
   def handle_call({{:enroll_socket, _, _, _}, _}, _from, state),
     do: settle({:error, :invalid_deadline}, expire(state))
+
+  def handle_call(
+        {{:record_socket_connect_failure, socket, reason, {:abs_ms, existing}},
+         {:abs_ms, deadline}},
+        from,
+        state
+      )
+      when is_integer(deadline) do
+    state = expire(state)
+
+    if now() < deadline do
+      operation = {:record_socket_connect_failure, socket, reason, existing, deadline}
+      {reply, next} = operate(operation, elem(from, 0), state)
+      settle(reply, next)
+    else
+      settle({:error, :deadline_exceeded}, state)
+    end
+  end
+
+  def handle_call({{:record_socket_connect_failure, _, _, _}, _}, _from, state),
+    do: settle({:error, :invalid_connect_failure}, expire(state))
+
+  def handle_call({{:record_socket_connect_failure, _, _, _, _}, _}, _from, state),
+    do: settle({:error, :invalid_connect_failure}, expire(state))
 
   def handle_call({operation, {:abs_ms, deadline}}, from, state) do
     state = expire(state)
@@ -375,7 +422,7 @@ defmodule SSL.Lifecycle.Observer do
          {:ok, ref} <- monitor_socket(socket) do
       # Once the real monitor exists, retain accounting even if authorization expired.
       next = socket_authorization(state, socket, caller, deadline)
-      enroll_socket_identity(next, permit, token, socket, ref)
+      enroll_socket_identity(next, permit, token, socket, ref, deadline)
     else
       {:error, reason} -> {{:error, reason}, state}
     end
@@ -531,6 +578,30 @@ defmodule SSL.Lifecycle.Observer do
   defp operate({:record_connect_failure, _reason, _existing, _requested}, _caller, state),
     do: {{:error, :invalid_connect_failure}, state}
 
+  defp operate(
+         {:record_socket_connect_failure, socket, reason, existing, requested},
+         caller,
+         state
+       )
+       when is_integer(existing) and is_integer(requested) and
+              reason in [:econnrefused, :enetunreach, :ehostunreach] do
+    with true <- connect_window?(existing, requested),
+         :ok <- socket_connect_caller(state, caller, socket, existing),
+         entered = now(),
+         true <-
+           entered < requested and entered < existing and
+             (state.expires == :infinity or entered < state.expires),
+         {:ok, authority} <-
+           Authority.cancel(state.authority, Authority.lease(state.authority), entered, requested) do
+      {:ok, record_connect_outcome(state, authority, min(existing, entered + 1_000))}
+    else
+      _ -> {{:error, :unauthorized_connect_failure}, state}
+    end
+  end
+
+  defp operate({:record_socket_connect_failure, _, _, _, _}, _caller, state),
+    do: {{:error, :invalid_connect_failure}, state}
+
   defp operate({:publish_setup, result}, caller, state) do
     if state.setup == :pending and open?(state) and match?({:setup, _}, creator(state, caller)),
       do: publish(state, result),
@@ -566,6 +637,35 @@ defmodule SSL.Lifecycle.Observer do
       :ok
     else
       _ -> {:error, :unknown_tcp_allocation}
+    end
+  end
+
+  defp socket_connect_caller(state, caller, socket, existing) do
+    with true <- state.scope == :dial and state.setup == :pending and open?(state),
+         true <- handoff_process_live?(state.owner) and handoff_process_live?(state.controller),
+         {:ok, {allocator_ref, :process, ^caller}} <- handoff_resource(state, :allocator),
+         %{
+           live: true,
+           done: false,
+           identity: {_socket_ref, :socket, ^socket} = identity,
+           creator: {:allocator, ^allocator_ref},
+           creator_pid: ^caller,
+           creator_monitor: ^allocator_ref,
+           allocation_deadline: original
+         } <-
+           Map.get(state.resources, :tcp),
+         {:ok, %{state: :live, identity: ^identity, creator: {:allocator, ^allocator_ref}}} <-
+           ResourceLedger.enrollment_view(state.ledger, :tcp),
+         true <- is_integer(original) and existing <= original,
+         false <- Handoff.committed?(state.handoff),
+         false <- Handoff.involves?(state.handoff, identity),
+         true <- socket_owned?(socket, caller),
+         true <-
+           handoff_process_live?(caller) and handoff_process_live?(state.owner) and
+             handoff_process_live?(state.controller) do
+      :ok
+    else
+      _ -> {:error, :unauthorized_connect_failure}
     end
   end
 
@@ -869,7 +969,7 @@ defmodule SSL.Lifecycle.Observer do
     _, _ -> false
   end
 
-  defp enroll_socket_identity(state, permit, token, socket, ref) do
+  defp enroll_socket_identity(state, permit, token, socket, ref, deadline) do
     case ResourceLedger.enroll(state.ledger, :tcp, token, {ref, :socket, socket}) do
       {:ok, ledger, action} ->
         resource = %{
@@ -878,7 +978,8 @@ defmodule SSL.Lifecycle.Observer do
           done: false,
           creator: permit.parent,
           creator_pid: permit.creator,
-          creator_monitor: permit.creator_monitor
+          creator_monitor: permit.creator_monitor,
+          allocation_deadline: deadline
         }
 
         next = %{

@@ -4061,3 +4061,83 @@ The native Socket TLS/failure-settlement path, known-socket lifetime, collector 
 retention, public lifecycle/completion/duplex/managed H1/H2/default flip, independent
 interop/performance/soak and publication/cold-published-consumer gates remain open.
 No push or next major release yet; Goal ACTIVE/ARMED and incomplete.
+
+## Round37 — raw Socket allocation and known connect-failure attribution
+
+Scope is private IPv4 dial construction through the existing Allocator actor.
+NativeSocket reserves TCP before open, enrolls the exact object before connect,
+and preserves one absolute NativeE. Allocator.start_socket is explicit; the old
+Port start entry remains the production Setup path. Raw handoff rejects before
+Port operations. Owned close checks the public current owner; its return is not
+cleanup proof. Open/enrollment unknowns and sticky losses remain unresolved.
+
+The separate known-socket failure operation accepts only refused/unreachable
+errors, authenticates the original live unfinished Allocator PID/monitor and
+canonical typed Socket/ledger creator generation, checks current public owner,
+fresh Root/controller/provider liveness and original expiry, and rejects prepared
+or committed transfer. NativeE cannot exceed its captured enrollment deadline.
+RPC R=min(NativeE,entry+250ms); completion only shortens. Acceptance closes
+admission/records failed-connect BEFORE close, without reminting a permit,
+monitor, lease or receipt. Original resource DOWNs and Reader settle cleanup.
+
+Receiver audit found an internal five-element frame could bypass the generic
+outer deadline. The focused regression actually failed: exit2, 0/1, returned
+:ok instead of invalid_connect_failure. A dedicated canonical four-element
+receiver now requires integer NativeE and canonical outer RPC deadlines and rejects injected
+internal frames before generic dispatch. The R29 pending/no-TCP path is unchanged.
+Final independent source review accepts only this cooperative phase protocol,
+not native preemption, complete constructor identity or public TLS support.
+
+First constructor/auth run passed16/17 (exit2): the new bound/non-listening
+fixture did not yield Allocator DOWN within1000ms. Direct public references
+on that endpoint returned timeout for BOTH raw Socket (1000802us) and classic
+inet (1002135us), each with1000ms. This established a fixture timing error,
+not a Socket-only failure. Replaced only the new fixture with the existing
+closed-local-listener pattern; keep NativeE5000ms, DOWN1000ms, Reader2000ms
+and all assertions. No retries, fallback, timeout extension or old-test edits.
+
+Corrected focused17/17 passes0.5s/exit0: four actual Allocator cases exercise
+real peer probe/closure, recipient/owner loss, gated handoff and refused connect
+with failed/connect sealed receipt and actual roles17/observed_down17. The other
+thirteen cases cover authentication/deadline negatives and three pure argument
+units. All fourteen native cases are integration-tagged; unit fixtures do no I/O.
+Plain all-nine mix test --seed 101:1679 pass,1601 excluded, exit0+prompt.
+ExSSL518, QUIC215, Core339, H3companion109, Runtime90, Fetch303, WS51, WT24, SSE30.
+
+The original four-scope source command, real QUIC enabled, include integration,
+seed101/max24, passes1592/1592 exit0+prompt: ExSSL882/102.1s (20 properties),
+QUIC249/13.2s, Core418/27.8s, Fetch H2 file43/7.2s. Existing test-module
+bitstring warnings persist; this does not accept test --warnings-as-errors.
+Configured Credo552files/9257mods-funs has no issues15.3s. Initial Dialyzer had
+one new generated unreachable-false warning: redundant is_pid on typed Receipt
+observer. Removing only that test retains the local-node guard. Final compile-WAE,
+format, focused17/17 (1.6s) and Dialyzer pass0:0errors/0skips/4 old unnecessary
+ignores,29.02s. This one-line type simplification followed the broad source run.
+
+Root byte guards confirm793 of795 previously tracked app paths unchanged.
+Reversing declared Observer additions and its private captured-deadline field
+reconstructs the complete R36 file exactly; Root reviewed the full Allocator diff.
+Connection retains SHA256 61b2fa41a60fb00d01335ea8486e698aecac8fc0a45a47e10d5adecb34cc3f91.
+All original tests, assertions, payloads, pins, deadlines, Setup/Writer/Connection
+and public backend selection remain unchanged. Three new files contain the raw
+constructor and two tier-separated regression suites; no new provider actor exists.
+
+This accepts the private Allocator/known-refusal slice only. Full Socket Setup,
+raw TLS I/O and handoff/connected publication, all-error constructor proof,
+STARTTLS adoption, public lifecycle/completion/duplex/managed H1/H2 and removal
+of production OTP SSL remain open. No physical-FD/drain or full P2 claim follows.
+The last all-nine integration run remains R36 RED (two HTTPS early-upload cases
+and one WSS peer-close case); those unchanged cases were not rerun this round.
+All-nine remote CI, independent peers/performance/soak, candidate/publication
+and cold-published-consumer gates remain pending. No push/major release yet.
+
+A subsequent default Credo returned0 while omitting36 parser-timeout files;
+that partial pass is NOT accepted. With ERL_FLAGS='+S 4:4', unchanged rules
+and timeouts parse all552 files/9257mods-funs: no issues57.6s, exit0+prompt.
+Working-tree and staged diff checks also pass. No test budget changed.
+
+Evidence: /tmp/http-fetch-round37-{compile,receiver-red,native-focus,
+refusal-reference,native-focus-final,unit,source,compile-final,format-check,
+credo,dialyzer,native-final,dialyzer-final,credo-final,credo-complete,diff-check}.log and allocator.diff. Actual exit
+markers and returned prompts were checked; silent/inferred-idle job status alone
+was not completion evidence. Goal remains ACTIVE/ARMED and incomplete.

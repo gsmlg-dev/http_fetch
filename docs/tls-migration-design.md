@@ -246,13 +246,31 @@ liveness/ownership and connected publication explicitly reject the new Socket ki
 Fresh post-monitor ownership, authority, ledger admission, provider/controller/owner
 liveness and original deadline checks precede use. Late authenticated identities
 retain actual-monitor accounting with stop, without resetting losses or grace.
-Native Socket TLS I/O, handoff, known-socket failure settlement and public lifecycle
-remain unsupported. Five new integration cases and five accepted ledger/reference
+At the R32/R33 boundary, native Socket TLS I/O, handoff, known-socket failure
+settlement and public lifecycle remain unsupported. Five new integration cases and five accepted ledger/reference
 cases pass (10/10). R33 source acceptance also passes the normal lifecycle suite
 (148) and original four-scope provider/consumer suite (1575), with configured
 static gates. R32 startup/bind failures and the R33 diagnosis remain recorded in
 the validation ledger. No Socket TLS readiness, historical-owner or physical-FD
 claim follows.
+
+R37 adds a private [raw Socket constructor](../apps/ex_ssl/lib/ssl/lifecycle/native_socket.ex)
+and explicit Allocator.start_socket entry. It reserves the TCP permit before open,
+enrolls the exact Socket before connect, and retains one original NativeE. Recognized
+refusal/reachability errors publish through a dedicated known-socket operation BEFORE
+owned close; the R29 pending/no-TCP operation is unchanged and is never this mode's
+fallback. The receiver requires its canonical integer outer RPC deadline and rejects
+injected internal frames. Authentication derives the original live Allocator monitor,
+canonical typed Socket and ledger creator generation; current ownership and fresh
+Root/controller/provider liveness are required. NativeE cannot exceed the integer
+captured at Socket enrollment. Prepared/committed handoff disqualifies this report.
+Acceptance only shortens settlement and closes admission; actual original DOWN events
+and the existing Reader establish the separate terminal cleanup result. Open/enroll
+unknowns and sticky losses remain unresolved; unrecognized errors gain no new mapping.
+Four real Allocator cases and thirteen authentication/unit cases pass17/17, including
+independent classic TCP peer bytes and closure. Raw Socket handoff explicitly rejects;
+Setup orchestration, native TLS send/receive/options/close adaptation, all-error
+constructor proof and public lifecycle remain gated. This is not physical-FD proof.
 
 The private ObserverSupervisor loads seven control modules (Bootstrap, Observer,
 Authority, Receipt, ResourceLedger, Handoff and Reader) and the directly called OTP

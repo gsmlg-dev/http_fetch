@@ -1,7 +1,7 @@
 defmodule SSL.Lifecycle.Allocator do
   @moduledoc false
   use GenServer, restart: :temporary
-  alias SSL.Lifecycle.{NativeTCP, Observer, Receipt}
+  alias SSL.Lifecycle.{NativeSocket, NativeTCP, Observer, Receipt}
 
   # Private trusted context: valid opaque Receipt and deadline already clipped to
   # setup. Startup acknowledges an inert process, never allocation or readiness.
@@ -15,25 +15,31 @@ defmodule SSL.Lifecycle.Allocator do
           nonce: reference()
         }
   @spec start(context()) :: GenServer.on_start()
-  def start(
-        %{
-          receipt: receipt,
-          permit: permit,
-          ip: {_, _, _, _} = ip,
-          port: port,
-          deadline: {:abs_ms, deadline},
-          recipient: recipient,
-          nonce: nonce
-        } = context
-      )
-      when is_reference(permit) and is_pid(recipient) and is_reference(nonce) and
-             is_integer(port) and port in 1..65_535 and is_integer(deadline) do
+  def start(context), do: start_allocator(context, :port)
+
+  @spec start_socket(context()) :: GenServer.on_start()
+  def start_socket(context), do: start_allocator(context, :socket)
+
+  defp start_allocator(
+         %{
+           receipt: receipt,
+           permit: permit,
+           ip: {_, _, _, _} = ip,
+           port: port,
+           deadline: {:abs_ms, deadline},
+           recipient: recipient,
+           nonce: nonce
+         } = context,
+         mode
+       )
+       when is_reference(permit) and is_pid(recipient) and is_reference(nonce) and
+              is_integer(port) and port in 1..65_535 and is_integer(deadline) do
     observer = Receipt.observer(receipt)
 
     with true <- node(observer) == node() and node(recipient) == node(),
          true <- Enum.all?(Tuple.to_list(ip), &(is_integer(&1) and &1 in 0..255)),
          remaining when remaining > 0 <- deadline - now() do
-      GenServer.start(__MODULE__, {context, self(), observer},
+      GenServer.start(__MODULE__, {context, self(), observer, mode},
         timeout: min(remaining, 0xFFFFFFFF)
       )
     else
@@ -42,7 +48,7 @@ defmodule SSL.Lifecycle.Allocator do
     end
   end
 
-  def start(_), do: {:error, :invalid_lifecycle_context}
+  defp start_allocator(_, _mode), do: {:error, :invalid_lifecycle_context}
 
   @spec handoff(pid(), reference(), {pid(), reference(), reference()}, {:abs_ms, integer()}) ::
           :ok | {:error, atom()}
@@ -63,7 +69,9 @@ defmodule SSL.Lifecycle.Allocator do
     do: {:error, :invalid_handoff_context}
 
   @impl true
-  def init({context, parent, observer}) do
+  def init({context, parent, observer}), do: init({context, parent, observer, :port})
+
+  def init({context, parent, observer, mode}) when mode in [:port, :socket] do
     monitors =
       Map.new([parent, context.recipient, observer], fn pid -> {Process.monitor(pid), pid} end)
 
@@ -71,6 +79,7 @@ defmodule SSL.Lifecycle.Allocator do
 
     state = %{
       context: context,
+      mode: mode,
       parent: parent,
       observer: observer,
       monitors: monitors,
@@ -90,7 +99,7 @@ defmodule SSL.Lifecycle.Allocator do
            Observer.enroll_self(context.receipt, :allocator, context.permit, context.deadline),
          true <- live?(state) do
       native_result(
-        NativeTCP.connect(context.receipt, context.ip, context.port, context.deadline),
+        connect(state),
         state
       )
     else
@@ -100,9 +109,14 @@ defmodule SSL.Lifecycle.Allocator do
     end
   end
 
+  defp connect(%{mode: mode, context: context}) do
+    constructor = if mode == :socket, do: NativeSocket, else: NativeTCP
+    constructor.connect(context.receipt, context.ip, context.port, context.deadline)
+  end
+
   defp native_result({:ok, tcp}, state), do: allocated(%{state | tcp: tcp})
 
-  defp native_result({:error, reason}, state)
+  defp native_result({:error, reason}, %{mode: :port} = state)
        when reason in [:econnrefused, :enetunreach, :ehostunreach] do
     record_connect_failure(state.context, reason)
     {:stop, :normal, state}
@@ -136,6 +150,9 @@ defmodule SSL.Lifecycle.Allocator do
       elem(from, 0) != state.context.recipient or nonce != state.context.nonce ->
         {:reply, {:error, :unauthorized_handoff}, state}
 
+      state.mode == :socket ->
+        {:reply, {:error, :socket_transport_not_implemented}, state}
+
       state.transfer.from != nil ->
         {:reply, {:error, :handoff_spent}, state}
 
@@ -160,6 +177,11 @@ defmodule SSL.Lifecycle.Allocator do
   def handle_info(message, state), do: response(message, state)
 
   @impl true
+  def terminate(_reason, %{mode: :socket, tcp: tcp}) when not is_nil(tcp) do
+    _ = NativeSocket.close_owned(tcp)
+    :ok
+  end
+
   def terminate(_reason, %{tcp: tcp}) when is_port(tcp) do
     if Port.info(tcp, :connected) == {:connected, self()}, do: :gen_tcp.close(tcp)
     :ok

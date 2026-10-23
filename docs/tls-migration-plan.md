@@ -224,8 +224,14 @@ coverage; no supported endpoint class silently lost.
       before successful supervisor startup. Normal lifecycle148/four-scope1575,
       WAE/format/configuredCredo/Dial and independent source review pass. Task40/41
       are accepted for this private scope; native Socket transport lifetime is below.
-- [ ] Adapt the full native Socket transport lifetime and authenticated known-socket
-      connect-failure settlement. R29 pending/no-TCP failure API is not this path.
+- [x] Add the private raw Socket Allocator constructor and authenticated recognized
+      connect-failure settlement (R37). Exact pre-connect enrollment, captured NativeE,
+      original typed monitor/creator generation and canonical receiver are enforced.
+      Four real Allocator cases plus13 authentication/unit cases pass17/17; unknown
+      open/enrollment errors remain unknown. Handoff/TLS/publication are still gated.
+- [ ] Adapt the full native Socket transport lifetime, Setup orchestration and TLS I/O.
+      R37 recognized known-socket failure support is not this full-lifetime gate;
+      R29 pending/no-TCP failure API remains a separate path.
 - [ ] Before public lifecycle acceptance, complete native constructor identity proof
       and acknowledged failure publication for real allocator/setup orchestration
       under original deadlines. Private success and TLS/connect attribution above
