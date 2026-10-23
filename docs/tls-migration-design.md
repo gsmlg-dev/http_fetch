@@ -682,6 +682,15 @@ Static runner fixtures and real cryptographic computation remain unit inputs. So
 review of transitive normalizers and callbacks complements executed test partitions.
 Whole-umbrella policies and CI routing remain pending; see the validation ledger.
 
+R36 applies this routing across the remaining eight applications and all nine test
+helpers. Plain mix test excludes integration and E2E. Test CI provisions dependencies
+and runs units; separate Integration CI provisions independent peers, enables real
+QUIC and selects integration cases. Both use the same changed-app closure and manual
+all-nine selection. Release and shared H2 source gates explicitly include integration.
+E2E callers include the e2e tag, supplied automatically by the test.e2e alias. These
+routes preserve external coverage when defaults change; execution and remaining
+acceptance limits are recorded separately in the validation ledger.
+
 ## Source/dependency inventory and evidence boundaries
 
 Run `python3 scripts/tls_migration_inventory.py` for a bounded JSON inventory of

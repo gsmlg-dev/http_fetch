@@ -1,5 +1,6 @@
 defmodule HTTP.ExSSLVersionPolicyTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias ExSSL.TestSupport.OpenSSLPeer
   alias HTTP.Transport.ExSSL

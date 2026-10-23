@@ -1,5 +1,6 @@
 defmodule HTTP.ProxyPreparedTLSTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias Elixir.ExSSL.TestSupport.OpenSSLPeer
   alias HTTP.Transport.ExSSL

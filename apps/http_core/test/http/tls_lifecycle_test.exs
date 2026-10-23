@@ -7,6 +7,7 @@ defmodule HTTP.TLSLifecycleTest do
   @fixtures Path.expand("../../../http_fetch/test/support/fixtures", __DIR__)
 
   for entry <- [:connect, :connect_default, :upgrade, :upgrade_default] do
+    @tag :integration
     test "#{entry} registers the actual verified OTP receiver and sender" do
       {peer, listener, port} = peer()
       {tracker, _latch} = RequestLifecycle.start()
@@ -43,6 +44,7 @@ defmodule HTTP.TLSLifecycleTest do
     end
   end
 
+  @tag :integration
   test "raw abort remains pending until the actual suspended sender goes DOWN" do
     {tracker, latch, owner} = lifecycle()
     {socket, peer} = tracked_connection(tracker)
@@ -72,6 +74,7 @@ defmodule HTTP.TLSLifecycleTest do
   end
 
   for handoff <- [:socket, :connection] do
+    @tag :integration
     test "#{handoff} handoff releases only that connection and checkout restores its TLS monitors" do
       {tracker, _latch, _owner} = lifecycle()
       {first, first_peer} = tracked_connection(tracker)
@@ -103,6 +106,7 @@ defmodule HTTP.TLSLifecycleTest do
     end
   end
 
+  @tag :integration
   test "legacy OTP process list retains both resources and exact handoff" do
     {tracker, _latch, _owner} = lifecycle()
     {:ok, tcp} = :gen_tcp.listen(0, [:binary, active: false])
@@ -165,6 +169,7 @@ defmodule HTTP.TLSLifecycleTest do
     refute_receive :scope_unconfirmed, 0
   end
 
+  @tag :integration
   test "handoff keeps independently scoped TLS resources" do
     {tracker, _latch, _owner} = lifecycle()
     scope = start_supervised!({__MODULE__.ScopeRecorder, self()})
@@ -186,6 +191,7 @@ defmodule HTTP.TLSLifecycleTest do
   end
 
   for entry <- [:connect, :upgrade] do
+    @tag :integration
     test "managed #{entry} handshake failure keeps its missing TLS evidence unconfirmed" do
       {tracker, latch, owner} = lifecycle()
       scope = start_supervised!({__MODULE__.ScopeRecorder, self()})

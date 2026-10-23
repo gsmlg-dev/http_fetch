@@ -67,6 +67,7 @@ defmodule HTTP.WebSocket.TelemetryTest do
     end
   end
 
+  @tag :integration
   test "live connections redact telemetry while retaining the original handshake URL" do
     alias HTTP.WebSocket
     alias HTTP.WebSocket.Event.{Open, Message, Close}

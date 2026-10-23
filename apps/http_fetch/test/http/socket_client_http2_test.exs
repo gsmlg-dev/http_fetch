@@ -1,5 +1,6 @@
 defmodule HTTP.SocketClientHTTP2Test do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   import Bitwise
 

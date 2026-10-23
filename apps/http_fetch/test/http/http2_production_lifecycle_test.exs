@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP2ProductionLifecycleTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer
 

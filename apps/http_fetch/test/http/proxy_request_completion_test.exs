@@ -3,6 +3,7 @@ defmodule HTTP.ProxyRequestCompletionTest do
 
   alias HTTP.{Promise, RequestCompletion}
 
+  @tag :integration
   test "HTTP forwarding confirms socket closure and repeated concurrent waits" do
     {peer, route} =
       proxy(fn socket, parent ->
@@ -28,15 +29,18 @@ defmodule HTTP.ProxyRequestCompletionTest do
   for stage <- [:connect, :origin_tls, :proxy_tls] do
     completion = if stage == :connect, do: "confirmed", else: "unconfirmed without a TLS handle"
 
+    @tag :integration
     test "#{stage} cancellation waits for the dial helper with cleanup #{completion}" do
       assert_pending_stage(unquote(stage))
     end
 
+    @tag :integration
     test "#{stage} deadline closes the pending proxy route with cleanup #{completion}" do
       assert_pending_deadline(unquote(stage))
     end
   end
 
+  @tag :integration
   test "proxy response stream termination stays pending behind its real owner" do
     {peer, route} =
       proxy(fn socket, parent ->
@@ -69,6 +73,7 @@ defmodule HTTP.ProxyRequestCompletionTest do
     assert :ok = Task.await(peer)
   end
 
+  @tag :integration
   test "a proxy upload waits for the library source and blocked producer to stop" do
     parent = self()
 

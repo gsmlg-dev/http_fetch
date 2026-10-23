@@ -15,6 +15,7 @@ defmodule HTTP.ManagedTransport.ScopeTest do
   end
 
   for kind <- [:connection, :tls] do
+    @tag :integration
     test "closed raw socket retains capacity until its #{kind} process terminates" do
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
       {:ok, {_, port}} = :inet.sockname(listener)
@@ -79,6 +80,7 @@ defmodule HTTP.ManagedTransport.ScopeTest do
     end
   end
 
+  @tag :integration
   test "unknown TLS inventory retires admission and preserves unconfirmed generation evidence" do
     {:ok, scope} =
       ManagedTransport.open(

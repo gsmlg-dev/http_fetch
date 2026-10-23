@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP2ResponseMetadataTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer
   alias HTTP.HTTP2.HPACK

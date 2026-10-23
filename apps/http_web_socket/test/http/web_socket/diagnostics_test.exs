@@ -20,6 +20,7 @@ defmodule HTTP.WebSocket.DiagnosticsTest do
     :ok
   end
 
+  @tag :integration
   test "actual OTP status hides opening URL and private TLS options" do
     secret = "opening-diagnostic-secret"
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
@@ -54,6 +55,7 @@ defmodule HTTP.WebSocket.DiagnosticsTest do
     assert_receive {:peer_closed, ^peer}, @timeout
   end
 
+  @tag :integration
   test "actual termination reports and monitored reason hide private exit and pending input" do
     ws = open_connection("exit-diagnostic-secret")
     monitor = Process.monitor(ws.pid)
@@ -141,6 +143,7 @@ defmodule HTTP.WebSocket.DiagnosticsTest do
     assert summary.control_frames == nil
   end
 
+  @tag :integration
   test "default OTP status hides parser and delivery queues without changing state" do
     ws = open_connection("status-diagnostic-secret")
 
@@ -194,6 +197,7 @@ defmodule HTTP.WebSocket.DiagnosticsTest do
     end
   end
 
+  @tag :integration
   test "callback exception arguments are absent from raw and rendered crash reports" do
     ws = open_connection("exception-diagnostic-secret")
     install_transport(ws, :ok, "cleanup-diagnostic-secret")
@@ -205,6 +209,7 @@ defmodule HTTP.WebSocket.DiagnosticsTest do
 
   for kind <- [:error, :throw, :exit],
       reason <- [:normal, {:private, "reason-diagnostic-secret"}] do
+    @tag :integration
     test "cleanup #{kind} during #{inspect(reason)} termination is safe" do
       ws = open_connection("cleanup-url-diagnostic-secret")
       install_transport(ws, unquote(kind), "cleanup-diagnostic-secret")

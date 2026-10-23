@@ -1,4 +1,4 @@
-ExUnit.start(exclude: [:integration])
+ExUnit.start(exclude: [:integration, :e2e])
 
 if result_file = System.get_env("CI_EXUNIT_RESULT_FILE") do
   ExUnit.after_suite(fn results ->

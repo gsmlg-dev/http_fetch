@@ -3944,3 +3944,120 @@ FD21/23 gaps, native Socket TLS/failure settlement and public lifecycle/completi
 managed H1/H2/default-backend/P6/P7 gates remain unaccepted. No physical-FD guarantee
 or publication follows. Final GitHub push and next coordinated major release remain
 after all migration gates. Goal stays ACTIVE/ARMED and incomplete.
+
+## R36 — umbrella unit default and separate integration CI
+
+Base 47a2a030b00082cee534431057f5b677b08c1602. Task42 stays IN_PROGRESS;
+P0 acceptance remains unchecked and Goal active/armed. Two disjoint writer tasks
+classify the other eight apps. Root owns shared tooling, formatting and all runtime
+execution. Both workers froze their sources before Root formatting or source tests.
+Production, transport support, assertions, wire payloads, peer pins, async settings,
+case names and deadlines remain unchanged. No constructor or crypto primitive is
+replaced by a fake cleanup fact. All source cases retain their original discovery.
+
+All nine source test helpers exclude integration and E2E by default. Test CI now runs
+units without Python/uv/independent-peer provisioning. New integration.yml uses the
+same owner/H2 closure and manual all-nine selector, provisions the previous Fetch
+peer dependencies and selects --only integration with HTTP_QUIC_PHASE1_REAL=1.
+It has no continue-on-error escape. CLI allowlists and workflow regressions include
+this fourth entry workflow. Release full-source and shared H2 consumer gates include
+integration explicitly. E2E destination commands include e2e; both test.e2e overloads
+supply it. Independent imported/pinned historical gates remain unchanged. Separate
+consumer source-smoke helpers already use plain ExUnit.start and need no tag change.
+
+The corrected eight-app file census is 113 unit, 33 mixed, 67 integration (213 files):
+
+| App | Unit files | Mixed files | Integration files |
+| --- | --- | --- | --- |
+| elixir_quic | 30 | 4 | 4 |
+| elixir_quic_http3 | 10 | 0 | 1 |
+| http_core | 29 | 3 | 4 |
+| http_runtime | 9 | 5 | 2 |
+| http_fetch | 22 | 16 | 47 |
+| http_event_source | 3 | 1 | 3 |
+| http_web_socket | 5 | 4 | 6 |
+| http_web_transport | 5 | 0 | 0 |
+
+File classes are source-boundary inventory, distinct from executed case counts.
+Fetch has 85 files/86 modules; the second RequestCompletionBackendTest remains unit.
+
+The new metadata is 67 module attributes, 236 literal case attributes and two generated
+reader conditionals. QUIC/Core/Runtime/HTTP3 change 27 files; four consumers change 81;
+ExSSL changes only its helper. Root normalized all 109 app changes against HEAD:
+case content is identical after reversing tags/helper options and ONLY the H3
+callback wrappers, ignoring blank lines. All 686 other app files/symlink targets are
+byte-exact; the original Connection production SHA is unchanged. Root reviewed the
+provider (812 lines), consumer (2027 lines) and shared (319 lines) diffs using
+normalized all-file guards; both reviewers accepted their source scopes, with an independent consumer/transitive audit.
+
+Review recovered pure cases instead of excluding mixed modules wholesale. QUIC
+DATAGRAM's first two profile/codec cases remain units. Fetch HTTP3's pure flat-options
+case bypasses the original File/Quic.listen fixture through a named integration:true
+callback; its fixture body stays verbatim, with a :ok unit fallback. Pooled completion
+retains local-tracker and already-aborted request cases. Only write_to iterations
+receive filesystem integration tags; read_all siblings remain units. WS proxy-frame
+constructor and option-validation units remain; Fetch's profile/ALPN conflict case
+moves to integration because Options loads host trust before reporting that conflict.
+Pure WebTransport fake/capability cases remain units and provide no wire evidence.
+
+Actual root prep: MIX_ENV=test, HTTP_FETCH_CI_APP unset, existing isolated build32
+and P0 Python venv; deps.get --check-locked plus compile --warnings-as-errors both
+pass0. Root format applies/checks pass0. Plain mix test --seed 101 then executes all
+nine apps with max 24: 1676 passed and 1587 excluded; actual exit0+returned prompt.
+
+| App | Unit passed | Integration excluded | Unit seconds |
+| --- | --- | --- | --- |
+| ex_ssl | 515 | 350 | 30.9 |
+| elixir_quic | 215 | 34 | 13.6 |
+| http_core | 339 | 79 | 3.3 |
+| elixir_quic_http3 | 109 | 4 | 2.1 |
+| http_runtime | 90 | 59 | 5.6 |
+| http_fetch | 303 | 929 | 23.8 |
+| http_web_socket | 51 | 87 | 9.4 |
+| http_web_transport | 24 | 0 | 0.5 |
+| http_event_source | 30 | 45 | 2.9 |
+| Total | 1676 | 1587 | — |
+
+Counts include20 ExSSL properties and20 Fetch doctests. Existing Elixir1.20 bitstring
+pin/type warnings still appear while loading some test modules; this plain default
+run is green, not a new test --warnings-as-errors acceptance. The separate library
+compile uses warnings-as-errors. Source loading/static fixture inputs and runner
+report output remain preparation, not a zero-filesystem or security-sandbox claim.
+
+Explicit real integration command: HTTP_QUIC_PHASE1_REAL=1 mix test --only integration
+--seed 101. Actual1584/1587 pass,1676 excluded, exit2+returned prompt. ExSSL350/350
+105.7s; QUIC34/34 8.7s; Core79/79 27.2s; HTTP3 4/4 2.0s; Runtime59/59 6.5s;
+Fetch927/929 212.6s; WS86/87 12.8s; WT0 cases/24 excluded0.6s; SSE45/45 2.9s.
+Together the two runs account for all 3263 currently discovered source cases.
+The integration tier stays red. The failed original bodies are unchanged:
+
+- HTTPS early upload16: ex_ssl auto streamed infinity and ex_ssl http1 streamed 4000
+  both reach the original peer drain, which remains open after its 2-second recv.
+  Original source/writer/owner/Connection/Writer DOWN and Port.info/1 returning nil
+  assertions precede that drain; they do not establish physical descriptor destruction or FIN.
+- WS proxy_boundary264/339: ex_ssl WSS owner loss observes connection/writer DOWN,
+  then misses original lost_owner_closed notification within 1000ms. Existing peer
+  does ssl_drain before sending that notification. No observation budget changes.
+
+These belong to the existing blocked-TLS teardown family. Exact failed variants
+vary from historical R22; this run does not clear its FD/peer-cleanup findings.
+No retry, fallback, GC, new trace/introspection or descriptor campaign was added.
+
+Required static checks pass0: Credo549 files/9205 modules/functions, no issues19.0s;
+Dialyzer0 errors/0 skipped/4 unchanged unnecessary ignores25.36s. CI Python16 tests
+pass5.325s; release-automation34 tests pass44.202s; app closure4 cases pass0.08s.
+The scoped test.e2e apps/http_web_transport/e2e --seed 101 check runs2 existing cases
+with e2e INCLUDED (0.2s/exit0). This verifies the changed alias routing only; these
+capability/fake cases are not independent WebTransport wire evidence. Actual full
+public E2E, all-nine GitHub manual workflows and release/candidate consumer gates
+remain pending. The combined static/automation/routing chain returns0+prompt.
+
+Evidence /tmp/http-fetch-round36-*: prep.log, unit.log, integration.log, format.log,
+credo.log, dialyzer.log, ci-python.log, release-python.log, closures.log,
+e2e-routing.log; quic-core-runtime.diff and fetch-clients.diff retain source review.
+Final reviewed source routing and local unit partition are accepted at this scope.
+P0 remains open: the integration tier is RED and actual manual remote CI is pending.
+The native Socket TLS/failure-settlement path, known-socket lifetime, collector error
+retention, public lifecycle/completion/duplex/managed H1/H2/default flip, independent
+interop/performance/soak and publication/cold-published-consumer gates remain open.
+No push or next major release yet; Goal ACTIVE/ARMED and incomplete.

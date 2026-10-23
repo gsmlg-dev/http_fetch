@@ -11,6 +11,7 @@ defmodule HTTP.HeaderFirstTest do
   end
 
   for protocol <- [:http1, :h2c], status <- [200, 404] do
+    @tag :integration
     test "#{protocol} resolves #{status} at headers while body remains gated" do
       {url, peer} = gated_peer(unquote(protocol), unquote(status), "ok")
 
@@ -32,6 +33,7 @@ defmodule HTTP.HeaderFirstTest do
     end
   end
 
+  @tag :integration
   test "concurrent default caller still waits for the small body" do
     {url, peer} = gated_peer(:http1, 200, "ok")
     promise = HTTP.fetch(url, timeout: 3_000)
@@ -42,6 +44,7 @@ defmodule HTTP.HeaderFirstTest do
   end
 
   for {method, status} <- [{:head, 200}, {:get, 204}, {:get, 304}] do
+    @tag :integration
     test "stream policy preserves bodyless #{method}/#{status}" do
       {url, peer} = gated_peer(:http1, unquote(status), "", "2")
       promise = HTTP.fetch(url, method: unquote(method), stream_response: true, redirect: :manual)
@@ -51,6 +54,7 @@ defmodule HTTP.HeaderFirstTest do
     end
   end
 
+  @tag :integration
   test "abort after headers reports stream error and closes connection" do
     controller = HTTP.AbortController.new()
     {url, peer} = gated_peer(:http1, 200, "ok")
@@ -66,6 +70,7 @@ defmodule HTTP.HeaderFirstTest do
     assert_receive {:peer_closed, ^peer}, 2_000
   end
 
+  @tag :integration
   test "acknowledgement gates stream completion" do
     {url, peer} = gated_peer(:http1, 200, "ok")
     promise = HTTP.fetch(url, stream_response: true, timeout: 3_000)
@@ -80,6 +85,7 @@ defmodule HTTP.HeaderFirstTest do
     assert_receive {:stream_end, ^stream}, 2_000
   end
 
+  @tag :integration
   test "request deadline still bounds the body after headers" do
     {url, peer} = gated_peer(:http1, 200, "ok")
     promise = HTTP.fetch(url, stream_response: true, timeout: 500)

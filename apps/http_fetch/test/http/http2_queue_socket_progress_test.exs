@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP2QueueSocketProgressTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
   alias HTTP.HTTP2.Pool
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer
 

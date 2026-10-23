@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP2.ProductionFlowTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer
 
   for kind <- [:binary, :stream] do

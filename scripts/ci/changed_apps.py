@@ -89,7 +89,7 @@ def changed_paths(base, head):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--workflow", required=True, choices=("ci.yml", "test.yml", "e2e.yml"))
+    parser.add_argument("--workflow", required=True, choices=("ci.yml", "test.yml", "integration.yml", "e2e.yml"))
     parser.add_argument("--event", required=True, choices=("push", "pull_request", "workflow_dispatch"))
     parser.add_argument("--base", default="")
     parser.add_argument("--head", default="HEAD")

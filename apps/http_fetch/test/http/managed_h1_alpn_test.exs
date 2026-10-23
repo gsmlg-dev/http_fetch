@@ -1,5 +1,6 @@
 defmodule HTTP.ManagedH1ALPNTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.{ManagedTransport, Promise, RequestCompletion, Response}
   @fixtures Path.expand("../support/fixtures", __DIR__)

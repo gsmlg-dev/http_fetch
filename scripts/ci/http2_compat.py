@@ -91,7 +91,7 @@ def main():
         run('root-format', ['mix', 'format', '--check-formatted', 'mix.exs', '.formatter.exs', 'config/config.exs'])
         run('consumer-tests', ['mix', 'test', 'apps/http_core/test', 'apps/http_runtime/test',
                                'apps/http_fetch/test', 'apps/http_event_source/test',
-                               'apps/http_web_socket/test', '--seed', '36'])
+                               'apps/http_web_socket/test', '--include', 'integration', '--seed', '36'])
         for peer in ('hyper-h2', 'node'):
             for route, flags in (('h2c', []), ('ssl', ['--tls', '--backend', 'ssl']),
                                  ('ex_ssl', ['--tls', '--backend', 'ex_ssl'])):

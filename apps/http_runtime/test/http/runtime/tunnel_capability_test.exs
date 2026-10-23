@@ -1,5 +1,6 @@
 defmodule HTTP.Runtime.TunnelCapabilityTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
   import Bitwise
 
   alias HTTP.HTTP2.{ConnectionOwner, Pool}

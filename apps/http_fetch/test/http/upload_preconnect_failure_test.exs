@@ -1,5 +1,6 @@
 defmodule HTTP.UploadPreconnectFailureTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   for route <- [:proxy, :reuse] do
     test "#{route} refusal terminates an upload and wakes its pending producer" do

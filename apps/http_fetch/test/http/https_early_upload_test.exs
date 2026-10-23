@@ -1,5 +1,6 @@
 defmodule HTTP.HTTPSEarlyUploadTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   @fixtures Path.expand("../../../http_web_socket/test/support/fixtures", __DIR__)
   @timeout 5_000

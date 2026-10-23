@@ -6,6 +6,7 @@ defmodule HTTP.Runtime.StreamTest do
 
   @preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
+  @tag :integration
   test "h2c delivers generation-qualified headers and DATA and restores receive credit" do
     test_pid = self()
 
@@ -39,6 +40,7 @@ defmodule HTTP.Runtime.StreamTest do
     assert %{active_streams: 0, protocol_streams: 0} = ConnectionOwner.status(owner)
   end
 
+  @tag :integration
   test "cancelling one stream leaves its sibling usable on the same observed connection" do
     test_pid = self()
 
@@ -83,6 +85,7 @@ defmodule HTTP.Runtime.StreamTest do
     assert Process.alive?(owner)
   end
 
+  @tag :integration
   test "delivery references settle in order and duplicate or unknown ACKs return no extra credit" do
     test_pid = self()
 
@@ -126,6 +129,7 @@ defmodule HTTP.Runtime.StreamTest do
     close_stream(stream)
   end
 
+  @tag :integration
   test "subscriber death releases the established stream without closing the shared owner" do
     test_pid = self()
 
@@ -151,6 +155,7 @@ defmodule HTTP.Runtime.StreamTest do
     assert %{active_streams: 0, protocol_streams: 0} = ConnectionOwner.status(owner)
   end
 
+  @tag :integration
   test "GOAWAY preserves an accepted stream and forwards later DATA" do
     {url, _peer} =
       peer(fn socket ->
@@ -180,6 +185,7 @@ defmodule HTTP.Runtime.StreamTest do
     close_stream(stream)
   end
 
+  @tag :integration
   test "final HEADERS release a completed request without sending a reset" do
     test_pid = self()
 
@@ -211,6 +217,7 @@ defmodule HTTP.Runtime.StreamTest do
   end
 
   for payload <- ["", "final bytes"] do
+    @tag :integration
     test "END_STREAM DATA #{inspect(payload)} releases only after its transport delivery ACK" do
       test_pid = self()
       payload = unquote(payload)
@@ -241,6 +248,7 @@ defmodule HTTP.Runtime.StreamTest do
   end
 
   for cancellation <- [:deadline, :close, :subscriber_death] do
+    @tag :integration
     test "#{cancellation} while the owner is suspended cannot write queued request headers" do
       test_pid = self()
 
@@ -302,6 +310,7 @@ defmodule HTTP.Runtime.StreamTest do
     end
   end
 
+  @tag :integration
   test "owner death during a queued opening settles both admitted and opening logical streams" do
     {url, _peer} =
       peer(fn socket ->
@@ -345,6 +354,7 @@ defmodule HTTP.Runtime.StreamTest do
     assert reason in [:normal, :noproc]
   end
 
+  @tag :integration
   test "explicit HTTP/1 cannot open a stream on a healthy pooled HTTP/2 owner" do
     test_pid = self()
 
@@ -382,6 +392,7 @@ defmodule HTTP.Runtime.StreamTest do
   end
 
   for cancellation <- [:close, :subscriber_death] do
+    @tag :integration
     test "#{cancellation} does not wait for a suspended exclusive owner to stop" do
       test_pid = self()
 
@@ -425,6 +436,7 @@ defmodule HTTP.Runtime.StreamTest do
     end
   end
 
+  @tag :integration
   test "fragmented bytes coalesce under pressure without losing bounded FIFO credit" do
     {url, _peer} =
       peer(fn socket ->
@@ -457,6 +469,7 @@ defmodule HTTP.Runtime.StreamTest do
     close_stream(stream)
   end
 
+  @tag :integration
   test "settled remote EOF does not keep its task blocked behind a stalled owner" do
     {url, _peer} =
       peer(fn socket ->
@@ -481,6 +494,7 @@ defmodule HTTP.Runtime.StreamTest do
     assert %{active_streams: 0, protocol_streams: 0} = ConnectionOwner.status(owner)
   end
 
+  @tag :integration
   test "shared owner death settles the logical stream with its generation" do
     {url, _peer} =
       peer(fn socket ->
@@ -499,6 +513,7 @@ defmodule HTTP.Runtime.StreamTest do
   end
 
   for cancellation <- [:close, :subscriber_death], timeout <- [5_000, :infinity] do
+    @tag :integration
     test "#{cancellation} interrupts a stalled TLS handshake with #{timeout} timeout and closes the dial socket" do
       test_pid = self()
 

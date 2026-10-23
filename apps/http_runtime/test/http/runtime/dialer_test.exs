@@ -49,6 +49,7 @@ defmodule HTTP.Runtime.DialerTest do
   end
 
   for {signal, reason} <- [abort: :aborted, deadline: :request_timeout] do
+    @tag :integration
     test "#{signal} drains a result queued during handoff" do
       {listener, port} = listener()
       {caller, worker, monitor} = start_connect(port)
@@ -71,6 +72,7 @@ defmodule HTTP.Runtime.DialerTest do
     end
   end
 
+  @tag :integration
   test "tracked cancellation rejects a cooperative worker's late result" do
     {listener, port} = listener()
     {caller, worker, monitor} = start_connect(port, lifecycle: true)
@@ -88,6 +90,7 @@ defmodule HTTP.Runtime.DialerTest do
     :gen_tcp.close(peer)
   end
 
+  @tag :integration
   test "a crash after socket transfer closes the caller-owned socket" do
     {listener, port} = listener()
     {caller, worker, monitor} = start_connect(port)
@@ -103,6 +106,7 @@ defmodule HTTP.Runtime.DialerTest do
     :gen_tcp.close(peer)
   end
 
+  @tag :integration
   test "successful result wins over normal worker exit and retains the socket" do
     {listener, port} = listener()
     {caller, worker, monitor} = start_connect(port)
@@ -125,6 +129,7 @@ defmodule HTTP.Runtime.DialerTest do
   end
 
   for {signal, reason} <- [abort: :aborted, deadline: :request_timeout] do
+    @tag :integration
     test "#{signal} during handoff closes the socket and cleans the monitor" do
       {listener, port} = listener()
       {caller, worker, monitor} = start_connect(port)

@@ -1,5 +1,6 @@
 defmodule HTTP.ResponseCancellationCompatibilityTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.{AbortController, Promise, RequestCompletion, Response}
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer

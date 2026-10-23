@@ -1,5 +1,6 @@
 defmodule HTTP.ManagedTransportTLSBackingTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.{ManagedTransport, Promise, RequestCompletion, Response}
 

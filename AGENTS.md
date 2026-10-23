@@ -38,8 +38,15 @@ Use the same root preparation and replace the path for any app under `apps/`,
 including `apps/ex_ssl/test`, `apps/elixir_quic/test`, and
 `apps/elixir_quic_http3/test`. Run E2E suites from the umbrella root with
 `MIX_ENV=test mix test.e2e` or scope them with
-`MIX_ENV=test mix test apps/<app>/e2e`. These root-scoped forms retain the
+`MIX_ENV=test mix test apps/<app>/e2e --include e2e`. These root-scoped forms retain the
 runtime dependency closure of umbrella apps.
+
+Default `mix test` selects single-VM unit cases. Real sockets, operating-system
+processes, system trust and SUT filesystem interactions belong to integration:
+`MIX_ENV=test mix test --only integration`. `test.yml` runs units;
+`integration.yml` provisions peers and runs integration cases as a separate gate.
+Use `mix test --include integration` for the full source suite. E2E tests require
+`--include e2e`; `mix test.e2e` supplies that flag automatically.
 
 ## Project layout
 
@@ -103,7 +110,7 @@ For module-by-module details, see the table in `CLAUDE.md` and read
   `git log --oneline` for examples.
 - No release branch conventions are enforced beyond standard feature
   branches; PRs target `main` (see CI workflow files in `.github/workflows/`).
-- CI, Test, and E2E use isolated app jobs. Automatic push/PR runs select changed
+- CI, Test, Integration and E2E use isolated app jobs. Automatic push/PR runs select changed
   app owners and affected H2 Fetch/SSE/WebSocket consumers from the umbrella dependency graph. Relevant root manifests, configuration,
   H2 harnesses, CI tooling and workflows also trigger these consumers. CI retains
   independent h2c/TLS and candidate-package compatibility evidence. WebSocket
@@ -112,8 +119,8 @@ For module-by-module details, see the table in `CLAUDE.md` and read
 - Shared configuration, tooling, and workflow changes require manual full
   regression. `workflow_dispatch` on each workflow forces all nine apps;
   manual CI also checks shared formatting, candidate consumers, and historical
-  TLS compatibility. Use `gh workflow run ci.yml --ref main` (or `test.yml`
-  or `e2e.yml`) after shared changes. Release validation still covers the full
+  TLS compatibility. Use `gh workflow run ci.yml --ref main` (or `test.yml`,
+  `integration.yml` or `e2e.yml`) after shared changes. Release validation still covers the full
   umbrella regardless of app selection.
 
 ## Reference

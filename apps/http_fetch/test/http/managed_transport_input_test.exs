@@ -4,6 +4,7 @@ defmodule HTTP.ManagedTransportInputTest do
   alias HTTP.{ManagedTransport, Promise, RequestCompletion, Response}
   alias HTTP.ManagedTransport.Policy
 
+  @tag :integration
   test "oversized convenience Content-Type rejects before any accept and settles its source" do
     {origin, listener} = listener()
     scope = open(origin)
@@ -26,6 +27,7 @@ defmodule HTTP.ManagedTransportInputTest do
     retire(scope)
   end
 
+  @tag :integration
   test "unused URI authority is discarded while path, query and Host reach the peer" do
     {origin, listener} = listener()
     scope = open(origin)
@@ -39,6 +41,7 @@ defmodule HTTP.ManagedTransportInputTest do
     retire(scope)
   end
 
+  @tag :integration
   test "bounded empty iodata normalizes to an empty buffered upload" do
     {origin, listener} = listener()
     scope = open(origin)
@@ -52,6 +55,7 @@ defmodule HTTP.ManagedTransportInputTest do
     retire(scope)
   end
 
+  @tag :integration
   test "structural and nesting bounds reject empty iodata before dialing" do
     {origin, listener} = listener()
     scope = open(origin)
@@ -67,6 +71,7 @@ defmodule HTTP.ManagedTransportInputTest do
     retire(scope)
   end
 
+  @tag :integration
   test "generated body and HTTP1 headers participate in the field count limit" do
     {origin, listener} = listener()
     scope = open(origin)
@@ -84,6 +89,7 @@ defmodule HTTP.ManagedTransportInputTest do
     retire(scope)
   end
 
+  @tag :integration
   test "generated fields participate in the exact HTTP1 metadata byte boundary" do
     {origin, listener} = listener()
     scope = open(origin)
@@ -132,6 +138,7 @@ defmodule HTTP.ManagedTransportInputTest do
     retire(scope)
   end
 
+  @tag :integration
   test "explicit Content-Type wins and original framing is preserved for rejection" do
     {origin, listener} = listener()
     scope = open(origin)

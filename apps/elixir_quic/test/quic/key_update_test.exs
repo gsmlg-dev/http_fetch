@@ -205,6 +205,7 @@ defmodule Quic.KeyUpdateTest do
     def abort(state, _), do: state
   end
 
+  @tag :integration
   test "connection discards only failed authentication without changing state or idle deadline" do
     alias Quic.Connection
     alias Quic.IO.GenUDP

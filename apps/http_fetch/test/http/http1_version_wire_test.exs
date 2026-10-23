@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP1VersionWireTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias HTTP.{Promise, RequestCompletion, RequestError, Response}
 

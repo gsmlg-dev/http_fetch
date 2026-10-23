@@ -1,5 +1,6 @@
 defmodule HTTP.ContentEncodingTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias HTTP.HTTP2.HPACK
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer

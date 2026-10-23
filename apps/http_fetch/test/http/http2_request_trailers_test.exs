@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP2RequestTrailersTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
 

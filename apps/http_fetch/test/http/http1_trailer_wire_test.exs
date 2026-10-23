@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP1TrailerWireTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   test "public response trailers preserve order after acknowledged body delivery" do
     {url, _peer} =

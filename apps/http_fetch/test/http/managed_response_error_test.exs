@@ -1,5 +1,6 @@
 defmodule HTTP.ManagedResponseErrorTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.{ManagedTransport, Promise, RequestCompletion, Response}
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer

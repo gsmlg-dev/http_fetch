@@ -15,6 +15,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     end
   end
 
+  @tag :integration
   test "HTTP1 completion returns an idle connection and cannot cancel its next lease" do
     parent = self()
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
@@ -53,6 +54,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     assert :ok = Task.await(peer)
   end
 
+  @tag :integration
   test "HTTP2 cancellation settles one stream while a live sibling and pooled socket survive" do
     parent = self()
 
@@ -91,6 +93,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     send(peer, :close)
   end
 
+  @tag :integration
   test "HTTP1 cancellation during checkout stays pending until the leased socket closes" do
     parent = self()
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
@@ -134,6 +137,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     assert :ok = Task.await(peer)
   end
 
+  @tag :integration
   test "HTTP2 stream termination stays pending behind suspended shared-owner cleanup" do
     {url, peer} =
       Peer.start(self(), fn socket ->
@@ -167,6 +171,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     send(peer, :close)
   end
 
+  @tag :integration
   test "HTTP2 early response waits for a suspended upload source to terminate" do
     {url, peer} =
       Peer.start(self(), fn socket ->
@@ -200,6 +205,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     send(peer, :close)
   end
 
+  @tag :integration
   test "HTTP2 shared-owner death returns persistent unconfirmed cleanup" do
     {url, peer} =
       Peer.start(self(), fn socket ->
@@ -221,6 +227,7 @@ defmodule HTTP.PooledRequestCompletionTest do
   end
 
   for terminal <- [:abort, :deadline] do
+    @tag :integration
     test "HTTP2 #{terminal} settles a pool wait without touching the occupied sibling" do
       parent = self()
       pool = Process.whereis(:http_fetch_http2_pool)
@@ -273,6 +280,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     end
   end
 
+  @tag :integration
   test "HTTP2 completion waits for pool release after request EOF" do
     {url, peer} =
       Peer.start(self(), fn socket ->
@@ -321,6 +329,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     end
   end
 
+  @tag :integration
   test "HTTP2 TLS cancellation closes TCP but leaves unreturned TLS cleanup unconfirmed" do
     parent = self()
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
@@ -355,12 +364,14 @@ defmodule HTTP.PooledRequestCompletionTest do
   end
 
   for version <- [:http1, :http2] do
+    @tag :integration
     test "verified OTP TLS #{version} cleanup preserves its pooled connection for reuse" do
       assert_tls_reuse(unquote(version))
     end
   end
 
   for mode <- [:disabled_reuse, :non_reusable_key] do
+    @tag :integration
     test "HTTP2 #{mode} cancellation confirms dedicated owner and socket termination" do
       parent = self()
 
@@ -399,6 +410,7 @@ defmodule HTTP.PooledRequestCompletionTest do
       send(peer, :close)
     end
 
+    @tag :integration
     test "HTTP2 exclusive cleanup retains connection evidence for #{mode}" do
       parent = self()
 
@@ -420,6 +432,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     end
   end
 
+  @tag :integration
   test "HTTP2 failed pool registration settles its provisional owner and TLS socket" do
     parent = self()
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])

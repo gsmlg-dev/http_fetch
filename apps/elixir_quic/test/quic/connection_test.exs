@@ -90,6 +90,7 @@ defmodule Quic.ConnectionTest do
     )
   end
 
+  @tag :integration
   test "connection sends a protected Initial over UDP and keeps local send distinct from ACK" do
     {:ok, peer} = GenUDP.open()
     {:ok, writer} = GenUDP.open()
@@ -106,6 +107,7 @@ defmodule Quic.ConnectionTest do
     :ok = GenUDP.close(peer)
   end
 
+  @tag :integration
   test "runtime PTO retransmits a retained Initial with a fresh packet number" do
     {:ok, peer} = GenUDP.open()
     {:ok, writer} = GenUDP.open()
@@ -127,6 +129,7 @@ defmodule Quic.ConnectionTest do
     :ok = GenUDP.close(peer)
   end
 
+  @tag :integration
   test "server holds its flight until it has amplification credit" do
     {:ok, peer} = GenUDP.open()
     {:ok, writer} = GenUDP.open()
@@ -156,6 +159,7 @@ defmodule Quic.ConnectionTest do
     :ok = GenUDP.close(peer)
   end
 
+  @tag :integration
   test "authenticated Handshake validates the server path without a 1200 byte minimum" do
     {:ok, writer} = GenUDP.open()
     opts = options({GenUDP, writer}, role: :server)
@@ -170,6 +174,7 @@ defmodule Quic.ConnectionTest do
     :ok = GenUDP.close(writer)
   end
 
+  @tag :integration
   test "TLS completion cannot bypass parameter authentication or CID validation" do
     for {adapter, reason} <- [
           {InvalidParametersTLS, {:transport_parameters, :connection_id_mismatch}},
@@ -196,6 +201,7 @@ defmodule Quic.ConnectionTest do
     end
   end
 
+  @tag :integration
   test "stale datagrams cannot change credit and a handshake deadline terminates" do
     {:ok, writer} = GenUDP.open()
 
@@ -217,6 +223,7 @@ defmodule Quic.ConnectionTest do
     assert_receive {:quic_closed, ^conn, _, {:local_send, :writer_failed}}, 1_000
   end
 
+  @tag :integration
   test "writer death terminates a waiting connection" do
     {:ok, writer} = GenUDP.open()
     {:ok, conn} = Connection.start_link(options({GenUDP, writer}, role: :server))
@@ -225,6 +232,7 @@ defmodule Quic.ConnectionTest do
     assert_receive {:quic_closed, ^conn, ^generation, {:writer_down, :normal}}, 1_000
   end
 
+  @tag :integration
   test "close enters closing, ignores late datagrams, then drains and cleans up" do
     {:ok, peer} = GenUDP.open()
     {:ok, writer} = GenUDP.open()

@@ -16,6 +16,7 @@ defmodule HTTP.EventSourceTest do
     assert EventSource.closed() == 2
   end
 
+  @tag :integration
   test "connects, receives events, and closes" do
     {:ok, _server, port} =
       HTTPEventSource.TestServer.start_link(
@@ -49,6 +50,7 @@ defmodule HTTP.EventSourceTest do
     assert_receive :event_source_server_closed, 1_000
   end
 
+  @tag :integration
   test "reconnects with last event id after EOF" do
     {:ok, _server, port} =
       HTTPEventSource.TestServer.start_link(
@@ -76,6 +78,7 @@ defmodule HTTP.EventSourceTest do
     assert :ok = EventSource.close(source)
   end
 
+  @tag :integration
   test "stops on 204 responses" do
     {:ok, _server, port} =
       HTTPEventSource.TestServer.start_link(status: 204, content_type: nil, body: "")
@@ -86,6 +89,7 @@ defmodule HTTP.EventSourceTest do
     assert EventSource.ready_state(source) == EventSource.closed()
   end
 
+  @tag :integration
   test "stops on invalid content type" do
     {:ok, _server, port} =
       HTTPEventSource.TestServer.start_link(content_type: "application/json", body: "{}")
@@ -96,6 +100,7 @@ defmodule HTTP.EventSourceTest do
     assert EventSource.ready_state(source) == EventSource.closed()
   end
 
+  @tag :integration
   test "honors retry fields from the stream" do
     {:ok, _server, port} =
       HTTPEventSource.TestServer.start_link(body: "retry: 25\ndata: ready\n\n", close: false)
@@ -108,6 +113,7 @@ defmodule HTTP.EventSourceTest do
     assert :ok = EventSource.close(source)
   end
 
+  @tag :integration
   test "delivers events over verified TLS 1.3 for each backend" do
     for backend <- [:ssl, :ex_ssl] do
       {:ok, _server, port} =
@@ -132,6 +138,7 @@ defmodule HTTP.EventSourceTest do
     end
   end
 
+  @tag :integration
   test "retains the configured TLS backend across reconnects" do
     previous = Application.get_env(:http_core, :tls_backend)
     on_exit(fn -> restore_tls_backend(previous) end)
@@ -167,6 +174,7 @@ defmodule HTTP.EventSourceTest do
     assert {:error, {:unsupported_scheme, "ftp"}} = EventSource.new("ftp://example.com/events")
   end
 
+  @tag :integration
   test "finalizes events when TLS closes before a delayed consumer rearms" do
     {:ok, server, port} =
       HTTPEventSource.TestServer.start_link(

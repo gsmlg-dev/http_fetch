@@ -29,6 +29,7 @@ defmodule Quic.Phase1APIRegressionTest do
     assert {:error, :closed} = Quic.stop_stream(stream, 7, ref: ref, timeout: 1, deadline: 0)
   end
 
+  @tag :integration
   test "endpoint connect and accept expose timeout references for status resolution" do
     {:ok, client} = Quic.client([])
     {:ok, server} = Quic.listen([])

@@ -7,6 +7,7 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
   @settings <<4::16, 0::32, 3::16, 1::32>>
 
   for kind <- [:binary, :stream], status <- [200, 413] do
+    @tag :integration
     test "complete #{status} abandons #{kind} upload before socket reuse" do
       test_pid = self()
       status = unquote(status)
@@ -59,6 +60,7 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
   end
 
   for reset? <- [false, true] do
+    @tag :integration
     test "blocked owner chunk stays abandoned through sibling traffic and trailers, peer NO_ERROR=#{reset?}" do
       test_pid = self()
 
@@ -174,6 +176,7 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
     end
   end
 
+  @tag :integration
   test "a completed upload receives no duplicate EOF or reset on final response" do
     test_pid = self()
 

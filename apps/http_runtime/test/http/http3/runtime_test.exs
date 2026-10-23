@@ -166,6 +166,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     assert :ok = Pool.release(pool, second)
   end
 
+  @tag :integration
   test "request deadline releases native admission while DATA awaits settlement", ctx do
     server =
       start_supervised!(%{
@@ -211,6 +212,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 1_000
   end
 
+  @tag :integration
   test "pool admits the actual owner concurrency and queues until that slot releases", ctx do
     {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
     on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
@@ -261,6 +263,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     GenServer.stop(pool)
   end
 
+  @tag :integration
   test "concurrent leases beyond remaining rotation capacity transfer only unsent opens", ctx do
     {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
     on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
@@ -315,6 +318,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     refute_receive {:read_chunk, _, :ack}, 0
   end
 
+  @tag :integration
   test "raw native Session GOAWAY is returned without transfer or producer demand", ctx do
     {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
     on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
@@ -343,6 +347,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
 
   for admission <- [:sent, :indeterminate] do
     @admission admission
+    @tag :integration
     test "#{admission} request GOAWAY remains terminal without another native allocation", ctx do
       {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
       on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
@@ -377,6 +382,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
 
   for cancellation <- [:abort, :subscriber_down] do
     @cancellation cancellation
+    @tag :integration
     test "#{cancellation} removes queued admission before a slot becomes available", ctx do
       {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
       on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
@@ -423,6 +429,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     end
   end
 
+  @tag :integration
   test "native owner opens 32 requests on one connection and exposes cleanup accounting", ctx do
     {:ok, server} =
       Quic.listen(
@@ -461,6 +468,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     refute Process.alive?(endpoint)
   end
 
+  @tag :integration
   test "abort while authenticated readiness is pending releases the connector without upload",
        ctx do
     {:ok, socket} = :gen_udp.open(0, [:binary, active: false])
@@ -487,6 +495,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     refute_receive {:read_chunk, _, :ack}, 0
   end
 
+  @tag :integration
   test "known-unsent owner opens reject dead subscribers and expired deadlines", ctx do
     {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
     on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
@@ -531,6 +540,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     assert %{requests: 0, allocations: 1} = ConnectionOwner.status(owner)
   end
 
+  @tag :integration
   test "a paused native download allows a sibling and terminal delivery follows acknowledged bytes",
        ctx do
     {:ok, server} =
@@ -588,6 +598,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     assert_receive {:http_runtime, ^generation, ^stream, {:error, :invalid_http3_headers}}, 1_000
   end
 
+  @tag :integration
   test "native early final response cancels the producer without acknowledging unadmitted bytes",
        ctx do
     {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
@@ -619,6 +630,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     GenServer.stop(pool)
   end
 
+  @tag :integration
   test "stopping an owner preserves a verified shared endpoint", ctx do
     {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
     on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)

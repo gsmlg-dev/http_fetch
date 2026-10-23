@@ -57,6 +57,7 @@ defmodule HTTP.HTTP2PoolKeyTest do
     refute left == right
   end
 
+  @tag :integration
   test "file-backed TLS identity includes file contents" do
     path = Path.join(System.tmp_dir!(), "http2-pool-key-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm(path) end)

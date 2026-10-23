@@ -5,6 +5,7 @@ defmodule HTTP.RequestErrorWireTest do
   @ipv4 {127, 0, 0, 1}
   @ipv6 {0, 0, 0, 0, 0, 0, 0, 1}
 
+  @tag :integration
   test "a saturated first pin times out before establishment and permits a successful second pin" do
     {blocked, available, port} = paired_listeners(10)
 
@@ -133,6 +134,7 @@ defmodule HTTP.RequestErrorWireTest do
   end
 
   for scheme <- ["http", "https"] do
+    @tag :integration
     test "#{scheme} refusal exposes pre-send evidence and caller can try a second validated pin" do
       {refused, listener, port} = paired_listeners(10, 16)
       :ok = :gen_tcp.close(refused)
@@ -215,6 +217,7 @@ defmodule HTTP.RequestErrorWireTest do
   end
 
   for terminal <- [:close, :deadline, :source_error] do
+    @tag :integration
     test "#{terminal} after request bytes never gives pre-send evidence" do
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
       on_exit(fn -> :gen_tcp.close(listener) end)
@@ -279,6 +282,7 @@ defmodule HTTP.RequestErrorWireTest do
     end
   end
 
+  @tag :integration
   test "TLS establishment abort is ambiguous and the raw default remains compatible" do
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: @ipv4])
     {:ok, {_, port}} = :inet.sockname(listener)
@@ -336,6 +340,7 @@ defmodule HTTP.RequestErrorWireTest do
     end
   end
 
+  @tag :integration
   test "a failed redirected connection cannot make the earlier mutation replay-safe" do
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: @ipv4])
     {:ok, {_, port}} = :inet.sockname(listener)

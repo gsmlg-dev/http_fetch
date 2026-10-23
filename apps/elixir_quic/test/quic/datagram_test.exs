@@ -94,6 +94,7 @@ defmodule Quic.DatagramTest do
              Codec.validate_frame_levels([%{type: :datagram, data: "x"}], :handshake)
   end
 
+  @tag :integration
   test "negotiated DATAGRAMs preserve duplicate payloads and bounded pull delivery" do
     opts = [datagram: [max_frame_size: 1200, max_items: 2, max_buffer_bytes: 8]]
     {outgoing, incoming} = pair(opts, opts)
@@ -126,6 +127,7 @@ defmodule Quic.DatagramTest do
     assert {:error, :datagram_too_large} = Quic.send_datagram(outgoing, :binary.copy("a", 1198))
   end
 
+  @tag :integration
   test "DATAGRAM send reports unsupported when the peer does not advertise it" do
     {outgoing, incoming} = pair([], datagram: [max_frame_size: 1200])
     assert {:ok, %{datagram: %{send_max_bytes: 0, receive_max_bytes: 1197}}} = Quic.info(outgoing)
@@ -141,6 +143,7 @@ defmodule Quic.DatagramTest do
     assert {:ok, ["one-way"]} = Quic.read_datagrams(outgoing)
   end
 
+  @tag :integration
   test "receive overflow drops whole DATAGRAMs and retains exact admitted bytes" do
     opts = [datagram: [max_frame_size: 1200, max_items: 1, max_buffer_bytes: 4]]
     {outgoing, incoming} = pair(opts, opts)

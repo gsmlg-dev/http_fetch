@@ -1,5 +1,6 @@
 defmodule HTTP.WebSocketTLSLifecycleTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.WebSocket
   alias HTTP.WebSocket.Event.Close

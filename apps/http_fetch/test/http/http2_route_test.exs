@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP2RouteTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer
 

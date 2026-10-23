@@ -1,5 +1,6 @@
 defmodule HTTP.WebSocket.LifecycleBoundsTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
   import Bitwise
 
   alias HTTP.WebSocket

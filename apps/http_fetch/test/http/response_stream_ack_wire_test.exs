@@ -1,5 +1,6 @@
 defmodule HTTP.ResponseStreamAckWireTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.{Promise, RequestCompletion, Response}
 

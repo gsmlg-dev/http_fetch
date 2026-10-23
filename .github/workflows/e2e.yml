@@ -173,7 +173,7 @@ jobs:
           E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
         run: |
           if compgen -G "apps/${HTTP_FETCH_CI_APP}/e2e/*_test.exs" > /dev/null; then
-            mix test "apps/${HTTP_FETCH_CI_APP}/e2e"
+            mix test "apps/${HTTP_FETCH_CI_APP}/e2e" --include e2e
           else
             echo "No E2E ExUnit suite for ${HTTP_FETCH_CI_APP}"
           fi

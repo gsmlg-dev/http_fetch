@@ -1,5 +1,6 @@
 defmodule HTTP.RequestTargetWireTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   for suffix <- ["", "?", "?key=%2F%3F&value=a%20b"],
       method <- [:post, :get, :delete],

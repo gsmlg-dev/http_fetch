@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP3RequestTrailersTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
   @fixtures Path.expand("../../../elixir_quic/test/fixtures/tls", __DIR__)
 
   for body <- ["abc", ""], declaration? <- [false, true] do

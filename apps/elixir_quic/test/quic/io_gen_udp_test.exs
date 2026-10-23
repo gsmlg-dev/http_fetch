@@ -1,5 +1,6 @@
 defmodule Quic.IO.GenUDPTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias Quic.IO.GenUDP
 

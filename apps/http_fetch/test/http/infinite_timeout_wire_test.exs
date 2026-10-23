@@ -1,5 +1,6 @@
 defmodule HTTP.InfiniteTimeoutWireTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   @fixtures Path.expand("../../../http_web_socket/test/support/fixtures", __DIR__)
   @wait 2_000

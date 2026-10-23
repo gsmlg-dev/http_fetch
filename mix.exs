@@ -127,10 +127,10 @@ defmodule HttpFetch.Umbrella.MixProject do
   end
 
   defp run_e2e_tests([]) do
-    Mix.Task.run("test", Enum.map(@e2e_apps, &"apps/#{&1}/e2e"))
+    Mix.Task.run("test", ["--include", "e2e" | Enum.map(@e2e_apps, &"apps/#{&1}/e2e")])
   end
 
   defp run_e2e_tests(args) do
-    Mix.Task.run("test", args)
+    Mix.Task.run("test", ["--include", "e2e" | args])
   end
 end

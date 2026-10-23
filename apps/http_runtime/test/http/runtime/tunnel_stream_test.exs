@@ -1,5 +1,6 @@
 defmodule HTTP.Runtime.TunnelStreamTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
   alias HTTP.HTTP2.ConnectionOwner
   alias HTTP.Runtime.Stream
   @preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"

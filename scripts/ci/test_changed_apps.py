@@ -10,7 +10,7 @@ from pathlib import Path
 from changed_apps import ALL, H2_CONSUMERS, affected_h2_consumers, dependency_graph, select_apps
 
 SCRIPT = Path(__file__).with_name("changed_apps.py").resolve()
-WORKFLOWS = ("ci.yml", "test.yml", "e2e.yml")
+WORKFLOWS = ("ci.yml", "test.yml", "integration.yml", "e2e.yml")
 
 
 def run_cli(cwd, *args):
@@ -168,6 +168,8 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("python3 scripts/ci/http2_compat.py", ci)
         self.assertIn("h2-compat-${{ github.sha }}", ci)
         self.assertIn("if-no-files-found: error", ci)
+        compatibility = (root / "scripts/ci/http2_compat.py").read_text()
+        self.assertIn("'--include', 'integration', '--seed', '36'", compatibility)
 
     def test_scoped_checks_and_manual_full_gates_are_preserved(self):
         root = SCRIPT.parents[2]
@@ -189,9 +191,21 @@ class WorkflowContractTest(unittest.TestCase):
         test = (root / ".github/workflows/test.yml").read_text()
         self.assertIn("mix test apps/${{ matrix.app }}/test", test)
         self.assertIn("test-${{ matrix.app }}-", test)
-        self.assertIn("python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt", test)
+        self.assertNotIn("pip install", test)
+        self.assertNotIn("setup-uv", test)
+        self.assertNotIn("--include integration", test)
+        integration = (root / ".github/workflows/integration.yml").read_text()
+        self.assertIn("python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt", integration)
+        self.assertIn("--only integration", integration)
+        self.assertNotIn("continue-on-error", integration)
         self.assertNotIn("restore-keys:", test)
+        self.assertIn('HTTP_QUIC_PHASE1_REAL: "1"', integration)
+        self.assertIn('mix test "apps/${HTTP_FETCH_CI_APP}/e2e" --include e2e', e2e)
+        for app in ALL:
+            helper = (root / "apps" / app / "test/test_helper.exs").read_text()
+            self.assertIn("exclude: [:integration, :e2e]", helper, app)
         release = (root / ".github/workflows/release.yml").read_text()
+        self.assertIn("mix test --seed 28092026 --include integration", release)
         self.assertLess(release.index("--requirement scripts/requirements-http2-stream-clients.txt"),
                         release.index("mix test --seed"))
 

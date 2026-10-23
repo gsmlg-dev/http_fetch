@@ -33,6 +33,7 @@ defmodule HTTP.SSLTransportTest do
       end
     end
 
+    @tag :integration
     test "propagates ex_ssl profile and ALPN conflicts through HTTP.fetch" do
       profile = %SSL.ClientHello.WireProfile{extensions: [{:alpn, ["http/1.1"]}]}
 
@@ -49,12 +50,14 @@ defmodule HTTP.SSLTransportTest do
                |> HTTP.Promise.await()
     end
 
+    @tag :integration
     test "rejects self-signed certificates by default" do
       url = start_https_server!(fn socket -> send_response(socket, "secure") end)
 
       assert {:error, _reason} = url |> HTTP.fetch() |> HTTP.Promise.await()
     end
 
+    @tag :integration
     test "fetches responses over ssl" do
       url =
         start_https_server!(fn socket ->
@@ -73,6 +76,7 @@ defmodule HTTP.SSLTransportTest do
       assert HTTP.Response.read_all(response) == "secure"
     end
 
+    @tag :integration
     test "honors caller cacertfile with verify peer" do
       url =
         start_https_server!(fn socket ->
@@ -91,6 +95,7 @@ defmodule HTTP.SSLTransportTest do
       assert HTTP.Response.read_all(response) == "trusted"
     end
 
+    @tag :integration
     test "fetches a verified response through ex_ssl" do
       url =
         start_https_server!(fn socket ->
@@ -108,6 +113,7 @@ defmodule HTTP.SSLTransportTest do
       assert HTTP.Response.read_all(response) == "ex-ssl"
     end
 
+    @tag :integration
     test "streams chunked responses through ex_ssl" do
       url =
         start_https_server!(fn socket ->
@@ -131,6 +137,7 @@ defmodule HTTP.SSLTransportTest do
       assert HTTP.Response.read_all(response) == "chunked"
     end
 
+    @tag :integration
     test "streams close-delimited responses through ex_ssl" do
       url =
         start_https_server!(fn socket ->
@@ -160,6 +167,7 @@ defmodule HTTP.SSLTransportTest do
       assert HTTP.Response.read_all(response) == "close-delimited"
     end
 
+    @tag :integration
     test "uploads large buffered bodies through ex_ssl" do
       body = :binary.copy("u", HTTP.Config.streaming_threshold() + 1)
 
@@ -185,6 +193,7 @@ defmodule HTTP.SSLTransportTest do
       assert HTTP.Response.read_all(response) == "uploaded"
     end
 
+    @tag :integration
     test "cancels an in-flight ex_ssl request" do
       test_pid = self()
 
@@ -211,6 +220,7 @@ defmodule HTTP.SSLTransportTest do
       assert_receive {:server_recv_after_abort, {:error, :closed}}, 2_000
     end
 
+    @tag :integration
     test "times out an ex_ssl request waiting for response headers" do
       test_pid = self()
 
@@ -233,6 +243,7 @@ defmodule HTTP.SSLTransportTest do
       assert_receive {:server_recv_after_timeout, {:error, :closed}}, 2_000
     end
 
+    @tag :integration
     test "uses TLS backend transport options on direct requests" do
       url =
         start_https_server!(fn socket ->
@@ -251,6 +262,7 @@ defmodule HTTP.SSLTransportTest do
       assert HTTP.Response.read_all(response) == "direct"
     end
 
+    @tag :integration
     test "pins the configured backend through HTTPS redirects" do
       test_pid = self()
 
@@ -290,6 +302,7 @@ defmodule HTTP.SSLTransportTest do
       assert HTTP.Response.read_all(response) == "redirected"
     end
 
+    @tag :integration
     test "streams large responses over ssl" do
       body = String.duplicate("s", HTTP.Config.streaming_threshold() + 1)
 
@@ -310,6 +323,7 @@ defmodule HTTP.SSLTransportTest do
       assert HTTP.Response.read_all(response) == body
     end
 
+    @tag :integration
     test "streams large verified responses through ex_ssl" do
       body = String.duplicate("s", HTTP.Config.streaming_threshold() + 1)
 

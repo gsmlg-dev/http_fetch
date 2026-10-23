@@ -1,5 +1,6 @@
 defmodule HTTP.WebSocket.ConnectionHTTP2Test do
   use ExUnit.Case, async: true
+  @moduletag :integration
   import Bitwise
   alias HTTP.WebSocket
   alias HTTP.WebSocket.Event.{Open, Message, Close, Error}

@@ -63,6 +63,7 @@ defmodule HTTP.ConnectAddressTest do
              HTTP.SocketClient.request(request)
   end
 
+  @tag :integration
   test "conflicting SNI and explicit certificate identities reject pinned routes before I/O" do
     {:ok, listener} = listen(@ipv4)
     on_exit(fn -> :gen_tcp.close(listener) end)
@@ -123,6 +124,7 @@ defmodule HTTP.ConnectAddressTest do
   end
 
   for address <- [@ipv4, @ipv6] do
+    @tag :integration
     test "HTTP literal #{inspect(address)} dialing preserves original Host without DNS" do
       address = unquote(Macro.escape(address))
       parent = self()
@@ -149,6 +151,7 @@ defmodule HTTP.ConnectAddressTest do
   end
 
   for backend <- [:ssl, :ex_ssl], address <- [@ipv4, @ipv6] do
+    @tag :integration
     test "#{backend} pin #{inspect(address)} retains SNI and hostname verification" do
       address = unquote(Macro.escape(address))
       backend = unquote(backend)
@@ -178,6 +181,7 @@ defmodule HTTP.ConnectAddressTest do
   end
 
   for backend <- [:ssl, :ex_ssl] do
+    @tag :integration
     test "#{backend} pin keeps default trust and rejects wrong URL certificate identity" do
       for {host, ssl} <- [
             {"pinned.invalid", []},
@@ -208,6 +212,7 @@ defmodule HTTP.ConnectAddressTest do
         {@ipv4, @ipv6, "localhost"}
       ],
       form <- [:implicit, :tuple, :string] do
+    @tag :integration
     test "ExSSL original IP #{inspect(origin)} (#{form}) survives distinct pin #{inspect(address)}" do
       origin = unquote(Macro.escape(origin))
       address = unquote(Macro.escape(address))
@@ -259,6 +264,7 @@ defmodule HTTP.ConnectAddressTest do
   end
 
   for host <- ["127.0.0.2", "[::1]"] do
+    @tag :integration
     test "ExSSL pin verifies original #{host} instead of the dialed certificate IP" do
       {port, peer} =
         tls_peer(
@@ -280,6 +286,7 @@ defmodule HTTP.ConnectAddressTest do
     end
   end
 
+  @tag :integration
   test "independent IP certificate cannot authenticate the routable dial address" do
     {port, peer} =
       tls_peer(@ipv4, fn _ -> flunk("dial identity reached HTTP") end, "pinned-ip")
@@ -296,6 +303,7 @@ defmodule HTTP.ConnectAddressTest do
     assert_receive {:tls_handshake, ^peer, {:error, _}}, @timeout
   end
 
+  @tag :integration
   test "refused pin never falls back to DNS or repeats a mutation after peer failure" do
     {listener, refused, port} = paired_listeners()
     :ok = :gen_tcp.close(refused)
@@ -341,6 +349,7 @@ defmodule HTTP.ConnectAddressTest do
     refute_receive {:mutation, _}, 0
   end
 
+  @tag :integration
   test "a permitted redirect is returned and the next hop needs a new caller pin" do
     {port, _} =
       tcp_peer(@ipv4, fn socket ->
@@ -362,6 +371,7 @@ defmodule HTTP.ConnectAddressTest do
   end
 
   for backend <- [:ssl, :ex_ssl], stop <- [:abort, :deadline] do
+    @tag :integration
     test "#{backend} pinned TLS establishment cleanup on #{stop}" do
       parent = self()
 
@@ -395,6 +405,7 @@ defmodule HTTP.ConnectAddressTest do
     end
   end
 
+  @tag :integration
   test "HTTP2 pools cannot reuse a live connection established for a different pin" do
     parent = self()
     {first, second, port} = paired_listeners()
@@ -491,6 +502,7 @@ defmodule HTTP.ConnectAddressTest do
     end
   end
 
+  @tag :integration
   test "pinned OTP streaming connection retains cancellable TCP ownership" do
     {port, _} =
       tls_peer(@ipv4, fn socket ->

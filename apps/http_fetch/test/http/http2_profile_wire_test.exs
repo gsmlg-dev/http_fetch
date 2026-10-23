@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP2ProfileWireTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.HTTP2.HPACK
 

@@ -1,5 +1,6 @@
 defmodule HTTPUnixSocketTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias HTTP.Promise
   alias HTTP.Response

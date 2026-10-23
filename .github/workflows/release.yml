@@ -100,6 +100,7 @@ jobs:
       - name: Validate all source and automation
         env:
           MIX_ENV: test
+          HTTP_QUIC_PHASE1_REAL: "1"
         run: |
           unset HTTP_FETCH_CI_APP
           mix format --check-formatted
@@ -109,7 +110,7 @@ jobs:
           mix format --check-formatted scripts/http3/session_gate.exs scripts/http3/public_gate.exs scripts/http3/canary.exs
           mix compile --warnings-as-errors
           mix run scripts/phase1/admission_test.exs
-          mix test --seed 28092026
+          mix test --seed 28092026 --include integration
           mix test apps/ex_ssl/test --include integration --seed 743209
           mix credo
           mix dialyzer --format github

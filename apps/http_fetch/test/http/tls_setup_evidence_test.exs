@@ -3,6 +3,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
+  @tag :integration
   test "certificate rejection after ServerHello proves no HTTP and cleanup observes TLS processes" do
     {listener, second, port} = paired_listeners()
     parent = self()
@@ -104,6 +105,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
     assert {:error, :timeout} = :gen_tcp.accept(second, 0)
   end
 
+  @tag :integration
   test "fatal alert before ServerHello remains unknown and cleanup unconfirmed" do
     {listener, port} = listener()
 
@@ -129,6 +131,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
   end
 
   for cancellation <- [:abort, :deadline] do
+    @tag :integration
     test "queued #{cancellation} wins over a proof-bearing TLS result" do
       {listener, port} = listener()
 
@@ -173,6 +176,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
         {:custom_handshake, [], [handshake: :full]},
         {:raw, [error_mode: :raw], []}
       ] do
+    @tag :integration
     test "#{name} does not expose confirmed TLS setup evidence" do
       {listener, port} = listener()
 
@@ -203,6 +207,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
     end
   end
 
+  @tag :integration
   test "early_data does not expose confirmed TLS setup evidence" do
     {_listener, port} = listener()
     request_opts = Keyword.put(options(), :ssl, cacerts: [], early_data: <<"must not transmit">>)
@@ -224,6 +229,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
     refute HTTP.RequestError.pre_send?(error)
   end
 
+  @tag :integration
   test "a continuation alert accepted after the absolute connect deadline stays unknown" do
     {listener, port} = listener()
 
@@ -282,6 +288,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
     refute HTTP.RequestError.pre_send?(forged)
   end
 
+  @tag :integration
   test "TLS peer closure after actual POST bytes remains unknown and is never replayed" do
     {listener, port} = listener()
     parent = self()
@@ -381,6 +388,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
   end
 
   for version <- [:"tlsv1.2", :"tlsv1.3"] do
+    @tag :integration
     test "ordinary successful #{version} preserves verified authority and supports a rebuilt upload" do
       {listener, port} = listener()
       parent = self()

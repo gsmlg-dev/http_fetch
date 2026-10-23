@@ -1,5 +1,6 @@
 defmodule Quic.Phase1MetricsTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias Quic.Endpoint
 

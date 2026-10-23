@@ -11,6 +11,7 @@ defmodule HTTP.TLSTransportTest do
     @transport transport
 
     describe "#{inspect(transport)}" do
+      @tag :integration
       test "verified passive traffic and absent ALPN" do
         port =
           peer(fn socket ->
@@ -28,6 +29,7 @@ defmodule HTTP.TLSTransportTest do
         assert :ok = @transport.close(socket)
       end
 
+      @tag :integration
       test "worker ownership transfer, ALPN and active-once delivery survive worker exit" do
         parent = self()
 
@@ -72,6 +74,7 @@ defmodule HTTP.TLSTransportTest do
         assert :ok = @transport.close(socket)
       end
 
+      @tag :integration
       test "explicit verify_none permits untrusted wrong-host traffic" do
         port =
           peer(fn socket ->
@@ -95,11 +98,13 @@ defmodule HTTP.TLSTransportTest do
         end
       end
 
+      @tag :integration
       test "rejects an untrusted peer" do
         port = peer(fn _socket -> :ok end)
         assert {:error, _} = @transport.connect("localhost", port, [], 5_000)
       end
 
+      @tag :integration
       test "rejects a mismatched reference hostname" do
         port = peer(fn _socket -> :ok end)
 
@@ -114,6 +119,7 @@ defmodule HTTP.TLSTransportTest do
     end
   end
 
+  @tag :integration
   test "ex_ssl verifies IP literals without treating the IP as DNS SNI" do
     port = peer(fn socket -> :ssl.send(socket, "ip") end)
     assert {:ok, socket} = ExSSL.connect("127.0.0.1", port, [ssl: [cacertfile: @ca]], 5_000)
@@ -121,6 +127,7 @@ defmodule HTTP.TLSTransportTest do
     assert :ok = ExSSL.close(socket)
   end
 
+  @tag :integration
   test "ex_ssl keeps IP verification separate from DNS SNI with a custom profile" do
     parent = self()
 
@@ -150,6 +157,7 @@ defmodule HTTP.TLSTransportTest do
     assert :ok = ExSSL.close(socket)
   end
 
+  @tag :integration
   test "ex_ssl direct IP dialing preserves DNS SNI identity with profile-only options" do
     port = peer(fn socket -> :ssl.send(socket, "dns") end, [], "pinned")
 
@@ -172,6 +180,7 @@ defmodule HTTP.TLSTransportTest do
   end
 
   for fixture <- ["localhost", "pinned"] do
+    @tag :integration
     test "ex_ssl direct IP with wrong DNS SNI rejects trusted #{fixture} certificate" do
       port =
         peer(
@@ -196,6 +205,7 @@ defmodule HTTP.TLSTransportTest do
     end
   end
 
+  @tag :integration
   test "ex_ssl rejects unsupported TLS and TCP options before connecting" do
     for ssl <- [
           [verify: :invalid],
@@ -228,6 +238,7 @@ defmodule HTTP.TLSTransportTest do
     end
   end
 
+  @tag :integration
   test "ex_ssl rejects malformed nested options for literal IP routes before I/O" do
     for ex_ssl <- [
           [],
@@ -249,6 +260,7 @@ defmodule HTTP.TLSTransportTest do
     end
   end
 
+  @tag :integration
   test "ex_ssl socket send options take precedence over matching TLS options" do
     port = peer(fn socket -> :ssl.send(socket, "ok") end)
 
@@ -267,6 +279,7 @@ defmodule HTTP.TLSTransportTest do
     assert :ok = ExSSL.close(socket)
   end
 
+  @tag :integration
   test "ex_ssl driver buffer and traffic socket options override matching ssl entries" do
     port = peer(fn socket -> :ssl.recv(socket, 0, 5_000) end)
 
@@ -302,6 +315,7 @@ defmodule HTTP.TLSTransportTest do
     end
   end
 
+  @tag :integration
   test "ex_ssl upgrade retains socket option precedence and caller driver buffer" do
     port = peer(fn socket -> :ssl.recv(socket, 0, 5_000) end)
     {:ok, tcp} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 5_000)
@@ -324,6 +338,7 @@ defmodule HTTP.TLSTransportTest do
     end
   end
 
+  @tag :integration
   test "ex_ssl reports invalid admitted options and native family errors explicitly" do
     for key <- [:buffer, :tos, :tclass, :priority] do
       assert {:error, {:options, {^key, :unsupported_or_invalid}}} =
@@ -349,6 +364,7 @@ defmodule HTTP.TLSTransportTest do
     end
   end
 
+  @tag :integration
   test "ex_ssl explicit TLS 1.3 rejects TLS 1.2-only peers without backend fallback" do
     port = peer(fn _socket -> :ok end, versions: [:"tlsv1.2"])
 
@@ -361,6 +377,7 @@ defmodule HTTP.TLSTransportTest do
              )
   end
 
+  @tag :integration
   test "ex_ssl keeps partial passive bytes across receive timeouts" do
     parent = self()
 
@@ -384,6 +401,7 @@ defmodule HTTP.TLSTransportTest do
     assert :ok = ExSSL.close(socket)
   end
 
+  @tag :integration
   test "ex_ssl closes a passive connection when its application owner exits" do
     parent = self()
 
@@ -410,6 +428,7 @@ defmodule HTTP.TLSTransportTest do
     assert :ok = ExSSL.close(socket)
   end
 
+  @tag :integration
   test "ex_ssl propagates custom-profile ALPN conflicts without connecting" do
     profile = %SSL.ClientHello.WireProfile{extensions: [{:alpn, ["http/1.1"]}]}
 
@@ -428,6 +447,7 @@ defmodule HTTP.TLSTransportTest do
              )
   end
 
+  @tag :integration
   test "ex_ssl accepts the default custom profile with HTTP ALPN" do
     port = peer(fn socket -> :ssl.send(socket, "ok") end, alpn_preferred_protocols: ["http/1.1"])
 

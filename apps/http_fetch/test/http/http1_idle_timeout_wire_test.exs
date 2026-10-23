@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP1IdleTimeoutWireTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias HTTP.{Promise, RequestCompletion}
 

@@ -1,5 +1,6 @@
 defmodule HTTP.WebSocket.ClosedRearmTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   import Bitwise
 

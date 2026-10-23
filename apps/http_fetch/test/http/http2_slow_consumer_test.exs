@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP2.SlowConsumerTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer
 
   test "real public paused consumer bounds all delivery processes and preserves sibling progress" do

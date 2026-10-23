@@ -3,7 +3,9 @@ defmodule HTTP.FetchHTTP3Test do
   alias Quic.Runtime.StreamHandle
   alias QuicHttp3.{Frame, Qpack}
 
-  setup do
+  setup :start_quic_fixture
+
+  defp start_quic_fixture(%{integration: true}) do
     fixture = Path.expand("../../../elixir_quic/test/fixtures/tls", __DIR__)
 
     cert = fn name ->
@@ -28,6 +30,9 @@ defmodule HTTP.FetchHTTP3Test do
     %{server: server, url: "https://127.0.0.1:#{port}/events", ssl: ssl}
   end
 
+  defp start_quic_fixture(_context), do: :ok
+
+  @tag :integration
   test "Fetch reports actual H3 with binary body, informational fields and trailers", context do
     parent = self()
     handler = {__MODULE__, make_ref()}
@@ -66,6 +71,7 @@ defmodule HTTP.FetchHTTP3Test do
     assert_receive {:request_stop, %{http_version: :http3, status: 200}}
   end
 
+  @tag :integration
   test "Fetch streams unknown-length response and delivers trailers before end", context do
     promise = fetch(context)
     connection = accept(context.server)
@@ -92,6 +98,7 @@ defmodule HTTP.FetchHTTP3Test do
   end
 
   for encoding <- ["gzip", "deflate"], streaming? <- [false, true] do
+    @tag :integration
     test "H3 #{encoding} streaming=#{streaming?} decodes DATA and preserves trailers", context do
       body = ~s({"protocol":"h3"})
 
@@ -127,6 +134,7 @@ defmodule HTTP.FetchHTTP3Test do
   end
 
   for encoding <- ["gzip", "deflate"], streaming? <- [false, true] do
+    @tag :integration
     test "H3 raw #{encoding} streaming=#{streaming?} preserves DATA and trailers", context do
       original = <<0, 255, 128, 1>>
 
@@ -162,6 +170,7 @@ defmodule HTTP.FetchHTTP3Test do
   end
 
   for encoding <- ["gzip", "deflate"] do
+    @tag :integration
     test "H3 raw #{encoding} interrupted stream preserves ACK and cancellation", context do
       original = <<0, 255, 128, 1>>
 
@@ -195,6 +204,7 @@ defmodule HTTP.FetchHTTP3Test do
     end
   end
 
+  @tag :integration
   test "H3 per-request telemetry opt-out covers request and response streaming", context do
     handler = {__MODULE__, make_ref()}
 
@@ -235,6 +245,7 @@ defmodule HTTP.FetchHTTP3Test do
     refute_receive {:disabled_event, _, _, _}
   end
 
+  @tag :integration
   test "Fetch rejects wrong reference identity without fallback", context do
     result =
       fetch(context, ssl: Keyword.put(context.ssl, :reference_identity, {:dns_id, "wrong.test"}))
@@ -256,6 +267,7 @@ defmodule HTTP.FetchHTTP3Test do
     assert_raise ArgumentError, fn -> HTTP.FetchOptions.new(http3_reuse: :sometimes) end
   end
 
+  @tag :integration
   test "Fetch upload producer uses DATA frames and definitive acknowledgement", context do
     chunks = [<<0, 255, 128>>, :binary.copy("abcd", 8_192)]
     {:ok, producer} = HTTP.Stream.from_enumerable(chunks)
@@ -273,6 +285,7 @@ defmodule HTTP.FetchHTTP3Test do
     assert %HTTP.Response{body: "OK", http_version: :http3} = HTTP.Promise.await(promise)
   end
 
+  @tag :integration
   test "abort cancels one H3 request while a pooled sibling remains usable", context do
     controller = HTTP.AbortController.new()
     promise = fetch(context, signal: controller)
@@ -288,6 +301,7 @@ defmodule HTTP.FetchHTTP3Test do
     assert %HTTP.Response{body: "OK", http_version: :http3} = HTTP.Promise.await(sibling)
   end
 
+  @tag :integration
   test "streamed redirects that preserve the method never replay the producer", context do
     {:ok, producer} = HTTP.Stream.from_enumerable(["consumed"])
     promise = fetch(context, method: :post, body: producer, duplex: :half)
@@ -298,6 +312,7 @@ defmodule HTTP.FetchHTTP3Test do
     assert {:error, :streaming_body_redirect_not_replayable} = HTTP.Promise.await(promise)
   end
 
+  @tag :integration
   test "H3 incompatible TCP routes are rejected explicitly", context do
     for {option, error} <- [
           {{:tls_backend, :ssl}, :tls_backend_not_supported_for_quic},
@@ -309,6 +324,7 @@ defmodule HTTP.FetchHTTP3Test do
     end
   end
 
+  @tag :integration
   test "informational response retention has a finite application budget", context do
     promise = fetch(context)
     connection = accept(context.server)

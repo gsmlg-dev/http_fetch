@@ -84,6 +84,7 @@ defmodule HTTP.ResponseTest do
       assert HTTP.Response.content_type(response) == {"application/json", %{"charset" => "utf-8"}}
     end
 
+    @tag :integration
     test "fetch and read data by `read_all/1`" do
       body = String.duplicate("root-zone-line\n", 100)
       url = start_local_http_server!(body)
@@ -99,6 +100,7 @@ defmodule HTTP.ResponseTest do
   end
 
   describe "write_to/2" do
+    @tag :integration
     test "write non-streaming response to file" do
       temp_path = Path.join(System.tmp_dir!(), "http_response_test.txt")
 
@@ -117,6 +119,7 @@ defmodule HTTP.ResponseTest do
       File.rm!(temp_path)
     end
 
+    @tag :integration
     test "write empty response to file" do
       temp_path = Path.join(System.tmp_dir!(), "empty_response_test.txt")
 
@@ -135,6 +138,7 @@ defmodule HTTP.ResponseTest do
       File.rm!(temp_path)
     end
 
+    @tag :integration
     test "write iodata response to file" do
       temp_path = Path.join(System.tmp_dir!(), "iodata_response_test.txt")
 
@@ -153,6 +157,7 @@ defmodule HTTP.ResponseTest do
       File.rm!(temp_path)
     end
 
+    @tag :integration
     test "write creates directory if needed" do
       temp_dir = Path.join(System.tmp_dir!(), "nested_test_dir")
       temp_path = Path.join(temp_dir, "test_file.txt")
@@ -172,6 +177,7 @@ defmodule HTTP.ResponseTest do
       File.rm_rf!(temp_dir)
     end
 
+    @tag :integration
     test "write streaming response directly to a file" do
       temp_path = Path.join(System.tmp_dir!(), "stream_response_test.txt")
       {:ok, stream} = HTTP.Stream.start_link(0)
@@ -192,6 +198,7 @@ defmodule HTTP.ResponseTest do
       File.rm!(temp_path)
     end
 
+    @tag :integration
     test "write streaming response returns stream errors" do
       temp_path = Path.join(System.tmp_dir!(), "stream_response_error_test.txt")
       {:ok, stream} = HTTP.Stream.start_link(0)
@@ -211,6 +218,7 @@ defmodule HTTP.ResponseTest do
       File.rm!(temp_path)
     end
 
+    @tag :integration
     test "write_to with actual HTTP response" do
       temp_path = Path.join(System.tmp_dir!(), "actual_response_test.txt")
       body = ~s({"slideshow":{"title":"Sample Slide Show"}})
@@ -231,6 +239,7 @@ defmodule HTTP.ResponseTest do
       File.rm!(temp_path)
     end
 
+    @tag :integration
     test "streams large redirect bodies when redirect is manual" do
       body = String.duplicate("x", HTTP.Config.streaming_threshold() + 1)
 
@@ -261,6 +270,7 @@ defmodule HTTP.ResponseTest do
       assert HTTP.Response.read_all(response) == body
     end
 
+    @tag :integration
     test "follows redirects after headers without buffering large redirect bodies" do
       url =
         start_raw_http_server!(fn listen_socket ->
@@ -297,6 +307,7 @@ defmodule HTTP.ResponseTest do
       assert HTTP.Response.read_all(response) == "ok"
     end
 
+    @tag :integration
     test "follows redirects by default" do
       url =
         start_raw_http_server!(fn listen_socket ->
@@ -328,6 +339,7 @@ defmodule HTTP.ResponseTest do
       assert HTTP.Response.read_all(response) == "ok"
     end
 
+    @tag :integration
     test "returns invalid content-length errors for comma-joined response framing" do
       url =
         start_raw_http_server!(fn listen_socket ->
@@ -349,6 +361,7 @@ defmodule HTTP.ResponseTest do
                url |> HTTP.fetch() |> HTTP.Promise.await()
     end
 
+    @tag :integration
     test "closes sockets when waiting for response headers times out" do
       test_pid = self()
 
@@ -368,6 +381,7 @@ defmodule HTTP.ResponseTest do
       assert_receive {:server_recv_after_timeout, {:error, :closed}}, 2_000
     end
 
+    @tag :integration
     test "rejects chunked responses with a conflicting content-length" do
       url =
         start_raw_http_server!(fn listen_socket ->
@@ -386,6 +400,7 @@ defmodule HTTP.ResponseTest do
       assert {:error, :conflicting_response_framing} = url |> HTTP.fetch() |> HTTP.Promise.await()
     end
 
+    @tag :integration
     test "streams small chunked responses without a content-length" do
       url =
         start_raw_http_server!(fn listen_socket ->
@@ -408,6 +423,7 @@ defmodule HTTP.ResponseTest do
       assert HTTP.Response.read_all(response) == "hello"
     end
 
+    @tag :integration
     test "rewrites POST 302 redirects to GET and strips entity headers" do
       test_pid = self()
 
@@ -458,6 +474,7 @@ defmodule HTTP.ResponseTest do
       refute Map.has_key?(request.headers, "content-length")
     end
 
+    @tag :integration
     test "preserves non-POST methods on 302 redirects" do
       test_pid = self()
 
@@ -505,6 +522,7 @@ defmodule HTTP.ResponseTest do
       assert headers["content-length"] == "7"
     end
 
+    @tag :integration
     test "rewrites 303 redirects to GET and strips representation headers" do
       test_pid = self()
 
@@ -561,6 +579,7 @@ defmodule HTTP.ResponseTest do
       refute Map.has_key?(headers, "content-length")
     end
 
+    @tag :integration
     test "strips credentials on cross-origin redirects" do
       test_pid = self()
 

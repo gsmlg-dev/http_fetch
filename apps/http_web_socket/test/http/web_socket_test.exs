@@ -31,6 +31,7 @@ defmodule HTTP.WebSocketTest do
     assert %Close{type: "close"} = %Close{}
   end
 
+  @tag :integration
   test "connects, receives messages, sends text, and closes cleanly" do
     {:ok, _server, port} = HTTPWebSocket.TestServer.start_link(open_message: "welcome")
 
@@ -57,6 +58,7 @@ defmodule HTTP.WebSocketTest do
                    1_000
   end
 
+  @tag :integration
   test "supports selected subprotocols and array buffer receive mode" do
     {:ok, _server, port} =
       HTTPWebSocket.TestServer.start_link(protocol: "chat", open_message: {:binary, <<1, 2, 3>>})
@@ -72,6 +74,7 @@ defmodule HTTP.WebSocketTest do
                    1_000
   end
 
+  @tag :integration
   test "sends array buffer and blob payloads as binary frames" do
     {:ok, _server, port} = HTTPWebSocket.TestServer.start_link()
     socket = WebSocket.new("ws://127.0.0.1:#{port}/socket")
@@ -85,6 +88,7 @@ defmodule HTTP.WebSocketTest do
     assert_receive {:websocket_server_received, :binary, <<4, 5, 6>>}, 1_000
   end
 
+  @tag :integration
   test "upgrades, exchanges frames, and closes over verified TLS 1.3" do
     for backend <- [:ssl, :ex_ssl] do
       {:ok, _server, port} =

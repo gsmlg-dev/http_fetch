@@ -45,6 +45,7 @@ defmodule HTTP.FormDataTest do
     end
 
     @tag :tmp_dir
+    @tag :integration
     test "adds file with stream", %{tmp_dir: tmp_dir} do
       test_content = "test file content"
       path = Path.join(tmp_dir, "test.txt")
@@ -110,6 +111,7 @@ defmodule HTTP.FormDataTest do
     end
 
     @tag :tmp_dir
+    @tag :integration
     test "encodes multipart with file stream", %{tmp_dir: tmp_dir} do
       test_content = "test file content"
       path = Path.join(tmp_dir, "test.txt")
@@ -132,6 +134,7 @@ defmodule HTTP.FormDataTest do
     end
 
     @tag :tmp_dir
+    @tag :integration
     test "encodes binary file streams without line-mode truncation", %{tmp_dir: tmp_dir} do
       test_content = :crypto.strong_rand_bytes(100_000)
       path = Path.join(tmp_dir, "test.bin")

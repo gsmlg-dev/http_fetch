@@ -1,5 +1,6 @@
 defmodule Quic.Phase1PublicTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
   alias Quic.Endpoint
   alias Quic.Runtime.StreamHandle
 

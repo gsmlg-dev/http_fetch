@@ -205,6 +205,7 @@ defmodule HTTP.HTTP3.LifecycleTest do
 
   for stage <- [:initial, :reconciliation] do
     @stage stage
+    @tag :integration
     test "watchdog reports indeterminate #{@stage} HEADERS admission without replay", %{
       controller: controller
     } do

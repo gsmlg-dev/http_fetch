@@ -1,5 +1,6 @@
 defmodule HTTP.RequestStreamTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   for method <- [:get, :delete, :head] do
     test "proxy mode preserves a binary #{method} entity and HEAD response semantics" do

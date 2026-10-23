@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP2HeaderFragmentLimitTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.{Promise, RequestCompletion}
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer

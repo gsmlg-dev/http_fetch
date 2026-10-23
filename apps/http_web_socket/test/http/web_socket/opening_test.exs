@@ -1,5 +1,6 @@
 defmodule HTTP.WebSocket.OpeningTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
   import Bitwise
   alias HTTP.WebSocket
   alias HTTP.WebSocket.Event.{Open, Close, Error}

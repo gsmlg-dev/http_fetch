@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP1CancellationRaceTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.{Promise, RequestCompletion}
 

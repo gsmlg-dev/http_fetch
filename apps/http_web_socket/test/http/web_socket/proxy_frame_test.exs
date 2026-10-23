@@ -30,6 +30,7 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
              WebSocket.new("ws://example.com", [], automatic_pong: false)
   end
 
+  @tag :integration
   test "proxy delivers bounded FIFO text binary ping pong and sends explicit frames before close" do
     {url, _} =
       peer(fn socket, key ->
@@ -81,6 +82,7 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
                    @timeout
   end
 
+  @tag :integration
   test "proxy automatic pong remains opt-in configurable while delivering controls" do
     {url, _} =
       peer(fn socket, key ->
@@ -105,6 +107,7 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
     assert_receive {WebSocket, ^ws, %Close{was_clean: true}}, @timeout
   end
 
+  @tag :integration
   test "full-size controls retain ACK byte bounds even with a smaller message limit" do
     payload = :binary.copy("p", 125)
 
@@ -153,6 +156,7 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
              )
   end
 
+  @tag :integration
   test "explicit frame validation rejects invalid UTF8 oversized controls and reserved close codes" do
     {url, _} =
       peer(fn socket, key ->
@@ -184,6 +188,7 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
     assert {:error, :closed} = WebSocket.send_frame_ack(ws, {:pong, ""})
   end
 
+  @tag :integration
   test "browser rejects explicit frame sends and non-browser close codes" do
     {url, _} =
       peer(fn socket, key ->
@@ -201,6 +206,7 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
     assert_receive {WebSocket, ^ws, %Close{was_clean: true}}, @timeout
   end
 
+  @tag :integration
   test "proxy close emits every supported wire status and an empty close" do
     for code <- [
           nil,
@@ -240,6 +246,7 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
     end
   end
 
+  @tag :integration
   test "proxy empty control sends count toward bounded queue and close deadline cancels pending sends" do
     parent = self()
 
@@ -275,6 +282,7 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
     assert_receive {:closed, ^peer}, @timeout
   end
 
+  @tag :integration
   test "owner death closes proxy transport despite an unacknowledged control event" do
     parent = self()
 

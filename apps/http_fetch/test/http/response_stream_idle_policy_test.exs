@@ -90,6 +90,8 @@ defmodule HTTP.ResponseStreamIdlePolicyTest do
   end
 
   for reader <- [:read_all, :write_to] do
+    if reader == :write_to, do: @tag(:integration)
+
     test "#{reader} observes stream DOWN without an infinite receive or leaked monitor" do
       stream =
         spawn(fn ->
@@ -121,6 +123,8 @@ defmodule HTTP.ResponseStreamIdlePolicyTest do
 
       assert Process.info(self(), :monitors) == monitors
     end
+
+    if reader == :write_to, do: @tag(:integration)
 
     test "#{reader} removes its monitor after a terminal event from a still-live stream" do
       stream =

@@ -1,5 +1,6 @@
 defmodule HTTP.QUIC.TLSOptionsTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias HTTP.QUIC.TLSOptions
   alias SSL.ClientHello.{RecordPolicy, WireProfile}

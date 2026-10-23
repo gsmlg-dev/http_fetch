@@ -1,5 +1,6 @@
 defmodule HTTP.QUIC.IntegrationTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.QUIC.ExQuic, as: Adapter
 

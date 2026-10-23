@@ -2,6 +2,7 @@ defmodule HTTP.HTTP1ReuseTest do
   use ExUnit.Case, async: false
 
   for {scheme, backend} <- [{:http, nil}, {:https, :ssl}, {:https, :ex_ssl}] do
+    @tag :integration
     test "#{scheme}/#{backend} reuses one fully consumed connection" do
       {url, peer, opts} = peer(unquote(scheme))
       opts = Keyword.merge(opts, http1_reuse: true, tls_backend: unquote(backend))
@@ -14,6 +15,7 @@ defmodule HTTP.HTTP1ReuseTest do
   end
 
   for {scheme, backend} <- [{:http, nil}, {:https, :ssl}, {:https, :ex_ssl}] do
+    @tag :integration
     test "#{scheme}/#{backend} reuses a connection with an infinite request deadline" do
       {url, peer, opts} = peer(unquote(scheme))
 
@@ -28,6 +30,7 @@ defmodule HTTP.HTTP1ReuseTest do
     end
   end
 
+  @tag :integration
   test "default policy uses separate connections" do
     {url, peer, opts} = peer(:http)
     assert fetch(url, opts).body == "ok"
@@ -36,6 +39,7 @@ defmodule HTTP.HTTP1ReuseTest do
     assert_receive {:accepted, ^peer}, 2_000
   end
 
+  @tag :integration
   test "a server close response is not retained" do
     {url, peer, opts} = peer(:http, "Connection: close\r\n")
     assert fetch(url, Keyword.put(opts, :http1_reuse, true)).body == "ok"
@@ -44,6 +48,7 @@ defmodule HTTP.HTTP1ReuseTest do
     assert_receive {:accepted, ^peer}, 2_000
   end
 
+  @tag :integration
   test "HTTP1.0 without keep-alive is not retained" do
     {url, peer, opts} = peer(:http, "", "HTTP/1.0")
     assert fetch(url, Keyword.put(opts, :http1_reuse, true)).body == "ok"
@@ -52,6 +57,7 @@ defmodule HTTP.HTTP1ReuseTest do
     assert_receive {:accepted, ^peer}, 2_000
   end
 
+  @tag :integration
   test "idle expiry closes a retained peer" do
     {url, peer, opts} = peer(:http)
 
@@ -62,6 +68,7 @@ defmodule HTTP.HTTP1ReuseTest do
     assert_receive {:closed, ^peer}, 2_000
   end
 
+  @tag :integration
   test "queued activation cannot revive an expired ownership handoff" do
     {url, peer, opts} = peer(:http)
     assert fetch(url, Keyword.put(opts, :http1_reuse, true)).body == "ok"
@@ -80,6 +87,7 @@ defmodule HTTP.HTTP1ReuseTest do
     assert_receive {:closed, ^peer}, 2_000
   end
 
+  @tag :integration
   test "a queued checkout cannot lease a socket after its idle deadline" do
     {url, peer, opts} = peer(:http)
     opts = Keyword.merge(opts, http1_reuse: true, http1_idle_timeout: 300)
@@ -97,6 +105,7 @@ defmodule HTTP.HTTP1ReuseTest do
   end
 
   for cancellation <- [:deadline, :abort, :caller_death] do
+    @tag :integration
     test "#{cancellation} during queued checkout sends no POST bytes" do
       {url, peer, opts} = peer(:http)
       opts = Keyword.put(opts, :http1_reuse, true)
@@ -149,6 +158,7 @@ defmodule HTTP.HTTP1ReuseTest do
     end
   end
 
+  @tag :integration
   test "idle socket data queued behind checkout discards the socket before reuse" do
     {url, peer, opts} = peer(:http)
     opts = Keyword.put(opts, :http1_reuse, true)
@@ -171,6 +181,7 @@ defmodule HTTP.HTTP1ReuseTest do
     assert_receive {:closed, ^peer}, 2_000
   end
 
+  @tag :integration
   test "reuse refreshes send timeout from the current request budget" do
     {url, _peer, opts} = peer(:http)
     opts = Keyword.put(opts, :http1_reuse, true)
@@ -181,6 +192,7 @@ defmodule HTTP.HTTP1ReuseTest do
     assert timeout > 0 and timeout <= 1_000
   end
 
+  @tag :integration
   test "buffered OTP TLS prime retains bounded teardown for a blocked reused upload" do
     {url, peer, opts} = peer(:https, :tls_upload)
 
@@ -228,6 +240,7 @@ defmodule HTTP.HTTP1ReuseTest do
     refute_receive {:accepted, ^peer}, 0
   end
 
+  @tag :integration
   test "TLS policies and caller scopes do not share idle connections" do
     {url, peer, opts} = peer(:https)
     first = Keyword.merge(opts, http1_reuse: true, http1_scope: "route-a")
@@ -240,6 +253,7 @@ defmodule HTTP.HTTP1ReuseTest do
     assert_receive {:accepted, ^peer}, 2_000
   end
 
+  @tag :integration
   test "stale idle connections are discarded before a new request" do
     {url, peer, opts} = peer(:http)
     opts = Keyword.put(opts, :http1_reuse, true)
@@ -251,6 +265,7 @@ defmodule HTTP.HTTP1ReuseTest do
     assert_receive {:accepted, ^peer}, 2_000
   end
 
+  @tag :integration
   test "acknowledged chunked responses can reuse the connection" do
     {url, peer, opts} = peer(:http, :chunked)
     opts = Keyword.put(opts, :http1_reuse, true)
@@ -262,6 +277,7 @@ defmodule HTTP.HTTP1ReuseTest do
     refute_receive {:accepted, ^peer}, 50
   end
 
+  @tag :integration
   test "abort with an unread chunked body closes instead of retaining the socket" do
     {url, peer, opts} = peer(:http, :chunked)
     controller = HTTP.AbortController.new()
@@ -275,6 +291,7 @@ defmodule HTTP.HTTP1ReuseTest do
     assert_receive {:accepted, ^peer}, 2_000
   end
 
+  @tag :integration
   test "a connection closed after uncertain POST response is never replayed" do
     {url, peer, opts} = peer(:http, :truncated)
 
@@ -285,6 +302,7 @@ defmodule HTTP.HTTP1ReuseTest do
     refute_receive {:accepted, ^peer}, 50
   end
 
+  @tag :integration
   test "per-route idle limit closes excess simultaneous connections" do
     {url, peer, opts} = peer(:http, :gated)
     opts = Keyword.merge(opts, http1_reuse: true, http1_pool_size: 1)

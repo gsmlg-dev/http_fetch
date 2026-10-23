@@ -57,6 +57,12 @@ reviewed acceptance, not merely a test file or implementation exists.
       R35 additionally classifies ExSSL trust/filesystem/native peers and extracts
       seven pure bodies from generated-fixture callbacks, preserving all865 cases.
       Full umbrella default and mandatory CI tier routing remain unaccepted.
+      R36 implements the remaining eight-app tag boundaries, all-nine default
+      exclusions, separate unit/integration workflows and explicit E2E selection.
+      Release/H2 full-source routes preserve integration inclusion. Local default
+      units pass 1676/1676; integration remains red at 1584/1587. Actual manual
+      full-nine CI and public E2E evidence remain pending; details are in the ledger.
+      Source routing and green units alone do not close this acceptance checkbox.
 
 Exit: every blocker has an owner and acceptance test; current implementation,
 executed evidence and required work are distinguishable. OTP remains default.

@@ -1,5 +1,6 @@
 defmodule Quic.EndpointTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
   alias Quic.{Endpoint, Connection}
 
   defmodule RecordedTLS do

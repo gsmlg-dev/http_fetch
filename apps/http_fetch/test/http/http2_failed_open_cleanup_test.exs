@@ -1,5 +1,6 @@
 defmodule HTTP.HTTP2FailedOpenCleanupTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.HTTP2.{ConnectionOwner, Pool}
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer

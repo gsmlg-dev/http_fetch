@@ -1,5 +1,6 @@
 defmodule HTTP.ProxyCompletionAcceptanceTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   import Bitwise
   alias HTTP.{Promise, RequestCompletion}

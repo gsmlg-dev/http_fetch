@@ -42,6 +42,7 @@ defmodule HTTP.TelemetryPrivacyTest do
   end
 
   for protocol <- [:http1, :h2c], mode <- [:buffered, :streamed, :exception] do
+    @tag :integration
     test "real #{protocol} #{mode} traffic keeps telemetry secret-safe" do
       {url, peer} = peer(unquote(protocol), unquote(mode))
       on_exit(fn -> if Process.alive?(peer), do: send(peer, :close) end)
@@ -85,6 +86,7 @@ defmodule HTTP.TelemetryPrivacyTest do
   end
 
   for protocol <- [:http1, :h2c], mode <- [:buffered, :streamed, :exception] do
+    @tag :integration
     test "real #{protocol} #{mode} per-request opt-out suppresses request and body events" do
       {url, peer} = peer(unquote(protocol), unquote(mode))
       on_exit(fn -> if Process.alive?(peer), do: send(peer, :close) end)
@@ -116,6 +118,7 @@ defmodule HTTP.TelemetryPrivacyTest do
   end
 
   for upload <- [:binary, :producer] do
+    @tag :integration
     test "H2 disabled #{upload} upload suppresses internal stream and bridge events" do
       body = :binary.copy("upload", 4_096)
 
@@ -151,6 +154,7 @@ defmodule HTTP.TelemetryPrivacyTest do
   end
 
   @tag disable_telemetry: :http_fetch
+  @tag :integration
   test "global Fetch opt-out suppresses helpers and actual shared H2 counters" do
     HTTP.Telemetry.request_start(
       "GET",

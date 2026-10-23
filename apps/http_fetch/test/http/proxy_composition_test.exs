@@ -1,5 +1,6 @@
 defmodule HTTP.ProxyCompositionTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
 

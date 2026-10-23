@@ -1,5 +1,6 @@
 defmodule HTTP.EventSource.HTTP3Test do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias HTTP.EventSource
   alias HTTP.EventSource.Event.{Error, Message, Open}

@@ -1,5 +1,6 @@
 defmodule QuicHttp3.NativeSessionTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias Quic.Runtime.StreamHandle
   alias QuicHttp3.{Frame, Qpack, Session, Varint}

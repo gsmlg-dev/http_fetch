@@ -1,0 +1,88 @@
+name: Integration
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
+  pull_request:
+    branches: [main]
+    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
+
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ELIXIR_VERSION: "1.18"
+  OTP_VERSION: "28"
+
+jobs:
+  changes:
+    uses: ./.github/workflows/changes.yml
+    with:
+      workflow_file: integration.yml
+
+  test:
+    name: Integration ${{ matrix.app }}
+    needs: changes
+    if: needs.changes.outputs.has_changes == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.changes.outputs.apps) }}
+    env:
+      MIX_ENV: test
+      HTTP_QUIC_PHASE1_REAL: "1"
+      HTTP_FETCH_CI_APP: ${{ matrix.app }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Restore dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: integration-${{ matrix.app }}-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs', format('apps/{0}/mix.exs', matrix.app)) }}
+
+      - uses: actions/setup-python@v5
+        if: matrix.app == 'http_fetch'
+        with:
+          python-version: '3.12'
+
+      - name: Set up pinned independent HTTP/3 peer runner
+        if: matrix.app == 'http_fetch'
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install independent admission peer dependencies
+        if: matrix.app == 'http_fetch'
+        run: python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt
+
+      - name: Install dependencies
+        env:
+          MIX_ENV: test
+        run: mix deps.get
+
+      - name: Compile selected closure
+        env:
+          MIX_ENV: test
+        run: mix compile --warnings-as-errors
+
+      - name: Run integration tests
+        env:
+          MIX_ENV: test
+        run: mix test apps/${{ matrix.app }}/test --only integration

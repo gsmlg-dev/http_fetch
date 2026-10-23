@@ -160,6 +160,7 @@ defmodule HTTP.RequestCompletionTest do
     assert {:error, :cleanup_unconfirmed} = RequestCompletion.await(handle, 1_000)
   end
 
+  @tag :integration
   test "actual TCP streaming abort waits for request resource shutdown" do
     {server, url} =
       server(fn socket, parent ->
@@ -184,6 +185,7 @@ defmodule HTTP.RequestCompletionTest do
     assert :ok = Task.await(server)
   end
 
+  @tag :integration
   test "actual streamed terminal stays pending while its real socket owner is suspended" do
     {server, url} =
       server(fn socket, parent ->
@@ -217,6 +219,7 @@ defmodule HTTP.RequestCompletionTest do
     assert :ok = Task.await(server)
   end
 
+  @tag :integration
   test "OTP TLS cancellation closes TCP but leaves unreturned TLS cleanup unconfirmed" do
     {server, url} =
       server(fn socket, parent ->
@@ -240,6 +243,7 @@ defmodule HTTP.RequestCompletionTest do
     assert :ok = Task.await(server)
   end
 
+  @tag :integration
   test "a suspended upload source cannot block access to its public cancellation handle" do
     {:ok, source} = HTTP.Stream.start_link(0)
     :erlang.suspend_process(source)
@@ -257,6 +261,7 @@ defmodule HTTP.RequestCompletionTest do
     refute Process.alive?(source)
   end
 
+  @tag :integration
   test "library enumerable blocked before its first item is stopped on cancellation" do
     parent = self()
 
@@ -295,6 +300,7 @@ defmodule HTTP.RequestCompletionTest do
     assert :ok = Task.await(server)
   end
 
+  @tag :integration
   test "buffered success and invalid URL seal requests without leaking the tracker" do
     {server, url} =
       server(fn socket, _parent ->
