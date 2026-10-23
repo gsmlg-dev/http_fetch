@@ -1,5 +1,6 @@
 defmodule SSL.Protocol.ResumptionHRRTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias SSL.{Options, SessionTicket}
   alias SSL.ClientHello.Materializer

@@ -2,6 +2,7 @@ defmodule SSL.ClientIdentityOptionsTest do
   use ExUnit.Case, async: false
   alias ExSSL.TestSupport.LocalTLSPeer
 
+  @tag :integration
   test "normalizes a matching client identity independently of server trust and redacts it" do
     fixture = LocalTLSPeer.certificates()
 
@@ -16,6 +17,7 @@ defmodule SSL.ClientIdentityOptionsTest do
     refute inspect(normalized) =~ "private_key"
   end
 
+  @tag :integration
   test "invalid and conflicting identities fail before network I/O without echoing material" do
     fixture = LocalTLSPeer.certificates()
 
@@ -30,6 +32,7 @@ defmodule SSL.ClientIdentityOptionsTest do
     end
   end
 
+  @tag :integration
   test "identity selection hardware and encrypted-key controls remain explicitly unsupported" do
     for option <- [certs_keys: [], password: "private-password", key: %{engine: :external}] do
       assert {:error, {:options, reason}} = SSL.Options.normalize(~c"localhost", [option])

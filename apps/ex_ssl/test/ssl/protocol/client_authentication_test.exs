@@ -1,5 +1,6 @@
 defmodule SSL.Protocol.ClientAuthenticationTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias ExSSL.TestSupport.ClientAuthFixtures
   alias ExSSL.TestSupport.SignatureFixtures
@@ -26,23 +27,6 @@ defmodule SSL.Protocol.ClientAuthenticationTest do
 
     {:ok,
      fixtures: fixtures, signature_fixtures: signature_fixtures, identity: identity, large: large}
-  end
-
-  test "unsupported OID filter values preserve valid high-tag DER as opaque bytes" do
-    oid = <<6, 3, 85, 29, 37>>
-    high_tag_value = <<0x9F, 0x20, 0x01, 0x00>>
-
-    filter =
-      <<byte_size(oid), oid::binary, byte_size(high_tag_value)::16, high_tag_value::binary>>
-
-    encoded =
-      request_message([
-        extension(13, <<2::16, 0x0804::16>>),
-        extension(48, <<byte_size(filter)::16, filter::binary>>)
-      ])
-
-    assert {:ok, %CertificateRequest{extensions: extensions}, <<>>} = ServerFlight.decode(encoded)
-    assert {:oid_filters, [{oid, high_tag_value}]} in extensions
   end
 
   test "CertificateRequest decodes bounded CA, certificate-signature and OID constraints",
@@ -370,4 +354,36 @@ defmodule SSL.Protocol.ClientAuthenticationTest do
 
     der
   end
+end
+
+defmodule SSL.Protocol.ClientAuthenticationUnitTest do
+  use ExUnit.Case, async: false
+
+  alias SSL.Protocol.ServerFlight
+  alias SSL.Protocol.ServerFlight.CertificateRequest
+
+  test "unsupported OID filter values preserve valid high-tag DER as opaque bytes" do
+    oid = <<6, 3, 85, 29, 37>>
+    high_tag_value = <<0x9F, 0x20, 0x01, 0x00>>
+
+    filter =
+      <<byte_size(oid), oid::binary, byte_size(high_tag_value)::16, high_tag_value::binary>>
+
+    encoded =
+      request_message([
+        extension(13, <<2::16, 0x0804::16>>),
+        extension(48, <<byte_size(filter)::16, filter::binary>>)
+      ])
+
+    assert {:ok, %CertificateRequest{extensions: extensions}, <<>>} = ServerFlight.decode(encoded)
+    assert {:oid_filters, [{oid, high_tag_value}]} in extensions
+  end
+
+  defp request_message(extensions) do
+    encoded = IO.iodata_to_binary(extensions)
+    body = <<0, byte_size(encoded)::16, encoded::binary>>
+    <<13, byte_size(body)::24, body::binary>>
+  end
+
+  defp extension(id, payload), do: <<id::16, byte_size(payload)::16, payload::binary>>
 end

@@ -3848,3 +3848,99 @@ physical-FD guarantee or publication follows. Final reviewed GitHub push and nex
 coordinated major release remain after the whole migration's gates. Goal stays
 ACTIVE/ARMED and incomplete. Next: finish ExSSL fixture/trust eligibility while
 retaining pure bodies, then other app tags/helpers and explicit CI routing.
+
+
+## R35 — separate generated fixtures, host trust and native peers from units
+
+Base184173862ba025da6930ad291ca61a2cdc7ffa02; task42 stays IN_PROGRESS and
+Goal remains active/armed across automatic rounds34–35. Fifteen test files change;
+production, support helpers, Mix, CI and the other eight apps remain frozen.
+
+Five files retain79 cases: Options6U/19I, PKIX27U/1I, PreparedUpgrade2U/5I,
+TCPOptions2U/14I and ClientIdentityOptions0U/3I. Case tags route real filesystem,
+system trust and native transport work to integration. Removing TCPOptions' module
+tag recovers its first two pure parser cases. No assertion, deadline or peer pin
+changes. Runner static fixtures remain inputs; SUT file loading remains integration.
+
+Seven pure test bodies move BYTE-UNCHANGED into four new second top-level UnitTest
+modules in the SAME files, keeping async:false. Old generated-fixture modules keep
+their callbacks, integration bodies and helpers. Four pure helpers copy verbatim;
+only the now-unused original SignatureExpansion Capabilities alias moves away.
+
+| File | Unit | Integration | Existing total |
+| --- | --- | --- | --- |
+| crypto/signature_expansion | 2 | 7 | 9 |
+| client_identity | 1 | 9 | 10 |
+| protocol/client_authentication | 1 | 7 | 8 |
+| quic_config_contract | 3 | 4 | 7 |
+| Total | 7 | 27 | 34 |
+
+Those units exercise literal registry schemes, actual signed-content crypto,
+identity rejection before file access, opaque DER decoding and real fresh QUIC
+random/key shares with stable fingerprints. Copied QUIC helpers read checked-in
+root bytes as runner inputs and pass explicit cacerts into the SUT. They inherit
+no setup_all. Across these files old default25/excluded9 becomes7/excluded27;
+reporting only +7 would hide newly excluded generated-fixture work.
+
+Nine original modules gain whole integration tags: client_identity, diagnostics,
+protocol/client_authentication, protocol/resumption_hrr, protocol/tls12_dispatch,
+quic_config_contract, resumption_cache_lifecycle, resumption_context, local_tls_peer.
+Existing signature_expansion and tls12_machine integration tags remain intact.
+
+Review caught two omissions after initial greens. The initial five-file38U/41I and
+whole-ExSSL518U/347I were not isolation proof. ClientIdentityOptions' last case
+includes key:%{engine: :external}; Options resolves host trust before rejecting the
+identity, so that entire unchanged case is integration. local_tls_peer has two real
+TCP/proxy/closed-port cases; its omitted module tag is now added. Two read-only
+reviewers checked all100 paths and transitive normalizers/fixtures, found no further
+candidate gap, and accepted the corrected15-file source. This is reviewed source
+classification, not a VM security sandbox or a claim of zero runner filesystem I/O.
+
+Final actual root-scoped commands, seed101/max24: default ExSSL515 passed
+(20 properties,495 tests),350 excluded in32.7s (27.1async/5.5sync); integration-only
+350 passed/515 excluded in111.6s (27.2async/84.3sync). Chain exit0 and returned
+prompt observed. All865 cases remain selected across the two tiers. Earlier generator
+subsets passed7/27 and27/7, but their old terminal/job was lost overnight; retained
+logs are not an independently recovered exit status. Fresh final whole-app runs
+supersede that uncertainty. Initial five-file38/41 remains historical, corrected37/42.
+
+Before the final two attribute corrections, the unchanged full inclusion command
+passed1575/1575: ExSSL865 in109.3s, Quic249 in11.0s, Core418 in25.3s and Fetch H2
+file43 in7.7s. It used real-QUIC flag1, integration inclusion, seed101 and no helper,
+probe, alternate formatter or max-failure filter. Configured format0; Credo549 files,
+9203 modules/functions, no issues18.3s; Dialyzer0 errors/0 skips, four unchanged
+unnecessary ignores24.32s. Full chain exit0+prompt observed. Subsequent edits add
+ONLY two routing attributes, then the complete corrected ExSSL partition and root
+format check pass0. No production or analysis-input implementation changes follow.
+
+Byte guards: all795 app/symlink files matched baseline before edits. Final780 other
+files match HEAD exactly; eleven annotation-only files preserve original nonblank
+content after stripping integration attributes. Seven moved test blocks each occur
+once unchanged; four copied helpers each occur twice unchanged. Four original
+integration modules preserve all remaining content apart from attributes/blank lines
+and removal of the now-unused alias. An initial guard REPL syntax error was corrected
+and actual checks rerun; premature print output is not evidence. Root read the full
+810-line initial diff; both reviewers accepted the two final routing corrections.
+
+Reproduce final partition from the umbrella root after MIX_ENV=test dependency and
+warnings-as-errors preparation:
+
+```bash
+mix test apps/ex_ssl/test --seed 101
+mix test apps/ex_ssl/test --only integration --seed 101
+```
+
+Evidence lives under /tmp/http-fetch-round35-*: final-unit.log,
+final-integration.log, final-format.log, provider.log, credo.log, dialyzer.log;
+extraction-spec.json and originals/ retain exact pre-edit blocks. Existing isolated
+build32 and P0 pinned Python venv were reused. No dependency changes or new peer
+pins. The old unknown job/PTY was not assumed to remain alive after runtime reset.
+
+This accepts the bounded ExSSL source routing and executed partition. Whole umbrella
+mix test, eight other helper defaults, test.yml, mandatory integration/E2E routing,
+shared-change full-nine/manual CI and successful public wire flows remain required.
+The P0 checkbox stays unchecked. R22 whole-nine3201/3206 plus test-WAE failures,
+FD21/23 gaps, native Socket TLS/failure settlement and public lifecycle/completion/
+managed H1/H2/default-backend/P6/P7 gates remain unaccepted. No physical-FD guarantee
+or publication follows. Final GitHub push and next coordinated major release remain
+after all migration gates. Goal stays ACTIVE/ARMED and incomplete.

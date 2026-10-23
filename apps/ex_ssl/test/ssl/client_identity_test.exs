@@ -1,5 +1,6 @@
 defmodule SSL.ClientIdentityTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias ExSSL.TestSupport.LocalTLSPeer
   alias ExSSL.TestSupport.SignatureFixtures
@@ -12,19 +13,6 @@ defmodule SSL.ClientIdentityTest do
     File.mkdir_p!(directory)
     on_exit(fn -> File.rm_rf!(directory) end)
     {:ok, directory: directory, fixtures: SignatureFixtures.create(directory)}
-  end
-
-  test "no identity returns nil and partial or conflicting configuration fails" do
-    assert {:ok, nil} = ClientIdentity.load([])
-    assert {:error, {:options, :incomplete_identity}} = ClientIdentity.load(cert: <<1>>)
-    assert {:error, {:options, :incomplete_identity}} = ClientIdentity.load(keyfile: "/missing")
-
-    assert {:error, {:options, :conflicting_identity_sources}} =
-             ClientIdentity.load(cert: <<1>>, certfile: "/missing", keyfile: "/missing")
-
-    for malformed <- [[{:cert, <<1>>} | :invalid_tail], [:cert], [{:cert, <<1>>}, {:cert, <<2>>}]] do
-      assert {:error, {:options, _}} = ClientIdentity.load(malformed)
-    end
   end
 
   test "loads PEM binary and charlist paths with one matching identity", context do
@@ -196,6 +184,25 @@ defmodule SSL.ClientIdentityTest do
           [certfile: fixture.certificate, keyfile: fixture.key, password: "example"]
         ] do
       assert {:error, {:options, _reason}} = ClientIdentity.load(options)
+    end
+  end
+end
+
+defmodule SSL.ClientIdentityUnitTest do
+  use ExUnit.Case, async: false
+
+  alias SSL.ClientIdentity
+
+  test "no identity returns nil and partial or conflicting configuration fails" do
+    assert {:ok, nil} = ClientIdentity.load([])
+    assert {:error, {:options, :incomplete_identity}} = ClientIdentity.load(cert: <<1>>)
+    assert {:error, {:options, :incomplete_identity}} = ClientIdentity.load(keyfile: "/missing")
+
+    assert {:error, {:options, :conflicting_identity_sources}} =
+             ClientIdentity.load(cert: <<1>>, certfile: "/missing", keyfile: "/missing")
+
+    for malformed <- [[{:cert, <<1>>} | :invalid_tail], [:cert], [{:cert, <<1>>}, {:cert, <<2>>}]] do
+      assert {:error, {:options, _}} = ClientIdentity.load(malformed)
     end
   end
 end

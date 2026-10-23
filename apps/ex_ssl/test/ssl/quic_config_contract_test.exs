@@ -1,5 +1,6 @@
 defmodule SSL.QUICConfigContractTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias ExSSL.TestSupport.ClientAuthFixtures
 
@@ -10,20 +11,6 @@ defmodule SSL.QUICConfigContractTest do
     fixtures = ClientAuthFixtures.create(directory)
     on_exit(fn -> File.rm_rf!(directory) end)
     {:ok, fixtures: fixtures}
-  end
-
-  test "rejects malformed IP reference identities at construction" do
-    for identity <- [
-          {:ip, {127, 0, 0, 256}},
-          {:ip, {127, 0, 0, -1}},
-          {:ip, {0, 0, 0, 0, 0, 0, 0, 65_536}},
-          {:ip, {127, 0, 0, "1"}},
-          {:ip, <<255>>},
-          {:ip, "not-an-ip"}
-        ] do
-      assert {:error, %SSL.QUIC.Error{kind: :configuration, reason: :invalid_configuration}} =
-               SSL.QUIC.new(:client, client_options(reference_identity: identity))
-    end
   end
 
   test "authenticates matching textual and tuple IP SANs independently from SNI", %{
@@ -83,23 +70,6 @@ defmodule SSL.QUICConfigContractTest do
     end
   end
 
-  test "rejects duplicate top-level and nested options while accepting opaque ALPN tokens" do
-    assert {:error, %SSL.QUIC.Error{kind: :configuration}} =
-             SSL.QUIC.new(:client, client_options([]) ++ [alpn: ["test"]])
-
-    assert {:error, %SSL.QUIC.Error{kind: :configuration}} =
-             SSL.QUIC.new(
-               :client,
-               client_options(limits: [max_extension_bytes: 16, max_extension_bytes: 8])
-             )
-
-    assert {:ok, _, [{:emit, :initial, _}]} =
-             SSL.QUIC.new(:client, client_options(alpn: [:binary.copy(<<0>>, 255)]))
-
-    assert {:error, %SSL.QUIC.Error{kind: :configuration}} =
-             SSL.QUIC.new(:client, client_options(alpn: [:binary.copy(<<0>>, 256)]))
-  end
-
   test "accepts in-memory PEM trust and rejects unsafe option combinations", %{fixtures: fixtures} do
     assert {:ok, _, [{:emit, :initial, _}]} =
              SSL.QUIC.new(:client, client_options(cacerts: File.read!(fixtures.ca.certificate)))
@@ -115,49 +85,6 @@ defmodule SSL.QUICConfigContractTest do
       role = if Keyword.has_key?(options, :cert), do: :server, else: :client
       assert {:error, %SSL.QUIC.Error{kind: :configuration}} = SSL.QUIC.new(role, options)
     end
-  end
-
-  test "an explicit record-free QUIC profile materializes fresh shares with a stable fingerprint" do
-    profile = %SSL.ClientHello.WireProfile{
-      session_id: :empty,
-      record: %SSL.ClientHello.RecordPolicy{mode: :none},
-      cipher_suites: [0x1301],
-      extensions: [
-        {:supported_versions, [0x0304]},
-        {:supported_groups, [0x001D]},
-        {:signature_algorithms, [0x0403, 0x0804]},
-        {:signature_algorithms_cert, [0x0403, 0x0804]},
-        {:alpn, ["test"]},
-        {:key_share, [0x001D]},
-        {:raw, 57, <<1, 0>>}
-      ]
-    }
-
-    assert {:ok, _, [{:emit, :initial, first}]} =
-             SSL.QUIC.new(
-               :client,
-               client_options(profile: profile, ciphers: [0x1301], groups: [0x001D])
-             )
-
-    assert {:ok, _, [{:emit, :initial, second}]} =
-             SSL.QUIC.new(
-               :client,
-               client_options(profile: profile, ciphers: [0x1301], groups: [0x001D])
-             )
-
-    refute first == second
-    assert {:ok, first_offer} = SSL.Protocol.ClientOffer.from_client_hello(first)
-    assert {:ok, second_offer} = SSL.Protocol.ClientOffer.from_client_hello(second)
-    <<1, _::24, _::16, first_random::binary-size(32), _::binary>> = first
-    <<1, _::24, _::16, second_random::binary-size(32), _::binary>> = second
-    refute first_random == second_random
-    assert [%{key_exchange: first_share}] = first_offer.key_shares
-    assert [%{key_exchange: second_share}] = second_offer.key_shares
-    refute first_share == second_share
-    assert {:ok, first_fingerprint} = SSL.Fingerprint.client_hello(first, :quic)
-    assert {:ok, second_fingerprint} = SSL.Fingerprint.client_hello(second, :quic)
-    assert first_fingerprint.ja3 == second_fingerprint.ja3
-    assert first_fingerprint.ja4 == second_fingerprint.ja4
   end
 
   defp client_options(extra) do
@@ -226,5 +153,101 @@ defmodule SSL.QUICConfigContractTest do
       _, result ->
         result
     end)
+  end
+end
+
+defmodule SSL.QUICConfigContractUnitTest do
+  use ExUnit.Case, async: false
+
+  test "rejects malformed IP reference identities at construction" do
+    for identity <- [
+          {:ip, {127, 0, 0, 256}},
+          {:ip, {127, 0, 0, -1}},
+          {:ip, {0, 0, 0, 0, 0, 0, 0, 65_536}},
+          {:ip, {127, 0, 0, "1"}},
+          {:ip, <<255>>},
+          {:ip, "not-an-ip"}
+        ] do
+      assert {:error, %SSL.QUIC.Error{kind: :configuration, reason: :invalid_configuration}} =
+               SSL.QUIC.new(:client, client_options(reference_identity: identity))
+    end
+  end
+
+  test "rejects duplicate top-level and nested options while accepting opaque ALPN tokens" do
+    assert {:error, %SSL.QUIC.Error{kind: :configuration}} =
+             SSL.QUIC.new(:client, client_options([]) ++ [alpn: ["test"]])
+
+    assert {:error, %SSL.QUIC.Error{kind: :configuration}} =
+             SSL.QUIC.new(
+               :client,
+               client_options(limits: [max_extension_bytes: 16, max_extension_bytes: 8])
+             )
+
+    assert {:ok, _, [{:emit, :initial, _}]} =
+             SSL.QUIC.new(:client, client_options(alpn: [:binary.copy(<<0>>, 255)]))
+
+    assert {:error, %SSL.QUIC.Error{kind: :configuration}} =
+             SSL.QUIC.new(:client, client_options(alpn: [:binary.copy(<<0>>, 256)]))
+  end
+
+  test "an explicit record-free QUIC profile materializes fresh shares with a stable fingerprint" do
+    profile = %SSL.ClientHello.WireProfile{
+      session_id: :empty,
+      record: %SSL.ClientHello.RecordPolicy{mode: :none},
+      cipher_suites: [0x1301],
+      extensions: [
+        {:supported_versions, [0x0304]},
+        {:supported_groups, [0x001D]},
+        {:signature_algorithms, [0x0403, 0x0804]},
+        {:signature_algorithms_cert, [0x0403, 0x0804]},
+        {:alpn, ["test"]},
+        {:key_share, [0x001D]},
+        {:raw, 57, <<1, 0>>}
+      ]
+    }
+
+    assert {:ok, _, [{:emit, :initial, first}]} =
+             SSL.QUIC.new(
+               :client,
+               client_options(profile: profile, ciphers: [0x1301], groups: [0x001D])
+             )
+
+    assert {:ok, _, [{:emit, :initial, second}]} =
+             SSL.QUIC.new(
+               :client,
+               client_options(profile: profile, ciphers: [0x1301], groups: [0x001D])
+             )
+
+    refute first == second
+    assert {:ok, first_offer} = SSL.Protocol.ClientOffer.from_client_hello(first)
+    assert {:ok, second_offer} = SSL.Protocol.ClientOffer.from_client_hello(second)
+    <<1, _::24, _::16, first_random::binary-size(32), _::binary>> = first
+    <<1, _::24, _::16, second_random::binary-size(32), _::binary>> = second
+    refute first_random == second_random
+    assert [%{key_exchange: first_share}] = first_offer.key_shares
+    assert [%{key_exchange: second_share}] = second_offer.key_shares
+    refute first_share == second_share
+    assert {:ok, first_fingerprint} = SSL.Fingerprint.client_hello(first, :quic)
+    assert {:ok, second_fingerprint} = SSL.Fingerprint.client_hello(second, :quic)
+    assert first_fingerprint.ja3 == second_fingerprint.ja3
+    assert first_fingerprint.ja4 == second_fingerprint.ja4
+  end
+
+  defp client_options(extra) do
+    Keyword.merge(
+      [
+        cacerts: [server_flight_der("root.pem")],
+        reference_identity: {:dns_id, "exssl.test"},
+        alpn: ["test"],
+        transport_parameters: <<1, 0>>
+      ],
+      extra
+    )
+  end
+
+  defp server_flight_der(name) do
+    path = Path.expand("../fixtures/server_flight/#{name}", __DIR__)
+    [{:Certificate, der, :not_encrypted}] = path |> File.read!() |> :public_key.pem_decode()
+    der
   end
 end

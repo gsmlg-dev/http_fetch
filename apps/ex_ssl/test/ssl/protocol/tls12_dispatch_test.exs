@@ -1,5 +1,6 @@
 defmodule SSL.Protocol.TLS12DispatchTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias SSL.ClientHello.Materializer
   alias SSL.Protocol.{HandshakeFramer, HandshakeMachine, TLS12}

@@ -54,6 +54,9 @@ reviewed acceptance, not merely a test file or implementation exists.
       partition into 89 default VM units and 76 explicit integration cases. Whole
       ExSSL/umbrella isolation, mock/input refactors and CI routing remain pending;
       system trust and generated-fixture setup_all cannot hide inside unit runs.
+      R35 additionally classifies ExSSL trust/filesystem/native peers and extracts
+      seven pure bodies from generated-fixture callbacks, preserving all865 cases.
+      Full umbrella default and mandatory CI tier routing remain unaccepted.
 
 Exit: every blocker has an owner and acceptance test; current implementation,
 executed evidence and required work are distinguishable. OTP remains default.

@@ -1,5 +1,6 @@
 defmodule SSL.ResumptionCacheLifecycleTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias SSL.{SessionTicket, TicketCache}
 

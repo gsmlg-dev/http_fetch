@@ -1,6 +1,7 @@
 defmodule SSL.OptionsTest do
   use ExUnit.Case, async: true
 
+  @tag :integration
   test "explicit none carries policy without system trust or an invented upgrade identity" do
     assert {:ok, %{verify: :verify_none, trust_source: nil, identity: {:dns_id, "example.test"}}} =
              SSL.Options.normalize("example.test", verify: :verify_none)
@@ -29,6 +30,7 @@ defmodule SSL.OptionsTest do
   end
 
   @tag :tmp_dir
+  @tag :integration
   test "none still reads explicit CA files and preserves CA-list precedence", %{tmp_dir: dir} do
     path = Path.join(dir, "unused-ca.pem")
     File.write!(path, "not a PEM certificate")
@@ -49,6 +51,7 @@ defmodule SSL.OptionsTest do
              )
   end
 
+  @tag :integration
   test "TLS12 rejects an effective signature list with no supported cipher authentication" do
     assert {:error, {:options, {:signature_algs, :unsupported_or_invalid}}} =
              SSL.Options.normalize("example.com",
@@ -57,6 +60,7 @@ defmodule SSL.OptionsTest do
              )
   end
 
+  @tag :integration
   test "consumer binary/passive/raw options retain DNS identity independently of IP routing" do
     opts = [
       :binary,
@@ -86,6 +90,7 @@ defmodule SSL.OptionsTest do
     end
   end
 
+  @tag :integration
   test "TLS 1.2-only and mixed versions generate bounded ordered ClientHello offers" do
     for {versions, expected} <- [
           {[:"tlsv1.2"], [0x0303]},
@@ -124,6 +129,7 @@ defmodule SSL.OptionsTest do
     end
   end
 
+  @tag :integration
   test "TLS version and cipher/profile conflicts reject without fallback" do
     for versions <- [[], [:"tlsv1.2", :"tlsv1.2"], [:"tlsv1.3", :"tlsv1.3"], [:"tlsv1.1"]] do
       assert {:error, {:options, _}} = SSL.Options.normalize("mail.example", versions: versions)
@@ -179,6 +185,7 @@ defmodule SSL.OptionsTest do
              )
   end
 
+  @tag :integration
   test "normalizes active-once, depth, and send policy without accepting weaker variants" do
     assert {:ok, %{active: :once, depth: 2, send_timeout: :infinity, send_timeout_close: true}} =
              SSL.Options.normalize("mail.example",
@@ -228,6 +235,7 @@ defmodule SSL.OptionsTest do
     end
   end
 
+  @tag :integration
   test "adds ordered ALPN to the default profile" do
     assert {:ok, %{profile: profile, alpn_advertised_protocols: ["h2", "http/1.1"]}} =
              SSL.Options.normalize("mail.example", alpn_advertised_protocols: ["h2", "http/1.1"])
@@ -235,6 +243,7 @@ defmodule SSL.OptionsTest do
     assert {:alpn, ["h2", "http/1.1"]} = Enum.find(profile.extensions, &match?({:alpn, _}, &1))
   end
 
+  @tag :integration
   test "requires an exact ALPN match for an explicit profile" do
     profile = default_profile_with_alpn(["h2", "http/1.1"])
 
@@ -251,6 +260,7 @@ defmodule SSL.OptionsTest do
              )
   end
 
+  @tag :integration
   test "does not inject top-level ALPN into an explicit profile without ALPN" do
     profile = default_profile_with_alpn(nil)
 
@@ -302,6 +312,7 @@ defmodule SSL.OptionsTest do
     assert SSL.Options.remaining(deadline) == 0
   end
 
+  @tag :integration
   test "upgrade requires an explicit reference identity" do
     assert {:error, {:options, _}} = SSL.Options.normalize(:upgrade, [])
 
@@ -309,6 +320,7 @@ defmodule SSL.OptionsTest do
              SSL.Options.normalize(:upgrade, server_name_indication: ~c"mail.example")
   end
 
+  @tag :integration
   test "explicit IP identities permit upgrade without fabricating SNI" do
     for {reference, expected} <- [
           {"127.0.0.1", {127, 0, 0, 1}},
@@ -325,6 +337,7 @@ defmodule SSL.OptionsTest do
     end
   end
 
+  @tag :integration
   test "explicit reference identity is independent of routing and SNI" do
     assert {:ok, options} =
              SSL.Options.normalize({127, 0, 0, 2},
@@ -402,6 +415,7 @@ defmodule SSL.OptionsTest do
              SSL.Options.normalize(nil, ex_ssl: [reference_identity: {:ip, "127.0.0.1"}])
   end
 
+  @tag :integration
   test "IP connection never fabricates SNI" do
     assert {:ok, options} = SSL.Options.normalize({127, 0, 0, 1}, [])
     assert options.identity == {:ip, {127, 0, 0, 1}}
@@ -416,6 +430,7 @@ defmodule SSL.OptionsTest do
     end
   end
 
+  @tag :integration
   test "incomplete profiles are rejected before a TCP connection is attempted" do
     assert {:error, {:options, _}} =
              SSL.Options.normalize("mail.example",
@@ -423,6 +438,7 @@ defmodule SSL.OptionsTest do
              )
   end
 
+  @tag :integration
   test "accepts an explicit certificate signature policy only when PKIX can enforce it" do
     assert {:ok, %{profile: profile}} = SSL.Options.normalize("mail.example", [])
 
@@ -435,6 +451,7 @@ defmodule SSL.OptionsTest do
              SSL.Options.normalize("mail.example", ex_ssl: [profile: profile])
   end
 
+  @tag :integration
   test "ordered public TLS policy lists materialize exact ClientHello choices" do
     suites = :ssl.cipher_suites(:exclusive, :"tlsv1.3")
     aes_256 = Enum.find(suites, &(&1.cipher == :aes_256_gcm))
@@ -468,6 +485,7 @@ defmodule SSL.OptionsTest do
     assert offer.certificate_signature_schemes == [0x0401, 0x0805]
   end
 
+  @tag :integration
   test "invalid or duplicate public TLS policy values fail instead of using defaults" do
     for option <- [
           ciphers: [],
@@ -488,6 +506,7 @@ defmodule SSL.OptionsTest do
     end
   end
 
+  @tag :integration
   test "explicit profiles cannot silently override supplied TLS policy" do
     assert {:ok, %{profile: profile}} = SSL.Options.normalize("mail.example", [])
 

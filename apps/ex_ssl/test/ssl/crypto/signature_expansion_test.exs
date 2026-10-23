@@ -3,7 +3,6 @@ defmodule SSL.Crypto.SignatureExpansionTest do
 
   alias ExSSL.TestSupport.LocalTLSPeer
   alias ExSSL.TestSupport.SignatureFixtures
-  alias SSL.Capabilities
   alias SSL.Crypto.Signature
   alias SSL.PKIX
 
@@ -204,28 +203,6 @@ defmodule SSL.Crypto.SignatureExpansionTest do
     end
   end
 
-  test "registry removes new schemes when required runtime primitives are absent" do
-    runtime = Capabilities.runtime()
-
-    for {scheme, _name, type} <- SignatureFixtures.schemes() do
-      kind = if type == :ed25519, do: :eddsa, else: if(type == :p384, do: :ecdsa, else: :rsa)
-      unavailable = Map.update!(runtime, :public_keys, &List.delete(&1, kind))
-      refute scheme in Capabilities.identifiers(:signature_algorithm, unavailable)
-    end
-  end
-
-  test "client signed content uses the client context and signing rejects wrong key" do
-    digest = :crypto.hash(:sha256, "client transcript")
-
-    assert {:ok, content} = Signature.client_signed_content(:sha256, digest)
-
-    assert content ==
-             :binary.copy(" ", 64) <> "TLS 1.3, client CertificateVerify" <> <<0>> <> digest
-
-    assert {:error, {:key_type_mismatch, :eddsa}} =
-             Signature.sign_client(0x0807, :not_a_key, :sha256, digest)
-  end
-
   test "client signing uses the matching private key and client context", context do
     digest = :crypto.hash(:sha384, "client signing transcript")
     {:ok, content} = Signature.client_signed_content(:sha384, digest)
@@ -389,4 +366,34 @@ defmodule SSL.Crypto.SignatureExpansionTest do
         signature,
         input
       ])
+end
+
+defmodule SSL.Crypto.SignatureExpansionUnitTest do
+  use ExUnit.Case, async: false
+
+  alias ExSSL.TestSupport.SignatureFixtures
+  alias SSL.Capabilities
+  alias SSL.Crypto.Signature
+
+  test "registry removes new schemes when required runtime primitives are absent" do
+    runtime = Capabilities.runtime()
+
+    for {scheme, _name, type} <- SignatureFixtures.schemes() do
+      kind = if type == :ed25519, do: :eddsa, else: if(type == :p384, do: :ecdsa, else: :rsa)
+      unavailable = Map.update!(runtime, :public_keys, &List.delete(&1, kind))
+      refute scheme in Capabilities.identifiers(:signature_algorithm, unavailable)
+    end
+  end
+
+  test "client signed content uses the client context and signing rejects wrong key" do
+    digest = :crypto.hash(:sha256, "client transcript")
+
+    assert {:ok, content} = Signature.client_signed_content(:sha256, digest)
+
+    assert content ==
+             :binary.copy(" ", 64) <> "TLS 1.3, client CertificateVerify" <> <<0>> <> digest
+
+    assert {:error, {:key_type_mismatch, :eddsa}} =
+             Signature.sign_client(0x0807, :not_a_key, :sha256, digest)
+  end
 end

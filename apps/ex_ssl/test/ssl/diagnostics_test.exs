@@ -1,5 +1,6 @@
 defmodule SSL.DiagnosticsTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias ExSSL.TestSupport.{ClientAuthFixtures, LocalTLSPeer, OpenSSLPeer}
 

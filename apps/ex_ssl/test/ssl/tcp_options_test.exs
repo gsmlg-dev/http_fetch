@@ -5,8 +5,6 @@ defmodule SSL.TCPOptionsTest do
   alias ExSSL.TestSupport.ClientAuthFixtures
   alias SSL.TCPOptions
 
-  @moduletag :integration
-
   test "extracts only validated TCP options and infers literal address family" do
     assert {:ok, [verify: :verify_peer], [{:nodelay, true}, :inet6]} =
              TCPOptions.extract({0, 0, 0, 0, 0, 0, 0, 1}, nodelay: true, verify: :verify_peer)
@@ -67,6 +65,7 @@ defmodule SSL.TCPOptionsTest do
     end
   end
 
+  @tag :integration
   test "connect and setopts match actual driver values for both address families and OTP" do
     for family <- [:inet, :inet6], provider <- [SSL, :ssl] do
       traffic = if family == :inet, do: [tos: 16], else: [tclass: 16]
@@ -94,6 +93,7 @@ defmodule SSL.TCPOptionsTest do
     end
   end
 
+  @tag :integration
   test "driver buffer zero and large-value rounding agree with the public OTP reference" do
     for provider <- [SSL, :ssl] do
       with_tls_peer(:inet, fn host, port ->
@@ -113,6 +113,7 @@ defmodule SSL.TCPOptionsTest do
     end
   end
 
+  @tag :integration
   test "traffic option results match the OS without committing virtual active mode on failure" do
     for {family, options} <- [{:inet, [tclass: 16]}, {:inet6, [tos: 16]}] do
       reference = driver_reference(family, options)
@@ -129,6 +130,7 @@ defmodule SSL.TCPOptionsTest do
     end
   end
 
+  @tag :integration
   test "wrong-family connect classifies raw badarg without accepting a connection" do
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     on_exit(fn -> :gen_tcp.close(listener) end)
@@ -146,6 +148,7 @@ defmodule SSL.TCPOptionsTest do
     assert {:error, :timeout} = :gen_tcp.accept(listener, 30)
   end
 
+  @tag :integration
   test "connect applies the safe TCP options and a local IPv4 bind" do
     peer = waiting_peer()
 
@@ -170,6 +173,7 @@ defmodule SSL.TCPOptionsTest do
     assert :ok = Peer.stop(peer)
   end
 
+  @tag :integration
   test "setopts validates all values before mutating TLS or TCP state" do
     peer = waiting_peer()
     assert {:ok, socket} = SSL.connect(~c"127.0.0.1", peer.port, Peer.client_options(), 5_000)
@@ -191,6 +195,7 @@ defmodule SSL.TCPOptionsTest do
     assert :ok = Peer.stop(peer)
   end
 
+  @tag :integration
   test "unsupported raw socket controls are rejected before connect" do
     for option <- [[buffer: -1], [linger: {true, 0}], [send_timeout_close: false]] do
       assert {:error, {:options, _}} =
@@ -198,6 +203,7 @@ defmodule SSL.TCPOptionsTest do
     end
   end
 
+  @tag :integration
   test "an IPv4 literal verifies the certificate IP SAN without SNI" do
     directory =
       Path.join(System.tmp_dir!(), "ex-ssl-tcp-ip-#{System.unique_integer([:positive])}")
@@ -232,6 +238,7 @@ defmodule SSL.TCPOptionsTest do
     assert :ok = Peer.stop(peer)
   end
 
+  @tag :integration
   test "IPv6 literal and DNS connections honor local IPv6 binds" do
     for host <- [{0, 0, 0, 0, 0, 0, 0, 1}, "::1", ~c"::1", "localhost"] do
       {listener, port, server} = ipv6_peer()
@@ -245,6 +252,7 @@ defmodule SSL.TCPOptionsTest do
     end
   end
 
+  @tag :integration
   test "textual IPv6 literal verifies its IP SAN and sends no SNI" do
     directory =
       Path.join(System.tmp_dir!(), "ex-ssl-tcp-ip6-#{System.unique_integer([:positive])}")
@@ -267,6 +275,7 @@ defmodule SSL.TCPOptionsTest do
     end
   end
 
+  @tag :integration
   test "OTP reference accepts the same safe TCP option forms" do
     peer = waiting_peer()
 
@@ -288,6 +297,7 @@ defmodule SSL.TCPOptionsTest do
     end
   end
 
+  @tag :integration
   test "STARTTLS applies mutable TCP options after a validated plaintext handoff" do
     for provider <- [SSL, :ssl] do
       {:ok, peer} =
@@ -326,6 +336,7 @@ defmodule SSL.TCPOptionsTest do
     end
   end
 
+  @tag :integration
   test "STARTTLS without a TLS buffer option preserves the existing raw driver buffer" do
     for provider <- [SSL, :ssl] do
       {:ok, peer} =
@@ -358,6 +369,7 @@ defmodule SSL.TCPOptionsTest do
     end
   end
 
+  @tag :integration
   test "underlying socket errors propagate without crashing the connection" do
     peer = waiting_peer()
     assert {:ok, socket} = SSL.connect(~c"127.0.0.1", peer.port, Peer.client_options(), 5_000)

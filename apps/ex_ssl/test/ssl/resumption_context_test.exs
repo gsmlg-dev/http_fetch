@@ -1,5 +1,6 @@
 defmodule SSL.ResumptionContextTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
   alias SSL.{Options, ResumptionContext, SessionTicket, TicketCache}
   alias ExSSL.TestSupport.ClientAuthFixtures
   @host {127, 0, 0, 1}

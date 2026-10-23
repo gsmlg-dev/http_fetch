@@ -675,6 +675,13 @@ async settings and the R33 readiness fix remain unchanged. Whole-ExSSL/umbrella
 unit-only acceptance, mock/input refactors, eight other default helper policies and
 unit/integration/E2E CI alignment remain open in the plan and execution ledger.
 
+R35 separates seven pure bodies from four generated-fixture owners into independent
+modules in the same files. Case/module tags classify host trust, SUT filesystem effects
+and native peer fixtures; both pure TCP parser cases return to default selection.
+Static runner fixtures and real cryptographic computation remain unit inputs. Source
+review of transitive normalizers and callbacks complements executed test partitions.
+Whole-umbrella policies and CI routing remain pending; see the validation ledger.
+
 ## Source/dependency inventory and evidence boundaries
 
 Run `python3 scripts/tls_migration_inventory.py` for a bounded JSON inventory of

@@ -33,6 +33,7 @@ defmodule SSL.PreparedUpgradeTest do
 
   for change <- [:replace, :delete] do
     @tag :tmp_dir
+    @tag :integration
     test "loaded trust and client credentials survive source file #{change}", %{
       tmp_dir: directory
     } do
@@ -109,6 +110,7 @@ defmodule SSL.PreparedUpgradeTest do
     end
   end
 
+  @tag :integration
   test "a reused snapshot generates fresh wire random, session ID and key share" do
     {listener, port} = listener()
     assert {:ok, prepared} = SSL.prepare_upgrade(verify: :verify_none)
@@ -143,6 +145,7 @@ defmodule SSL.PreparedUpgradeTest do
   end
 
   @tag :tmp_dir
+  @tag :integration
   test "reused policy selects live tickets and authenticates fresh resumed flights", %{
     tmp_dir: directory
   } do
@@ -201,6 +204,7 @@ defmodule SSL.PreparedUpgradeTest do
     Task.await(peer, 5_000)
   end
 
+  @tag :integration
   test "prepared consumption preserves ownership and pending-plaintext boundaries" do
     {listener, port} = listener()
     {:ok, prepared} = SSL.prepare_upgrade(verify: :verify_none)

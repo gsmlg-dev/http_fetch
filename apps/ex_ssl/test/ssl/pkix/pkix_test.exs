@@ -144,6 +144,7 @@ defmodule SSL.PKIXTest do
     assert {:ok, [%Certificate{der: @root_der}]} = PKIX.normalize_trust(@root_pem)
   end
 
+  @tag :integration
   test "normalizes the tagged entries returned by public_key.cacerts_get/0" do
     cacerts = :public_key.cacerts_get()
     assert cacerts != []
