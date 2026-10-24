@@ -15,6 +15,7 @@ defmodule SSL.PKIX do
   alias SSL.PKIX.Certificate
   alias SSL.PKIX.CertificateSignaturePolicy
   alias SSL.PKIX.VerifiedPeer
+  alias SSL.PKIX.VerifyFun
 
   require Record
 
@@ -54,6 +55,7 @@ defmodule SSL.PKIX do
     :max_total_der_bytes,
     :max_pem_bytes,
     :depth,
+    :verify_fun,
     :customize_hostname_check,
     :certificate_signature_schemes
   ]
@@ -66,6 +68,7 @@ defmodule SSL.PKIX do
           | {:max_total_der_bytes, pos_integer()}
           | {:max_pem_bytes, pos_integer()}
           | {:depth, non_neg_integer()}
+          | {:verify_fun, VerifyFun.policy()}
           | {:customize_hostname_check, keyword()}
           | {:certificate_signature_schemes, [non_neg_integer()] | nil}
   @type error_reason ::
@@ -106,6 +109,15 @@ defmodule SSL.PKIX do
   @spec verify(term(), term(), term(), [option()]) ::
           {:ok, VerifiedPeer.t()} | {:error, error_reason()}
   def verify(chain, trust_source, identity, options \\ []) do
+    if is_list(options) and Keyword.keyword?(options) and
+         VerifyFun.enabled?(Keyword.get(options, :verify_fun, :undefined)) do
+      verify_callback(chain, trust_source, identity, options)
+    else
+      verify_default(chain, trust_source, identity, options)
+    end
+  end
+
+  defp verify_default(chain, trust_source, identity, options) do
     with :ok <- validate_identity(identity),
          {:ok, chain} <- decode_chain(chain, options),
          {:ok, trust_anchors} <- normalize_trust(trust_source, options),
@@ -142,15 +154,145 @@ defmodule SSL.PKIX do
 
   def peer(chain, trust_source, identity, mode, options, protocol)
       when mode in [:verify_peer, :verify_none] do
-    with :ok <- protocol_chain(chain, protocol, options) do
+    with {:ok, _limits} <- limits(options),
+         :ok <- protocol_chain(chain, protocol, options) do
       result =
         case mode do
-          :verify_peer -> verify(chain, trust_source, identity, options)
-          :verify_none -> decode_peer(chain, options)
+          :verify_peer ->
+            verify(chain, trust_source, identity, options)
+
+          :verify_none ->
+            if VerifyFun.enabled?(Keyword.get(options, :verify_fun, :undefined)),
+              do: verify_callback(chain, trust_source, identity, options),
+              else: decode_peer(chain, options)
         end
 
       signing_peer(result)
     end
+  end
+
+  defp verify_callback(chain, trust_source, identity, options) do
+    with :ok <- callback_identity(identity),
+         {:ok, [leaf | _] = certificates} <- decode_chain(chain, options),
+         {:ok, anchors} <- callback_trust(trust_source, options),
+         {:ok, public_key} <- callback_paths(certificates, anchors, identity, options) do
+      {:ok,
+       %VerifiedPeer{
+         leaf_der: leaf.der,
+         leaf: leaf.decoded,
+         public_key: public_key,
+         chain: Enum.map(certificates, & &1.der)
+       }}
+    end
+  end
+
+  defp callback_identity(nil), do: :ok
+  defp callback_identity(identity), do: validate_identity(identity)
+  defp callback_trust(source, _options) when source in [nil, []], do: {:ok, []}
+  defp callback_trust(source, options), do: normalize_trust(source, options)
+
+  # Each candidate has a decreasing position in the admitted peer list. Skip
+  # disjoint cross-sign siblings without expanding a certificate graph. The
+  # ordinary no-callback prefix selection below is deliberately independent.
+  defp callback_paths(chain, anchors, identity, options) do
+    chain
+    |> Enum.with_index()
+    |> Enum.reverse()
+    |> Enum.reject(fn {certificate, _} ->
+      Enum.any?(chain, fn issuer ->
+        certificate.der != issuer.der and safe_is_issuer(certificate.decoded, issuer.decoded)
+      end)
+    end)
+    |> Enum.flat_map(fn {top, index} ->
+      case callback_chain(top, index, chain) do
+        nil -> []
+        path -> callback_anchors(path, anchors)
+      end
+    end)
+    |> Enum.reduce_while({:error, {:path_validation_failed, :unknown_ca}}, fn {anchor, path}, _ ->
+      hostname_match = fn certificate ->
+        identity == nil or
+          verify_identity(
+            certificate,
+            identity,
+            Keyword.get(options, :customize_hostname_check, [])
+          ) == :ok
+      end
+
+      callback = VerifyFun.wrap(Keyword.fetch!(options, :verify_fun), hostname_match)
+
+      case callback_path_validation(anchor, path, callback, options) do
+        {:ok, _} = success -> {:halt, success}
+        {:error, _} = error -> {:cont, error}
+      end
+    end)
+  end
+
+  defp callback_chain(leaf, 0, _chain), do: [leaf]
+
+  defp callback_chain(top, index, chain) do
+    chain
+    |> Enum.take(index)
+    |> Enum.with_index()
+    |> Enum.reverse()
+    |> Enum.find(fn {child, _} -> safe_is_issuer(child.decoded, top.decoded) end)
+    |> case do
+      nil ->
+        nil
+
+      {child, position} ->
+        case callback_chain(child, position, chain) do
+          nil -> nil
+          path -> path ++ [top]
+        end
+    end
+  end
+
+  defp callback_anchors([leaf] = path, anchors) do
+    if :public_key.pkix_is_self_signed(leaf.decoded),
+      do: [{:selfsigned_peer, path}],
+      else: callback_trusted_anchors(path, anchors)
+  end
+
+  defp callback_anchors(path, anchors), do: callback_trusted_anchors(path, anchors)
+
+  defp callback_trusted_anchors(path, anchors) do
+    top = List.last(path)
+
+    candidates =
+      Enum.flat_map(anchors, fn anchor ->
+        cond do
+          top.der == anchor.der -> [{anchor, Enum.drop(path, -1)}]
+          safe_is_issuer(top.decoded, anchor.decoded) -> [{anchor, path}]
+          true -> []
+        end
+      end)
+
+    if candidates == [], do: [{:unknown_ca, path}], else: candidates
+  end
+
+  defp callback_path_validation(anchor, path, callback, options) do
+    anchor_der = if is_atom(anchor), do: anchor, else: anchor.der
+    ders = path |> Enum.map(& &1.der) |> Enum.reverse()
+
+    case :public_key.pkix_path_validation(anchor_der, ders,
+           max_path_length: Keyword.get(options, :depth, 10),
+           verify_fun: callback
+         ) do
+      {:ok, {public_key_info, _}} ->
+        schemes = Keyword.get(options, :certificate_signature_schemes)
+        policy_anchor = if is_atom(anchor), do: nil, else: anchor.der
+
+        if schemes == nil or
+             CertificateSignaturePolicy.compatible?(Enum.reverse(ders), policy_anchor, schemes),
+           do: {:ok, certificate_verify_key(public_key_info)},
+           else: {:error, {:certificate_signature_scheme_not_allowed, schemes}}
+
+      {:error, reason} ->
+        {:error, {:path_validation_failed, reason}}
+    end
+  catch
+    _kind, _reason -> {:error, {:path_validation_failed, {:verify_fun, :invalid_return}}}
   end
 
   defp protocol_chain(chain, :tls13, options) do
@@ -198,6 +340,74 @@ defmodule SSL.PKIX do
   end
 
   defp signing_peer({:error, _} = error), do: error
+
+  # An explicitly selected leaf is a trust anchor, so the path validator has
+  # no subordinate certificates and emits no leaf events. Its time is still
+  # checked by public_key; enforce TLS identity and purpose without replaying
+  # any user verify_fun event or claiming an issuer-validated nonempty path.
+  @doc false
+  def verify_selected_leaf(%Certificate{decoded: certificate}, identity, options) do
+    extensions =
+      certificate |> otp_certificate(:tbsCertificate) |> otp_tbs_certificate(:extensions)
+
+    extensions = if extensions == :asn1_NOVALUE, do: [], else: extensions
+
+    usages =
+      for extension <- extensions,
+          certificate_extension(extension, :extnID) == {2, 5, 29, 37},
+          do: certificate_extension(extension, :extnValue)
+
+    constraints =
+      for extension <- extensions,
+          certificate_extension(extension, :extnID) == {2, 5, 29, 19},
+          do: certificate_extension(extension, :extnValue)
+
+    ids = Enum.map(extensions, &certificate_extension(&1, :extnID))
+    # Only extensions checked as leaf properties are admitted here. Other
+    # critical constraints need a real subordinate path, not OID recognition.
+    checked_critical = for id <- [15, 17, 19, 37], do: {2, 5, 29, id}
+
+    cond do
+      length(ids) != length(Enum.uniq(ids)) ->
+        {:error, {:path_validation_failed, {:bad_cert, :duplicate_extensions}}}
+
+      not valid_leaf_constraints?(constraints) ->
+        {:error, {:path_validation_failed, {:bad_cert, :invalid_basic_constraints}}}
+
+      Enum.any?(extensions, fn extension ->
+        certificate_extension(extension, :critical) == true and
+            certificate_extension(extension, :extnID) not in checked_critical
+      end) ->
+        {:error, {:path_validation_failed, {:bad_cert, :unknown_critical_extension}}}
+
+      not valid_leaf_usages?(usages) ->
+        {:error, {:path_validation_failed, {:bad_cert, :invalid_ext_keyusage}}}
+
+      identity == nil ->
+        :ok
+
+      true ->
+        verify_identity(
+          certificate,
+          identity,
+          Keyword.get(options, :customize_hostname_check, [])
+        )
+    end
+  end
+
+  defp valid_leaf_constraints?([]), do: true
+  defp valid_leaf_constraints?([{:BasicConstraints, false, :asn1_NOVALUE}]), do: true
+  defp valid_leaf_constraints?([{:BasicConstraints, true, :asn1_NOVALUE}]), do: true
+
+  defp valid_leaf_constraints?([{:BasicConstraints, true, length}])
+       when is_integer(length) and length >= 0,
+       do: true
+
+  defp valid_leaf_constraints?(_), do: false
+
+  defp valid_leaf_usages?([]), do: true
+  defp valid_leaf_usages?([[_ | _] = usages]), do: {1, 3, 6, 1, 5, 5, 7, 3, 1} in usages
+  defp valid_leaf_usages?(_), do: false
 
   @doc false
   @spec decode_peer(term(), [option()]) :: {:ok, VerifiedPeer.t()} | {:error, error_reason()}
@@ -711,6 +921,7 @@ defmodule SSL.PKIX do
 
   defp valid_limit?(value), do: is_integer(value) and value > 0
   defp valid_pkix_option?(:depth, value), do: is_integer(value) and value >= 0
+  defp valid_pkix_option?(:verify_fun, value), do: VerifyFun.valid?(value)
   defp valid_pkix_option?(:certificate_signature_schemes, nil), do: true
 
   defp valid_pkix_option?(:certificate_signature_schemes, schemes),
