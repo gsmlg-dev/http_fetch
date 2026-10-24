@@ -5,6 +5,17 @@ defmodule Quic do
   See `docs/consumer-contract.md` for ownership, generation handles, deadlines,
   admission outcomes and limitations. ALPN is metadata; application protocols
   are provided by consumers.
+
+  Endpoints created with `listen/1` or `client/1` accept `idle_timeout` as
+  positive milliseconds (default `30_000`) or `:infinity`. The latter advertises
+  a disabled local idle limit; both endpoints must disable their limits to avoid
+  a finite idle timer. A peer's finite limit still applies. Handshake, operation,
+  closing and draining deadlines remain finite. `info/1` and ready metadata expose
+  `idle_timeout` with `local_ms`, `peer_ms`, `negotiated_ms`, and `effective_ms`
+  (milliseconds or `:infinity`); the effective period includes a three-PTO floor.
+  Callers can use `ping/2` at a finite cadence below the peer limit. Admission is
+  not a peer ACK, and repeated sends without processing peer packets cannot
+  postpone local idle expiry indefinitely. No automatic keepalive task is created.
   """
   alias Quic.{Connection, Endpoint}
   alias Quic.Runtime.{ConnectionHandle, StreamHandle}
@@ -65,6 +76,19 @@ defmodule Quic do
         opts \\ []
       ),
       do: Connection.read(pid, generation, id, max, opts)
+
+  @doc """
+  Admit one QUIC PING for caller-managed keepalive.
+
+  Uses the same finite operation deadlines, deduplication, bounded send queue and
+  recovery as stream sends. `{:ok, ref}` reports admission, not peer receipt or ACK.
+  Choose a finite cadence below the peer's advertised idle limit, available in
+  `info/1`. Sending without successfully processing peer packets cannot postpone
+  local idle expiry indefinitely. No periodic task or timer is created.
+  """
+  @spec ping(ConnectionHandle.t(), operation_options()) :: {:ok, reference()} | failure()
+  def ping(%ConnectionHandle{id: pid, generation: generation}, opts \\ []),
+    do: Connection.ping(pid, generation, opts)
 
   @spec send_datagram(ConnectionHandle.t(), binary(), operation_options()) ::
           {:ok, reference()} | failure()

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.17] - 2026-10-24
+
+### Added
+- Support disabling QUIC local idle expiry with `idle_timeout: :infinity`
+  and bounded public PING admission for caller-managed keepalive. Preserve peer
+  idle constraints and independent handshake, operation and closing bounds (#143).
+
 ## [0.21.16] - 2026-10-22
 
 ### Added

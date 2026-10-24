@@ -166,7 +166,8 @@ defmodule Quic.ReceiveHistoryTest do
 
     bytes = packet(state, 1, frames)
     assert {:ok, state, _} = HandshakeScheduler.receive_datagram(state, bytes, 1)
-    assert {:ok, ^state, []} = HandshakeScheduler.receive_datagram(state, bytes, 2)
+    expected = %{state | authenticated_packets: state.authenticated_packets + 1}
+    assert {:ok, ^expected, []} = HandshakeScheduler.receive_datagram(state, bytes, 2)
     assert {:ok, _, []} = HandshakeScheduler.schedule(state)
   end
 
