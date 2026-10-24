@@ -238,6 +238,24 @@ defmodule SSL.Capabilities do
       ]
     }
   ]
+  @tls12_pkcs1_signatures (for {id, name, hash} <- [
+                                 {0x0401, :rsa_pkcs1_sha256, :sha256},
+                                 {0x0501, :rsa_pkcs1_sha384, :sha384},
+                                 {0x0601, :rsa_pkcs1_sha512, :sha512}
+                               ] do
+                             %{
+                               id: id,
+                               name: name,
+                               key: :rsa,
+                               hash: hash,
+                               needs: [
+                                 public_keys: :rsa,
+                                 hashs: hash,
+                                 rsa_opts: :rsa_pkcs1_padding
+                               ],
+                               verify_options: [rsa_padding: :rsa_pkcs1_padding]
+                             }
+                           end)
   @tls13_signature_ids [
     0x0403,
     0x0503,
@@ -301,8 +319,10 @@ defmodule SSL.Capabilities do
   @spec resolve(atom(), term()) :: map() | nil
   def resolve(kind, value), do: Enum.find(entries(kind), &matches?(&1, kind, value))
 
-  @spec signature(term()) :: map() | nil
-  def signature(value), do: resolve(:signature_algorithm, value)
+  @spec signature(term(), :tls12 | :tls13) :: map() | nil
+  def signature(value, version \\ :tls13)
+  def signature(value, :tls13), do: resolve(:signature_algorithm, value)
+  def signature(value, :tls12), do: resolve(:tls12_signature_algorithm, value)
 
   @spec cipher_ids(0x0303 | 0x0304, map()) :: [non_neg_integer()]
   def cipher_ids(version, runtime \\ runtime()) do
@@ -332,6 +352,7 @@ defmodule SSL.Capabilities do
   defp entries(:cipher_suite), do: @ciphers
   defp entries(:group), do: @groups
   defp entries(:signature_algorithm), do: @signatures
+  defp entries(:tls12_signature_algorithm), do: @signatures ++ @tls12_pkcs1_signatures
   defp entries(:certificate_signature_algorithm), do: @certificate_signatures
   defp entries(_kind), do: []
 

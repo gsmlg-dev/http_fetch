@@ -165,10 +165,10 @@ defmodule SSL.Crypto.Signature do
              | {:unsupported_ec_curve, term()}
              | {:unsupported_signature_scheme, term()}}
   def verify_message(signature_scheme, public_key, data, signature) do
-    with {:ok, scheme} <- signature_scheme(signature_scheme),
+    with {:ok, scheme} <- signature_scheme(signature_scheme, :tls12),
          :ok <- validate_message(data),
          :ok <- validate_signature(signature),
-         {:ok, verification_key} <- validate_public_key(scheme, public_key),
+         {:ok, verification_key} <- validate_message_public_key(scheme, public_key),
          :ok <- validate_signature_encoding(scheme, signature) do
       verify(data, scheme.hash, signature, verification_key, scheme.verify_options)
     end
@@ -184,9 +184,9 @@ defmodule SSL.Crypto.Signature do
            | {:unsupported_signature_scheme, term()}}
           | {:ok, binary()}
   def sign_message(signature_scheme, private_key, data) do
-    with {:ok, scheme} <- signature_scheme(signature_scheme),
+    with {:ok, scheme} <- signature_scheme(signature_scheme, :tls12),
          :ok <- validate_message(data),
-         {:ok, signing_key} <- validate_private_key(scheme, private_key) do
+         {:ok, signing_key} <- validate_message_private_key(scheme, private_key) do
       try do
         {:ok, :public_key.sign(data, scheme.hash, signing_key, scheme.verify_options)}
       catch
@@ -198,10 +198,34 @@ defmodule SSL.Crypto.Signature do
   defp validate_message(data) when is_binary(data) and byte_size(data) <= 1_048_576, do: :ok
   defp validate_message(_), do: {:error, {:invalid_input, :message}}
 
-  defp signature_scheme(value) do
-    case Capabilities.signature(value) do
+  # TLS1.2 ECDSA schemes select the digest, independently of the supported
+  # signing curve. TLS1.3 role APIs retain their scheme-specific curve binding.
+  defp validate_message_public_key(
+         %{key: :ecdsa} = scheme,
+         {{:ECPoint, _}, {:namedCurve, oid}} = key
+       )
+       when oid in [{1, 2, 840, 10_045, 3, 1, 7}, {1, 3, 132, 0, 34}] do
+    size = if oid == {1, 3, 132, 0, 34}, do: 97, else: 65
+    validate_public_key(%{scheme | curve_oid: oid, public_key_size: size}, key)
+  end
+
+  defp validate_message_public_key(scheme, key), do: validate_public_key(scheme, key)
+
+  defp validate_message_private_key(
+         %{key: :ecdsa} = scheme,
+         {:ECPrivateKey, _, _, {:namedCurve, oid}, _, _} = key
+       )
+       when oid in [{1, 2, 840, 10_045, 3, 1, 7}, {1, 3, 132, 0, 34}],
+       do: validate_private_key(%{scheme | curve_oid: oid}, key)
+
+  defp validate_message_private_key(scheme, key), do: validate_private_key(scheme, key)
+
+  defp signature_scheme(value, version \\ :tls13) do
+    kind = if version == :tls12, do: :tls12_signature_algorithm, else: :signature_algorithm
+
+    case Capabilities.signature(value, version) do
       %{id: ^value} = scheme ->
-        if value in Capabilities.identifiers(:signature_algorithm),
+        if value in Capabilities.identifiers(kind),
           do: {:ok, scheme},
           else: {:error, {:unsupported_signature_scheme, value}}
 
