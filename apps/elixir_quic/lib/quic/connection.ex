@@ -47,8 +47,15 @@ defmodule Quic.Connection do
   def deliver(pid, generation, bytes, received_at),
     do: :gen_statem.call(pid, {:datagram, generation, bytes, received_at})
 
-  def attach(pid, generation, consumer, opts),
-    do: safe_call(pid, {:attach, generation, consumer, opts}, Keyword.get(opts, :timeout, 5_000))
+  def attach(pid, generation, consumer, opts) do
+    timeout = Keyword.get(opts, :timeout, 5_000)
+    deadline = absolute_deadline(Keyword.get(opts, :deadline, timeout))
+    remaining = max(0, min(timeout, deadline - System.monotonic_time(:millisecond)))
+
+    if remaining > 0,
+      do: safe_call(pid, {:attach, generation, consumer, opts, deadline}, remaining),
+      else: {:error, :deadline_expired}
+  end
 
   def ready(pid, generation), do: safe_call(pid, {:ready, generation}, 5_000)
   def info(pid, generation), do: safe_call(pid, {:info, generation}, 5_000)
@@ -86,10 +93,58 @@ defmodule Quic.Connection do
   def stop_public_stream(pid, generation, id, code, opts \\ []),
     do: operation_call(pid, generation, {:stop, id, code}, opts)
 
+  defp handshake_deadline(opts, adapter, timeout) do
+    relative = adapter.monotonic_time() + timeout * 1000
+
+    case Keyword.get(opts, :cleanup_deadline) do
+      {:abs_ms, deadline} when is_integer(deadline) -> min(relative, deadline * 1000)
+      _ -> relative
+    end
+  end
+
+  defp handshake_timeout(opts) do
+    timeout = Keyword.get(opts, :handshake_timeout, 10_000)
+
+    case Keyword.get(opts, :cleanup_deadline) do
+      {:abs_ms, deadline} when is_integer(timeout) and timeout > 0 and is_integer(deadline) ->
+        max(1, min(timeout, deadline - System.monotonic_time(:millisecond)))
+
+      _ ->
+        timeout
+    end
+  end
+
+  defp enroll_cleanup(opts) do
+    case Keyword.get(opts, :cleanup_birth) do
+      nil -> :ok
+      birth -> Quic.Cleanup.enroll(birth, self())
+    end
+  end
+
+  defp start_handshake(data) do
+    case HandshakeScheduler.new(data.role, data.scheduler_opts) do
+      {:ok, scheduler, effects} ->
+        scheduler =
+          if data.address_validated,
+            do: %{scheduler | tls: TLSDriver.mark_address_validated(scheduler.tls)},
+            else: scheduler
+
+        advance(%{data | scheduler: scheduler}, effects, [])
+
+      {:error, reason} ->
+        stop(data, {:initialization, reason})
+
+      {:error, reason, scheduler} ->
+        stop(%{data | scheduler: scheduler}, {:initialization, reason})
+    end
+  end
+
   defp operation_call(pid, generation, request, opts) do
     ref = Keyword.get(opts, :ref, make_ref())
     timeout = Keyword.get(opts, :timeout, 5_000)
-    deadline = System.monotonic_time(:millisecond) + Keyword.get(opts, :deadline, timeout)
+    bound = Keyword.get(opts, :deadline, timeout)
+    deadline = absolute_deadline(bound)
+    timeout = call_timeout(timeout, bound)
 
     try do
       :gen_statem.call(pid, {:operation, generation, ref, deadline, request}, timeout)
@@ -103,7 +158,9 @@ defmodule Quic.Connection do
   defp durable_call(pid, request, generation, opts) do
     ref = Keyword.get(opts, :ref, make_ref())
     timeout = Keyword.get(opts, :timeout, 5_000)
-    deadline = System.monotonic_time(:millisecond) + Keyword.get(opts, :deadline, timeout)
+    bound = Keyword.get(opts, :deadline, timeout)
+    deadline = absolute_deadline(bound)
+    timeout = call_timeout(timeout, bound)
 
     try do
       :gen_statem.call(pid, {:public_pull, generation, ref, deadline, request}, timeout)
@@ -113,6 +170,15 @@ defmodule Quic.Connection do
       :exit, {_reason, _call} -> {:unknown, ref}
     end
   end
+
+  defp call_timeout(timeout, {:abs_ms, deadline}),
+    do: max(0, min(timeout, deadline - System.monotonic_time(:millisecond)))
+
+  # Legacy duration options retain their existing call wait semantics.
+  defp call_timeout(timeout, _duration), do: timeout
+
+  defp absolute_deadline({:abs_ms, deadline}) when is_integer(deadline), do: deadline
+  defp absolute_deadline(duration), do: System.monotonic_time(:millisecond) + duration
 
   defp safe_call(pid, request, timeout) do
     try do
@@ -132,7 +198,7 @@ defmodule Quic.Connection do
   def init(opts) do
     role = Keyword.fetch!(opts, :role)
     {adapter, writer} = Keyword.fetch!(opts, :io)
-    timeout = Keyword.get(opts, :handshake_timeout, 10_000)
+    timeout = handshake_timeout(opts)
     idle_timeout = Keyword.get(opts, :idle_timeout, 30_000)
     closing_timeout = Keyword.get(opts, :closing_timeout)
     draining_timeout = Keyword.get(opts, :draining_timeout)
@@ -156,6 +222,8 @@ defmodule Quic.Connection do
           generation = make_ref()
 
           data = %{
+            cleanup: Keyword.get(opts, :cleanup),
+            cleanup_monitor: Quic.Cleanup.monitor(Keyword.get(opts, :cleanup)),
             role: role,
             address_validated: Keyword.get(opts, :address_validated, false),
             adapter: adapter,
@@ -171,7 +239,7 @@ defmodule Quic.Connection do
             ready: false,
             parameters_valid: false,
             generation: generation,
-            deadline: adapter.monotonic_time() + timeout * 1000,
+            deadline: handshake_deadline(opts, adapter, timeout),
             idle_timeout: idle_timeout,
             effective_idle_timeout: idle_timeout,
             idle_deadline: nil,
@@ -203,8 +271,7 @@ defmodule Quic.Connection do
             highwaters: %{}
           }
 
-          {:ok, :handshaking, data,
-           [{:next_event, :internal, :start}, {{:timeout, :handshake}, timeout, generation}]}
+          finish_init(opts, data, timeout)
 
         {:error, reason} ->
           {:stop, reason}
@@ -214,22 +281,25 @@ defmodule Quic.Connection do
     end
   end
 
-  @impl true
-  def handle_event(:internal, :start, :handshaking, data) do
-    case HandshakeScheduler.new(data.role, data.scheduler_opts) do
-      {:ok, scheduler, effects} ->
-        scheduler =
-          if data.address_validated,
-            do: %{scheduler | tls: TLSDriver.mark_address_validated(scheduler.tls)},
-            else: scheduler
-
-        advance(%{data | scheduler: scheduler}, effects, [])
+  defp finish_init(opts, data, timeout) do
+    case enroll_cleanup(opts) do
+      :ok ->
+        {:ok, :handshaking, data,
+         [{:next_event, :internal, :start}, {{:timeout, :handshake}, timeout, data.generation}]}
 
       {:error, reason} ->
-        stop(data, {:initialization, reason})
+        {:stop, reason}
+    end
+  end
 
-      {:error, reason, scheduler} ->
-        stop(%{data | scheduler: scheduler}, {:initialization, reason})
+  @impl true
+  def handle_event(:internal, :start, :handshaking, data) do
+    with :ok <- Quic.Cleanup.authorize(data.cleanup),
+         true <- data.adapter.monotonic_time() < data.deadline do
+      start_handshake(data)
+    else
+      {:error, reason} -> {:stop, {:cleanup, reason}, data}
+      false -> {:stop, :normal, data}
     end
   end
 
@@ -259,6 +329,12 @@ defmodule Quic.Connection do
     }
 
     {:keep_state_and_data, [{:reply, from, status}]}
+  end
+
+  def handle_event({:call, from}, {:attach, generation, consumer, opts, deadline}, phase, data) do
+    if System.monotonic_time(:millisecond) >= deadline,
+      do: reply(from, {:error, :deadline_expired}),
+      else: handle_event({:call, from}, {:attach, generation, consumer, opts}, phase, data)
   end
 
   def handle_event(
@@ -638,8 +714,17 @@ defmodule Quic.Connection do
       when phase in [:closing, :draining],
       do: :keep_state_and_data
 
+  def handle_event(
+        :info,
+        {:quic_cleanup_retire, observer},
+        _phase,
+        %{cleanup: %Quic.Cleanup.Lease{handle: %{observer: observer}}} = data
+      ),
+      do: {:stop, :normal, data}
+
   def handle_event(:info, {:DOWN, ref, :process, _pid, reason}, _phase, data) do
     cond do
+      ref == data.cleanup_monitor -> {:stop, :normal, data}
       ref == data.writer_monitor -> stop(data, {:writer_down, reason})
       ref == data.owner_monitor -> stop(data, :owner_down)
       ref == data.consumer_monitor -> stop(data, :consumer_down)

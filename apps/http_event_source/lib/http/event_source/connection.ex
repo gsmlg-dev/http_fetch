@@ -3,6 +3,7 @@ defmodule HTTP.EventSource.Connection do
 
   use GenServer
 
+  alias HTTP.ClientCompletion
   alias HTTP.EventSource
   alias HTTP.EventSource.Event.Error
   alias HTTP.EventSource.Event.Message
@@ -10,7 +11,9 @@ defmodule HTTP.EventSource.Connection do
   alias HTTP.EventSource.Options
   alias HTTP.EventSource.Parser
   alias HTTP.EventSource.Telemetry
+  alias HTTP.HTTP2.WireProfile
   alias HTTP.HTTP3.Stream, as: H3Stream
+  alias HTTP.RequestLifecycle
   alias HTTP.Runtime.Delivery
   alias HTTP.Runtime.Stream
 
@@ -19,6 +22,9 @@ defmodule HTTP.EventSource.Connection do
   @closed EventSource.closed()
 
   defstruct options: nil,
+            completion: nil,
+            attempt_tracker: nil,
+            opening_deadline: :infinity,
             generation: nil,
             worker: nil,
             worker_monitor: nil,
@@ -34,6 +40,7 @@ defmodule HTTP.EventSource.Connection do
             terminal_reason: nil,
             opening_timer: nil,
             owner: nil,
+            owner_guard: nil,
             target: nil,
             uri: nil,
             url: nil,
@@ -59,35 +66,50 @@ defmodule HTTP.EventSource.Connection do
             attempt: 0,
             connect_started_at: nil
 
-  @spec start_link(Options.t()) :: GenServer.on_start()
+  @spec start_link(Options.t() | {Options.t(), ClientCompletion.t()}) :: GenServer.on_start()
   def start_link(%Options{} = options) do
-    GenServer.start_link(__MODULE__, options)
+    receipt =
+      if options.http_version == :http3,
+        do: ClientCompletion.unsupported(:http3),
+        else: ClientCompletion.new(:client)
+
+    start_link({options, receipt})
   end
 
-  def child_spec(%Options{ref: ref} = options) do
+  def start_link({%Options{} = options, %ClientCompletion{} = receipt}),
+    do: GenServer.start_link(__MODULE__, {options, receipt})
+
+  def child_spec(%Options{} = options), do: child_spec({options, nil})
+
+  def child_spec({%Options{ref: ref}, _} = args) do
     %{
       id: {__MODULE__, ref},
-      start: {__MODULE__, :start_link, [options]},
+      start: {__MODULE__, :start_link, [if(elem(args, 1), do: args, else: elem(args, 0))]},
       restart: :temporary,
       type: :worker
     }
   end
 
   @impl true
-  def init(%Options{} = options) do
-    _ = HTTP.OwnerMonitor.start(self(), options.owner)
+  def init({%Options{} = options, receipt}) do
+    :ok = RequestLifecycle.enter(receipt.tracker, :owner)
+    Process.flag(:trap_exit, true)
+    owner_guard = HTTP.OwnerMonitor.start(self(), options.owner)
 
     target = %EventSource{
       pid: self(),
       ref: options.ref,
       url: options.url,
-      with_credentials: options.with_credentials
+      with_credentials: options.with_credentials,
+      completion: receipt
     }
 
     state = %__MODULE__{
       options: options,
+      completion: receipt,
       delivery: Delivery.new(options),
       owner: options.owner,
+      owner_guard: owner_guard,
       target: target,
       uri: options.uri,
       url: options.url,
@@ -158,6 +180,9 @@ defmodule HTTP.EventSource.Connection do
   end
 
   @impl true
+  def handle_info({:EXIT, guard, :shutdown}, %{owner_guard: guard} = state),
+    do: {:stop, :shutdown, close_state(state, :owner_down)}
+
   def handle_info({:reconnect, token}, %{reconnect_timer: {_timer, token}} = state),
     do: {:noreply, connect(%{state | reconnect_timer: nil, redirects: 0})}
 
@@ -259,19 +284,63 @@ defmodule HTTP.EventSource.Connection do
           remote_end?: false
       }
 
-    state = %{state | generation: make_ref(), http_version: nil, stream_handle: nil}
+    state = %{
+      state
+      | generation: make_ref(),
+        http_version: nil,
+        stream_handle: nil,
+        opening_deadline: opening_deadline(state.connect_timeout)
+    }
+
     state = schedule_opening_timer(state)
 
-    cond do
-      state.options.http_version == :http3 -> connect_stream(state, H3Stream)
-      HTTP.Runtime.Options.h2?(state.options) -> connect_stream(state, Stream)
-      true -> connect_http1(state)
+    if state.options.http_version == :http3 do
+      connect_stream(state, H3Stream)
+    else
+      case admit_attempt(state) do
+        {:ok, state} ->
+          if HTTP.Runtime.Options.h2?(state.options),
+            do: connect_stream(state, Stream),
+            else: connect_http1(state)
+
+        {:error, reason} ->
+          reconnect(state, reason)
+      end
+    end
+  end
+
+  defp admit_attempt(state) do
+    deadline = control_deadline(state.opening_deadline)
+
+    with {:ok, permit} <- RequestLifecycle.reserve_attempt(state.completion.tracker, deadline) do
+      receipt = ClientCompletion.new()
+
+      result =
+        with :ok <-
+               RequestLifecycle.retain_attempt(
+                 state.completion.tracker,
+                 permit,
+                 receipt,
+                 deadline
+               ),
+             :ok <- RequestLifecycle.enter(receipt.tracker, :owner, deadline),
+             do: {:ok, %{state | attempt_tracker: receipt.tracker}}
+
+      case result do
+        {:ok, _} ->
+          result
+
+        error ->
+          RequestLifecycle.abort(receipt.tracker)
+          RequestLifecycle.retire_owner(receipt.tracker)
+          error
+      end
     end
   end
 
   defp connect_stream(state, module) do
     case module.start(request(state), self(),
-           opening_timeout: state.connect_timeout,
+           opening_timeout: opening_remaining(state.opening_deadline),
            generation: state.generation
          ) do
       {:ok, pid, _generation} ->
@@ -286,33 +355,38 @@ defmodule HTTP.EventSource.Connection do
     parent = self()
     generation = state.generation
 
-    {:ok, worker} =
-      Task.Supervisor.start_child(:http_runtime_task_supervisor, fn ->
-        HTTP.OwnerMonitor.start(self(), parent)
+    case RequestLifecycle.start_worker(state.attempt_tracker, :dial, state.opening_deadline, fn ->
+           HTTP.OwnerMonitor.start(self(), parent)
 
-        result =
-          with {:ok, transport, socket} <- open_transport(state),
-               :ok <- send_request(transport, socket, state) do
-            case transport.controlling_process(socket, parent) do
-              :ok ->
-                {:ok, transport, socket}
+           result = open_http1(state, parent)
 
-              {:error, reason} ->
-                transport.close(socket)
-                {:error, reason}
-            end
-          end
+           RequestLifecycle.complete(state.attempt_tracker, state.opening_deadline)
+           send(parent, {:http1_connected, generation, self(), result})
 
-        send(parent, {:http1_connected, generation, self(), result})
+           receive do
+             :accepted -> :ok
+             :abort -> :ok
+           after
+             opening_remaining(state.opening_deadline) -> :ok
+           end
+         end) do
+      {:ok, worker} -> %{state | worker: worker, worker_monitor: Process.monitor(worker)}
+      {:error, reason} -> reconnect(state, reason)
+    end
+  end
 
-        receive do
-          :accepted -> :ok
-        after
-          30_000 -> :ok
-        end
-      end)
+  defp open_http1(state, parent) do
+    with {:ok, transport, socket} <- open_transport(state),
+         :ok <- send_request(transport, socket, state) do
+      case transport.controlling_process(socket, parent) do
+        :ok ->
+          {:ok, transport, socket}
 
-    %{state | worker: worker, worker_monitor: Process.monitor(worker)}
+        {:error, reason} ->
+          transport.close(socket)
+          {:error, reason}
+      end
+    end
   end
 
   defp open_transport(state) do
@@ -321,8 +395,12 @@ defmodule HTTP.EventSource.Connection do
            transport.connect(
              host,
              port,
-             [ssl: http1_ssl(state), socket_opts: state.socket_opts],
-             state.connect_timeout
+             [
+               ssl: http1_ssl(state),
+               socket_opts: state.socket_opts,
+               request_lifecycle: state.attempt_tracker
+             ],
+             opening_remaining(state.opening_deadline)
            ) do
       {:ok, transport, socket}
     end
@@ -367,6 +445,7 @@ defmodule HTTP.EventSource.Connection do
       |> maybe_set_last_event_id(state.last_event_id)
 
     transport_options = HTTP.Runtime.Options.transport_options(state.options)
+    transport_options = Keyword.put(transport_options, :request_lifecycle, state.attempt_tracker)
 
     transport_options =
       if state.options.http_version == :http3,
@@ -623,13 +702,16 @@ defmodule HTTP.EventSource.Connection do
     state = cancel_opening_timer(state)
     if state.stream, do: stream_module(state).close(state.stream)
     if state.stream_monitor, do: _ = Process.demonitor(state.stream_monitor, [:flush])
-    if state.worker, do: _ = Process.exit(state.worker, :kill)
+    if state.worker, do: RequestLifecycle.cancel_worker(state.attempt_tracker, state.worker)
     if state.worker_monitor, do: _ = Process.demonitor(state.worker_monitor, [:flush])
     if state.transport && state.socket, do: _ = state.transport.close(state.socket)
+    RequestLifecycle.abort(state.attempt_tracker)
+    RequestLifecycle.retire_owner(state.attempt_tracker)
 
     %{
       state
-      | socket: nil,
+      | attempt_tracker: nil,
+        socket: nil,
         transport: nil,
         stream: nil,
         stream_monitor: nil,
@@ -640,11 +722,22 @@ defmodule HTTP.EventSource.Connection do
     }
   end
 
+  defp opening_deadline(:infinity), do: :infinity
+  defp opening_deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
+  defp opening_remaining(:infinity), do: :infinity
+  defp opening_remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+  defp control_deadline(:infinity), do: System.monotonic_time(:millisecond) + 1_000
+  defp control_deadline(deadline), do: deadline
+
   defp schedule_opening_timer(%{connect_timeout: :infinity} = state), do: state
 
   defp schedule_opening_timer(state) do
     timer =
-      Process.send_after(self(), {:opening_timeout, state.generation}, state.connect_timeout)
+      Process.send_after(
+        self(),
+        {:opening_timeout, state.generation},
+        opening_remaining(state.opening_deadline)
+      )
 
     %{state | opening_timer: timer}
   end
@@ -684,6 +777,7 @@ defmodule HTTP.EventSource.Connection do
   @impl true
   def terminate(_reason, state) do
     _ = close_transport(state)
+    RequestLifecycle.complete(state.completion.tracker, System.monotonic_time(:millisecond))
     :ok
   end
 
@@ -761,7 +855,11 @@ defmodule HTTP.EventSource.Connection do
       state = close_transport(state)
       state = schedule_opening_timer(%{state | generation: make_ref()})
       stream_telemetry(state, :fallback, :protocol_unavailable)
-      {:noreply, connect_http1(state)}
+
+      case admit_attempt(state) do
+        {:ok, state} -> {:noreply, connect_http1(state)}
+        {:error, reason} -> {:noreply, reconnect(state, reason)}
+      end
     else
       {:stop, :normal, fatal(state, :http1_negotiated)}
     end
@@ -887,7 +985,7 @@ defmodule HTTP.EventSource.Connection do
   defp raw_limit(%{options: %{http_version: :http3}}), do: 1_048_576 + 16_384
 
   defp raw_limit(state) do
-    profile = state.options.http2_profile || HTTP.HTTP2.WireProfile.native_v1()
+    profile = state.options.http2_profile || WireProfile.native_v1()
     settings = Map.new(profile.settings)
     1_048_576 + Map.get(settings, :initial_window_size, Map.get(settings, 4, 65_535))
   end

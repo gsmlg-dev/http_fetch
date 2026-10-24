@@ -63,7 +63,7 @@ defmodule HTTP.EventSource do
   alias HTTP.EventSource.Connection
   alias HTTP.EventSource.Options
 
-  defstruct pid: nil, ref: nil, url: nil, with_credentials: false
+  defstruct pid: nil, ref: nil, url: nil, with_credentials: false, completion: nil
 
   @connecting 0
   @open 1
@@ -74,7 +74,8 @@ defmodule HTTP.EventSource do
           pid: pid() | nil,
           ref: reference() | nil,
           url: String.t() | nil,
-          with_credentials: boolean()
+          with_credentials: boolean(),
+          completion: HTTP.ClientCompletion.t() | nil
         }
 
   @spec connecting() :: 0
@@ -90,20 +91,35 @@ defmodule HTTP.EventSource do
   def new(url, init \\ []) do
     ref = make_ref()
 
-    with {:ok, options} <- Options.new(url, put_ref(init, ref)),
-         {:ok, pid} <-
-           DynamicSupervisor.start_child(
+    with {:ok, options} <- Options.new(url, put_ref(init, ref)) do
+      receipt =
+        if options.http_version == :http3,
+          do: HTTP.ClientCompletion.unsupported(:http3),
+          else: HTTP.ClientCompletion.new(:client)
+
+      case DynamicSupervisor.start_child(
              HTTP.EventSource.ConnectionSupervisor,
-             {Connection, options}
+             {Connection, {options, receipt}}
            ) do
-      %__MODULE__{
-        pid: pid,
-        ref: ref,
-        url: options.url,
-        with_credentials: options.with_credentials
-      }
+        {:ok, pid} ->
+          %__MODULE__{
+            pid: pid,
+            ref: ref,
+            url: options.url,
+            with_credentials: options.with_credentials,
+            completion: receipt
+          }
+
+        error ->
+          if receipt.tracker, do: send(receipt.tracker, :launch_failed)
+          error
+      end
     end
   end
+
+  @doc "Returns the durable cleanup receipt without contacting the connection."
+  @spec completion(t()) :: HTTP.ClientCompletion.t() | nil
+  def completion(%__MODULE__{completion: receipt}), do: receipt
 
   @spec url(t()) :: String.t() | nil
   def url(%__MODULE__{url: url}), do: url

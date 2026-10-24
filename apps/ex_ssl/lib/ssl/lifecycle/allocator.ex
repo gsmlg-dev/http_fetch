@@ -22,6 +22,28 @@ defmodule SSL.Lifecycle.Allocator do
 
   defp start_allocator(
          %{
+           public: true,
+           receipt: receipt,
+           permit: permit,
+           recipient: recipient,
+           nonce: nonce,
+           deadline: {:abs_ms, deadline}
+         } = context,
+         mode
+       )
+       when is_reference(permit) and is_pid(recipient) and is_reference(nonce) do
+    observer = Receipt.observer(receipt)
+
+    if deadline > now() and node(observer) == node(),
+      do:
+        GenServer.start(__MODULE__, {context, self(), observer, mode},
+          timeout: max(1, deadline - now())
+        ),
+      else: {:error, :deadline_exceeded}
+  end
+
+  defp start_allocator(
+         %{
            receipt: receipt,
            permit: permit,
            ip: {_, _, _, _} = ip,
@@ -75,7 +97,12 @@ defmodule SSL.Lifecycle.Allocator do
     monitors =
       Map.new([parent, context.recipient, observer], fn pid -> {Process.monitor(pid), pid} end)
 
-    timer = :erlang.start_timer(elem(context.deadline, 1), self(), :expiry, abs: true)
+    expiry = Map.get(context, :original, elem(context.deadline, 1))
+
+    timer =
+      if expiry == :infinity,
+        do: nil,
+        else: :erlang.start_timer(expiry, self(), :expiry, abs: true)
 
     state = %{
       context: context,
@@ -109,6 +136,16 @@ defmodule SSL.Lifecycle.Allocator do
     end
   end
 
+  defp connect(%{context: %{public: true} = context}) do
+    NativeSocket.connect_public(
+      context.receipt,
+      context.ip,
+      context.port,
+      context.options,
+      context.original
+    )
+  end
+
   defp connect(%{mode: mode, context: context}) do
     constructor = if mode == :socket, do: NativeSocket, else: NativeTCP
     constructor.connect(context.receipt, context.ip, context.port, context.deadline)
@@ -116,13 +153,26 @@ defmodule SSL.Lifecycle.Allocator do
 
   defp native_result({:ok, tcp}, state), do: allocated(%{state | tcp: tcp})
 
+  defp native_result({:error, reason}, %{context: %{public: true}} = state) do
+    category = if reason in [:timeout, :deadline_exceeded], do: :timeout, else: :connect
+    _ = Observer.attempt_failed(state.context.receipt, category, reason, {:abs_ms, now() + 250})
+    {:stop, :normal, state}
+  end
+
   defp native_result({:error, reason}, %{mode: :port} = state)
        when reason in [:econnrefused, :enetunreach, :ehostunreach] do
     record_connect_failure(state.context, reason)
     {:stop, :normal, state}
   end
 
-  defp native_result({:error, _reason}, state), do: {:stop, :normal, state}
+  defp native_result({:error, reason}, state) do
+    send(
+      state.context.recipient,
+      {:lifecycle_allocation_failed, self(), state.context.nonce, state.observer, reason}
+    )
+
+    {:stop, :normal, state}
+  end
 
   defp record_connect_failure(context, reason) do
     _ = Observer.record_connect_failure(context.receipt, reason, context.deadline)
@@ -132,6 +182,11 @@ defmodule SSL.Lifecycle.Allocator do
   end
 
   defp allocated(state) do
+    state =
+      if Map.get(state.context, :public, false),
+        do: %{state | context: %{state.context | deadline: {:abs_ms, now() + 1_000}}},
+        else: state
+
     if live?(state) do
       send(
         state.context.recipient,
@@ -149,9 +204,6 @@ defmodule SSL.Lifecycle.Allocator do
     cond do
       elem(from, 0) != state.context.recipient or nonce != state.context.nonce ->
         {:reply, {:error, :unauthorized_handoff}, state}
-
-      state.mode == :socket ->
-        {:reply, {:error, :socket_transport_not_implemented}, state}
 
       state.transfer.from != nil ->
         {:reply, {:error, :handoff_spent}, state}
@@ -177,10 +229,10 @@ defmodule SSL.Lifecycle.Allocator do
   def handle_info(message, state), do: response(message, state)
 
   @impl true
-  def terminate(_reason, %{mode: :socket, tcp: tcp}) when not is_nil(tcp) do
-    _ = NativeSocket.close_owned(tcp)
-    :ok
-  end
+  # Native ownership exit closes only sockets still owned by this allocator.
+  # An explicit close here races the observer's kill during dirty finalization,
+  # which can lose the original Socket DOWN on OTP 29.
+  def terminate(_reason, %{mode: :socket}), do: :ok
 
   def terminate(_reason, %{tcp: tcp}) when is_port(tcp) do
     if Port.info(tcp, :connected) == {:connected, self()}, do: :gen_tcp.close(tcp)
@@ -223,10 +275,10 @@ defmodule SSL.Lifecycle.Allocator do
     connection = state.transfer.connection
 
     with true <- handoff_live?(state),
-         {:connected, owner} when owner == self() <- Port.info(state.tcp, :connected),
-         :ok <- :gen_tcp.controlling_process(state.tcp, connection),
+         true <- native_owned?(state, self()),
+         :ok <- transfer_native(state, connection),
          true <- handoff_live?(state),
-         {:connected, ^connection} <- Port.info(state.tcp, :connected) do
+         true <- native_owned?(state, connection) do
       offer =
         {socket_ref,
          {:commit_handoff, self(), state.context.recipient, ready_nonce, state.observer,
@@ -239,8 +291,26 @@ defmodule SSL.Lifecycle.Allocator do
     end
   end
 
+  defp native_owned?(%{mode: :port, tcp: tcp}, owner),
+    do: Port.info(tcp, :connected) == {:connected, owner}
+
+  defp native_owned?(%{mode: :socket, tcp: socket} = state, owner) do
+    :socket.getopt(socket, :otp, :controlling_process) == {:ok, owner} and handoff_live?(state)
+  catch
+    _, _ -> false
+  end
+
+  defp transfer_native(%{mode: :port, tcp: tcp}, owner),
+    do: :gen_tcp.controlling_process(tcp, owner)
+
+  defp transfer_native(%{mode: :socket, tcp: socket}, owner) do
+    :socket.setopt(socket, :otp, :controlling_process, owner)
+  catch
+    _, _ -> {:error, :ownership_unconfirmed}
+  end
+
   defp arm_handoff(state, deadline) do
-    _ = Process.cancel_timer(state.timer)
+    _ = if state.timer, do: Process.cancel_timer(state.timer)
     transfer = %{state.transfer | deadline: {:abs_ms, deadline}}
     timer = :erlang.start_timer(deadline, self(), :expiry, abs: true)
     %{state | timer: timer, transfer: transfer}
@@ -275,7 +345,7 @@ defmodule SSL.Lifecycle.Allocator do
   defp transferred_live?(state),
     do:
       handoff_live?(state) and
-        Port.info(state.tcp, :connected) == {:connected, state.transfer.connection}
+        native_owned?(state, state.transfer.connection)
 
   # Unknown control acceptance never authorizes rollback or foreign-owner close.
   defp stop_handoff(state) do
@@ -286,7 +356,10 @@ defmodule SSL.Lifecycle.Allocator do
   end
 
   defp live?(state) do
-    now() < elem(state.context.deadline, 1) and
+    if(Map.get(state.context, :public, false),
+      do: SSL.Options.remaining(state.context.original) > 0,
+      else: now() < elem(state.context.deadline, 1)
+    ) and
       Enum.all?([state.parent, state.context.recipient, state.observer], &Process.alive?/1)
   end
 

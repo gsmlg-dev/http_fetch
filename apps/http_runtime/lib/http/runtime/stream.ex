@@ -13,8 +13,9 @@ defmodule HTTP.Runtime.Stream do
   before another submission; progress reports transport-accepted bytes.
   """
   alias HTTP.HTTP2.{ConnectionOwner, ConnectionSupervisor, Pool, PoolKey}
-  alias HTTP.Request
+  alias HTTP.{Request, RequestLifecycle}
   alias HTTP.Runtime.Dialer
+  alias HTTP.Transport.ExSSL
 
   @type handle :: %{owner: pid(), id: pos_integer(), ref: reference(), protocol: :h2 | :h2c}
 
@@ -23,10 +24,25 @@ defmodule HTTP.Runtime.Stream do
     with :ok <- validate_writer_limit(Keyword.get(opts, :max_write_bytes, 16_777_230)),
          :ok <- validate_purpose(Keyword.get(opts, :purpose, :request)) do
       generation = Keyword.get(opts, :generation, make_ref())
+      deadline = opening_deadline(Keyword.get(opts, :opening_timeout, 30_000))
 
-      case Task.Supervisor.start_child(:http_runtime_task_supervisor, fn ->
-             run(request, subscriber, generation, opts)
-           end) do
+      start = fn -> run(request, subscriber, generation, opts, deadline) end
+
+      on_rejected = fn reason ->
+        reason = if reason == :request_timeout, do: :opening_timeout, else: reason
+        notify(subscriber, generation, {:error, reason})
+      end
+
+      result =
+        case request.transport_options[:request_lifecycle] do
+          nil ->
+            Task.Supervisor.start_child(:http_runtime_task_supervisor, start)
+
+          tracker ->
+            RequestLifecycle.start_worker(tracker, :owner, deadline, start, on_rejected)
+        end
+
+      case result do
         {:ok, pid} -> {:ok, pid, generation}
         {:error, reason} -> {:error, reason}
       end
@@ -56,7 +72,46 @@ defmodule HTTP.Runtime.Stream do
   @doc "Half-closes the local tunnel direction after the previous write completes."
   def half_close(stream), do: write(stream, "", true)
 
-  defp run(request, subscriber, generation, opts) do
+  defp run(request, subscriber, generation, opts, deadline) do
+    {request, tracker} = establish_lifecycle(request)
+
+    result =
+      case RequestLifecycle.enter(tracker, :owner, finite_deadline(deadline)) do
+        :ok -> run_request(request, subscriber, generation, opts, deadline)
+        {:error, :request_timeout} -> notify(subscriber, generation, {:error, :opening_timeout})
+        {:error, reason} -> notify(subscriber, generation, {:error, reason})
+      end
+
+    RequestLifecycle.complete(tracker, finite_deadline(deadline))
+    result
+  end
+
+  defp establish_lifecycle(request) do
+    opts = request.transport_options
+
+    cond do
+      is_pid(opts[:request_lifecycle]) ->
+        {request, opts[:request_lifecycle]}
+
+      opts[:tls_backend] == :ex_ssl and request.url.scheme == "https" and
+        supported_lifecycle_proxy?(request) and opts[:managed_coordinator] == nil ->
+        {tracker, _latch} = RequestLifecycle.start()
+        {%{request | transport_options: Keyword.put(opts, :request_lifecycle, tracker)}, tracker}
+
+      true ->
+        {request, nil}
+    end
+  end
+
+  defp supported_lifecycle_proxy?(request) do
+    case HTTP.Proxy.route(request) do
+      {:ok, nil} -> true
+      {:ok, %{scheme: :http}} -> true
+      _ -> false
+    end
+  end
+
+  defp run_request(request, subscriber, generation, opts, deadline) do
     monitor = Process.monitor(subscriber)
     purpose = Keyword.get(opts, :purpose, :request)
 
@@ -64,8 +119,6 @@ defmodule HTTP.Runtime.Stream do
       request
       | transport_options: Keyword.put(request.transport_options, :stream_purpose, purpose)
     }
-
-    deadline = opening_deadline(Keyword.get(opts, :opening_timeout, 30_000))
 
     with {:ok, backend} <- HTTP.TLSBackend.resolve(request.transport_options[:tls_backend]),
          request = %{
@@ -96,6 +149,7 @@ defmodule HTTP.Runtime.Stream do
       open(lease, headers, subscriber, generation, monitor, deadline)
     else
       {:error, reason} ->
+        RequestLifecycle.abort(RequestLifecycle.current())
         notify(subscriber, generation, {:error, reason})
 
       {:ok, _headers, _body} ->
@@ -108,9 +162,16 @@ defmodule HTTP.Runtime.Stream do
 
   defp acquire(request, selection, transport, host, port, deadline, monitor) do
     protocol = if selection.mode == :h2c, do: :h2c, else: :h2
-    pool = Process.whereis(:http_fetch_http2_pool)
 
-    case PoolKey.build(request, profile(request), protocol) do
+    pool =
+      Keyword.get(request.transport_options, :http2_pool, Process.whereis(:http_fetch_http2_pool))
+
+    key_result =
+      if request.transport_options[:http2_reuse] == false,
+        do: {:ok, :non_reusable, nil},
+        else: PoolKey.build(request, profile(request), protocol)
+
+    case key_result do
       {:ok, key} ->
         case reserve(pool, key, deadline, monitor, required_capability(request)) do
           {:ok, owner, reservation} ->
@@ -177,11 +238,11 @@ defmodule HTTP.Runtime.Stream do
        ) do
     receive do
       :abort ->
-        _ = Pool.cancel(pool, token)
+        send(pool, {:http2_cancel_reservation, token})
         {:error, :aborted}
 
       {:DOWN, ^monitor, :process, _pid, _reason} ->
-        _ = Pool.cancel(pool, token)
+        send(pool, {:http2_cancel_reservation, token})
         {:error, :subscriber_down}
 
       {:write, ref, _bytes, _end_stream?} ->
@@ -196,7 +257,7 @@ defmodule HTTP.Runtime.Stream do
         end
     after
       remaining(deadline) ->
-        _ = Pool.cancel(pool, token)
+        send(pool, {:http2_cancel_reservation, token})
         {:error, :opening_timeout}
     end
   end
@@ -250,10 +311,20 @@ defmodule HTTP.Runtime.Stream do
            activate?: false
          ) do
       {:ok, owner} ->
-        with :ok <- transport.controlling_process(socket, owner),
-             :ok <- ConnectionOwner.activate(owner) do
+        with :ok <-
+               RequestLifecycle.register(
+                 RequestLifecycle.current(),
+                 owner,
+                 :connection,
+                 finite_deadline(deadline)
+               ),
+             :ok <- opening_ready(deadline, elem(monitor, 2)),
+             :ok <- prepare_owner(request, transport, socket, owner, pool, key, deadline) do
           register(pool, key, owner, deadline, monitor, protocol, required_capability(request))
         else
+          {:error, reason, :registered} ->
+            {:error, reason}
+
           {:error, reason} ->
             stop_owner(owner)
             {:error, reason}
@@ -265,29 +336,62 @@ defmodule HTTP.Runtime.Stream do
     end
   end
 
+  defp opening_ready(deadline, monitor) do
+    receive do
+      :abort -> {:error, :aborted}
+      {:DOWN, ^monitor, :process, _, _} -> {:error, :subscriber_down}
+    after
+      0 -> if remaining(deadline) == 0, do: {:error, :opening_timeout}, else: :ok
+    end
+  end
+
+  defp prepare_owner(_request, transport, socket, owner, nil, _key, deadline) do
+    with :ok <- transport.controlling_process(socket, owner),
+         do: ConnectionOwner.activate(owner, finite_deadline(deadline))
+  end
+
+  defp prepare_owner(_request, ExSSL, socket, owner, pool, key, deadline) do
+    Pool.register(pool, key, owner,
+      connecting?: true,
+      max_streams: 0,
+      provider_handoff: true,
+      request_lifecycle: RequestLifecycle.current(),
+      socket: socket,
+      deadline_at: finite_deadline(deadline)
+    )
+  end
+
+  defp prepare_owner(_request, transport, socket, owner, pool, key, deadline) do
+    with :ok <- transport.controlling_process(socket, owner),
+         :ok <- ConnectionOwner.activate(owner, finite_deadline(deadline)),
+         do:
+           Pool.register(pool, key, owner,
+             connecting?: true,
+             max_streams: 0,
+             request_lifecycle: RequestLifecycle.current(),
+             socket: socket
+           )
+  end
+
+  defp finite_deadline(:infinity), do: System.monotonic_time(:millisecond) + 1_000
+  defp finite_deadline(deadline), do: deadline
+
   defp register(nil, key, owner, _deadline, _monitor, protocol, _capability),
     do: {:ok, %{owner: owner, pool: nil, key: key, reservation: nil, protocol: protocol}}
 
   defp register(pool, key, owner, deadline, monitor, protocol, capability) do
-    case Pool.register(pool, key, owner, connecting?: true, max_streams: 0) do
-      :ok ->
-        case reserve(pool, key, deadline, monitor, capability, owner) do
-          {:ok, selected_owner, reservation} ->
-            {:ok,
-             %{
-               owner: selected_owner,
-               pool: pool,
-               key: key,
-               reservation: reservation,
-               protocol: protocol
-             }}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
+    case reserve(pool, key, deadline, monitor, capability, owner) do
+      {:ok, selected_owner, reservation} ->
+        {:ok,
+         %{
+           owner: selected_owner,
+           pool: pool,
+           key: key,
+           reservation: reservation,
+           protocol: protocol
+         }}
 
       {:error, reason} ->
-        stop_owner(owner)
         {:error, reason}
     end
   end

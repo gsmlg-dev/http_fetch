@@ -215,6 +215,9 @@ TLS 1.3 handshake signatures are P-256/P-384 ECDSA, Ed25519, and RSA-PSS-RSAE /
 RSA-PSS-PSS SHA-256/384/512, with strict key and parameter checks. See
 [the compatibility matrix](docs/COMPATIBILITY.md) for the bounded subset; client
 certificates and explicit bounded TLS 1.2 are implemented in version 0.4.
+The current migration candidate also supports TLS1.2 RSA-PKCS1 SHA256/384/512
+server and client handshake signatures. These schemes remain excluded from
+TLS1.3 CertificateVerify and QUIC.
 
 ## Architecture
 

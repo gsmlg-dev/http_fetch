@@ -3,7 +3,10 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   use GenServer
   alias QuicHttp3.Session
 
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+  def start_link(opts),
+    do: GenServer.start_link(__MODULE__, Keyword.put_new(opts, :creator, self()))
+
+  def activate(owner, token), do: GenServer.call(owner, {:activate, token})
   def await_ready(owner, timeout \\ 5_000), do: GenServer.call(owner, :await_ready, timeout)
 
   def open(owner, fields, body, subscriber, generation, opts \\ []) do
@@ -34,43 +37,76 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   @impl true
   def init(opts) do
     {:ok, opts} = HTTP.HTTP3.ReceiveBudget.normalize(opts)
-    owner = self()
-
-    {:ok, watchdog} =
-      Task.Supervisor.start_child(:http_runtime_task_supervisor, fn -> watchdog(owner) end)
-
     timeout = Keyword.get(opts, :operation_timeout, 1_000)
 
-    {:ok, session} =
-      Session.new(Keyword.put(Keyword.get(opts, :session_options, []), :timeout, timeout))
+    opening_deadline =
+      Keyword.get(opts, :opening_deadline_at, now() + Keyword.get(opts, :connect_timeout, 5_000))
 
-    {:ok,
-     %{
-       session: session,
-       opts: opts,
-       watchdog: watchdog,
-       timeout: timeout,
-       lifecycle: :connecting,
-       ready_waiters: [],
-       requests: %{},
-       pending: nil,
-       continuations: [],
-       queue: [],
-       allocations: 0,
-       writable_epoch: 0,
-       continuation_turn?: true,
-       max_streams: Keyword.get(opts, :max_streams, 32),
-       rotation: Keyword.get(opts, :rotation_after, 960),
-       pool: nil,
-       pool_monitor: nil,
-       last_activity: now(),
-       idle_timeout: Keyword.get(opts, :idle_timeout, 30_000),
-       opening_deadline: now() + Keyword.get(opts, :connect_timeout, 5_000)
-     }, {:continue, :connect}}
+    request_deadline = Keyword.get(opts, :deadline_at)
+    session_opts = Keyword.put(Keyword.get(opts, :session_options, []), :timeout, timeout)
+
+    session_opts =
+      if opts[:cleanup],
+        do: Keyword.put(session_opts, :cleanup, opts[:cleanup]),
+        else: session_opts
+
+    session_opts =
+      if opts[:opening_deadline_at],
+        do: Keyword.put(session_opts, :deadline, {:abs_ms, opening_deadline}),
+        else: session_opts
+
+    {:ok, session} = Session.new(session_opts)
+    inert? = Keyword.get(opts, :inert, false)
+
+    state = %{
+      session: session,
+      opts: opts,
+      watchdog: nil,
+      watchdog_monitor: nil,
+      tracker_monitor:
+        if(opts[:request_lifecycle], do: Process.monitor(opts[:request_lifecycle])),
+      creator_monitor: if(inert?, do: Process.monitor(opts[:creator])),
+      activation: opts[:activation],
+      cleanup: opts[:cleanup],
+      exclusive?: Keyword.get(opts, :exclusive?, false),
+      lease_token: nil,
+      request_deadline: request_deadline,
+      timeout: timeout,
+      lifecycle: if(inert?, do: :inert, else: :connecting),
+      ready_waiters: [],
+      requests: %{},
+      pending: nil,
+      continuations: [],
+      queue: [],
+      allocations: 0,
+      writable_epoch: 0,
+      continuation_turn?: true,
+      max_streams: Keyword.get(opts, :max_streams, 32),
+      rotation: Keyword.get(opts, :rotation_after, 960),
+      pool: nil,
+      pool_monitor: nil,
+      last_activity: now(),
+      idle_timeout: Keyword.get(opts, :idle_timeout, 30_000),
+      opening_deadline: opening_deadline
+    }
+
+    if inert?, do: {:ok, state}, else: {:ok, state, {:continue, :connect}}
   end
 
   @impl true
   def handle_continue(:connect, state) do
+    owner = self()
+
+    {:ok, watchdog} =
+      HTTP.RequestLifecycle.start_worker(
+        state.opts[:request_lifecycle],
+        :http3_watchdog,
+        state.opening_deadline,
+        fn -> watchdog(owner, state.cleanup, state.opts[:request_lifecycle]) end
+      )
+
+    state = %{state | watchdog: watchdog, watchdog_monitor: Process.monitor(watchdog)}
+
     result =
       guarded(state, state.opening_deadline - now(), fn ->
         Session.connect(
@@ -82,8 +118,18 @@ defmodule HTTP.HTTP3.ConnectionOwner do
             :port,
             :max_streams,
             :rotation_after,
-            :operation_timeout
+            :operation_timeout,
+            :deadline_at,
+            :opening_deadline_at,
+            :exclusive?,
+            :inert,
+            :activation,
+            :creator,
+            :request_lifecycle,
+            :session_options
           ])
+          |> Keyword.put(:deadline, {:abs_ms, state.opening_deadline})
+          |> Keyword.put(:timeout, min(state.timeout, max(state.opening_deadline - now(), 1)))
         )
       end)
 
@@ -93,6 +139,24 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   end
 
   @impl true
+  def handle_call({:activate, token}, {creator, _}, %{lifecycle: :inert} = state) do
+    cond do
+      token != state.activation or creator != state.opts[:creator] ->
+        {:reply, {:error, :invalid_activation}, state}
+
+      now() >= state.opening_deadline ->
+        {:stop, :normal, {:error, :opening_timeout}, state}
+
+      true ->
+        {:reply, :ok, %{state | lifecycle: :connecting}, {:continue, :connect}}
+    end
+  end
+
+  def handle_call({:activate, _}, _from, state), do: {:reply, {:error, :already_activated}, state}
+
+  def handle_call(:await_ready, _from, %{lifecycle: :inert} = state),
+    do: {:reply, {:error, :owner_inert}, state}
+
   def handle_call(:await_ready, _from, %{lifecycle: :ready} = state), do: {:reply, :ok, state}
 
   def handle_call(:await_ready, from, state),
@@ -109,9 +173,16 @@ defmodule HTTP.HTTP3.ConnectionOwner do
        pending: state.pending != nil,
        continuations: length(state.continuations),
        queued: length(state.queue),
-       endpoint: endpoint
+       endpoint: endpoint,
+       watchdog: state.watchdog,
+       exclusive?: state.exclusive?,
+       request_deadline: state.request_deadline,
+       opening_deadline: state.opening_deadline
      }, state}
   end
+
+  def handle_call({:open, _, _, _, _, _}, _from, %{lifecycle: :inert} = state),
+    do: {:reply, {:error, :owner_inert}, state}
 
   def handle_call(
         {:open, _fields, _body, _subscriber, _generation, _opts},
@@ -174,6 +245,21 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   def handle_info({:quic_ready, _handle, _metadata}, state), do: {:noreply, state}
   def handle_info({:quic_closed, _handle, reason}, state), do: {:stop, {:shutdown, reason}, state}
 
+  def handle_info(
+        {:http3_retire, pool, token},
+        %{pool: pool, lease_token: token, exclusive?: true} = state
+      ) do
+    retire_native(state.cleanup)
+    {:stop, :normal, %{state | lifecycle: :retiring}}
+  end
+
+  def handle_info({:http3_retire, _, _}, state), do: {:noreply, state}
+
+  def handle_info({:http3_pool, pool, key, token, exclusive?}, state) do
+    {:noreply, next} = handle_info({:http3_pool, pool, key}, state)
+    {:noreply, %{next | lease_token: token, exclusive?: exclusive?}}
+  end
+
   def handle_info({:http3_pool, pool, _key}, state) do
     if state.pool_monitor, do: Process.demonitor(state.pool_monitor, [:flush])
     if state.lifecycle == :draining, do: HTTP.HTTP3.Pool.drain(pool, self())
@@ -181,6 +267,13 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   end
 
   def handle_info(:http3_pool_down, state), do: {:stop, :normal, state}
+
+  def handle_info({:DOWN, monitor, :process, _pid, _reason}, state)
+      when monitor == state.watchdog_monitor or monitor == state.tracker_monitor or
+             (monitor == state.creator_monitor and state.pool == nil) do
+    retire_native(state.cleanup)
+    {:stop, :normal, state}
+  end
 
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
     if monitor == state.pool_monitor, do: send(self(), :http3_pool_down)
@@ -200,10 +293,14 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   def terminate(reason, state) do
     fail_all(state, {:owner_down, reason})
 
-    if state.session.connection,
-      do: guarded(state, state.timeout, fn -> Session.abort(state.session) end)
+    if state.cleanup do
+      retire_native(state.cleanup)
+    else
+      if state.session.connection && state.watchdog,
+        do: guarded(state, state.timeout, fn -> Session.abort(state.session) end)
+    end
 
-    send(state.watchdog, :stop)
+    stop_watchdog(state.watchdog, state.watchdog_monitor)
     :ok
   end
 
@@ -321,15 +418,30 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     end
   end
 
-  defp perform(state, {:write, ref, bytes, fin, _recipient, _write_ref} = action),
-    do:
+  defp perform(state, {:write, ref, bytes, fin, _recipient, _write_ref} = action) do
+    deadline =
+      case state.requests[ref] do
+        %{deadline: deadline} -> deadline
+        _ -> nil
+      end
+
+    if is_integer(deadline) and now() >= deadline do
+      reject(state, action, :request_timeout)
+    else
+      opts = if is_integer(deadline), do: [deadline: {:abs_ms, deadline}], else: []
+
+      budget =
+        if is_integer(deadline),
+          do: min(state.timeout, max(deadline - now(), 1)),
+          else: state.timeout
+
       result(
         state,
         action,
-        guarded(state, state.timeout, fn ->
-          write(state.session, ref, bytes, fin)
-        end)
+        guarded(state, budget, fn -> write(state.session, ref, bytes, fin, opts) end)
       )
+    end
+  end
 
   defp perform(state, {:cancel, ref} = action) do
     if Map.has_key?(state.session.requests, ref),
@@ -358,10 +470,11 @@ defmodule HTTP.HTTP3.ConnectionOwner do
         guarded(state, state.timeout, fn -> Session.reset_send(state.session, ref) end)
       )
 
-  defp write(session, ref, {:trailers, fields}, true),
-    do: Session.send_trailers(session, ref, fields, [])
+  defp write(session, ref, {:trailers, fields}, true, opts),
+    do: Session.send_trailers(session, ref, fields, opts)
 
-  defp write(session, ref, bytes, fin), do: Session.send_data(session, ref, bytes, fin, [])
+  defp write(session, ref, bytes, fin, opts),
+    do: Session.send_data(session, ref, bytes, fin, opts)
 
   defp result(state, context, response) do
     next = apply_result(state, context, response)
@@ -406,6 +519,12 @@ defmodule HTTP.HTTP3.ConnectionOwner do
 
   defp apply_result(state, :initialize, {:ok, session}) do
     for from <- state.ready_waiters, do: GenServer.reply(from, :ok)
+
+    deadline =
+      if state.exclusive? and is_integer(state.request_deadline),
+        do: {:abs_ms, state.request_deadline}
+
+    session = %{session | deadline: deadline}
     %{state | session: session, lifecycle: :ready, ready_waiters: [], pending: nil}
   end
 
@@ -415,7 +534,7 @@ defmodule HTTP.HTTP3.ConnectionOwner do
 
   defp apply_result(
          state,
-         {:open, from, subscriber, generation, _fields, _body, _opts},
+         {:open, from, subscriber, generation, _fields, _body, opts},
          {:ok, session, ref}
        ) do
     monitor = Process.monitor(subscriber)
@@ -423,6 +542,7 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     request = %{
       subscriber: subscriber,
       generation: generation,
+      deadline: opts[:request_deadline_at],
       monitor: monitor,
       paused: false,
       headers_pending?: false,
@@ -662,32 +782,62 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     result
   end
 
-  defp watchdog(owner) do
+  defp watchdog(owner, cleanup, tracker) do
     monitor = Process.monitor(owner)
+    tracker_monitor = if tracker, do: Process.monitor(tracker)
 
     receive do
       {:arm, token, timeout, recipients, operation} ->
         receive do
           {:disarm, ^token} ->
             Process.demonitor(monitor, [:flush])
-            watchdog(owner)
+            if tracker_monitor, do: Process.demonitor(tracker_monitor, [:flush])
+            watchdog(owner, cleanup, tracker)
 
           {:DOWN, ^monitor, :process, _, _} ->
-            :ok
+            retire_native(cleanup)
+
+          {:DOWN, ^tracker_monitor, :process, _, _} ->
+            retire_native(cleanup)
+            Process.exit(owner, :kill)
 
           :stop ->
             :ok
         after
           timeout ->
             if operation, do: Enum.each(recipients, &send(&1, {:http3_indeterminate, operation}))
+            retire_native(cleanup)
             Process.exit(owner, :kill)
         end
 
       {:DOWN, ^monitor, :process, _, _} ->
-        :ok
+        retire_native(cleanup)
+
+      {:DOWN, ^tracker_monitor, :process, _, _} ->
+        retire_native(cleanup)
+        Process.exit(owner, :kill)
 
       :stop ->
         :ok
+    end
+  end
+
+  defp retire_native(%{lease: lease}) do
+    Quic.Cleanup.retire(lease, {:abs_ms, now()})
+    :ok
+  end
+
+  defp retire_native(nil), do: :ok
+
+  defp stop_watchdog(nil, _monitor), do: :ok
+
+  defp stop_watchdog(watchdog, monitor) do
+    send(watchdog, :stop)
+
+    receive do
+      {:DOWN, ^monitor, :process, ^watchdog, _} -> :ok
+    after
+      1_000 -> Process.exit(watchdog, :kill)
     end
   end
 

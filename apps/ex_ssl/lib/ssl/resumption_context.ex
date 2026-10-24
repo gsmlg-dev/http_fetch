@@ -5,6 +5,16 @@ defmodule SSL.ResumptionContext do
 
   @spec prepare(Options.t(), term()) ::
           {:ok, Options.t(), SessionTicket.t() | nil, binary() | nil}
+  def prepare(%{policy: policy} = options, _endpoint) when policy != nil do
+    {:ok, prepared, nil} = material(nil, options)
+    {:ok, prepared, nil, nil}
+  end
+
+  def prepare(%{verify_fun: policy} = options, _endpoint) when policy != :undefined do
+    {:ok, prepared, nil} = material(nil, options)
+    {:ok, %{prepared | session_tickets: :disabled}, nil, nil}
+  end
+
   def prepare(%{session_tickets: :disabled} = options, _endpoint), do: {:ok, options, nil, nil}
 
   def prepare(%{session_tickets: :auto} = options, endpoint) do

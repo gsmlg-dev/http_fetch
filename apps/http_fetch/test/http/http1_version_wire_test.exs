@@ -69,13 +69,8 @@ defmodule HTTP.HTTP1VersionWireTest do
     refute Enum.any?(entries, fn {_, entry} -> entry.key.port == port end)
   end
 
-  defp assert_completion(promise, backend) do
-    result = RequestCompletion.await(Promise.completion(promise), 5_000)
-
-    case backend do
-      :ssl -> assert result == :ok
-      :ex_ssl -> assert result == {:error, {:unsupported_completion, :tls_backend}}
-    end
+  defp assert_completion(promise, _backend) do
+    assert RequestCompletion.await(Promise.completion(promise), 5_000) == :ok
   end
 
   defp assert_fresh_get(url, peer, options, backend) do

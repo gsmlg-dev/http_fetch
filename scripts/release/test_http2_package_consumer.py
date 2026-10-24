@@ -1,4 +1,5 @@
 """Candidate package HTTP/2 endpoint routing and provenance regressions."""
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -8,6 +9,124 @@ from unittest.mock import patch
 
 import consumer_gate
 from stage import PACKAGES, ROOT
+
+spec = importlib.util.spec_from_file_location(
+    'package_traffic', ROOT / 'scripts/http_runtime_package_traffic_gate.py')
+package_traffic = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(package_traffic)
+
+
+class HTTPRuntimeTrafficEvidenceTests(unittest.TestCase):
+    def evidence(self, mode):
+        tls = mode == 'ex_ssl'
+        records = [dict(kind='ready', port=8443, tls=tls)]
+        clients = [['http_fetch'], ['http_event_source'], ['http_web_socket'],
+                   ['http_fetch', 'http_event_source', 'http_web_socket']]
+        consumer = []
+        for cid, (selected, kinds) in enumerate(zip(clients, (
+                ['fetch'], ['sse'], ['connect'], ['sse', 'connect', 'fetch'])), 1):
+            records.append(dict(kind='connection', connection=cid,
+                                protocol='h2' if tls else 'h2c', alpn='h2' if tls else None))
+            for kind in kinds:
+                records.append(dict(kind=kind, connection=cid))
+            if 'connect' in kinds:
+                records.append(dict(kind='wire_complete', connection=cid,
+                                    messages=2 if len(selected) == 3 else 1,
+                                    client_end_stream=True, peer_end_stream=True,
+                                    client_close_code=1000, client_frames={'8': 1}))
+            consumer.extend([
+                dict(result='PASS', gate='isolated_http2_traffic', clients=selected,
+                     mode=mode, protocol='http2' if tls else 'h2c',
+                     backend='ex_ssl' if tls else None, verified_tls=tls,
+                     scheme='https' if tls else 'http'),
+                dict(result='PASS', gate='isolated_runtime_startup', clients=selected),
+            ])
+        return records, consumer
+
+    def test_both_modes_require_actual_peer_and_all_four_consumer_evidence(self):
+        for mode in ('h2c', 'ex_ssl'):
+            records, consumer = self.evidence(mode)
+            result = package_traffic.validate_mode(records, consumer, mode)
+            self.assertEqual(result['mode'], mode)
+            self.assertEqual(result['connections'], 4)
+            self.assertEqual(result['consumers'], 4)
+            self.assertEqual(result['verified_tls'], mode == 'ex_ssl')
+
+    def test_missing_traffic_unverified_tls_wrong_alpn_and_replay_fail(self):
+        for mode in ('h2c', 'ex_ssl'):
+            original, original_consumer = self.evidence(mode)
+            mutations = [([], original_consumer), (original, [])]
+            mutations.append(([r for r in original if r.get('kind') != 'fetch'], original_consumer))
+            mutations.append((original + [dict(kind='fetch', connection=1)], original_consumer))
+            mutations.append((original, original_consumer[:-1]))
+            mutations.append((original, [r for r in original_consumer
+                                         if r.get('gate') != 'isolated_http2_traffic']))
+            if mode == 'ex_ssl':
+                mutations.append(([{**r, 'protocol': 'h2c'} if r.get('kind') == 'connection' else r
+                                   for r in original], original_consumer))
+                mutations.append(([{**r, 'alpn': None} if r.get('kind') == 'connection' else r
+                                   for r in original], original_consumer))
+                mutations.append((original, [{**r, 'verified_tls': False}
+                                             if r.get('gate') == 'isolated_http2_traffic' else r
+                                             for r in original_consumer]))
+            mutations.append(([{**r, 'peer_end_stream': False}
+                               if r.get('kind') == 'wire_complete' else r
+                               for r in original], original_consumer))
+            for index, (records, consumer) in enumerate(mutations):
+                with self.subTest(mode=mode, mutation=index):
+                    with self.assertRaises((AssertionError, ValueError)):
+                        package_traffic.validate_mode(records, consumer, mode)
+
+    def test_aggregate_rejects_h2c_only_duplicate_modes_and_incomplete_tls(self):
+        results = [package_traffic.validate_mode(*self.evidence(mode), mode)
+                   for mode in ('h2c', 'ex_ssl')]
+        summary = package_traffic.aggregate_modes(results)
+        self.assertEqual((summary['consumers'], summary['connections']), (8, 8))
+        self.assertTrue(summary['verified_tls'])
+        for incomplete in (results[:1], results[1:], [results[0], results[0]],
+                           [results[0], {**results[1], 'verified_tls': False}]):
+            with self.assertRaises((AssertionError, ValueError)):
+                package_traffic.aggregate_modes(incomplete)
+
+    def test_modes_select_tls_peer_and_verified_https_consumer_without_fallback(self):
+        environment = {'HTTP_FETCH_ARCHIVE_DIR': '/exact/archives',
+                       'HTTP_FETCH_RELEASE_VERSION': '1.2.3'}
+        for mode, scheme in (('h2c', 'http'), ('ex_ssl', 'https')):
+            command = package_traffic.peer_command(ROOT, mode)
+            self.assertEqual('--tls' in command, mode == 'ex_ssl')
+            selected = package_traffic.consumer_environment(environment, ROOT, mode, 8443)
+            self.assertEqual(selected['HTTP_RUNTIME_CONSUMER_URL'], f'{scheme}://localhost:8443')
+            self.assertEqual(selected['HTTP_RUNTIME_CONSUMER_MODE'], mode)
+            for key, value in environment.items():
+                self.assertEqual(selected[key], value)
+            if mode == 'ex_ssl':
+                self.assertEqual(selected['HTTP_RUNTIME_CONSUMER_CA'],
+                                 str(ROOT / 'apps/http_fetch/test/support/fixtures/localhost-ca.pem'))
+                self.assertIn(str(ROOT / 'apps/http_fetch/test/support/fixtures/localhost.pem'), command)
+        driver = (ROOT / 'scripts/http_runtime_consumer_gate.exs').read_text()
+        for required in ('tls_backend: :ex_ssl', 'verify: :verify_peer',
+                         'server_name_indication: ~c"localhost"',
+                         '"https://", "wss://"', ':public_key.pkix_verify_hostname_match_fun(:https)'):
+            self.assertIn(required, driver)
+        self.assertNotIn(':verify_none', driver)
+
+    def test_runtime_projects_keep_exact_hex_graph_and_transport_environment(self):
+        environment = {'HTTP_RUNTIME_CONSUMER_URL': 'https://localhost:8443',
+                       'HTTP_RUNTIME_CONSUMER_MODE': 'ex_ssl',
+                       'HTTP_RUNTIME_CONSUMER_CA': '/fixture/ca.pem'}
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(consumer_gate, 'command') as command:
+                consumer_gate.runtime_projects(Path(directory), '1.2.3', environment)
+            launches = [call for call in command.call_args_list
+                        if call.args[0] == ['mix', 'run', 'gate.exs', 'verify']]
+            self.assertEqual(len(launches), 4)
+            for call in launches:
+                for key, value in environment.items():
+                    self.assertEqual(call.kwargs['env'][key], value)
+                source = (call.kwargs['cwd'] / 'mix.exs').read_text()
+                for forbidden in ('path:', 'override:', 'in_umbrella:'):
+                    self.assertNotIn(forbidden, source)
+                self.assertIn('"== 1.2.3"', source)
 
 
 class HTTP2PackageConsumerTests(unittest.TestCase):

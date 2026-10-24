@@ -12,9 +12,10 @@ defmodule QuicHttp3.Session do
   """
 
   alias QuicHttp3.{Control, Frame, Qpack, Response, Stream}
+  alias QuicHttp3.Transport.Quic, as: QuicTransport
   alias QuicHttp3.Transport.Quic.Stream, as: TransportStream
 
-  defstruct transport: QuicHttp3.Transport.Quic,
+  defstruct transport: QuicTransport,
             connection: nil,
             control: nil,
             control_stream: nil,
@@ -30,6 +31,8 @@ defmodule QuicHttp3.Session do
             continuations: %{},
             max_frame: 16_384,
             timeout: 5_000,
+            deadline: nil,
+            cleanup: nil,
             pending: nil,
             work: nil,
             runnable: [],
@@ -49,12 +52,14 @@ defmodule QuicHttp3.Session do
   def new(opts \\ [])
 
   def new(opts) when is_list(opts) do
-    transport = Keyword.get(opts, :transport, QuicHttp3.Transport.Quic)
+    transport = Keyword.get(opts, :transport, QuicTransport)
     max_frame = Keyword.get(opts, :max_frame, 16_384)
     timeout = Keyword.get(opts, :timeout, 5_000)
+    deadline = Keyword.get(opts, :deadline)
+    cleanup = Keyword.get(opts, :cleanup)
 
     if is_atom(transport) and is_integer(max_frame) and max_frame in 1..16_384 and
-         is_integer(timeout) and timeout > 0 do
+         is_integer(timeout) and timeout > 0 and valid_deadline?(deadline) do
       limits =
         Keyword.take(opts, [
           :max_fields,
@@ -66,16 +71,45 @@ defmodule QuicHttp3.Session do
       session =
         struct!(
           __MODULE__,
-          [transport: transport, max_frame: max_frame, timeout: timeout] ++ limits
+          [
+            transport: transport,
+            max_frame: max_frame,
+            timeout: timeout,
+            deadline: deadline,
+            cleanup: cleanup
+          ] ++ limits
         )
 
-      if valid_limits?(session), do: {:ok, session}, else: {:error, :invalid_session_options}
+      with :ok <- validate_cleanup(cleanup, transport) do
+        if valid_limits?(session), do: {:ok, session}, else: {:error, :invalid_session_options}
+      end
     else
       {:error, :invalid_session_options}
     end
   end
 
   def new(_), do: {:error, :invalid_session_options}
+
+  defp valid_deadline?(nil), do: true
+  defp valid_deadline?({:abs_ms, deadline}), do: is_integer(deadline)
+  defp valid_deadline?(_), do: false
+
+  defp validate_cleanup(nil, _), do: :ok
+
+  defp validate_cleanup(
+         %{
+           handle: %Quic.Cleanup.Handle{} = handle,
+           lease: %Quic.Cleanup.Lease{handle: lease_handle}
+         },
+         transport
+       )
+       when handle == lease_handle do
+    if transport == QuicTransport,
+      do: :ok,
+      else: {:error, :cleanup_requires_quic_transport}
+  end
+
+  defp validate_cleanup(_, _), do: {:error, :invalid_cleanup_descriptor}
 
   def connect(session, remote, port, opts) do
     if session.connection == nil do
@@ -86,7 +120,12 @@ defmodule QuicHttp3.Session do
   end
 
   def ready(%__MODULE__{connection: nil}), do: {:error, :not_connected}
-  def ready(session), do: session.transport.ready(session.connection, session.timeout)
+
+  def ready(session) do
+    if session.deadline != nil and now() >= elem(session.deadline, 1),
+      do: {:error, :deadline_expired},
+      else: session.transport.ready(session.connection, session.timeout)
+  end
 
   def open(%__MODULE__{connection: nil} = session), do: {:error, session, :not_connected}
   def open(%__MODULE__{open?: true} = session), do: {:error, session, :already_open}
@@ -274,6 +313,17 @@ defmodule QuicHttp3.Session do
   def abort(%__MODULE__{connection: nil} = session), do: {:ok, session}
 
   def abort(session) do
+    opts = if session.work, do: [deadline: {:abs_ms, session.work.deadline}], else: []
+
+    expired? =
+      (session.work != nil and now() >= session.work.deadline) or
+        (session.deadline != nil and now() >= elem(session.deadline, 1))
+
+    if session.cleanup && expired? do
+      # Resource retirement remains possible after the application budget ends.
+      Quic.Cleanup.retire(session.cleanup.lease, {:abs_ms, now()})
+    end
+
     abandoned =
       if session.pending,
         do: Map.take(session.pending, [:ref, :kind, :status]),
@@ -283,7 +333,7 @@ defmodule QuicHttp3.Session do
       %{session | pending: nil, work: nil, aborted_operation: abandoned},
       :abort,
       [:abort],
-      []
+      opts
     )
   end
 
@@ -328,11 +378,15 @@ defmodule QuicHttp3.Session do
     paused = Keyword.get(opts, :paused, MapSet.new())
 
     if is_integer(timeout) and timeout > 0 and is_integer(batches) and batches in 1..128 and
-         is_struct(paused, MapSet) do
+         is_struct(paused, MapSet) and valid_operation_deadline?(opts) do
       work = %{
         kind: kind,
         steps: steps,
-        deadline: now() + timeout,
+        deadline: operation_deadline(session, opts, timeout),
+        call_timeout: timeout,
+        absolute?:
+          session.transport == QuicTransport or session.deadline != nil or
+            match?({:abs_ms, _}, opts[:deadline]),
         acc: [],
         reads: batches,
         paused: paused,
@@ -343,6 +397,23 @@ defmodule QuicHttp3.Session do
     else
       {:error, session, :invalid_operation_options}
     end
+  end
+
+  defp valid_operation_deadline?(opts) do
+    case Keyword.get(opts, :deadline) do
+      {:abs_ms, deadline} -> is_integer(deadline)
+      _ -> true
+    end
+  end
+
+  defp operation_deadline(session, opts, timeout) do
+    requested =
+      case Keyword.get(opts, :deadline) do
+        {:abs_ms, deadline} -> deadline
+        _ -> now() + timeout
+      end
+
+    if session.deadline, do: min(requested, elem(session.deadline, 1)), else: requested
   end
 
   defp drive(%{work: %{steps: []}} = session), do: finish(session)
@@ -429,24 +500,48 @@ defmodule QuicHttp3.Session do
         status: :unknown
       }
 
-      opts = [ref: ref, timeout: remaining, deadline: remaining]
+      deadline = if session.work.absolute?, do: {:abs_ms, pending.deadline}, else: remaining
+      opts = [ref: ref, timeout: min(remaining, session.work.call_timeout), deadline: deadline]
 
-      result =
-        if operation_kind(action) == :open_stream and match?({:open_request, _, _, _, _}, action) do
-          case request_admission(session) do
-            :ok -> operation(session, action, opts)
-            error -> error
-          end
-        else
-          operation(session, action, opts)
-        end
+      case retain_intent(session, pending) do
+        {:ok, permit, target} ->
+          pending = Map.merge(pending, %{cleanup_permit: permit, target_generation: target})
+          next = %{session | pending: pending}
+          complete(next, action, admitted_operation(session, next, action, opts))
 
-      complete(%{session | pending: pending}, action, result)
+        {:error, reason} ->
+          {:error, session, reason}
+      end
     end
   end
 
-  defp operation(session, {:connect, remote, port, opts}, operation_opts),
-    do: session.transport.connect(remote, port, Keyword.merge(opts, operation_opts))
+  defp admitted_operation(session, next, {:open_request, _, _, _, _} = action, opts) do
+    with :ok <- request_admission(session), do: operation(next, action, opts)
+  end
+
+  defp admitted_operation(_session, next, action, opts), do: operation(next, action, opts)
+
+  defp retain_intent(%{cleanup: nil}, _pending), do: {:ok, nil, nil}
+
+  defp retain_intent(session, pending) do
+    with {:ok, target} <-
+           QuicTransport.cleanup_target(session.connection, session.cleanup),
+         {:ok, permit} <-
+           Quic.Cleanup.operation(
+             session.cleanup.lease,
+             target,
+             pending.ref,
+             pending.kind,
+             {:abs_ms, pending.deadline}
+           ) do
+      {:ok, permit, target}
+    end
+  end
+
+  defp operation(session, {:connect, remote, port, opts}, operation_opts) do
+    opts = if session.cleanup, do: Keyword.put(opts, :cleanup, session.cleanup), else: opts
+    session.transport.connect(remote, port, Keyword.merge(opts, operation_opts))
+  end
 
   defp operation(session, :open_control, opts),
     do: session.transport.open_stream(session.connection, :uni, opts)
@@ -491,16 +586,29 @@ defmodule QuicHttp3.Session do
   defp operation_kind({:stop_code, _, _}), do: :stop_stream
   defp operation_kind({:stop, _}), do: :stop_stream
   defp operation_kind(:close), do: :close
-  defp operation_kind(:abort), do: :close
+  defp operation_kind(:abort), do: :abort
 
-  defp complete(session, _action, {:unknown, connection, ref}),
+  defp complete(session, action, result) do
+    permit = session.pending && Map.get(session.pending, :cleanup_permit)
+
+    if permit do
+      if is_tuple(result) and elem(result, 0) == :unknown,
+        do: Quic.Cleanup.indeterminate(permit),
+        else: Quic.Cleanup.resolved(permit)
+    end
+
+    pending = if session.pending, do: Map.delete(session.pending, :cleanup_permit)
+    complete_result(%{session | pending: pending}, action, result)
+  end
+
+  defp complete_result(session, _action, {:unknown, connection, ref}),
     do:
       {:unknown, %{session | connection: connection, pending: %{session.pending | ref: ref}}, ref}
 
-  defp complete(session, _action, {:unknown, ref}),
+  defp complete_result(session, _action, {:unknown, ref}),
     do: {:unknown, %{session | pending: %{session.pending | ref: ref}}, ref}
 
-  defp complete(session, {:send, stream, bytes, fin}, {:blocked, %{type: :data_blocked}})
+  defp complete_result(session, {:send, stream, bytes, fin}, {:blocked, %{type: :data_blocked}})
        when byte_size(bytes) > 1 do
     # Definite rejection has no send effects. Keep FIN on the final suffix and
     # retain the same deadline; unknown admission never reaches this clause.
@@ -511,18 +619,18 @@ defmodule QuicHttp3.Session do
     drive(%{session | pending: nil, work: %{session.work | steps: steps}})
   end
 
-  defp complete(session, _action, {:blocked, reason}),
+  defp complete_result(session, _action, {:blocked, reason}),
     do: {:blocked, %{session | pending: %{session.pending | status: :blocked}}, reason}
 
-  defp complete(session, :close, {:error, :closed}), do: complete(session, :close, :ok)
+  defp complete_result(session, :close, {:error, :closed}), do: complete(session, :close, :ok)
 
-  defp complete(session, _action, {:error, {:attach_failed, connection, error}}),
+  defp complete_result(session, _action, {:error, {:attach_failed, connection, error}}),
     do: {:error, %{session | connection: connection, pending: nil}, {:attach_failed, error}}
 
-  defp complete(session, _action, {:error, reason}),
+  defp complete_result(session, _action, {:error, reason}),
     do: {:error, %{session | pending: nil}, reason}
 
-  defp complete(session, action, success) when success == :ok or elem(success, 0) == :ok do
+  defp complete_result(session, action, success) when success == :ok or elem(success, 0) == :ok do
     [_ | rest] = session.work.steps
     session = %{session | pending: nil, work: %{session.work | steps: rest}}
 

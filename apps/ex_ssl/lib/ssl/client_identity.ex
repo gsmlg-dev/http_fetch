@@ -2,18 +2,20 @@ defmodule SSL.ClientIdentity do
   @moduledoc false
 
   alias SSL.Capabilities
+  alias SSL.ClientIdentity.Candidates
   alias SSL.Crypto.Signature
   alias SSL.PKIX
 
   @derive {Inspect, only: [:signature_schemes]}
   @enforce_keys [:chain, :private_key, :public_key, :signature_schemes]
-  defstruct [:chain, :private_key, :public_key, :signature_schemes]
+  defstruct [:chain, :private_key, :public_key, :signature_schemes, tls12_signature_schemes: []]
 
   @type t :: %__MODULE__{
           chain: [binary()],
           private_key: term(),
           public_key: term(),
-          signature_schemes: [non_neg_integer()]
+          signature_schemes: [non_neg_integer()],
+          tls12_signature_schemes: [non_neg_integer()]
         }
 
   @max_certificates 16
@@ -23,29 +25,81 @@ defmodule SSL.ClientIdentity do
   @max_chain_bytes 524_288
   @max_pem_bytes 1_048_576
   @max_key_bytes 1_048_576
-  @identity_keys [:cert, :certfile, :key, :keyfile]
+  @identity_keys [:cert, :certfile, :key, :keyfile, :password]
+  @max_password_bytes 1_048_576
+  @max_password_nodes 2_097_153
+  @max_password_depth 64
   @rsa_encryption_oid {1, 2, 840, 113_549, 1, 1, 1}
   @rsa_pss_oid {1, 2, 840, 113_549, 1, 1, 10}
   @ec_oid {1, 2, 840, 10_045, 2, 1}
   @ed25519_oid {1, 3, 101, 112}
 
-  @spec load(keyword()) :: {:ok, nil | t()} | {:error, {:options, atom()}}
+  @type config :: nil | t() | Candidates.t()
+
+  @spec load(keyword()) :: {:ok, config()} | {:error, {:options, atom()}}
   def load(options) when is_list(options) do
-    with :ok <- validate_options(options),
-         {:ok, sources} <- sources(options) do
-      case sources do
-        :none -> {:ok, nil}
-        {cert_source, key_source} -> load_sources(cert_source, key_source)
+    with :ok <- validate_options(options, [:certs_keys | @identity_keys]) do
+      case Keyword.fetch(options, :certs_keys) do
+        {:ok, entries} -> load_candidates(entries, 0, [], 0)
+        :error -> load_single(options, false)
       end
     end
   end
 
   def load(_options), do: error(:invalid_identity_options)
 
-  defp validate_options(options) do
+  defp load_single(options, modern?) do
+    with :ok <- validate_options(options, @identity_keys),
+         {:ok, password} <- password_option(Keyword.fetch(options, :password)),
+         {:ok, sources} <- sources(options) do
+      case sources do
+        :none -> {:ok, nil}
+        {cert_source, key_source} -> load_sources(cert_source, key_source, password, modern?)
+      end
+    end
+  end
+
+  defp load_candidates([], _count, [], _bytes), do: {:ok, nil}
+
+  defp load_candidates([], _count, identities, _bytes),
+    do: Candidates.new(Enum.reverse(identities))
+
+  defp load_candidates([_ | _], count, _identities, _bytes) when count >= 16,
+    do: error(:identity_count_limit)
+
+  defp load_candidates([entry | rest], count, identities, bytes)
+       when is_map(entry) and map_size(entry) <= 5 do
+    if map_size(entry) == 0 do
+      load_candidates(rest, count + 1, identities, bytes)
+    else
+      options =
+        entry
+        |> prefer_direct(:cert, :certfile)
+        |> prefer_direct(:key, :keyfile)
+        |> Map.to_list()
+
+      with {:ok, %__MODULE__{} = identity} <- load_single(options, true),
+           next_bytes = bytes + Candidates.encoded_size(identity),
+           true <- next_bytes <= 8_388_608 do
+        load_candidates(rest, count + 1, [identity | identities], next_bytes)
+      else
+        false -> error(:identity_bytes_limit)
+        {:ok, nil} -> error(:incomplete_identity)
+        error -> error
+      end
+    end
+  end
+
+  defp load_candidates(_, _, _, _), do: error(:invalid_identity_collection)
+
+  defp prefer_direct(map, direct, file) do
+    if Map.has_key?(map, direct), do: Map.delete(map, file), else: map
+  end
+
+  defp validate_options(options, allowed) do
     if Keyword.keyword?(options) and
          Enum.all?(options, fn
-           {key, _value} -> key in @identity_keys
+           {key, _value} -> key in allowed
            _ -> false
          end) and Enum.uniq(Keyword.keys(options)) == Keyword.keys(options) do
       :ok
@@ -87,42 +141,54 @@ defmodule SSL.ClientIdentity do
     end
   end
 
-  defp load_sources(cert_source, key_source) do
-    with {:ok, chain} <- certificate_chain(cert_source, key_source),
+  defp load_sources(cert_source, key_source, password, modern?) do
+    with {:ok, chain} <- certificate_chain(cert_source, key_source, modern?),
          :ok <- validate_chain_order(chain),
-         {:ok, private_key} <- private_key(key_source),
+         {:ok, private_key} <- private_key(key_source, password),
          {:ok, public_key} <- leaf_public_key(hd(chain)),
-         {:ok, schemes} <- matching_schemes(private_key, public_key) do
+         schemes = matching_schemes(private_key, public_key, :tls13),
+         tls12_schemes = matching_schemes(private_key, public_key, :tls12),
+         true <- schemes != [] or tls12_schemes != [] do
       {:ok,
        %__MODULE__{
          chain: chain,
          private_key: private_key,
          public_key: public_key,
-         signature_schemes: schemes
+         signature_schemes: schemes,
+         tls12_signature_schemes: tls12_schemes
        }}
+    else
+      false -> error(:key_certificate_mismatch)
+      error -> error
     end
   end
 
-  defp certificate_chain({:der, der}, _key_source) when is_binary(der), do: checked_chain([der])
-  defp certificate_chain({:der, ders}, _key_source) when is_list(ders), do: checked_chain(ders)
-  defp certificate_chain({:der, _}, _key_source), do: error(:invalid_certificate)
+  defp certificate_chain({:der, der}, _key_source, _) when is_binary(der),
+    do: checked_chain([der])
 
-  defp certificate_chain({:file, path}, key_source) do
+  defp certificate_chain({:der, ders}, _key_source, _) when is_list(ders), do: checked_chain(ders)
+  defp certificate_chain({:der, _}, _key_source, _), do: error(:invalid_certificate)
+
+  defp certificate_chain({:file, path}, key_source, modern?) do
     with {:ok, pem} <- read_bounded(path, @max_pem_bytes),
          {:ok, entries} <- pem_entries(pem),
          certs when certs != [] <- for({:Certificate, der, :not_encrypted} <- entries, do: der),
-         true <- valid_certificate_entries?(entries, same_file?(path, key_source)) do
+         true <- valid_certificate_entries?(entries, same_file?(path, key_source), modern?) do
       checked_chain(certs)
     else
       _ -> error(:invalid_certificate_file)
     end
   end
 
-  defp valid_certificate_entries?(entries, same_file?) do
+  defp valid_certificate_entries?(entries, same_file?, modern?) do
     keys = Enum.reject(entries, fn {type, _, _} -> type == :Certificate end)
 
     Enum.all?(keys, fn {type, _, _} -> private_key_pem_type?(type) end) and
-      if(same_file?, do: length(keys) == 1, else: keys == [])
+      cond do
+        same_file? -> length(keys) == 1
+        modern? -> length(keys) <= 1
+        true -> keys == []
+      end
   end
 
   defp same_file?(cert_path, {:file, key_path}) do
@@ -169,21 +235,21 @@ defmodule SSL.ClientIdentity do
     _, _ -> error(:invalid_chain_order)
   end
 
-  defp private_key({:der, {type, der}})
+  defp private_key({:der, {type, der}}, _password)
        when type in [:RSAPrivateKey, :ECPrivateKey, :PrivateKeyInfo] and is_binary(der) and
               byte_size(der) <= @max_key_bytes do
-    decode_private_key({type, der, :not_encrypted})
+    decode_private_key({type, der, :not_encrypted}, :absent)
   end
 
-  defp private_key({:der, _}), do: error(:unsupported_private_key)
+  defp private_key({:der, _}, _password), do: error(:unsupported_private_key)
 
-  defp private_key({:file, path}) do
+  defp private_key({:file, path}, password) do
     with {:ok, pem} <- read_bounded(path, @max_pem_bytes),
          {:ok, entries} <- pem_entries(pem),
          [entry] <- Enum.reject(entries, fn {type, _, _} -> type == :Certificate end),
-         true <- elem(entry, 2) == :not_encrypted,
-         true <- private_key_pem_type?(elem(entry, 0)) do
-      decode_private_key(entry)
+         true <- private_key_pem_type?(elem(entry, 0)),
+         {:ok, resolved} <- resolve_password(password) do
+      decode_private_key(entry, resolved)
     else
       _ -> error(:unsupported_private_key)
     end
@@ -191,8 +257,17 @@ defmodule SSL.ClientIdentity do
 
   defp private_key_pem_type?(type), do: type in [:RSAPrivateKey, :ECPrivateKey, :PrivateKeyInfo]
 
-  defp decode_private_key(entry) do
-    key = :public_key.pem_entry_decode(entry)
+  defp decode_private_key(entry, password) do
+    key =
+      case elem(entry, 2) do
+        :not_encrypted ->
+          :public_key.pem_entry_decode(entry)
+
+        _ ->
+          :ok = SSL.ClientIdentity.Encryption.validate(entry, password)
+          # Older public decoders require a list despite their documented iodata API.
+          :public_key.pem_entry_decode(entry, :binary.bin_to_list(password))
+      end
 
     case key do
       {:RSAPrivateKey, _, _, _, _, _, _, _, _, _, _} ->
@@ -211,19 +286,75 @@ defmodule SSL.ClientIdentity do
     _, _ -> error(:unsupported_private_key)
   end
 
-  defp matching_schemes(private_key, public_key) do
-    digest = :crypto.hash(:sha256, "ex_ssl client identity key match")
+  defp password_option(:error), do: {:ok, :absent}
 
-    schemes =
-      Capabilities.identifiers(:signature_algorithm)
-      |> Enum.filter(fn id ->
-        is_integer(id) and matches_key?(id, private_key, public_key, digest)
-      end)
+  defp password_option({:ok, callback}) when is_function(callback, 0),
+    do: {:ok, {:callback, callback}}
 
-    if schemes == [], do: error(:key_certificate_mismatch), else: {:ok, schemes}
+  defp password_option({:ok, value}), do: password_bytes(value)
+
+  defp resolve_password({:callback, callback}) do
+    password_bytes(callback.())
+  catch
+    _, _ -> error(:invalid_password)
   end
 
-  defp matches_key?(id, private_key, public_key, digest) do
+  defp resolve_password(password), do: {:ok, password}
+
+  defp password_bytes(value) when is_binary(value) or is_list(value) do
+    with :ok <- password_walk([{value, 0, false}], 0, 0) do
+      {:ok, IO.iodata_to_binary(value)}
+    end
+  catch
+    _, _ -> error(:invalid_password)
+  end
+
+  defp password_bytes(_), do: error(:invalid_password)
+
+  # Bound traversal before flattening; flat list tails do not add nesting depth.
+  defp password_walk(_, bytes, nodes)
+       when bytes > @max_password_bytes or nodes > @max_password_nodes,
+       do: error(:invalid_password)
+
+  defp password_walk([], _bytes, _nodes), do: :ok
+
+  defp password_walk([{value, _depth, _tail?} | rest], bytes, nodes) when is_binary(value),
+    do: password_walk(rest, bytes + byte_size(value), nodes + 1)
+
+  defp password_walk([{value, _depth, false} | rest], bytes, nodes)
+       when is_integer(value) and value in 0..255,
+       do: password_walk(rest, bytes + 1, nodes + 1)
+
+  defp password_walk([{[], depth, tail?} | rest], bytes, nodes)
+       when tail? or depth < @max_password_depth,
+       do: password_walk(rest, bytes, nodes + 1)
+
+  defp password_walk([{[head | tail], depth, tail?} | rest], bytes, nodes)
+       when tail? or depth < @max_password_depth do
+    depth = if tail?, do: depth, else: depth + 1
+    password_walk([{head, depth, false}, {tail, depth, true} | rest], bytes, nodes + 1)
+  end
+
+  defp password_walk(_, _, _), do: error(:invalid_password)
+
+  defp matching_schemes(private_key, public_key, version) do
+    digest = :crypto.hash(:sha256, "ex_ssl client identity key match")
+    kind = if version == :tls12, do: :tls12_signature_algorithm, else: :signature_algorithm
+
+    Capabilities.identifiers(kind)
+    |> Enum.filter(fn id ->
+      is_integer(id) and matches_key?(id, private_key, public_key, digest, version)
+    end)
+  end
+
+  defp matches_key?(id, private_key, public_key, digest, :tls12) do
+    case Signature.sign_message(id, private_key, digest) do
+      {:ok, signature} -> Signature.verify_message(id, public_key, digest, signature) == :ok
+      _ -> false
+    end
+  end
+
+  defp matches_key?(id, private_key, public_key, digest, :tls13) do
     case Signature.sign_client(id, private_key, :sha256, digest) do
       {:ok, signature} ->
         Signature.verify_client(id, public_key, :sha256, digest, signature) == :ok

@@ -1,7 +1,10 @@
 defmodule SSL.Options do
   @moduledoc false
-  alias SSL.ClientHello.{Profile, WireProfile}
+  alias SSL.PKIX.VerifyFun
+  alias SSL.PolicyIO.Bounded
+
   alias SSL.Capabilities
+  alias SSL.ClientHello.{Profile, WireProfile}
 
   @derive {Inspect, only: [:identity]}
   defstruct [
@@ -10,8 +13,11 @@ defmodule SSL.Options do
     :identity,
     :trust_source,
     :client_identity,
+    :lifecycle,
+    :policy,
     :alpn_advertised_protocols,
     session_tickets: :disabled,
+    verify_fun: :undefined,
     verify: :verify_peer,
     tcp_options: [],
     active: false,
@@ -32,15 +38,23 @@ defmodule SSL.Options do
     :send_timeout,
     :send_timeout_close,
     :verify,
+    :verify_fun,
+    :partial_chain,
+    :crl_check,
+    :crl_cache,
+    :stapling,
     :cacerts,
     :cacertfile,
     :cert,
     :certfile,
     :key,
     :keyfile,
+    :password,
+    :certs_keys,
     :server_name_indication,
     :customize_hostname_check,
     :versions,
+    :middlebox_comp_mode,
     :session_tickets,
     :ciphers,
     :signature_algs,
@@ -58,6 +72,7 @@ defmodule SSL.Options do
           psk_key_exchange_modes: [:psk_dhe_ke | 1, ...],
           raw_extensions: [],
           signature_algorithms: [atom() | non_neg_integer()],
+          tls12_signature_algorithms: [atom() | non_neg_integer()],
           versions: [:tlsv1_2 | :tlsv1_3 | 771 | 772, ...]
         }
   def capabilities do
@@ -66,6 +81,7 @@ defmodule SSL.Options do
       ciphers: Capabilities.identifiers(:cipher_suite),
       groups: Capabilities.identifiers(:group),
       signature_algorithms: Capabilities.identifiers(:signature_algorithm),
+      tls12_signature_algorithms: Capabilities.identifiers(:tls12_signature_algorithm),
       certificate_signature_algorithms:
         Capabilities.identifiers(:certificate_signature_algorithm),
       psk_key_exchange_modes: [1, :psk_dhe_ke],
@@ -89,7 +105,9 @@ defmodule SSL.Options do
          {:ok, trust} <- trust_source(options),
          {:ok, profile} <- profile(options, context),
          {:ok, client_identity} <-
-           SSL.ClientIdentity.load(Keyword.take(options, [:cert, :certfile, :key, :keyfile])),
+           SSL.ClientIdentity.load(
+             Keyword.take(options, [:cert, :certfile, :key, :keyfile, :password, :certs_keys])
+           ),
          :ok <- ticket_identity(options, client_identity) do
       {:ok,
        %__MODULE__{
@@ -97,10 +115,13 @@ defmodule SSL.Options do
          endpoint: host,
          session_tickets: Keyword.get(options, :session_tickets, :disabled),
          verify: Keyword.get(options, :verify, :verify_peer),
+         verify_fun: Keyword.get(options, :verify_fun, :undefined),
          identity: identity,
          context: context,
          trust_source: trust,
          client_identity: client_identity,
+         lifecycle: get_in(options, [:ex_ssl, :lifecycle]),
+         policy: certificate_policy(options),
          tcp_options: tcp_options,
          alpn_advertised_protocols: profile_alpn(profile),
          active: Keyword.get(options, :active, false),
@@ -156,10 +177,17 @@ defmodule SSL.Options do
   end
 
   defp validate_options(options) do
-    Enum.reduce_while(options, :ok, fn {key, value}, :ok ->
-      if key in @keys and valid_option?(key, value),
-        do: {:cont, :ok},
-        else: {:halt, option_error({key, :unsupported_or_invalid})}
+    Enum.reduce_while(options, :ok, fn
+      {:honor_cipher_order, :undefined}, :ok ->
+        {:cont, :ok}
+
+      {:honor_cipher_order, _value}, :ok ->
+        {:halt, {:error, {:option, :server_only, :honor_cipher_order}}}
+
+      {key, value}, :ok ->
+        if key in @keys and valid_option?(key, value),
+          do: {:cont, :ok},
+          else: {:halt, option_error({key, :unsupported_or_invalid})}
     end)
   end
 
@@ -172,6 +200,7 @@ defmodule SSL.Options do
   end
 
   defp valid_option?(:session_tickets, value), do: value in [:disabled, :auto]
+  defp valid_option?(:middlebox_comp_mode, value), do: is_boolean(value)
   defp valid_option?(:mode, value), do: value == :binary
   defp valid_option?(:active, value), do: value in [false, :once]
   defp valid_option?(:packet, value), do: value in [:raw, 0]
@@ -186,6 +215,30 @@ defmodule SSL.Options do
 
   defp valid_option?(:send_timeout_close, value), do: value == true
   defp valid_option?(:verify, value), do: value in [:verify_peer, :verify_none]
+  defp valid_option?(:verify_fun, value), do: VerifyFun.valid?(value)
+  defp valid_option?(:stapling, value) when value in [:staple, :no_staple], do: true
+
+  defp valid_option?(:stapling, value) when is_map(value),
+    do:
+      map_size(value) <= 1 and
+        Enum.all?(value, fn {key, flag} -> key == :ocsp_nonce and is_boolean(flag) end)
+
+  defp valid_option?(:stapling, _), do: false
+  defp valid_option?(:partial_chain, value), do: is_function(value, 1)
+  defp valid_option?(:crl_check, value), do: value in [false, true, :peer, :best_effort]
+
+  defp valid_option?(:crl_cache, {:ssl_crl_hash_dir, {_reference, [{:dir, directory}]}}),
+    do: (is_binary(directory) or is_list(directory)) and directory not in ["", []]
+
+  defp valid_option?(:crl_cache, {:ssl_crl_cache, {_reference, options}}),
+    do:
+      options == [] or
+        match?([{:http, timeout}] when is_integer(timeout) and timeout > 0, options)
+
+  defp valid_option?(:crl_cache, {module, {_reference, options}}),
+    do: is_atom(module) and module not in [:ssl_crl_cache, :ssl_crl_hash_dir] and is_list(options)
+
+  defp valid_option?(:crl_cache, _), do: false
 
   defp valid_option?(:versions, value),
     do: value in [[:"tlsv1.3"], [:"tlsv1.2"], [:"tlsv1.3", :"tlsv1.2"], [:"tlsv1.2", :"tlsv1.3"]]
@@ -198,7 +251,9 @@ defmodule SSL.Options do
   defp valid_option?(:cacerts, value), do: is_list(value) and proper_list?(value)
 
   # The identity loader owns shape, size, source-conflict and key matching checks.
-  defp valid_option?(key, _value) when key in [:cert, :certfile, :key, :keyfile], do: true
+  defp valid_option?(key, _value)
+       when key in [:cert, :certfile, :key, :keyfile, :password, :certs_keys],
+       do: true
 
   defp valid_option?(:cacertfile, value),
     do: (is_binary(value) or is_list(value)) and value not in ["", []]
@@ -215,10 +270,32 @@ defmodule SSL.Options do
     Keyword.keyword?(value) and value != [] and
       length(Keyword.keys(value)) == length(Enum.uniq(Keyword.keys(value))) and
       Enum.all?(value, fn
+        {:lifecycle, descriptor} -> match?({:ok, _, _}, SSL.Lifecycle.descriptor(descriptor))
         {:profile, profile} -> profile == :default or match?(%WireProfile{}, profile)
         {:reference_identity, reference} -> match?({:ok, _}, reference_identity(reference))
         _ -> false
       end)
+  end
+
+  defp certificate_policy(options) do
+    partial = Keyword.get(options, :partial_chain)
+    crl = Keyword.get(options, :crl_check, false)
+
+    staple =
+      case Keyword.get(options, :stapling, :no_staple) do
+        :no_staple -> nil
+        :staple -> %{ocsp_nonce: false}
+        flags -> Map.put_new(flags, :ocsp_nonce, false)
+      end
+
+    if partial != nil or crl != false or staple != nil,
+      do: %{
+        partial_chain: partial,
+        crl_check: crl,
+        stapling: staple,
+        crl_cache: Keyword.get(options, :crl_cache, {:ssl_crl_cache, {:internal, []}})
+      },
+      else: nil
   end
 
   defp verification_identity(:upgrade, sni, nil, :verify_none) when sni in [nil, :disable],
@@ -331,12 +408,10 @@ defmodule SSL.Options do
     do: if(String.valid?(host), do: {:ok, host}, else: :error)
 
   defp host_text(host) when is_list(host) do
-    try do
-      text = List.to_string(host)
-      host_text(text)
-    rescue
-      _ -> :error
-    end
+    text = List.to_string(host)
+    host_text(text)
+  rescue
+    _ -> :error
   end
 
   defp dns_name(name) when is_list(name) do
@@ -355,18 +430,24 @@ defmodule SSL.Options do
   defp dns_name(_), do: option_error({:server_name_indication, :invalid})
 
   defp trust_source(options) do
+    callback? =
+      certificate_policy(options) != nil or
+        VerifyFun.enabled?(Keyword.get(options, :verify_fun, :undefined))
+
+    mode = if callback?, do: :callback, else: Keyword.get(options, :verify, :verify_peer)
+
     case {Keyword.fetch(options, :cacerts), Keyword.fetch(options, :cacertfile)} do
       {{:ok, certificates}, _} ->
-        validate_trust(certificates, Keyword.get(options, :verify, :verify_peer))
+        validate_trust(certificates, mode)
 
       {:error, {:ok, path}} ->
         case File.read(path) do
-          {:ok, pem} -> validate_trust(pem, Keyword.get(options, :verify, :verify_peer))
+          {:ok, pem} -> validate_trust(pem, mode)
           {:error, _} -> option_error({:cacertfile, :unreadable})
         end
 
       {:error, :error} ->
-        if Keyword.get(options, :verify, :verify_peer) == :verify_none,
+        if mode == :verify_none,
           do: {:ok, nil},
           else: validate_trust(:public_key.cacerts_get())
     end
@@ -375,6 +456,16 @@ defmodule SSL.Options do
   end
 
   defp validate_trust(source, :verify_none), do: {:ok, source}
+  defp validate_trust([], :callback), do: {:ok, []}
+
+  defp validate_trust(source, :callback) do
+    case Bounded.trust(source) do
+      {:ok, _ders} -> validate_trust(source)
+      {:error, :policy_capacity} = error -> error
+      {:error, :invalid_policy_material} -> option_error({:cacerts, :invalid})
+    end
+  end
+
   defp validate_trust(source, :verify_peer), do: validate_trust(source)
 
   defp validate_trust(source) do
@@ -393,13 +484,73 @@ defmodule SSL.Options do
     with {:ok, policy} <- policy_lists(options, versions),
          {:ok, profile} <-
            if(profile == :default,
-             do: {:ok, default_profile(context, advertised_protocols, policy, versions)},
+             do:
+               {:ok,
+                default_profile(
+                  context,
+                  advertised_protocols,
+                  policy,
+                  versions,
+                  Keyword.get(options, :middlebox_comp_mode, true)
+                )},
              else: resolve_explicit_profile(profile, advertised_protocols, explicit_profile?)
            ),
          :ok <- require_version_match(profile, versions),
          :ok <- require_policy_match(profile, policy),
+         :ok <- require_middlebox_match(options, profile, versions),
+         {:ok, profile} <- stapling_profile(options, profile),
          {:ok, profile} <- ticket_profile(options, profile, versions) do
       validate_profile(profile)
+    end
+  end
+
+  defp require_middlebox_match(options, profile, versions) do
+    case Keyword.fetch(options, :middlebox_comp_mode) do
+      :error ->
+        :ok
+
+      {:ok, mode} ->
+        cond do
+          0x0304 not in versions ->
+            {:error,
+             {:options, :incompatible,
+              [:middlebox_comp_mode, {:versions, Keyword.fetch!(options, :versions)}]}}
+
+          profile.session_id != if(mode, do: :random_32, else: :empty) ->
+            option_error({:middlebox_comp_mode, :profile_conflict})
+
+          true ->
+            :ok
+        end
+    end
+  end
+
+  defp stapling_profile(options, profile) do
+    policy = certificate_policy(options)
+
+    desired =
+      if policy && policy.stapling, do: {:status_request, policy.stapling.ocsp_nonce}, else: nil
+
+    existing =
+      Enum.filter(profile.extensions, fn extension ->
+        match?({:status_request, _}, extension) or match?({:raw, 5, _}, extension)
+      end)
+
+    cond do
+      desired == nil and existing == [] ->
+        {:ok, profile}
+
+      desired == nil ->
+        option_error({:stapling, :profile_conflict})
+
+      get_in(options, [:ex_ssl, :profile]) in [nil, :default] ->
+        {:ok, %{profile | extensions: profile.extensions ++ [desired]}}
+
+      existing == [desired] ->
+        {:ok, profile}
+
+      true ->
+        option_error({:stapling, :profile_conflict})
     end
   end
 
@@ -459,13 +610,13 @@ defmodule SSL.Options do
     end
   end
 
-  defp default_profile(context, alpn_protocols, policy, versions) do
+  defp default_profile(context, alpn_protocols, policy, versions, middlebox?) do
     capabilities = capabilities()
     groups = policy.supported_groups || Enum.filter(capabilities.groups, &is_integer/1)
     ciphers = policy.ciphers || Enum.flat_map(versions, &Capabilities.cipher_ids/1)
 
     signatures =
-      policy.signature_algs || default_signatures(versions, capabilities.signature_algorithms)
+      policy.signature_algs || default_signatures(versions, signature_capabilities(versions))
 
     certificate_signatures =
       if policy.signature_algs_cert,
@@ -474,7 +625,7 @@ defmodule SSL.Options do
 
     %WireProfile{
       name: :default,
-      session_id: if(versions == [0x0303], do: :empty, else: :random_32),
+      session_id: if(versions == [0x0303] or not middlebox?, do: :empty, else: :random_32),
       cipher_suites: ciphers,
       extensions:
         if(Map.has_key?(context, :server_name), do: [{:server_name, :from_connection}], else: []) ++
@@ -497,7 +648,8 @@ defmodule SSL.Options do
 
   defp policy_lists(options, versions) do
     with {:ok, ciphers} <- policy_list(options, :ciphers, :cipher_suite, versions),
-         {:ok, signatures} <- policy_list(options, :signature_algs, :signature_algorithm),
+         {:ok, signatures} <-
+           policy_list(options, :signature_algs, :signature_algorithm, versions),
          {:ok, cert_signatures} <-
            policy_list(options, :signature_algs_cert, :certificate_signature_algorithm),
          {:ok, groups} <- policy_list(options, :supported_groups, :group) do
@@ -518,6 +670,11 @@ defmodule SSL.Options do
         {:ok, nil}
 
       {:ok, values} ->
+        kind =
+          if kind == :signature_algorithm and 0x0303 in versions,
+            do: :tls12_signature_algorithm,
+            else: kind
+
         allowed =
           if kind == :cipher_suite,
             do: Enum.flat_map(versions, &Capabilities.cipher_ids/1),
@@ -571,7 +728,12 @@ defmodule SSL.Options do
   end
 
   defp documented_identifier(kind, name)
-       when kind in [:signature_algorithm, :certificate_signature_algorithm, :group] and
+       when kind in [
+              :signature_algorithm,
+              :tls12_signature_algorithm,
+              :certificate_signature_algorithm,
+              :group
+            ] and
               is_atom(name),
        do: {:ok, name}
 
@@ -582,6 +744,7 @@ defmodule SSL.Options do
   defp proper_list?(_), do: false
 
   defp capability_key(:signature_algorithm), do: :signature_algorithms
+  defp capability_key(:tls12_signature_algorithm), do: :tls12_signature_algorithms
   defp capability_key(:certificate_signature_algorithm), do: :certificate_signature_algorithms
   defp capability_key(:group), do: :groups
 
@@ -605,7 +768,7 @@ defmodule SSL.Options do
   end
 
   defp policy_kind(:ciphers), do: :cipher_suite
-  defp policy_kind(:signature_algs), do: :signature_algorithm
+  defp policy_kind(:signature_algs), do: :tls12_signature_algorithm
   defp policy_kind(:signature_algs_cert), do: :certificate_signature_algorithm
   defp policy_kind(:supported_groups), do: :group
 
@@ -618,9 +781,14 @@ defmodule SSL.Options do
     if versions == [0x0303], do: Enum.reject(ids, &(&1 == 0x0807)), else: ids
   end
 
+  defp signature_capabilities(versions) do
+    kind = if 0x0303 in versions, do: :tls12_signature_algorithm, else: :signature_algorithm
+    Capabilities.identifiers(kind)
+  end
+
   defp tls12_signature_available?(profile) do
     Enum.any?(profile_extension(profile, :signature_algorithms) || [], fn scheme ->
-      case Capabilities.signature(scheme) do
+      case Capabilities.signature(scheme, :tls12) do
         %{key: key} -> key in [:rsa, :rsa_pss, :ecdsa]
         _ -> false
       end

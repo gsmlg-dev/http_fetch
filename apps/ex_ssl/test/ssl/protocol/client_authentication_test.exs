@@ -161,7 +161,10 @@ defmodule SSL.Protocol.ClientAuthenticationTest do
 
     wrong_ca = ca_name(context.fixtures.server.der)
 
-    assert {:ok, nil} =
+    # A leaf without an available local issuer preserves the observed fallback.
+    identity = context.identity
+
+    assert {:ok, {^identity, 0x0804}} =
              ClientAuthentication.select(
                request([
                  {:signature_algorithms, [0x0804]},

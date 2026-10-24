@@ -6,6 +6,7 @@ defmodule HTTP.SocketClientHTTP2Test do
 
   alias HTTP.HTTP2.Frame
   alias HTTP.HTTP2.HPACK
+  alias HTTP.HTTP2.Pool
 
   @certfile Path.expand("../support/fixtures/localhost.pem", __DIR__)
   @cacertfile Path.expand("../support/fixtures/localhost-ca.pem", __DIR__)
@@ -223,7 +224,7 @@ defmodule HTTP.SocketClientHTTP2Test do
 
         assert initial_body == binary_part(body, 0, @initial_window_size)
         assert buffer == ""
-        assert {:error, :timeout} = apply(transport, :recv, [socket, 0, 50])
+        assert {:error, :timeout} = transport.recv(socket, 0, 50)
 
         send_all(socket, transport, [
           Frame.encode(:settings, 0, 0, ""),
@@ -2046,7 +2047,7 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert HTTP.Response.read_all(response) == "ticket-barrier"
     assert_receive {:ticket_barrier, ^peer}, 5_000
 
-    refute Enum.any?(HTTP.HTTP2.Pool.stats(Process.whereis(:http_fetch_http2_pool)), fn {key, _} ->
+    refute Enum.any?(Pool.stats(Process.whereis(:http_fetch_http2_pool)), fn {key, _} ->
              key.port == port
            end)
 
@@ -2137,7 +2138,7 @@ defmodule HTTP.SocketClientHTTP2Test do
         {:ok, frame, rest}
 
       :more ->
-        {:ok, data} = apply(transport, :recv, [socket, 0, 5_000])
+        {:ok, data} = transport.recv(socket, 0, 5_000)
         recv_frame(socket, transport, buffer <> data)
     end
   end
@@ -2148,7 +2149,7 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   defp recv_exact(socket, transport, size, acc) do
-    {:ok, data} = apply(transport, :recv, [socket, 0, 5_000])
+    {:ok, data} = transport.recv(socket, 0, 5_000)
     recv_exact(socket, transport, size, acc <> data)
   end
 
@@ -2185,7 +2186,7 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   defp send_all(socket, transport, iodata) do
-    :ok = apply(transport, :send, [socket, iodata])
+    :ok = transport.send(socket, iodata)
   end
 
   defp await_test_gate(gate) do
@@ -2302,15 +2303,15 @@ defmodule HTTP.SocketClientHTTP2Test do
   end
 
   defp assert_tls_buffered_after_peer_close(tls_pid, expected_size) do
-    # Reviewed after private inert Connection/writer births (classic path unchanged):
-    # closed/size/active fields and unabandoned peer-close drainage are unchanged.
+    # Audited classic Port path: closed/size/active fields still describe
+    # retained plaintext; terminal recv waits for reciprocal-close output retirement.
     # Native chunk sizing may vary; this probe checks the TLS plaintext buffer.
     # This is a test-only probe. Revalidate on any source change.
     source = SSL.Connection.module_info(:compile)[:source] |> List.to_string()
     assert File.regular?(source), "connection source is unavailable for private buffer probe"
 
     assert :crypto.hash(:sha256, File.read!(source)) |> Base.encode16(case: :lower) ==
-             "61b2fa41a60fb00d01335ea8486e698aecac8fc0a45a47e10d5adecb34cc3f91",
+             "512c9e029885e6a1dae56aa04bac65ab8bb4aee329c213ed726a4f3c8854da19",
            "revalidate this private buffer probe after changing SSL.Connection source"
 
     assert Application.spec(:ex_ssl, :vsn) == Application.spec(:http_fetch, :vsn),

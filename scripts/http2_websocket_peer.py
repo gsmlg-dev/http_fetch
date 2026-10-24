@@ -7,6 +7,7 @@ import json
 import socket
 import ssl
 import struct
+import sys
 import threading
 from urllib.parse import parse_qs, urlsplit
 
@@ -86,12 +87,18 @@ def main():
     parser.add_argument('--key')
     parser.add_argument('--limit', type=int, default=16)
     parser.add_argument('--capability', type=int, choices=[0, 1], default=1)
+    parser.add_argument('--tls-version', choices=['TLSv1.2', 'TLSv1.3'])
+    parser.add_argument('--hold-settings', action='store_true')
+    parser.add_argument('--completion-fallback', action='store_true')
     args = parser.parse_args()
     context = None
     if args.tls:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(args.cert, args.key)
-        context.set_alpn_protocols(['h2'])
+        context.set_alpn_protocols(['h2', 'http/1.1'] if args.completion_fallback else ['h2'])
+        if args.tls_version:
+            version = ssl.TLSVersion.TLSv1_2 if args.tls_version == 'TLSv1.2' else ssl.TLSVersion.TLSv1_3
+            context.minimum_version = context.maximum_version = version
     lock = threading.Lock()
     counter = itertools.count(1)
 
@@ -102,10 +109,16 @@ def main():
     def serve(raw, cid):
         sock = raw
         streams, pending, held, withheld = {}, {}, {}, Counter()
+        sent_bytes, blocked_at = Counter(), {}
         capability = args.capability
         try:
             if context:
                 sock = context.wrap_socket(raw, server_side=True)
+                if args.completion_fallback and sock.selected_alpn_protocol() == 'http/1.1':
+                    from ex_ssl_tls12_peer import websocket
+                    log(kind='fallback_connection', connection=cid, alpn='http/1.1', version=sock.version())
+                    websocket(sock)
+                    return
                 assert sock.selected_alpn_protocol() == 'h2', 'TLS did not negotiate h2'
             sock.settimeout(180)
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -114,10 +127,17 @@ def main():
                 SettingCodes.MAX_CONCURRENT_STREAMS: args.limit,
                 SettingCodes.ENABLE_CONNECT_PROTOCOL: capability,
             })
+            if args.hold_settings and cid == 1:
+                log(kind='settings_held', connection=cid, alpn=sock.selected_alpn_protocol(),
+                    version=sock.version())
+                # Test-only finite barrier. The client keeps its original opening budget.
+                if sys.stdin.buffer.readline() != b'go\n':
+                    return
             conn.initiate_connection()
             sock.sendall(conn.data_to_send())
             log(kind='connection', connection=cid, protocol='h2' if context else 'h2c',
-                alpn=sock.selected_alpn_protocol() if context else None, capability=capability)
+                alpn=sock.selected_alpn_protocol() if context else None, capability=capability,
+                version=sock.version() if context else None)
 
             def enqueue(sid, data, end=False):
                 state = pending.setdefault(sid, [deque(), 0, False, itertools.cycle([1, 7, 113, 4096, 8192])])
@@ -249,6 +269,11 @@ def main():
                                     text = f'pressure-{number}:' + 'x' * 4096
                                     enqueue(sid, state['codec'].send(TextMessage(data=text)))
                                     state['peer_messages'] += 1
+                        elif path == '/sse/pressure':
+                            conn.send_headers(sid, [(':status', '200'), ('content-type', 'text/event-stream')])
+                            held[sid] = 1
+                            enqueue(sid, (b'data: ' + b'x' * 4096 + b'\n\n') * 1024)
+                            log(kind='sse', connection=cid, stream=sid, endpoint=path)
                         elif path == '/sse/hold':
                             conn.send_headers(sid, [(':status', '200'), ('content-type', 'text/event-stream')])
                             held[sid] = 1
@@ -269,6 +294,8 @@ def main():
                         state = streams.get(sid)
                         if state and state['withhold']:
                             withheld[sid] += event.flow_controlled_length
+                            if withheld[sid] == 65_535:
+                                log(kind='flow_blocked', connection=cid, stream=sid, bytes=withheld[sid])
                         else:
                             conn.acknowledge_received_data(event.flow_controlled_length, sid)
                         if not state or not event.data:
@@ -343,10 +370,15 @@ def main():
                         if size > 0:
                             conn.send_data(sid, chunk[offset:offset + size])
                             state[1] += size
+                            sent_bytes[sid] += size
                             if state[1] == len(chunk):
                                 chunks.popleft()
                                 state[1] = 0
                             progress = True
+                        elif sid in held and blocked_at.get(sid) != sent_bytes[sid]:
+                            blocked_at[sid] = sent_bytes[sid]
+                            log(kind='sse_flow_blocked', connection=cid, stream=sid,
+                                sent=sent_bytes[sid], remaining=sum(map(len, chunks)) - offset)
                     output = conn.data_to_send()
                     if output:
                         sock.sendall(output)

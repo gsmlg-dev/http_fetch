@@ -17,7 +17,16 @@ defmodule SSL do
   never resume. A socket belonging to another process is left untouched.
   """
   import Kernel, except: [send: 2]
-  alias SSL.{Connection, IodataCursor, Options, PreparedUpgrade, Socket}
+
+  alias SSL.{
+    ClientHello.Profile,
+    Connection,
+    IodataCursor,
+    Lifecycle.Driver,
+    Options,
+    PreparedUpgrade,
+    Socket
+  }
 
   @spec connect(:gen_tcp.socket(), list()) :: {:ok, Socket.t()} | {:error, term()}
   def connect(tcp_socket, options), do: connect(tcp_socket, options, :infinity)
@@ -32,9 +41,29 @@ defmodule SSL do
   @spec connect(term(), :inet.port_number(), list(), timeout()) ::
           {:ok, Socket.t()} | {:error, term()}
   def connect(host, port, options, timeout) when is_integer(port) and port in 0..65_535 do
-    with {:ok, deadline} <- Options.deadline(timeout),
-         {:ok, options} <- Options.normalize(host, options),
-         {:ok, _} <- Application.ensure_all_started(:ex_ssl),
+    with {:ok, deadline} <- Options.deadline(timeout) do
+      case Driver.descriptor(options) do
+        {:ok, handle, lease} ->
+          Driver.connect(host, port, options, deadline, handle, lease)
+
+        :none ->
+          with {:ok, normalized} <- Options.normalize(host, options),
+               do: ordinary_connect(host, port, normalized, deadline)
+
+        error ->
+          error
+      end
+    end
+  catch
+    :exit, :badarg -> {:error, :badarg}
+    :exit, _ -> {:error, :closed}
+    :error, :badarg -> {:error, :badarg}
+  end
+
+  def connect(_, _, _, _), do: {:error, :badarg}
+
+  defp ordinary_connect(host, port, options, deadline) do
+    with {:ok, _} <- Application.ensure_all_started(:ex_ssl),
          {:ok, tcp_socket} <-
            :gen_tcp.connect(
              tcp_host(host),
@@ -45,18 +74,13 @@ defmodule SSL do
                packet: :raw,
                send_timeout: options.send_timeout,
                send_timeout_close: options.send_timeout_close
-             ] ++ Keyword.put_new(options.tcp_options, :buffer, 16_640),
+             ] ++
+               Keyword.put_new(options.tcp_options, :buffer, 16_640),
              Options.remaining(deadline)
            ) do
       close_on_error(handoff(tcp_socket, options, deadline), tcp_socket)
     end
-  catch
-    :exit, :badarg -> {:error, :badarg}
-    :exit, _ -> {:error, :closed}
-    :error, :badarg -> {:error, :badarg}
   end
-
-  def connect(_, _, _, _), do: {:error, :badarg}
 
   @doc """
   Resolves and validates TLS configuration for a later TCP upgrade.
@@ -70,8 +94,12 @@ defmodule SSL do
   @spec prepare_upgrade(term()) :: {:ok, PreparedUpgrade.t()} | {:error, term()}
   def prepare_upgrade(options) do
     with {:ok, normalized} <- Options.normalize(:upgrade, options),
+         true <- normalized.lifecycle == nil,
          :ok <- upgrade_profile_context(normalized) do
       {:ok, PreparedUpgrade.new(normalized)}
+    else
+      false -> {:error, {:options, :lifecycle_is_per_attempt}}
+      error -> error
     end
   end
 
@@ -87,6 +115,22 @@ defmodule SSL do
   def connect_prepared(tcp_socket, prepared, timeout \\ :infinity),
     do: upgrade_socket(tcp_socket, {:prepared, prepared}, timeout)
 
+  @doc "Attaches lifecycle authority to one prepared upgrade, without overriding policy."
+  @spec connect_prepared(:gen_tcp.socket(), PreparedUpgrade.t(), keyword(), timeout()) ::
+          {:ok, Socket.t()} | {:error, term()}
+  def connect_prepared(tcp, prepared, attempt_options, timeout) do
+    case attempt_options do
+      [ex_ssl: [lifecycle: descriptor]] ->
+        with {:ok, handle, lease} <- SSL.Lifecycle.descriptor(descriptor),
+             {:ok, deadline} <- Options.deadline(timeout) do
+          Driver.upgrade(tcp, {:prepared, prepared}, deadline, handle, lease)
+        end
+
+      _ ->
+        {:error, {:options, :invalid_attempt_options}}
+    end
+  end
+
   @doc "Writes iodata as one ordered logical write. Concurrent writes return `:busy`."
   @spec send(Socket.t(), iodata()) :: :ok | {:error, term()}
   def send(socket, data) do
@@ -96,13 +140,35 @@ defmodule SSL do
   end
 
   @doc """
+  Writes iodata under an absolute monotonic millisecond deadline.
+
+  The deadline includes reservation and every protected record of this logical
+  write. The controlling owner's configured send timeout may shorten it. This
+  operation does not change the socket's owner or configured timeout.
+  """
+  @spec send(Socket.t(), iodata(), {:abs_ms, integer()}) :: :ok | {:error, term()}
+  def send(socket, data, {:abs_ms, deadline}) when is_integer(deadline) do
+    if Options.remaining(deadline) == 0 do
+      {:error, :timeout}
+    else
+      with {:ok, _validated} <- Options.deadline(Options.remaining(deadline)),
+           {:ok, cursor, size} <- IodataCursor.new(data),
+           {:ok, token} <- call(socket, {:reserve_write, deadline}),
+           do: call(socket, {:send, token, cursor, size})
+    end
+  end
+
+  def send(_socket, _data, _deadline), do: {:error, :badarg}
+
+  @doc """
   Enables bounded response reads during an application send.
 
   This owner-only, idempotent operation applies to an established open socket.
   It requires a finite send timeout and rejects later infinite-timeout sends.
   Reads may progress while one already-protected application output job is
-  pending. Handshake, control and shutdown output barriers remain in place;
-  inbound protocol traffic requiring output on a busy writer fails closed.
+  pending. At most one already-protected mandatory control response may wait
+  behind that job under the original absolute write deadline. Handshake, control
+  and shutdown output barriers remain in place; waiting grants no new budget.
   Normal sender death still fails the connection closed.
   """
   @spec enable_duplex_reads(Socket.t()) :: :ok | {:error, term()}
@@ -116,8 +182,10 @@ defmodule SSL do
   future sends are rejected. A bounded already-protected application output job may
   still finish its original transport write under its original finite deadline.
   The job may include an automatic KeyUpdate followed by one application record. It is
-  never re-encrypted or replayed. Reads keep their existing byte bounds; inbound
-  protocol traffic that requires output while this record is pending fails closed.
+  never re-encrypted or replayed. At most one already-protected mandatory control
+  response may wait behind it, retaining committed traffic-key epochs and the
+  original finite deadline. Reads keep their existing byte bounds. Explicit close,
+  cancellation and owner loss abort both outputs.
 
   Call `close/1` after consuming the response, or to abort the pending record.
   Ordinary sender death continues to fail the connection closed unless the owner
@@ -191,7 +259,7 @@ defmodule SSL do
   def close(_), do: {:error, :badarg}
 
   defp upgrade_profile_context(options) do
-    case SSL.ClientHello.Profile.validate_context(
+    case Profile.validate_context(
            options.profile,
            Options.capabilities(),
            options.context
@@ -202,14 +270,33 @@ defmodule SSL do
   end
 
   defp upgrade_socket(tcp_socket, source, timeout) do
-    with :ok <- owned_socket(tcp_socket) do
-      result =
-        with {:ok, deadline} <- Options.deadline(timeout),
-             {:ok, options} <- upgrade_options(source),
-             :ok <- upgrade_boundary(tcp_socket),
-             do: handoff(tcp_socket, options, deadline)
+    descriptor =
+      case source do
+        {:options, options} -> Driver.descriptor(options)
+        _ -> :none
+      end
 
-      close_on_error(result, tcp_socket)
+    case descriptor do
+      {:ok, handle, lease} ->
+        with {:ok, deadline} <- Options.deadline(timeout),
+             do: Driver.upgrade(tcp_socket, source, deadline, handle, lease)
+
+      :none ->
+        with :ok <- owned_socket(tcp_socket) do
+          result =
+            with {:ok, deadline} <- Options.deadline(timeout),
+                 {:ok, options} <- upgrade_options(source),
+                 :ok <- upgrade_boundary(tcp_socket),
+                 do: handoff(tcp_socket, options, deadline)
+
+          close_on_error(result, tcp_socket)
+        end
+
+      error ->
+        with :ok <- owned_socket(tcp_socket) do
+          result = with {:ok, _deadline} <- Options.deadline(timeout), do: error
+          close_on_error(result, tcp_socket)
+        end
     end
   end
 

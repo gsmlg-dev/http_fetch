@@ -13,7 +13,21 @@ defmodule Quic.Endpoint do
   alias Quic.IO.ExternalWriter
 
   @cid_length 8
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+  def start_link(opts) do
+    case Keyword.get(opts, :cleanup) do
+      nil ->
+        GenServer.start_link(__MODULE__, opts)
+
+      _ ->
+        {:abs_ms, deadline} = Quic.Cleanup.deadline(opts)
+        remaining = deadline - System.monotonic_time(:millisecond)
+
+        if remaining > 0,
+          do: GenServer.start_link(__MODULE__, opts, timeout: remaining),
+          else: {:error, :deadline_expired}
+    end
+  end
+
   def local(pid), do: safe_call(pid, :local, 5_000)
   def connections(pid), do: safe_call(pid, :connections, 5_000)
   def stats(pid), do: safe_call(pid, :stats, 5_000)
@@ -44,8 +58,11 @@ defmodule Quic.Endpoint do
     if role in [:client, :server] and is_integer(max) and max > 0 and
          valid_item_limit?(event_limit) and valid_item_limit?(operation_limit) and
          valid_retry_options?(retry, role, retry_limit, retry_ttl) do
-      with {:ok, io} <- open_io(opts, role) do
+      with :ok <- enroll_cleanup(opts),
+           {:ok, io} <- open_io(opts, role) do
         data = %{
+          cleanup: Keyword.get(opts, :cleanup),
+          cleanup_monitor: Quic.Cleanup.monitor(Keyword.get(opts, :cleanup)),
           role: role,
           retry: retry,
           retry_key: if(retry, do: :crypto.strong_rand_bytes(32)),
@@ -155,7 +172,7 @@ defmodule Quic.Endpoint do
         end
 
       match?({:connect, _}, request) and data.role == :client ->
-        connect_operation(data, ref, signature, request)
+        connect_operation(data, ref, signature, request, deadline)
 
       match?({:connect, _}, request) ->
         result = {:error, :server_endpoint}
@@ -190,11 +207,18 @@ defmodule Quic.Endpoint do
 
   @impl true
   def handle_info({:quic_udp, generation, credit, remote, bytes, at}, data) do
-    next = route(data, remote, bytes, at)
+    case Quic.Cleanup.authorize(data.cleanup) do
+      :ok ->
+        next = route(data, remote, bytes, at)
 
-    case GenUDP.consumed(data.socket, generation, credit) do
-      :ok -> {:noreply, next}
-      {:error, reason} -> {:stop, {:socket_receive, reason}, next}
+        case consume_credit(next, generation, credit) do
+          :ok -> {:noreply, next}
+          :retired -> {:stop, :normal, next}
+          {:error, reason} -> {:stop, {:socket_receive, reason}, next}
+        end
+
+      {:error, _reason} ->
+        {:stop, :normal, data}
     end
   end
 
@@ -233,8 +257,14 @@ defmodule Quic.Endpoint do
     end
   end
 
+  def handle_info(
+        {:quic_cleanup_retire, observer},
+        %{cleanup: %Quic.Cleanup.Lease{handle: %{observer: observer}}} = data
+      ),
+      do: {:stop, :normal, data}
+
   def handle_info({:DOWN, monitor, :process, pid, _reason}, data) do
-    if monitor in [data.monitor, data.acceptor_monitor] do
+    if monitor in [data.monitor, data.acceptor_monitor, data.cleanup_monitor] do
       {:stop, :normal, data}
     else
       case data.connections[pid] do
@@ -261,6 +291,28 @@ defmodule Quic.Endpoint do
   end
 
   def handle_info(_, data), do: {:noreply, data}
+
+  defp consume_credit(%{socket: socket} = data, generation, credit) do
+    case GenUDP.consumed(socket, generation, credit) do
+      {:error, :retiring} = failure ->
+        case Quic.Cleanup.authorize(data.cleanup) do
+          :ok -> failure
+          {:error, _reason} -> :retired
+        end
+
+      result ->
+        result
+    end
+  catch
+    :exit, {reason, {GenServer, :call, [^socket, {:consumed, ^generation, ^credit}, _]}} = failure
+    when reason in [:noproc, :normal] ->
+      # Retirement can close IO after the routing authorization above. Only
+      # lost scope authority makes that exact receive-credit call a normal stop.
+      case Quic.Cleanup.authorize(data.cleanup) do
+        :ok -> exit(failure)
+        {:error, _reason} -> :retired
+      end
+  end
 
   defp route(data, remote, bytes, at) do
     case destination(bytes) do
@@ -349,7 +401,8 @@ defmodule Quic.Endpoint do
     end
   end
 
-  defp admit(data, remote, original_dcid, peer_scid, retry_scid \\ nil) do
+  defp admit(data, remote, original_dcid, peer_scid, retry_scid \\ nil, deadline \\ nil) do
+    deadline = deadline || Quic.Cleanup.deadline(data.opts)
     scid = :crypto.strong_rand_bytes(@cid_length)
     dcid = peer_scid || original_dcid
 
@@ -369,6 +422,8 @@ defmodule Quic.Endpoint do
            ),
          {:ok, local_parameters} <- TransportParameters.decode(tls[:transport_parameters]),
          opts <- [
+           cleanup: data.cleanup,
+           cleanup_deadline: if(data.cleanup, do: deadline),
            role: data.role,
            address_validated: retry_scid != nil,
            owner: self(),
@@ -396,7 +451,8 @@ defmodule Quic.Endpoint do
                max_packet_size: profile_packet_size(profile)
              ] ++ tls
          ],
-         {:ok, pid} <- Connection.start(opts),
+         {:ok, birth} <- reserve_connection(data, deadline),
+         {:ok, pid} <- start_connection(opts, birth),
          {:ok, generation} <- generation(pid) do
       entry = %{pid: pid, remote: remote, generation: generation, monitor: Process.monitor(pid)}
 
@@ -617,7 +673,9 @@ defmodule Quic.Endpoint do
   defp endpoint_call(pid, request, opts) do
     ref = Keyword.get(opts, :ref, make_ref())
     timeout = Keyword.get(opts, :timeout, 5_000)
-    deadline = System.monotonic_time(:millisecond) + Keyword.get(opts, :deadline, timeout)
+    bound = Keyword.get(opts, :deadline, timeout)
+    deadline = absolute_deadline(bound)
+    timeout = call_timeout(timeout, bound)
 
     try do
       GenServer.call(pid, {:endpoint_operation, ref, deadline, request}, timeout)
@@ -627,6 +685,15 @@ defmodule Quic.Endpoint do
       :exit, {_reason, _call} -> {:unknown, ref}
     end
   end
+
+  defp call_timeout(timeout, {:abs_ms, deadline}),
+    do: max(0, min(timeout, deadline - System.monotonic_time(:millisecond)))
+
+  # Legacy duration options retain their existing call wait semantics.
+  defp call_timeout(timeout, _duration), do: timeout
+
+  defp absolute_deadline({:abs_ms, deadline}) when is_integer(deadline), do: deadline
+  defp absolute_deadline(duration), do: System.monotonic_time(:millisecond) + duration
 
   defp safe_call(pid, request, timeout) do
     try do
@@ -686,7 +753,7 @@ defmodule Quic.Endpoint do
 
       nil ->
         with {:ok, socket} <-
-               GenUDP.open(Keyword.take(opts, [:ip, :port]) ++ [owner: self(), role: role]) do
+               open_udp(opts, role) do
           {:ok,
            %{
              socket: socket,
@@ -700,11 +767,65 @@ defmodule Quic.Endpoint do
     end
   end
 
+  defp enroll_cleanup(opts) do
+    case Keyword.get(opts, :cleanup_birth) do
+      nil -> :ok
+      birth -> Quic.Cleanup.enroll(birth, self())
+    end
+  end
+
+  defp reserve_connection(%{cleanup: nil}, _deadline), do: {:ok, nil}
+
+  defp reserve_connection(data, deadline),
+    do: Quic.Cleanup.reserve(data.cleanup, :connection, deadline)
+
+  defp start_connection(opts, nil), do: Connection.start(opts)
+
+  defp start_connection(opts, birth) do
+    case Connection.start(Keyword.put(opts, :cleanup_birth, birth)) do
+      {:ok, _} = result ->
+        result
+
+      {:error, _} = error ->
+        Quic.Cleanup.no_birth(birth)
+        error
+    end
+  end
+
+  defp open_udp(opts, role) do
+    io_opts = Keyword.take(opts, [:ip, :port]) ++ [owner: self(), role: role]
+
+    case Keyword.get(opts, :cleanup) do
+      nil ->
+        GenUDP.open(io_opts)
+
+      lease ->
+        with {:ok, birth} <- Quic.Cleanup.reserve(lease, :io, Quic.Cleanup.deadline(opts)) do
+          case GenUDP.open(
+                 io_opts ++
+                   [cleanup: lease, cleanup_birth: birth, deadline: Quic.Cleanup.deadline(opts)]
+               ) do
+            {:ok, _} = result ->
+              result
+
+            {:error, _} = error ->
+              Quic.Cleanup.no_birth(birth)
+              error
+          end
+        end
+    end
+  end
+
   defp close_io(%{external: true, io_writer: writer}) when is_pid(writer),
     do: ExternalWriter.close(writer)
 
-  defp close_io(%{external: false, socket: socket}) when is_pid(socket),
-    do: GenUDP.close(socket)
+  defp close_io(%{external: false, socket: socket}) when is_pid(socket) do
+    # The independent observer may have already retired IO. A close reply is
+    # only a request result; the cleanup receipt separately joins the actor/Port.
+    GenUDP.close(socket)
+  catch
+    :exit, reason -> {:error, {:close_unconfirmed, reason}}
+  end
 
   defp close_io(%{external: true, writer: writer}) when is_pid(writer),
     do: ExternalWriter.close(writer)
@@ -713,11 +834,19 @@ defmodule Quic.Endpoint do
 
   defp valid_item_limit?(value), do: is_integer(value) and value in 1..10_000
 
-  defp connect_operation(data, ref, signature, request) do
+  defp connect_operation(data, ref, signature, request, deadline) do
     {:connect, remote} = request
 
     case if(map_size(data.connections) < data.max,
-           do: admit(data, remote, :crypto.strong_rand_bytes(@cid_length), nil),
+           do:
+             admit(
+               data,
+               remote,
+               :crypto.strong_rand_bytes(@cid_length),
+               nil,
+               nil,
+               {:abs_ms, deadline}
+             ),
            else: {:error, :connection_limit}
          ) do
       {:ok, next, entry} ->

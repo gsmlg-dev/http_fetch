@@ -1,6 +1,8 @@
 defmodule HTTP.HTTP1.IdleTimeout do
   @moduledoc false
 
+  alias HTTP.Transport.ExSSL
+
   @write_bytes 16_384
 
   # A completed send means transport acceptance, not remote receipt. Keep each
@@ -29,8 +31,7 @@ defmodule HTTP.HTTP1.IdleTimeout do
       if remaining == 0 do
         {:error, :request_timeout}
       else
-        with :ok <- transport.setopts(socket, send_timeout: budget),
-             do: transport.send(socket, chunk)
+        send_chunk(transport, socket, chunk, budget, started)
       end
 
     case result do
@@ -52,6 +53,14 @@ defmodule HTTP.HTTP1.IdleTimeout do
       error ->
         error
     end
+  end
+
+  defp send_chunk(ExSSL, socket, chunk, budget, started),
+    do: ExSSL.send(socket, chunk, {:abs_ms, started + budget})
+
+  defp send_chunk(transport, socket, chunk, budget, _started) do
+    with :ok <- transport.setopts(socket, send_timeout: budget),
+         do: transport.send(socket, chunk)
   end
 
   defp remaining(nil), do: :infinity

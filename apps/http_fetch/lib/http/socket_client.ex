@@ -1,6 +1,12 @@
 defmodule HTTP.SocketClient do
   @moduledoc false
 
+  alias HTTP.HTTP1.{IdleTimeout, Upload}
+  alias HTTP.Runtime.Dialer
+  alias HTTP.Stream.Writer
+  alias HTTP.Transport.ExSSL
+  alias HTTP.Transport.SSL, as: OTPTLS
+
   alias HTTP.Headers
   alias HTTP.HTTP2.{BodyBridge, ConnectionOwner, ConnectionSupervisor, Frame, Pool, PoolKey}
   alias HTTP.Request
@@ -13,7 +19,7 @@ defmodule HTTP.SocketClient do
     with :ok <- validate_response_stream_ack_protocol(request),
          :ok <- validate_response_stream_idle_protocol(request),
          :ok <- validate_idle_protocol(request),
-         :ok <- HTTP.Runtime.Dialer.validate_connect_address_route(request, unix_socket_path) do
+         :ok <- Dialer.validate_connect_address_route(request, unix_socket_path) do
       do_request(request, abort_controller_pid, unix_socket_path)
     end
   end
@@ -67,15 +73,25 @@ defmodule HTTP.SocketClient do
                Process.demonitor(launch_monitor, [:flush])
                owner(parent, ref, request, unix_socket_path, 0, false, deadline_at)
 
+             :owner_launch_cancelled ->
+               Process.demonitor(launch_monitor, [:flush])
+               HTTP.RequestLifecycle.complete(tracker, deadline_at)
+
              {:DOWN, ^launch_monitor, :process, ^parent, _reason} ->
                :ok
            end
          end) do
       {:ok, owner_pid} ->
-        HTTP.RequestLifecycle.register(tracker, owner_pid, :owner)
-        send(owner_pid, :owner_launch)
-        set_abort_owner(abort_controller_pid, owner_pid)
-        await_owner(ref, owner_pid, timeout)
+        case HTTP.RequestLifecycle.register(tracker, owner_pid, :owner, deadline_at) do
+          :ok ->
+            send(owner_pid, :owner_launch)
+            set_abort_owner(abort_controller_pid, owner_pid)
+            await_owner(ref, owner_pid, remaining_timeout(deadline_at))
+
+          {:error, _reason} = error ->
+            send(owner_pid, :owner_launch_cancelled)
+            error
+        end
 
       {:error, reason} ->
         {:error, reason}
@@ -280,7 +296,7 @@ defmodule HTTP.SocketClient do
           parent_monitor
         )
 
-      HTTP.RequestLifecycle.complete(tracker)
+      HTTP.RequestLifecycle.complete(tracker, deadline_at)
       result
     after
       Process.demonitor(parent_monitor, [:flush])
@@ -375,9 +391,10 @@ defmodule HTTP.SocketClient do
   end
 
   defp connect_http1_or_new(transport, host, port, request, selection, deadline_at, monitor) do
-    reuse = if selection.mode == :http1, do: HTTP.HTTP1.Pool.checkout(request), else: :none
+    reuse =
+      if selection.mode == :http1, do: HTTP.HTTP1.Pool.checkout(request, deadline_at), else: :none
 
-    if match?({:ok, _}, reuse),
+    if match?({:ok, _}, reuse) and transport != ExSSL,
       do: HTTP.RequestLifecycle.track_socket(request.transport_options, elem(reuse, 1))
 
     case request_ready(deadline_at, monitor) do
@@ -389,7 +406,7 @@ defmodule HTTP.SocketClient do
             refresh_http1_socket(transport, socket, request, timeout)
 
           :none ->
-            HTTP.Runtime.Dialer.connect(
+            Dialer.connect(
               transport,
               host,
               port,
@@ -398,6 +415,9 @@ defmodule HTTP.SocketClient do
               timeout,
               monitor
             )
+
+          {:error, _} = error ->
+            error
         end
 
       {:error, _} = error ->
@@ -451,7 +471,7 @@ defmodule HTTP.SocketClient do
 
       with pool when is_pid(pool) <- pool,
            {:ok, key} <- PoolKey.build(request, profile, protocol) do
-        case Pool.try_reserve(pool, key) do
+        case Pool.try_reserve(pool, key, deadline_at) do
           {:ok, owner, reservation} ->
             {:ok, {:reused, owner, {pool, reservation}, key}}
 
@@ -463,6 +483,9 @@ defmodule HTTP.SocketClient do
               parent_monitor,
               request.transport_options[:transport_scope]
             )
+
+          {:error, reason} ->
+            http2_reservation_error(reason, deadline_at, parent_monitor)
         end
       else
         _ -> {:ok, {:connect, nil}}
@@ -472,8 +495,15 @@ defmodule HTTP.SocketClient do
     end
   end
 
+  defp http2_reservation_error(reason, deadline_at, parent_monitor) do
+    case request_ready(deadline_at, parent_monitor) do
+      :ok -> {:error, reason}
+      error -> error
+    end
+  end
+
   defp reserve_or_claim_http2_owner(pool, key, deadline_at, parent_monitor, scope) do
-    case Pool.claim_connect(pool, key) do
+    case Pool.claim_connect(pool, key, deadline_at) do
       :start ->
         {:ok, {:connect, {pool, key}}}
 
@@ -491,6 +521,9 @@ defmodule HTTP.SocketClient do
           {:error, reason} ->
             {:error, reason}
         end
+
+      {:error, reason} ->
+        http2_reservation_error(reason, deadline_at, parent_monitor)
     end
   end
 
@@ -511,15 +544,15 @@ defmodule HTTP.SocketClient do
   defp await_http2_reservation_reply(pool, token, request_id, deadline_at, parent_monitor) do
     receive do
       {:DOWN, ^parent_monitor, :process, _parent, _reason} when is_reference(parent_monitor) ->
-        _ = Pool.cancel(pool, token)
+        send(pool, {:http2_cancel_reservation, token})
         {:error, :subscriber_down}
 
       :abort ->
-        _ = Pool.cancel(pool, token)
+        send(pool, {:http2_cancel_reservation, token})
         {:error, :aborted}
 
       :deadline ->
-        _ = Pool.cancel(pool, token)
+        send(pool, {:http2_cancel_reservation, token})
         {:error, :request_timeout}
 
       message ->
@@ -535,7 +568,7 @@ defmodule HTTP.SocketClient do
         end
     after
       remaining_timeout(deadline_at) ->
-        _ = Pool.cancel(pool, token)
+        send(pool, {:http2_cancel_reservation, token})
         {:error, :request_timeout}
     end
   end
@@ -624,8 +657,6 @@ defmodule HTTP.SocketClient do
                :http_fetch_http2_connection_supervisor
              )
            ),
-         :ok <-
-           HTTP.RequestLifecycle.register(HTTP.RequestLifecycle.current(), owner, :connection),
          {:ok, pool, reservation, key} <-
            initialize_http2_owner(
              transport,
@@ -683,7 +714,7 @@ defmodule HTTP.SocketClient do
       do: confirm_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
 
     if not is_pid(pool),
-      do: safe_http2_cleanup(fn -> GenServer.stop(owner, :normal) end)
+      do: send(owner, :http2_shutdown_exclusive)
   end
 
   defp run_http2_reused_owner(context, owner, {pool, reservation}, key) do
@@ -744,15 +775,44 @@ defmodule HTTP.SocketClient do
          parent_monitor
        ) do
     result =
-      with :ok <- transfer_http2_socket(transport, socket, owner),
-           :ok <- ConnectionOwner.activate(owner) do
-        register_http2_owner(request, profile, owner, socket, claim, deadline_at, parent_monitor)
+      with :ok <-
+             HTTP.RequestLifecycle.register(
+               HTTP.RequestLifecycle.current(),
+               owner,
+               :connection,
+               deadline_at
+             ),
+           :ok <- request_ready(deadline_at, parent_monitor) do
+        case http2_registration(request, profile, claim) do
+          {:ok, pool, key} ->
+            provider? = transport == ExSSL and is_pid(HTTP.RequestLifecycle.current())
+
+            with :ok <-
+                   maybe_activate_http2_owner(provider?, transport, socket, owner, deadline_at),
+                 :ok <-
+                   Pool.register(pool, key, owner,
+                     connecting?: is_tuple(claim),
+                     max_streams: 0,
+                     request_lifecycle: HTTP.RequestLifecycle.current(),
+                     socket: socket,
+                     provider_handoff: provider?,
+                     deadline_at: deadline_at
+                   ) do
+              reserve_registered_http2_owner(pool, key, deadline_at, owner, parent_monitor)
+            end
+
+          :exclusive ->
+            with :ok <- maybe_activate_http2_owner(false, transport, socket, owner, deadline_at),
+                 do: {:ok, nil, nil, nil}
+
+          {:error, _} = error ->
+            error
+        end
       end
 
     case result do
       {:error, _reason} ->
-        if Process.alive?(owner),
-          do: safe_http2_cleanup(fn -> GenServer.stop(owner, :normal) end)
+        send(owner, :http2_shutdown_exclusive)
 
         result
 
@@ -761,10 +821,17 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp register_http2_owner(request, profile, owner, socket, claim, deadline_at, parent_monitor) do
+  defp maybe_activate_http2_owner(true, _transport, _socket, _owner, _deadline), do: :ok
+
+  defp maybe_activate_http2_owner(false, transport, socket, owner, deadline) do
+    with :ok <- transfer_http2_socket(transport, socket, owner),
+         do: ConnectionOwner.activate(owner, deadline)
+  end
+
+  defp http2_registration(request, profile, claim) do
     if request.url.scheme not in ["http", "https"] or
          Keyword.get(request.transport_options, :http2_reuse, true) == false do
-      {:ok, nil, nil, nil}
+      :exclusive
     else
       pool =
         Keyword.get(
@@ -773,19 +840,11 @@ defmodule HTTP.SocketClient do
           Process.whereis(:http_fetch_http2_pool)
         )
 
-      with pool when is_pid(pool) <- pool,
-           {:ok, key} <- pool_key_for_registration(request, profile, claim),
-           :ok <-
-             Pool.register(pool, key, owner,
-               connecting?: is_tuple(claim),
-               max_streams: 0,
-               request_lifecycle: HTTP.RequestLifecycle.current(),
-               socket: socket
-             ) do
-        reserve_registered_http2_owner(pool, key, deadline_at, owner, parent_monitor)
-      else
-        {:error, reason} -> {:error, reason}
-        _ -> {:ok, nil, nil, nil}
+      case pool_key_for_registration(request, profile, claim) do
+        {:ok, key} when is_pid(pool) -> {:ok, pool, key}
+        {:ok, :non_reusable, _key} -> :exclusive
+        {:error, _} = error -> error
+        _ -> :exclusive
       end
     end
   end
@@ -823,7 +882,7 @@ defmodule HTTP.SocketClient do
   defp transfer_http2_socket(transport, socket, owner) when is_atom(transport),
     do: transport.controlling_process(socket, owner)
 
-  defp maybe_start_http2_bridge({:stream, stream}, owner, headers, request) do
+  defp maybe_start_http2_bridge({:stream, stream}, owner, headers, request, deadline) do
     length =
       headers |> Enum.find_value(fn {name, value} -> if name == "content-length", do: value end)
 
@@ -833,12 +892,11 @@ defmodule HTTP.SocketClient do
     ]
 
     with {:ok, bridge} <- BodyBridge.start_link(stream, owner, opts) do
-      HTTP.RequestLifecycle.register(HTTP.RequestLifecycle.current(), bridge, :body_bridge)
-      {:ok, bridge, nil}
+      register_http2_bridge(bridge, nil, deadline)
     end
   end
 
-  defp maybe_start_http2_bridge(body, owner, _headers, request)
+  defp maybe_start_http2_bridge(body, owner, _headers, request, deadline)
        when is_binary(body) and byte_size(body) > 0 do
     chunks =
       Stream.unfold(body, fn
@@ -853,25 +911,46 @@ defmodule HTTP.SocketClient do
 
     with {:ok, stream} <-
            HTTP.Stream.from_enumerable(chunks, telemetry: request_telemetry?(request)) do
-      HTTP.RequestLifecycle.attach_stream(HTTP.RequestLifecycle.current(), stream)
+      result =
+        with :ok <-
+               HTTP.RequestLifecycle.attach_stream(
+                 HTTP.RequestLifecycle.current(),
+                 stream,
+                 deadline
+               ),
+             {:ok, bridge} <-
+               BodyBridge.start_link(stream, owner, telemetry: request_telemetry?(request)) do
+          register_http2_bridge(bridge, stream, deadline)
+        end
 
-      case BodyBridge.start_link(stream, owner, telemetry: request_telemetry?(request)) do
-        {:ok, bridge} ->
-          HTTP.RequestLifecycle.register(HTTP.RequestLifecycle.current(), bridge, :body_bridge)
-          {:ok, bridge, stream}
-
-        {:error, reason} ->
-          stop_internal_http2_stream(stream)
-          {:error, reason}
-      end
+      if match?({:error, _}, result), do: stop_internal_http2_stream(stream)
+      result
     end
   end
 
-  defp maybe_start_http2_bridge(_body, _owner, _headers, _request), do: {:ok, nil, nil}
+  defp maybe_start_http2_bridge(_body, _owner, _headers, _request, _deadline),
+    do: {:ok, nil, nil}
+
+  defp register_http2_bridge(bridge, stream, deadline) do
+    case HTTP.RequestLifecycle.register(
+           HTTP.RequestLifecycle.current(),
+           bridge,
+           :body_bridge,
+           deadline
+         ) do
+      :ok ->
+        {:ok, bridge, stream}
+
+      {:error, _} = error ->
+        GenServer.cast(bridge, :stop)
+        error
+    end
+  end
 
   defp start_http2_stream(owner, headers, body, request, deadline_at) do
     with :ok <- request_ready(deadline_at, nil),
-         {:ok, bridge, internal_stream} <- maybe_start_http2_bridge(body, owner, headers, request) do
+         {:ok, bridge, internal_stream} <-
+           maybe_start_http2_bridge(body, owner, headers, request, deadline_at) do
       opened =
         try do
           ConnectionOwner.open_stream(owner, headers,
@@ -917,7 +996,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp discard_http2_bridge(bridge, internal_stream) do
-    if is_pid(bridge), do: safe_http2_cleanup(fn -> BodyBridge.discard(bridge) end)
+    if is_pid(bridge), do: GenServer.cast(bridge, :stop)
     if is_pid(internal_stream), do: stop_internal_http2_stream(internal_stream)
     :ok
   end
@@ -1154,16 +1233,25 @@ defmodule HTTP.SocketClient do
             telemetry: request_telemetry?(state.request)
           )
 
-        HTTP.RequestLifecycle.attach_stream(HTTP.RequestLifecycle.current(), stream_pid)
+        case HTTP.RequestLifecycle.attach_stream(
+               HTTP.RequestLifecycle.current(),
+               stream_pid,
+               state.deadline_at
+             ) do
+          :ok ->
+            send_response(
+              state.parent,
+              state.ref,
+              Response.with_stream_body(response, stream_pid),
+              state.request
+            )
 
-        send_response(
-          state.parent,
-          state.ref,
-          Response.with_stream_body(response, stream_pid),
-          state.request
-        )
+            await_http2_response(%{state | mode: {:stream, stream_pid}, response_sent?: true})
 
-        await_http2_response(%{state | mode: {:stream, stream_pid}, response_sent?: true})
+          {:error, reason} ->
+            cancel_http2_stream(state)
+            fail_http2(state, reason)
+        end
 
       true ->
         await_http2_response(%{state | mode: {:buffer, response, []}})
@@ -1199,17 +1287,45 @@ defmodule HTTP.SocketClient do
     token = make_ref()
 
     case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
-           result = HTTP.Stream.chunk(stream_pid, chunk, stream_chunk_timeout(state.deadline_at))
-           send(coordinator, {:http2_delivery, token, result})
+           monitor = Process.monitor(coordinator)
+
+           receive do
+             :delivery_launch ->
+               Process.demonitor(monitor, [:flush])
+
+               result =
+                 HTTP.Stream.chunk(stream_pid, chunk, stream_chunk_timeout(state.deadline_at))
+
+               send(coordinator, {:http2_delivery, token, result})
+
+             :delivery_cancel ->
+               :ok
+
+             {:DOWN, ^monitor, :process, ^coordinator, _} ->
+               :ok
+           end
          end) do
       {:ok, worker} ->
-        HTTP.RequestLifecycle.register(HTTP.RequestLifecycle.current(), worker, :delivery)
-        monitor = Process.monitor(worker)
+        case HTTP.RequestLifecycle.register(
+               HTTP.RequestLifecycle.current(),
+               worker,
+               :delivery,
+               state.deadline_at
+             ) do
+          :ok ->
+            monitor = Process.monitor(worker)
+            send(worker, :delivery_launch)
 
-        await_http2_response(%{
-          state
-          | delivery: %{token: token, pid: worker, monitor: monitor, end_stream?: end_stream?}
-        })
+            await_http2_response(%{
+              state
+              | delivery: %{token: token, pid: worker, monitor: monitor, end_stream?: end_stream?}
+            })
+
+          {:error, reason} ->
+            send(worker, :delivery_cancel)
+            cancel_http2_stream(state)
+            fail_http2(state, reason)
+        end
 
       {:error, reason} ->
         fail_http2(state, {:body_delivery_start, reason})
@@ -1263,7 +1379,7 @@ defmodule HTTP.SocketClient do
   defp handle_http2_delivery(state, {:error, reason}, _end_stream?), do: fail_http2(state, reason)
 
   defp maybe_cancel_http2_bridge(%{body_bridge: bridge}) when is_pid(bridge),
-    do: safe_http2_cleanup(fn -> BodyBridge.early_response(bridge) end)
+    do: GenServer.cast(bridge, :early_response)
 
   defp maybe_cancel_http2_bridge(_state), do: :ok
 
@@ -1334,14 +1450,14 @@ defmodule HTTP.SocketClient do
     else
       # The tracker retains the dedicated owner and raw socket until DOWN.
       # Cancellation can already have stopped them before this call arrives.
-      safe_http2_cleanup(fn -> GenServer.stop(state.owner, :normal) end)
+      send(state.owner, :http2_shutdown_exclusive)
     end
 
     :ok
   end
 
   defp stop_http2_bridge(%{body_bridge: bridge}) when is_pid(bridge),
-    do: safe_http2_cleanup(fn -> GenServer.stop(bridge, :normal) end)
+    do: GenServer.cast(bridge, :stop)
 
   defp stop_http2_bridge(_state), do: :ok
 
@@ -1391,7 +1507,7 @@ defmodule HTTP.SocketClient do
       {:http1_upload, token, result} when state.upload != nil and token == state.upload.token ->
         case result do
           :ok ->
-            HTTP.HTTP1.Upload.completed(state.upload)
+            Upload.completed(state.upload)
             owner_loop(%{state | upload: nil})
 
           {:error, reason} ->
@@ -1587,8 +1703,7 @@ defmodule HTTP.SocketClient do
   defp handle_event(%{mode: {:stream, stream_pid}} = state, {:body, chunk}) do
     result =
       if state.writer,
-        do:
-          HTTP.Stream.Writer.chunk(state.writer, chunk, stream_chunk_timeout(state.deadline_at)),
+        do: Writer.chunk(state.writer, chunk, stream_chunk_timeout(state.deadline_at)),
         else:
           HTTP.Stream.chunk(
             stream_pid,
@@ -1646,7 +1761,7 @@ defmodule HTTP.SocketClient do
   defp settle_http1_upload(%{upload: nil} = state), do: {:ok, state}
 
   defp settle_http1_upload(state) do
-    case HTTP.HTTP1.Upload.completion_deadline(state.upload) do
+    case Upload.completion_deadline(state.upload) do
       nil -> stop_http1_upload(state, :early_response)
       deadline -> await_http1_upload_completion(state, deadline)
     end
@@ -1661,7 +1776,7 @@ defmodule HTTP.SocketClient do
       {:http1_upload, token, :ok} when token == upload.token ->
         case upload_completion_interruption(state, deadline) do
           nil ->
-            HTTP.HTTP1.Upload.completed(upload)
+            Upload.completed(upload)
             {:ok, %{state | upload: nil}}
 
           reason ->
@@ -1764,11 +1879,11 @@ defmodule HTTP.SocketClient do
   defp finish_completed(state) do
     demonitor_response_stream(state)
     state = disarm_read_idle(state)
-    if state.writer, do: HTTP.Stream.Writer.close(state.writer)
+    if state.writer, do: Writer.close(state.writer)
     _ = cancel_request_timer(state.timer_ref)
 
     if reusable_http1?(state) and not cancellation_pending?(state) do
-      HTTP.HTTP1.Pool.checkin(state.request, state.transport, state.socket)
+      HTTP.HTTP1.Pool.checkin(state.request, state.transport, state.socket, state.deadline_at)
       :done
     else
       finish(state)
@@ -1818,7 +1933,7 @@ defmodule HTTP.SocketClient do
   defp cleanup(state) do
     demonitor_response_stream(state)
     state = disarm_read_idle(state)
-    if state.writer, do: HTTP.Stream.Writer.close(state.writer)
+    if state.writer, do: Writer.close(state.writer)
     _ = cancel_request_timer(state.timer_ref)
 
     case stop_http1_upload(state, :aborted) do
@@ -1829,7 +1944,7 @@ defmodule HTTP.SocketClient do
         close_http1_socket(state)
 
         if state.upload != nil do
-          HTTP.HTTP1.Upload.stop(state.upload, :aborted, state.deadline_at)
+          Upload.stop(state.upload, :aborted, state.deadline_at)
         end
     end
   end
@@ -1931,23 +2046,24 @@ defmodule HTTP.SocketClient do
     profile = Keyword.get(request.transport_options, :http2_profile)
 
     if profile != nil and function_exported?(HTTP.HTTP2, :prepare_request, 3) do
-      apply(HTTP.HTTP2, :prepare_request, [conn, request, profile])
+      HTTP.HTTP2.prepare_request(conn, request, profile)
     else
       HTTP.HTTP2.prepare_request(conn, request)
     end
   end
 
   defp connected_protocol(transport, socket, selection),
-    do: HTTP.Runtime.Dialer.connected_protocol(transport, socket, selection)
+    do: Dialer.connected_protocol(transport, socket, selection)
 
   defp connect(transport, host, port, request, selection, timeout),
-    do: HTTP.Runtime.Dialer.connect(transport, host, port, request, selection, timeout)
+    do: Dialer.connect(transport, host, port, request, selection, timeout)
 
   defp send_request(transport, socket, iodata, timeout, options \\ []) do
     parent = self()
     ref = make_ref()
 
     tracker = HTTP.RequestLifecycle.current()
+    deadline = Keyword.get(options, :deadline_at, request_deadline(timeout))
 
     case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
            launch_monitor = Process.monitor(parent)
@@ -1955,42 +2071,55 @@ defmodule HTTP.SocketClient do
            receive do
              :send_launch ->
                Process.demonitor(launch_monitor, [:flush])
-               result = HTTP.HTTP1.IdleTimeout.send(transport, socket, iodata, options)
+               result = IdleTimeout.send(transport, socket, iodata, options)
                send(parent, {:send_result, ref, result})
+
+             :send_cancel ->
+               :ok
 
              {:DOWN, ^launch_monitor, :process, ^parent, _reason} ->
                :ok
            end
          end) do
       {:ok, pid} ->
-        HTTP.RequestLifecycle.register(tracker, pid, :send)
-        send(pid, :send_launch)
+        case HTTP.RequestLifecycle.register(tracker, pid, :send, deadline) do
+          :ok ->
+            send(pid, :send_launch)
+            await_request_send(transport, socket, pid, ref, remaining_timeout(deadline))
 
-        receive do
-          {:send_result, ^ref, result} ->
-            # The caller owns cleanup. A failed control write can leave readable
-            # TLS data behind, so sending must not destroy the receive side.
-            result
-
-          :abort ->
+          {:error, _} = error ->
+            send(pid, :send_cancel)
             transport.close(socket)
-            Process.exit(pid, :kill)
-            {:error, :aborted}
-
-          :deadline ->
-            transport.close(socket)
-            Process.exit(pid, :kill)
-            {:error, :request_timeout}
-        after
-          timeout ->
-            transport.close(socket)
-            Process.exit(pid, :kill)
-            {:error, :request_timeout}
+            error
         end
 
       {:error, reason} ->
         transport.close(socket)
         {:error, reason}
+    end
+  end
+
+  defp await_request_send(transport, socket, pid, ref, timeout) do
+    receive do
+      {:send_result, ^ref, result} ->
+        # The caller owns cleanup. A failed control write can leave readable
+        # TLS data behind, so sending must not destroy the receive side.
+        result
+
+      :abort ->
+        transport.close(socket)
+        Process.exit(pid, :kill)
+        {:error, :aborted}
+
+      :deadline ->
+        transport.close(socket)
+        Process.exit(pid, :kill)
+        {:error, :request_timeout}
+    after
+      timeout ->
+        transport.close(socket)
+        Process.exit(pid, :kill)
+        {:error, :request_timeout}
     end
   end
 
@@ -2012,7 +2141,7 @@ defmodule HTTP.SocketClient do
   defp start_prepared_request(state, {:http1_stream, head, stream, length}) do
     with :ok <- enable_http1_duplex_reads(state) do
       upload =
-        HTTP.HTTP1.Upload.start(
+        Upload.start(
           state.transport,
           state.socket,
           stream,
@@ -2027,7 +2156,7 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp enable_http1_duplex_reads(%{transport: HTTP.Transport.ExSSL} = state) do
+  defp enable_http1_duplex_reads(%{transport: ExSSL} = state) do
     remaining = remaining_timeout(state.deadline_at)
 
     # ExSSL duplex reads require a finite per-write timeout even when the
@@ -2041,7 +2170,7 @@ defmodule HTTP.SocketClient do
       |> Keyword.get(:send_timeout, default_send_timeout)
 
     timeout = if configured == :infinity, do: remaining, else: min(configured, remaining)
-    HTTP.Transport.ExSSL.enable_duplex_reads(state.socket, timeout)
+    ExSSL.enable_duplex_reads(state.socket, timeout)
   end
 
   defp enable_http1_duplex_reads(_state), do: :ok
@@ -2054,16 +2183,16 @@ defmodule HTTP.SocketClient do
     # instead of waiting indefinitely for a peer that has stopped reading.
     abandonment =
       case {state.transport, state.socket} do
-        {HTTP.Transport.SSL, socket} ->
-          if HTTP.Transport.SSL.cancellable?(socket) do
+        {OTPTLS, socket} ->
+          if OTPTLS.cancellable?(socket) do
             :ok
           else
             _ = state.transport.setopts(socket, linger: {true, 0})
             :ok
           end
 
-        {HTTP.Transport.ExSSL, socket} ->
-          HTTP.Transport.ExSSL.abandon_send(socket)
+        {ExSSL, socket} ->
+          ExSSL.abandon_send(socket)
 
         {_transport, socket} ->
           _ = state.transport.setopts(socket, linger: {true, 0})
@@ -2078,7 +2207,7 @@ defmodule HTTP.SocketClient do
         upload = state.upload
         state = %{state | upload: nil, upload_cancelled?: true}
 
-        case HTTP.HTTP1.Upload.stop(upload, reason, state.deadline_at) do
+        case Upload.stop(upload, reason, state.deadline_at) do
           :ok -> {:ok, state}
           {:error, reason} -> {:error, reason, state}
         end
@@ -2088,10 +2217,10 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp close_http1_socket(%{transport: HTTP.Transport.SSL, upload_cancelled?: true} = state) do
-    if HTTP.Transport.SSL.cancellable?(state.socket),
-      do: HTTP.Transport.SSL.abort(state.socket),
-      else: HTTP.Transport.SSL.close(state.socket)
+  defp close_http1_socket(%{transport: OTPTLS, upload_cancelled?: true} = state) do
+    if OTPTLS.cancellable?(state.socket),
+      do: OTPTLS.abort(state.socket),
+      else: OTPTLS.close(state.socket)
   end
 
   defp close_http1_socket(state), do: state.transport.close(state.socket)
@@ -2123,7 +2252,7 @@ defmodule HTTP.SocketClient do
     # This owner has not closed the socket locally. Rearming it drains that
     # plaintext (or reports EOF); only the HTTP parser can complete a response.
     HTTP.HTTP2.outbound_control_only?(protocol) and
-      (transport == HTTP.Transport.ExSSL or
+      (transport == ExSSL or
          (HTTP.HTTP2.complete_response?(protocol) and :done in events))
   end
 
@@ -2252,10 +2381,10 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp select_transport(request, path), do: HTTP.Runtime.Dialer.select_transport(request, path)
+  defp select_transport(request, path), do: Dialer.select_transport(request, path)
 
   defp protocol_selection(request, transport),
-    do: HTTP.Runtime.Dialer.protocol_selection(request, transport)
+    do: Dialer.protocol_selection(request, transport)
 
   defp http_version(%Request{} = request) do
     Keyword.get(request.transport_options, :http_version, :http1)

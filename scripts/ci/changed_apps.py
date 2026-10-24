@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select app owners and affected H2 consumers from umbrella dependencies."""
+"""Select app owners, affected consumers and required candidate TLS acceptance."""
 
 import argparse
 import json
@@ -17,6 +17,7 @@ ALL = list(APPS)
 
 
 H2_CONSUMERS = ("http_fetch", "http_web_socket", "http_event_source")
+QUIC_CONSUMERS = ("elixir_quic", "elixir_quic_http3")
 ROOT = Path(__file__).resolve().parents[2]
 SHARED_FILES = {"mix.exs", "mix.lock", ".formatter.exs", ".credo.exs",
                 ".dialyzer_ignore.exs"}
@@ -42,27 +43,51 @@ def dependency_closure(app, graph):
     return closure
 
 
+def documentation_path(path):
+    return path.endswith(".md") or "docs" in path.split("/")
+
+
+def source_owners(paths):
+    return {parts[1] for path in paths
+            if len(parts := path.split("/")) >= 3 and parts[0] == "apps"
+            and parts[1] in APPS and not documentation_path(path)}
+
+
 def shared_h2_path(path):
-    return (path in SHARED_FILES or path.startswith(("config/", "scripts/ci/",
+    return not documentation_path(path) and (
+        path in SHARED_FILES or path.startswith(("config/", "scripts/ci/",
             ".github/workflows/", "scripts/http2_", "scripts/http_runtime_",
-            "scripts/requirements-http2", "scripts/release/", "scripts/ex_ssl_")))
+            "scripts/requirements-http2", "scripts/release/", "scripts/ex_ssl_",
+            "scripts/external_consumer_smoke.", "scripts/http3/")))
 
 
 def affected_h2_consumers(paths, graph=None):
+    return affected_consumers(paths, H2_CONSUMERS, graph)
+
+
+def affected_quic_consumers(paths, graph=None):
+    return affected_consumers(paths, QUIC_CONSUMERS, graph)
+
+
+def affected_consumers(paths, consumers, graph=None):
     graph = dependency_graph() if graph is None else graph
     if any(shared_h2_path(path) for path in paths):
-        return list(H2_CONSUMERS)
-    owners = {parts[1] for path in paths
-              if len(parts := path.split("/")) >= 3 and parts[0] == "apps"
-              and not (parts[2] == "docs" or path.endswith(".md"))}
-    return [app for app in H2_CONSUMERS
+        return list(consumers)
+    owners = source_owners(paths)
+    return [app for app in consumers
             if owners & dependency_closure(app, graph)]
+
+
+def candidate_tls_required(paths):
+    return bool(source_owners(paths)) or any(shared_h2_path(path) for path in paths)
 
 
 def select_apps(paths, workflow):
     owners = {parts[1] for path in paths
               if len(parts := path.split("/")) >= 3 and parts[0] == "apps"}
-    selected = owners | set(affected_h2_consumers(paths))
+    graph = dependency_graph()
+    selected = owners | set(affected_h2_consumers(paths, graph)) | set(
+        affected_quic_consumers(paths, graph))
     return [app for app in APPS if app in selected]
 
 
@@ -99,11 +124,13 @@ def main():
     if manual:
         apps = ALL
         h2_compat = True
+        candidate_tls = True
     else:
         try:
             paths = changed_paths(args.base, args.head)
             apps = select_apps(paths, args.workflow)
             h2_compat = bool(affected_h2_consumers(paths))
+            candidate_tls = candidate_tls_required(paths)
         except ValueError as error:
             parser.error(str(error))
 
@@ -111,6 +138,7 @@ def main():
               f"has_changes={'true' if apps else 'false'}\n"
               f"full_gate={'true' if manual else 'false'}\n"
               f"h2_compat={'true' if h2_compat else 'false'}\n"
+              f"candidate_tls={'true' if candidate_tls else 'false'}\n"
               f"historical_tls={'true' if manual else 'false'}\n")
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:

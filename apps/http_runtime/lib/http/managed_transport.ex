@@ -2,7 +2,7 @@ defmodule HTTP.ManagedTransport do
   @moduledoc """
   Owns one bounded transport generation for a fixed origin and literal address.
 
-  `open/1` freezes direct TCP/OTP TLS policy and creates private connection pools.
+  `open/1` freezes direct TCP/TLS policy and creates private connection pools.
   Pass the opaque scope as `transport_scope` to raw, streamed Fetch requests with
   manual/error redirects. Request and connection capacity fail immediately;
   request leases last through unread response streams.
@@ -42,8 +42,9 @@ defmodule HTTP.ManagedTransport do
   (HTTP). Optional capacity is `max_requests: 1..2048` (default 100),
   `max_connections: 1..256` (default 2), `max_pending: 0`, and
   `idle_timeout: 1..60000` milliseconds (default 30000). `ssl` and `socket_opts`
-  freeze supported OTP TLS/socket settings. Only `tls_backend: :ssl` and
-  `http2_profile: :native_v1` are accepted. TLS files and system CAs are captured
+  freeze supported TLS/socket settings. `tls_backend: :ssl` (the current default)
+  and explicit `:ex_ssl` support HTTPS H1/H2; only `http2_profile: :native_v1`
+  is accepted. TLS files and system CAs are captured
   once at open; rotated policy requires a new scope. For explicit HTTPS `:http1`,
   `ssl: [alpn_advertised_protocols: ["http/1.1"]]` optionally advertises the single
   fixed binary protocol. Omitting it preserves no ALPN advertisement. Other
@@ -139,8 +140,10 @@ defmodule HTTP.ManagedTransport do
   end
 
   @spec snapshot(t(), non_neg_integer()) :: {:ok, map()} | {:error, term()}
-  def snapshot(%__MODULE__{} = scope, timeout) when is_integer(timeout) and timeout >= 0,
-    do: call(scope.coordinator, :snapshot, timeout)
+  def snapshot(%__MODULE__{} = scope, timeout) when is_integer(timeout) and timeout >= 0 do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    call(scope.coordinator, {:snapshot, deadline}, timeout)
+  end
 
   @spec retire(t(), keyword()) :: {:ok, Receipt.t()} | {:error, term()}
   def retire(%__MODULE__{} = scope, opts \\ []) do
@@ -283,14 +286,19 @@ defmodule HTTP.ManagedTransport do
         scope = request.transport_options[:transport_scope]
         deadline = request.transport_options[:managed_deadline_at]
 
-        case HTTP.RequestLifecycle.bind_scope(tracker, scope.coordinator, deadline) do
-          :ok ->
+        case HTTP.RequestLifecycle.bind_scope(
+               tracker,
+               scope.coordinator,
+               deadline,
+               :completion_proof
+             ) do
+          {:ok, completion} ->
             replaced =
               :ets.select_replace(
                 scope.ingress,
                 [
                   {{id, token, :_, :reserved, tracker}, [],
-                   [{:const, {id, token, self(), :awaiting, tracker}}]}
+                   [{:const, {id, token, {self(), completion}, :awaiting, tracker}}]}
                 ]
               )
 
@@ -300,7 +308,8 @@ defmodule HTTP.ManagedTransport do
                   scope,
                   lease,
                   deadline,
-                  tracker
+                  tracker,
+                  completion
                 ),
               else: {:error, :transport_scope_retired}
 
@@ -319,10 +328,10 @@ defmodule HTTP.ManagedTransport do
 
       id =
         Enum.find(1..scope.max_requests, fn id ->
-          :ets.select_replace(
-            scope.ingress,
-            [{{id, nil, nil, :free, nil}, [], [{:const, {id, token, self(), :preparing, nil}}]}]
-          ) == 1
+          replacement = {id, token, self(), :preparing, nil}
+
+          replace_claim(scope.ingress, {id, nil, nil, :free, nil}, replacement) or
+            reclaim_completed(scope.ingress, id, replacement)
         end)
 
       if id, do: {:ok, {id, token}}, else: {:error, {:transport_scope_capacity, :requests}}
@@ -331,13 +340,30 @@ defmodule HTTP.ManagedTransport do
     end
   end
 
-  defp await_admission(scope, {id, token} = lease, deadline, tracker) do
+  defp reclaim_completed(ingress, id, replacement) do
+    case :ets.lookup(ingress, id) do
+      [{^id, _token, {_owner, completion}, :active, tracker} = entry]
+      when is_pid(tracker) and is_reference(completion) ->
+        # The same durable latch used by RequestCompletion proves request cleanup.
+        # Scope's independent monitor/provider obligations remain until processed.
+        not Process.alive?(tracker) and :atomics.get(completion, 1) == 2 and
+          replace_claim(ingress, entry, replacement)
+
+      _ ->
+        false
+    end
+  end
+
+  defp replace_claim(ingress, entry, replacement),
+    do: :ets.select_replace(ingress, [{entry, [], [{:const, replacement}]}]) == 1
+
+  defp await_admission(scope, {id, token} = lease, deadline, tracker, completion) do
     cond do
       System.monotonic_time(:millisecond) >= deadline ->
         cancel_lease(scope, lease)
         {:error, :request_timeout}
 
-      :ets.lookup(scope.ingress, id) == [{id, token, self(), :active, tracker}] ->
+      :ets.lookup(scope.ingress, id) == [{id, token, {self(), completion}, :active, tracker}] ->
         :ok
 
       :atomics.get(scope.gate, 1) != 1 ->
@@ -351,7 +377,7 @@ defmodule HTTP.ManagedTransport do
             {:error, :aborted}
         after
           min(max(deadline - System.monotonic_time(:millisecond), 0), 5) ->
-            await_admission(scope, lease, deadline, tracker)
+            await_admission(scope, lease, deadline, tracker, completion)
         end
     end
   end

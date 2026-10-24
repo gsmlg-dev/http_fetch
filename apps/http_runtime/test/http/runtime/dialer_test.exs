@@ -1,6 +1,8 @@
 defmodule HTTP.Runtime.DialerTest do
   use ExUnit.Case, async: true
 
+  alias HTTP.Runtime.Dialer
+
   defmodule ControlledTransport do
     def connect(observer, port, _opts, timeout) do
       send(observer, {:connecting, self()})
@@ -17,6 +19,9 @@ defmodule HTTP.Runtime.DialerTest do
 
         :error ->
           {:error, :econnrefused}
+
+        {:error, reason} ->
+          {:error, reason}
 
         :connect ->
           {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false], timeout)
@@ -129,6 +134,71 @@ defmodule HTTP.Runtime.DialerTest do
   end
 
   for {signal, reason} <- [abort: :aborted, deadline: :request_timeout] do
+    test "queued #{signal} overrides an earlier ordinary error" do
+      {caller, worker, monitor} = queued_error()
+      send(caller, unquote(signal))
+      resume(caller)
+      assert_result(caller, {:error, unquote(reason)})
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+    end
+  end
+
+  test "subscriber death queued after an ordinary error overrides it" do
+    subscriber = spawn(fn -> receive do: (:stop -> :ok) end)
+    subscriber_monitor = Process.monitor(subscriber)
+    {caller, worker, monitor} = queued_error(subscriber: subscriber)
+    send(subscriber, :stop)
+    assert_receive {:DOWN, ^subscriber_monitor, :process, ^subscriber, :normal}, 1_000
+
+    assert {:messages,
+            [
+              {:connect_result, _, {:error, :timeout}},
+              {:DOWN, _, :process, ^worker, :normal},
+              {:DOWN, _, :process, ^subscriber, :normal}
+            ]} =
+             Process.info(caller, :messages)
+
+    resume(caller)
+    assert_result(caller, {:error, :subscriber_down})
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+  end
+
+  for {first, second, reason} <- [
+        {:abort, :deadline, :aborted},
+        {:deadline, :abort, :request_timeout}
+      ] do
+    test "ordinary error preserves queued #{first} before #{second} ordering" do
+      {caller, _worker, _monitor} = queued_error()
+      send(caller, unquote(first))
+      send(caller, unquote(second))
+      resume(caller)
+      assert_receive {:result, ^caller, {:error, unquote(reason)}}, 1_000
+      send(caller, :inspect)
+      assert_receive {:clean, ^caller, {:monitors, []}, {:messages, [unquote(second)]}}, 1_000
+    end
+  end
+
+  test "elapsed original request budget overrides an ordinary error without a timer message" do
+    {caller, _worker, _monitor} = queued_error(timeout: 100)
+    wait_until_budget_elapsed(100)
+    resume(caller)
+    assert_result(caller, {:error, :request_timeout})
+  end
+
+  test "elapsed shorter connect budget retains native timeout while the request budget is live" do
+    {caller, _worker, _monitor} = queued_error(timeout: 3_000, connect_timeout: 100)
+    wait_until_budget_elapsed(100)
+    resume(caller)
+    assert_result(caller, {:error, :timeout})
+  end
+
+  test "an unexpired request retains a native timeout" do
+    {caller, _worker, _monitor} = queued_error()
+    resume(caller)
+    assert_result(caller, {:error, :timeout})
+  end
+
+  for {signal, reason} <- [abort: :aborted, deadline: :request_timeout] do
     @tag :integration
     test "#{signal} during handoff closes the socket and cleans the monitor" do
       {listener, port} = listener()
@@ -187,14 +257,14 @@ defmodule HTTP.Runtime.DialerTest do
         request = %HTTP.Request{
           url: URI.parse("http://localhost"),
           transport_options: [
-            connect_timeout: timeout,
+            connect_timeout: Keyword.get(opts, :connect_timeout, timeout),
             request_lifecycle: tracker,
             connect_failure_token: opts[:connect_failure_token]
           ]
         }
 
         result =
-          HTTP.Runtime.Dialer.connect(
+          Dialer.connect(
             ControlledTransport,
             observer,
             port,
@@ -218,6 +288,31 @@ defmodule HTTP.Runtime.DialerTest do
     assert_receive {:connecting, worker}, 1_000
     on_exit(fn -> Process.exit(worker, :kill) end)
     {caller, worker, Process.monitor(worker)}
+  end
+
+  defp queued_error(opts \\ []) do
+    {caller, worker, monitor} = start_connect(0, opts)
+    true = :erlang.suspend_process(caller)
+    send(worker, {:error, :timeout})
+    worker_monitor = Process.monitor(worker)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 1_000
+
+    assert {:messages,
+            [
+              {:connect_result, _, {:error, :timeout}},
+              {:DOWN, _, :process, ^worker, :normal}
+            ]} =
+             Process.info(caller, :messages)
+
+    {caller, worker, monitor}
+  end
+
+  defp resume(caller), do: :erlang.resume_process(caller)
+
+  defp wait_until_budget_elapsed(milliseconds) do
+    ref = make_ref()
+    Process.send_after(self(), ref, milliseconds)
+    assert_receive ^ref, 1_000
   end
 
   defp caller_loop(observer) do

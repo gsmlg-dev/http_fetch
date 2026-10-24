@@ -1189,13 +1189,36 @@ mix test apps/http_fetch/test/http/response_test.exs
 mix test --cover
 ```
 
+Default `mix test` runs single-VM unit tests, excluding `:integration` and `:e2e`.
+Tests that use real sockets, subprocesses, system trust or filesystem I/O belong
+to integration; end-to-end tests exercise complete client/server flows.
+
+Run integration separately with the pinned independent peer dependencies used by
+`integration.yml`. Keep the Python environment outside the source tree:
+
+```bash
+python3 -m venv /tmp/http-fetch-integration-venv
+/tmp/http-fetch-integration-venv/bin/python -m pip install \
+  --requirement scripts/requirements-http2-stream-clients.txt
+PATH="/tmp/http-fetch-integration-venv/bin:$PATH" \
+  HTTP_QUIC_PHASE1_REAL=1 MIX_ENV=test mix test --only integration
+```
+
+Missing peer prerequisites and skipped mandatory scenarios do not establish a
+passing integration gate. Use `mix test --include integration` for units and
+integration together after preparing the same peers. Run timing-sensitive suites
+serially with other verification commands so concurrent builds do not distort
+deadline observations.
+
 ### App-scoped GitHub Actions
 
-CI, Test, and E2E run separate jobs for each app under `apps/`. Automatic
-push and pull-request runs select changed app owners plus affected H2
-Fetch/EventSource/WebSocket consumers, using the actual umbrella dependency
-graph. Changes to root manifests/lockfile, configuration, H2 peers/harnesses,
-CI selectors, release tooling and workflows also select these consumers.
+CI, Test, Integration, and E2E run separate jobs for each app under `apps/`.
+Automatic push and pull-request runs select changed app owners plus affected H2
+Fetch/EventSource/WebSocket and QUIC/H3 consumers, using the actual umbrella
+dependency graph. Changes to root manifests/lockfile, configuration, peers,
+acceptance harnesses, CI selectors, release tooling and workflows also select
+these consumers. Relevant app and shared changes require current candidate
+package consumers and TLS feature validation.
 Unrelated root documentation does not trigger these jobs.
 
 The CI H2 compatibility job checks consumer suites, both independent peers over
@@ -1206,8 +1229,8 @@ Each app job prepares its dependency closure; WebSocket and EventSource test
 closures include Fetch for their existing cross-client tests.
 
 Shared changes still require manual full regression. Dispatching any of these
-workflows forces all nine app jobs on the selected branch. Manual CI also runs
-candidate package consumers and historical TLS compatibility checks:
+workflows forces all nine app jobs on the selected branch. Manual CI additionally
+runs full shared checks and historical TLS compatibility checks:
 
 ```bash
 gh workflow run ci.yml --ref main
@@ -1239,7 +1262,7 @@ MIX_ENV=test mix test.e2e
 In CI, the `e2e.yml` and `release.yml` workflows run the applicable E2E gates,
 including the pinned Caddy TLS fingerprint fixture on CI runners.
 `mix test.e2e` keeps execution at the umbrella root. To run one suite, use
-`MIX_ENV=test mix test apps/http_web_socket/e2e` (or another app's `e2e`
+`MIX_ENV=test mix test apps/http_web_socket/e2e --include e2e` (or another app's `e2e`
 directory) after the same preparation as the unit tests.
 
 ### Testing Packaged Consumers

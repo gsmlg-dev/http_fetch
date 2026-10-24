@@ -5,6 +5,18 @@ defmodule HTTP.Transport.SSL do
 
   @type cancellable_socket :: {:cancellable_ssl, :ssl.sslsocket(), port()}
 
+  # Temporary OTP-only accounting. Other providers supply public lifecycle proof.
+  @doc false
+  def lifecycle_resources({:sslsocket, {:gen_tcp, tcp, _, _}, [receiver, sender]})
+      when is_port(tcp) and is_pid(receiver) and is_pid(sender),
+      do: {:ok, tcp, [receiver, sender]}
+
+  def lifecycle_resources({:sslsocket, tcp, receiver, sender, :gen_tcp, _, _, _})
+      when is_port(tcp) and is_pid(receiver) and is_pid(sender),
+      do: {:ok, tcp, [receiver, sender]}
+
+  def lifecycle_resources(_socket), do: :error
+
   # Retain the TCP handle through the public TLS upgrade API. OTP's graceful
   # close can wait on its sender even with a zero close timeout.
   @spec connect_cancellable(String.t(), non_neg_integer(), keyword(), timeout()) ::

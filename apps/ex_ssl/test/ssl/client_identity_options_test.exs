@@ -33,10 +33,9 @@ defmodule SSL.ClientIdentityOptionsTest do
   end
 
   @tag :integration
-  test "identity selection hardware and encrypted-key controls remain explicitly unsupported" do
-    for option <- [certs_keys: [], password: "private-password", key: %{engine: :external}] do
-      assert {:error, {:options, reason}} = SSL.Options.normalize(~c"localhost", [option])
-      refute inspect(reason) =~ "private-password"
+  test "hardware remains explicitly unsupported" do
+    for option <- [key: %{engine: :external}] do
+      assert {:error, {:options, _reason}} = SSL.Options.normalize(~c"localhost", [option])
     end
   end
 end

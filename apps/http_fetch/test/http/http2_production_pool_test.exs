@@ -200,7 +200,7 @@ defmodule HTTP.HTTP2ProductionPoolTest do
 
     ref = Process.monitor(caller)
     assert_receive {:started, ^caller, {:ok, owner}}, 5_000
-    # start_link acknowledges init before handle_continue writes the preface.
+    :ok = ConnectionOwner.activate(owner)
     assert %{lifecycle: :ready} = ConnectionOwner.status(owner)
     assert_receive {:wire, _}
     send(caller, :stop)

@@ -99,6 +99,23 @@ defmodule SSL.ConnectionWriter do
     nonce = context.nonce
 
     receive do
+      {:lifecycle_socket_send, ^nonce, token, tcp, bytes, shutdown?, deadline}
+      when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
+             is_boolean(shutdown?) and (is_integer(deadline) or deadline == :infinity) ->
+        if live?(connection, observer) do
+          result = SSL.Lifecycle.NativeSocket.send_bytes(tcp, bytes, shutdown?, deadline)
+          send(connection, {:writer_result, self(), token, result})
+
+          enrolled_loop(
+            connection,
+            connection_monitor,
+            observer,
+            observer_monitor,
+            context,
+            spent
+          )
+        end
+
       {:lifecycle_send, ^nonce, token, tcp, bytes, shutdown?}
       when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
              is_boolean(shutdown?) ->

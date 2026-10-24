@@ -68,8 +68,9 @@ defmodule HTTP.WebSocket do
 
   WSS retains the selected TLS backend's CA, hostname and SNI verification;
   supply trusted `ssl: [cacertfile: ...]` for private CAs. Owner death closes
-  the connection. `close/1` signals cancellation; monitor the socket's public
-  `pid` for `:DOWN` to confirm cleanup, including a cancelled opening. A
+  the connection. `close/1` signals cancellation; use `completion/1` with
+  `HTTP.ClientCompletion.await/2` to confirm cleanup, including a cancelled
+  opening. The receipt remains readable after the socket process exits. A
   Close event describes the handshake result; it does not prove peer
   application receipt of earlier writes. Terminal cancellation discards
   pending transport bytes, so a failed write may have reached the peer partly.
@@ -87,7 +88,7 @@ defmodule HTTP.WebSocket do
   alias HTTP.WebSocket.Frame
   alias HTTP.WebSocket.Options
 
-  defstruct pid: nil, ref: nil, url: nil
+  defstruct pid: nil, ref: nil, url: nil, completion: nil
 
   @connecting 0
   @open 1
@@ -95,7 +96,12 @@ defmodule HTTP.WebSocket do
   @closed 3
   @call_timeout 5_000
 
-  @type t :: %__MODULE__{pid: pid() | nil, ref: reference() | nil, url: String.t() | nil}
+  @type t :: %__MODULE__{
+          pid: pid() | nil,
+          ref: reference() | nil,
+          url: String.t() | nil,
+          completion: HTTP.ClientCompletion.t() | nil
+        }
 
   @spec connecting() :: 0
   def connecting, do: @connecting
@@ -114,15 +120,26 @@ defmodule HTTP.WebSocket do
   def new(url, protocols \\ [], init \\ []) do
     ref = make_ref()
 
-    with {:ok, options} <- Options.new(url, protocols, put_ref(init, ref)),
-         {:ok, pid} <-
-           DynamicSupervisor.start_child(
+    with {:ok, options} <- Options.new(url, protocols, put_ref(init, ref)) do
+      receipt = HTTP.ClientCompletion.new(:client)
+
+      case DynamicSupervisor.start_child(
              HTTP.WebSocket.ConnectionSupervisor,
-             {Connection, options}
+             {Connection, {options, receipt}}
            ) do
-      %__MODULE__{pid: pid, ref: ref, url: options.url}
+        {:ok, pid} ->
+          %__MODULE__{pid: pid, ref: ref, url: options.url, completion: receipt}
+
+        error ->
+          Kernel.send(receipt.tracker, :launch_failed)
+          error
+      end
     end
   end
+
+  @doc "Returns the durable cleanup receipt without contacting the connection."
+  @spec completion(t()) :: HTTP.ClientCompletion.t() | nil
+  def completion(%__MODULE__{completion: receipt}), do: receipt
 
   @spec array_buffer(binary()) :: ArrayBuffer.t() | {:error, :invalid_array_buffer}
   def array_buffer(data) when is_binary(data), do: ArrayBuffer.new(data)

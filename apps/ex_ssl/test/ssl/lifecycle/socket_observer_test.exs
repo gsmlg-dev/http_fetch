@@ -55,7 +55,7 @@ defmodule SSL.Lifecycle.SocketObserverTest do
              Reader.await(receipt, budget(parent))
   end
 
-  test "fully enrolled Socket graph rejects Port handoff and connected publication" do
+  test "fully enrolled Socket graph authenticates native handoff and provider publication" do
     {receipt, lease, owner, _owner_mon, socket, _socket_mon, _token, native, parent} = attempt()
     assert :use = invoke(owner, {:enroll, socket}, native)
     {:ok, setup_token} = Observer.reserve_root(receipt, lease, :setup, budget(native))
@@ -68,13 +68,38 @@ defmodule SSL.Lifecycle.SocketObserverTest do
     assert {:ok, nonce} = invoke(writer, {:perform, :writer_ready}, native)
     assert :ok = invoke(connection, {:perform, {:connection_ready, nonce}}, native)
 
-    assert {:error, :handoff_resources_pending} =
-             invoke(owner, {:perform, {:prepare, socket, connection}}, native)
+    for frame <- [
+          {{:prepare_handoff, socket, connection, budget(native)}, budget(native)},
+          {{:prepare_handoff_bounded, socket, connection, budget(native)}, budget(native)},
+          {{:prepare_handoff, socket, connection}, {:abs_ms, :later}},
+          {{:prepare_handoff_bounded, socket, connection}, {:abs_ms, :later}}
+        ] do
+      assert {:error, :invalid_handoff_context} =
+               invoke(owner, {:perform, {:raw_handoff, frame}}, native)
+    end
 
-    assert {:error, :socket_transport_not_implemented} =
-             invoke(setup, {:perform, :connected}, native)
+    assert {:ok, grant} = invoke(owner, {:perform, {:prepare, socket, connection}}, native)
 
-    assert {:ok, %{setup: :pending, roles: 31}} = Observer.snapshot(receipt, budget(native))
+    assert {:error, :unauthorized_connect_failure} =
+             invoke(owner, {:perform, {:connect_failure, socket}}, native)
+
+    assert :ok = invoke(owner, {:perform, {:transfer, socket, connection}}, native)
+
+    for frame <- [
+          {{:commit_handoff, socket, owner, grant, budget(native)}, budget(native)},
+          {{:commit_handoff, grant, budget(native)}, budget(native)},
+          {{:commit_handoff, socket, owner, grant}, {:abs_ms, :later}},
+          {{:commit_handoff, grant}, {:abs_ms, :later}}
+        ] do
+      assert {:error, :invalid_handoff_context} =
+               invoke(connection, {:perform, {:raw_handoff, frame}}, native)
+    end
+
+    assert :ok = invoke(connection, {:perform, {:commit, grant}}, native)
+
+    assert :ok = invoke(setup, {:perform, :connected}, native)
+
+    assert {:ok, %{setup: :connected, roles: 31}} = Observer.snapshot(receipt, budget(native))
     assert Process.alive?(Receipt.observer(receipt))
     assert :ok = Observer.cancel(receipt, lease, budget(native))
 
@@ -191,6 +216,18 @@ defmodule SSL.Lifecycle.SocketObserverTest do
 
   defp perform(receipt, {:prepare, socket, connection}, deadline),
     do: Observer.prepare_handoff(receipt, socket, connection, deadline)
+
+  defp perform(receipt, {:raw_handoff, frame}, {:abs_ms, deadline}),
+    do: GenServer.call(Receipt.observer(receipt), frame, left(deadline))
+
+  defp perform(receipt, {:connect_failure, socket}, deadline),
+    do: Observer.record_socket_connect_failure(receipt, socket, :econnrefused, deadline)
+
+  defp perform(_receipt, {:transfer, socket, connection}, _deadline),
+    do: :socket.setopt(socket, :otp, :controlling_process, connection)
+
+  defp perform(receipt, {:commit, grant}, deadline),
+    do: Observer.commit_handoff(receipt, grant, deadline)
 
   defp perform(receipt, :connected, deadline),
     do: Observer.publish_setup(receipt, :connected, deadline)

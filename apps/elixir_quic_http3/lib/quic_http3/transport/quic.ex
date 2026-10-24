@@ -12,7 +12,18 @@ defmodule QuicHttp3.Transport.Quic do
   alias Quic.Profile
   alias SSL.ClientHello.Profile, as: TLSProfile
 
-  defstruct [:endpoint, :handle, :ops, :consumer, :connect_ref, endpoint_owned?: false]
+  defstruct [
+    :endpoint,
+    :handle,
+    :ops,
+    :consumer,
+    :connect_ref,
+    :cleanup,
+    :deadline,
+    :call_timeout,
+    attach_unknown?: false,
+    endpoint_owned?: false
+  ]
 
   defmodule Stream do
     @moduledoc false
@@ -37,6 +48,7 @@ defmodule QuicHttp3.Transport.Quic do
     {ops, options} = Keyword.pop(options, :ops, Quic)
 
     with :ok <- valid_options(options),
+         :ok <- shared_cleanup_options(options),
          {:ok, host} <- reference_host(Keyword.get(options, :host)),
          {:ok, tls} <- QuicHttp3.TLSOptions.normalize(host, Keyword.get(options, :tls, [])),
          options = options |> Keyword.put(:tls, tls) |> Keyword.put(:host, host),
@@ -63,6 +75,7 @@ defmodule QuicHttp3.Transport.Quic do
     {injected_endpoint, options} = Keyword.pop(options, :endpoint)
 
     with :ok <- valid_options(options),
+         :ok <- tracked_options(options, ops, injected_endpoint),
          {:ok, host} <- reference_host(remote),
          {:ok, tls} <- QuicHttp3.TLSOptions.normalize(host, Keyword.get(options, :tls, [])),
          options = options |> Keyword.put(:tls, tls) |> Keyword.put(:host, host),
@@ -79,7 +92,10 @@ defmodule QuicHttp3.Transport.Quic do
         ops: ops,
         endpoint_owned?: owned?,
         consumer: Keyword.get(options, :consumer, self()),
-        connect_ref: connect_ref
+        connect_ref: connect_ref,
+        cleanup: Keyword.get(options, :cleanup),
+        deadline: Keyword.get(options, :deadline),
+        call_timeout: Keyword.get(options, :timeout, 5_000)
       }
 
       case ops.connect(endpoint, normalized_remote, connect_options(options)) do
@@ -117,6 +133,8 @@ defmodule QuicHttp3.Transport.Quic do
   def info(%__MODULE__{handle: handle, ops: ops}), do: ops.info(handle)
 
   @impl true
+  def operation_status(%__MODULE__{attach_unknown?: true}, _ref, :connect), do: :unknown
+
   def operation_status(%__MODULE__{handle: handle, connect_ref: ref} = connection, ref, :connect)
       when not is_nil(handle) do
     %{status: :admitted, result: attach(connection)}
@@ -152,14 +170,69 @@ defmodule QuicHttp3.Transport.Quic do
 
   defp normalize_result(_connection, _kind, result), do: result
 
-  defp attach(%__MODULE__{ops: ops, handle: handle, consumer: consumer} = connection) do
-    case ops.attach(handle, consumer, []) do
+  defp attach(%__MODULE__{cleanup: nil} = connection), do: attach(connection, [], nil)
+
+  defp attach(connection) do
+    with {:ok, target} <- cleanup_target(connection, connection.cleanup),
+         {:ok, permit} <-
+           Quic.Cleanup.operation(
+             connection.cleanup.lease,
+             target,
+             make_ref(),
+             :attach,
+             connection.deadline
+           ) do
+      {:abs_ms, deadline} = connection.deadline
+
+      options = [
+        deadline: connection.deadline,
+        timeout: max(0, min(connection.call_timeout, deadline - now()))
+      ]
+
+      attach(connection, options, permit)
+    else
+      {:error, reason} -> {:error, {:attach_failed, connection, {:error, reason}}}
+    end
+  end
+
+  defp attach(connection, options, permit) do
+    result = connection.ops.attach(connection.handle, connection.consumer, options)
+    unknown? = result == {:error, :timeout} or match?({:unknown, _}, result)
+
+    if permit do
+      if unknown?, do: Quic.Cleanup.indeterminate(permit), else: Quic.Cleanup.resolved(permit)
+    end
+
+    case result do
       :ok -> {:ok, connection}
-      {:error, :timeout} -> {:unknown, connection, connection.connect_ref}
-      {:unknown, _ref} -> {:unknown, connection, connection.connect_ref}
+      {:error, :timeout} -> unknown_attach(connection)
+      {:unknown, _ref} -> unknown_attach(connection)
       error -> {:error, {:attach_failed, connection, error}}
     end
   end
+
+  defp unknown_attach(%{cleanup: nil} = connection),
+    do: {:unknown, connection, connection.connect_ref}
+
+  defp unknown_attach(connection),
+    do: {:unknown, %{connection | attach_unknown?: true}, connection.connect_ref}
+
+  @doc false
+  def cleanup_target(connection, %{handle: handle}) do
+    case Quic.Cleanup.status(handle) do
+      {:pending, %{admission: :open, generation: scope}} ->
+        target = if connection && connection.handle, do: connection.handle.generation, else: scope
+        {:ok, target}
+
+      {:pending, _} ->
+        {:error, :retiring}
+
+      _ ->
+        {:error, :cleanup_unavailable}
+    end
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
 
   defp authenticated_h3(%{alpn: alpn}) when alpn != "h3", do: {:error, :h3_not_negotiated}
   defp authenticated_h3(%{peer_authenticated: false}), do: {:error, :peer_not_authenticated}
@@ -246,10 +319,18 @@ defmodule QuicHttp3.Transport.Quic do
   def stop_endpoint(_), do: {:error, :invalid_endpoint}
 
   @impl true
+  def cleanup(%__MODULE__{cleanup: %{lease: lease}}) do
+    case Quic.Cleanup.retire(lease, {:abs_ms, now()}) do
+      {:error, reason, _} -> {:error, reason}
+      _ -> :ok
+    end
+  end
+
   def cleanup(%__MODULE__{endpoint_owned?: false}), do: :ok
   def cleanup(%__MODULE__{ops: ops, endpoint: endpoint}), do: stop_owned_endpoint(ops, endpoint)
 
   @impl true
+  def abort(%__MODULE__{cleanup: %{}} = connection, _opts), do: cleanup(connection)
   def abort(%__MODULE__{endpoint_owned?: true} = connection, _opts), do: cleanup(connection)
   def abort(%__MODULE__{handle: nil}, _opts), do: {:error, :unresolved_shared_connect}
 
@@ -360,22 +441,29 @@ defmodule QuicHttp3.Transport.Quic do
   defp datagram_options(_), do: {:error, :invalid_datagram_options}
 
   defp endpoint_options(options, profile, datagram) do
-    options
-    |> Keyword.drop([
-      :ops,
-      :host,
-      :alpn,
-      :profile,
-      :timeout,
-      :connect_timeout,
-      :datagram,
-      :deadline,
-      :ref,
-      :consumer,
-      :tls_backend
-    ])
-    |> Keyword.put(:profile, profile)
-    |> Keyword.put(:datagram, datagram)
+    cleanup = Keyword.get(options, :cleanup)
+    deadline = Keyword.get(options, :deadline)
+    options = if cleanup, do: Keyword.put(options, :cleanup, cleanup.lease), else: options
+
+    result =
+      options
+      |> Keyword.drop([
+        :ops,
+        :host,
+        :alpn,
+        :profile,
+        :timeout,
+        :connect_timeout,
+        :datagram,
+        :deadline,
+        :ref,
+        :consumer,
+        :tls_backend
+      ])
+      |> Keyword.put(:profile, profile)
+      |> Keyword.put(:datagram, datagram)
+
+    if cleanup, do: Keyword.put(result, :deadline, deadline), else: result
   end
 
   defp start_endpoint(ops, %Endpoint{} = endpoint, options, profile, _datagram) do
@@ -435,6 +523,36 @@ defmodule QuicHttp3.Transport.Quic do
     |> case do
       {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
       error -> error
+    end
+  end
+
+  defp shared_cleanup_options(options) do
+    if options[:cleanup], do: {:error, :cleanup_requires_owned_endpoint}, else: :ok
+  end
+
+  defp tracked_options(options, ops, endpoint) do
+    case Keyword.get(options, :cleanup) do
+      nil ->
+        :ok
+
+      %{handle: %Quic.Cleanup.Handle{} = handle, lease: %Quic.Cleanup.Lease{handle: lease_handle}}
+      when handle == lease_handle ->
+        cond do
+          ops != Quic ->
+            {:error, :cleanup_requires_quic_transport}
+
+          endpoint != nil ->
+            {:error, :cleanup_requires_owned_endpoint}
+
+          not match?({:abs_ms, deadline} when is_integer(deadline), options[:deadline]) ->
+            {:error, :invalid_cleanup_deadline}
+
+          true ->
+            :ok
+        end
+
+      _ ->
+        {:error, :invalid_cleanup_descriptor}
     end
   end
 

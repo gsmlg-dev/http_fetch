@@ -260,11 +260,13 @@ defmodule HTTP.HTTP1CancellationRaceTest do
     {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", URI.parse(url).port, [:binary, active: false])
     test = self()
 
-    # Explicit callback state makes socket-first enumeration deterministic.
-    state = %{resources: %{0 => {socket, :socket}, 1 => {test, :owner}}, aborted?: false}
-
     worker =
-      spawn(fn -> receive do: (:cancel -> HTTP.RequestLifecycle.handle_info(:abort, state)) end)
+      spawn(fn ->
+        {:ok, state} = HTTP.RequestLifecycle.init({test, :atomics.new(1, [])})
+        # Keep valid lifecycle state with deterministic socket-first enumeration.
+        state = %{state | resources: %{0 => {socket, :socket}, 1 => {test, :owner}}}
+        receive do: (:cancel -> HTTP.RequestLifecycle.handle_info(:abort, state))
+      end)
 
     :erlang.trace_pattern({:gen_tcp, :close, 1}, true, [:local])
     :erlang.trace(worker, true, [:send, :call])

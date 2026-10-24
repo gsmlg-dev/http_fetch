@@ -2,6 +2,11 @@ defmodule HTTP.HTTP2.Pool do
   @moduledoc "Bounded profile-aware HTTP/2 connection pool."
   use GenServer
 
+  alias HTTP.HTTP2.ConnectionOwner
+  alias HTTP.RequestLifecycle
+
+  alias HTTP.Runtime.Telemetry
+
   @type key :: term()
   @type reservation :: reference()
 
@@ -27,9 +32,21 @@ defmodule HTTP.HTTP2.Pool do
   @spec try_reserve(pid(), key()) :: {:ok, pid(), reservation()} | :none
   def try_reserve(pool, key), do: GenServer.call(pool, {:try_reserve, key})
 
+  @doc false
+  def try_reserve(pool, key, deadline) do
+    deadline = control_deadline(deadline)
+    provider_call(pool, {:try_reserve, key, deadline}, deadline)
+  end
+
   @doc "Claims the per-key connection slot for an out-of-band connector."
   @spec claim_connect(pid(), key()) :: :start | :wait
   def claim_connect(pool, key), do: GenServer.call(pool, {:claim_connect, key})
+
+  @doc false
+  def claim_connect(pool, key, deadline) do
+    deadline = control_deadline(deadline)
+    provider_call(pool, {:claim_connect, key, deadline}, deadline)
+  end
 
   @doc "Settles a successful non-H2 negotiation and lets queued requests negotiate in turn."
   @spec complete_connect(pid(), key()) :: :ok
@@ -53,8 +70,55 @@ defmodule HTTP.HTTP2.Pool do
 
   @spec register(pid(), key(), pid(), keyword()) ::
           :ok | {:error, :connector_cancelled | :owner_closed | :connection_capacity}
-  def register(pool, key, owner, opts \\ []),
-    do: GenServer.call(pool, {:register, key, owner, opts})
+  def register(pool, key, owner, opts \\ []) do
+    if Keyword.get(opts, :provider_handoff, false),
+      do: register_provider(pool, key, owner, opts),
+      else: GenServer.call(pool, {:register, key, owner, opts})
+  end
+
+  # The caller orchestrates these stages. Neither pool nor request tracker calls
+  # back synchronously into an actor which is waiting on it.
+  defp register_provider(pool, key, owner, opts) do
+    deadline = control_deadline(Keyword.get(opts, :deadline_at))
+    tracker = Keyword.fetch!(opts, :request_lifecycle)
+    socket = Keyword.fetch!(opts, :socket)
+
+    result =
+      with :ok <- provider_call(pool, {:prepare_provider, key, owner, opts, deadline}, deadline),
+           {:ok, carrier} <-
+             RequestLifecycle.offer_provider(
+               tracker,
+               socket,
+               %{controller: pool, owner: owner},
+               deadline
+             ),
+           :ok <- provider_call(pool, {:accept_provider, owner, carrier, deadline}, deadline),
+           :ok <- RequestLifecycle.release_provider(tracker, carrier, deadline),
+           :ok <- ConnectionOwner.activate(owner, deadline) do
+        provider_call(pool, {:publish_provider, owner, deadline}, deadline)
+      end
+
+    case result do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        GenServer.cast(pool, {:retire_provider, owner})
+        {:error, reason, :registered}
+    end
+  end
+
+  defp control_deadline(deadline) when is_integer(deadline), do: min(deadline, now_ms() + 1_000)
+  defp control_deadline(_), do: now_ms() + 1_000
+
+  defp provider_call(pool, message, deadline) do
+    case max(deadline - now_ms(), 0) do
+      0 -> {:error, :handoff_expired}
+      timeout -> GenServer.call(pool, message, timeout)
+    end
+  catch
+    :exit, _ -> {:error, :handoff_unconfirmed}
+  end
 
   @doc "Updates one owner's effective peer stream limit."
   def update_capacity(pool, key, owner, limit),
@@ -87,6 +151,7 @@ defmodule HTTP.HTTP2.Pool do
        connectors: %{},
        promotions: %{},
        deadlines: %{},
+       providers: %{},
        retiring?: false
      }}
   end
@@ -100,11 +165,98 @@ defmodule HTTP.HTTP2.Pool do
            connections: map_size(entry.connections),
            pending: length(entry.pending),
            connecting: entry.connecting,
+           provider_pending: provider_capacity(state, key),
            streams: entry.streams
          }}
       end)
 
     {:reply, entries, state}
+  end
+
+  def handle_call({:prepare_provider, key, owner, opts, deadline}, from, state) do
+    caller = elem(from, 0)
+
+    cond do
+      deadline <= now_ms() or not Process.alive?(caller) ->
+        {:reply, {:error, :handoff_expired}, state}
+
+      not Process.alive?(owner) ->
+        {:reply, {:error, :owner_closed}, state}
+
+      Keyword.get(opts, :connecting?, false) and not connector_caller?(state, key, caller) ->
+        {:reply, {:error, :connector_cancelled}, state}
+
+      not registration_capacity?(state, key, Keyword.get(opts, :connecting?, false)) ->
+        {:reply, {:error, :connection_capacity}, state}
+
+      Map.has_key?(state.providers, owner) ->
+        {:reply, {:error, :provider_already_registered}, state}
+
+      true ->
+        monitor = Process.monitor(owner)
+
+        provider = %{
+          key: key,
+          caller: caller,
+          tracker: opts[:request_lifecycle],
+          deadline: deadline,
+          carrier: nil,
+          lease: nil,
+          phase: :preparing,
+          monitor: monitor
+        }
+
+        state = put_in(state.providers[owner], provider)
+        state = put_entry(state, key, Map.get(state.entries, key, new_entry()))
+        state = if opts[:connecting?], do: finish_connect(state, key), else: state
+        if map_size(state.providers) == 1, do: Process.send_after(self(), :poll_providers, 10)
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:accept_provider, owner, carrier, deadline}, from, state) do
+    case state.providers[owner] do
+      %{caller: caller, phase: :preparing, deadline: expiry} = provider
+      when caller == elem(from, 0) and deadline == expiry ->
+        if deadline > now_ms() and Process.alive?(caller) and Process.alive?(owner) do
+          # Retain the exact incoming obligation before the potentially unknown ACK.
+          state = put_in(state.providers[owner], %{provider | carrier: carrier})
+
+          case SSL.Lifecycle.accept(carrier.transfer, {:abs_ms, deadline}) do
+            {:ok, lease} ->
+              {:reply, :ok, put_in(state.providers[owner].lease, lease)}
+
+            {:error, _} = error ->
+              {:reply, error, state}
+          end
+        else
+          {:reply, {:error, :handoff_expired}, state}
+        end
+
+      _ ->
+        {:reply, {:error, :handoff_unconfirmed}, state}
+    end
+  end
+
+  def handle_call({:publish_provider, owner, deadline}, from, state) do
+    case state.providers[owner] do
+      %{caller: caller, phase: :preparing, lease: lease, deadline: ^deadline} = provider
+      when caller == elem(from, 0) and lease != nil ->
+        if RequestLifecycle.transfer_state(provider.carrier) == :accepted and
+             deadline > now_ms() and Process.alive?(caller) and Process.alive?(owner) do
+          state = register_internal(state, provider.key, owner, 0)
+          state = put_in(state.entries[provider.key].connections[owner].admission_caller, caller)
+          state = put_in(state.providers[owner].phase, :active)
+
+          {:reply, :ok,
+           state |> dispatch_waiters(provider.key) |> emit_pool(:connection, :registered)}
+        else
+          {:reply, {:error, :handoff_expired}, state}
+        end
+
+      _ ->
+        {:reply, {:error, :handoff_unconfirmed}, state}
+    end
   end
 
   def handle_call({:register, key, owner, opts}, from, state) when is_pid(owner) do
@@ -205,6 +357,9 @@ defmodule HTTP.HTTP2.Pool do
       is_integer(deadline) and deadline <= now_ms() ->
         {:reply, {:error, :deadline_exceeded}, state}
 
+      not Process.alive?(elem(from, 0)) ->
+        {:reply, {:error, :caller_down}, state}
+
       not key_capacity?(state, key) ->
         {:reply, {:error, :key_capacity}, state}
 
@@ -212,6 +367,13 @@ defmodule HTTP.HTTP2.Pool do
         {state, opts} = take_admission(state, key, opts, elem(from, 0))
         reserve_available(state, key, opts, from, token, deadline)
     end
+  end
+
+  def handle_call({operation, key, deadline}, from, state)
+      when operation in [:try_reserve, :claim_connect] do
+    if deadline > now_ms() and Process.alive?(elem(from, 0)),
+      do: handle_call({operation, key}, from, state),
+      else: {:reply, {:error, :handoff_expired}, state}
   end
 
   def handle_call({:try_reserve, key}, from, state) do
@@ -346,6 +508,13 @@ defmodule HTTP.HTTP2.Pool do
   end
 
   @impl true
+  def handle_cast({:retire_provider, owner}, state) do
+    case state.providers[owner] do
+      nil -> {:noreply, state}
+      _ -> {:noreply, put_in(state.providers[owner].phase, :retiring)}
+    end
+  end
+
   def handle_cast({:owner_snapshot, key, owner, token, {ready?, enabled, limit}}, state)
       when is_pid(owner) and is_reference(token) and is_boolean(ready?) and
              is_boolean(enabled) and is_integer(limit) and limit >= 0 do
@@ -393,8 +562,19 @@ defmodule HTTP.HTTP2.Pool do
     do: {:noreply, set_draining(state, key, owner)}
 
   @impl true
+  def handle_info(:poll_providers, state) do
+    state = Enum.reduce(Map.keys(state.providers), state, &poll_provider/2)
+    if map_size(state.providers) > 0, do: Process.send_after(self(), :poll_providers, 10)
+    {:noreply, state}
+  end
+
   def handle_info({:http2_release_reservation, key, token}, state) do
     {:reply, :ok, state} = handle_call({:release, key, token}, nil, state)
+    {:noreply, state}
+  end
+
+  def handle_info({:http2_cancel_reservation, token}, state) do
+    {_, _, state} = handle_call({:cancel, token}, nil, state)
     {:noreply, state}
   end
 
@@ -1002,6 +1182,15 @@ defmodule HTTP.HTTP2.Pool do
   defp total_connections(state) do
     Enum.reduce(state.entries, 0, fn {_key, entry}, count ->
       count + map_size(entry.connections) + entry.connecting
+    end) +
+      Enum.count(state.providers, fn {owner, provider} ->
+        is_nil(get_in(state.entries, [provider.key, :connections, owner]))
+      end)
+  end
+
+  defp provider_capacity(state, key) do
+    Enum.count(state.providers, fn {owner, provider} ->
+      provider.key == key and is_nil(get_in(state.entries, [key, :connections, owner]))
     end)
   end
 
@@ -1009,7 +1198,8 @@ defmodule HTTP.HTTP2.Pool do
     entry = Map.get(state.entries, key, new_entry())
 
     key_capacity?(state, key) and
-      active_connections(entry) + entry.connecting < state.max_connections and
+      active_connections(entry) + entry.connecting + provider_capacity(state, key) <
+        state.max_connections and
       total_connections(state) < state.max_total_connections
   end
 
@@ -1018,7 +1208,8 @@ defmodule HTTP.HTTP2.Pool do
     adjustment = if(connecting? and entry.connecting > 0, do: 1, else: 0)
 
     key_capacity?(state, key) and
-      active_connections(entry) + entry.connecting + 1 - adjustment <= state.max_connections and
+      active_connections(entry) + entry.connecting + provider_capacity(state, key) + 1 -
+        adjustment <= state.max_connections and
       total_connections(state) + 1 - adjustment <= state.max_total_connections
   end
 
@@ -1136,12 +1327,73 @@ defmodule HTTP.HTTP2.Pool do
     case Map.get(state.entries, key) do
       %{connections: connections, pending: [], connecting: 0, streams: 0}
       when map_size(connections) == 0 ->
-        %{state | entries: Map.delete(state.entries, key)}
+        if provider_capacity(state, key) == 0,
+          do: %{state | entries: Map.delete(state.entries, key)},
+          else: state
 
       _ ->
         state
     end
   end
+
+  defp poll_provider(owner, state) do
+    provider = state.providers[owner]
+
+    retiring? =
+      provider.phase == :retiring or not Process.alive?(owner) or
+        (provider.phase == :preparing and
+           (provider.deadline <= now_ms() or not Process.alive?(provider.caller)))
+
+    if retiring? do
+      provider = recover_provider(%{provider | phase: :retiring})
+      state = put_in(state.providers[owner], provider)
+
+      if provider.lease do
+        SSL.Lifecycle.cancel(provider.lease, {:abs_ms, now_ms() + 250})
+      else
+        RequestLifecycle.provider_failed(provider.tracker)
+      end
+
+      case provider.carrier do
+        nil ->
+          # A lost offer reply supplies no readable Handle. Keep bounded capacity
+          # rather than inventing a cleanup result or admitting another socket.
+          send(owner, :http2_shutdown_exclusive)
+          state
+
+        carrier ->
+          case RequestLifecycle.provider_cleanup(
+                 SSL.Lifecycle.await(carrier.handle, {:abs_ms, now_ms()})
+               ) do
+            :confirmed ->
+              send(owner, :http2_shutdown_exclusive)
+              Process.demonitor(provider.monitor, [:flush])
+
+              %{state | providers: Map.delete(state.providers, owner)}
+              |> prune_key(provider.key)
+              |> dispatch_all()
+
+            _ ->
+              state
+          end
+      end
+    else
+      state
+    end
+  end
+
+  defp recover_provider(%{lease: nil, carrier: carrier} = provider) when carrier != nil do
+    if RequestLifecycle.transfer_state(carrier) == :accepted do
+      case SSL.Lifecycle.accept(carrier.transfer, {:abs_ms, now_ms() + 250}) do
+        {:ok, lease} -> %{provider | lease: lease}
+        _ -> provider
+      end
+    else
+      provider
+    end
+  end
+
+  defp recover_provider(provider), do: provider
 
   defp queue_wait_us(opts) do
     case Keyword.get(opts, :queued_at_us) do
@@ -1162,7 +1414,7 @@ defmodule HTTP.HTTP2.Pool do
         }
       end)
 
-    HTTP.Runtime.Telemetry.http2_pool(event, outcome, %{
+    Telemetry.http2_pool(event, outcome, %{
       reservations: map_size(state.reservations),
       waiters: waiters,
       connecting: connecting,

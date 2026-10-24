@@ -2,8 +2,9 @@
 
 Execution checklist derived from the accepted 2026-10-21 HTTP Fetch migration plan.
 Baseline: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, nine packages at `0.21.14`.
-Status: P0 baseline/interfaces recorded with explicit failing gates; P1/P2 implementation
-is active. No production default or dependency removal has been made.
+Status: P0 is recorded and the public provider/current ExSSL source gate is accepted
+locally. P1 compatibility remains active; ordinary P3 integration is next. No
+production default or dependency removal has been made.
 
 See [design and compatibility table](tls-migration-design.md) and
 [execution evidence](tls-migration-validation.md). A checkbox means executed and
@@ -63,6 +64,9 @@ reviewed acceptance, not merely a test file or implementation exists.
       units pass 1676/1676; integration remains red at 1584/1587. Actual manual
       full-nine CI and public E2E evidence remain pending; details are in the ledger.
       Source routing and green units alone do not close this acceptance checkbox.
+      R38 prepared serial replay passes all1679 units and1605 integration cases,
+      zero skips, including the three real-QUIC opt-ins. Earlier failing and
+      environment-incomplete invocations remain recorded. Remote CI/E2E remain open.
 
 Exit: every blocker has an owner and acceptance test; current implementation,
 executed evidence and required work are distinguishable. OTP remains default.
@@ -72,8 +76,11 @@ executed evidence and required work are distinguishable. OTP remains default.
 - [x] Default HTTP ExSSL policy offers TLS1.3 + supported TLS1.2 in one handshake;
       explicit TLS1.3-only still works and has an independent negative peer test
       (22 contextual policy scenarios; broad P1 option/peer compatibility stays open).
-- [ ] Validate bounded TLS1.2 ECDHE/AES-GCM, EMS, secure renegotiation and needed
-      version-specific signature support. Never enable TLS1.3 PKCS1 CertificateVerify.
+- [x] Validate the source subset for TLS1.2 ECDHE/AES-GCM, EMS, secure renegotiation
+      and version-specific RSA-PKCS1 SHA256/384/512 server/client signatures.
+      R42 passes922 ExSSL checks including six forced OpenSSL cases and14 shared
+      QUIC checks. TLS1.3/QUIC PKCS1 handshake exclusion remains enforced;
+      integrated candidate/HTTP/platform acceptance is still required by P4.
 - [x] Resolve internal managed buffer and explicit buffer/tos/tclass/priority values
       without silently dropping options or changing protocol safety bounds
       (driver support tested; enabling managed ExSSL remains a P3 gate).
@@ -85,7 +92,18 @@ executed evidence and required work are distinguishable. OTP remains default.
       consume the same loaded trust/client credentials/profile/reference/SNI/options,
       with fresh connection keys/randomness and live session-ticket binders
       (133 focused checks including59 lifecycle; adoption/cleanup integration remains open).
-- [ ] Resolve advanced verification callbacks, revocation and client identity compatibility.
+- [x] Preserve ordinary TCP verify_fun, including setup/cancellation and callback-state
+      privacy; retain existing managed callback exclusions. The ordinary callback
+      slice passes22 policy/security, seven live and369 regression checks; both
+      prepared attachments verify full ordered events/state reset. Current-source
+      focused85/P2-391 and scoped quality pass. Four TLS13 integration cases prove
+      cancellation/expiry of an actually blocked callback on dial/prepared routes,
+      exact original-resource DOWN, durable receipts and callback-state privacy.
+- [ ] Fully implement CRL/OCSP and partial_chain before OTP removal, with OTP reference
+      and independent positive/negative acceptance.
+- [ ] Fully implement encrypted private keys and multiple client identities before
+      OTP removal, preserving ordinary mTLS and HTTP behavior. The user accepted the
+      longer migration on 2026-10-23; next-major removal is not an alternative.
 - [ ] Preserve trust precedence, system roots, DNS/IP origin identity, SNI separation,
       pinned dialing, CONNECT upgrade and mTLS redirect isolation.
 - [ ] Preserve explicit ordered wire profiles; reject real conflicts before I/O.
@@ -229,23 +247,40 @@ coverage; no supported endpoint class silently lost.
       original typed monitor/creator generation and canonical receiver are enforced.
       Four real Allocator cases plus13 authentication/unit cases pass17/17; unknown
       open/enrollment errors remain unknown. Handoff/TLS/publication are still gated.
-- [ ] Adapt the full native Socket transport lifetime, Setup orchestration and TLS I/O.
-      R37 recognized known-socket failure support is not this full-lifetime gate;
-      R29 pending/no-TCP failure API remains a separate path.
-- [ ] Before public lifecycle acceptance, complete native constructor identity proof
-      and acknowledged failure publication for real allocator/setup orchestration
-      under original deadlines. Private success and TLS/connect attribution above
-      do not complete this all-error identity/publication gate.
+- [x] Accept explicit private Socket Setup and authenticated inert ownership handoff (R38).
+      Same roles, original typed monitors, nonces and absolute deadlines; public SDK
+      owner transfer and Allocator DOWN precede native-owned. Canonical raw handoff
+      frames reject injected/malformed budgets. Four real Setup cases require peer
+      closure and original roles31/observed_down31; inert terminal controller exit
+      avoids competing explicit close/forced-retirement calls. No raw TLS readiness.
+      Focused lifecycle169/169, prepared serial integration1605/1605 and default
+      units1679/1679 pass. Earlier concurrent timing failure remains unexplained;
+      acceptance is limited to this private inert handoff, not TLS/public lifecycle.
+- [x] Adapt the native Socket transport lifetime, Setup orchestration and TLS I/O;
+      public lifecycle/duplex coverage and the current complete ExSSL source gate pass.
+- [x] Validate native constructor identity and acknowledged failure publication for
+      real allocator/setup orchestration under original deadlines, including public
+      failed setup and cancellation. Unknown native identity remains unconfirmed.
       Native connect error/helper DOWN is not native cleanup proof; unresolved identity
       coverage remains unconfirmed. Public upgrade/transfer stay gated separately.
-- [ ] Public attempt handle exists before allocation, survives failed setup and transfer.
-- [ ] Provider enrolls/observes every connection, writer, TCP and setup worker without
+- [x] Public attempt handle exists before allocation, survives failed setup and transfer.
+- [x] Provider enrolls/observes every connection, writer, TCP and setup worker without
       a cancellation gap; completion requires closed enrollment and observed DOWN.
-- [ ] Separate handshake outcome, logical closure, cleanup pending and unconfirmed.
-- [ ] Durable bounded terminal receipt and finite waits use original absolute deadline.
-- [ ] Explicit acknowledged cancellation ownership transfer prevents stale abort.
-- [ ] Reproduce occupied-writer control :busy; implement bounded pending output while
-      preserving record sequence, key epoch, protected bytes and write deadline.
+- [x] Separate handshake outcome, logical closure, cleanup pending and unconfirmed.
+- [x] Durable bounded terminal receipt and finite waits use original absolute deadline.
+- [x] Explicit acknowledged cancellation ownership transfer prevents stale abort.
+- [x] Reproduce occupied-writer control :busy; implement one bounded protected-control
+      slot preserving sequence, epoch, ciphertext and original deadline, including
+      abandonment and reciprocal close. R43 focused/nearby and reviewed HTTP consumer
+      checks pass; public lifecycle and integrated stage gates remain below.
+- [x] Validate public killed-blocked-writer cleanup, connect after pre-cancel and
+      deterministic trust/identity/options/setup/established-cancel resource recovery.
+      Seven integration checks and the391-case provider/duplex/QUIC selection pass;
+      default units exclude these seven cases and scoped quality gates pass.
+      The complete current ExSSL default gate passes580 checks, with577 integration/
+      E2E cases excluded and zero skipped; source-matched391 evidence remains valid.
+      The complete current ExSSL integration gate now also passes1157 checks with
+      zero failures, skips or exclusions. P1 compatibility remains open.
 - [ ] Cover abort/setup/handoff races, wrong trust/identity/options, killed writers,
       KeyUpdate/upload, early response, close_notify/truncation, owner death,
       abandonment, stale acknowledgments, repeated close/await and evidence loss.
@@ -254,8 +289,15 @@ coverage; no supported endpoint class silently lost.
 
 Exit: HTTP obtains truthful cleanup evidence with no private TLS field inspection;
 resources return to baseline after deterministic failures/cancellation.
+The accepted local source result does not imply package, runtime-matrix, CI,
+performance or HTTP integration acceptance; those gates remain below.
 
 ## P3 — Completion and managed H1/H2 (after P1 + P2)
+
+Ordinary direct/pinned ExSSL H1 completion and reuse are accepted locally on
+TLS1.2 and TLS1.3. Request completion releases request ownership while the healthy
+pool retains TLS authority; queued handoffs respect the original deadline.
+H2, managed scopes, proxy/prepared routes and full-stage acceptance remain open.
 
 - [ ] ExSSL connect/upgrade enroll attempts and return public phase/lifecycle evidence.
 - [ ] Generic HTTP lifecycle accepts evidence; temporary OTP extraction stays isolated.
@@ -275,8 +317,13 @@ resources return to baseline after deterministic failures/cancellation.
 - [ ] Execute deterministic independent OTP/OpenSSL/Python/Node/H2/aioquic peers;
       missing prerequisites, zero tests and skipped mandatory scenarios fail the gate.
 - [ ] Candidate Hex consumers use all current archives with equal exact versions.
-- [ ] Mixed-package traffic includes real ExSSL TLS in addition to h2c.
-- [ ] Relevant changes automatically select candidate TLS consumers and QUIC/H3 CI.
+- [x] Extend mixed-package traffic harness to require verified ExSSL TLS plus h2c
+      (R41 bounded automation checks pass).
+- [ ] Execute both traffic modes against the integrated current candidate archives.
+- [x] Implement automatic candidate TLS and affected QUIC/H3 selection for relevant
+      changes; R40 local automation suite passes 20 checks. Remote execution remains
+      a separate gate below.
+- [ ] Execute relevant automatic CI and manual all-nine regression on integrated source.
 - [ ] Execute supported runtime matrix (baseline 1.18/OTP28; configured 1.19/OTP28
       and 1.20/OTP29) and retain historical standalone labels separately.
 - [ ] Compare workload results against budgets set from P0.

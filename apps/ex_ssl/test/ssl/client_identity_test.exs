@@ -161,7 +161,7 @@ defmodule SSL.ClientIdentityTest do
     end
   end
 
-  test "rejects unsupported identity selection and encrypted key forms", context do
+  test "rejects encrypted keys without a password", context do
     fixture = Map.fetch!(context.fixtures, 0x0503)
     encrypted = Path.join(context.directory, "encrypted.key")
 
@@ -179,12 +179,17 @@ defmodule SSL.ClientIdentityTest do
     ])
 
     for options <- [
-          [certs_keys: [%{certfile: fixture.certificate, keyfile: fixture.key}]],
-          [certfile: fixture.certificate, keyfile: encrypted],
-          [certfile: fixture.certificate, keyfile: fixture.key, password: "example"]
+          [certfile: fixture.certificate, keyfile: encrypted]
         ] do
       assert {:error, {:options, _reason}} = ClientIdentity.load(options)
     end
+
+    assert {:ok, %ClientIdentity{}} =
+             ClientIdentity.load(
+               certfile: fixture.certificate,
+               keyfile: fixture.key,
+               password: "example"
+             )
   end
 end
 

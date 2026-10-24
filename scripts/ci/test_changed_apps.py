@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import changed_apps
 from changed_apps import ALL, H2_CONSUMERS, affected_h2_consumers, dependency_graph, select_apps
 
 SCRIPT = Path(__file__).with_name("changed_apps.py").resolve()
@@ -24,11 +25,12 @@ def run_cli(cwd, *args):
         return result, output_file.read_text() if output_file.exists() else ""
 
 
-def expected_output(apps, manual=False):
+def expected_output(apps, manual=False, candidate=False):
     return ("apps=" + json.dumps(apps, separators=(",", ":"))
             + f"\nhas_changes={'true' if apps else 'false'}"
             + f"\nfull_gate={'true' if manual else 'false'}"
             + f"\nh2_compat={'true' if manual or any(app in H2_CONSUMERS for app in apps) else 'false'}"
+            + f"\ncandidate_tls={'true' if manual or candidate else 'false'}"
             + f"\nhistorical_tls={'true' if manual else 'false'}\n")
 
 
@@ -36,11 +38,16 @@ class SelectionTest(unittest.TestCase):
     def test_actual_graph_selects_shared_h2_consumers(self):
         graph = dependency_graph()
         self.assertEqual(graph["http_fetch"], {"http_core", "http_runtime"})
-        for owner in ("http_core", "http_runtime", "ex_ssl", "elixir_quic",
-                      "elixir_quic_http3"):
+        affected = {
+            "ex_ssl": ["ex_ssl", "elixir_quic", "elixir_quic_http3", *H2_CONSUMERS],
+            "elixir_quic": ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS],
+            "http_core": ["http_core", "elixir_quic_http3", *H2_CONSUMERS],
+            "http_runtime": ["http_runtime", *H2_CONSUMERS],
+            "elixir_quic_http3": ["elixir_quic_http3", *H2_CONSUMERS],
+        }
+        for owner, expected in affected.items():
             paths = [f"apps/{owner}/lib/module.ex"]
             for workflow in WORKFLOWS:
-                expected = [app for app in ALL if app == owner or app in H2_CONSUMERS]
                 self.assertEqual(select_apps(paths, workflow), expected)
                 self.assertEqual(affected_h2_consumers(paths), list(H2_CONSUMERS))
 
@@ -52,10 +59,42 @@ class SelectionTest(unittest.TestCase):
                      "scripts/requirements-http2-stream-clients.txt",
                      "scripts/ex_ssl_source_smoke.sh", ".github/workflows/changes.yml"):
             for workflow in WORKFLOWS:
-                self.assertEqual(select_apps([path], workflow), list(H2_CONSUMERS))
+                self.assertEqual(select_apps([path], workflow),
+                                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS])
         for workflow in WORKFLOWS:
             self.assertEqual(select_apps([f".github/workflows/{workflow}"], workflow),
-                             list(H2_CONSUMERS))
+                             ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS])
+
+    def test_candidate_tls_covers_app_code_tests_manifests_and_direct_harnesses(self):
+        for app in ALL:
+            for suffix in ("lib/module.ex", "test/module_test.exs", "mix.exs",
+                           "e2e/traffic.exs", "priv/fixture.pem"):
+                with self.subTest(app=app, suffix=suffix):
+                    self.assertTrue(changed_apps.candidate_tls_required([f"apps/{app}/{suffix}"]))
+        for path in ("mix.exs", "mix.lock", "config/test.exs", ".formatter.exs",
+                     ".credo.exs", ".dialyzer_ignore.exs", "scripts/ci/changed_apps.py",
+                     ".github/workflows/test.yml", "scripts/ex_ssl_options_test.exs",
+                     "scripts/ex_ssl_tls12_peer.py", "scripts/external_consumer_smoke.exs",
+                     "scripts/external_consumer_smoke.sh", "scripts/http3/public_gate.py",
+                     "scripts/release/consumer_gate.py", "scripts/http2_stream_peer.py",
+                     "scripts/http_runtime_package_traffic_gate.py"):
+            with self.subTest(path=path):
+                self.assertTrue(changed_apps.candidate_tls_required([path]))
+
+    def test_candidate_tls_keeps_docs_and_unrelated_paths_cheap(self):
+        for path in ("README.md", "docs/migration.md", "scripts/unrelated.py",
+                     "apps/unknown/lib/module.ex", "scripts/release/README.md",
+                     "apps/ex_ssl/docs/ARCHITECTURE.md", "apps/http_core/README.md"):
+            with self.subTest(path=path):
+                self.assertFalse(changed_apps.candidate_tls_required([path]))
+
+    def test_quic_selection_uses_current_dependency_graph(self):
+        graph = {app: set() for app in ALL}
+        graph["elixir_quic_http3"] = {"http_runtime"}
+        self.assertEqual(changed_apps.affected_quic_consumers(
+            ["apps/http_runtime/lib/module.ex"], graph), ["elixir_quic_http3"])
+        self.assertEqual(changed_apps.affected_quic_consumers(
+            ["apps/ex_ssl/lib/module.ex"], graph), [])
 
     def test_irrelevant_docs_and_unrelated_apps_remain_cheap(self):
         for path in ("README.md", "docs/overview.md", "scripts/unrelated.py",
@@ -84,9 +123,11 @@ class SelectionTest(unittest.TestCase):
 
     def test_missing_or_invalid_ranges_fail_without_enabling_full_gates(self):
         with tempfile.TemporaryDirectory() as directory:
-            for base in ("", "0" * 40, "not-a-revision"):
+            for base, head in (("", "HEAD"), ("0" * 40, "HEAD"),
+                               ("not-a-revision", "HEAD"), ("HEAD", ""),
+                               ("0" * 40, "0" * 40)):
                 result, output = run_cli(directory, "--workflow", "ci.yml", "--event", "push",
-                                         "--base", base)
+                                         "--base", base, "--head", head)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(output, "")
                 self.assertIn("Cannot determine changed paths", result.stderr)
@@ -104,12 +145,13 @@ class SelectionTest(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content)
 
-            def check(base, head, apps):
+            def check(base, head, apps, candidate=False):
                 for workflow in WORKFLOWS:
-                    result, output = run_cli(directory, "--workflow", workflow, "--event", "push",
-                                             "--base", base, "--head", head)
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(output, expected_output(apps))
+                    for event in ("push", "pull_request"):
+                        result, output = run_cli(directory, "--workflow", workflow, "--event", event,
+                                                 "--base", base, "--head", head)
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(output, expected_output(apps, candidate=candidate))
 
             git("init", "-q")
             git("config", "user.name", "Workflow Test")
@@ -119,7 +161,7 @@ class SelectionTest(unittest.TestCase):
             git("add", ".")
             git("commit", "-qm", "baseline")
             base = git("rev-parse", "HEAD")
-            check("0" * 40, base, ["http_event_source"])
+            check("0" * 40, base, ["http_event_source"], candidate=True)
             write("README.md", "docs only")
             git("add", ".")
             git("commit", "-qm", "docs")
@@ -127,13 +169,34 @@ class SelectionTest(unittest.TestCase):
             (root / "apps/http_core").mkdir()
             git("mv", "apps/http_event_source/old.ex", "apps/http_core/new.ex")
             git("commit", "-qm", "rename")
-            check(base, "HEAD", ["http_core", *H2_CONSUMERS])
+            check(base, "HEAD", ["http_core", "elixir_quic_http3", *H2_CONSUMERS], candidate=True)
             base = git("rev-parse", "HEAD")
             git("rm", "apps/http_core/new.ex")
             git("commit", "-qm", "delete")
-            check(base, "HEAD", ["http_core", *H2_CONSUMERS])
-            check(base, "0" * 40, ["http_core", *H2_CONSUMERS])
+            check(base, "HEAD", ["http_core", "elixir_quic_http3", *H2_CONSUMERS], candidate=True)
+            check(base, "0" * 40, ["http_core", "elixir_quic_http3", *H2_CONSUMERS], candidate=True)
             check("0" * 40, "HEAD", [])
+            base = git("rev-parse", "HEAD")
+            write("apps/ex_ssl/README.md", "app docs only")
+            git("add", ".")
+            git("commit", "-qm", "app docs")
+            check(base, "HEAD", ["ex_ssl"])
+            for path, expected in (
+                ("apps/ex_ssl/test/policy_test.exs",
+                 ["ex_ssl", "elixir_quic", "elixir_quic_http3", *H2_CONSUMERS]),
+                ("apps/http_fetch/mix.exs", ["http_fetch"]),
+                ("scripts/ex_ssl_options_test.exs",
+                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS]),
+                ("scripts/external_consumer_smoke.exs",
+                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS]),
+                ("scripts/http3/public_gate.py",
+                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS]),
+            ):
+                base = git("rev-parse", "HEAD")
+                write(path, "candidate harness or app source")
+                git("add", ".")
+                git("commit", "-qm", "relevant change")
+                check(base, "HEAD", expected, candidate=True)
             result, output = run_cli(directory, "--workflow", "ci.yml", "--event", "push",
                                      "--base", "", "--head", "HEAD")
             self.assertNotEqual(result.returncode, 0)
@@ -141,6 +204,24 @@ class SelectionTest(unittest.TestCase):
 
 
 class WorkflowContractTest(unittest.TestCase):
+    def test_candidate_tls_is_automatic_required_and_retains_feature_evidence(self):
+        root = SCRIPT.parents[2]
+        ci = (root / ".github/workflows/ci.yml").read_text()
+        candidate = ci.split("  candidate-consumer:")[1].split("  published-ex-ssl-feature-gate:")[0]
+        self.assertIn("if: needs.changes.outputs.candidate_tls == 'true'", candidate)
+        self.assertNotIn("continue-on-error", candidate)
+        self.assertIn("if-no-files-found: error", candidate)
+        self.assertNotIn("if-no-files-found: warn", candidate)
+        self.assertIn("- name: Check root formatting and automation regressions\n"
+                      "        if: needs.changes.outputs.full_gate == 'true'", candidate)
+        for event in ("push", "pull_request"):
+            block = re.search(rf"(?m)^  {event}:\n((?:    .*\n)+)", ci).group(1)
+            self.assertIn("'scripts/external_consumer_smoke.*'", block)
+            self.assertIn("'scripts/http3/**'", block)
+        changes = (root / ".github/workflows/changes.yml").read_text()
+        self.assertIn("value: ${{ jobs.detect.outputs.candidate_tls }}", changes)
+        self.assertIn("candidate_tls: ${{ steps.paths.outputs.candidate_tls }}", changes)
+
     def test_all_entry_workflows_dispatch_all_and_automatically_filter_app_paths(self):
         root = SCRIPT.parents[2]
         for workflow in WORKFLOWS:

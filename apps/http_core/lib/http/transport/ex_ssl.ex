@@ -5,23 +5,41 @@ defmodule HTTP.Transport.ExSSL do
 
   @impl true
   def connect(host, port, opts, timeout) do
-    with {:ok, ssl_opts} <- tls_options(opts) do
+    deadline = setup_deadline(timeout)
+
+    with {:ok, ssl_opts} <- tls_options(opts),
+         {:ok, ssl_opts} <- lifecycle_options(ssl_opts, opts, deadline) do
       route = if Keyword.get(opts, :connect_address) != nil, do: :pinned, else: :direct
       ssl_opts = origin_identity(host, ssl_opts, route)
+      ex_ssl = Keyword.get(ssl_opts, :ex_ssl, [])
+      descriptor = if Keyword.keyword?(ex_ssl), do: Keyword.get(ex_ssl, :lifecycle)
 
-      SSL.connect(
-        Keyword.get(opts, :connect_address, connect_host(host)),
-        port,
-        ssl_opts,
-        timeout
-      )
+      result =
+        SSL.connect(
+          Keyword.get(opts, :connect_address, connect_host(host)),
+          port,
+          ssl_opts,
+          setup_remaining(deadline)
+        )
+
+      finish_attempt(result, opts, deadline, descriptor)
     end
   end
 
   @doc false
+  def upgrade(tcp, _host, _opts, timeout)
+      when timeout != :infinity and (not is_integer(timeout) or timeout < 0),
+      do: SSL.connect(tcp, [], timeout)
+
   def upgrade(tcp, host, opts, timeout) do
+    deadline = setup_deadline(timeout)
+
     with {:ok, ssl_opts} <- tls_options(opts),
-         do: SSL.connect(tcp, origin_identity(host, ssl_opts, :upgrade), timeout)
+         {:ok, ssl_opts} <- lifecycle_options(ssl_opts, opts, deadline) do
+      tcp
+      |> SSL.connect(origin_identity(host, ssl_opts, :upgrade), setup_remaining(deadline))
+      |> finish_attempt(opts, deadline)
+    end
   end
 
   @doc false
@@ -30,15 +48,59 @@ defmodule HTTP.Transport.ExSSL do
          do: SSL.prepare_upgrade(origin_identity(host, ssl_opts, :upgrade))
   end
 
+  # Reusable policy and one-attempt cancellation authority remain separate.
   @doc false
+  def prepare_upgrade(host, opts, deadline) do
+    with {:ok, prepared} <- prepare_upgrade(host, opts),
+         {:ok, attempt_opts} <- lifecycle_options([], opts, deadline) do
+      {:ok,
+       {:prepared_attempt, prepared, Keyword.get(attempt_opts, :ex_ssl, [])[:lifecycle],
+        Keyword.get(opts, :request_lifecycle), deadline}}
+    end
+  end
+
+  @doc false
+  def upgrade_prepared(tcp, {:prepared_attempt, prepared, nil, _tracker, deadline}, _timeout),
+    do: SSL.connect_prepared(tcp, prepared, setup_remaining(deadline))
+
+  def upgrade_prepared(
+        tcp,
+        {:prepared_attempt, prepared, descriptor, tracker, deadline},
+        _timeout
+      ) do
+    result =
+      with {:ok, socket} <-
+             SSL.connect_prepared(
+               tcp,
+               prepared,
+               [ex_ssl: [lifecycle: descriptor]],
+               setup_remaining(deadline)
+             ),
+           :ok <- HTTP.RequestLifecycle.adopt_provider(tracker, descriptor, tcp, socket, deadline),
+           do: {:ok, socket}
+
+    if match?({:error, _}, result), do: HTTP.RequestLifecycle.provider_failed(tracker)
+    result
+  end
+
   def upgrade_prepared(tcp, prepared, timeout),
     do: SSL.connect_prepared(tcp, prepared, timeout)
+
+  @doc false
+  def cancel_prepared({:prepared_attempt, _prepared, _descriptor, tracker, _deadline}),
+    do: HTTP.RequestLifecycle.provider_failed(tracker)
+
+  def cancel_prepared(_prepared), do: :ok
 
   @impl true
   def controlling_process(socket, pid), do: SSL.controlling_process(socket, pid)
 
   @impl true
   def send(socket, iodata), do: SSL.send(socket, iodata)
+
+  @doc false
+  def send(socket, iodata, {:abs_ms, _deadline} = deadline),
+    do: SSL.send(socket, iodata, deadline)
 
   @doc false
   def enable_duplex_reads(socket, timeout) do
@@ -71,6 +133,71 @@ defmodule HTTP.Transport.ExSSL do
   def normalize_message({:ssl_closed, socket}, socket), do: :closed
   def normalize_message({:ssl_error, socket, reason}, socket), do: {:error, reason}
   def normalize_message(_, _), do: :unknown
+
+  defp lifecycle_options(ssl_opts, opts, deadline) do
+    case Keyword.get(opts, :request_lifecycle) do
+      nil ->
+        {:ok, ssl_opts}
+
+      tracker ->
+        ex_ssl = Keyword.get(ssl_opts, :ex_ssl, [])
+
+        cond do
+          not Keyword.keyword?(ex_ssl) or
+              (Keyword.has_key?(ssl_opts, :ex_ssl) and ex_ssl == []) ->
+            {:error, {:options, {:ex_ssl, :unsupported_or_invalid}}}
+
+          Keyword.has_key?(ex_ssl, :lifecycle) ->
+            {:error, {:options, {:lifecycle, :request_owned}}}
+
+          true ->
+            with {:ok, descriptor} <-
+                   HTTP.RequestLifecycle.begin_provider(tracker, :ex_ssl, deadline),
+                 do: {:ok, Keyword.put(ssl_opts, :ex_ssl, [{:lifecycle, descriptor} | ex_ssl])}
+        end
+    end
+  end
+
+  defp setup_deadline(:infinity), do: :infinity
+  defp setup_deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
+  defp setup_remaining(:infinity), do: :infinity
+  defp setup_remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  defp finish_attempt(result, opts, deadline, descriptor \\ nil)
+
+  defp finish_attempt({:error, reason} = error, opts, _deadline, descriptor) do
+    result = setup_failure_result(error, reason, opts, descriptor)
+    HTTP.RequestLifecycle.provider_failed(Keyword.get(opts, :request_lifecycle))
+    result
+  end
+
+  defp finish_attempt({:ok, socket} = result, opts, deadline, _descriptor) do
+    case HTTP.RequestLifecycle.bind_provider(
+           Keyword.get(opts, :request_lifecycle),
+           socket,
+           deadline
+         ) do
+      :ok ->
+        result
+
+      error ->
+        HTTP.RequestLifecycle.provider_failed(Keyword.get(opts, :request_lifecycle))
+        error
+    end
+  end
+
+  defp finish_attempt(result, _opts, _deadline, _descriptor), do: result
+
+  defp setup_failure_result(error, reason, opts, {handle, _lease}) do
+    if Keyword.get(opts, :tls_setup_evidence) === true and
+         is_pid(Keyword.get(opts, :request_lifecycle)) and
+         is_reference(Keyword.get(opts, :connect_failure_token)) and
+         SSL.Lifecycle.setup_failure(handle) == {:ok, %{phase: :tls_setup}},
+       do: HTTP.Transport.tls_setup_error(opts, reason),
+       else: error
+  end
+
+  defp setup_failure_result(error, _reason, _opts, _descriptor), do: error
 
   defp tls_options(opts) do
     ssl_opts = Keyword.get(opts, :ssl, [])

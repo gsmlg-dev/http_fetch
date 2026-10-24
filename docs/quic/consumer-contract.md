@@ -229,3 +229,45 @@ described above.
 The older PID-oriented `Quic.Connection` and diagnostic `stream_observer` seams
 remain for internal tests. Downstream applications should use the generation
 handles and consumer operations above.
+
+
+## Retained cleanup for one exclusive client endpoint
+
+Create `{:ok, handle, lease} = Quic.Cleanup.new(owner: lifecycle_owner)` before
+constructing `Quic.client(cleanup: lease, deadline: {:abs_ms, deadline})`. Creating
+the scope has no UDP effects. A lease admits one standalone client endpoint;
+retain its opaque read handle independently of the endpoint and its caller.
+This scope does not add shared-endpoint or HTTP client completion semantics.
+
+`Quic.Cleanup.retire(lease, {:abs_ms, deadline})` immediately closes admission
+using the lease's authenticated authority, requests retirement, then waits at
+most until the supplied monotonic millisecond deadline. `await(handle, bound)`
+and `status(handle)` observe the same receipt. A zero remaining wait returns
+immediately. The first retirement trigger fixes a separate 5,000ms internal
+observation cap; repeated calls and an observer pause never renew it. Reaching
+that cap yields unconfirmed evidence, even when remaining actors are killed.
+
+Results are `{:pending, snapshot}`, `{:ok, %{cleanup: :confirmed, ...}}`, or
+`{:error, {:cleanup_unconfirmed, reason}, snapshot}`. Confirmation requires
+independent joins of every enrolled Endpoint, Connection, GenUDP actor and actual
+UDP Port, including late births, and termination of the observer. Endpoint DOWN,
+a close reply and an empty routing table do not establish cleanup. Missing birth
+publication, lost observation or an unsupported native socket representation
+remains unconfirmed. The versioned receipt remains readable after those actors
+exit, within the same VM; retaining it does not keep the observer alive.
+
+Before a native operation, retain
+`Quic.Cleanup.operation(lease, target_generation, operation_ref, kind, bound)`.
+A successful result contains a permit for the original producer to report through
+`resolved(permit)` or `indeterminate(permit)`. Keep the original target, reference,
+kind and absolute deadline across continuation and reconciliation. Unknown
+outcomes remain `native_outcome: :indeterminate` independently of confirmed graph
+retirement. Cache eviction never proves an operation was unsent; never replay an
+unknown operation. The scope bounds unresolved births to 132 and operations to
+256, rejecting new intent when capacity is exhausted.
+
+Endpoint and connection operation/pull options, including `Quic.attach/3`, accept
+`deadline: {:abs_ms, deadline}`. This form bounds both the call wait and admission
+by that original deadline. Existing duration options keep their prior semantics.
+The cleanup receipt proves local resource retirement, never peer delivery or
+application protocol success.

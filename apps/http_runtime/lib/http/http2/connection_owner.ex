@@ -27,6 +27,8 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   @max_informational_heads 128
   @max_informational_bytes 65_536
 
+  alias HTTP.Runtime.Telemetry
+
   @type transport :: module() | map()
   @type t :: %{
           lifecycle: :connecting | :initializing | :ready | :draining | :closed,
@@ -46,6 +48,18 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   @spec activate(pid()) :: :ok | {:error, term()}
   def activate(owner), do: GenServer.call(owner, :activate)
+
+  @doc false
+  def activate(owner, :infinity), do: activate(owner, System.monotonic_time(:millisecond) + 1_000)
+
+  def activate(owner, deadline) when is_integer(deadline) do
+    case max(deadline - System.monotonic_time(:millisecond), 0) do
+      0 -> {:error, :request_timeout}
+      timeout -> GenServer.call(owner, {:activate, deadline}, timeout)
+    end
+  catch
+    :exit, _ -> {:error, :activation_unconfirmed}
+  end
 
   @spec send_data(pid(), pos_integer(), binary(), boolean()) :: :ok | {:error, term()}
   def send_data(owner, id, data, end_stream? \\ false),
@@ -114,6 +128,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         upload_stalls: %{},
         write_closed?: false,
         activate?: Keyword.get(opts, :activate?, true),
+        owns_transport?: Keyword.get(opts, :activate?, true),
         drain_timeout: Keyword.get(opts, :drain_timeout, @default_drain_timeout),
         drain_timer: nil,
         pool: nil,
@@ -135,29 +150,14 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   @impl true
+  def handle_continue(:initialize, %{activate?: false} = state), do: {:noreply, state}
+
   def handle_continue(:initialize, state) do
-    result =
-      with :ok <-
-             set_transport_options(state,
-               send_timeout: state.write_timeout,
-               send_timeout_close: true
-             ),
-           do: initialize_wire(state)
-
-    case result do
+    case initialize_active(state) do
       {:ok, state} ->
-        timer = Process.send_after(self(), :settings_timeout, state.settings_timeout)
-        state = %{state | lifecycle: :ready, settings_timer: timer}
-
-        case if(state.activate?, do: activate_socket(state), else: {:ok, state}) do
-          {:ok, state} -> {:noreply, state}
-          {:error, reason} -> {:stop, reason, %{state | lifecycle: :closed, close_reason: reason}}
-        end
+        {:noreply, state}
 
       {:error, reason, state} ->
-        {:stop, reason, state}
-
-      {:error, reason} ->
         {:stop, reason, state}
     end
   end
@@ -381,22 +381,15 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   def handle_call(:activate, _from, state) do
-    case set_transport_options(state, send_timeout: state.write_timeout, send_timeout_close: true) do
-      :ok ->
-        case activate_socket(state) do
-          {:ok, state} ->
-            {:reply, :ok, state}
+    activate_owner(%{state | owns_transport?: true}, nil)
+  end
 
-          {:error, reason} ->
-            notify_transport_error(state, reason)
+  def handle_call({:activate, deadline}, from, state) do
+    admission = {deadline, elem(from, 0)}
 
-            {:stop, :normal, {:error, reason},
-             %{state | lifecycle: :closed, close_reason: reason}}
-        end
-
-      {:error, reason} ->
-        notify_transport_error(state, reason)
-        {:stop, :normal, {:error, reason}, %{state | lifecycle: :closed, close_reason: reason}}
+    case activation_ready(admission) do
+      :ok -> activate_owner(state, admission)
+      {:error, _} = error -> {:reply, error, state}
     end
   end
 
@@ -409,7 +402,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   def handle_call({:open_stream, _headers, _opts}, _from, %{lifecycle: lifecycle} = state)
-      when lifecycle in [:draining, :closed],
+      when lifecycle in [:initializing, :draining, :closed],
       do: {:reply, {:error, lifecycle}, state}
 
   def handle_call({:open_stream, _headers, _opts}, _from, state)
@@ -553,7 +546,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   def terminate(reason, state) do
     Enum.each(state.upload_stalls, fn {_id, started} -> emit_stall(started, :closed) end)
 
-    HTTP.Runtime.Telemetry.http2_runtime(
+    Telemetry.http2_runtime(
       :connection_close,
       close_category(state.close_reason || reason),
       %{}
@@ -561,7 +554,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
     emit_runtime(state, :closed)
     Enum.each(Map.keys(state.streams), &stop_body_bridge(state, &1))
-    close_transport(state)
+    if state.owns_transport?, do: close_transport(state)
     :ok
   end
 
@@ -633,6 +626,47 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
         {:stop, :normal, {:error, reason},
          %{failed_state | lifecycle: :closed, close_reason: reason}}
+    end
+  end
+
+  defp activate_owner(state, admission) do
+    case initialize_active(state, admission) do
+      {:ok, state} ->
+        {:reply, :ok, state}
+
+      {:error, reason, state} ->
+        notify_transport_error(state, reason)
+        {:stop, :normal, {:error, reason}, %{state | lifecycle: :closed, close_reason: reason}}
+    end
+  end
+
+  defp activation_ready(nil), do: :ok
+
+  defp activation_ready({deadline, caller}) do
+    cond do
+      deadline <= System.monotonic_time(:millisecond) -> {:error, :request_timeout}
+      not Process.alive?(caller) -> {:error, :aborted}
+      true -> :ok
+    end
+  end
+
+  defp initialize_active(state, admission \\ nil)
+  defp initialize_active(%{wrote_preface?: true} = state, _admission), do: {:ok, state}
+
+  defp initialize_active(state, admission) do
+    with :ok <-
+           set_transport_options(state,
+             send_timeout: state.write_timeout,
+             send_timeout_close: true
+           ),
+         :ok <- activation_ready(admission),
+         {:ok, state} <- initialize_wire(%{state | owns_transport?: true}),
+         {:ok, state} <- activate_socket(state) do
+      timer = Process.send_after(self(), :settings_timeout, state.settings_timeout)
+      {:ok, %{state | lifecycle: :ready, settings_timer: timer, activate?: true}}
+    else
+      {:error, reason, state} -> {:error, reason, state}
+      {:error, reason} -> {:error, reason, state}
     end
   end
 
@@ -857,7 +891,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         {:ok, %{state | connection: Connection.put_stream(state.connection, stream)}}
 
       {:ok, stream} ->
-        HTTP.Runtime.Telemetry.http2_runtime(:peer_reset, :received, %{error_code: code})
+        Telemetry.http2_runtime(:peer_reset, :received, %{error_code: code})
         {:ok, stream} = StreamState.rst(stream, code)
         state = terminal_stream(state, id, {:http2, :reset, code})
         events = Enum.reject(state.response_events, fn {stream_id, _} -> stream_id == id end)
@@ -932,7 +966,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
        }) do
     case Connection.receive_goaway(state.connection, last) do
       {:ok, connection, _} ->
-        HTTP.Runtime.Telemetry.http2_runtime(:peer_goaway, :received, %{error_code: error})
+        Telemetry.http2_runtime(:peer_goaway, :received, %{error_code: error})
         first_goaway? = state.lifecycle != :draining
 
         if first_goaway? and state.pool,
@@ -1753,8 +1787,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   defp emit_runtime(state, event),
-    do:
-      HTTP.Runtime.Telemetry.http2_connection(event, state.lifecycle, runtime_measurements(state))
+    do: Telemetry.http2_connection(event, state.lifecycle, runtime_measurements(state))
 
   defp start_upload_stall(state, id) do
     %{state | upload_stalls: Map.put_new(state.upload_stalls, id, System.monotonic_time())}
@@ -1775,7 +1808,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
     duration_us =
       System.convert_time_unit(System.monotonic_time() - started, :native, :microsecond)
 
-    HTTP.Runtime.Telemetry.http2_runtime(:flow_control_stall, outcome, %{
+    Telemetry.http2_runtime(:flow_control_stall, outcome, %{
       count: 1,
       duration_us: duration_us
     })

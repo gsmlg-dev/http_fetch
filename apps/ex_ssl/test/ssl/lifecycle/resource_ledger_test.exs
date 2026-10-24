@@ -3,6 +3,84 @@ defmodule SSL.Lifecycle.ResourceLedgerTest do
 
   alias SSL.Lifecycle.ResourceLedger, as: Ledger
 
+  test "numeric projection counts live identities rather than historical roles" do
+    {ledger, connection} = observed(:connection)
+    {ledger, writer} = observed(:writer, ledger)
+    # Pure ledger events deliberately enroll the same PID under distinct monitors.
+    # The actual process identity contributes once even though both roles exist.
+    assert Ledger.resource_counts(ledger) == %{
+             processes: 1,
+             tcp_sockets: 0,
+             observers: 0,
+             data_resources: 1
+           }
+
+    ledger = Ledger.down(ledger, {:DOWN, connection, :process, self(), :normal})
+    assert Ledger.resource_counts(ledger).processes == 1
+    ledger = Ledger.down(ledger, {:DOWN, writer, :process, self(), :normal})
+
+    assert Ledger.resource_counts(ledger) == %{
+             processes: 0,
+             tcp_sockets: 0,
+             observers: 0,
+             data_resources: 0
+           }
+
+    assert Ledger.snapshot(ledger).roles == 12
+  end
+
+  test "numeric projection is unknown for unresolved creation and sticky loss" do
+    {ledger, allocator} = observed(:allocator)
+    token = make_ref()
+    assert {:ok, ledger} = Ledger.reserve(ledger, :tcp, {:allocator, allocator}, token)
+    assert Ledger.resource_counts(ledger) == nil
+    ledger = Ledger.down(ledger, {:DOWN, allocator, :process, self(), :killed})
+    assert Ledger.resource_counts(ledger) == nil
+    assert Ledger.snapshot(ledger).losses == 16
+  end
+
+  test "distinct processes and TCP survive only their own exact monitor DOWN" do
+    actor = spawn(fn -> receive do: (:stop -> :ok) end)
+    on_exit(fn -> send(actor, :stop) end)
+    refs = for _ <- 1..3, do: make_ref()
+    [connection, writer, tcp] = refs
+
+    identities = [
+      {:connection, {connection, :process, self()}},
+      {:writer, {writer, :process, actor}},
+      {:tcp, {tcp, :socket, :fake_socket}}
+    ]
+
+    ledger =
+      Enum.reduce(identities, Ledger.new(), fn {role, identity}, ledger ->
+        token = make_ref()
+        assert {:ok, ledger} = Ledger.reserve(ledger, role, :observer, token)
+        assert {:ok, ledger, :use} = Ledger.enroll(ledger, role, token, identity)
+        ledger
+      end)
+
+    assert Ledger.resource_counts(ledger) == %{
+             processes: 2,
+             tcp_sockets: 1,
+             observers: 0,
+             data_resources: 3
+           }
+
+    ledger = Ledger.down(ledger, {:DOWN, connection, :process, self(), :normal})
+    ledger = Ledger.down(ledger, {:DOWN, writer, :process, actor, :normal})
+
+    assert Ledger.resource_counts(ledger) == %{
+             processes: 0,
+             tcp_sockets: 1,
+             observers: 0,
+             data_resources: 1
+           }
+
+    assert Ledger.down(ledger, {:DOWN, make_ref(), :socket, :fake_socket, :closed}) == ledger
+    ledger = Ledger.down(ledger, {:DOWN, tcp, :socket, :fake_socket, :closed})
+    assert Ledger.resource_counts(ledger).data_resources == 0
+  end
+
   test "enrollment view retains consumed creator generation through child DOWN" do
     # Pure event data only; these references are not runtime monitor evidence.
     {ledger, parent_ref} = observed(:setup)
@@ -335,6 +413,48 @@ defmodule SSL.Lifecycle.ResourceLedgerTest do
 
     assert {:ok, %{cleanup: :unconfirmed, losses: 4, roles: 7, observed_down: 7}} =
              Ledger.proof(ledger)
+  end
+
+  test "TCP rollover retains bounded exact history and fences later identities" do
+    {ledger, allocator} = observed(:allocator)
+    creator = {:allocator, allocator}
+    token = make_ref()
+    old = {make_ref(), :socket, :first}
+    assert {:ok, ledger} = Ledger.reserve(ledger, :tcp, creator, token)
+    assert {:ok, ledger, :use} = Ledger.enroll(ledger, :tcp, token, old)
+
+    assert {:error, :rollover_not_permitted} =
+             Ledger.rollover_tcp(ledger, old, creator, make_ref())
+
+    ledger = Ledger.down(ledger, {:DOWN, elem(old, 0), :socket, :first, :closed})
+    next_token = make_ref()
+    assert {:ok, pending} = Ledger.rollover_tcp(ledger, old, creator, next_token)
+    assert %{roles: 17, observed_down: 0, allocations: 16} = Ledger.snapshot(pending)
+    assert map_size(pending.resources) == 2
+
+    assert {:error, :rollover_not_permitted} =
+             Ledger.rollover_tcp(pending, old, creator, make_ref())
+
+    assert {:error, :rollover_not_permitted} =
+             Ledger.rollover_tcp(Ledger.close_admission(ledger), old, creator, make_ref())
+
+    replacement = {make_ref(), :socket, :second}
+    assert {:ok, next, :use} = Ledger.enroll(pending, :tcp, next_token, replacement)
+    late = Ledger.down(next, {:DOWN, elem(old, 0), :socket, :first, :closed})
+    assert Ledger.snapshot(late) == Ledger.snapshot(next)
+    assert map_size(late.resources) == 2
+    assert {:ok, %{identity: ^replacement, state: :live}} = Ledger.enrollment_view(late, :tcp)
+    assert {:error, :unknown_permit} = Ledger.enroll(next, :tcp, token, old)
+
+    lost = Ledger.down(pending, {:DOWN, allocator, :process, self(), :killed})
+    assert %{losses: 16, allocations: 16, observed_down: 1} = Ledger.snapshot(lost)
+    assert {:pending, _} = lost |> Ledger.close_admission() |> Ledger.proof()
+    assert {:error, :rollover_not_permitted} = Ledger.rollover_tcp(lost, old, creator, make_ref())
+    assert {:ok, lost, :stop} = Ledger.enroll(lost, :tcp, next_token, replacement)
+    lost = Ledger.down(lost, {:DOWN, elem(replacement, 0), :socket, :second, :closed})
+
+    assert {:ok, %{cleanup: :unconfirmed, losses: 16, roles: 17, observed_down: 17}} =
+             lost |> Ledger.close_admission() |> Ledger.proof()
   end
 
   defp observed(role, ledger \\ Ledger.new()) do

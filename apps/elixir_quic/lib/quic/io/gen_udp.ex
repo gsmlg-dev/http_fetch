@@ -14,7 +14,17 @@ defmodule Quic.IO.GenUDP do
   use GenServer
   @behaviour Quic.IO
 
-  defstruct [:socket, :owner, :owner_monitor, :generation, :local, :role, :credit]
+  defstruct [
+    :socket,
+    :owner,
+    :owner_monitor,
+    :generation,
+    :local,
+    :role,
+    :credit,
+    :cleanup,
+    :cleanup_monitor
+  ]
 
   def open(opts \\ []) do
     opts = Keyword.put_new(opts, :owner, self())
@@ -42,8 +52,18 @@ defmodule Quic.IO.GenUDP do
     ip = Keyword.get(opts, :ip, {127, 0, 0, 1})
     family = if tuple_size(ip) == 8, do: :inet6, else: :inet
 
-    case :gen_udp.open(Keyword.get(opts, :port, 0), [family, :binary, {:ip, ip}, {:active, :once}]) do
-      {:ok, socket} ->
+    with :ok <- enroll_cleanup(opts),
+         {:ok, allocation} <- reserve_port(opts),
+         {:ok, socket} <- allocate_socket(opts, family, ip, allocation) do
+      initialize_socket(opts, owner, socket)
+    else
+      {:error, reason} -> {:stop, reason}
+    end
+  end
+
+  defp initialize_socket(opts, owner, socket) do
+    case :inet.setopts(socket, active: :once) do
+      :ok ->
         {:ok, local} = :inet.sockname(socket)
 
         {:ok,
@@ -53,13 +73,57 @@ defmodule Quic.IO.GenUDP do
            owner_monitor: Process.monitor(owner),
            generation: make_ref(),
            local: local,
-           role: Keyword.get(opts, :role, :client)
+           role: Keyword.get(opts, :role, :client),
+           cleanup: Keyword.get(opts, :cleanup),
+           cleanup_monitor: Quic.Cleanup.monitor(Keyword.get(opts, :cleanup))
          }}
 
       {:error, reason} ->
+        :gen_udp.close(socket)
         {:stop, reason}
     end
   end
+
+  defp allocate_socket(opts, family, ip, allocation) do
+    # Keep the real backend selected by the runtime. Start passive: the actual
+    # native resource must be observable before receive activation/publication.
+    case :gen_udp.open(Keyword.get(opts, :port, 0), [family, :binary, {:ip, ip}, {:active, false}]) do
+      {:ok, socket} ->
+        case enroll_port(allocation, socket) do
+          :ok ->
+            {:ok, socket}
+
+          {:error, reason} ->
+            :gen_udp.close(socket)
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        if allocation, do: Quic.Cleanup.no_birth(allocation)
+        {:error, reason}
+    end
+  end
+
+  defp enroll_cleanup(opts) do
+    case Keyword.get(opts, :cleanup_birth) do
+      nil -> :ok
+      birth -> Quic.Cleanup.enroll(birth, self())
+    end
+  end
+
+  defp reserve_port(opts) do
+    case Keyword.get(opts, :cleanup) do
+      nil -> {:ok, nil}
+      lease -> Quic.Cleanup.reserve(lease, :port, Quic.Cleanup.deadline(opts))
+    end
+  end
+
+  defp enroll_port(nil, _socket), do: :ok
+
+  defp enroll_port(allocation, socket) when is_port(socket),
+    do: Quic.Cleanup.enroll(allocation, socket)
+
+  defp enroll_port(_allocation, _socket), do: {:error, :unsupported_native_socket}
 
   @impl true
   def handle_call({:send, bytes, remote}, _from, state) do
@@ -72,11 +136,13 @@ defmodule Quic.IO.GenUDP do
           {:error, :invalid_remote}
 
         true ->
-          {ip, port} = remote
+          with :ok <- Quic.Cleanup.authorize(state.cleanup) do
+            {ip, port} = remote
 
-          case :gen_udp.send(state.socket, ip, port, bytes) do
-            :ok -> {:ok, monotonic_time()}
-            {:error, reason} -> {:error, reason}
+            case :gen_udp.send(state.socket, ip, port, bytes) do
+              :ok -> {:ok, monotonic_time()}
+              {:error, reason} -> {:error, reason}
+            end
           end
       end
 
@@ -89,7 +155,8 @@ defmodule Quic.IO.GenUDP do
         %{generation: generation, credit: credit, owner: owner} = state
       )
       when is_reference(credit) do
-    case :inet.setopts(state.socket, active: :once) do
+    case with :ok <- Quic.Cleanup.authorize(state.cleanup),
+              do: :inet.setopts(state.socket, active: :once) do
       :ok -> {:reply, :ok, %{state | credit: nil}}
       {:error, reason} -> {:stop, :normal, {:error, reason}, state}
     end
@@ -101,10 +168,33 @@ defmodule Quic.IO.GenUDP do
 
   @impl true
   def handle_info({:udp, socket, ip, port, bytes}, %{socket: socket, credit: nil} = state) do
-    credit = make_ref()
-    send(state.owner, {:quic_udp, state.generation, credit, {ip, port}, bytes, monotonic_time()})
-    {:noreply, %{state | credit: credit}}
+    case Quic.Cleanup.authorize(state.cleanup) do
+      :ok ->
+        credit = make_ref()
+
+        send(
+          state.owner,
+          {:quic_udp, state.generation, credit, {ip, port}, bytes, monotonic_time()}
+        )
+
+        {:noreply, %{state | credit: credit}}
+
+      {:error, _} ->
+        {:stop, :normal, state}
+    end
   end
+
+  def handle_info(
+        {:quic_cleanup_retire, observer},
+        %{cleanup: %Quic.Cleanup.Lease{handle: %{observer: observer}}} = state
+      ),
+      do: {:stop, :normal, state}
+
+  def handle_info(
+        {:DOWN, monitor, :process, _observer, _reason},
+        %{cleanup_monitor: monitor} = state
+      ),
+      do: {:stop, :normal, state}
 
   def handle_info(
         {:DOWN, monitor, :process, owner, _reason},

@@ -1,15 +1,37 @@
 defmodule HTTP.HTTP3.Stream do
   @moduledoc "Supervised per-request H3 relay; application acknowledgements gate native reads."
   alias HTTP.HTTP3.{BodyBridge, ConnectionOwner, ConnectionSupervisor, Pool, PoolKey}
+  alias HTTP.RequestLifecycle
   alias HTTP.Runtime.Delivery
   @max_open_attempts 3
 
   def start(%HTTP.Request{} = request, subscriber, opts \\ []) when is_pid(subscriber) do
     generation = Keyword.get(opts, :generation, make_ref())
 
-    case Task.Supervisor.start_child(:http_runtime_task_supervisor, fn ->
-           run(request, subscriber, generation, opts)
-         end) do
+    request_deadline =
+      Keyword.get_lazy(opts, :deadline_at, fn ->
+        deadline(Keyword.get(request.transport_options, :timeout, 30_000))
+      end)
+
+    opening_deadline =
+      min_deadline(
+        request_deadline,
+        Keyword.get_lazy(opts, :opening_deadline_at, fn ->
+          deadline(Keyword.get(opts, :opening_timeout, 5_000))
+        end)
+      )
+
+    opts =
+      Keyword.merge(opts, deadline_at: request_deadline, opening_deadline_at: opening_deadline)
+
+    case RequestLifecycle.start_worker(
+           opts[:request_lifecycle],
+           :http3_relay,
+           opening_deadline,
+           fn ->
+             run(request, subscriber, generation, opts)
+           end
+         ) do
       {:ok, pid} -> {:ok, pid, generation}
       {:error, reason} -> {:error, reason}
     end
@@ -20,19 +42,31 @@ defmodule HTTP.HTTP3.Stream do
 
   defp run(request, subscriber, generation, opts) do
     monitor = Process.monitor(subscriber)
+    tracker_monitor = if opts[:request_lifecycle], do: Process.monitor(opts[:request_lifecycle])
+    Process.put({__MODULE__, :tracker_monitor}, tracker_monitor)
     pool = Keyword.get(opts, :pool, :http_fetch_http3_pool)
-    deadline = deadline(Keyword.get(request.transport_options, :timeout, 30_000))
-    opening = Keyword.get(opts, :opening_timeout, 5_000)
-    opening_deadline = min_deadline(deadline, deadline(opening))
+    deadline = opts[:deadline_at]
+    opening_deadline = opts[:opening_deadline_at]
 
     with {:ok, key, connect} <- PoolKey.build(request, opts),
+         connect =
+           Keyword.merge(
+             connect,
+             Keyword.take(opts, [
+               :deadline_at,
+               :opening_deadline_at,
+               :request_lifecycle,
+               :quic_cleanup,
+               :cleanup
+             ])
+           ),
          {:ok, fields, body} <- headers(request),
          {:ok, owner, lease, ref} <-
            open_request(
              pool,
              key,
              connect,
-             {fields, body, generation},
+             {fields, body, generation, deadline},
              {opening_deadline, monitor, @max_open_attempts}
            ) do
       try do
@@ -58,11 +92,13 @@ defmodule HTTP.HTTP3.Stream do
               max_queue_bytes: Keyword.get(opts, :max_queue_bytes, 65_536),
               max_queue_events: Keyword.get(opts, :max_queue_events, 128)
             ),
-          deadline: deadline
+          deadline: deadline,
+          tracker: opts[:request_lifecycle],
+          tracker_monitor: tracker_monitor
         }
 
         try do
-          uploaded = start_upload(state)
+          uploaded = if request_expired?(state), do: state, else: start_upload(state)
 
           try do
             relay(uploaded)
@@ -117,11 +153,22 @@ defmodule HTTP.HTTP3.Stream do
     end
   end
 
-  defp open_leased(pool, owner, lease, {fields, body, generation}, {deadline, monitor, _attempts}) do
+  defp open_leased(
+         pool,
+         owner,
+         lease,
+         {fields, body, generation, request_deadline},
+         {deadline, monitor, _attempts}
+       ) do
     opening_call(
       owner,
       {:open, fields, if(body == "", do: "", else: :stream), self(), generation,
-       [timeout: remaining(deadline), deadline_at: deadline]},
+       [
+         timeout: remaining(deadline),
+         deadline_at: deadline,
+         request_deadline_at: request_deadline,
+         deadline: {:abs_ms, deadline}
+       ]},
       deadline,
       monitor
     )
@@ -136,7 +183,13 @@ defmodule HTTP.HTTP3.Stream do
 
     case opening_call(
            pool,
-           {:reserve, key, [timeout: remaining(deadline), token: token]},
+           {:reserve, key,
+            [
+              timeout: remaining(deadline),
+              token: token,
+              deadline_at: deadline,
+              exclusive?: connect[:exclusive?]
+            ]},
            deadline,
            monitor
          ) do
@@ -145,41 +198,13 @@ defmodule HTTP.HTTP3.Stream do
 
       {:connect, lease} ->
         try do
-          timeout = remaining(deadline)
-          connect_timeout = min(Keyword.get(connect, :connect_timeout, timeout), timeout)
+          case cleanup_descriptor(connect, deadline, monitor) do
+            {:ok, cleanup} ->
+              launch_owner(pool, key, lease, connect, cleanup, deadline, monitor)
 
-          case ConnectionSupervisor.start_connection(
-                 Keyword.put(connect, :connect_timeout, connect_timeout)
-               ) do
-            {:ok, owner} ->
-              try do
-                with :ok <- ready(owner, deadline, monitor),
-                     :ok <-
-                       Pool.register(
-                         pool,
-                         key,
-                         owner,
-                         lease,
-                         Keyword.get(connect, :max_streams, 32)
-                       ),
-                     do: {:ok, owner, lease}
-              else
-                {:ok, _, _} = result ->
-                  result
-
-                failure ->
-                  safe(fn -> GenServer.stop(owner) end)
-                  Pool.release(pool, lease)
-                  failure
-              catch
-                kind, reason ->
-                  safe(fn -> GenServer.stop(owner) end)
-                  :erlang.raise(kind, reason, __STACKTRACE__)
-              end
-
-            failure ->
+            error ->
               Pool.release(pool, lease)
-              failure
+              error
           end
         catch
           kind, reason ->
@@ -192,6 +217,252 @@ defmodule HTTP.HTTP3.Stream do
         error
     end
   end
+
+  defp launch_owner(pool, key, lease, connect, cleanup, deadline, monitor) do
+    activation = make_ref()
+    tracker = if connect[:exclusive?], do: connect[:request_lifecycle]
+
+    opts =
+      connect
+      |> Keyword.drop([:quic_cleanup])
+      |> Keyword.merge(
+        inert: true,
+        creator: self(),
+        activation: activation,
+        cleanup: cleanup,
+        request_lifecycle: tracker
+      )
+
+    case ConnectionSupervisor.start_connection(opts) do
+      {:ok, owner} ->
+        result =
+          with :ok <- RequestLifecycle.register(tracker, owner, :http3_owner, deadline),
+               :ok <- opening_active(deadline, monitor),
+               :ok <-
+                 opening_call(
+                   pool,
+                   {:register, key, owner, lease, Keyword.get(connect, :max_streams, 32),
+                    [cleanup: cleanup, ready?: false]},
+                   deadline,
+                   monitor
+                 ),
+               :ok <- opening_call(owner, {:activate, activation}, deadline, monitor),
+               :ok <- ready(owner, deadline, monitor),
+               :ok <- opening_call(pool, {:ready, owner, lease}, deadline, monitor),
+               do: {:ok, owner, lease}
+
+        case result do
+          {:ok, _, _} ->
+            result
+
+          failure ->
+            retire(cleanup)
+            safe(fn -> Pool.release(pool, lease) end)
+            Process.exit(owner, :kill)
+            failure
+        end
+
+      failure ->
+        retire(cleanup)
+        safe(fn -> Pool.release(pool, lease) end)
+        failure
+    end
+  end
+
+  defp cleanup_descriptor(connect, deadline, monitor) do
+    case {connect[:exclusive?], connect[:quic_cleanup], connect[:cleanup]} do
+      {false, nil, nil} ->
+        {:ok, nil}
+
+      {false, _, _} ->
+        {:error, :cleanup_requires_exclusive_owner}
+
+      {true, nil, nil} ->
+        {:ok, nil}
+
+      {true, nil, descriptor} ->
+        validate_descriptor(descriptor)
+
+      {true, callback, nil} when is_function(callback, 1) ->
+        callback_descriptor(callback, connect[:request_lifecycle], deadline, monitor)
+
+      _ ->
+        {:error, :invalid_cleanup_descriptor}
+    end
+  end
+
+  defp validate_descriptor(
+         %{handle: %Quic.Cleanup.Handle{}, lease: %Quic.Cleanup.Lease{}} = descriptor
+       ) do
+    case QuicHttp3.Session.new(cleanup: descriptor) do
+      {:ok, _} -> {:ok, descriptor}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp validate_descriptor(_), do: {:error, :invalid_cleanup_descriptor}
+
+  # Both workers are retained before callback invocation. The callback retains
+  # its native descriptor in the external tracker before returning it; no
+  # native work is admitted here until that retained descriptor is validated.
+  defp callback_descriptor(callback, tracker, deadline, subscriber_monitor) do
+    relay = self()
+    tag = make_ref()
+
+    with {:ok, guard} <-
+           RequestLifecycle.start_worker(tracker, :http3_connector_watchdog, deadline, fn ->
+             connector_guard(relay, tracker, tag, deadline)
+           end) do
+      try do
+        case RequestLifecycle.start_worker(tracker, :http3_connector, deadline, fn ->
+               connector_wait(relay, guard, tag, deadline, callback)
+             end) do
+          {:ok, connector} ->
+            send(guard, {:bind, tag, connector})
+            await_descriptor(connector, guard, tag, deadline, subscriber_monitor)
+
+          error ->
+            error
+        end
+      after
+        send(guard, :stop)
+      end
+    end
+  end
+
+  defp connector_wait(relay, guard, tag, deadline, callback) do
+    relay_monitor = Process.monitor(relay)
+    guard_monitor = Process.monitor(guard)
+
+    receive do
+      {:invoke, ^tag} -> send(relay, {tag, callback.(deadline)})
+      {:DOWN, ^relay_monitor, :process, _, _} -> :ok
+      {:DOWN, ^guard_monitor, :process, _, _} -> :ok
+    after
+      remaining(deadline) -> :ok
+    end
+  end
+
+  defp connector_guard(relay, tracker, tag, deadline) do
+    relay_monitor = Process.monitor(relay)
+    tracker_monitor = if tracker, do: Process.monitor(tracker)
+
+    receive do
+      {:bind, ^tag, connector} ->
+        connector_monitor = Process.monitor(connector)
+        send(relay, {:armed, tag})
+
+        receive do
+          {:DOWN, ^connector_monitor, :process, _, _} ->
+            receive do
+              :stop -> :ok
+              {:DOWN, ^relay_monitor, :process, _, _} -> :ok
+            after
+              remaining(deadline) -> :ok
+            end
+
+          {:DOWN, ^relay_monitor, :process, _, _} ->
+            Process.exit(connector, :kill)
+
+          {:DOWN, ^tracker_monitor, :process, _, _} ->
+            Process.exit(connector, :kill)
+
+          :stop ->
+            Process.exit(connector, :kill)
+        after
+          remaining(deadline) -> Process.exit(connector, :kill)
+        end
+
+      {:DOWN, ^relay_monitor, :process, _, _} ->
+        :ok
+
+      {:DOWN, ^tracker_monitor, :process, _, _} ->
+        :ok
+
+      :stop ->
+        :ok
+    after
+      remaining(deadline) -> :ok
+    end
+  end
+
+  defp await_descriptor(connector, guard, tag, deadline, subscriber_monitor) do
+    connector_monitor = Process.monitor(connector)
+    guard_monitor = Process.monitor(guard)
+
+    try do
+      receive do
+        {:armed, ^tag} ->
+          send(connector, {:invoke, tag})
+
+          await_descriptor_reply(
+            connector_monitor,
+            guard_monitor,
+            tag,
+            deadline,
+            subscriber_monitor
+          )
+
+        {:DOWN, ^guard_monitor, :process, _, _} ->
+          {:error, :cleanup_connector_down}
+
+        {:DOWN, ^connector_monitor, :process, _, _} ->
+          {:error, :cleanup_connector_down}
+
+        {:DOWN, ^subscriber_monitor, :process, _, _} ->
+          {:error, :subscriber_down}
+
+        :abort ->
+          {:error, :aborted}
+      after
+        remaining(deadline) -> {:error, :opening_timeout}
+      end
+    after
+      send(guard, :stop)
+      Process.exit(connector, :kill)
+      Process.demonitor(connector_monitor, [:flush])
+      Process.demonitor(guard_monitor, [:flush])
+    end
+  end
+
+  defp await_descriptor_reply(connector_monitor, guard_monitor, tag, deadline, subscriber_monitor) do
+    receive do
+      {^tag, {:ok, descriptor}} ->
+        case validate_descriptor(descriptor) do
+          {:ok, _} = result ->
+            result
+
+          error ->
+            retire(descriptor)
+            error
+        end
+
+      {^tag, {:error, _} = error} ->
+        error
+
+      {^tag, _} ->
+        {:error, :invalid_cleanup_descriptor}
+
+      {:DOWN, ^connector_monitor, :process, _, _} ->
+        {:error, :cleanup_connector_down}
+
+      {:DOWN, ^guard_monitor, :process, _, _} ->
+        {:error, :cleanup_connector_down}
+
+      {:DOWN, ^subscriber_monitor, :process, _, _} ->
+        {:error, :subscriber_down}
+
+      :abort ->
+        {:error, :aborted}
+    after
+      remaining(deadline) -> {:error, :opening_timeout}
+    end
+  end
+
+  defp retire(%{lease: %Quic.Cleanup.Lease{} = lease}),
+    do: Quic.Cleanup.retire(lease, {:abs_ms, now()})
+
+  defp retire(_), do: :ok
 
   defp ready(owner, deadline, monitor) do
     case opening_call(owner, :await_ready, deadline, monitor) do
@@ -216,7 +487,10 @@ defmodule HTTP.HTTP3.Stream do
   end
 
   defp opening_active(deadline, monitor) do
+    tracker_monitor = Process.get({__MODULE__, :tracker_monitor})
+
     receive do
+      {:DOWN, ^tracker_monitor, :process, _, _} -> {:error, :cleanup_unconfirmed}
       :abort -> {:error, :aborted}
       {:DOWN, ^monitor, :process, _pid, _reason} -> {:error, :subscriber_down}
     after
@@ -228,7 +502,12 @@ defmodule HTTP.HTTP3.Stream do
   end
 
   defp await_opening(request_id, deadline, monitor) do
+    tracker_monitor = Process.get({__MODULE__, :tracker_monitor})
+
     receive do
+      {:DOWN, ^tracker_monitor, :process, _, _} ->
+        abandon_opening(request_id, :cleanup_unconfirmed)
+
       :abort ->
         abandon_opening(request_id, :aborted)
 
@@ -283,6 +562,7 @@ defmodule HTTP.HTTP3.Stream do
 
   defp start_upload(%{upload: {:stream, source}} = state) do
     {:ok, bridge} = BodyBridge.start_link(source, self())
+    :ok = RequestLifecycle.register(state.tracker, bridge, :http3_body_bridge, state.deadline)
     :ok = BodyBridge.credit(bridge, 16_384)
     %{state | bridge: bridge}
   end
@@ -292,6 +572,10 @@ defmodule HTTP.HTTP3.Stream do
   defp write_binary(%{upload: <<>>} = state), do: state
 
   defp write_binary(state) do
+    if request_expired?(state), do: state, else: send_binary(state)
+  end
+
+  defp send_binary(state) do
     size = min(byte_size(state.upload), 16_384)
     <<bytes::binary-size(^size), rest::binary>> = state.upload
     ref = make_ref()
@@ -323,8 +607,12 @@ defmodule HTTP.HTTP3.Stream do
         relay(next)
 
       {:body_chunk, bridge, bytes, ref} when bridge == state.bridge ->
-        ConnectionOwner.send_data(state.owner, state.ref, bytes, false, self(), ref)
-        relay(%{state | write: {ref, :producer}})
+        if request_expired?(state) do
+          expire_request(state)
+        else
+          ConnectionOwner.send_data(state.owner, state.ref, bytes, false, self(), ref)
+          relay(%{state | write: {ref, :producer}})
+        end
 
       {:body_trailers, bridge, fields} when bridge == state.bridge ->
         ref = make_ref()
@@ -374,6 +662,9 @@ defmodule HTTP.HTTP3.Stream do
 
       {:DOWN, monitor, :process, _pid, _reason} when monitor == state.monitor ->
         :ok
+
+      {:DOWN, monitor, :process, _pid, _reason} when monitor == state.tracker_monitor ->
+        relay(queue(state, {:error, :cleanup_unconfirmed}))
 
       :abort ->
         :ok
@@ -461,12 +752,14 @@ defmodule HTTP.HTTP3.Stream do
     do: send(subscriber, {:http_runtime, generation, self(), event})
 
   defp deadline(:infinity), do: :infinity
-  defp deadline(timeout) when is_integer(timeout) and timeout > 0, do: now() + timeout
+  defp deadline(timeout) when is_integer(timeout) and timeout >= 0, do: now() + timeout
   defp min_deadline(:infinity, right), do: right
   defp min_deadline(left, :infinity), do: left
   defp min_deadline(left, right), do: min(left, right)
   defp remaining(:infinity), do: :infinity
-  defp remaining(deadline), do: max(deadline - now(), 1)
+  defp remaining(deadline), do: max(deadline - now(), 0)
+
+  defp request_expired?(%{deadline: deadline}), do: is_integer(deadline) and now() >= deadline
 
   defp safe(fun) do
     fun.()

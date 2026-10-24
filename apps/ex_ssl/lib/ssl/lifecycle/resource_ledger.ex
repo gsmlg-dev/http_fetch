@@ -52,6 +52,27 @@ defmodule SSL.Lifecycle.ResourceLedger do
     end
   end
 
+  # Only the runtime's authenticated pre-TLS candidate transition uses this.
+  # Keep the old exact DOWN until replacement enrollment, so a creator lost
+  # between reserve and birth cannot erase either historical proof or its permit.
+  @spec rollover_tcp(t(), identity(), creator(), reference()) ::
+          {:ok, t()} | {:error, atom()}
+  def rollover_tcp(ledger, identity, {:allocator, ref} = creator, token)
+      when is_reference(ref) and is_reference(token) do
+    with :dial <- ledger.scope,
+         :open <- ledger.admission,
+         0 <- ledger.losses,
+         false <- Map.has_key?(ledger.permits, :tcp),
+         true <- creator_live?(ledger, creator),
+         %{identity: ^identity, creator: ^creator, state: :down} <- ledger.resources[:tcp] do
+      {:ok, %{ledger | permits: Map.put(ledger.permits, :tcp, {token, creator})}}
+    else
+      _ -> {:error, :rollover_not_permitted}
+    end
+  end
+
+  def rollover_tcp(_ledger, _identity, _creator, _token), do: {:error, :rollover_not_permitted}
+
   @spec enroll(t(), role(), reference(), identity()) ::
           {:ok, t(), :use | :stop} | {:error, atom()}
   def enroll(%__MODULE__{} = ledger, role, token, identity) do
@@ -126,6 +147,33 @@ defmodule SSL.Lifecycle.ResourceLedger do
       allocations: mask(Map.keys(ledger.permits)),
       losses: ledger.losses
     }
+  end
+
+  # Count enrolled live identities, never the historical role masks. Outstanding
+  # constructors and lost evidence make a complete numerical census unavailable.
+  @spec resource_counts(t()) :: map() | nil
+  def resource_counts(%__MODULE__{losses: 0, permits: permits} = ledger)
+      when map_size(permits) == 0 do
+    live = Enum.filter(ledger.resources, fn {_, record} -> record.state == :live end)
+    processes = identities(live, fn {_, {_, kind, _}} -> kind == :process end)
+    sockets = identities(live, fn {_, {_, kind, _}} -> kind in [:port, :socket] end)
+    data = identities(live, fn {role, _} -> role in [:connection, :writer, :tcp] end)
+
+    %{
+      processes: MapSet.size(processes),
+      tcp_sockets: MapSet.size(sockets),
+      observers: 0,
+      data_resources: MapSet.size(data)
+    }
+  end
+
+  def resource_counts(%__MODULE__{}), do: nil
+
+  defp identities(records, predicate) do
+    for {role, %{identity: identity}} <- records,
+        predicate.({role, identity}),
+        into: MapSet.new(),
+        do: {elem(identity, 1), elem(identity, 2)}
   end
 
   # This bounded proof fragment excludes setup/authority and observer termination.
@@ -221,7 +269,9 @@ defmodule SSL.Lifecycle.ResourceLedger do
 
   defp down_mask(ledger) do
     ledger.resources
-    |> Enum.filter(fn {_role, resource} -> resource.state == :down end)
+    |> Enum.filter(fn {role, resource} ->
+      resource.state == :down and not Map.has_key?(ledger.permits, role)
+    end)
     |> Enum.map(&elem(&1, 0))
     |> mask()
   end

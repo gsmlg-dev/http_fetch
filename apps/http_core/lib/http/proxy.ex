@@ -2,6 +2,7 @@ defmodule HTTP.Proxy do
   @moduledoc false
 
   alias HTTP.{Headers, Request}
+  alias HTTP.Transport.{ExSSL, TCP}
 
   @max_head_bytes 16_384
   @max_auth_bytes 8_192
@@ -112,11 +113,10 @@ defmodule HTTP.Proxy do
   def connect(transport, host, port, opts, timeout, proxy) do
     deadline = System.monotonic_time(:millisecond) + min(timeout, proxy.timeout)
 
-    with {:ok, upgrade} <- prepare_tunnel_upgrade(transport, host, opts),
-         {:ok, tcp} <-
-           connect_proxy_tcp(proxy, opts, deadline) do
+    with {:ok, upgrade} <- prepare_tunnel_upgrade(transport, host, opts, deadline),
+         {:ok, tcp} <- connect_proxy_tcp_attempt(proxy, opts, deadline, upgrade) do
       result =
-        if transport == HTTP.Transport.TCP do
+        if transport == TCP do
           {:ok, tcp}
         else
           with :ok <- establish_tunnel(tcp, host, port, proxy, deadline),
@@ -128,32 +128,51 @@ defmodule HTTP.Proxy do
           result
 
         {:error, _} ->
-          :gen_tcp.close(tcp)
+          cancel_upgrade(upgrade)
+          close_owned_tcp(tcp)
           result
       end
     end
   end
 
-  defp prepare_tunnel_upgrade(HTTP.Transport.ExSSL, host, opts) do
-    with {:ok, prepared} <- HTTP.Transport.ExSSL.prepare_upgrade(host, opts),
+  defp prepare_tunnel_upgrade(ExSSL, host, opts, deadline) do
+    with {:ok, prepared} <- ExSSL.prepare_upgrade(host, opts, deadline),
          do: {:ok, {:ex_ssl, prepared}}
   end
 
-  defp prepare_tunnel_upgrade(transport, host, opts),
+  defp prepare_tunnel_upgrade(transport, host, opts, _deadline),
     do: {:ok, {:legacy, transport, host, opts}}
 
   defp upgrade_tunnel({:ex_ssl, prepared}, tcp, timeout),
-    do: HTTP.Transport.ExSSL.upgrade_prepared(tcp, prepared, timeout)
+    do: ExSSL.upgrade_prepared(tcp, prepared, timeout)
 
   defp upgrade_tunnel({:legacy, transport, host, opts}, tcp, timeout),
     do: transport.upgrade(tcp, host, opts, timeout)
+
+  defp cancel_upgrade({:ex_ssl, attempt}), do: ExSSL.cancel_prepared(attempt)
+  defp cancel_upgrade(_upgrade), do: :ok
+
+  defp connect_proxy_tcp_attempt(proxy, opts, deadline, upgrade) do
+    case connect_proxy_tcp(proxy, opts, deadline) do
+      {:ok, _} = result ->
+        result
+
+      error ->
+        cancel_upgrade(upgrade)
+        error
+    end
+  end
+
+  defp close_owned_tcp(tcp) do
+    if Port.info(tcp, :connected) == {:connected, self()}, do: :gen_tcp.close(tcp)
+  end
 
   defp connect_proxy_tcp(proxy, opts, deadline) do
     tcp_opts = proxy_tcp_options(opts)
 
     case remaining(deadline) do
       0 -> {:error, :timeout}
-      timeout -> HTTP.Transport.TCP.connect(proxy.host, proxy.port, tcp_opts, timeout)
+      timeout -> TCP.connect(proxy.host, proxy.port, tcp_opts, timeout)
     end
   end
 

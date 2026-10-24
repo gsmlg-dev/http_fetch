@@ -7,6 +7,8 @@ defmodule HTTP.RequestCompletion do
   HTTPS proxies. HTTP proxies support HTTP/1 forwarding and HTTP/1 or HTTP/2
   CONNECT tunnels to HTTPS origins. HTTPS proxies support HTTP/1 forwarding to
   HTTP origins. Nested TLS and proxy h2c routes remain unsupported.
+  Explicit ExSSL supports direct or pinned HTTPS HTTP/1 and HTTP/2, including reuse,
+  and the proxy routes described above.
   Awaiting the Promise or monitoring its response stream alone does not
   establish request cleanup.
 
@@ -51,7 +53,7 @@ defmodule HTTP.RequestCompletion do
       options.unix_socket != nil ->
         %__MODULE__{unsupported: :unix_socket}
 
-      options.tls_backend == :ex_ssl ->
+      options.tls_backend == :ex_ssl and not supported_ex_ssl?(options, request) ->
         %__MODULE__{unsupported: :tls_backend}
 
       true ->
@@ -63,6 +65,17 @@ defmodule HTTP.RequestCompletion do
   @doc false
   @spec tracker(t()) :: pid() | nil
   def tracker(%__MODULE__{tracker: tracker}), do: tracker
+
+  defp supported_ex_ssl?(options, %HTTP.Request{} = request) do
+    options.http_version in [:http1, :http2] and
+      ((options.proxy == nil and request.url.scheme == "https" and
+          (options.transport_scope == nil or
+             match?(%HTTP.ManagedTransport{}, options.transport_scope))) or
+         (options.proxy != nil and options.transport_scope == nil and
+            supported_proxy?(options, request)))
+  end
+
+  defp supported_ex_ssl?(_options, _request), do: false
 
   defp supported_proxy?(options, %HTTP.Request{} = request) do
     case HTTP.Proxy.route(request, options.unix_socket) do

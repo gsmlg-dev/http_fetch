@@ -5,6 +5,7 @@ defmodule SSL.ClientHello.Extension do
 
   @ids %{
     server_name: 0,
+    status_request: 5,
     supported_groups: 10,
     ec_point_formats: 11,
     extended_master_secret: 23,
@@ -32,6 +33,9 @@ defmodule SSL.ClientHello.Extension do
       {:error, {:extension_payload_length_exceeded, :server_name, payload_size, 0xFFFF}}
     end
   end
+
+  def encode({:status_request, payload}) when is_binary(payload),
+    do: bounded(:status_request, @ids.status_request, payload)
 
   def encode({:supported_groups, groups}),
     do: uint16_vector(:supported_groups, @ids.supported_groups, groups)

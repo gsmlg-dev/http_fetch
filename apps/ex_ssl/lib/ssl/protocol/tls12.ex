@@ -17,6 +17,8 @@ defmodule SSL.Protocol.TLS12 do
     :server_random,
     :suite,
     :peer,
+    :pending_chain,
+    :status_negotiated,
     :key_pair,
     :premaster,
     :master_secret,
@@ -61,16 +63,23 @@ defmodule SSL.Protocol.TLS12 do
   def new(_, _, _, _, _), do: fatal(:decode_error, :invalid_client_hello)
 
   @spec feed(t(), binary()) :: {:ok, t(), [binary()], [term()]} | {:error, term()}
-  def feed(%{phase: :await_server_ccs} = state, @ccs) do
+  def feed(state, record), do: elem(feed_with_progress(state, record), 0)
+
+  @doc false
+  def feed_with_progress(state, record),
+    do: progress(state, feed_record(state, record))
+
+  defp feed_record(%{phase: :await_server_ccs} = state, @ccs) do
     if HandshakeFramer.buffered_size(state.framer) == 0,
       do: {:ok, %{state | phase: :await_server_finished}, [], []},
       else: fatal(:unexpected_message, :fragment_across_ccs)
   end
 
-  def feed(_state, <<20, _::binary>>), do: fatal(:unexpected_message, :invalid_change_cipher_spec)
+  defp feed_record(_state, <<20, _::binary>>),
+    do: fatal(:unexpected_message, :invalid_change_cipher_spec)
 
-  def feed(%{phase: phase} = state, record)
-      when phase in [:await_server_finished, :connected, :closed] do
+  defp feed_record(%{phase: phase} = state, record)
+       when phase in [:await_server_finished, :connected, :closed] do
     case TLS12Record.decrypt(state.read_state, record) do
       {:ok, :handshake, bytes, read} when phase == :await_server_finished ->
         handshake_bytes(%{state | read_state: read}, bytes)
@@ -92,18 +101,19 @@ defmodule SSL.Protocol.TLS12 do
     end
   end
 
-  def feed(_state, <<21, 3, 3, 2::16, level, description>>),
+  defp feed_record(_state, <<21, 3, 3, 2::16, level, description>>),
     do: {:error, {:peer_alert, level, description}}
 
-  def feed(state, <<22, 3, 3, length::16, bytes::binary-size(length)>>) when length <= 16_384,
-    do: handshake_bytes(state, bytes)
+  defp feed_record(state, <<22, 3, 3, length::16, bytes::binary-size(length)>>)
+       when length <= 16_384,
+       do: handshake_bytes(state, bytes)
 
-  def feed(_, _), do: fatal(:unexpected_message, :invalid_tls12_record)
+  defp feed_record(_, _), do: fatal(:unexpected_message, :invalid_tls12_record)
 
   defp handshake_bytes(state, bytes) do
     case HandshakeFramer.feed(state.framer, bytes, max_handshake_length: 524_336) do
       {:ok, messages, framer} ->
-        feed_handshakes(state, messages, framer)
+        run_handshakes(state, messages, framer)
 
       {:error, reason} ->
         fatal(:decode_error, reason)
@@ -111,7 +121,14 @@ defmodule SSL.Protocol.TLS12 do
   end
 
   @doc false
-  def feed_handshakes(state, messages, framer) do
+  def feed_handshakes(state, messages, framer),
+    do: elem(feed_handshakes_with_progress(state, messages, framer), 0)
+
+  @doc false
+  def feed_handshakes_with_progress(state, messages, framer),
+    do: progress(state, run_handshakes(state, messages, framer))
+
+  defp run_handshakes(state, messages, framer) do
     Enum.reduce_while(messages, {:ok, %{state | framer: framer}, [], []}, fn encoded,
                                                                              {:ok, current, out,
                                                                               events} ->
@@ -122,22 +139,41 @@ defmodule SSL.Protocol.TLS12 do
            {:ok, next, records, emitted} <- process(current, message) do
         {:cont, {:ok, next, out ++ records, events ++ emitted}}
       else
-        false -> {:halt, fatal(:unexpected_message, :tls12_transcript_limit_or_complete)}
-        {:error, {:fatal_alert, _, _}} = error -> {:halt, error}
-        {:error, reason} -> {:halt, fatal(:decode_error, reason)}
+        false ->
+          {:halt,
+           failed(current, fatal(:unexpected_message, :tls12_transcript_limit_or_complete))}
+
+        {:error, {:fatal_alert, _, _}} = error ->
+          {:halt, failed(current, error)}
+
+        {:error, reason} ->
+          {:halt, failed(current, fatal(:decode_error, reason))}
       end
     end)
     |> check_boundary()
   end
 
-  defp check_boundary({:ok, %{phase: phase, framer: framer}, _, _} = result)
+  defp check_boundary({:ok, %{phase: phase, framer: framer} = state, _, _} = result)
        when phase in [:await_server_ccs, :connected] do
     if HandshakeFramer.buffered_size(framer) == 0,
       do: result,
-      else: fatal(:unexpected_message, :fragment_across_epoch)
+      else: failed(state, fatal(:unexpected_message, :fragment_across_epoch))
   end
 
   defp check_boundary(result), do: result
+
+  defp progress(_state, {:ok, next, _out, _events} = result),
+    do: {result, accepted_hello?(next)}
+
+  defp progress(_state, {:error, reason, accepted}), do: {{:error, reason}, accepted}
+  defp progress(state, result), do: {result, accepted_hello?(state)}
+
+  defp failed(state, {:error, reason}), do: {:error, reason, accepted_hello?(state)}
+
+  defp accepted_hello?(%__MODULE__{suite: suite, server_random: random}),
+    do: not is_nil(suite) and is_binary(random) and byte_size(random) == 32
+
+  defp accepted_hello?(_), do: false
 
   defp process(%{phase: :await_server_hello} = state, %{type: :server_hello} = hello) do
     with {:ok, suite} <- TLS12KeySchedule.suite(hello.cipher_suite),
@@ -148,6 +184,7 @@ defmodule SSL.Protocol.TLS12 do
         | suite: suite,
           server_random: hello.random,
           negotiated_protocol: alpn,
+          status_negotiated: {5, <<>>} in hello.extensions,
           transcript: %{state.transcript | hash: suite.hash},
           phase: :await_certificate
       }
@@ -163,25 +200,30 @@ defmodule SSL.Protocol.TLS12 do
          %{phase: :await_certificate} = state,
          %{type: :certificate, chain: chain} = message
        ) do
-    options =
-      Keyword.take(state.options, [:depth, :customize_hostname_check]) ++
-        [certificate_signature_schemes: state.offer.certificate_signature_schemes]
+    state = append(state, message.encoded)
 
-    case SSL.PKIX.peer(
-           chain,
-           state.trust,
-           state.identity,
-           Keyword.get(state.options, :verify, :verify_peer),
-           options,
-           :tls12
-         ) do
-      {:ok, peer} ->
-        {:ok, append(%{state | peer: peer, phase: :await_server_key_exchange}, message.encoded),
-         [], []}
-
-      {:error, reason} ->
-        fatal(:bad_certificate, reason)
+    if 5 in state.offer.extension_ids do
+      {:ok, %{state | pending_chain: chain, phase: :await_certificate_status}, [], []}
+    else
+      verify_certificate(state, chain, [])
     end
+  end
+
+  defp process(
+         %{phase: :await_certificate_status, status_negotiated: true} = state,
+         %{type: :certificate_status, response: response} = message
+       ) do
+    verify_certificate(append(state, message.encoded), state.pending_chain, [
+      {hd(state.pending_chain), response}
+    ])
+  end
+
+  defp process(
+         %{phase: :await_certificate_status} = state,
+         %{type: :server_key_exchange} = message
+       ) do
+    with {:ok, next, [], []} <- verify_certificate(state, state.pending_chain, []),
+         do: process(next, message)
   end
 
   defp process(
@@ -190,7 +232,7 @@ defmodule SSL.Protocol.TLS12 do
        ) do
     with true <- message.group in state.offer.supported_groups,
          true <- message.scheme in state.offer.signature_schemes,
-         %{key: key} <- SSL.Capabilities.signature(message.scheme),
+         %{key: key} <- SSL.Capabilities.signature(message.scheme, :tls12),
          true <- signature_key_matches?(state.suite.key_exchange, key),
          %{name: group} <- SSL.Capabilities.resolve(:group, message.group),
          :ok <-
@@ -235,7 +277,8 @@ defmodule SSL.Protocol.TLS12 do
            client_identity: nil,
            key_pair: nil,
            premaster: nil,
-           request: nil
+           request: nil,
+           options: Keyword.drop(state.options, [:verify_fun, :certificate_policy])
        }, [], [{:connected, state.negotiated_protocol}]}
     else
       _ -> fatal(:decrypt_error, :invalid_finished)
@@ -243,6 +286,35 @@ defmodule SSL.Protocol.TLS12 do
   end
 
   defp process(_, _), do: fatal(:unexpected_message, :unexpected_tls12_handshake)
+
+  defp verify_certificate(state, chain, staples) do
+    options =
+      Keyword.take(state.options, [:depth, :customize_hostname_check, :verify_fun]) ++
+        [certificate_signature_schemes: state.offer.certificate_signature_schemes]
+
+    options =
+      if Keyword.get(state.options, :certificate_policy),
+        do: Keyword.put(options, :policy_staples, staples),
+        else: options
+
+    verifier = Keyword.get(state.options, :certificate_policy) || (&SSL.PKIX.peer/6)
+
+    case verifier.(
+           chain,
+           state.trust,
+           state.identity,
+           Keyword.get(state.options, :verify, :verify_peer),
+           options,
+           :tls12
+         ) do
+      {:ok, peer} ->
+        {:ok, %{state | peer: peer, pending_chain: nil, phase: :await_server_key_exchange}, [],
+         []}
+
+      {:error, reason} ->
+        fatal(:bad_certificate, reason)
+    end
+  end
 
   defp client_flight(state) do
     with {:ok, selection} <- select_identity(state),
@@ -301,17 +373,11 @@ defmodule SSL.Protocol.TLS12 do
       ]
     }
 
-    with {:ok, selection} <- ClientAuthentication.select(request, state.client_identity) do
-      case selection do
-        nil ->
-          {:ok, nil}
-
-        {_, scheme} ->
-          key = SSL.Capabilities.signature(scheme).key
-          type = if key == :ecdsa, do: 64, else: 1
-          if type in state.request.certificate_types, do: {:ok, selection}, else: {:ok, nil}
-      end
-    end
+    ClientAuthentication.select(request, state.client_identity, :tls12,
+      signature_schemes: state.offer.signature_schemes,
+      certificate_types: state.request.certificate_types,
+      trust_source: state.trust
+    )
   end
 
   defp client_certificate(nil, _), do: {:ok, <<>>}
@@ -384,6 +450,7 @@ defmodule SSL.Protocol.TLS12 do
   end
 
   defp valid_server_extension?({23, <<>>}, _), do: true
+  defp valid_server_extension?({5, <<>>}, _), do: true
   defp valid_server_extension?({0xFF01, <<0>>}, _), do: true
   defp valid_server_extension?({0, <<>>}, _), do: true
 

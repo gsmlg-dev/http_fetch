@@ -2,7 +2,17 @@ defmodule SSL.Lifecycle.Observer do
   @moduledoc false
   use GenServer, restart: :temporary
 
-  alias SSL.Lifecycle.{Authority, Handoff, ObserverSupervisor, Receipt, ResourceLedger}
+  alias SSL.Lifecycle.{
+    Authority,
+    AuxiliaryLedger,
+    Bootstrap,
+    Handoff,
+    ObserverSupervisor,
+    Receipt,
+    ResourceLedger
+  }
+
+  alias SSL.PolicyIO.Guard
 
   # Private cooperative provider protocol, not the public lifecycle API. Possession
   # of a permit delegates self-enrollment; it does not attest spawn ancestry.
@@ -22,7 +32,7 @@ defmodule SSL.Lifecycle.Observer do
     with :ok <- validate(controller, deadline, scope) do
       expiry = min_deadline(entered + @call_ms, deadline)
 
-      with {:ok, pid} <- SSL.Lifecycle.Bootstrap.start(controller, deadline, scope, expiry) do
+      with {:ok, pid} <- Bootstrap.start(controller, deadline, scope, expiry) do
         request(pid, :reservation, {:abs_ms, expiry})
       end
     end
@@ -33,11 +43,59 @@ defmodule SSL.Lifecycle.Observer do
   @spec bind(Receipt.t(), Authority.lease(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
   def bind(receipt, lease, deadline), do: call(receipt, {:bind, lease}, deadline)
 
+  @doc false
+  def bind(receipt, lease, scope, setup_deadline, deadline),
+    do: call(receipt, {:bind_public, lease, scope, setup_deadline}, deadline)
+
+  @doc false
+  def adopt(receipt, lease, tcp, deadline), do: call(receipt, {:adopt, lease, tcp}, deadline)
+
+  @doc false
+  def commit_upgrade(receipt, tcp, deadline), do: call(receipt, {:commit_upgrade, tcp}, deadline)
+
+  @doc false
+  def failure(receipt, lease, category, deadline),
+    do: call(receipt, {:public_failure, lease, category}, deadline)
+
+  # Raw results travel only to the synchronous attempt caller. They are never
+  # retained in the authority, resource ledger or terminal receipt.
+  @doc false
+  def attempt_failed(receipt, category, reason, deadline),
+    do: call(receipt, {:attempt_failed, category, reason}, deadline)
+
+  # A received prepare grant must be echoed by the same live Connection. The
+  # bounded sidecar records phase only; it never retires resources or seals cleanup.
+  @doc false
+  def prepare_setup_failure(receipt, attempt, epoch, deadline),
+    do: call(receipt, {:prepare_setup_failure, attempt, epoch}, deadline)
+
+  @doc false
+  def commit_setup_failure(receipt, attempt, epoch, nonce, deadline),
+    do: call(receipt, {:commit_setup_failure, attempt, epoch, nonce}, deadline)
+
+  @doc false
+  def logical_closed(receipt),
+    do: send(Receipt.observer(receipt), {:lifecycle_closed, self()})
+
+  @doc false
+  def owner_change(receipt, old, owner, deadline),
+    do: call(receipt, {:owner_change, old, owner}, deadline)
+
+  @doc false
+  def offer(receipt, lease, target, deadline),
+    do: call(receipt, {:offer, lease, target}, deadline)
+
+  @doc false
+  def accept(receipt, ticket, deadline), do: call(receipt, {:accept, ticket}, deadline)
+
   @spec cancel(Receipt.t(), Authority.lease(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
   def cancel(receipt, lease, deadline), do: call(receipt, {:cancel, lease}, deadline)
 
   @spec snapshot(Receipt.t(), {:abs_ms, integer()}) :: {:ok, map()} | {:error, atom()}
   def snapshot(receipt, deadline), do: call(receipt, :snapshot, deadline)
+
+  @doc false
+  def snapshot_resources(receipt, deadline), do: call(receipt, :snapshot_resources, deadline)
 
   # Record metadata before the existing failure path; this is not cleanup or Setup ACK.
   @spec record_tls_failure(Receipt.t(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
@@ -107,6 +165,14 @@ defmodule SSL.Lifecycle.Observer do
           {:ok, reference()} | {:error, atom()}
   def reserve_child(receipt, role, deadline), do: call(receipt, {:reserve_child, role}, deadline)
 
+  @doc false
+  def begin_candidate_close(receipt, socket, deadline),
+    do: call(receipt, {:begin_candidate_close, socket}, deadline)
+
+  @doc false
+  def finish_candidate_close(receipt, nonce, deadline),
+    do: call(receipt, {:finish_candidate_close, nonce}, deadline)
+
   @spec enroll_self(Receipt.t(), ResourceLedger.role(), reference(), {:abs_ms, integer()}) ::
           :use | :stop | {:error, atom()}
   def enroll_self(receipt, role, token, deadline),
@@ -142,17 +208,28 @@ defmodule SSL.Lifecycle.Observer do
   def connection_ready(receipt, nonce, deadline),
     do: call(receipt, {:connection_ready, nonce}, deadline)
 
-  @spec prepare_handoff(Receipt.t(), port(), pid(), {:abs_ms, integer()}) ::
+  @spec prepare_handoff(Receipt.t(), port() | :socket.socket(), pid(), {:abs_ms, integer()}) ::
           {:ok, reference()} | {:error, atom()}
   def prepare_handoff(receipt, port, connection, deadline),
     do: call(receipt, {:prepare_handoff, port, connection}, deadline)
 
-  @spec prepare_handoff_bounded(Receipt.t(), port(), pid(), {:abs_ms, integer()}) ::
+  @spec prepare_handoff_bounded(
+          Receipt.t(),
+          port() | :socket.socket(),
+          pid(),
+          {:abs_ms, integer()}
+        ) ::
           {:ok, reference(), {:abs_ms, integer()}} | {:error, atom()}
   def prepare_handoff_bounded(receipt, port, connection, deadline),
     do: call(receipt, {:prepare_handoff_bounded, port, connection}, deadline)
 
-  @spec commit_handoff(Receipt.t(), port(), pid(), reference(), {:abs_ms, integer()}) ::
+  @spec commit_handoff(
+          Receipt.t(),
+          port() | :socket.socket(),
+          pid(),
+          reference(),
+          {:abs_ms, integer()}
+        ) ::
           :ok | {:error, atom()}
   def commit_handoff(receipt, port, allocator, nonce, deadline),
     do: call(receipt, {:commit_handoff, port, allocator, nonce}, deadline)
@@ -170,6 +247,12 @@ defmodule SSL.Lifecycle.Observer do
     do: call(receipt, {:publish_setup, result}, deadline)
 
   @impl true
+  def format_status(%{state: %{policy: policy}} = status) when policy != nil,
+    do: status |> Map.put(:state, :redacted) |> Map.put(:message, :redacted) |> Map.put(:log, [])
+
+  def format_status(status), do: status
+
+  @impl true
   def init({controller, deadline, scope}) do
     monitor = Process.monitor(controller)
     authority = Authority.new(make_ref(), controller, monitor, make_ref())
@@ -178,6 +261,8 @@ defmodule SSL.Lifecycle.Observer do
 
     {:ok,
      %{
+       transfer: nil,
+       logical_closed: false,
        receipt: Receipt.new(),
        authority: authority,
        controller: controller,
@@ -185,8 +270,11 @@ defmodule SSL.Lifecycle.Observer do
        owner: nil,
        owner_monitor: nil,
        ledger: ResourceLedger.new(scope),
+       policy: nil,
        permits: %{},
        resources: %{},
+       candidate_close: nil,
+       setup_phase_grant: nil,
        handoff: Handoff.new(self()),
        handoff_timer: nil,
        setup: :not_started,
@@ -201,6 +289,18 @@ defmodule SSL.Lifecycle.Observer do
   end
 
   @impl true
+  def handle_call({{:finish_candidate_close, nonce}, {:abs_ms, deadline}}, from, state)
+      when is_integer(deadline) do
+    case state.candidate_close do
+      %{nonce: ^nonce, owner: owner, from: nil} = closing when owner == elem(from, 0) ->
+        next = %{state | candidate_close: %{closing | from: from, finished: true}}
+        settle_info(next |> expire() |> complete_candidate_close())
+
+      _ ->
+        settle({:error, :unauthorized_candidate_close}, expire(state))
+    end
+  end
+
   def handle_call({{:enroll_socket, token, socket}, {:abs_ms, deadline}}, from, state)
       when is_integer(deadline) do
     state = expire(state)
@@ -243,14 +343,48 @@ defmodule SSL.Lifecycle.Observer do
   def handle_call({{:record_socket_connect_failure, _, _, _, _}, _}, _from, state),
     do: settle({:error, :invalid_connect_failure}, expire(state))
 
+  def handle_call(
+        {operation, budget},
+        from,
+        %{resources: %{tcp: %{identity: {_ref, :socket, _socket}}}} = state
+      )
+      when is_tuple(operation) and tuple_size(operation) > 0 and
+             elem(operation, 0) in [:prepare_handoff, :prepare_handoff_bounded, :commit_handoff] do
+    state = expire(state)
+
+    case socket_handoff_operation(operation, budget) do
+      {:ok, normalized, deadline} ->
+        if now() < deadline do
+          {reply, next} = operate(normalized, elem(from, 0), state)
+          settle(reply, next)
+        else
+          settle({:error, :deadline_exceeded}, state)
+        end
+
+      :error ->
+        settle({:error, :invalid_handoff_context}, state)
+    end
+  end
+
+  def handle_call({{:accept, ticket}, {:abs_ms, deadline}}, from, state)
+      when is_integer(deadline) do
+    begin_accept(ticket, deadline, from, expire(state))
+  end
+
   def handle_call({operation, {:abs_ms, deadline}}, from, state) do
     state = expire(state)
 
     if now() < deadline do
       operation =
-        case operation do
+        case setup_phase_operation(operation, deadline) do
+          {:offer, lease, target} ->
+            {:offer, lease, target, deadline}
+
           {:cancel, lease} ->
             {:cancel, lease, deadline}
+
+          {:begin_candidate_close, socket} ->
+            {:begin_candidate_close, socket, deadline}
 
           :writer_ready ->
             {:writer_ready, {:abs_ms, deadline}}
@@ -291,7 +425,7 @@ defmodule SSL.Lifecycle.Observer do
   def handle_info({:DOWN, ref, type, object, _reason} = event, state) do
     state = expire(state)
     next = record_down(state, {ref, type, object}, event)
-    settle_info(next)
+    settle_info(complete_candidate_close(next))
   end
 
   def handle_info({:timeout, ref, :deadline}, %{timer: ref} = state) do
@@ -315,18 +449,431 @@ defmodule SSL.Lifecycle.Observer do
     end
   end
 
-  def handle_info({:timeout, ref, :grace}, %{grace_timer: ref} = state), do: settle_info(state)
+  def handle_info({:transfer_expired, nonce}, %{transfer: %{nonce: nonce} = transfer} = state) do
+    if transfer.from, do: GenServer.reply(transfer.from, {:error, :acceptance_unconfirmed})
+    # Connection may already have changed owner. Preserve the one outstanding
+    # request until its authenticated ACK/refusal, never roll back or close on
+    # the strength of a lost control reply.
+    {:noreply, %{state | transfer: %{transfer | from: nil}}}
+  end
+
+  def handle_info({:lifecycle_closed, connection}, state) do
+    case state.resources[:connection] do
+      %{identity: {_, :process, ^connection}, live: true} ->
+        {:noreply, %{state | logical_closed: true}}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:timeout, ref, :candidate_close}, %{candidate_close: %{timer: ref}} = state),
+    do: settle_info(retire(state, :timeout))
+
+  def handle_info({:timeout, ref, :grace}, %{grace_timer: ref} = state),
+    do: settle_info(state)
+
+  def handle_info(message, %{transfer: %{request: request} = transfer} = state) do
+    case :gen_statem.check_response(message, request) do
+      {:reply, {:ok, nonce, owner, accepted_at}} ->
+        finish_accept(state, transfer, nonce, owner, accepted_at)
+
+      {:reply, {:error, reason}} ->
+        Process.cancel_timer(transfer.timer)
+        if transfer.from, do: GenServer.reply(transfer.from, {:error, reason})
+        settle_info(%{state | transfer: nil})
+
+      :no_reply ->
+        {:noreply, state}
+
+      _ ->
+        if transfer.from, do: GenServer.reply(transfer.from, {:error, :acceptance_unconfirmed})
+        settle_info(retire(%{state | transfer: nil}, :internal))
+    end
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp begin_accept(ticket, deadline, from, state) do
+    offer = state.authority.offer
+
+    context = %{
+      caller: elem(from, 0),
+      owner_ack: nil,
+      monitor: nil,
+      capability: nil,
+      now: now(),
+      deadline: deadline
+    }
+
+    cond do
+      state.transfer != nil ->
+        settle({:error, :acceptance_unconfirmed}, state)
+
+      not is_map(offer) or offer.ticket !== ticket ->
+        settle({:error, :stale_transfer}, state)
+
+      offer.status == :accepted ->
+        case Authority.accept(state.authority, ticket, context) do
+          {:ok, _, lease} -> settle({:ok, lease}, state)
+          error -> settle(error, state)
+        end
+
+      elem(from, 0) != offer.controller ->
+        settle({:error, :not_recipient}, state)
+
+      now() >= deadline ->
+        settle({:error, :deadline_exceeded}, state)
+
+      not open?(state) ->
+        settle({:error, :cancelled}, state)
+
+      now() >= offer.expires ->
+        settle({:error, :offer_expired}, state)
+
+      not Process.alive?(offer.controller) or not Process.alive?(offer.owner) ->
+        settle({:error, :noproc}, state)
+
+      true ->
+        %{identity: {_, :process, connection}} = state.resources.connection
+        bound = min(deadline, offer.expires)
+        nonce = elem(ticket, 2)
+
+        request =
+          :gen_statem.send_request(
+            connection,
+            {:lifecycle_owner_transfer, self(), state.authority.attempt, state.authority.epoch,
+             nonce, offer.owner, bound}
+          )
+
+        timer = Process.send_after(self(), {:transfer_expired, nonce}, max(0, bound - now()))
+
+        transfer = %{
+          from: from,
+          recipient: elem(from, 0),
+          request: request,
+          nonce: nonce,
+          ticket: ticket,
+          deadline: bound,
+          timer: timer
+        }
+
+        {:noreply, %{state | transfer: transfer}}
+    end
+  end
+
+  defp finish_accept(state, transfer, nonce, owner, accepted_at) do
+    offer = state.authority.offer
+    controller_monitor = Process.monitor(offer.controller)
+    owner_monitor = Process.monitor(offer.owner)
+    # The exact enrolled Connection attests when it committed its owner ACK.
+    # Delivery/Observer scheduling after the caller deadline cannot undo it.
+    context = %{
+      caller: transfer.recipient,
+      owner_ack: {nonce, owner},
+      monitor: controller_monitor,
+      capability: make_ref(),
+      now: accepted_at,
+      deadline: transfer.deadline
+    }
+
+    _ = Process.cancel_timer(transfer.timer)
+
+    case Authority.accept(state.authority, transfer.ticket, context) do
+      {:ok, authority, lease} ->
+        Process.demonitor(state.controller_monitor, [:flush])
+        Process.demonitor(state.owner_monitor, [:flush])
+
+        next = %{
+          state
+          | authority: authority,
+            controller: offer.controller,
+            controller_monitor: controller_monitor,
+            owner: offer.owner,
+            owner_monitor: owner_monitor,
+            transfer: nil
+        }
+
+        if transfer.from, do: GenServer.reply(transfer.from, {:ok, lease})
+        settle_info(next)
+
+      error ->
+        Process.demonitor(controller_monitor, [:flush])
+        Process.demonitor(owner_monitor, [:flush])
+        if transfer.from, do: GenServer.reply(transfer.from, error)
+        settle_info(retire(%{state | transfer: nil}, :internal))
+    end
+  end
+
+  defp setup_phase_operation({:prepare_setup_failure, attempt, epoch}, deadline),
+    do: {:prepare_setup_failure, attempt, epoch, deadline}
+
+  defp setup_phase_operation({:commit_setup_failure, attempt, epoch, nonce}, deadline),
+    do: {:commit_setup_failure, attempt, epoch, nonce, deadline}
+
+  defp setup_phase_operation(operation, _deadline), do: operation
+
+  defp socket_handoff_operation(
+         {kind, _tcp, _connection} = operation,
+         {:abs_ms, deadline} = budget
+       )
+       when kind in [:prepare_handoff, :prepare_handoff_bounded] and is_integer(deadline),
+       do: {:ok, Tuple.insert_at(operation, tuple_size(operation), budget), deadline}
+
+  defp socket_handoff_operation(
+         {:commit_handoff, _tcp, _allocator, _nonce} = operation,
+         {:abs_ms, deadline} = budget
+       )
+       when is_integer(deadline),
+       do: {:ok, Tuple.insert_at(operation, tuple_size(operation), budget), deadline}
+
+  defp socket_handoff_operation(
+         {:commit_handoff, _nonce} = operation,
+         {:abs_ms, deadline} = budget
+       )
+       when is_integer(deadline),
+       do: {:ok, Tuple.insert_at(operation, tuple_size(operation), budget), deadline}
+
+  defp socket_handoff_operation(_operation, _budget), do: :error
+
+  defp operate(:policy_context, caller, state) do
+    case creator(state, caller) do
+      {:connection, %{identity: identity}} ->
+        if open?(state) do
+          deadline =
+            case state.deadline do
+              {:abs_ms, instant} -> instant
+              value -> value
+            end
+
+          policy = state.policy || Guard.new(caller, identity, deadline)
+          {{:ok, Guard.context(policy)}, %{state | policy: policy}}
+        else
+          {{:error, :admission_closed}, state}
+        end
+
+      _ ->
+        {{:error, :unauthorized_policy}, state}
+    end
+  end
+
+  defp operate({:policy, capability, operation}, caller, %{policy: policy} = state)
+       when policy != nil do
+    {reply, policy} = Guard.operation(policy, capability, operation, caller)
+    {reply, %{state | policy: policy}}
+  end
+
+  defp operate({:policy_actor, capability, operation}, caller, %{policy: policy} = state)
+       when policy != nil do
+    {reply, policy} = Guard.actor_operation(policy, capability, operation, caller)
+    {reply, %{state | policy: policy}}
+  end
 
   defp operate(:reservation, _caller, state),
     do: {{:ok, state.receipt, Authority.lease(state.authority)}, state}
 
   defp operate(:snapshot, _caller, state) do
     authority =
-      Map.take(Authority.snapshot(state.authority, now()), [:epoch, :phase, :bound?, :transfer])
+      Map.take(Authority.snapshot(state.authority, now()), [
+        :epoch,
+        :phase,
+        :bound?,
+        :transfer,
+        :transfer_nonce
+      ])
 
     snapshot = Map.merge(ResourceLedger.snapshot(state.ledger), authority)
-    {{:ok, Map.merge(snapshot, %{setup: state.setup, setup_failure: state.failure})}, state}
+
+    snapshot =
+      if state.policy && AuxiliaryLedger.admitted?(state.policy.ledger),
+        do: Map.put(snapshot, :auxiliary, AuxiliaryLedger.snapshot(state.policy.ledger)),
+        else: snapshot
+
+    snapshot =
+      if match?(%{from: nil}, state.transfer),
+        do: Map.put(snapshot, :transfer, :unknown),
+        else: snapshot
+
+    logical =
+      cond do
+        state.logical_closed -> :closed
+        state.grace != nil -> :closing
+        state.setup == :connected -> :open
+        true -> :pending
+      end
+
+    {{:ok,
+      Map.merge(snapshot, %{
+        setup: state.setup,
+        setup_failure: state.failure,
+        logical: logical,
+        cleanup: :pending
+      })}, state}
+  end
+
+  defp operate(:snapshot_resources, caller, state) do
+    {{:ok, snapshot}, state} = operate(:snapshot, caller, state)
+
+    counts =
+      case ResourceLedger.resource_counts(state.ledger) do
+        nil ->
+          nil
+
+        counts ->
+          auxiliary =
+            if state.policy, do: Guard.counts(state.policy), else: %{processes: 0, sockets: 0}
+
+          if auxiliary,
+            do: %{
+              counts
+              | processes: counts.processes + 1 + auxiliary.processes,
+                tcp_sockets: counts.tcp_sockets + auxiliary.sockets,
+                data_resources: counts.data_resources + auxiliary.processes + auxiliary.sockets,
+                observers: 1
+            },
+            else: nil
+      end
+
+    {{:ok, Map.put(snapshot, :provider_resources, counts)}, state}
+  end
+
+  defp operate({:bind_public, lease, scope, setup_deadline}, caller, state)
+       when scope in [:dial, :upgrade] and
+              (is_integer(setup_deadline) or setup_deadline == :infinity) do
+    if not state.authority.bound? and map_size(state.resources) == 0 and
+         map_size(state.permits) == 0 do
+      deadline =
+        case {state.deadline, setup_deadline} do
+          {:infinity, :infinity} -> :infinity
+          {:infinity, value} -> {:abs_ms, value}
+          {value, :infinity} -> value
+          {{:abs_ms, left}, right} -> {:abs_ms, min(left, right)}
+        end
+
+      operate({:bind, lease}, caller, %{
+        state
+        | scope: scope,
+          ledger: ResourceLedger.new(scope),
+          policy: nil,
+          deadline: deadline
+      })
+    else
+      {{:error, :already_bound}, state}
+    end
+  end
+
+  defp operate({:adopt, lease, tcp}, caller, state) do
+    with true <-
+           caller == state.owner and lease === Authority.lease(state.authority) and open?(state),
+         true <- is_port(tcp) and Port.info(tcp, :connected) == {:connected, caller} do
+      ref = :erlang.monitor(:port, tcp)
+
+      case ResourceLedger.adopt_tcp(state.ledger, {ref, :port, tcp}) do
+        {:ok, ledger, action} ->
+          resource = %{
+            identity: {ref, :port, tcp},
+            live: true,
+            done: false,
+            creator: :observer,
+            creator_pid: caller,
+            creator_monitor: state.owner_monitor
+          }
+
+          {action, %{state | ledger: ledger, resources: Map.put(state.resources, :tcp, resource)}}
+
+        _ ->
+          Process.demonitor(ref, [:flush])
+          {{:error, :adoption_not_permitted}, state}
+      end
+    else
+      _ -> {{:error, :adoption_not_permitted}, state}
+    end
+  end
+
+  defp operate({:commit_upgrade, tcp}, caller, state) do
+    with true <- state.scope == :upgrade and open?(state),
+         %{identity: {_, :process, ^caller}, live: true} <- state.resources[:connection],
+         %{identity: {_, :port, ^tcp}, live: true} <- state.resources[:tcp],
+         true <- Port.info(tcp, :connected) == {:connected, caller},
+         true <- Enum.all?([:setup, :writer], &match?(%{live: true}, state.resources[&1])) do
+      {:ok, update_handoff(state, Handoff.invalidate(state.handoff))}
+    else
+      _ -> {{:error, :adoption_not_permitted}, state}
+    end
+  end
+
+  defp operate({:public_failure, lease, category}, caller, state) do
+    if lease === Authority.lease(state.authority) and caller == state.owner and
+         category in @failures do
+      {:ok, retire(%{state | setup: :failed, failure: category}, :internal)}
+    else
+      {{:error, :stale_lease}, state}
+    end
+  end
+
+  defp operate({:attempt_failed, category, reason}, caller, state) do
+    if state.setup == :pending and category in @failures and
+         match?({role, _} when role in [:allocator, :connection], creator(state, caller)) do
+      send(state.owner, {:lifecycle_failure, self(), state.receipt.cell, {:error, reason}})
+      {:ok, retire(%{state | setup: :failed, failure: category}, :internal)}
+    else
+      {{:error, :unauthorized_failure}, state}
+    end
+  end
+
+  defp operate({:prepare_setup_failure, attempt, epoch, deadline}, caller, state) do
+    with true <- is_nil(state.setup_phase_grant),
+         :ok <- setup_failure_caller(state, caller, attempt, epoch, deadline) do
+      nonce = make_ref()
+      grant = %{caller: caller, attempt: attempt, epoch: epoch, nonce: nonce, deadline: deadline}
+      {{:ok, nonce}, %{state | setup_phase_grant: grant}}
+    else
+      _ -> {{:error, :unauthorized_setup_failure}, state}
+    end
+  end
+
+  defp operate({:commit_setup_failure, attempt, epoch, nonce, deadline}, caller, state) do
+    with %{caller: ^caller, attempt: ^attempt, epoch: ^epoch, nonce: ^nonce} = grant <-
+           state.setup_phase_grant,
+         true <- is_reference(nonce),
+         :ok <- setup_failure_caller(state, caller, attempt, epoch, min(deadline, grant.deadline)),
+         :ok <- Receipt.seal_setup_failure(state.receipt) do
+      {:ok, %{state | setup_phase_grant: :committed}}
+    else
+      _ -> {{:error, :unauthorized_setup_failure}, state}
+    end
+  end
+
+  defp operate({:owner_change, old, owner}, caller, state) do
+    with true <- open?(state) and state.setup == :connected and state.transfer == nil,
+         %{identity: {_, :process, ^caller}, live: true} <- state.resources[:connection],
+         true <-
+           old == state.owner and is_pid(owner) and node(owner) == node() and
+             Process.alive?(owner) do
+      monitor = Process.monitor(owner)
+      Process.demonitor(state.owner_monitor, [:flush])
+
+      {:ok,
+       %{
+         state
+         | owner: owner,
+           owner_monitor: monitor,
+           authority: %{state.authority | owner: owner}
+       }}
+    else
+      _ -> {{:error, :owner_change_not_permitted}, state}
+    end
+  end
+
+  defp operate({:offer, lease, target, deadline}, _caller, state) do
+    if state.setup == :connected and not state.logical_closed and state.transfer == nil do
+      case Authority.offer(state.authority, lease, target, make_ref(), now(), deadline) do
+        {:ok, authority, ticket} -> {{:ok, ticket}, %{state | authority: authority}}
+        error -> {error, state}
+      end
+    else
+      {{:error, :not_ready}, state}
+    end
   end
 
   defp operate({:bind, lease}, caller, state) do
@@ -375,6 +922,36 @@ defmodule SSL.Lifecycle.Observer do
 
       _ ->
         {{:error, :unauthorized_creator}, state}
+    end
+  end
+
+  defp operate({:begin_candidate_close, socket, deadline}, caller, state) do
+    with nil <- state.candidate_close,
+         true <- candidate_window?(state, caller),
+         %{
+           identity: {_, :socket, ^socket} = identity,
+           live: true,
+           creator: {:allocator, allocator_ref}
+         } <- state.resources[:tcp],
+         {:ok, {^allocator_ref, :process, ^caller}} <- handoff_resource(state, :allocator),
+         true <- socket_owned?(socket, caller) do
+      nonce = make_ref()
+      bound = min_deadline(state.expires, {:abs_ms, min(deadline, now() + @call_ms)})
+      timer = :erlang.start_timer(bound, self(), :candidate_close, abs: true)
+
+      closing = %{
+        identity: identity,
+        owner: caller,
+        nonce: nonce,
+        deadline: bound,
+        timer: timer,
+        from: nil,
+        finished: false
+      }
+
+      {{:ok, nonce}, %{state | candidate_close: closing}}
+    else
+      _ -> {{:error, :candidate_close_not_permitted}, state}
     end
   end
 
@@ -472,7 +1049,7 @@ defmodule SSL.Lifecycle.Observer do
          true <-
            elem(context.identities.tcp, 2) == port and
              elem(context.identities.connection, 2) == connection,
-         :ok <- handoff_owner(context, :allocator),
+         :ok <- handoff_owner(context, :allocator, state),
          {:ok, handoff} <- Handoff.prepare(state.handoff, %{context | now: now()}, nonce) do
       {{:ok, nonce}, update_handoff(state, handoff)}
     else
@@ -497,7 +1074,7 @@ defmodule SSL.Lifecycle.Observer do
          true <-
            elem(context.identities.tcp, 2) == port and
              elem(context.identities.allocator, 2) == allocator,
-         :ok <- handoff_owner(context, :connection),
+         :ok <- handoff_owner(context, :connection, state),
          {:ok, handoff} <- Handoff.commit(state.handoff, %{context | now: now()}, nonce) do
       {:ok, update_handoff(state, handoff)}
     else
@@ -509,7 +1086,7 @@ defmodule SSL.Lifecycle.Observer do
   defp operate({:commit_handoff, nonce, {:abs_ms, deadline}}, caller, state) do
     with {:ok, context} <-
            handoff_context(state, caller, :connection, @process_roles ++ [:tcp], deadline),
-         :ok <- handoff_owner(context, :connection),
+         :ok <- handoff_owner(context, :connection, state),
          {:ok, handoff} <- Handoff.commit(state.handoff, %{context | now: now()}, nonce) do
       {:ok, update_handoff(state, handoff)}
     else
@@ -706,25 +1283,65 @@ defmodule SSL.Lifecycle.Observer do
     end
   end
 
-  defp failure_tcp(state, caller) do
-    with %{
-           live: true,
-           done: false,
-           identity: {_monitor, :port, port} = identity,
-           creator: {:allocator, allocation} = creator,
-           creator_pid: allocator,
-           creator_monitor: creator_monitor
-         } <- Map.get(state.resources, :tcp),
-         true <- allocation == creator_monitor,
-         {:ok, %{state: :live, identity: ^identity, creator: ^creator}} <-
+  defp setup_failure_caller(state, caller, attempt, epoch, deadline) do
+    with true <-
+           is_reference(attempt) and attempt === state.authority.attempt and
+             epoch === state.authority.epoch and is_integer(deadline),
+         true <- state.setup == :pending and state.failure == :none and open?(state),
+         true <- handoff_process_live?(state.owner) and handoff_process_live?(state.controller),
+         {:ok, _setup} <- handoff_resource(state, :setup),
+         {:ok, {_ref, :process, ^caller}} <- handoff_resource(state, :connection),
+         {:ok, _writer} <- handoff_resource(state, :writer),
+         :ok <- setup_failure_transport(state, caller),
+         true <- now() < deadline and (state.expires == :infinity or now() < state.expires) do
+      :ok
+    else
+      _ -> {:error, :unauthorized_setup_failure}
+    end
+  end
+
+  defp setup_failure_transport(%{scope: :dial} = state, caller) do
+    if Handoff.committed?(state.handoff),
+      do: failure_tcp(state, caller),
+      else: {:error, :handoff_not_committed}
+  end
+
+  defp setup_failure_transport(%{scope: :upgrade} = state, caller) do
+    with %{live: true, done: false, creator: :observer, identity: {_, :port, tcp} = identity} <-
+           state.resources[:tcp],
+         {:ok, %{state: :live, identity: ^identity, creator: :observer}} <-
            ResourceLedger.enrollment_view(state.ledger, :tcp),
-         :ok <- failure_allocator(state, allocation, allocator),
-         true <- Port.info(port, :connected) == {:connected, caller} do
+         true <- Port.info(tcp, :connected) == {:connected, caller} do
       :ok
     else
       _ -> {:error, :foreign_tls_resource}
     end
   end
+
+  defp failure_tcp(state, caller) do
+    with %{
+           live: true,
+           done: false,
+           identity: {_monitor, kind, socket} = identity,
+           creator: {:allocator, allocation} = creator,
+           creator_pid: allocator,
+           creator_monitor: creator_monitor
+         } <- Map.get(state.resources, :tcp),
+         true <- kind in [:port, :socket] and allocation == creator_monitor,
+         {:ok, %{state: :live, identity: ^identity, creator: ^creator}} <-
+           ResourceLedger.enrollment_view(state.ledger, :tcp),
+         :ok <- failure_allocator(state, allocation, allocator),
+         true <- failure_owned?(kind, socket, caller) do
+      :ok
+    else
+      _ -> {:error, :foreign_tls_resource}
+    end
+  end
+
+  defp failure_owned?(:port, socket, caller),
+    do: Port.info(socket, :connected) == {:connected, caller}
+
+  defp failure_owned?(:socket, socket, caller), do: socket_owned?(socket, caller)
 
   # Committed ownership retains the allocator generation after its normal done-DOWN.
   defp failure_allocator(state, monitor, pid) do
@@ -766,7 +1383,7 @@ defmodule SSL.Lifecycle.Observer do
   end
 
   defp handoff_context(state, caller, role, roles, deadline) do
-    with true <- state.scope == :dial and open?(state),
+    with true <- open?(state),
          true <- handoff_process_live?(state.owner) and handoff_process_live?(state.controller),
          {:ok, identities} <- handoff_resources(state, roles),
          true <- elem(Map.fetch!(identities, role), 2) == caller do
@@ -830,7 +1447,35 @@ defmodule SSL.Lifecycle.Observer do
 
   defp handoff_identity_live?({_ref, :process, pid}), do: handoff_process_live?(pid)
   defp handoff_identity_live?({_ref, :port, port}), do: Port.info(port) != nil
-  defp handoff_identity_live?({_ref, :socket, _socket}), do: false
+
+  defp handoff_identity_live?({_ref, :socket, socket}) do
+    case :socket.getopt(socket, :otp, :controlling_process) do
+      {:ok, owner} -> handoff_process_live?(owner)
+      _ -> false
+    end
+  catch
+    _, _ -> false
+  end
+
+  defp handoff_owner(%{identities: %{tcp: {_ref, :socket, socket}}} = context, role, state) do
+    owner = elem(Map.fetch!(context.identities, role), 2)
+    owned = socket_owned?(socket, owner)
+
+    current =
+      Enum.all?(context.identities, fn
+        {_role, {_ref, :process, pid}} -> handoff_process_live?(pid)
+        _ -> true
+      end)
+
+    instant = now()
+
+    if owned and current and is_integer(context.deadline) and instant < context.deadline and
+         (state.expires == :infinity or instant < state.expires),
+       do: :ok,
+       else: {:error, :socket_not_owned}
+  end
+
+  defp handoff_owner(context, role, _state), do: handoff_owner(context, role)
 
   defp handoff_owner(%{identities: %{tcp: {_ref, :port, _port}}} = context, role) do
     port = elem(context.identities.tcp, 2)
@@ -1041,10 +1686,30 @@ defmodule SSL.Lifecycle.Observer do
   defp open?(state),
     do: match?(%{bound?: true, phase: :open}, authority_view(state)) and state.grace == nil
 
-  defp publish(%{resources: %{tcp: %{identity: {_ref, :socket, _socket}}}} = state, :connected),
-    do: {{:error, :socket_transport_not_implemented}, state}
+  defp publish(%{resources: %{tcp: %{identity: {_ref, :socket, socket}}}} = state, :connected) do
+    with true <- Handoff.committed?(state.handoff),
+         {:ok, {_ref, :process, connection}} <- handoff_resource(state, :connection),
+         true <- socket_owned?(socket, connection),
+         true <-
+           open?(state) and handoff_process_live?(state.owner) and
+             handoff_process_live?(state.controller) do
+      publish_connected(state)
+    else
+      _ -> {{:error, :resources_pending}, state}
+    end
+  end
 
-  defp publish(state, :connected) do
+  defp publish(state, :connected), do: publish_connected(state)
+
+  defp publish(state, {:failed, failure}) when failure in @failures,
+    do: {:ok, retire(%{state | setup: :failed, failure: failure}, :internal)}
+
+  defp publish(state, _), do: {{:error, :invalid_outcome}, state}
+
+  defp publish_connected(%{policy: policy} = state) when policy != nil and not policy.finished,
+    do: {{:error, :resources_pending}, state}
+
+  defp publish_connected(state) do
     if Enum.all?([:connection, :writer, :tcp], fn role ->
          match?(%{live: true}, Map.get(state.resources, role))
        end) do
@@ -1055,12 +1720,9 @@ defmodule SSL.Lifecycle.Observer do
     end
   end
 
-  defp publish(state, {:failed, failure}) when failure in @failures,
-    do: {:ok, retire(%{state | setup: :failed, failure: failure}, :internal)}
-
-  defp publish(state, _), do: {{:error, :invalid_outcome}, state}
-
   defp record_down(state, identity, event) do
+    state = if state.policy, do: %{state | policy: Guard.down(state.policy, event)}, else: state
+
     cond do
       identity == {state.controller_monitor, :process, state.controller} ->
         retire(state, :owner_down)
@@ -1087,8 +1749,9 @@ defmodule SSL.Lifecycle.Observer do
             resources: Map.put(state.resources, role, %{resource | live: false})
         }
 
-        if role in [:allocator, :setup] and resource.done and
-             not Handoff.involves?(state.handoff, identity),
+        if (role == :tcp and match?(%{identity: ^identity}, state.candidate_close)) or
+             (role in [:allocator, :setup] and resource.done and
+                not Handoff.involves?(state.handoff, identity)),
            do: next,
            else: retire(next, :internal)
     end
@@ -1106,7 +1769,12 @@ defmodule SSL.Lifecycle.Observer do
   defp expire(state), do: state
 
   defp retire(%{grace: nil} = state, reason) do
-    state = update_handoff(state, Handoff.invalidate(state.handoff))
+    if state.transfer do
+      Process.cancel_timer(state.transfer.timer)
+      if state.transfer.from, do: GenServer.reply(state.transfer.from, {:error, :cancelled})
+    end
+
+    state = update_handoff(%{state | transfer: nil}, Handoff.invalidate(state.handoff))
     instant = now()
 
     {:ok, authority} =
@@ -1115,8 +1783,21 @@ defmodule SSL.Lifecycle.Observer do
     ledger = ResourceLedger.close_admission(state.ledger)
     grace = now() + @grace_ms
     grace_timer = :erlang.start_timer(@grace_ms, self(), :grace)
-    next = %{state | authority: authority, ledger: ledger, grace: grace, grace_timer: grace_timer}
-    Enum.each(next.resources, fn {_, resource} -> stop_process(resource) end)
+    policy = if state.policy, do: Guard.retire(state.policy, grace), else: nil
+
+    next = %{
+      state
+      | authority: authority,
+        ledger: ledger,
+        policy: policy,
+        grace: grace,
+        grace_timer: grace_timer
+    }
+
+    Enum.each(next.resources, fn {_, resource} ->
+      unless closing_owner?(next, resource), do: stop_process(resource)
+    end)
+
     outcome(next, reason)
   end
 
@@ -1133,6 +1814,76 @@ defmodule SSL.Lifecycle.Observer do
   # Its enrolled provider creator/owner exits independently. Never block this
   # observer in native close or infer port DOWN from the owner's death.
   defp stop_process(_resource), do: :ok
+
+  defp closing_owner?(
+         %{candidate_close: %{owner: pid, finished: false}},
+         %{identity: {_, :process, pid}}
+       ),
+       do: true
+
+  defp closing_owner?(_state, _resource), do: false
+
+  defp candidate_window?(state, caller) do
+    tcp = Map.get(state.resources, :tcp)
+
+    state.scope == :dial and state.setup == :pending and open?(state) and
+      is_map(tcp) and
+      not Handoff.committed?(state.handoff) and
+      not Handoff.involves?(state.handoff, tcp.identity) and
+      state.transfer == nil and handoff_process_live?(caller) and
+      handoff_process_live?(state.owner) and handoff_process_live?(state.controller) and
+      match?({:allocator, %{done: false}}, creator(state, caller))
+  end
+
+  defp complete_candidate_close(%{candidate_close: %{finished: true} = closing} = state) do
+    cond do
+      not candidate_window?(state, closing.owner) or now() >= closing.deadline ->
+        GenServer.reply(closing.from, {:error, :admission_closed})
+        next = clear_candidate_close(state)
+        next = retire(next, :internal)
+        stop_process(next.resources.allocator)
+        next
+
+      match?(
+        %{identity: identity, live: false} when identity == closing.identity,
+        state.resources[:tcp]
+      ) ->
+        token = make_ref()
+        resource = state.resources.tcp
+
+        case ResourceLedger.rollover_tcp(state.ledger, closing.identity, resource.creator, token) do
+          {:ok, ledger} ->
+            permit = %{
+              token: token,
+              creator: closing.owner,
+              parent: resource.creator,
+              creator_monitor: resource.creator_monitor
+            }
+
+            GenServer.reply(closing.from, {:ok, token})
+
+            %{
+              clear_candidate_close(state)
+              | ledger: ledger,
+                permits: Map.put(state.permits, :tcp, permit)
+            }
+
+          {:error, reason} ->
+            GenServer.reply(closing.from, {:error, reason})
+            retire(clear_candidate_close(state), :internal)
+        end
+
+      true ->
+        state
+    end
+  end
+
+  defp complete_candidate_close(state), do: state
+
+  defp clear_candidate_close(state) do
+    Process.cancel_timer(state.candidate_close.timer)
+    %{state | candidate_close: nil}
+  end
 
   defp settle(reply, state) do
     case terminal(state) do
@@ -1151,19 +1902,31 @@ defmodule SSL.Lifecycle.Observer do
   defp terminal(%{grace: nil}), do: :pending
 
   defp terminal(state) do
-    case ResourceLedger.proof(state.ledger) do
-      {:ok, _} ->
+    auxiliary = if state.policy, do: Guard.proof(state.policy), else: {:ok, nil}
+
+    case {ResourceLedger.proof(state.ledger), auxiliary} do
+      {{:ok, _}, {:ok, _}} ->
+        metadata = %{
+          setup: state.setup,
+          failure: state.failure,
+          epoch: authority_view(state).epoch
+        }
+
         :ok =
-          Receipt.seal(state.receipt, state.ledger, %{
-            setup: state.setup,
-            failure: state.failure,
-            epoch: authority_view(state).epoch
-          })
+          if state.policy,
+            do: Receipt.seal(state.receipt, state.ledger, state.policy.ledger, metadata),
+            else: Receipt.seal(state.receipt, state.ledger, metadata)
 
         :stop
 
-      {:pending, _} ->
-        if now() >= state.grace, do: :stop, else: :pending
+      _ ->
+        if now() >= state.grace do
+          Enum.each(state.resources, fn {_, resource} -> stop_process(resource) end)
+          if state.policy, do: Guard.kill(state.policy)
+          :stop
+        else
+          :pending
+        end
     end
   end
 

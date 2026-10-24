@@ -6,6 +6,7 @@ defmodule HTTP.ManagedTransportPolicyBackingTest do
   @fixtures Path.expand("../../../http_fetch/test/support/fixtures", __DIR__)
 
   for key <- [:cacerts, :cert, :key, :ciphers] do
+    @tag :integration
     test "frozen #{key} binary representations own compact backing" do
       option = unquote(key)
       {type, der} = pem(pem_name(option))
@@ -23,6 +24,7 @@ defmodule HTTP.ManagedTransportPolicyBackingTest do
     end
   end
 
+  @tag :integration
   test "policy digest and equality are independent of borrowed backing" do
     {_, der} = pem("localhost-ca.pem")
     assert {:ok, borrowed_policy} = freeze(cacerts: [borrowed(der)])

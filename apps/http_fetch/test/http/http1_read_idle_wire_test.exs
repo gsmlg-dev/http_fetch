@@ -284,14 +284,11 @@ defmodule HTTP.HTTP1ReadIdleWireTest do
     assert_receive {:stimulus, ^ref}, @wait
   end
 
-  defp finish(%Task{pid: peer} = task, promise, backend) do
+  defp finish(%Task{pid: peer} = task, promise, _backend) do
     send(peer, :await_close)
     assert_receive {:peer_closed, ^peer}, @wait
     assert :ok = Task.await(task, @wait)
 
-    expected =
-      if backend == :ex_ssl, do: {:error, {:unsupported_completion, :tls_backend}}, else: :ok
-
-    assert RequestCompletion.await(Promise.completion(promise), @wait) == expected
+    assert RequestCompletion.await(Promise.completion(promise), @wait) == :ok
   end
 end

@@ -2,6 +2,7 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
   use ExUnit.Case, async: true
   @moduletag :integration
 
+  alias ExSSL.TestSupport.ManagedLifecycleProbe, as: Probe
   alias HTTP.{Promise, RequestCompletion, Response}
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
@@ -135,7 +136,7 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
       endpoints = assert_request(peer)
       writer = await_blocked_writer(source)
       writer_monitor = Process.monitor(writer)
-      provider = observe_provider(backend, endpoints)
+      provider = observe_provider(backend, endpoints, promise)
       HTTP.AbortController.abort(controller)
       assert {:error, :aborted} = Promise.await(promise, @wait)
       assert_receive {:DOWN, ^writer_monitor, :process, ^writer, _}, @wait
@@ -459,33 +460,19 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
   end
 
   # Observe the original native owner independently of the HTTP upload worker.
-  defp observe_provider(:ex_ssl, endpoints) do
-    ports = Port.list()
-    assert length(ports) < 2_048, "client-port discovery reached the 2048-port limit"
-    candidates = Enum.filter(ports, &client_port?(&1, endpoints))
-    assert [port] = candidates
-    assert {:connected, owner} = Port.info(port, :connected)
-    assert is_pid(owner)
-    port_monitor = :erlang.monitor(:port, port)
-    owner_monitor = Process.monitor(owner)
-
-    assert client_port?(port, endpoints)
-    assert Port.info(port, :connected) == {:connected, owner}
-    assert Process.alive?(owner)
-    %{port: port, owner: owner, port_monitor: port_monitor, owner_monitor: owner_monitor}
+  defp observe_provider(:ex_ssl, {server, client}, %{completion: %{tracker: tracker}}) do
+    [handle] = Map.keys(:sys.get_state(tracker, 1_000).providers)
+    provider = Probe.graph_handle(handle)
+    on_exit(fn -> Probe.release_monitors(provider) end)
+    {server_ip, server_port} = server
+    {client_ip, client_port} = client
+    assert {:ok, %{addr: ^client_ip, port: ^client_port}} = :socket.sockname(provider.tcp)
+    assert {:ok, %{addr: ^server_ip, port: ^server_port}} = :socket.peername(provider.tcp)
+    assert :ok = Probe.await_native_blocked(provider, System.monotonic_time(:millisecond) + 1_000)
+    provider
   end
 
-  defp observe_provider(_other, _endpoints), do: nil
-
-  defp client_port?(port, {server, client}) do
-    Port.info(port, :name) == {:name, ~c"tcp_inet"} and
-      :inet.sockname(port) == {:ok, client} and :inet.peername(port) == {:ok, server}
-  rescue
-    ArgumentError -> false
-  catch
-    :exit, {:noproc, _} -> false
-    :exit, :noproc -> false
-  end
+  defp observe_provider(_other, _endpoints, _promise), do: nil
 
   defp finish_provider(task, promise, backend, nil), do: finish(task, promise, backend)
 
@@ -494,62 +481,23 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
     send(peer, :await_close)
 
     try do
-      await_provider_close(peer, provider, deadline, %{
-        port_down: false,
-        owner_down: false,
-        peer_closed: false
-      })
+      Probe.await_down(provider, [:tcp, :connection, :writer, :observer], remaining!(deadline))
 
+      assert {:ok, %{cleanup: :confirmed}} =
+               SSL.Lifecycle.await(provider.handle, {:abs_ms, deadline})
+
+      assert_receive {:peer_closed, ^peer}, remaining!(deadline)
       assert :ok = Task.await(task, @wait)
       assert_completion(promise, backend)
     after
-      Process.demonitor(provider.port_monitor, [:flush])
-      Process.demonitor(provider.owner_monitor, [:flush])
+      Probe.release_monitors(provider)
     end
   end
 
-  defp await_provider_close(peer, provider, deadline, observed) do
+  defp remaining!(deadline) do
     remaining = deadline - System.monotonic_time(:millisecond)
-
-    cond do
-      remaining <= 0 ->
-        provider_close_timeout(provider, observed)
-
-      observed.port_down and observed.owner_down and observed.peer_closed ->
-        :ok
-
-      true ->
-        %{port: port, owner: owner, port_monitor: port_monitor, owner_monitor: owner_monitor} =
-          provider
-
-        receive do
-          {:DOWN, ^port_monitor, :port, ^port, _reason} ->
-            await_provider_close(peer, provider, deadline, %{observed | port_down: true})
-
-          {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-            await_provider_close(peer, provider, deadline, %{observed | owner_down: true})
-
-          {:peer_closed, ^peer} ->
-            await_provider_close(peer, provider, deadline, %{observed | peer_closed: true})
-        after
-          remaining -> provider_close_timeout(provider, observed)
-        end
-    end
-  end
-
-  defp provider_close_timeout(provider, observed) do
-    metadata = %{
-      observed: observed,
-      port: provider.port,
-      owner: provider.owner,
-      port_driver: Port.info(provider.port, :name),
-      port_owner: Port.info(provider.port, :connected),
-      owner_alive: Process.alive?(provider.owner)
-    }
-
-    flunk(
-      "original ex_ssl provider/peer closure exceeded the finish window: #{inspect(metadata)}"
-    )
+    assert remaining > 0, "original ex_ssl provider/peer closure exceeded the finish window"
+    remaining
   end
 
   defp finish(%Task{pid: peer} = task, promise, backend) do
@@ -559,10 +507,7 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
     assert_completion(promise, backend)
   end
 
-  defp assert_completion(promise, backend) do
-    expected =
-      if backend == :ex_ssl, do: {:error, {:unsupported_completion, :tls_backend}}, else: :ok
-
-    assert RequestCompletion.await(Promise.completion(promise), @wait) == expected
+  defp assert_completion(promise, _backend) do
+    assert RequestCompletion.await(Promise.completion(promise), @wait) == :ok
   end
 end

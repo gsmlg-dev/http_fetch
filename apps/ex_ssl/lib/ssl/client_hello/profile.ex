@@ -6,11 +6,12 @@ defmodule SSL.ClientHello.Profile do
   extension ID in the optional `:raw_extensions` capability allowlist.
   """
 
-  alias SSL.ClientHello.{Extension, GreasePolicy, RecordPolicy, WireProfile}
   alias SSL.Capabilities
+  alias SSL.ClientHello.{Extension, GreasePolicy, RecordPolicy, WireProfile}
 
   @extension_ids %{
     server_name: 0,
+    status_request: 5,
     supported_groups: 10,
     ec_point_formats: 11,
     extended_master_secret: 23,
@@ -35,6 +36,7 @@ defmodule SSL.ClientHello.Profile do
           optional(:raw_extensions) => [0..0xFFFF],
           optional(:record_modes) => [:default | :none],
           optional(:signature_algorithms) => [atom() | 0..0xFFFF],
+          optional(:tls12_signature_algorithms) => [atom() | 0..0xFFFF],
           optional(:certificate_signature_algorithms) => [atom() | 0..0xFFFF],
           optional(:psk_key_exchange_modes) => [atom() | 0..0xFF],
           optional(:key_share_sizes) => %{optional(WireProfile.group()) => pos_integer()}
@@ -105,6 +107,7 @@ defmodule SSL.ClientHello.Profile do
          :ok <- require_capability_list(capabilities, :ciphers),
          :ok <- require_capability_list(capabilities, :groups),
          :ok <- validate_optional_capability_list(capabilities, :signature_algorithms),
+         :ok <- validate_optional_capability_list(capabilities, :tls12_signature_algorithms),
          :ok <-
            validate_optional_capability_list(capabilities, :certificate_signature_algorithms),
          :ok <- validate_optional_capability_list(capabilities, :psk_key_exchange_modes),
@@ -220,6 +223,7 @@ defmodule SSL.ClientHello.Profile do
   end
 
   defp valid_extension?({:server_name, :from_connection}), do: true
+  defp valid_extension?({:status_request, nonce?}), do: is_boolean(nonce?)
   defp valid_extension?({:supported_groups, groups}), do: uint16_vector?(groups)
   defp valid_extension?({:ec_point_formats, formats}), do: uint8_integer_vector?(formats)
   defp valid_extension?({:extended_master_secret, <<>>}), do: true
@@ -432,6 +436,16 @@ defmodule SSL.ClientHello.Profile do
   end
 
   defp validate_signature_algorithms(extensions, capabilities) do
+    tls12? =
+      Enum.any?(extensions, fn
+        {:supported_versions, versions} -> 0x0303 in versions or :tlsv1_2 in versions
+        _ -> false
+      end)
+
+    supported =
+      Map.get(capabilities, :signature_algorithms, []) ++
+        if(tls12?, do: Map.get(capabilities, :tls12_signature_algorithms, []), else: [])
+
     handshake =
       Enum.flat_map(extensions, fn
         {:signature_algorithms, algorithms} -> algorithms
@@ -447,7 +461,7 @@ defmodule SSL.ClientHello.Profile do
     with :ok <-
            reject_unsupported(
              without_grease(handshake),
-             Map.get(capabilities, :signature_algorithms, []),
+             supported,
              :unsupported_signature_algorithms
            ) do
       reject_unsupported(
@@ -576,6 +590,8 @@ defmodule SSL.ClientHello.Profile do
 
   # Dynamic values are bounded again after per-connection materialization.
   defp extension_payload_length({:server_name, :from_connection}, _capabilities), do: 0
+  defp extension_payload_length({:status_request, true}, _), do: 56
+  defp extension_payload_length({:status_request, false}, _), do: 5
 
   defp extension_payload_length({:supported_groups, groups}, _capabilities),
     do: 2 + 2 * length(groups)

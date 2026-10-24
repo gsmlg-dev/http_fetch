@@ -8,7 +8,7 @@ on:
         type: string
     outputs:
       apps:
-        description: JSON array of app owners and affected H2 consumers
+        description: JSON array of app owners and affected H2 and QUIC/H3 consumers
         value: ${{ jobs.detect.outputs.apps }}
       has_changes:
         description: Whether the array is nonempty
@@ -16,8 +16,11 @@ on:
       h2_compat:
         description: Whether shared H2 compatibility must run
         value: ${{ jobs.detect.outputs.h2_compat }}
+      candidate_tls:
+        description: Whether current candidate TLS and package consumers must run
+        value: ${{ jobs.detect.outputs.candidate_tls }}
       full_gate:
-        description: Whether manual verification requires all candidate consumers
+        description: Whether manual verification requires full shared checks
         value: ${{ jobs.detect.outputs.full_gate }}
       historical_tls:
         description: Whether manual verification requires historical compatibility coverage
@@ -33,6 +36,7 @@ jobs:
       apps: ${{ steps.paths.outputs.apps }}
       has_changes: ${{ steps.paths.outputs.has_changes }}
       h2_compat: ${{ steps.paths.outputs.h2_compat }}
+      candidate_tls: ${{ steps.paths.outputs.candidate_tls }}
       full_gate: ${{ steps.paths.outputs.full_gate }}
       historical_tls: ${{ steps.paths.outputs.historical_tls }}
     steps:

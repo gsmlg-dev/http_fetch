@@ -1,7 +1,8 @@
 # TLS migration design and compatibility contract
 
-Status: P0 baseline/interfaces recorded; v1 targets below are not implemented public APIs
-or accepted migration test results.
+Status: P0 is recorded; public provider lifecycle and the current ExSSL source gate
+are accepted locally. P1 compatibility and P3 HTTP integration remain incomplete.
+Historical foundation sections retain their original implementation boundaries.
 Execution baseline: `main`, `6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, all nine packages
 `0.21.14`, initially clean worktree, 2026-10-21 (Asia/Shanghai).
 Local toolchain: Elixir 1.20.1 / Erlang OTP 29 (ERTS 17.0.2).
@@ -36,20 +37,21 @@ Test paths below are relative to the repository root.
 | --- | --- | --- | --- | --- | --- | --- |
 | Unspecified backend | OTP default | Explicit selector works | Preserve OTP until P4 passes; consistent ExSSL default only in P5 (required) | core, clients | `apps/http_core/test/http/tls_backend_test.exs` | P5 gate |
 | Default TLS versions | 1.3 + 1.2 | HTTP ordinary default now mixed; raw engine default 1.3 | One ClientHello; explicit versions and concrete profile order retained, auto tickets/explicit cipher policy keep existing 1.3 context absent versions (implemented adapter slice) | core | [version-policy tests](../apps/http_core/test/http/ex_ssl_version_policy_test.exs) | Broader P1 compatibility/consumer gates remain |
-| TLS 1.2 endpoint profile | OTP policy | ECDHE AES-GCM, EMS, initial secure renegotiation | Independent peer coverage; decide PKCS1 SHA256+ handshake support separately from TLS1.3 (decision) | ex_ssl | `apps/ex_ssl/test/ssl/tls12_interop_test.exs` | Yes |
+| TLS 1.2 endpoint profile | OTP policy | ECDHE AES-GCM, EMS, initial secure renegotiation and version-specific RSA-PKCS1 SHA256/384/512 | Forced OpenSSL server/mTLS plus independent raw vectors; TLS1.3/QUIC stay strict (R42 source slice accepted) | ex_ssl | `apps/ex_ssl/test/ssl/tls12_pkcs1_interop_test.exs` and TLS1.2 suites | Integrated consumer/platform gate remains |
 | CA precedence / reference identity | System roots unless explicit CA; origin verification | Explicit cacerts, then file, then roots; DNS/IP identity and SNI | Preserve system/custom trust, pinned and tunnel-origin identity (supported subset) | core, ex_ssl | `tls_transport_test.exs`, `reference_identity_interop_test.exs` under respective app tests | Additional route matrix |
 | `verify_none` | Public adapter passes through; managed allows | Explicit TCP mode skips path/identity policy; verify_peer remains default | Preserve CV/SKE/Finished/AEAD and TLS credential constraints; auto tickets partition verification mode; QUIC still rejects none | ex_ssl, core | engine verify_none interop/authentication negatives and core transport references | Proxy-specific cases, package/runtime matrix and managed lifecycle remain open |
-| Verification callbacks, partial chain, CRL/OCSP, encrypted keys, identities | Ordinary OTP backend accepts backend-specific options; managed policy explicitly excludes callbacks/revocation/encrypted keys | Bounded verified subset, explicit unsupported errors | Classify ordinary escape hatches separately; verify_fun has actual HTTP tests and special pool treatment; no whole-OTP claim (decision) | ex_ssl | `certificate_policy_options_test.exs`, `apps/http_fetch/test/http/tls_setup_evidence_test.exs`, mTLS candidate groups | Yes until individually resolved |
+| Verification callbacks, partial chain, CRL/OCSP, encrypted keys, identities | Ordinary OTP backend accepts backend-specific options; managed policy explicitly excludes callbacks/revocation/encrypted keys | Bounded verified subset, explicit unsupported errors | Preserve ordinary verify_fun and fully implement CRL/OCSP, partial_chain, encrypted keys and multiple identities before OTP removal (user decision, 2026-10-23); existing managed exclusions remain | ex_ssl | OTP references plus independent positive/negative policy and mTLS consumers; `apps/http_fetch/test/http/tls_setup_evidence_test.exs` | Yes until implemented and accepted |
 | Safe TCP/send options | OTP options | Adapter allowlist; defaults < ssl < socket options | Preserve explicit precedence and mutation/binding rules (supported) | core, ex_ssl | `scripts/ex_ssl_options_test.exs` | Required matrix |
 | Managed H1/H2 | OTP only | Rejected before dial | Enable after provider lifecycle and policy are complete (required) | runtime, core | `apps/http_fetch/test/http/managed_otp_tls_lifecycle_test.exs` adapted to ExSSL | Yes |
 | Managed internal `buffer: 65_536` | Injected into socket options | Adapter/engine now preserve explicit driver value | Native driver support implemented; managed enablement still needs lifecycle integration | runtime, core, ex_ssl | [TCP option references](../apps/ex_ssl/test/ssl/tcp_options_test.exs), core direct/upgrade precedence tests | P3 managed gate remains |
 | Explicit tos/tclass/priority | Platform-dependent driver semantics | Passed to driver with validation; platform errors/rounding retained | Actual IPv4/IPv6 + OTP references; macOS priority :ok/read0 is not effective QoS support | core, ex_ssl | TCP option references above | Supported-platform CI still required |
-| Explicit reuse_sessions/middlebox_comp_mode/honor_cipher_order/manual tickets | Managed policy accepts | Unsupported controls rejected | Per-option implementation or versioned compatibility decision (decision) | runtime, ex_ssl | Add independent positive/negative option matrix | Yes |
+| Explicit middlebox_comp_mode/honor_cipher_order | Managed policy accepts | Middlebox wire behavior implemented; client-role honor_cipher_order rejection matches OTP | Independent TLS12/TLS13, mixed-order, HRR and mTLS matrix accepted locally | runtime, ex_ssl | `middlebox_comp_mode_interop_test.exs`, `honor_cipher_order_test.exs` | Managed/package/runtime gates remain |
+| Explicit reuse_sessions/manual tickets | Managed policy accepts | Unsupported controls rejected | Per-option implementation or versioned compatibility decision (decision) | runtime, ex_ssl | OTP initial-hello references; full handshake/consumer coverage required | Yes |
 | Ordered ClientHello profiles | Backend-specific | Exact version/ALPN/policy matching | Preserve wire order; resolve TLS1.3 profiles against future mixed HTTP default without silently rewriting them (decision) | core, ex_ssl | `scripts/ex_ssl_options_test.exs`, engine options/profile golden tests | Yes |
 | Tickets / resumption | OTP behavior | Disabled default; auto only TLS1.3 and no identity | Preserve explicit TLS1.3 opt-in; do not ignore auto under mixed default (decision) | core, ex_ssl | `scripts/ex_ssl_resumption*_test.exs` | Yes |
 | Completion / failed setup cleanup | Current barrier, conservative unconfirmed setup failures | Explicitly unsupported | Public provider evidence before allocation; preserve pending/unconfirmed semantics (required) | ex_ssl, core, Fetch | `apps/http_fetch/test/http/*request_completion_test.exs` | Yes |
 | H1 handoff / H2 cancellation | Managed ownership and capacity invariants | Managed path disabled | Handoff transfers cancellation rights; one H2 stream cancel preserves others (required) | runtime, core | Managed and pooled completion tests | Yes |
-| Busy writer + inbound control | OTP handles its implementation | Control output can fail `:busy` | Bounded pending output; preserve ciphertext, epoch and absolute deadline (required) | ex_ssl | Reproduce with independent KeyUpdate/upload and close races | Yes |
+| Busy writer + inbound control | OTP handles its implementation | Bounded pending control output implemented | Provider/duplex source acceptance preserves ciphertext, epoch and absolute deadline | ex_ssl | Independent KeyUpdate/upload and close-race tests | Integrated HTTP/package gates remain |
 | Fetch / SSE / WSS | Existing supported H1/H2 APIs | Explicit ExSSL ordinary paths exist | Preserve streaming, reconnect pinning, Upgrade, timeouts, abort and proxies (supported subset) | clients, runtime | Existing client suites + feature candidate groups | Full integrated acceptance |
 | Explicit H3 / QUIC | Separate path | Public SSL.QUIC path | Preserve current explicit static/literal QPACK beta; no new support claim | ex_ssl, QUIC, H3 | Existing QUIC/H3 source and candidate gates | Shared-core regression |
 | Production dependency closure | Five HTTP manifests include ssl | Independent engine itself needs crypto/public_key | Remove adapter/dispatch/private assumptions and five app dependencies in P6; isolate test peers (required) | all, release tooling | New actual production release + BEAM/boot/closure gate | Yes |
@@ -71,20 +73,80 @@ Test paths below are relative to the repository root.
   an existing H2 resumption fixture omits versions and must continue working.
 - Implement TLS1.2 PKCS1 SHA256/384/512 with version-specific scheme resolution and
   independent forced-scheme peers, never by widening TLS1.3 CertificateVerify.
-- Resolve managed controls individually. Client honor_cipher_order may be inert only
-  after differential OTP evidence. middlebox_comp_mode affects actual wire behavior.
-  reuse_sessions is TLS1.2 resumption, distinct from H1 pooling/TLS1.3 tickets. Manual
-  ticket enum acceptance is public policy but does not imply HTTP ticket socket APIs.
-- Ordinary OTP verify_fun has real setup/cancellation tests and a non-reusable pool
-  key rule; preserve its behavior or explicitly version its removal. Managed policy
-  already excludes it. CRL/OCSP/partial_chain/encrypted-key/multiple-identity escape
-  hatches have no equivalent independent engine implementation: removal must be a
-  named versioned incompatibility with actionable errors and migration notes, not a
-  quiet claim that current optional ExSSL rejection settles the overall contract.
+- Match OTP29 client-role rejection for explicit honor_cipher_order; :undefined
+  behaves as omission. This bounded option check is implemented and validated.
+  Resolve the remaining controls individually: middlebox_comp_mode affects actual
+  wire behavior; reuse_sessions is TLS1.2 resumption, distinct from H1 pooling and
+  TLS1.3 tickets. Manual ticket enum acceptance is public policy but does not imply
+  HTTP ticket socket APIs. Managed ExSSL enablement remains a P3 lifecycle gate.
+- Preserve ordinary OTP verify_fun, including its setup/cancellation behavior and
+  non-reusable pool rule. The user also requires complete CRL/OCSP, partial_chain,
+  encrypted-key and multiple-client-identity implementation before OTP removal,
+  accepting a longer migration (2026-10-23). Each remains a separate P1 acceptance
+  requirement with OTP reference and independent positive/negative coverage.
+  Existing managed-policy exclusions remain; ordinary mTLS and HTTP behavior must
+  continue to work.
 
-These directions do not accept a breaking removal or establish completed support.
-Any narrowed ordinary OTP escape hatch remains a release blocker until its exact
-boundary and migration behavior are resolved and documented.
+These decisions establish required compatibility, not completed support. Outstanding
+implementation or acceptance of these capabilities blocks OTP removal and release.
+
+For the required CRL work, ExSSL will own bounded default and hash-directory cache
+implementations. Legacy built-in `crl_cache` module identifiers are compatibility
+selectors; production must not invoke or shadow OTP SSL cache modules. A public
+`SSL.CRLCache` facade will replace direct OTP cache population calls, with that
+namespace migration documented explicitly. Custom cache callbacks retain their
+reference-validated public contract. This interface direction is not implemented.
+
+Verification callbacks, partial-chain trust, enabled CRL checks and requested
+stapling require a full certificate handshake rather than ticket reuse that skips
+their policy. Keep explicit auto-ticket configuration accepted while bypassing
+ticket lookup/insertion for these policies. Existing healthy pooled connections
+retain handshake-time validation; new handshakes check current policy and cache
+material. This does not add periodic or per-request certificate verification.
+
+The encrypted-key loader accepts byte-preserving iodata uniformly, including
+legacy/PBES1 binary passwords that hit an OTP 29 decoder guard error. Passwords
+are transient: resolve a file-backed PEM callback once (including plaintext PEM),
+and do not invoke it for typed DER or absent identity. Trusted synchronous callback
+code may outlast connect's timeout, as observed with OTP; keep the original
+deadline afterward. `prepare_upgrade/1` remains synchronous without a timeout.
+No callback preemption or lifecycle cleanup guarantee is implied.
+
+Library-controlled decoding has explicit admission limits: 1 MiB of password
+octets, 2,097,153 traversal nodes, nesting depth 64, KDF iterations from 1 through
+1,000,000, and 2,000,000 conservative KDF work units accounting for PRF blocks,
+password length and salt length. PBES2 OCTET salts may be empty and are bounded
+at 65,536 bytes; PBES1 salt and cipher IV/key lengths follow their scheme. Reject
+malformed or over-budget inputs with a fixed redacted option error before KDF.
+These are finite compatibility limits, not unrestricted OTP parity or wall-time
+guarantees. Available-platform mTLS/HTTP checks pass; full acceptance remains
+open. Default local OTP provider discovery lacks DES/RC2. An isolated process
+with the installed legacy provider passes all336 loader/password cells and40
+independent mTLS exchanges for the ten otherwise unavailable formats, including
+TLS12 EMS. This is version-specific local evidence; default-provider and platform
+acceptance remain open. No global configuration changes apply.
+
+Multiple-identity implementation keeps the existing immutable client-identity
+field and shared selector. Explicit `certs_keys`, including an empty list,
+overrides legacy identity sources and passwords; each map owns its password.
+Modern DER values take precedence over corresponding file sources. Preserve
+legacy source-conflict checks and the stronger ExSSL requirement to validate
+every candidate, including unused ones, before dialing. OTP's observed deferred
+errors and incompatible restricted-PSS selections do not relax key matching or
+signature restrictions. Selection intersects local and peer signature policy
+and TLS12 certificate types before considering CA hints. A later actual CA match
+must beat an earlier fallback; version-specific fallback and emitted chains
+follow the reference evidence. Signing/output failure remains terminal.
+
+Bound the outer modern list to16 entries, including empty maps, and aggregate
+retained credentials to8 MiB, measured as DER bytes plus the external-encoded
+size of decoded private keys.
+Keep all per-identity limits. Local chain completion uses the immutable existing
+trust snapshot and its4,096-certificate/8 MiB bounds, emits at most16 certificates,
+and has a finite search cap of65,536 issuer-candidate visits per identity and
+1,048,576 overall. Do not enumerate unlimited path permutations or turn another
+identity's leaf into trust. These are explicit admission/work limits, not
+unrestricted OTP parity. Prepared reuse must not reload files or callbacks.
 
 ### Effective configuration facts
 
@@ -268,9 +330,31 @@ Acceptance only shortens settlement and closes admission; actual original DOWN e
 and the existing Reader establish the separate terminal cleanup result. Open/enroll
 unknowns and sticky losses remain unresolved; unrecognized errors gain no new mapping.
 Four real Allocator cases and thirteen authentication/unit cases pass17/17, including
-independent classic TCP peer bytes and closure. Raw Socket handoff explicitly rejects;
+independent classic TCP peer bytes and closure. At the R37 boundary, raw Socket handoff rejects;
 Setup orchestration, native TLS send/receive/options/close adaptation, all-error
 constructor proof and public lifecycle remain gated. This is not physical-FD proof.
+
+R38 adds explicit private Setup.start_socket with mode outside its unchanged context.
+It uses the same actors, original typed Socket identity, creator generations,
+readiness/grant nonces and clipped absolute budgets. Public Socket owner queries
+and controlling-process transfer establish actual Connection ownership; Allocator
+ACK plus its original normal DOWN precede the unchanged native-owned notice.
+A dedicated receiver selects by the canonical STATE Socket kind, requires an
+integer outer deadline and only canonical prepare/commit wire forms, and rejects
+injected internal forms before dispatch. Port/absent-TCP dispatch and the R37
+failure receiver remain unchanged. The all-live checks after public owner queries
+retain original expiry/readiness bounds; no monitor or deadline is reminted.
+
+Raw transport remains inert. Setup and Connection reject raw TLS attach before
+TLS/inet I/O, and connected publication still rejects this resource kind.
+All currently reachable raw Connection close paths stop its controlling process.
+They use controller exit rather than an explicit public close racing Observer
+retirement. A focused A/B reproduces peer EOF with closed public metadata but no
+Socket DOWN and an unsealed receipt under explicit close; exit-only terminal
+handling passes the unchanged DOWN/peer/31-role checks. This is not a claim about
+OTP registry internals or physical FD drain. Constructor-owned close is unchanged.
+Future raw TLS I/O and any continuing close path require a separate close protocol;
+all-error identity, STARTTLS and public lifecycle remain gated.
 
 The private ObserverSupervisor loads seven control modules (Bootstrap, Observer,
 Authority, Receipt, ResourceLedger, Handoff and Reader) and the directly called OTP
@@ -530,9 +614,10 @@ The proposed public boundary must provide:
 Request completion releases/hands off request resources and reservations; a healthy
 pooled connection remains alive. Generation retirement waits for provider cleanup.
 Keep pure state/policy logic separate from monitoring and socket ownership.
-The reviewed v1 shape below is the implementation target. These APIs do not exist
-yet. Implement the pure transition/receipt model before changing engine topology;
-HTTP integrations must consume public evidence rather than copy these internals.
+The reviewed v1 shape below is implemented by the public `SSL.Lifecycle` facade.
+The complete local ExSSL source gate passes with integration included; HTTP
+integration remains P3. Consumers must use public evidence rather than copy the
+provider internals described in the historical foundation sections above.
 
 ```elixir
 SSL.Lifecycle.new(controller: pid, deadline: {:abs_ms, integer} | :infinity)
@@ -540,6 +625,8 @@ SSL.Lifecycle.new(controller: pid, deadline: {:abs_ms, integer} | :infinity)
 SSL.connect(host, port, [..., ex_ssl: [lifecycle: {handle, lease}]], timeout)
 SSL.connect(tcp, [..., ex_ssl: [lifecycle: {handle, lease}]], timeout)
 # Existing connect return forms; one attempt may bind once only.
+SSL.connect_prepared(tcp, prepared, [ex_ssl: [lifecycle: {handle, lease}]], timeout)
+# Additive /4: attach only this attempt; reject policy overrides, keep /3 unchanged.
 SSL.Lifecycle.status(handle)
 # {:pending, snapshot} | {:terminal, receipt} | {:unconfirmed, reason}
 SSL.Lifecycle.cancel(lease, {:abs_ms, integer})
@@ -640,14 +727,25 @@ control stays with the pool/owner, and retirement retains the provider dependenc
 ## Abandoned-upload terminal policy
 
 `SSL.abandon_send/1` remains a one-way owner operation: discard the logical cursor,
-settle its caller once, retain at most the original bounded protected output, and
-allow authenticated response reads. Its existing `write_abandoned?` flag also owns
-the final transport policy. Completion of that output or `send_pend == 0` does not
-acknowledge the logical upload or establish an empty kernel queue. Final close,
-owner death or peer closure therefore skips orderly close_notify and uses the
-existing zero-linger abort path when that flag is set. Ordinary complete writes
-retain graceful close. No new state field, actor, timer, re-encryption or replay is
-introduced, and authenticated buffered response bytes retain their drainage rules.
+settle its caller once, and allow authenticated response reads. P2 duplex completion
+retains the original bounded protected application output plus at most one bounded,
+already-protected mandatory TLS control response. Both use the original output/write
+deadline; queue residence consumes that budget, and peer closure additionally uses
+the existing 250ms shutdown cap from admission. No further application plaintext may
+be admitted. An authenticated control response and its traffic-key transition must
+not be discarded or rebuilt when abandonment occurs. This bounded-control extension
+is the R43 implementation target; it has not yet passed its acceptance tests.
+The existing `write_abandoned?` flag also owns the final transport policy.
+Completion of protected output or `send_pend == 0` does not
+acknowledge the logical upload or establish an empty kernel queue. Explicit final
+close and owner death abort retained output instead of initiating orderly
+close_notify. Authenticated peer closure may enqueue its one bounded reciprocal
+control response; terminal transport disposal retains the existing zero-linger
+abort policy when the flag is set. Ordinary complete writes
+retain graceful close. Explicit final close, cancellation and owner loss abort both
+slots. Use the existing Connection/Writer actors, never re-encrypt or replay protected
+bytes, and retain authenticated buffered response drainage and original-resource
+cleanup rules.
 
 The regression distinguishes first-hop FIN/RST before any relay cleanup, matched
 complete/abandoned one-record output, exact local Connection/writer DOWN and Port
@@ -710,6 +808,14 @@ routes preserve external coverage when defaults change; execution and remaining
 acceptance limits are recorded separately in the validation ledger.
 
 ## Source/dependency inventory and evidence boundaries
+
+Ordinary ExSSL H1 now carries opaque public lifecycle evidence through request and
+pool ownership. Pool prepare, activation and checkout share one finite admission
+deadline; late work cannot publish a connection. An exact accepted transfer releases
+the old request obligation. A lost reply without an opaque transfer ticket retains
+bounded unpublished capacity and may remain unconfirmed; it never authorizes a
+replacement dial or a fabricated cleanup result. H2 and managed retirement remain
+separate integration gates.
 
 Run `python3 scripts/tls_migration_inventory.py` for a bounded JSON inventory of
 production libraries and manifests, including SHA256 of matched files and HEAD.

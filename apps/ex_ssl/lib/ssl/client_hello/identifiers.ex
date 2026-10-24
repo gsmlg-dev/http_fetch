@@ -11,6 +11,13 @@ defmodule SSL.ClientHello.Identifiers do
   @spec uint16(atom(), term()) :: {:ok, 0..0xFFFF} | {:error, term()}
   def uint16(_kind, value) when is_integer(value) and value in 0..0xFFFF, do: {:ok, value}
 
+  def uint16(:signature_algorithm, value) do
+    case Capabilities.signature(value, :tls12) do
+      %{id: id} -> {:ok, id}
+      nil -> {:error, {:unsupported_identifier, :signature_algorithm, value}}
+    end
+  end
+
   def uint16(kind, value) do
     case Capabilities.resolve(kind, value) do
       %{id: identifier} ->

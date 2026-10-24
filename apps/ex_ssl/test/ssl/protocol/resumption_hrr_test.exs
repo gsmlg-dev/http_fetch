@@ -60,7 +60,7 @@ defmodule SSL.Protocol.ResumptionHRRTest do
         extension(51, <<0x0018::16>>)
       ])
 
-    assert {:ok, retried, [record], []} =
+    assert {:ok, retried, [<<20, 3, 3, 0, 1, 1>>, record], []} =
              HandshakeMachine.feed(machine, plaintext_record(hrr))
 
     <<22, 3, 3, _length::16, client_hello2::binary>> = record

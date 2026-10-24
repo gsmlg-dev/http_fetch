@@ -4,6 +4,12 @@ defmodule QuicHttp3.Transport do
 
   Implementations provide QUIC operations only. HTTP/3 frame parsing, QPACK,
   control streams, and request streams remain in `QuicHttp3`.
+
+  Operation options may carry `deadline: {:abs_ms, monotonic_milliseconds}`.
+  Session retains the same absolute deadline across blocked or unknown work.
+  The internal exclusive `cleanup` descriptor is supported only by a Session
+  using the production Quic adapter and an owned endpoint. Cleanup acknowledgements
+  do not replace the separately retained `Quic.Cleanup` receipt.
   """
 
   @type connection :: term()

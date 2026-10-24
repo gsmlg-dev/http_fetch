@@ -109,11 +109,12 @@ defmodule HTTPRuntimeConsumerGate do
     resolved = Enum.map(Mix.Dep.cached(), & &1.app)
 
     if release = System.get_env("HTTP_RUNTIME_CONSUMER_RELEASE") do
-      for app <- [:http_core, :elixir_quic_http3, :http_runtime | selected] do
+      for app <- [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime | selected] do
         dep = Enum.find(Mix.Dep.cached(), &(&1.app == app))
 
         assert!(
-          dep.scm == Hex.SCM and dep.opts[:hex] == Atom.to_string(app),
+          dep.scm == Hex.SCM and dep.opts[:hex] == Atom.to_string(app) and
+            dep.status == {:ok, release},
           "#{app} is not the published Hex app"
         )
 
@@ -154,6 +155,13 @@ defmodule HTTPRuntimeConsumerGate do
     assert!(
       not String.contains?(owner_beam, System.fetch_env!("HTTP_RUNTIME_REPO_ROOT")),
       "owner loaded from umbrella"
+    )
+
+    ssl_beam = SSL.Connection |> :code.which() |> List.to_string() |> Path.expand()
+
+    assert!(
+      String.starts_with?(ssl_beam, Path.join(build, "lib/ex_ssl/ebin/")),
+      "TLS provider loaded outside isolated candidate"
     )
 
     runtime = runtime_processes!()
@@ -204,7 +212,7 @@ defmodule HTTPRuntimeConsumerGate do
   end
 
   defp traffic!(selected, url) do
-    opts = [http_version: :h2c, connect_timeout: 30_000, http2_scope: "package-traffic"]
+    {mode, opts} = traffic_options!(url)
 
     source =
       if :http_event_source in selected do
@@ -219,7 +227,11 @@ defmodule HTTPRuntimeConsumerGate do
 
     socket =
       if :http_web_socket in selected do
-        ws_url = String.replace_prefix(url, "http://", "ws://")
+        ws_url =
+          url
+          |> String.replace_prefix("https://", "wss://")
+          |> String.replace_prefix("http://", "ws://")
+
         count = if length(selected) == 3, do: 2, else: 1
 
         socket =
@@ -242,6 +254,7 @@ defmodule HTTPRuntimeConsumerGate do
       promise = apply(HTTP, :fetch, [url <> "/fetch/package", opts])
       response = apply(HTTP.Promise, :await, [promise, 30_000])
       assert!(response.status == 200, "standalone Fetch failed")
+      assert!(response.http_version == :http2, "Fetch used HTTP/1")
 
       assert!(
         apply(HTTP.Response, :read_all, [response]) == "/fetch/package",
@@ -272,7 +285,45 @@ defmodule HTTPRuntimeConsumerGate do
 
     await_release!(System.monotonic_time(:millisecond) + 10_000)
 
-    IO.puts(JSON.encode!(%{result: "PASS", gate: "isolated_http2_traffic", clients: selected}))
+    IO.puts(
+      JSON.encode!(%{
+        result: "PASS",
+        gate: "isolated_http2_traffic",
+        clients: selected,
+        mode: mode,
+        scheme: URI.parse(url).scheme,
+        protocol: opts[:http_version],
+        backend: opts[:tls_backend],
+        verified_tls: mode == "ex_ssl"
+      })
+    )
+  end
+
+  defp traffic_options!(url) do
+    common = [connect_timeout: 30_000, http2_scope: "package-traffic"]
+
+    case {System.get_env("HTTP_RUNTIME_CONSUMER_MODE", "h2c"), URI.parse(url)} do
+      {"h2c", %URI{scheme: "http"}} ->
+        {"h2c", [http_version: :h2c] ++ common}
+
+      {"ex_ssl", %URI{scheme: "https", host: "localhost"}} ->
+        {"ex_ssl",
+         [
+           http_version: :http2,
+           tls_backend: :ex_ssl,
+           ssl: [
+             cacertfile: System.fetch_env!("HTTP_RUNTIME_CONSUMER_CA"),
+             verify: :verify_peer,
+             server_name_indication: ~c"localhost",
+             customize_hostname_check: [
+               match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+             ]
+           ]
+         ] ++ common}
+
+      _ ->
+        raise "unsupported package traffic mode or endpoint"
+    end
   end
 
   defp event!(module, client, type) do

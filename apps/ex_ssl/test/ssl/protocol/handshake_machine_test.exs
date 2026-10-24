@@ -399,7 +399,8 @@ defmodule SSL.Protocol.HandshakeMachineTest do
         extension(51, <<0x0017::16>>)
       ])
 
-    assert {:ok, retried, [record], []} = HandshakeMachine.feed(machine, plaintext_record(hrr))
+    assert {:ok, retried, [<<20, 3, 3, 0, 1, 1>>, record], []} =
+             HandshakeMachine.feed(machine, plaintext_record(hrr))
     <<22, 3, 3, _::16, client_hello2::binary>> = record
     assert {:ok, offer} = ClientOffer.from_client_hello(client_hello2)
     assert [%{group: 0x0017, key_exchange: second_public}] = offer.key_shares
@@ -443,7 +444,8 @@ defmodule SSL.Protocol.HandshakeMachineTest do
         extension(51, <<0x0018::16>>)
       ])
 
-    assert {:ok, retried, [record], []} = HandshakeMachine.feed(machine, plaintext_record(hrr))
+    assert {:ok, retried, [<<20, 3, 3, 0, 1, 1>>, record], []} =
+             HandshakeMachine.feed(machine, plaintext_record(hrr))
     <<22, 3, 3, _::16, client_hello2::binary>> = record
     assert {:ok, offer} = ClientOffer.from_client_hello(client_hello2)
     assert [%{group: 0x0018, key_exchange: second_public}] = offer.key_shares

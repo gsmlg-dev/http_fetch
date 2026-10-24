@@ -1,6 +1,8 @@
 defmodule HTTP.SSLTransportTest do
   use ExUnit.Case
 
+  alias ExSSL.TestSupport.OpenSSLPeer
+
   @certfile Path.expand("../support/fixtures/localhost.pem", __DIR__)
   @cacertfile Path.expand("../support/fixtures/localhost-ca.pem", __DIR__)
   @keyfile Path.expand("../support/fixtures/localhost.key", __DIR__)
@@ -111,6 +113,278 @@ defmodule HTTP.SSLTransportTest do
 
       assert response.status == 200
       assert HTTP.Response.read_all(response) == "ex-ssl"
+    end
+
+    for {version, wire, negotiated} <- [
+          {:"tlsv1.2", :tls12, "TLSv1.2"},
+          {:"tlsv1.3", :tls13, "TLSv1.3"}
+        ] do
+      @tag :integration
+      @tag :p3_ex_ssl_completion
+      test "verified #{version} HTTP/1 response joins provider and request cleanup" do
+        version = unquote(version)
+        wire = unquote(wire)
+        negotiated = unquote(negotiated)
+
+        assert {:ok, peer} =
+                 OpenSSLPeer.start(
+                   certfile: @certfile,
+                   keyfile: @keyfile,
+                   min_version: wire,
+                   max_version: wire,
+                   mode: :http1
+                 )
+
+        try do
+          promise =
+            HTTP.fetch("https://127.0.0.1:#{peer.port}/secure",
+              tls_backend: :ex_ssl,
+              http_version: :http1,
+              http1_reuse: false,
+              redirect: :manual,
+              headers: [{"User-Agent", "p3-completion"}],
+              ssl: [cacertfile: @cacertfile, versions: [version]]
+            )
+
+          assert %HTTP.Response{status: 200} = response = HTTP.Promise.await(promise)
+          assert HTTP.Response.read_all(response) == "pong"
+
+          assert {:ok, %{"version" => ^negotiated, "resumed" => false}} =
+                   OpenSSLPeer.event(peer, "handshake", 5_000)
+
+          expected_request =
+            "GET /secure HTTP/1.1\r\nHost: 127.0.0.1:#{peer.port}\r\n" <>
+              "User-Agent: p3-completion\r\nConnection: close\r\n\r\n"
+
+          request_sha256 = :crypto.hash(:sha256, expected_request) |> Base.encode16(case: :lower)
+
+          assert {:ok, %{"bytes" => 0, "request_sha256" => ^request_sha256}} =
+                   OpenSSLPeer.event(peer, "exchange", 5_000)
+
+          assert_completion_peer_stopped(peer)
+
+          completion = HTTP.Promise.completion(promise)
+          assert :ok = HTTP.RequestCompletion.await(completion, 1_000)
+          assert :ok = HTTP.RequestCompletion.await(completion, 0)
+
+          waiters =
+            for _ <- 1..3, do: Task.async(fn -> HTTP.RequestCompletion.await(completion, 20) end)
+
+          assert Enum.all?(waiters, &(Task.await(&1) == :ok))
+        after
+          OpenSSLPeer.stop(peer)
+          assert Port.info(peer.handle) == nil
+        end
+      end
+    end
+
+    @tag :integration
+    @tag :p3_ex_ssl_completion
+    test "pinned ExSSL preserves origin identity, caller policy and exact HTTP authority" do
+      fixtures = Path.dirname(@certfile)
+
+      assert {:ok, peer} =
+               OpenSSLPeer.start(
+                 certfile: Path.join(fixtures, "pinned.pem"),
+                 keyfile: Path.join(fixtures, "pinned.key"),
+                 min_version: :tls13,
+                 max_version: :tls13,
+                 mode: :http1
+               )
+
+      try do
+        promise =
+          HTTP.fetch("https://pinned.invalid:#{peer.port}/secure",
+            tls_backend: :ex_ssl,
+            connect_address: {127, 0, 0, 1},
+            redirect: :manual,
+            headers: [{"User-Agent", "p3-completion"}],
+            ssl: [
+              cacertfile: Path.join(fixtures, "pinned-ca.pem"),
+              versions: [:"tlsv1.3"],
+              ex_ssl: [profile: :default]
+            ]
+          )
+
+        assert %HTTP.Response{status: 200} = response = HTTP.Promise.await(promise)
+        assert HTTP.Response.read_all(response) == "pong"
+
+        assert {:ok, %{"version" => "TLSv1.3", "resumed" => false}} =
+                 OpenSSLPeer.event(peer, "handshake", 5_000)
+
+        request =
+          "GET /secure HTTP/1.1\r\nHost: pinned.invalid:#{peer.port}\r\n" <>
+            "User-Agent: p3-completion\r\nConnection: close\r\n\r\n"
+
+        digest = :crypto.hash(:sha256, request) |> Base.encode16(case: :lower)
+
+        assert {:ok, %{"bytes" => 0, "request_sha256" => ^digest}} =
+                 OpenSSLPeer.event(peer, "exchange", 5_000)
+
+        assert_completion_peer_stopped(peer)
+        assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 1_000)
+      after
+        OpenSSLPeer.stop(peer)
+        assert Port.info(peer.handle) == nil
+      end
+    end
+
+    for {host, ca_file, alert} <- [
+          {"localhost", "pinned-ca.pem", :unknown_ca},
+          {"wrong.invalid", "localhost-ca.pem", :certificate_unknown}
+        ] do
+      @tag :integration
+      @tag :p3_ex_ssl_completion
+      test "ExSSL #{alert} retains confirmed failed-setup completion" do
+        assert {:ok, peer} =
+                 OpenSSLPeer.start(
+                   certfile: @certfile,
+                   keyfile: @keyfile,
+                   min_version: :tls13,
+                   max_version: :tls13,
+                   mode: :http1
+                 )
+
+        try do
+          promise =
+            HTTP.fetch("https://#{unquote(host)}:#{peer.port}/secure",
+              tls_backend: :ex_ssl,
+              redirect: :manual,
+              connect_address: {127, 0, 0, 1},
+              ssl: [
+                cacertfile: Path.join(Path.dirname(@certfile), unquote(ca_file)),
+                versions: [:"tlsv1.3"]
+              ]
+            )
+
+          assert {:error, {:tls_alert, {unquote(alert), _description}}} =
+                   HTTP.Promise.await(promise)
+
+          assert {:error, %{"kind" => "failure", "error" => ssl_error}} =
+                   OpenSSLPeer.event(peer, "handshake", 5_000)
+
+          assert ssl_error in ["SSLError", "SSLEOFError"]
+
+          assert_completion_peer_stopped(peer)
+          completion = HTTP.Promise.completion(promise)
+          assert :ok = HTTP.RequestCompletion.await(completion, 1_000)
+          assert :ok = HTTP.RequestCompletion.await(completion, 0)
+        after
+          OpenSSLPeer.stop(peer)
+          assert Port.info(peer.handle) == nil
+        end
+      end
+    end
+
+    @tag :integration
+    @tag :p3_ex_ssl_completion
+    test "ExSSL option rejection joins its preallocated attempt without dialing" do
+      {listener, port} = completion_listener()
+
+      promise =
+        HTTP.fetch("https://127.0.0.1:#{port}/secure",
+          tls_backend: :ex_ssl,
+          redirect: :manual,
+          ssl: [cacertfile: @cacertfile],
+          socket_opts: [nodelay: :invalid]
+        )
+
+      assert {:error, {:options, {:nodelay, :unsupported_or_invalid}}} =
+               HTTP.Promise.await(promise)
+
+      assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 1_000)
+      assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
+      close_completion_listener(listener)
+    end
+
+    @tag :integration
+    @tag :p3_ex_ssl_completion
+    test "ExSSL request rejects caller lifecycle authority without adopting or cancelling it" do
+      {listener, port} = completion_listener()
+      assert {:ok, handle, lease} = SSL.Lifecycle.new(controller: self(), deadline: :infinity)
+
+      try do
+        promise =
+          HTTP.fetch("https://127.0.0.1:#{port}/secure",
+            tls_backend: :ex_ssl,
+            redirect: :manual,
+            ssl: [cacertfile: @cacertfile, ex_ssl: [lifecycle: {handle, lease}]]
+          )
+
+        assert {:error, {:options, {:lifecycle, :request_owned}}} = HTTP.Promise.await(promise)
+        assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 1_000)
+        assert {:pending, _} = SSL.Lifecycle.await(handle, completion_deadline(0))
+        assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
+        close_completion_listener(listener)
+      after
+        SSL.Lifecycle.cancel(lease, completion_deadline(1_000))
+
+        assert {:ok, %{cleanup: :confirmed}} =
+                 SSL.Lifecycle.await(handle, completion_deadline(1_000))
+      end
+    end
+
+    @tag :integration
+    @tag :p3_ex_ssl_completion
+    test "an already aborted ExSSL request confirms cleanup without a dial or HTTP bytes" do
+      {listener, port} = completion_listener()
+      controller = HTTP.AbortController.new()
+      HTTP.AbortController.abort(controller)
+
+      promise =
+        HTTP.fetch("https://127.0.0.1:#{port}/secure",
+          tls_backend: :ex_ssl,
+          redirect: :manual,
+          signal: controller,
+          ssl: [cacertfile: @cacertfile]
+        )
+
+      assert {:error, :aborted} = HTTP.Promise.await(promise)
+      assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 1_000)
+      assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
+      close_completion_listener(listener)
+      Agent.stop(controller)
+    end
+
+    @tag :integration
+    @tag :p3_ex_ssl_completion
+    test "cancellation during an ExSSL handshake joins provider cleanup and the dial worker" do
+      {listener, port} = completion_listener()
+      parent = self()
+
+      peer =
+        Task.async(fn ->
+          {:ok, socket} = :gen_tcp.accept(listener, 2_000)
+
+          try do
+            assert {:ok, <<22, _version::16, length::16>>} = :gen_tcp.recv(socket, 5, 2_000)
+            assert {:ok, <<1, _hello::binary>>} = :gen_tcp.recv(socket, length, 2_000)
+            send(parent, :completion_handshake_started)
+            assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+          after
+            :gen_tcp.close(socket)
+          end
+        end)
+
+      on_exit(fn -> if Process.alive?(peer.pid), do: Process.exit(peer.pid, :kill) end)
+
+      promise =
+        HTTP.fetch("https://127.0.0.1:#{port}/secure",
+          tls_backend: :ex_ssl,
+          redirect: :manual,
+          timeout: 2_000,
+          ssl: [cacertfile: @cacertfile, versions: [:"tlsv1.3"]]
+        )
+
+      completion = HTTP.Promise.completion(promise)
+      assert_receive :completion_handshake_started, 1_000
+      assert {:error, :cleanup_pending} = HTTP.RequestCompletion.await(completion, 0)
+      assert :ok = HTTP.RequestCompletion.abort_and_await(completion, 1_000)
+      assert {:error, :aborted} = HTTP.Promise.await(promise)
+      assert {:error, :closed} = Task.await(peer, 1_000)
+      assert :ok = HTTP.RequestCompletion.await(completion, 0)
+      assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
+      close_completion_listener(listener)
     end
 
     @tag :integration
@@ -343,6 +617,37 @@ defmodule HTTP.SSLTransportTest do
       assert HTTP.Response.read_all(response) == body
     end
   end
+
+  defp assert_completion_peer_stopped(peer) do
+    handle = peer.handle
+    assert_receive {^handle, {:exit_status, 0}}, 1_000
+    assert Port.info(handle) == nil
+
+    {message, status} =
+      System.cmd("kill", ["-0", Integer.to_string(peer.os_pid)], stderr_to_stdout: true)
+
+    assert status != 0
+    assert message =~ "No such process"
+
+    assert {:error, :econnrefused} =
+             :gen_tcp.connect(~c"127.0.0.1", peer.port, [:binary, active: false], 1_000)
+  end
+
+  defp completion_listener do
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, {_address, port}} = :inet.sockname(listener)
+    on_exit(fn -> :gen_tcp.close(listener) end)
+    {listener, port}
+  end
+
+  defp close_completion_listener(listener) do
+    monitor = Port.monitor(listener)
+    :gen_tcp.close(listener)
+    assert_receive {:DOWN, ^monitor, :port, ^listener, :normal}, 1_000
+    assert Port.info(listener) == nil
+  end
+
+  defp completion_deadline(timeout), do: {:abs_ms, System.monotonic_time(:millisecond) + timeout}
 
   defp start_https_server!(handler) when is_function(handler, 1) do
     {:ok, listen_socket} =

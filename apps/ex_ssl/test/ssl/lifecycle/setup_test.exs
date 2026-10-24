@@ -190,7 +190,10 @@ defmodule SSL.Lifecycle.SetupTest do
   end
 
   defp native_owned(a) do
-    {:ok, peer} = :gen_tcp.accept(a.listener, 1_000)
+    entered = System.monotonic_time(:millisecond)
+    accepted = :gen_tcp.accept(a.listener, 1_000)
+    if match?({:error, _}, accepted), do: bootstrap_diagnostic(a, accepted, entered)
+    {:ok, peer} = accepted
     on_exit(fn -> :gen_tcp.close(peer) end)
     setup = a.setup
     nonce = a.nonce
@@ -207,6 +210,78 @@ defmodule SSL.Lifecycle.SetupTest do
 
     Map.merge(a, %{socket: socket, tcp: tcp, tcp_monitor: tcp_monitor, peer: peer, writer: writer})
   end
+
+  # Failure-only observation; never call a provider RPC or inspect actor state.
+  defp bootstrap_diagnostic(a, accepted, entered) do
+    now = System.monotonic_time(:millisecond)
+    {:abs_ms, control} = a.context.control_deadline
+    original = elem(a.context.classic, 4)
+    {:messages, messages} = Process.info(self(), :messages)
+
+    receipt =
+      case Receipt.read(a.receipt) do
+        {:sealed, proof} ->
+          Map.new(proof, fn {key, value} ->
+            {Atom.to_string(key), if(is_atom(value), do: Atom.to_string(value), else: value)}
+          end)
+
+        :unsealed ->
+          "unsealed"
+
+        _ ->
+          "unavailable"
+      end
+
+    report = %{
+      kind: "R52_BOOTSTRAP_ACCEPT_FAILURE",
+      accept_error: if(accepted == {:error, :timeout}, do: "timeout", else: "other"),
+      entered_ms: entered,
+      observed_ms: now,
+      elapsed_ms: now - entered,
+      control_remaining_ms: control - now,
+      original_remaining_ms: original - now,
+      run_queue_now: :erlang.statistics(:run_queue),
+      schedulers_online: :erlang.system_info(:schedulers_online),
+      setup: diagnostic_actor(a.setup),
+      observer: diagnostic_actor(a.observer),
+      receipt: receipt,
+      mailbox_count: length(messages),
+      mailbox_tags: Enum.map(Enum.take(messages, 16), &diagnostic_message/1),
+      allocator_result: "not_observed; consumed messages and sensitive actor state unavailable"
+    }
+
+    IO.puts(JSON.encode!(report))
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  defp diagnostic_actor(pid) do
+    info = Process.info(pid, [:status, :message_queue_len, :reductions])
+
+    case info do
+      nil ->
+        %{pid: inspect(pid), alive: false}
+
+      fields ->
+        %{
+          pid: inspect(pid),
+          alive: true,
+          status: Atom.to_string(fields[:status]),
+          queue_length: fields[:message_queue_len],
+          reductions: fields[:reductions]
+        }
+    end
+  end
+
+  defp diagnostic_message(message) when is_tuple(message) and tuple_size(message) > 0 do
+    tag = elem(message, 0)
+    allowed = [:DOWN, :timeout, :lifecycle_native_owned, :lifecycle_allocation_failed]
+    if tag in allowed, do: Atom.to_string(tag), else: "other_tuple"
+  end
+
+  defp diagnostic_message(_message), do: "other"
 
   defp cancel(a) do
     assert :ok = Observer.cancel(a.receipt, a.lease, deadline(500))

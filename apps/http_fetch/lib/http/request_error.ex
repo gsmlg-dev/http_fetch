@@ -7,15 +7,17 @@ defmodule HTTP.RequestError do
   established, for direct TCP and OTP TLS routes using `redirect: :manual` or
   `:error`. Automatic redirect chains always give conservative evidence.
   `phase: :tls_setup` confirms a fatal handshake or certificate alert after
-  ServerHello and before HTTP transmission on a direct, unpooled HTTP/1 OTP
-  TLS route. It requires the ordinary handshake (no custom `handshake` or
-  `early_data` option) and tracking of both TLS processes before continuation.
+  accepted ServerHello and before HTTP transmission on a direct, unpooled
+  HTTP/1 TLS route. It requires the ordinary handshake (no custom `handshake`
+  or `early_data` option). OTP tracks both TLS processes before continuation;
+  ExSSL supplies authenticated public evidence from the original attempt.
   Await cleanup separately before trying another validated pin.
 
   All other failures report
   `phase: :unknown` and `request_started: :unknown`, including earlier TLS failures,
   pooled connections, cancellation, source/send/response errors, and deadlines
-  whose connection state cannot be confirmed. ExSSL failures are conservative.
+  whose connection state cannot be confirmed or whose provider phase evidence
+  is unavailable.
 
   `pre_send?/1` identifies the only evidence suitable for caller-managed
   validated-address failover. Fetch never retries an attempt automatically.

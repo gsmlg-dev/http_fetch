@@ -1,4 +1,8 @@
 defmodule SSL.OptionsTest do
+  alias SSL.ClientHello.Materializer
+  alias SSL.ClientHello.Serializer
+  alias SSL.Protocol.ClientOffer
+
   use ExUnit.Case, async: true
 
   @tag :integration
@@ -20,13 +24,13 @@ defmodule SSL.OptionsTest do
                SSL.Options.normalize("example.test", verify: :verify_peer, cacerts: cacerts)
     end
 
-    for option <- [
-          verify_fun: {fn _, _, _ -> raise "must not run" end, :state},
-          partial_chain: fn _ -> :unknown_ca end
-        ] do
-      assert {:error, {:options, _}} =
-               SSL.Options.normalize("example.test", [verify: :verify_none] ++ [option])
-    end
+    partial_chain = fn _ -> raise "partial_chain ran during normalization" end
+
+    assert {:ok, %{verify: :verify_none, policy: %{partial_chain: ^partial_chain}}} =
+             SSL.Options.normalize("example.test",
+               verify: :verify_none,
+               partial_chain: partial_chain
+             )
   end
 
   @tag :tmp_dir
@@ -116,12 +120,12 @@ defmodule SSL.OptionsTest do
       assert 0x0304 in expected == (List.keyfind(profile.extensions, :key_share, 0) != nil)
 
       assert {:ok, materialized} =
-               SSL.ClientHello.Materializer.materialize(profile, SSL.Options.capabilities(), %{
+               Materializer.materialize(profile, SSL.Options.capabilities(), %{
                  server_name: "mail.example"
                })
 
-      assert {:ok, encoded} = SSL.ClientHello.Serializer.encode(materialized.client_hello)
-      assert {:ok, offer} = SSL.Protocol.ClientOffer.from_client_hello(encoded)
+      assert {:ok, encoded} = Serializer.encode(materialized.client_hello)
+      assert {:ok, offer} = ClientOffer.from_client_hello(encoded)
       assert offer.offered_versions == expected
       assert materialized.key_pairs == [] == (expected == [0x0303])
       assert 23 in offer.extension_ids
@@ -471,14 +475,14 @@ defmodule SSL.OptionsTest do
     assert {:signature_algorithms_cert, [0x0401, 0x0805]} in profile.extensions
 
     assert {:ok, materialized} =
-             SSL.ClientHello.Materializer.materialize(profile, SSL.Options.capabilities(), %{
+             Materializer.materialize(profile, SSL.Options.capabilities(), %{
                server_name: "mail.example"
              })
 
     assert {:ok, encoded} =
-             SSL.ClientHello.Serializer.encode(materialized.client_hello)
+             Serializer.encode(materialized.client_hello)
 
-    assert {:ok, offer} = SSL.Protocol.ClientOffer.from_client_hello(encoded)
+    assert {:ok, offer} = ClientOffer.from_client_hello(encoded)
     assert offer.cipher_suites == [0x1302, 0x1301]
     assert offer.supported_groups == [0x0018, 0x001D]
     assert offer.signature_schemes == [0x0805, 0x0403]

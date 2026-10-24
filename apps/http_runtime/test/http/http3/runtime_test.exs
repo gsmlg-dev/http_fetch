@@ -487,7 +487,8 @@ defmodule HTTP.HTTP3.RuntimeTest do
 
     assert {:ok, stream, _} = Stream.start(request, self(), pool: pool)
     assert {:ok, {_, _, _initial_packet}} = :gen_udp.recv(socket, 0, 2_000)
-    assert %{leases: 1, owners: 0} = Pool.status(pool)
+    # The inert owner is retained before authenticated readiness begins.
+    assert %{leases: 1, owners: 1} = Pool.status(pool)
     monitor = Process.monitor(stream)
     Stream.close(stream)
     assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 500

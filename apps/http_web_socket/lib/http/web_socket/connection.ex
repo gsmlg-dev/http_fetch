@@ -3,6 +3,10 @@ defmodule HTTP.WebSocket.Connection do
 
   use GenServer
 
+  alias HTTP.ClientCompletion
+  alias HTTP.HTTP2.WireProfile
+  alias HTTP.RequestLifecycle
+  alias HTTP.Transport.SSL, as: OTPTLS
   alias HTTP.WebSocket
   alias HTTP.WebSocket.ArrayBuffer
   alias HTTP.WebSocket.Event.Close
@@ -22,6 +26,8 @@ defmodule HTTP.WebSocket.Connection do
   alias HTTP.Runtime.Stream
 
   defstruct options: nil,
+            completion: nil,
+            attempt_tracker: nil,
             owner: nil,
             owner_guard: nil,
             target: nil,
@@ -65,31 +71,39 @@ defmodule HTTP.WebSocket.Connection do
             connect_started_at: nil,
             opening_deadline: :infinity
 
-  @spec start_link(Options.t()) :: GenServer.on_start()
-  def start_link(%Options{} = options), do: GenServer.start_link(__MODULE__, options)
+  @spec start_link(Options.t() | {Options.t(), ClientCompletion.t()}) :: GenServer.on_start()
+  def start_link(%Options{} = options), do: start_link({options, ClientCompletion.new(:client)})
 
-  def child_spec(%Options{ref: ref} = options) do
+  def start_link({%Options{} = options, %ClientCompletion{} = receipt}),
+    do: GenServer.start_link(__MODULE__, {options, receipt})
+
+  def child_spec(%Options{} = options), do: child_spec({options, nil})
+
+  def child_spec({%Options{ref: ref}, _} = args) do
     %{
       id: {__MODULE__, ref},
-      start: {__MODULE__, :start_link, [options]},
+      start: {__MODULE__, :start_link, [if(elem(args, 1), do: args, else: elem(args, 0))]},
       restart: :temporary,
       type: :worker
     }
   end
 
   @impl true
-  def init(%Options{} = options) do
+  def init({%Options{} = options, receipt}) do
+    :ok = RequestLifecycle.enter(receipt.tracker, :owner)
     Process.flag(:trap_exit, true)
     owner_guard = HTTP.OwnerMonitor.start(self(), options.owner)
 
     state = %__MODULE__{
       options: options,
+      completion: receipt,
+      attempt_tracker: nil,
       owner: options.owner,
       owner_guard: owner_guard,
       uri: options.uri,
       telemetry_uri:
         if(options.telemetry_url == :default, do: options.uri, else: options.telemetry_url),
-      target: %WebSocket{pid: self(), ref: options.ref, url: options.url},
+      target: %WebSocket{pid: self(), ref: options.ref, url: options.url, completion: receipt},
       binary_type: options.binary_type,
       delivery: Delivery.new(options),
       parser:
@@ -115,10 +129,54 @@ defmodule HTTP.WebSocket.Connection do
 
     state = timer(state, :opening_timer, :opening_timeout, remaining(state.opening_deadline))
 
-    if HTTP.Runtime.Options.h2?(state.options),
-      do: connect_http2(state),
-      else: {:noreply, connect_http1(state)}
+    case admit_attempt(state) do
+      {:ok, state} ->
+        if HTTP.Runtime.Options.h2?(state.options),
+          do: connect_http2(state),
+          else: {:noreply, connect_http1(state)}
+
+      {:error, reason} ->
+        fail(state, reason)
+    end
   end
+
+  defp admit_attempt(state) do
+    deadline = control_deadline(state.opening_deadline)
+
+    with {:ok, permit} <- RequestLifecycle.reserve_attempt(state.completion.tracker, deadline) do
+      receipt = ClientCompletion.new()
+
+      result =
+        with :ok <-
+               RequestLifecycle.retain_attempt(
+                 state.completion.tracker,
+                 permit,
+                 receipt,
+                 deadline
+               ),
+             :ok <- RequestLifecycle.enter(receipt.tracker, :owner, deadline),
+             do: {:ok, %{state | attempt_tracker: receipt.tracker}}
+
+      case result do
+        {:ok, _} ->
+          result
+
+        error ->
+          RequestLifecycle.abort(receipt.tracker)
+          RequestLifecycle.retire_owner(receipt.tracker)
+          error
+      end
+    end
+  end
+
+  defp retire_attempt(state) do
+    RequestLifecycle.abort(state.attempt_tracker)
+    RequestLifecycle.retire_owner(state.attempt_tracker)
+    %{state | attempt_tracker: nil}
+  end
+
+  defp control_deadline(:infinity), do: System.monotonic_time(:millisecond) + 1_000
+  defp control_deadline(deadline), do: deadline
 
   @impl true
   def handle_call(:ready_state, _from, state), do: {:reply, state.ready_state, state}
@@ -373,6 +431,18 @@ defmodule HTTP.WebSocket.Connection do
     end
   end
 
+  def handle_info(
+        {:opening_admission_failed, generation, reason},
+        %{generation: generation} = state
+      ),
+      do: fail(state, reason)
+
+  def handle_info(
+        {:write_admission_failed, generation, reason},
+        %{generation: generation} = state
+      ),
+      do: transport_terminal(state, reason)
+
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
@@ -383,6 +453,8 @@ defmodule HTTP.WebSocket.Connection do
       catch
         _kind, _private_reason -> exit(:shutdown)
       end
+
+    RequestLifecycle.complete(state.completion.tracker, now())
 
     # OTP can report the original exception and queued messages independently
     # of format_status/1. A literal shutdown prevents those crash reports.
@@ -426,7 +498,12 @@ defmodule HTTP.WebSocket.Connection do
            ),
          request = %{
            request
-           | transport_options: HTTP.Runtime.Options.transport_options(state.options)
+           | transport_options:
+               Keyword.put(
+                 HTTP.Runtime.Options.transport_options(state.options),
+                 :request_lifecycle,
+                 state.attempt_tracker
+               )
          },
          {:ok, pid, _generation} <-
            Stream.start(request, self(),
@@ -444,20 +521,26 @@ defmodule HTTP.WebSocket.Connection do
   defp connect_http1(state) do
     parent = self()
 
-    {:ok, worker} =
-      Task.Supervisor.start_child(:http_runtime_task_supervisor, fn ->
-        HTTP.OwnerMonitor.start(self(), parent)
-        result = http1_open(state, parent)
-        send(parent, {:http1_connected, state.generation, self(), result})
+    case RequestLifecycle.start_worker(state.attempt_tracker, :dial, state.opening_deadline, fn ->
+           HTTP.OwnerMonitor.start(self(), parent)
+           result = http1_open(state, parent)
+           RequestLifecycle.complete(state.attempt_tracker, state.opening_deadline)
+           send(parent, {:http1_connected, state.generation, self(), result})
 
-        receive do
-          :accepted -> :ok
-        after
-          30_000 -> :ok
-        end
-      end)
+           receive do
+             :accepted -> :ok
+             :abort -> :ok
+           after
+             remaining(state.opening_deadline) -> :ok
+           end
+         end) do
+      {:ok, worker} ->
+        %{state | worker: worker, worker_monitor: Process.monitor(worker)}
 
-    %{state | worker: worker, worker_monitor: Process.monitor(worker)}
+      {:error, reason} ->
+        send(self(), {:opening_admission_failed, state.generation, reason})
+        state
+    end
   end
 
   defp http1_open(state, parent) do
@@ -471,7 +554,11 @@ defmodule HTTP.WebSocket.Connection do
              transport,
              host,
              port,
-             [ssl: http1_ssl(state), socket_opts: state.options.socket_opts],
+             [
+               ssl: http1_ssl(state),
+               socket_opts: state.options.socket_opts,
+               request_lifecycle: state.attempt_tracker
+             ],
              bounded_timeout(state.options.connect_timeout, remaining(state.opening_deadline))
            ) do
       result =
@@ -503,8 +590,8 @@ defmodule HTTP.WebSocket.Connection do
     end
   end
 
-  defp connect_http1(HTTP.Transport.SSL, host, port, opts, timeout),
-    do: HTTP.Transport.SSL.connect_cancellable(host, port, opts, timeout)
+  defp connect_http1(OTPTLS, host, port, opts, timeout),
+    do: OTPTLS.connect_cancellable(host, port, opts, timeout)
 
   defp connect_http1(transport, host, port, opts, timeout),
     do: transport.connect(host, port, opts, timeout)
@@ -573,9 +660,13 @@ defmodule HTTP.WebSocket.Connection do
        when reason in [:http1_negotiated, :extended_connect_not_supported] do
     if state.options.http_version == :auto and not state.fallback? and
          is_nil(state.options.http2_profile) do
-      state = detach_stream(state)
+      state = state |> detach_stream() |> retire_attempt()
       stream_telemetry(state, :fallback, reason)
-      {:noreply, connect_http1(%{state | fallback?: true})}
+
+      case admit_attempt(%{state | fallback?: true}) do
+        {:ok, state} -> {:noreply, connect_http1(state)}
+        {:error, reason} -> fail(state, reason)
+      end
     else
       fail(state, reason)
     end
@@ -692,24 +783,33 @@ defmodule HTTP.WebSocket.Connection do
     transport = state.transport
     socket = state.socket
 
-    {:ok, worker} =
-      Task.Supervisor.start_child(:http_runtime_task_supervisor, fn ->
-        HTTP.OwnerMonitor.start(self(), parent)
-        send(parent, {:http1_write, self(), transport.send(socket, item.frame)})
-      end)
+    case RequestLifecycle.start_worker(
+           state.attempt_tracker,
+           :client_write,
+           deadline(state.options.write_timeout),
+           fn ->
+             HTTP.OwnerMonitor.start(self(), parent)
+             send(parent, {:http1_write, self(), transport.send(socket, item.frame)})
+           end
+         ) do
+      {:ok, worker} ->
+        monitor = Process.monitor(worker)
 
-    monitor = Process.monitor(worker)
+        timer =
+          Process.send_after(self(), {:http1_write_timeout, worker}, state.options.write_timeout)
 
-    timer =
-      Process.send_after(self(), {:http1_write_timeout, worker}, state.options.write_timeout)
+        %{
+          state
+          | write:
+              item
+              |> Map.delete(:frame)
+              |> Map.merge(%{worker: worker, monitor: monitor, timer: timer})
+        }
 
-    %{
-      state
-      | write:
-          item
-          |> Map.delete(:frame)
-          |> Map.merge(%{worker: worker, monitor: monitor, timer: timer})
-    }
+      {:error, reason} ->
+        send(self(), {:write_admission_failed, state.generation, reason})
+        state
+    end
   end
 
   defp write_event(%{write: %{ref: ref} = write} = state, ref, {:progress, sent}) do
@@ -869,7 +969,7 @@ defmodule HTTP.WebSocket.Connection do
   defp pack_raw(queue, data, ref), do: :queue.in({data, ref}, queue)
 
   defp raw_limit(state) do
-    profile = state.options.http2_profile || HTTP.HTTP2.WireProfile.native_v1()
+    profile = state.options.http2_profile || WireProfile.native_v1()
     settings = Map.new(profile.settings)
     1_048_576 + Map.get(settings, :initial_window_size, Map.get(settings, 4, 65_535))
   end
@@ -1212,7 +1312,10 @@ defmodule HTTP.WebSocket.Connection do
     _ =
       if state.write do
         settle_send(state, state.write, {:error, reason})
-        if worker = Map.get(state.write, :worker), do: Process.exit(worker, :kill)
+
+        if worker = Map.get(state.write, :worker),
+          do: RequestLifecycle.cancel_worker(state.attempt_tracker, worker)
+
         if monitor = Map.get(state.write, :monitor), do: Process.demonitor(monitor, [:flush])
         _ = if timer = Map.get(state.write, :timer), do: Process.cancel_timer(timer)
       end
@@ -1224,7 +1327,7 @@ defmodule HTTP.WebSocket.Connection do
       |> cancel_timer(:idle_timer)
       |> cancel_timer(:close_timer)
 
-    if state.worker, do: Process.exit(state.worker, :kill)
+    if state.worker, do: RequestLifecycle.cancel_worker(state.attempt_tracker, state.worker)
     if state.worker_monitor, do: Process.demonitor(state.worker_monitor, [:flush])
 
     if state.transport && state.socket do
@@ -1237,6 +1340,8 @@ defmodule HTTP.WebSocket.Connection do
         state.transport.close(state.socket)
       end
     end
+
+    state = retire_attempt(state)
 
     %{
       state
@@ -1251,7 +1356,7 @@ defmodule HTTP.WebSocket.Connection do
     }
   end
 
-  defp abort_transport(HTTP.Transport.SSL, socket), do: HTTP.Transport.SSL.abort(socket)
+  defp abort_transport(OTPTLS, socket), do: OTPTLS.abort(socket)
 
   defp abort_transport(transport, socket) do
     transport.setopts(socket, linger: {true, 0})

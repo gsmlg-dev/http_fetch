@@ -4,13 +4,18 @@ defmodule SSL.Lifecycle.NativeSocketAllocatorTest do
   alias SSL.Lifecycle.{Allocator, Observer, Reader, Receipt}
   @ip {127, 0, 0, 1}
 
-  test "actual Socket allocation retains its identity and keeps Port handoff gated" do
+  test "actual Socket allocation aborts incomplete handoff with original cleanup" do
     {listener, port} = listener()
-    {context, lease, observer} = attempt(port, self())
+    {context, _lease, observer} = attempt(port, self())
     allocation = start(context, listener)
     allocator = allocation.allocator
 
-    assert {:error, :socket_transport_not_implemented} =
+    assert {:ok, allocator} == :socket.getopt(allocation.socket, :otp, :controlling_process)
+
+    assert {:ok, %{setup: :pending, roles: 17, allocations: 0, losses: 0}} =
+             Observer.snapshot(context.receipt, deadline())
+
+    assert {:error, :acceptance_unconfirmed} =
              Allocator.handoff(
                allocator,
                context.nonce,
@@ -18,12 +23,6 @@ defmodule SSL.Lifecycle.NativeSocketAllocatorTest do
                deadline()
              )
 
-    assert {:ok, allocator} == :socket.getopt(allocation.socket, :otp, :controlling_process)
-
-    assert {:ok, %{setup: :pending, roles: 17, allocations: 0, losses: 0}} =
-             Observer.snapshot(context.receipt, deadline())
-
-    assert :ok = Observer.cancel(context.receipt, lease, deadline())
     assert_closed(allocation, context.receipt)
     refute Process.alive?(observer)
   end
@@ -88,6 +87,41 @@ defmodule SSL.Lifecycle.NativeSocketAllocatorTest do
              Receipt.read(context.receipt)
 
     refute Process.alive?(observer)
+  end
+
+  test "observer loss still closes the owned Socket without invented receipt proof" do
+    {listener, port} = listener()
+    {context, _lease, observer} = attempt(port, self())
+    allocation = start(context, listener)
+    Process.exit(observer, :kill)
+
+    %{allocator: allocator, monitor: monitor, socket: socket, socket_monitor: socket_monitor} =
+      allocation
+
+    assert_receive {:DOWN, ^monitor, :process, ^allocator, _}, 1_000
+    assert_receive {:DOWN, ^socket_monitor, :socket, ^socket, :closed}, 1_000
+    assert {:error, :closed} = :gen_tcp.recv(allocation.peer, 0, 1_000)
+    assert {:unconfirmed, _} = Reader.await(context.receipt, deadline(1_000))
+  end
+
+  test "allocator exit preserves a Socket already transferred to another owner" do
+    {listener, port} = listener()
+    {context, _lease, _observer} = attempt(port, self())
+    allocation = start(context, listener)
+    parent = self()
+    # Execute the real native ownership transfer in its actual owner, without
+    # changing the allocator's state or fabricating any monitor evidence.
+    :sys.replace_state(allocation.allocator, fn state ->
+      :ok = :socket.setopt(allocation.socket, :otp, :controlling_process, parent)
+      state
+    end)
+
+    :ok = GenServer.stop(allocation.allocator, :normal)
+    assert {:ok, parent} == :socket.getopt(allocation.socket, :otp, :controlling_process)
+    assert :ok = :socket.send(allocation.socket, "kept", 1_000)
+    assert {:ok, "kept"} = :gen_tcp.recv(allocation.peer, 4, 1_000)
+    assert :ok = :socket.close(allocation.socket)
+    assert_closed(allocation, context.receipt)
   end
 
   defp attempt(port, recipient) do

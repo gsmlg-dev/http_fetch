@@ -97,6 +97,12 @@ defmodule SSL.Protocol.TLS12Codec do
 
   defp decode_body(11, _), do: {:error, :invalid_certificate_chain}
 
+  defp decode_body(22, <<1, length::24, response::binary>>)
+       when length > 0 and length == byte_size(response),
+       do: {:ok, %{type: :certificate_status, response: response}}
+
+  defp decode_body(22, _), do: {:error, :invalid_certificate_status}
+
   defp decode_body(
          12,
          <<3, group::16, key_length, public_key::binary-size(key_length), scheme::16,

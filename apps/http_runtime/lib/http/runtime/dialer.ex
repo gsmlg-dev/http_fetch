@@ -37,7 +37,11 @@ defmodule HTTP.Runtime.Dialer do
   defp normalize_alpn_protocol(protocol) when is_binary(protocol), do: protocol
 
   def connect(transport, host, port, request, selection, timeout, cancel_monitor \\ nil) do
+    started_at = System.monotonic_time(:millisecond)
     connect_timeout = min(connect_timeout(request), timeout)
+
+    deadlines =
+      {connect_deadline(connect_timeout, started_at), connect_deadline(timeout, started_at)}
 
     with :ok <- validate_connect_address_route(request, nil),
          {:ok, proxy} <- HTTP.Proxy.route(request),
@@ -52,9 +56,8 @@ defmodule HTTP.Runtime.Dialer do
             transport_opts(request, selection, timeout)
             |> Keyword.put(:proxy_route, proxy)
             |> Keyword.update!(:tls_setup_evidence, &(&1 and is_nil(proxy))),
-            connect_timeout,
             cancel_monitor,
-            timeout
+            deadlines
           )
 
         HTTP.ManagedTransport.connect_done(request, managed_token)
@@ -161,23 +164,20 @@ defmodule HTTP.Runtime.Dialer do
          host,
          port,
          opts,
-         timeout,
          cancel_monitor,
-         request_timeout
+         {dial_deadline, request_deadline}
        ) do
     parent = self()
     ref = Process.alias()
     # Structured callers need the low-level TCP failure, rather than a timer
     # racing that result. The connect call keeps its smaller timeout; observing
     # its outcome remains bounded by the original request deadline and signal.
-    confirmation_timeout =
+    deadline_at =
       if is_reference(Keyword.get(opts, :connect_failure_token)) and
            Keyword.get(opts, :proxy_route) == nil and
            transport in [HTTP.Transport.TCP, HTTP.Transport.SSL],
-         do: request_timeout,
-         else: timeout
-
-    deadline_at = connect_deadline(confirmation_timeout)
+         do: request_deadline,
+         else: dial_deadline
 
     tracker = Keyword.get(opts, :request_lifecycle)
 
@@ -188,9 +188,28 @@ defmodule HTTP.Runtime.Dialer do
              :connect_launch ->
                Process.demonitor(launch_monitor, [:flush])
                Process.put(HTTP.RequestLifecycle, tracker)
-               result = connect_in_worker(transport, host, port, opts, timeout, parent, ref)
-               HTTP.RequestLifecycle.complete(tracker)
+
+               result =
+                 if Process.alive?(parent) and remaining_timeout(dial_deadline) != 0 do
+                   connect_in_worker(
+                     transport,
+                     host,
+                     port,
+                     opts,
+                     remaining_timeout(dial_deadline),
+                     parent,
+                     ref
+                   )
+                 else
+                   {:error, :connect_timeout}
+                 end
+
+               HTTP.RequestLifecycle.complete(tracker, deadline_at)
                send(ref, {:connect_result, ref, result})
+
+             message when message in [:connect_launch_cancelled, :abort] ->
+               Process.demonitor(launch_monitor, [:flush])
+               HTTP.RequestLifecycle.complete(tracker, deadline_at)
 
              {:DOWN, ^launch_monitor, :process, ^parent, _reason} ->
                :ok
@@ -200,19 +219,18 @@ defmodule HTTP.Runtime.Dialer do
         worker_monitor = Process.monitor(pid)
 
         try do
-          HTTP.RequestLifecycle.register(tracker, pid, :dial)
-          send(pid, :connect_launch)
-
           result =
-            await_connect_result(
-              transport,
-              pid,
-              ref,
-              worker_monitor,
-              nil,
-              deadline_at,
-              cancel_monitor
-            )
+            with :ok <- launch_connect_worker(tracker, pid, deadline_at) do
+              await_connect_result(
+                transport,
+                pid,
+                ref,
+                worker_monitor,
+                nil,
+                {deadline_at, request_deadline},
+                cancel_monitor
+              )
+            end
 
           Process.unalias(ref)
           flush_connect_messages(transport, ref, result)
@@ -228,13 +246,25 @@ defmodule HTTP.Runtime.Dialer do
     end
   end
 
+  defp launch_connect_worker(tracker, pid, deadline) do
+    result = HTTP.RequestLifecycle.register(tracker, pid, :dial, deadline)
+
+    result =
+      if result == :ok and remaining_timeout(deadline) == 0,
+        do: {:error, :request_timeout},
+        else: result
+
+    send(pid, if(result == :ok, do: :connect_launch, else: :connect_launch_cancelled))
+    result
+  end
+
   defp await_connect_result(
          transport,
          pid,
          ref,
          worker_monitor,
          socket,
-         deadline_at,
+         {deadline_at, request_deadline} = deadlines,
          cancel_monitor
        ) do
     receive do
@@ -247,26 +277,12 @@ defmodule HTTP.Runtime.Dialer do
           ref,
           worker_monitor,
           connected_socket,
-          deadline_at,
+          deadlines,
           cancel_monitor
         )
 
-      {:connect_result, ^ref, {:error, {:tls_setup_failure, _, _}} = result} ->
-        # Cancellation/deadline may already be queued behind the native result.
-        # Evidence never authorizes a retry when either has won the request race.
-        receive do
-          :abort ->
-            {:error, :aborted}
-
-          :deadline ->
-            {:error, :request_timeout}
-
-          {:DOWN, ^cancel_monitor, :process, _, _} when is_reference(cancel_monitor) ->
-            {:error, :subscriber_down}
-        after
-          0 ->
-            if remaining_timeout(deadline_at) == 0, do: {:error, :request_timeout}, else: result
-        end
+      {:connect_result, ^ref, {:error, _reason} = result} ->
+        resolve_connect_error(result, request_deadline, cancel_monitor)
 
       {:connect_result, ^ref, result} ->
         result
@@ -299,6 +315,24 @@ defmodule HTTP.Runtime.Dialer do
         close_connect_socket(transport, socket)
         stop_connect_worker(pid, ref)
         {:error, :connect_timeout}
+    end
+  end
+
+  defp resolve_connect_error(result, request_deadline, cancel_monitor) do
+    # Preserve queued control order even when the native error arrived first.
+    # The smaller connect budget cannot stand in for the overall request budget.
+    receive do
+      :abort ->
+        {:error, :aborted}
+
+      :deadline ->
+        {:error, :request_timeout}
+
+      {:DOWN, ^cancel_monitor, :process, _, _} when is_reference(cancel_monitor) ->
+        {:error, :subscriber_down}
+    after
+      0 ->
+        if remaining_timeout(request_deadline) == 0, do: {:error, :request_timeout}, else: result
     end
   end
 
@@ -569,8 +603,8 @@ defmodule HTTP.Runtime.Dialer do
   defp tls_backend(%Request{} = request), do: Keyword.get(request.transport_options, :tls_backend)
 
   defp request_timeout(request), do: Keyword.get(request.transport_options, :timeout, 30_000)
-  defp connect_deadline(:infinity), do: :infinity
-  defp connect_deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
+  defp connect_deadline(:infinity, _started_at), do: :infinity
+  defp connect_deadline(timeout, started_at), do: started_at + timeout
   defp remaining_timeout(:infinity), do: :infinity
   defp remaining_timeout(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 end

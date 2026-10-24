@@ -252,12 +252,37 @@ defmodule HTTP.TLSTransportTest do
 
       {:ok, tcp} = :gen_tcp.listen(0, [:binary, active: false])
       on_exit(fn -> :gen_tcp.close(tcp) end)
+      owner = self()
+      assert {:ok, before_options} = :inet.getopts(tcp, [:active, :packet, :mode, :buffer])
+
+      outsider =
+        Task.async(fn ->
+          ExSSL.upgrade(tcp, "127.0.0.1", [ssl: [ex_ssl: ex_ssl]], 100)
+        end)
+
+      assert {:error, :not_owner} = Task.await(outsider, 1_000)
+      assert {:connected, ^owner} = :erlang.port_info(tcp, :connected)
+      assert {:ok, ^before_options} = :inet.getopts(tcp, [:active, :packet, :mode, :buffer])
 
       assert {:error, {:options, {:ex_ssl, :unsupported_or_invalid}}} =
                ExSSL.upgrade(tcp, "127.0.0.1", [ssl: [ex_ssl: ex_ssl]], 100)
 
       assert :erlang.port_info(tcp) == :undefined
+
+      assert {:error, :closed} =
+               ExSSL.upgrade(tcp, "127.0.0.1", [ssl: [ex_ssl: ex_ssl]], 100)
+
+      assert {:error, :badarg} =
+               ExSSL.upgrade(:not_a_socket, "127.0.0.1", [ssl: [ex_ssl: ex_ssl]], 100)
     end
+
+    {:ok, tcp} = :gen_tcp.listen(0, [:binary, active: false])
+    on_exit(fn -> :gen_tcp.close(tcp) end)
+
+    assert {:error, :badarg} =
+             ExSSL.upgrade(tcp, "127.0.0.1", [ssl: [ex_ssl: nil]], :invalid_timeout)
+
+    assert :erlang.port_info(tcp) == :undefined
   end
 
   @tag :integration
@@ -295,13 +320,12 @@ defmodule HTTP.TLSTransportTest do
              )
 
     try do
-      # Test-only driver probe; buffer attach and verify-mode forwarding audited.
-      # Private inert births leave classic tuple5 buffer and verify-mode forwarding unchanged.
+      # Test-only probe: classic Port ownership, buffer/tos and verify forwarding audited.
       # Production HTTP consumes only the transport API.
       source = SSL.Connection.module_info(:compile)[:source] |> List.to_string()
 
       assert :crypto.hash(:sha256, File.read!(source)) |> Base.encode16(case: :lower) ==
-               "61b2fa41a60fb00d01335ea8486e698aecac8fc0a45a47e10d5adecb34cc3f91"
+               "512c9e029885e6a1dae56aa04bac65ab8bb4aee329c213ed726a4f3c8854da19"
 
       assert Application.spec(:ex_ssl, :vsn) == Application.spec(:http_core, :vsn)
       {:connected, state} = :sys.get_state(socket.pid)

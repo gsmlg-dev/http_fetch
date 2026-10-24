@@ -7,6 +7,7 @@ defmodule HTTP.HTTP2.HeaderFragmentLimitTest do
     {:ok, owner} =
       ConnectionOwner.start_link(transport: %{send: fn _, _ -> :ok end}, activate?: false)
 
+    :ok = ConnectionOwner.activate(owner)
     assert :ok = ConnectionOwner.receive_bytes(owner, Frame.encode(:settings, 0, 0, <<>>))
     assert {:ok, %{id: id}} = ConnectionOwner.open_stream(owner, [{":method", "GET"}])
     {owner, id}

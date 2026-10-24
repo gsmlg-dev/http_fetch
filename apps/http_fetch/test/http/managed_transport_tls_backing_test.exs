@@ -30,7 +30,8 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
                :resources,
                :limits,
                :identity,
-               :lifecycle
+               :lifecycle,
+               :provider_resources
              ])
 
     assert {:error, :timeout} = :ssl.transport_accept(listener, 0)

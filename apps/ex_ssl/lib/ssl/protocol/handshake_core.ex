@@ -7,14 +7,17 @@ defmodule SSL.Protocol.HandshakeCore do
   Inputs contain already loaded trust and fresh connection key material.
   """
 
-  alias SSL.Crypto.{KeyExchange, KeySchedule, Signature}
+  alias SSL.ClientIdentity.Candidates
+  alias SSL.PKIX.VerifyFun
+
   alias SSL.Crypto.Finished, as: CryptoFinished
+  alias SSL.Crypto.{KeyExchange, KeySchedule, Signature}
   alias SSL.Crypto.KeyExchange.KeyPair
   alias SSL.PKIX
 
   alias SSL.Protocol.{
-    ClientOffer,
     ClientAuthentication,
+    ClientOffer,
     ServerFlight,
     ServerHello,
     Transcript
@@ -87,6 +90,8 @@ defmodule SSL.Protocol.HandshakeCore do
   ]
   @option_keys [
     :verify,
+    :verify_fun,
+    :certificate_policy,
     :max_records,
     :depth,
     :customize_hostname_check | @server_flight_option_keys
@@ -176,7 +181,7 @@ defmodule SSL.Protocol.HandshakeCore do
     with {:ok, config} <- validate_options(options),
          {:ok, offer, server_hello} <- validate_input(input),
          {:ok, config} <- bind_offer(config, offer),
-         input = %{input | server_hello: server_hello},
+         input = callback_input(%{input | server_hello: server_hello}, config.verify_fun),
          {:ok, suite, hash, peer_public_key} <- negotiate(input, offer),
          :ok <- validate_selected_ticket(input, offer, hash),
          {:ok, secrets} <-
@@ -193,6 +198,9 @@ defmodule SSL.Protocol.HandshakeCore do
        }}
     end
   end
+
+  defp callback_input(input, :undefined), do: input
+  defp callback_input(input, _policy), do: %{input | ticket: nil, enable_tickets: false}
 
   defp do_process_message(%Incremental{phase: :encrypted_extensions} = state, encoded) do
     options = [{:hash, state.secrets.hash} | state.config.server_flight_options]
@@ -296,6 +304,13 @@ defmodule SSL.Protocol.HandshakeCore do
 
   defp validate_client_identity(nil), do: :ok
   defp validate_client_identity(%SSL.ClientIdentity{}), do: :ok
+
+  defp validate_client_identity(%Candidates{} = candidates) do
+    if Candidates.valid?(candidates),
+      do: :ok,
+      else: alert(:illegal_parameter, :invalid_client_identity)
+  end
+
   defp validate_client_identity(_), do: alert(:illegal_parameter, :invalid_client_identity)
 
   defp client_offer(encoded) do
@@ -730,11 +745,28 @@ defmodule SSL.Protocol.HandshakeCore do
   defp verify_peer(%Certificate{entries: entries}, input, config) do
     chain = Enum.map(entries, & &1.der)
 
-    case PKIX.peer(chain, input.trust_source, input.identity, config.verify,
-           customize_hostname_check: config.hostname_check,
-           depth: config.depth,
-           certificate_signature_schemes: config.certificate_signature_schemes
-         ) do
+    options = [
+      verify_fun: config.verify_fun,
+      customize_hostname_check: config.hostname_check,
+      depth: config.depth,
+      certificate_signature_schemes: config.certificate_signature_schemes
+    ]
+
+    options =
+      if config.certificate_policy do
+        staples =
+          for entry <- entries,
+              {:status_request, response} <- entry.extensions,
+              do: {entry.der, response}
+
+        Keyword.put(options, :policy_staples, staples)
+      else
+        options
+      end
+
+    verifier = config.certificate_policy || (&PKIX.peer/6)
+
+    case verifier.(chain, input.trust_source, input.identity, config.verify, options, :tls13) do
       {:ok, verified_peer} ->
         {:ok, verified_peer}
 
@@ -779,7 +811,9 @@ defmodule SSL.Protocol.HandshakeCore do
              ClientAuthentication.messages(
                state.certificate_request,
                state.input.client_identity,
-               server_transcript
+               server_transcript,
+               signature_schemes: state.offer.signature_schemes,
+               trust_source: state.input.trust_source
              )
            ),
          {:ok, client_verify_data} <-
@@ -885,16 +919,26 @@ defmodule SSL.Protocol.HandshakeCore do
       case Keyword.get(options, :max_records, @default_max_records) do
         maximum when is_integer(maximum) and maximum > 0 ->
           server_flight_options =
-            Keyword.drop(options, [:verify, :max_records, :depth, :customize_hostname_check])
+            Keyword.drop(options, [
+              :verify,
+              :verify_fun,
+              :certificate_policy,
+              :max_records,
+              :depth,
+              :customize_hostname_check
+            ])
 
           with :ok <- validate_signature_policy_option(server_flight_options),
                :ok <- validate_hostname_check_option(options),
                :ok <- validate_depth_option(options),
-               :ok <- validate_verify_option(options) do
+               :ok <- validate_verify_option(options),
+               :ok <- validate_verify_fun_option(options) do
             {:ok,
              %{
                max_records: maximum,
                verify: Keyword.get(options, :verify, :verify_peer),
+               verify_fun: Keyword.get(options, :verify_fun, :undefined),
+               certificate_policy: Keyword.get(options, :certificate_policy),
                depth: Keyword.get(options, :depth, 10),
                hostname_check: Keyword.get(options, :customize_hostname_check, []),
                max_handshake_length:
@@ -937,6 +981,12 @@ defmodule SSL.Protocol.HandshakeCore do
     if Keyword.get(options, :verify, :verify_peer) in [:verify_peer, :verify_none],
       do: :ok,
       else: alert(:decode_error, {:invalid_options, :verify})
+  end
+
+  defp validate_verify_fun_option(options) do
+    if VerifyFun.valid?(Keyword.get(options, :verify_fun, :undefined)),
+      do: :ok,
+      else: alert(:decode_error, {:invalid_options, :verify_fun})
   end
 
   defp validate_depth_option(options) do

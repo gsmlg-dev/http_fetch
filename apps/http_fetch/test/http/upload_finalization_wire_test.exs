@@ -433,15 +433,11 @@ defmodule HTTP.UploadFinalizationWireTest do
     bytes
   end
 
-  defp finish(peer, promise, backend, completion \\ :ok) do
+  defp finish(peer, promise, _backend, completion \\ :ok) do
     assert Task.await(peer, @wait) == :ok
 
     expected =
-      cond do
-        backend == :ex_ssl -> {:error, {:unsupported_completion, :tls_backend}}
-        completion == :unconfirmed -> {:error, :cleanup_unconfirmed}
-        true -> :ok
-      end
+      if completion == :unconfirmed, do: {:error, :cleanup_unconfirmed}, else: :ok
 
     assert RequestCompletion.await(Promise.completion(promise), @wait) == expected
   end

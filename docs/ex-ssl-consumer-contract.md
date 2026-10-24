@@ -33,6 +33,14 @@ contracts in the design, not current public APIs. Backend pinning through redire
 or reconnects does not freeze raw CA/identity files or system roots for an ordinary
 fresh dial; managed policy snapshots have that stronger contract.
 
+The unreleased R42 source slice adds version-specific TLS1.2 RSA-PKCS1
+SHA256/384/512 for server and initial client authentication. Independent fixed
+vectors and six forced OpenSSL server/mTLS scenarios verify exact scheme IDs;
+the full ExSSL suite passes922 checks and shared QUIC checks pass14. TLS1.3
+CertificateVerify and QUIC still reject these handshake schemes. These are source
+results, not candidate HTTP package or published-consumer acceptance; see the
+execution ledger for commands, repair history and remaining gates.
+
 The completed route audit also retains explicit migration blockers: secure-scheme
 Unix selection currently uses plaintext, CONNECT validates some TLS conflicts after
 proxy I/O, and Fetch's OTP cross-origin client-identity forwarding differs from
@@ -138,6 +146,11 @@ through `ssl: [certfile: ..., keyfile: ...]` or the documented in-memory forms.
 It remains separate from the server's `cacerts`/`cacertfile` trust. Encrypted keys,
 hardware signing and multiple identities remain unsupported. The library's
 compatibility matrix documents CertificateRequest selection limits.
+
+The complete migration requires ordinary verification callbacks, CRL/OCSP,
+`partial_chain`, encrypted private keys and multiple client identities before OTP
+SSL removal (user decision, 2026-10-23). These remain implementation and acceptance
+blockers; the current optional-backend subset does not establish that compatibility.
 
 For `:ex_ssl` with any configured `cert`, `certfile`, `key` or `keyfile`, an
 automatic redirect that changes scheme, case-insensitive hostname or effective

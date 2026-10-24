@@ -308,6 +308,7 @@ defmodule HTTP.HTTP2.NotificationBoundsTest do
         {ConnectionOwner, transport: %{send: fn _, _ -> :ok end}, activate?: false}
       )
 
+    :ok = ConnectionOwner.activate(owner)
     assert :ok = ConnectionOwner.receive_bytes(owner, Frame.encode(:settings, 0, 0, <<>>))
     owner
   end

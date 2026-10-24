@@ -9,6 +9,8 @@ defmodule HTTP.HTTP3.ConnectionSupervisor do
   def init(_opts), do: DynamicSupervisor.init(strategy: :one_for_one)
 
   def start_connection(opts, supervisor \\ :http_fetch_http3_connection_supervisor) do
+    opts = Keyword.put_new(opts, :creator, self())
+
     DynamicSupervisor.start_child(supervisor, %{
       id: HTTP.HTTP3.ConnectionOwner,
       start: {HTTP.HTTP3.ConnectionOwner, :start_link, [opts]},

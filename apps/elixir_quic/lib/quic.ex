@@ -28,7 +28,32 @@ defmodule Quic do
   @spec listen(keyword()) :: GenServer.on_start()
   def listen(opts), do: Endpoint.start_link(public_opts(opts, :server))
   @spec client(keyword()) :: GenServer.on_start()
-  def client(opts), do: Endpoint.start_link(public_opts(opts, :client))
+  def client(opts) do
+    opts = public_opts(opts, :client)
+
+    case Keyword.get(opts, :cleanup) do
+      nil -> Endpoint.start_link(opts)
+      %Quic.Cleanup.Lease{} = lease -> tracked_client(opts, lease)
+      _ -> {:error, :invalid_cleanup_lease}
+    end
+  end
+
+  defp tracked_client(opts, lease) do
+    deadline = Quic.Cleanup.deadline(opts)
+    opts = Keyword.put(opts, :deadline, deadline)
+
+    with {:ok, birth} <- Quic.Cleanup.reserve(lease, :endpoint, deadline) do
+      case Endpoint.start_link(Keyword.put(opts, :cleanup_birth, birth)) do
+        {:ok, _} = result ->
+          result
+
+        {:error, _} = error ->
+          # Only an unconsumed permit can establish that start failed pre-effect.
+          Quic.Cleanup.no_birth(birth)
+          error
+      end
+    end
+  end
 
   defp public_opts(opts, role) do
     opts

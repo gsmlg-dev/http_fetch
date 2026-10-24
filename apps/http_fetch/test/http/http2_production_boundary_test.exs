@@ -20,6 +20,7 @@ defmodule HTTP.HTTP2.ProductionBoundaryTest do
     }
 
     {:ok, owner} = ConnectionOwner.start_link(transport: transport, activate?: false)
+    :ok = ConnectionOwner.activate(owner)
     assert_receive {:wire, _}
     owner
   end
@@ -90,6 +91,7 @@ defmodule HTTP.HTTP2.ProductionBoundaryTest do
     }
 
     {:ok, owner} = ConnectionOwner.start_link(transport: transport, activate?: false)
+    :ok = ConnectionOwner.activate(owner)
     assert :ok = ConnectionOwner.receive_bytes(owner, wire(4, 0, 0, <<>>))
     assert {:ok, %{id: first}} = ConnectionOwner.open_stream(owner, [{":method", "GET"}])
     :atomics.put(failure, 1, 1)
@@ -110,6 +112,7 @@ defmodule HTTP.HTTP2.ProductionBoundaryTest do
     }
 
     {:ok, owner} = ConnectionOwner.start_link(transport: transport, activate?: false)
+    :ok = ConnectionOwner.activate(owner)
     assert {:ok, %{id: id}} = ConnectionOwner.open_stream(owner, [{":method", "GET"}])
     :atomics.put(failure, 1, 1)
     bytes = wire(4, 0, 0, <<>>) <> wire(1, 4, id, <<0x88>>) <> wire(0, 1, id, "complete")
@@ -160,6 +163,8 @@ defmodule HTTP.HTTP2.ProductionBoundaryTest do
         activate?: false,
         profile: :synthetic_test_v1
       )
+
+    :ok = ConnectionOwner.activate(owner)
 
     assert_receive {:wire, _}
     state = :sys.get_state(owner)
@@ -233,6 +238,8 @@ defmodule HTTP.HTTP2.ProductionBoundaryTest do
 
     {:ok, owner} =
       ConnectionOwner.start_link(transport: transport, socket: :socket, activate?: false)
+
+    :ok = ConnectionOwner.activate(owner)
 
     monitor = Process.monitor(owner)
     assert {:error, :timeout} = ConnectionOwner.open_stream(owner, [{":method", "GET"}])
@@ -322,6 +329,8 @@ defmodule HTTP.HTTP2.ProductionBoundaryTest do
     {:ok, owner} =
       ConnectionOwner.start_link(transport: transport, socket: :socket, activate?: false)
 
+    :ok = ConnectionOwner.activate(owner)
+
     monitor = Process.monitor(owner)
 
     assert {:ok, %{id: id}} =
@@ -364,6 +373,7 @@ defmodule HTTP.HTTP2.ProductionBoundaryTest do
     }
 
     {:ok, owner} = ConnectionOwner.start_link(transport: transport, activate?: false)
+    :ok = ConnectionOwner.activate(owner)
     monitor = Process.monitor(owner)
 
     assert {:ok, %{id: id}} =

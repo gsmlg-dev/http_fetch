@@ -59,7 +59,7 @@ defmodule HTTP.ManagedTransport.Policy do
          version when version in [:http1, :http2, :h2c] <- opts[:http_version],
          true <- version != :h2c or origin.scheme == "http",
          true <- version != :http2 or origin.scheme == "https",
-         true <- Keyword.get(opts, :tls_backend, :ssl) == :ssl,
+         {:ok, backend} <- HTTP.TLSBackend.resolve(opts[:tls_backend]),
          true <- Keyword.get(opts, :http2_profile, :native_v1) == :native_v1,
          true <- Keyword.get(opts, :max_pending, 0) == 0,
          {:ok, requests} <- limit(opts, :max_requests, 100, 2_048),
@@ -79,7 +79,7 @@ defmodule HTTP.ManagedTransport.Policy do
         [
           http_version: version,
           connect_address: opts[:connect_address],
-          tls_backend: :ssl,
+          tls_backend: backend,
           ssl: ssl,
           socket_opts: sockets
         ] ++
@@ -293,6 +293,9 @@ defmodule HTTP.ManagedTransport.Policy do
   defp own_policy(value) when is_binary(value), do: own(value)
   defp own_policy(value) when is_list(value), do: Enum.map(value, &own_policy/1)
 
+  defp own_policy(value) when is_map(value),
+    do: Map.new(value, fn {key, item} -> {own_policy(key), own_policy(item)} end)
+
   defp own_policy(value) when is_tuple(value),
     do: value |> Tuple.to_list() |> own_policy() |> List.to_tuple()
 
@@ -341,7 +344,7 @@ defmodule HTTP.ManagedTransport.Policy do
              String.to_charlist(origin.host) do
       {:ok,
        opts
-       |> Keyword.put_new(:cacerts, :public_key.cacerts_get())
+       |> Keyword.put_new_lazy(:cacerts, &:public_key.cacerts_get/0)
        |> Keyword.put_new(:verify, :verify_peer)
        |> Keyword.put_new(:versions, [:"tlsv1.3", :"tlsv1.2"])
        |> Keyword.put_new(:depth, 4)
@@ -455,6 +458,13 @@ defmodule HTTP.ManagedTransport.Policy do
 
   defp bounded_term?(value, depth) when is_list(value),
     do: length(value) <= 4_096 and Enum.all?(value, &bounded_term?(&1, depth - 1))
+
+  defp bounded_term?(value, depth) when is_map(value),
+    do:
+      map_size(value) <= 4_096 and
+        Enum.all?(value, fn {key, item} ->
+          bounded_term?(key, depth - 1) and bounded_term?(item, depth - 1)
+        end)
 
   defp bounded_term?(value, depth) when is_tuple(value),
     do: value |> Tuple.to_list() |> Enum.all?(&bounded_term?(&1, depth - 1))

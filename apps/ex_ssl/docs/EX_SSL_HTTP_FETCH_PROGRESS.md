@@ -1,5 +1,16 @@
 # ex_ssl / http_fetch implementation ledger
 
+Current umbrella migration status (2026-10-23): the canonical implementation is
+this repository's apps/ex_ssl. The unreleased TLS1.2 PKCS1 source slice passes
+922 ExSSL checks including six independent forced-scheme OpenSSL server/mTLS
+cases, plus14 shared QUIC checks. Public lifecycle/managed completion, candidate
+acceptance, default promotion and production OTP removal remain open. See the
+[umbrella execution ledger](../../../docs/tls-migration-validation.md) for current
+evidence. Ordinary verification callbacks, CRL/OCSP, partial_chain, encrypted keys
+and multiple client identities must be implemented before OTP removal; historical
+unsupported-policy rejection below does not satisfy this migration requirement.
+The standalone versions and release authorizations below are historical.
+
 Release authorization update: after completing the validation work below, the
 user authorized committing, pushing, and releasing the next minor version,
 **0.5.0**, through the existing Release workflow. The original no-release scope

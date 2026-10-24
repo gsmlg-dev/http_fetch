@@ -54,6 +54,90 @@ defmodule SSL.DuplexProtocolBoundsTest do
     assert :erlang.port_info(pending.tcp) == :undefined
   end
 
+  test "fragmented coalesced KeyUpdate retains later records behind mandatory control" do
+    {:ok, peer} =
+      Peer.start(fn socket ->
+        receive do: (:update -> :ok)
+        assert :ok = :ssl.update_keys(socket, :read_write)
+        assert :ok = :ssl.send(socket, "reverse")
+        payload = :binary.copy("x", 65_536)
+        assert {:ok, ^payload} = :ssl.recv(socket, byte_size(payload), 3_000)
+        assert {:ok, "client-after-update"} = :ssl.recv(socket, 19, 2_000)
+        assert :ok = :ssl.send(socket, "verified")
+        assert {:error, :closed} = :ssl.recv(socket, 0, 2_000)
+        :ok
+      end)
+
+    {:ok, proxy} = Peer.start_fragmenting_proxy(peer.port, self())
+    options = [:binary | Keyword.merge(tl(Peer.client_options()), send_timeout: 3_000)]
+    {:ok, socket} = SSL.connect(~c"127.0.0.1", proxy.port, options, 5_000)
+
+    try do
+      assert :ok = SSL.enable_duplex_reads(socket)
+      {sender, held} = hold_write(socket)
+      send(peer.task.pid, :update)
+      queued = wait_control(socket.pid, System.monotonic_time(:millisecond) + 1_000)
+      assert queued.output == held.output
+      assert queued.size == 0
+      assert queued.pending_control.size == 27
+      assert queued.machine.read_state.generation == held.machine.read_state.generation + 1
+      assert true = :erlang.resume_process(held.writer)
+      assert :ok = Task.await(sender, 3_000)
+      assert {:ok, "reverse"} = SSL.recv(socket, 7, 2_000)
+      assert :ok = SSL.send(socket, "client-after-update")
+      assert {:ok, "verified"} = SSL.recv(socket, 8, 2_000)
+      assert :ok = SSL.close(socket)
+      assert :ok = Peer.stop(peer)
+    after
+      if Process.alive?(socket.pid), do: SSL.close(socket)
+      if Process.alive?(proxy.task.pid), do: Peer.stop_fragmenting_proxy(proxy)
+      if Process.alive?(peer.task.pid), do: Task.shutdown(peer.task, :brutal_kill)
+      :ssl.close(peer.listener)
+    end
+  end
+
+  for abandon? <- [false, true] do
+    test "peer closure queues bounded immutable control during upload abandon=#{abandon?}" do
+      {socket, peer, _proxy} = fixture()
+      {sender, held} = hold_write(socket)
+
+      if unquote(abandon?) do
+        assert :ok = SSL.abandon_send(socket)
+        assert {:error, :write_abandoned} = Task.await(sender, 1_000)
+      end
+
+      send(peer.task.pid, :finish)
+      queued = wait_control(socket.pid, System.monotonic_time(:millisecond) + 1_000)
+      assert queued.closed
+      assert queued.output == held.output
+      assert queued.pending_control.kind == :close_notify
+      assert queued.pending_control.deadline <= held.output.deadline
+      assert SSL.Options.remaining(queued.pending_control.deadline) <= 250
+      assert queued.pending_control.size == 24
+      assert queued.size == 10
+      unless unquote(abandon?), do: assert({:error, :closed} == Task.await(sender, 1_000))
+      assert {:ok, "final"} = SSL.recv(socket, 5, 1_000)
+      assert {:ok, "-data"} = SSL.recv(socket, 5, 1_000)
+      assert {:error, :closed} = SSL.recv(socket, 0, 1_000)
+      assert Process.read_timer(queued.pending_control.timer) == false
+      assert Port.info(held.tcp) == nil
+    end
+  end
+
+  defp wait_control(pid, limit) do
+    assert System.monotonic_time(:millisecond) < limit
+    {:connected, state} = :sys.get_state(pid)
+
+    if state.pending_control do
+      state
+    else
+      receive do
+      after
+        1 -> wait_control(pid, limit)
+      end
+    end
+  end
+
   defp fixture do
     {:ok, peer} =
       Peer.start(fn socket ->

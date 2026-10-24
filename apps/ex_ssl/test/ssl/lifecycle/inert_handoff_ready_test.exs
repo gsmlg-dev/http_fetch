@@ -1,5 +1,5 @@
 defmodule SSL.Lifecycle.InertHandoffReadyTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   alias SSL.{Connection, Options}
   alias SSL.Lifecycle.{Observer, Reader, Receipt}
 
@@ -76,9 +76,11 @@ defmodule SSL.Lifecycle.InertHandoffReadyTest do
   end
 
   test "original setup expiry retires a suspended prepared Connection" do
-    attempt = attempt(2_000, System.monotonic_time(:millisecond) + 400)
+    setup_deadline = System.monotonic_time(:millisecond) + 400
+    attempt = attempt(2_000, setup_deadline)
     assert :ok = prepare(attempt, deadline(5_000))
     assert :ok = :sys.suspend(attempt.connection)
+    assert System.monotonic_time(:millisecond) < setup_deadline
     cleanup(attempt)
   end
 

@@ -2,6 +2,8 @@ defmodule HTTP.HTTPSEarlyUploadTest do
   use ExUnit.Case, async: false
   @moduletag :integration
 
+  alias ExSSL.TestSupport.ManagedLifecycleProbe, as: Probe
+
   @fixtures Path.expand("../../../http_web_socket/test/support/fixtures", __DIR__)
   @timeout 5_000
 
@@ -51,7 +53,7 @@ defmodule HTTP.HTTPSEarlyUploadTest do
 
       provider =
         if unquote(backend) == :ex_ssl do
-          pending_tls_output(owner, System.monotonic_time(:millisecond) + 1_000)
+          pending_tls_output(promise, owner, System.monotonic_time(:millisecond) + 1_000)
         end
 
       writer_monitor = Process.monitor(writer)
@@ -118,10 +120,25 @@ defmodule HTTP.HTTPSEarlyUploadTest do
                        when monitor == provider.writer_monitor and writer == provider.writer,
                        1_000
 
-        assert Port.info(provider.tcp) == nil
+        if Map.has_key?(provider, :handle) do
+          assert_receive {:DOWN, monitor, :socket, tcp, _}
+                         when monitor == provider.monitors.tcp and tcp == provider.tcp,
+                         1_000
+
+          assert {:ok, %{cleanup: :confirmed}} =
+                   SSL.Lifecycle.await(
+                     provider.handle,
+                     {:abs_ms, System.monotonic_time(:millisecond) + 1_000}
+                   )
+
+          Probe.await_down(provider, [:observer], 1_000)
+          Probe.release_monitors(provider)
+        else
+          assert Port.info(provider.tcp) == nil
+        end
       end
 
-      if unquote(backend) == :ssl and unquote(version) == :http1 do
+      if unquote(version) == :http1 do
         completion = HTTP.Promise.completion(promise)
 
         expected =
@@ -173,6 +190,22 @@ defmodule HTTP.HTTPSEarlyUploadTest do
 
   # Test-only TLS state evidence: the actual encrypted writer job must remain
   # blocked with nonzero inet output before the peer sends the first headers.
+  defp pending_tls_output(%{completion: %{tracker: tracker}}, _owner, deadline)
+       when is_pid(tracker) do
+    assert System.monotonic_time(:millisecond) < deadline
+    [handle] = Map.keys(:sys.get_state(tracker, 1_000).providers)
+    graph = Probe.graph_handle(handle)
+    on_exit(fn -> Probe.release_monitors(graph) end)
+    :ok = Probe.await_native_blocked(graph, deadline)
+
+    Map.merge(graph, %{
+      connection_monitor: graph.monitors.connection,
+      writer_monitor: graph.monitors.writer
+    })
+  end
+
+  defp pending_tls_output(_promise, owner, deadline), do: pending_tls_output(owner, deadline)
+
   defp pending_tls_output(owner, deadline) do
     assert System.monotonic_time(:millisecond) < deadline
 

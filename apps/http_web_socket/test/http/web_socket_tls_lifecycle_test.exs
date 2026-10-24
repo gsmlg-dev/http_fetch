@@ -2,6 +2,7 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
   use ExUnit.Case, async: false
   @moduletag :integration
 
+  alias ExSSL.TestSupport.ManagedLifecycleProbe, as: Probe
   alias HTTP.WebSocket
   alias HTTP.WebSocket.Event.Close
   alias HTTP.WebSocket.Event.Message
@@ -104,7 +105,12 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
         :ok = :sys.resume(tls_pid)
         {:connected, %{owner: owner}} = :sys.get_state(tls_pid)
         assert owner == socket.pid
-        :ok = transport.setopts(tls, active: :once)
+
+        :sys.replace_state(socket.pid, fn state ->
+          :ok = transport.setopts(tls, active: :once)
+          state
+        end)
+
         tls_monitor = Process.monitor(tls_pid)
         send(peer, :send_tail)
         assert_receive {:DOWN, ^tls_monitor, :process, ^tls_pid, :normal}, 5_000
@@ -160,7 +166,6 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
 
   test "delivers upgrade-buffered frames after the TLS peer has closed" do
     parent = self()
-    existing_connections = tls_connections()
 
     {:ok, server, port} =
       HTTPWebSocket.TestServer.start_link(
@@ -191,7 +196,11 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
       )
 
     assert_receive {:upgrade_received, consumer}, 5_000
-    [tls_pid] = tls_connections() -- existing_connections
+    receipt = WebSocket.completion(socket)
+    [attempt] = Map.values(:sys.get_state(receipt.tracker).children)
+    [handle] = Map.keys(:sys.get_state(attempt.child).providers)
+    graph = Probe.graph_handle(handle)
+    tls_pid = graph.connection
     monitor = Process.monitor(tls_pid)
 
     try do
@@ -199,6 +208,7 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
       assert_receive {:DOWN, ^monitor, :process, ^tls_pid, _}, 5_000
     after
       send(consumer, :continue_upgrade)
+      Probe.release_monitors(graph)
     end
 
     assert_receive {WebSocket, ^socket, %Open{}}, 5_000
@@ -217,10 +227,6 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
   end
 
   def pause_after_upgrade(_event, _measurements, _metadata, _config), do: :ok
-
-  defp tls_connections do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(SSL.ConnectionSupervisor), do: pid
-  end
 
   defp next_event(socket) do
     assert_receive {WebSocket, ^socket, event}, 5_000

@@ -248,11 +248,33 @@ def sse(connection, index):
         if not select.select([sys.stdin], [], [], 10)[0] or sys.stdin.buffer.readline() != b"go\n":
             raise ValueError("missing_release")
     else:
-        connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\ndata: second\n\n")
+        data = b"second" if index == 2 else b"third"
+        connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\ndata: " + data + b"\n\n")
         event("second_ready")
         if not select.select([sys.stdin], [], [], 10)[0]:
             raise ValueError("missing_stop")
         sys.stdin.buffer.readline()
+
+
+def completion_hold(connection, mode):
+    request = headers(connection)
+    expected = b"GET /events HTTP/1.1\r\n" if mode == "sse" else b"GET /socket HTTP/1.1\r\n"
+    if not request.startswith(expected):
+        raise ValueError("wrong_completion_request")
+    event("request", mode=mode, request_exact=True)
+    if mode == "sse":
+        connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\nid: 41\ndata: held\n\n")
+    else:
+        keys = [line.split(b":", 1)[1].strip() for line in request.split(b"\r\n")
+                if line.lower().startswith(b"sec-websocket-key:")]
+        if len(keys) != 1:
+            raise ValueError("missing_completion_wss_key")
+        accept = base64.b64encode(hashlib.sha1(keys[0] + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest())
+        connection.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + b"\r\n\r\n\x81\x04held")
+    event("held", mode=mode)
+    if not select.select([sys.stdin], [], [], 10)[0]:
+        raise ValueError("missing_completion_release")
+    sys.stdin.buffer.readline()
 
 
 def main():
@@ -265,6 +287,11 @@ def main():
     parser.add_argument("--large", action="store_true")
     parser.add_argument("--reject-ticket", action="store_true")
     parser.add_argument("--hold-second-handshake", action="store_true")
+    parser.add_argument("--completion-hold", action="store_true")
+    parser.add_argument("--completion-delay-handshake", action="store_true")
+    parser.add_argument("--completion-reconnects", type=int, choices=[3])
+    parser.add_argument("--hold-handshake", action="store_true")
+    parser.add_argument("--no-client-auth", action="store_true")
     args = parser.parse_args()
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -274,7 +301,7 @@ def main():
     context.options |= ssl.OP_NO_COMPRESSION | ssl.OP_NO_RENEGOTIATION
     context.load_cert_chain(args.certfile, args.keyfile)
     context.load_verify_locations(cafile=args.cafile)
-    context.verify_mode = ssl.CERT_NONE if resumption else ssl.CERT_REQUIRED
+    context.verify_mode = ssl.CERT_NONE if resumption or args.no_client_auth else ssl.CERT_REQUIRED
     context.set_ciphers("ECDHE-RSA-AES128-GCM-SHA256")
     context.set_ecdh_curve("prime256v1")
     context.set_alpn_protocols(["h2" if args.mode == "h2" or args.mode == "resumption-h2" else "http/1.1"])
@@ -286,10 +313,27 @@ def main():
     listener.settimeout(10)
     event("ready", port=listener.getsockname()[1], openssl=ssl.OPENSSL_VERSION)
     count = 2 if args.mode in ("sse", "resumption", "resumption-h2", "resumption-wss", "resumption-sse") else 1
+    if args.completion_reconnects:
+        count = args.completion_reconnects
+    if args.completion_hold or args.hold_handshake:
+        count = 1
     for index in range(1, count + 1):
         raw, _ = listener.accept()
         raw.settimeout(10)
         try:
+            if args.completion_delay_handshake:
+                if not raw.recv(1, socket.MSG_PEEK):
+                    raise EOFError("missing_client_hello")
+                event("setup_wait", index=index)
+                if not select.select([sys.stdin], [], [], 10)[0] or sys.stdin.buffer.readline() != b"go\n":
+                    raise ValueError("missing_handshake_release")
+            if args.hold_handshake:
+                event("setup", index=index, ticket_offered=read_client_hello_ticket_offered(raw))
+                while raw.recv(4096):
+                    pass
+                event("setup_closed", index=index)
+                raw.close()
+                continue
             if args.hold_second_handshake and index == 2:
                 event("setup", index=index, ticket_offered=read_client_hello_ticket_offered(raw))
                 while raw.recv(4096):
@@ -313,7 +357,9 @@ def main():
             with active_context.wrap_socket(raw, server_side=True) as connection:
                 der = connection.getpeercert(binary_form=True)
                 event("handshake", index=index, version=connection.version(), cipher=connection.cipher()[0], alpn=connection.selected_alpn_protocol(), client_der_b64=base64.b64encode(der).decode() if der else None, session_reused=connection.session_reused, ticket_offered=ticket_offered)
-                if args.mode == "http1":
+                if args.completion_hold:
+                    completion_hold(connection, args.mode)
+                elif args.mode == "http1":
                     http1(connection, args.large)
                 elif args.mode == "resumption":
                     http1(connection, False, b"/resumption")

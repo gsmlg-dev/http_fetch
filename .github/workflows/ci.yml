@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches: ["**"]
-    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
+    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
   pull_request:
     branches: [main]
-    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
+    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
 
   workflow_dispatch: {}
 
@@ -76,7 +76,7 @@ jobs:
   candidate-consumer:
     name: Candidate Hex consumers and TLS smoke
     needs: changes
-    if: needs.changes.outputs.full_gate == 'true'
+    if: needs.changes.outputs.candidate_tls == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,6 +90,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Check root formatting and automation regressions
+        if: needs.changes.outputs.full_gate == 'true'
         run: |
           mix format --check-formatted mix.exs .formatter.exs config/config.exs scripts/ci/test_app_closures.exs
           elixir scripts/ci/test_app_closures.exs
@@ -125,7 +126,7 @@ jobs:
         with:
           name: candidate-ex-ssl-feature-report
           path: ${{ runner.temp }}/ex-ssl-candidate-results/*.txt
-          if-no-files-found: warn
+          if-no-files-found: error
 
   published-ex-ssl-feature-gate:
     name: Historical published ex_ssl 0.7.2 compatibility

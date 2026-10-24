@@ -4,6 +4,11 @@ defmodule HTTP.HTTP1.PoolTest do
   alias HTTP.HTTP1.Pool
 
   defmodule Transport do
+    def setopts(observer, opts) when is_pid(observer) do
+      send(observer, {:setopts, observer, opts})
+      :ok
+    end
+
     def setopts({observer, ref, mode}, opts) do
       send(observer, {:setopts, ref, opts})
 
@@ -29,6 +34,11 @@ defmodule HTTP.HTTP1.PoolTest do
       :ok
     end
 
+    def close(observer) when is_pid(observer) do
+      send(observer, {:closed, observer})
+      :ok
+    end
+
     def close({observer, ref, _}) do
       send(observer, {:closed, ref})
       :ok
@@ -36,6 +46,195 @@ defmodule HTTP.HTTP1.PoolTest do
 
     def normalize_message({:socket_event, ref}, {_, ref, _}), do: :closed
     def normalize_message(_, _), do: :unknown
+  end
+
+  @tag :p3_outer_deadline
+  test "contextual checkout returns by its original deadline while the pool stays suspended" do
+    pool = start_supervised!({Pool, name: nil})
+    parent = self()
+
+    request = %HTTP.Request{
+      url: URI.parse("https://localhost/"),
+      transport_options: [tls_backend: :ex_ssl, http1_reuse: true, http1_pool: pool]
+    }
+
+    :sys.suspend(pool)
+
+    caller =
+      Task.async(fn ->
+        Process.put(HTTP.RequestLifecycle, parent)
+        Pool.checkout(request, System.monotonic_time(:millisecond) + 50)
+      end)
+
+    try do
+      assert {:ok, {:error, :handoff_unconfirmed}} = Task.yield(caller, 250)
+    after
+      :sys.resume(pool)
+      Task.shutdown(caller, 1_000)
+    end
+
+    assert %{entries: entries} = :sys.get_state(pool)
+    assert entries == %{}
+  end
+
+  test "infinite request timeout still bounds a suspended contextual checkout" do
+    pool = start_supervised!({Pool, name: nil})
+    parent = self()
+
+    request = %HTTP.Request{
+      url: URI.parse("https://localhost/"),
+      transport_options: [tls_backend: :ex_ssl, http1_reuse: true, http1_pool: pool]
+    }
+
+    :sys.suspend(pool)
+
+    caller =
+      Task.async(fn ->
+        Process.put(HTTP.RequestLifecycle, parent)
+        Pool.checkout(request, :infinity)
+      end)
+
+    try do
+      assert {:ok, {:error, :handoff_unconfirmed}} = Task.yield(caller, 1_500)
+    after
+      :sys.resume(pool)
+      Task.shutdown(caller, 1_000)
+    end
+
+    assert %{entries: entries} = :sys.get_state(pool)
+    assert entries == %{}
+  end
+
+  test "expired provider prepare cannot allocate and queued activation cannot offer or close" do
+    {:ok, initial} = Pool.init([])
+    key = %{http1_policy: {1, 30_000}}
+    socket = {self(), make_ref(), :normal}
+    expired = System.monotonic_time(:millisecond) - 1
+
+    assert {:reply, :full, ^initial} =
+             Pool.handle_call(
+               {:prepare, key, Transport, socket, self(), expired},
+               {self(), nil},
+               initial
+             )
+
+    deadline = System.monotonic_time(:millisecond) + 50
+
+    {:reply, {:ok, token}, pending} =
+      Pool.handle_call(
+        {:prepare, key, Transport, socket, self(), deadline},
+        {self(), nil},
+        initial
+      )
+
+    assert pending.entries[token].expires_at == deadline
+    assert {:reply, :full, ^pending} = prepare(pending, key, socket)
+    witness = :erlang.start_timer(51, self(), :activation_expired)
+    assert_receive {:timeout, ^witness, :activation_expired}, 500
+
+    assert {:reply, :expired, empty} =
+             Pool.handle_call(
+               {:activate_provider, token, self(), deadline},
+               {self(), nil},
+               pending
+             )
+
+    assert empty.entries == %{}
+    assert_receive {:"$gen_cast", :provider_failed}
+    refute_receive {:"$gen_call", _, {:offer_provider, _, _, _}}, 0
+    refute_receive {:closed, _}, 0
+    refute_receive {:setopts, _, [active: :once]}, 0
+    :erlang.cancel_timer(pending.expiry_timer)
+  end
+
+  test "expired contextual checkout cannot lease a legacy entry or return none to dial" do
+    {:ok, initial} = Pool.init([])
+    key = %{http1_policy: {1, 30_000}}
+    socket = {self(), make_ref(), :normal}
+    {:reply, {:ok, token}, pending} = prepare(initial, key, socket)
+    {:reply, :ok, idle} = Pool.handle_call({:activate, token}, {self(), nil}, pending)
+
+    assert {:reply, {:error, :handoff_expired}, ^idle} =
+             Pool.handle_call(
+               {:checkout, key, self(), System.monotonic_time(:millisecond) - 1},
+               {self(), nil},
+               idle
+             )
+
+    refute_receive {:transferred, _, _}, 0
+    :erlang.cancel_timer(idle.expiry_timer)
+    Pool.terminate(:normal, idle)
+  end
+
+  test "unknown offer reply retains capacity without a guessed ticket or socket close" do
+    {:ok, initial} = Pool.init([])
+    key = %{http1_policy: {1, 30_000}}
+    socket = {self(), make_ref(), :normal}
+
+    tracker =
+      spawn(fn ->
+        receive do
+          {:"$gen_call", from, {:offer_provider, _, _, _}} ->
+            GenServer.reply(from, {:error, :handoff_unconfirmed})
+        end
+      end)
+
+    monitor = Process.monitor(tracker)
+    deadline = System.monotonic_time(:millisecond) + 1_000
+
+    {:reply, {:ok, token}, pending} =
+      Pool.handle_call(
+        {:prepare, key, Transport, socket, tracker, deadline},
+        {self(), nil},
+        initial
+      )
+
+    assert {:reply, :closed, retained} =
+             Pool.handle_call(
+               {:activate_provider, token, tracker, deadline},
+               {self(), nil},
+               pending
+             )
+
+    assert %{status: :retiring, provider: %{handle: nil, lease: nil}} = retained.entries[token]
+    assert {:reply, :full, ^retained} = prepare(retained, key, socket)
+
+    assert {:reply, {:error, :handoff_unconfirmed}, ^retained} =
+             Pool.handle_call({:checkout, key, self(), deadline}, {self(), nil}, retained)
+
+    assert_receive {:DOWN, ^monitor, :process, ^tracker, :normal}
+    retiring = %{retained | retiring?: true}
+    assert {:noreply, ^retiring} = Pool.handle_cast(:close_idle, retiring)
+    refute_receive {:closed, _}, 0
+    refute_receive {:transferred, _, _}, 0
+    :erlang.cancel_timer(retained.expiry_timer)
+    Process.demonitor(retained.entries[token].monitor, [:flush])
+  end
+
+  test "unresolved provider entries retain capacity and bar fallback dialing" do
+    for status <- [:accepting, :checkout, :retiring] do
+      {:ok, initial} = Pool.init([])
+      socket = {self(), make_ref(), :normal}
+      key = %{http1_policy: {1, 30_000}}
+      {:reply, {:ok, token}, pending} = prepare(initial, key, socket)
+      provider = %{handle: :missing, lease: nil, outgoing: nil}
+      retained = put_in(pending.entries[token].provider, provider)
+      retained = put_in(retained.entries[token].status, status)
+
+      assert {:reply, {:error, :handoff_unconfirmed}, ^retained} =
+               Pool.handle_call(
+                 {:checkout, key, self(), System.monotonic_time(:millisecond) + 1_000},
+                 {self(), nil},
+                 retained
+               )
+
+      assert {:reply, :full, ^retained} = prepare(retained, key, socket)
+      assert map_size(retained.entries) == 1
+      refute_receive {:closed, _}, 0
+      refute_receive {:transferred, _, _}, 0
+      :erlang.cancel_timer(retained.expiry_timer)
+      Process.demonitor(retained.entries[token].monitor, [:flush])
+    end
   end
 
   test "repeated checkin and checkout reuse one logical tick without entry timers" do
@@ -156,7 +355,7 @@ defmodule HTTP.HTTP1.PoolTest do
   end
 
   test "a handoff accepted by its deadline remains valid after a delayed reply" do
-    ref = make_ref()
+    ref = self()
     key = %{http1_policy: {2, 30_000}}
     parent = self()
 
@@ -179,7 +378,7 @@ defmodule HTTP.HTTP1.PoolTest do
 
         {:reply, {:ok, token}, pending} =
           Pool.handle_call(
-            {:prepare, key, Transport, {parent, ref, :normal}},
+            {:prepare, key, Transport, parent},
             {parent, nil},
             initial
           )

@@ -1,6 +1,8 @@
 defmodule SSL.Protocol.HandshakeMachine do
   @moduledoc "Pure TLS client coordinator consuming one complete record at a time."
 
+  alias SSL.PKIX.VerifyFun
+
   alias SSL.ClientHello.Materializer.Materialized
   alias SSL.Crypto.{KeySchedule, TrafficState}
 
@@ -33,7 +35,8 @@ defmodule SSL.Protocol.HandshakeMachine do
              :client_identity,
              :ticket,
              :resumption_master,
-             :pending_tickets
+             :pending_tickets,
+             :options
            ]}
   defstruct [
     :client_hello,
@@ -72,44 +75,79 @@ defmodule SSL.Protocol.HandshakeMachine do
   def init(materialized, trust_source, identity, opts \\ [])
 
   def init(%Materialized{} = materialized, trust_source, identity, opts) when is_list(opts) do
-    with {:ok, fields, bytes} <-
+    with true <-
+           Keyword.keyword?(opts) and
+             VerifyFun.valid?(Keyword.get(opts, :verify_fun, :undefined)),
+         opts = callback_options(opts),
+         {:ok, fields, bytes} <-
            ClientHandshake.prepare(materialized, trust_source, identity, opts) do
       state = struct!(__MODULE__, Map.put(fields, :framer, HandshakeFramer.new()))
       {:ok, state, plaintext_handshake_records(bytes)}
+    else
+      false -> {:error, {:invalid_input, :verify_fun}}
+      error -> error
     end
   end
 
   def init(_, _, _, _), do: {:error, {:invalid_input, :handshake_machine}}
 
+  defp callback_options(opts) do
+    if Keyword.get(opts, :certificate_policy) != nil or
+         VerifyFun.enabled?(Keyword.get(opts, :verify_fun, :undefined)),
+       do: opts |> Keyword.delete(:ticket) |> Keyword.put(:enable_tickets, false),
+       else: opts
+  end
+
   @spec feed(t(), binary()) ::
           {:ok, t(), [binary()], [event()]}
           | {:error, {:fatal_alert, atom(), term()} | {:peer_alert, byte(), byte()}}
-  def feed(%TLS12{} = state, record), do: TLS12.feed(state, record)
+  def feed(state, record), do: elem(feed_with_progress(state, record), 0)
 
-  def feed(%__MODULE__{phase: phase} = state, @ccs)
-      when phase in [:await_server_hello, :await_server_hello_after_retry, :await_server_flight],
-      do:
-        if(0x0304 in state.offer.offered_versions,
-          do: {:ok, state, [], []},
-          else: fatal(:unexpected_message, :unexpected_tls12_change_cipher_spec)
-        )
+  @doc false
+  def feed_with_progress(%TLS12{} = state, record), do: TLS12.feed_with_progress(state, record)
 
-  def feed(%__MODULE__{phase: phase}, <<20, _::binary>>)
-      when phase in [:await_server_hello, :await_server_hello_after_retry, :await_server_flight],
-      do: fatal(:unexpected_message, :invalid_change_cipher_spec)
+  def feed_with_progress(state, record) do
+    case feed_record(state, record) do
+      {:ok, next, _out, _events} = result -> {result, accepted_hello?(next)}
+      {:error, reason, accepted} -> {{:error, reason}, accepted}
+      result -> {result, accepted_hello?(state)}
+    end
+  end
 
-  def feed(%__MODULE__{phase: phase}, <<21, 3, _minor, 2::16, level, description>>)
-      when phase in [:await_server_hello, :await_server_hello_after_retry],
-      do: {:error, {:peer_alert, level, description}}
+  defp accepted_hello?(%TLS12{suite: suite}), do: not is_nil(suite)
 
-  def feed(
-        %__MODULE__{phase: :await_server_flight},
-        <<21, 3, _minor, 2::16, _level, _description>>
-      ),
-      do: fatal(:unexpected_message, :unprotected_alert_after_server_hello)
+  defp accepted_hello?(%__MODULE__{
+         server_hello: %ServerHello{kind: :server_hello},
+         verifier: %Incremental{}
+       }),
+       do: true
 
-  def feed(%__MODULE__{phase: phase} = state, record)
-      when phase in [:await_server_hello, :await_server_hello_after_retry] and is_binary(record) do
+  defp accepted_hello?(_), do: false
+
+  defp feed_record(%__MODULE__{phase: phase} = state, @ccs)
+       when phase in [:await_server_hello, :await_server_hello_after_retry, :await_server_flight],
+       do:
+         if(0x0304 in state.offer.offered_versions,
+           do: {:ok, state, [], []},
+           else: fatal(:unexpected_message, :unexpected_tls12_change_cipher_spec)
+         )
+
+  defp feed_record(%__MODULE__{phase: phase}, <<20, _::binary>>)
+       when phase in [:await_server_hello, :await_server_hello_after_retry, :await_server_flight],
+       do: fatal(:unexpected_message, :invalid_change_cipher_spec)
+
+  defp feed_record(%__MODULE__{phase: phase}, <<21, 3, _minor, 2::16, level, description>>)
+       when phase in [:await_server_hello, :await_server_hello_after_retry],
+       do: {:error, {:peer_alert, level, description}}
+
+  defp feed_record(
+         %__MODULE__{phase: :await_server_flight},
+         <<21, 3, _minor, 2::16, _level, _description>>
+       ),
+       do: fatal(:unexpected_message, :unprotected_alert_after_server_hello)
+
+  defp feed_record(%__MODULE__{phase: phase} = state, record)
+       when phase in [:await_server_hello, :await_server_hello_after_retry] and is_binary(record) do
     with {:ok, bytes} <- plaintext_handshake_payload(record),
          {:ok, messages, framer} <-
            HandshakeFramer.feed(state.framer, bytes, max_handshake_length: @max_handshake_length) do
@@ -126,7 +164,8 @@ defmodule SSL.Protocol.HandshakeMachine do
     end
   end
 
-  def feed(%__MODULE__{phase: :await_server_flight} = state, record) when is_binary(record) do
+  defp feed_record(%__MODULE__{phase: :await_server_flight} = state, record)
+       when is_binary(record) do
     case decrypt_handshake(state.read_state, record) do
       {:ok, :handshake, bytes, read_state} ->
         feed_server_handshake(state, bytes, read_state)
@@ -142,13 +181,13 @@ defmodule SSL.Protocol.HandshakeMachine do
     end
   end
 
-  def feed(%__MODULE__{phase: :connected} = state, record)
-      when is_binary(record),
-      do: feed_connected(state, record)
+  defp feed_record(%__MODULE__{phase: :connected} = state, record)
+       when is_binary(record),
+       do: feed_connected(state, record)
 
-  def feed(%__MODULE__{phase: :closed}, _record), do: {:error, :closed}
+  defp feed_record(%__MODULE__{phase: :closed}, _record), do: {:error, :closed}
 
-  def feed(_, _), do: fatal(:decode_error, :invalid_record)
+  defp feed_record(_, _), do: fatal(:decode_error, :invalid_record)
 
   defp accept_initial_handshakes(state, handshake, handshakes, framer) do
     case TLS12Codec.decode(handshake) do
@@ -231,7 +270,7 @@ defmodule SSL.Protocol.HandshakeMachine do
 
   defp accept_server_hello(state, %ServerHello{kind: :hello_retry_request} = hrr) do
     with {:ok, next, bytes} <- ClientHandshake.retry(state, hrr) do
-      {:ok, next, plaintext_handshake_records(bytes), []}
+      {:ok, next, compatibility_flight(state, plaintext_handshake_records(bytes)), []}
     end
   end
 
@@ -275,6 +314,8 @@ defmodule SSL.Protocol.HandshakeMachine do
             {:cont, {:ok, %{current | verifier: verifier}, out, events}}
 
           {:connected, result, records} ->
+            records = compatibility_flight(current, records)
+
             connected = %{
               current
               | phase: :connected,
@@ -287,6 +328,7 @@ defmodule SSL.Protocol.HandshakeMachine do
                 client_identity: nil,
                 ticket: nil,
                 trust_source: nil,
+                options: Keyword.drop(current.options, [:verify_fun, :certificate_policy]),
                 resumption_master: result.resumption_master,
                 resumed: result.resumed,
                 hrr_transcript: nil,
@@ -307,6 +349,12 @@ defmodule SSL.Protocol.HandshakeMachine do
     end)
     |> reject_partial_after_finished()
   end
+
+  defp compatibility_flight(%{hrr: nil, offer: %{legacy_session_id: id}}, records)
+       when id != <<>>,
+       do: [@ccs | records]
+
+  defp compatibility_flight(_state, records), do: records
 
   defp reject_partial_after_finished({:ok, %{phase: :connected, framer: framer}, _, _} = result) do
     if HandshakeFramer.buffered_size(framer) == 0 do
@@ -512,6 +560,8 @@ defmodule SSL.Protocol.HandshakeMachine do
     do:
       Keyword.take(options, [
         :verify,
+        :verify_fun,
+        :certificate_policy,
         :customize_hostname_check,
         :depth,
         :max_handshake_length,
@@ -548,7 +598,10 @@ defmodule SSL.Protocol.HandshakeMachine do
                state.identity,
                [client_identity: state.client_identity] ++ state.options
              ) do
-        TLS12.feed_handshakes(tls12, handshakes, framer)
+        case TLS12.feed_handshakes_with_progress(tls12, handshakes, framer) do
+          {{:error, reason}, accepted} -> {:error, reason, accepted}
+          {result, _accepted} -> result
+        end
       end
     else
       fatal(:illegal_parameter, :unoffered_tls12_selection)

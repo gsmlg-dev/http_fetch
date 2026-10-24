@@ -4,6 +4,7 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
 
   import Bitwise
 
+  alias HTTP.Transport.TCP
   alias HTTP.WebSocket
   alias HTTP.WebSocket.Event.{Close, Error, Message, Open}
 
@@ -100,51 +101,43 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
       :erlang.trace(consumer, true, [:send])
       :erlang.trace(writer_supervisor, true, [:send, :set_on_spawn])
       :erlang.trace(native, true, [:send])
-      :ok = :sys.suspend(writer_supervisor)
+      token = make_ref()
+      :ok = park_after_close(consumer, self(), token)
+      close_task = Task.async(fn -> WebSocket.close(socket, 1000, "done") end)
+      on_exit(fn -> Process.exit(close_task.pid, :kill) end)
 
       try do
-        close_task = Task.async(fn -> WebSocket.close(socket, 1000, "done") end)
-        on_exit(fn -> Process.exit(close_task.pid, :kill) end)
+        # The reply barrier follows retained writer admission and precedes the
+        # next mailbox receive, so ACK and final data remain queued together.
+        assert_receive {:close_parked, ^token, writer}, 5_000
+        assert_receive {:peer_received_close, ^peer}, 5_000
 
-        # Park the consumer at its real writer admission, before it can rearm.
-        assert_receive {:trace, ^consumer, :send, {:"$gen_call", _, _}, ^writer_supervisor},
+        assert_receive {:trace, ^writer, :send, {:http1_write, ^writer, :ok}, ^consumer},
                        5_000
 
-        true = :erlang.suspend_process(consumer)
+        send(consumer, {:http1_read_closed, make_ref(), tcp})
+        send(consumer, {:http1_read_closed, generation, make_ref()})
+        send(peer, :reply_close)
+        assert_receive {:trace, ^native, :send, {:tcp, ^tcp, _}, ^consumer}, 5_000
 
-        try do
-          :ok = :sys.resume(writer_supervisor)
-          assert_receive {:peer_received_close, ^peer}, 5_000
-
-          assert_receive {:trace, writer, :send, {:http1_write, writer, :ok}, ^consumer},
-                         5_000
-
-          send(consumer, {:http1_read_closed, make_ref(), tcp})
-          send(consumer, {:http1_read_closed, generation, make_ref()})
-          send(peer, :reply_close)
-          assert_receive {:trace, ^native, :send, {:tcp, ^tcp, _}, ^consumer}, 5_000
-
-          # Model the next read credit with final data queued and the owner paused.
-          # Native socket death proves this is EOF, not an invalid live option.
-          assert :ok = :inet.setopts(tcp, active: :once)
-          assert_receive {:DOWN, ^native_monitor, ^native_type, ^native, _}, 5_000
-          assert_tcp_exited(native)
-          assert {:error, :einval} = :inet.setopts(tcp, active: :once)
-          {:messages, pending} = Process.info(consumer, :messages)
-          write_index = Enum.find_index(pending, &match?({:http1_write, _, :ok}, &1))
-          data_index = Enum.find_index(pending, &match?({:tcp, ^tcp, _}, &1))
-          assert is_integer(write_index) and is_integer(data_index)
-          assert write_index < data_index
-        after
-          :erlang.trace(consumer, false, [:send])
-          true = :erlang.resume_process(consumer)
-        end
-
-        assert :ok = Task.await(close_task, 5_000)
+        # Model the next read credit with final data queued and the owner paused.
+        # Native socket death proves this is EOF, not an invalid live option.
+        assert :ok = :inet.setopts(tcp, active: :once)
+        assert_receive {:DOWN, ^native_monitor, ^native_type, ^native, _}, 5_000
+        assert_tcp_exited(native)
+        assert {:error, :einval} = :inet.setopts(tcp, active: :once)
+        {:messages, pending} = Process.info(consumer, :messages)
+        write_index = Enum.find_index(pending, &match?({:http1_write, _, :ok}, &1))
+        data_index = Enum.find_index(pending, &match?({:tcp, ^tcp, _}, &1))
+        assert is_integer(write_index) and is_integer(data_index)
+        assert write_index < data_index
       after
+        send(consumer, {:release_close, token})
+        :erlang.trace(consumer, false, [:send])
         :erlang.trace(writer_supervisor, false, [:send, :set_on_spawn])
-        :ok = :sys.resume(writer_supervisor)
       end
+
+      assert :ok = Task.await(close_task, 5_000)
 
       assert_receive {WebSocket, ^socket, %Message{data: "tail"}}, 5_000
       expected_code = %{close: 1000, eof: 1006, truncated: 1006, invalid: 1002}[terminal]
@@ -168,7 +161,7 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
       assert_receive {WebSocket, ^socket, %Open{}}, 5_000
       %{socket: tcp} = :sys.get_state(socket.pid)
 
-      assert {:error, :einval} = HTTP.Transport.TCP.setopts(tcp, active: :invalid)
+      assert {:error, :einval} = TCP.setopts(tcp, active: :invalid)
       {native, native_type} = tcp_actor(tcp)
 
       assert if(native_type == :port,
@@ -176,7 +169,7 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
                else: Process.alive?(native)
              )
 
-      assert :ok = HTTP.Transport.TCP.setopts(tcp, active: :once)
+      assert :ok = TCP.setopts(tcp, active: :once)
       assert :ok = WebSocket.send(socket, "still-open")
       assert_receive {WebSocket, ^socket, %Message{data: "echo:still-open"}}, 5_000
       refute_receive {WebSocket, ^socket, %Error{}}, 0
@@ -202,6 +195,24 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
     refute_receive {WebSocket, ^socket, %Close{}}, 0
     assert :ok = WebSocket.close(socket, 1000, "done")
     assert_receive {WebSocket, ^socket, %Close{code: 1000, was_clean: true}}, 5_000
+  end
+
+  defp park_after_close(consumer, parent, token) do
+    callback = fn
+      :armed, {:out, :ok, _, %{ready_state: 2, write: %{worker: worker}}}, _ ->
+        send(parent, {:close_parked, token, worker})
+
+        receive do
+          {:release_close, ^token} -> :done
+        after
+          5_000 -> :done
+        end
+
+      :armed, _, _ ->
+        :armed
+    end
+
+    :sys.install(consumer, {callback, :armed})
   end
 
   defp close_peer(parent, terminal, transport \\ :ssl) do

@@ -8,8 +8,10 @@ defmodule HTTP.HTTP3.Pool do
   def reserve(pool, key, opts \\ []),
     do: GenServer.call(pool, {:reserve, key, opts}, Keyword.get(opts, :timeout, 5_000) + 1_000)
 
-  def register(pool, key, owner, token \\ nil, capacity \\ nil),
-    do: GenServer.call(pool, {:register, key, owner, token, capacity})
+  def register(pool, key, owner, token \\ nil, capacity \\ nil, opts \\ []),
+    do: GenServer.call(pool, {:register, key, owner, token, capacity, opts})
+
+  def ready(pool, owner, token), do: GenServer.call(pool, {:ready, owner, token})
 
   def release(pool, token), do: GenServer.call(pool, {:release, token})
   def drain(pool, owner), do: GenServer.cast(pool, {:drain, owner})
@@ -43,7 +45,10 @@ defmodule HTTP.HTTP3.Pool do
          draining: Enum.count(state.owners, fn {_, value} -> value.draining end)
        }, state}
 
-  def handle_call({:register, key, owner, token, capacity}, _from, state) do
+  def handle_call({:register, key, owner, token, capacity}, from, state),
+    do: handle_call({:register, key, owner, token, capacity, []}, from, state)
+
+  def handle_call({:register, key, owner, token, capacity, opts}, _from, state) do
     capacity = capacity || state.max_streams
 
     cond do
@@ -65,51 +70,60 @@ defmodule HTTP.HTTP3.Pool do
       true ->
         monitor = Process.monitor(owner)
         capacity = if state.stream_limit, do: min(capacity, state.stream_limit), else: capacity
+        exclusive? = token != nil and state.leases[token].exclusive?
+        capacity = if exclusive?, do: 1, else: capacity
 
         next = %{
           state
           | owners:
-              Map.put(state.owners, owner, %{key: key, draining: false, capacity: capacity}),
+              Map.put(state.owners, owner, %{
+                key: key,
+                draining: false,
+                capacity: capacity,
+                exclusive?: exclusive?,
+                token: token,
+                cleanup: opts[:cleanup],
+                ready?: Keyword.get(opts, :ready?, true)
+              }),
             monitors: Map.put(state.monitors, monitor, {:owner, owner})
         }
 
         next = if token, do: put_in(next.leases[token].owner, owner), else: next
-        send(owner, {:http3_pool, self(), key})
+        send(owner, {:http3_pool, self(), key, token, exclusive?})
         {:reply, :ok, dispatch(next)}
     end
   end
 
-  def handle_call({:reserve, key, opts}, from, state) do
-    case available(state, key) do
-      owner when is_pid(owner) ->
-        {token, next} = lease(state, key, owner, elem(from, 0), opts[:token] || make_ref())
-        {:reply, {:ok, owner, token}, next}
-
-      nil ->
-        cond do
-          can_connect?(state, key) ->
-            {token, next} = lease(state, key, nil, elem(from, 0), opts[:token] || make_ref())
-            {:reply, {:connect, token}, next}
-
-          length(state.waiters) >= state.max_pending ->
-            {:reply, {:error, :pool_queue_full}, state}
-
-          true ->
-            token = opts[:token] || make_ref()
-            monitor = Process.monitor(elem(from, 0))
-
-            timer =
-              Process.send_after(self(), {:expire, token}, Keyword.get(opts, :timeout, 5_000))
-
-            waiter = %{key: key, token: token, from: from, monitor: monitor, timer: timer}
-
-            {:noreply,
-             %{
-               state
-               | waiters: state.waiters ++ [waiter],
-                 monitors: Map.put(state.monitors, monitor, {:waiter, token})
-             }}
+  def handle_call({:ready, owner, token}, _from, state) do
+    case {state.owners[owner], state.leases[token]} do
+      {%{token: ^token, draining: false}, %{owner: ^owner, caller: caller}} ->
+        if Process.alive?(owner) and Process.alive?(caller) do
+          next = put_in(state.owners[owner].ready?, true)
+          {:reply, :ok, dispatch(next)}
+        else
+          {:reply, {:error, :invalid_connector}, state}
         end
+
+      _ ->
+        {:reply, {:error, :invalid_connector}, state}
+    end
+  end
+
+  def handle_call({:reserve, key, opts}, from, state) do
+    cond do
+      opts[:exclusive?] not in [nil, true, false] ->
+        {:reply, {:error, :invalid_exclusive_policy}, state}
+
+      expired?(opts[:deadline_at]) ->
+        {:reply, {:error, :pool_timeout}, state}
+
+      opts[:token] != nil and
+          (Map.has_key?(state.leases, opts[:token]) or
+             Enum.any?(state.waiters, &(&1.token == opts[:token]))) ->
+        {:reply, {:error, :token_in_use}, state}
+
+      true ->
+        reserve(state, key, opts, from)
     end
   end
 
@@ -140,6 +154,7 @@ defmodule HTTP.HTTP3.Pool do
   def handle_info({:DOWN, monitor, :process, _pid, reason}, state) do
     case state.monitors[monitor] do
       {:owner, owner} ->
+        retire_native(state.owners[owner].cleanup)
         tokens = for {token, lease} <- state.leases, lease.owner == owner, do: token
 
         next =
@@ -170,27 +185,86 @@ defmodule HTTP.HTTP3.Pool do
 
   @impl true
   def terminate(_reason, state) do
-    for {owner, _} <- state.owners, do: send(owner, :http3_pool_down)
+    for {owner, info} <- state.owners do
+      if info.exclusive?, do: retire_native(info.cleanup)
+      send(owner, :http3_pool_down)
+    end
+
     for waiter <- state.waiters, do: GenServer.reply(waiter.from, {:error, :pool_down})
     :ok
+  end
+
+  defp reserve(state, key, opts, from) do
+    exclusive? = Keyword.get(opts, :exclusive?, false)
+
+    case available(state, key, exclusive?) do
+      owner when is_pid(owner) ->
+        {token, next} =
+          lease(state, key, owner, elem(from, 0), opts[:token] || make_ref(), exclusive?)
+
+        {:reply, {:ok, owner, token}, next}
+
+      nil ->
+        cond do
+          can_connect?(state, key) ->
+            {token, next} =
+              lease(state, key, nil, elem(from, 0), opts[:token] || make_ref(), exclusive?)
+
+            {:reply, {:connect, token}, next}
+
+          length(state.waiters) >= state.max_pending ->
+            {:reply, {:error, :pool_queue_full}, state}
+
+          true ->
+            token = opts[:token] || make_ref()
+            monitor = Process.monitor(elem(from, 0))
+
+            timer =
+              Process.send_after(self(), {:expire, token}, wait_timeout(opts))
+
+            waiter = %{
+              key: key,
+              token: token,
+              from: from,
+              monitor: monitor,
+              timer: timer,
+              exclusive?: exclusive?,
+              deadline: opts[:deadline_at]
+            }
+
+            {:noreply,
+             %{
+               state
+               | waiters: state.waiters ++ [waiter],
+                 monitors: Map.put(state.monitors, monitor, {:waiter, token})
+             }}
+        end
+    end
   end
 
   defp valid_owner_capacity?(capacity), do: is_integer(capacity) and capacity in 1..128
 
   defp valid_connector?(state, key, token) do
     case state.leases[token] do
-      %{key: ^key, owner: nil} -> true
+      %{key: ^key, owner: nil, caller: caller} -> Process.alive?(caller)
       _ -> false
     end
   end
 
-  defp lease(state, key, owner, caller, token) do
+  defp lease(state, key, owner, caller, token, exclusive?) do
     monitor = Process.monitor(caller)
 
     {token,
      %{
        state
-       | leases: Map.put(state.leases, token, %{key: key, owner: owner, monitor: monitor}),
+       | leases:
+           Map.put(state.leases, token, %{
+             key: key,
+             owner: owner,
+             monitor: monitor,
+             caller: caller,
+             exclusive?: exclusive?
+           }),
          monitors: Map.put(state.monitors, monitor, {:lease, token})
      }}
   end
@@ -202,9 +276,32 @@ defmodule HTTP.HTTP3.Pool do
 
       {lease, remaining} ->
         Process.demonitor(lease.monitor, [:flush])
-        %{state | leases: remaining, monitors: Map.delete(state.monitors, lease.monitor)}
+        next = %{state | leases: remaining, monitors: Map.delete(state.monitors, lease.monitor)}
+        retire_released_owner(next, lease, token)
     end
   end
+
+  defp retire_released_owner(state, %{owner: owner, exclusive?: true}, token)
+       when is_pid(owner) do
+    case state.owners[owner] do
+      %{exclusive?: true, token: ^token} = info ->
+        retire_native(info.cleanup)
+        send(owner, {:http3_retire, self(), token})
+        put_in(state.owners[owner].draining, true)
+
+      _ ->
+        state
+    end
+  end
+
+  defp retire_released_owner(state, _lease, _token), do: state
+
+  defp retire_native(%{lease: lease}) do
+    Quic.Cleanup.retire(lease, {:abs_ms, System.monotonic_time(:millisecond)})
+    :ok
+  end
+
+  defp retire_native(nil), do: :ok
 
   defp forget_waiter(state, waiter) do
     _ = Process.cancel_timer(waiter.timer)
@@ -212,10 +309,15 @@ defmodule HTTP.HTTP3.Pool do
     %{state | monitors: Map.delete(state.monitors, waiter.monitor)}
   end
 
-  defp available(state, key) do
+  defp available(_state, _key, true), do: nil
+
+  defp available(state, key, false) do
     Enum.find_value(state.owners, fn {owner, info} ->
       count = Enum.count(state.leases, fn {_, lease} -> lease.owner == owner end)
-      if info.key == key and not info.draining and count < info.capacity, do: owner
+
+      if info.key == key and info.ready? and not info.exclusive? and not info.draining and
+           count < info.capacity,
+         do: owner
     end)
   end
 
@@ -241,23 +343,64 @@ defmodule HTTP.HTTP3.Pool do
 
   defp dispatch(state) do
     Enum.reduce(state.waiters, %{state | waiters: []}, fn waiter, next ->
-      case available(next, waiter.key) do
-        owner when is_pid(owner) ->
-          next = forget_waiter(next, waiter)
-          {token, next} = lease(next, waiter.key, owner, elem(waiter.from, 0), waiter.token)
-          GenServer.reply(waiter.from, {:ok, owner, token})
-          next
-
-        nil ->
-          if can_connect?(next, waiter.key) do
+      if expired?(waiter.deadline) or not Process.alive?(elem(waiter.from, 0)) do
+        GenServer.reply(waiter.from, {:error, :pool_timeout})
+        forget_waiter(next, waiter)
+      else
+        case available(next, waiter.key, waiter.exclusive?) do
+          owner when is_pid(owner) ->
             next = forget_waiter(next, waiter)
-            {token, next} = lease(next, waiter.key, nil, elem(waiter.from, 0), waiter.token)
-            GenServer.reply(waiter.from, {:connect, token})
+
+            {token, next} =
+              lease(
+                next,
+                waiter.key,
+                owner,
+                elem(waiter.from, 0),
+                waiter.token,
+                waiter.exclusive?
+              )
+
+            GenServer.reply(waiter.from, {:ok, owner, token})
             next
-          else
-            %{next | waiters: next.waiters ++ [waiter]}
-          end
+
+          nil ->
+            dispatch_connection(next, waiter)
+        end
       end
     end)
+  end
+
+  defp dispatch_connection(next, waiter) do
+    if can_connect?(next, waiter.key) do
+      next = forget_waiter(next, waiter)
+
+      {token, next} =
+        lease(
+          next,
+          waiter.key,
+          nil,
+          elem(waiter.from, 0),
+          waiter.token,
+          waiter.exclusive?
+        )
+
+      GenServer.reply(waiter.from, {:connect, token})
+      next
+    else
+      %{next | waiters: next.waiters ++ [waiter]}
+    end
+  end
+
+  defp expired?(deadline) when is_integer(deadline),
+    do: deadline <= System.monotonic_time(:millisecond)
+
+  defp expired?(_), do: false
+
+  defp wait_timeout(opts) do
+    case opts[:deadline_at] do
+      deadline when is_integer(deadline) -> max(deadline - System.monotonic_time(:millisecond), 0)
+      _ -> Keyword.get(opts, :timeout, 5_000)
+    end
   end
 end

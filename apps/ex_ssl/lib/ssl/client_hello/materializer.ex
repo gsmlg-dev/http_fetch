@@ -223,6 +223,14 @@ defmodule SSL.ClientHello.Materializer do
     end
   end
 
+  defp materialize_extension({:status_request, nonce?}, context, _opts, _grease) do
+    payload = Map.get(context, :status_request, if(nonce?, do: nil, else: <<1, 0::16, 0::16>>))
+
+    if is_binary(payload),
+      do: Extension.encode({:status_request, payload}) |> with_no_key_pairs(),
+      else: {:error, {:missing_material, :status_request}}
+  end
+
   defp materialize_extension({:pre_shared_key, :deferred}, context, _opts, _grease) do
     with {:ok, payload} <- fetch_material(context, :pre_shared_key),
          true <- is_binary(payload) do

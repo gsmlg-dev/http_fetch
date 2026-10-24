@@ -78,6 +78,13 @@ Supported connection options are:
 - `alpn_advertised_protocols: [nonempty_binary, ...]`;
 - `ex_ssl: [profile: :default | %SSL.ClientHello.WireProfile{}, reference_identity: {:ip, address} | {:dns_id, name}]` (either key may be supplied).
 
+`honor_cipher_order` is a server-only option. This client returns
+`{:error, {:option, :server_only, :honor_cipher_order}}` for any explicit value
+except `:undefined`, which behaves as omission. Validation occurs before trust
+loading or connection allocation. TLS12/TLS13 and mixed-offer reference runs
+observe the error for both booleans; other values and `:undefined` follow the
+installed OTP29 public option validation source and focused regression checks.
+
 Explicit TCP `verify_none` skips certificate path/trust, validity and hostname
 verification. It still bounds and decodes the peer certificate chain, extracts the
 leaf public key with its key parameters, and requires valid CertificateVerify (TLS
@@ -154,12 +161,13 @@ certificate-version behavior; an independent OTP/OpenSSL v1 none-mode exchange i
 covered by the compatibility test. A certificate failing the signing/v3 checks
 requires a corrected or reissued signing-capable v3 credential. A locally trusted
 v1 root can instead be omitted from the presented chain.
-RSA PKCS1 SHA256/384/512 is supported
-for certificate signatures only, with the required runtime padding primitive.
-It is never accepted as a TLS 1.3 CertificateVerify signature.
+RSA PKCS1 SHA256/384/512 is supported for certificate signatures and TLS1.2
+ServerKeyExchange/client CertificateVerify, with the required runtime padding
+primitive. It is never accepted as a TLS1.3 CertificateVerify signature or a
+QUIC handshake signature. TLS1.2 eligibility uses a separate capability registry.
 
 The default profile and trust behavior remain unchanged when no certificate
-signature policy is supplied. `signature_algs` restricts CertificateVerify;
+signature policy is supplied. `signature_algs` restricts version-specific handshake signatures;
 use `signature_algs_cert` to impose a validated-chain restriction in `verify_peer`. This explicit-policy
 boundary is a documented difference from OTP's default option derivation.
 
@@ -388,12 +396,40 @@ identity afterward. TLS1.2 waits for the server Finished after the client flight
 Server trust and hostname verification are unchanged.
 
 The loader handles one DER certificate or leaf-first DER chain, typed DER RSA/EC/
-PKCS#8 private keys, and unencrypted PEM through binary or charlist paths. One
-combined certificate/key PEM is supported when `certfile` supplies both. Separate
-sources cannot conflict or hide additional private keys. Passwords, encrypted
-keys, hardware signers and `certs_keys` multiple-identity selection are rejected.
+PKCS#8 private keys, and PEM through binary or charlist paths. One combined
+certificate/key PEM is supported when `certfile` supplies both. Separate sources
+cannot conflict or hide additional private keys. Encrypted PEM accepts byte
+iodata or a zero-arity `password` callback through public `:public_key` decryption.
+Legacy AES/3DES and PBES2 AES with SHA1/224/256/384/512 PRFs have local positive
+evidence. Default local OTP provider discovery rejects ten DES/RC2 and PBES1
+formats with fixed redacted errors. An isolated process configured with the
+installed legacy provider passes all336 loader/password combinations and40
+independent TLS12/TLS13 host/prepared mTLS exchanges for those ten formats,
+including exact client identity, authenticated HTTP and TLS12 EMS. This local
+version-specific configuration does not establish default-provider or platform
+compatibility.
+Full encrypted-key compatibility remains unaccepted. Hardware signers remain
+unsupported. Ordinary `certs_keys` selection has independent TLS1.2/TLS1.3
+evidence: explicit modern sources override legacy sources, each map owns its
+password, and all candidates are validated before dialing. Selection respects
+local/peer signature policy, certificate types and CA hints, including later
+matching candidates and bounded local chain completion. Prepared identities
+retain their snapshot across file changes. Fetch, EventSource and WebSocket
+have independent authenticated exchanges; public lifecycle/cleanup and complete
+P3 acceptance remain pending. See `docs/tls-migration-design.md` in the umbrella
+for the explicit candidate, credential-byte and issuer-search limits.
 Chain order and a scheme-specific signing/verification proof bind the key to the
 leaf; the peer remains responsible for client certificate trust and validity.
+
+File-backed PEM invokes a password callback once, including plaintext PEM;
+typed DER and absent identities never invoke it. Normalization retains decoded
+credentials only. Callbacks are trusted synchronous code and may outlast a
+connect timeout; the original absolute deadline still applies afterward.
+`prepare_upgrade/1` has no callback preemption or timeout guarantee. Passwords
+are bounded to 1 MiB, 2,097,153 traversal nodes and nesting depth 64. Encoded KDF
+iterations are bounded to 1,000,000 and conservative aggregate work to 2,000,000
+units before decryption; PBES2 OCTET salts may be empty and are at most 65,536
+bytes. These finite admission limits are not unrestricted OTP parity.
 
 Bounds: 16 certificates, 256 KiB per DER certificate, 512 KiB aggregate DER,
 1 MiB per PEM file or typed DER key. The chain bound leaves room for TLS record
@@ -414,11 +450,11 @@ verification remains required; certificate-signature policy applies to the
 selected path. This does not reorder arbitrary peer chains or discover new
 trust anchors. Bounds and certificate decoding cover the full presented chain.
 
-The http_fetch production inventory uses CA overrides, depth, inferred DNS/IP
-identity, and the HTTPS hostname matcher. It has no production calls requesting
-`verify_fun`, `partial_chain`, CRL or OCSP policies. Those options therefore do
-not block the restricted backend, but consumers that depend on them cannot use
-this subset unchanged.
+This table describes the current optional-backend subset. The complete http_fetch
+migration must preserve ordinary `verify_fun` and fully implement `partial_chain`,
+CRL/OCSP, encrypted private keys and multiple client identities before OTP SSL
+removal (user decision, 2026-10-23). Migration acceptance remains open; partial
+support or current rejection does not satisfy the migration contract.
 
 | Policy | Candidate support |
 | --- | --- |
@@ -426,7 +462,7 @@ this subset unchanged.
 | `depth` | Intermediate-CA bound, independent of parser/resource limits |
 | SNI / reference identity | DNS identity or IP SAN verification; explicit `ex_ssl.reference_identity` is independent of SNI and destination, including socket upgrades |
 | `customize_hostname_check: [match_fun: fun]` | Supported hostname matching customization; path validation remains required |
-| `verify_fun` | Rejected; supplied callbacks never replace authentication failures |
+| `verify_fun` | Ordinary TCP supports tuple fun3/native-DER fun4, legacy fun1 and `:undefined`; prepared two-attach state-reset acceptance and final regression gates remain open |
 | `partial_chain` | Rejected; no user callback can introduce an intermediate trust anchor |
 | `crl_check` / `crl_cache` | Rejected; no revocation freshness or retrieval guarantee is claimed |
 | `stapling` | Rejected; OCSP response validation and availability policy are not implemented |
@@ -435,7 +471,16 @@ this subset unchanged.
 These names follow the [OTP 29 public option documentation](https://www.erlang.org/docs/29/apps/ssl/ssl.html).
 Each supplied unsupported policy fails before network I/O, with its value
 redacted. Implementing one requires a separate trust-semantics design and
-negative/availability tests; no permissive verification callback is installed.
+negative/availability tests.
+
+Ordinary verification callbacks receive a fresh initial state for each candidate
+path and prepared attachment. Callback overrides apply to X.509 validation;
+TLS1.3 certificate-version, signing-key usage, certificate-signature policy,
+CertificateVerify/ServerKeyExchange, Finished and AEAD checks remain mandatory.
+Callback failures expose fixed diagnostic classes. Configured callbacks force a
+full certificate handshake, including with explicit automatic tickets, and bypass
+ticket partition/cache access and insertion. Managed and QUIC callback support
+remains excluded. Public cancellation and cleanup acceptance remains blocked by P2.
 
 ## Explicit TLS1.2 subset (since 0.4)
 
@@ -450,8 +495,9 @@ Four suites are supported: `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`,
 `TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384`. Ordered public suite maps use
 `key_exchange: :ecdhe_rsa | :ecdhe_ecdsa`, `mac: :aead`, the matching cipher and PRF.
 ECDHE groups remain X25519/P256/P384. The bounded handshake signature subset uses
-RSA-PSS and P256/P384 ECDSA; legacy RSA-PKCS1 handshake signatures and EdDSA cipher
-authentication are not offered by the TLS1.2-only generated profile.
+RSA-PSS, RSA-PKCS1 SHA256/384/512 and P256/P384 ECDSA. SHA1 and EdDSA cipher
+authentication are not offered by the TLS1.2-only generated profile. Supplied
+signature order is preserved; TLS1.3-only policies reject PKCS1 handshake schemes.
 
 Extended Master Secret and a valid initial secure-renegotiation indication are
 mandatory. Missing EMS fails explicitly. The repository's observed OTP28/OTP29

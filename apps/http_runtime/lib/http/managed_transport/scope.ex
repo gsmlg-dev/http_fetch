@@ -2,6 +2,8 @@ defmodule HTTP.ManagedTransport.Scope do
   @moduledoc false
   use GenServer
 
+  alias HTTP.HTTP2.ConnectionSupervisor
+
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
   @impl true
@@ -9,7 +11,7 @@ defmodule HTTP.ManagedTransport.Scope do
     Process.flag(:trap_exit, true)
     policy = opts[:policy]
     {:ok, h1} = HTTP.HTTP1.Pool.start_link(name: nil)
-    {:ok, h2_supervisor} = HTTP.HTTP2.ConnectionSupervisor.start_link([])
+    {:ok, h2_supervisor} = ConnectionSupervisor.start_link([])
 
     {:ok, h2} =
       HTTP.HTTP2.Pool.start_link(
@@ -64,7 +66,7 @@ defmodule HTTP.ManagedTransport.Scope do
      }, state}
   end
 
-  def handle_call(:snapshot, _, state) do
+  def handle_call({:snapshot, deadline}, _, state) do
     state = reconcile(state)
 
     {:reply,
@@ -77,7 +79,8 @@ defmodule HTTP.ManagedTransport.Scope do
         resources: map_size(state.resources),
         limits: state.policy.limits,
         identity: Base.encode16(state.policy.identity, case: :lower),
-        lifecycle: state.lifecycle
+        lifecycle: state.lifecycle,
+        provider_resources: provider_resources(state, deadline)
       }}, state}
   end
 
@@ -94,10 +97,58 @@ defmodule HTTP.ManagedTransport.Scope do
 
       true ->
         token = make_ref()
-        slot = %{tracker: tracker, socket: nil, dials: MapSet.new(), done?: false}
+
+        provider =
+          if state.policy.transport[:tls_backend] == :ex_ssl and
+               state.policy.origin.scheme == "https", do: :birth, else: nil
+
+        slot = %{
+          tracker: tracker,
+          socket: nil,
+          dials: MapSet.new(),
+          done?: false,
+          provider: provider,
+          provider_lost?: false
+        }
+
         {:reply, {:ok, token}, %{state | slots: Map.put(state.slots, token, slot)}}
     end
   end
+
+  def handle_call(
+        {:track_provider, token, %SSL.Lifecycle.Handle{} = handle, deadline},
+        {caller, _},
+        state
+      ) do
+    case state.slots[token] do
+      %{tracker: ^caller, provider: provider} = slot
+      when provider in [:birth, :lost] or provider == handle ->
+        slots = Map.put(state.slots, token, %{slot | provider: handle})
+        state = %{state | slots: slots}
+
+        if state.lifecycle == :open and not state.uncertain? and deadline > now() do
+          {:reply, :ok, state}
+        else
+          {:reply, {:error, :transport_scope_retired}, retire(state, :graceful)}
+        end
+
+      _ ->
+        {:reply, {:error, :invalid_provider_registration}, state}
+    end
+  end
+
+  def handle_call({:provider_not_started, token}, {caller, _}, state) do
+    case state.slots[token] do
+      %{tracker: ^caller, provider: :birth} = slot ->
+        {:reply, :ok, %{state | slots: Map.put(state.slots, token, %{slot | provider: nil})}}
+
+      _ ->
+        {:reply, {:error, :invalid_provider_registration}, state}
+    end
+  end
+
+  def handle_call({:track_provider, _token, _handle, _deadline}, _, state),
+    do: {:reply, {:error, :invalid_provider_registration}, state}
 
   def handle_call({:track, resource, kind, token}, _, state) do
     if Enum.any?(state.resources, fn {_, {existing, _, _}} -> existing == resource end) do
@@ -238,7 +289,7 @@ defmodule HTTP.ManagedTransport.Scope do
       end
 
     if state.lifecycle == :stopping and map_size(state.resources) == 0 and
-         map_size(state.children) == 0 and map_size(state.slots) == 0 do
+         map_size(state.children) == 0 and settled_slots?(state.slots) do
       :atomics.put(state.latch, 1, if(state.uncertain?, do: 3, else: 2))
       {:stop, :normal, state}
     else
@@ -254,7 +305,8 @@ defmodule HTTP.ManagedTransport.Scope do
 
     slots =
       Map.reject(state.slots, fn {token, slot} ->
-        slot.done? and slot.socket == nil and MapSet.size(slot.dials) == 0 and
+        slot.done? and slot.provider == nil and slot.socket == nil and
+          MapSet.size(slot.dials) == 0 and
           not MapSet.member?(retained_tokens, token)
       end)
 
@@ -283,7 +335,97 @@ defmodule HTTP.ManagedTransport.Scope do
         {{:_, :_, :_, :"$1", :_}, [{:"/=", :"$1", :free}], [true]}
       ])
 
-  defp reconcile(state), do: Enum.reduce(:ets.tab2list(state.ingress), state, &reconcile_slot/2)
+  defp reconcile(state) do
+    state = Enum.reduce(:ets.tab2list(state.ingress), state, &reconcile_slot/2)
+    state = Enum.reduce(Map.keys(state.slots), state, &reconcile_provider/2)
+    prune_slots(state)
+  end
+
+  defp reconcile_provider(token, state) do
+    slot = state.slots[token]
+
+    case {slot.provider_lost?, slot.provider} do
+      {true, _} ->
+        state
+
+      {false, nil} ->
+        state
+
+      {false, :birth} ->
+        # A completed tracker enqueues authenticated no-birth evidence before
+        # its ordered DOWN. Reconcile may already be queued ahead of both, so
+        # only the processed monitor event can establish missing evidence.
+        if slot.tracker in Map.values(state.requests) do
+          state
+        else
+          state = put_in(state.slots[token].provider_lost?, true)
+          retire(%{state | uncertain?: true}, :graceful)
+        end
+
+      {false, handle} ->
+        case HTTP.RequestLifecycle.provider_cleanup(SSL.Lifecycle.await(handle, {:abs_ms, now()})) do
+          :confirmed ->
+            put_in(state.slots[token].provider, nil)
+
+          :pending ->
+            state
+
+          :unconfirmed ->
+            state = put_in(state.slots[token].provider_lost?, true)
+            retire(%{state | uncertain?: true}, :graceful)
+        end
+    end
+  end
+
+  defp settled_slots?(slots) do
+    Enum.all?(slots, fn {_, slot} ->
+      slot.done? and (slot.provider == nil or slot.provider_lost?) and slot.socket == nil and
+        MapSet.size(slot.dials) == 0
+    end)
+  end
+
+  defp provider_resources(%{uncertain?: true}, _deadline), do: nil
+
+  defp provider_resources(state, deadline) do
+    providers = state.slots |> Map.values() |> Enum.map(& &1.provider) |> Enum.uniq()
+
+    if Enum.any?(providers, &(&1 in [:birth, :lost])) do
+      nil
+    else
+      initial = otp_resources(state)
+
+      Enum.reduce_while(Enum.reject(providers, &is_nil/1), initial, fn handle, counts ->
+        case SSL.Lifecycle.status(handle, {:abs_ms, deadline}) do
+          {:pending, %{provider_resources: observed}} when is_map(observed) ->
+            {:cont, Map.merge(counts, observed, fn _, a, b -> a + b end)}
+
+          {:terminal, %{cleanup: :confirmed}} ->
+            {:cont, counts}
+
+          _ ->
+            {:halt, nil}
+        end
+      end)
+      |> case do
+        nil -> nil
+        counts -> Map.put(counts, :generations, 1)
+      end
+    end
+  end
+
+  defp otp_resources(state) do
+    processes = for {_, {pid, :tls, _}} <- state.resources, into: MapSet.new(), do: pid
+    sockets = for {_, {port, :socket, _}} <- state.resources, into: MapSet.new(), do: port
+
+    %{
+      processes: MapSet.size(processes),
+      tcp_sockets: MapSet.size(sockets),
+      observers: 0,
+      data_resources: MapSet.size(processes) + MapSet.size(sockets)
+    }
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
 
   defp reconcile_slot({id, token, owner, :preparing, nil}, state) do
     if state.lifecycle != :open or not Process.alive?(owner),

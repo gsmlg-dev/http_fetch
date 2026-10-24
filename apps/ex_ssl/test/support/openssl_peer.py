@@ -3,6 +3,7 @@
 
 import argparse
 import base64
+import hashlib
 import json
 import select
 import socket
@@ -60,10 +61,12 @@ def exchange(connection, mode, delay_ms):
                 content_length = int(line.split(b":", 1)[1].strip())
         if content_length > MAX_BODY or len(body) > content_length:
             raise ValueError("HTTP body too large")
+        request_digest = hashlib.sha256(header + b"\r\n\r\n")
+        request_digest.update(body)
         if len(body) < content_length:
-            read_exact(connection, content_length - len(body))
+            request_digest.update(read_exact(connection, content_length - len(body)))
         connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\npong")
-        announce("exchange", bytes=content_length)
+        announce("exchange", bytes=content_length, request_sha256=request_digest.hexdigest())
 
 
 def make_context(args, versions):

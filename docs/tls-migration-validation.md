@@ -1,5 +1,28 @@
 # TLS migration execution ledger
 
+## Current accepted boundary — 2026-10-24
+
+The public provider lifecycle and duplex source slices are accepted locally. The
+original full ExSSL command, with integration, seed101, max_cases24 and unchanged
+deadlines, now passes1157 checks (20 properties,1137 tests), with zero failures,
+skips or exclusions. Its standalone setup suite passes6. All observed command
+roots are reaped; independent checks find221 observed PIDs and153 process groups
+absent. Source/Git preservation and evidence are in
+`/tmp/http-fetch-r52-astra-bootstrap/HANDOFF.md`. The earlier accept timeout remains
+a historical failure with an unproven cause; this run does not establish causality.
+
+The middlebox interoperability matrix passes26 cases/64 authenticated cleanup
+exchanges through independent peers, including mixed version order, HRR and mTLS.
+ExSSL TLS12 requires actual EMS in both hellos; the OTP29 comparator explicitly
+records its absence instead of weakening ExSSL policy. Fetch verify_fun's four
+TLS12/TLS13 accept/reject paths also pass. Evidence is in
+`/tmp/http-fetch-r51-sol7/HANDOFF.md`; original failed runs remain historical.
+
+P3 HTTP completion/pooling integration is next. Required advanced P1 policies,
+remaining option controls, package/platform/CI/performance, default promotion,
+production OTP SSL removal and coordinated publication remain open. The sections
+below retain the scope and results of their original checkpoints.
+
 ## Execution identity and limits
 
 Date: 2026-10-21 (Asia/Shanghai). Source: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`,
@@ -4141,3 +4164,764 @@ refusal-reference,native-focus-final,unit,source,compile-final,format-check,
 credo,dialyzer,native-final,dialyzer-final,credo-final,credo-complete,diff-check}.log and allocator.diff. Actual exit
 markers and returned prompts were checked; silent/inferred-idle job status alone
 was not completion evidence. Goal remains ACTIVE/ARMED and incomplete.
+
+## R38 continuation — current-source verification (2026-10-23)
+
+The inherited uncommitted Socket Setup/handoff implementation is under review,
+not accepted. The other writing session was explicitly confirmed stopped before
+continuing. Preserve its source changes and the supplied plan copy. No provider
+default, manifest dependency, public lifecycle API or release version has changed.
+
+Current-source compile with warnings-as-errors and format checks return exit0.
+Focused native Setup/Allocator/Observer integration passes13/13 (exit0), and the
+complete lifecycle directory passes169/169 (exit0). Core TLS and Fetch H2 consumers
+pass43/43 (exit0) after revalidating the classic-path private probes against
+Connection SHA256 7ececbbfbbad9040811c12b3975ffa77a7948a3283e966625e775bd18fd8d19f.
+Configured Credo parses553 files/9300mods-funs with no issues (exit0).
+
+The historical HTTPS early-upload/WSS peer-close failures do not reproduce in
+the two-file focused run:44+10 pass (exit0). This does not resolve their earlier
+intermittent failures and is not a full integration acceptance result.
+
+The current default all-nine unit run returns exit2:1677/1679 pass. Two existing
+ResponseStreamIdlePolicyTest cases fail (compressed-header chunk reaches an
+already-dead stream; finite wait notification misses350ms). The concurrent full
+integration run also fails the new NativeSocketSetupTest first native-owned
+notification after1000ms. Suite-level process contention is a hypothesis, not a
+confirmed cause. Keep assertions/deadlines unchanged; serial reproduction and
+diagnosis remain required. No test retry replaces these failures in the record.
+
+Logs: /tmp/http-fetch-r38-{compile,focus,lifecycle,consumers,units,format,credo}.log
+and /tmp/http-fetch-cleanup-repro.log. Dialyzer subsequently passes (exit0,
+0errors/0skips/4 unchanged unnecessary ignores). Serial idle-policy replay passes
+8/8,2 integration cases excluded (exit0; /tmp/http-fetch-r38-idle-serial.log);
+the full default unit gate remains red until independently revalidated.
+
+The first full integration invocation omitted the Python peer environment:
+direct `python3 -c 'import h2'` reproduces ModuleNotFoundError. H2 trailer/admission
+peers consequently exit before readiness; their traceback is not JSON, producing
+fixture JSON.DecodeError as well. This is BLOCKED_ENV for those cases, separate
+from the native Setup failure. The known-invalid run was explicitly terminated
+with SIGTERM (notice in its log), not reported as a completed/pass result even
+though the unbuffer wrapper returns0. Its three real-QUIC opt-ins were also skipped.
+
+Prepared /tmp/http-fetch-migration-peers-venv using the unchanged pinned
+scripts/requirements-http2-stream-clients.txt, matching integration.yml. Installation
+passes (exit0). A new serial full integration run uses that environment plus
+HTTP_QUIC_PHASE1_REAL=1; result pending in
+/tmp/http-fetch-r38-integration-prepared.log. P2 acceptance, P3–P7, remote CI and
+publication remain incomplete; no commit/push or major release in this continuation.
+
+Prepared serial integration completes with exit0:1605/1605 pass, zero skips.
+Per app: ExSSL368, QUIC34, Core79, H3companion4, Runtime59, Fetch929, WS87,
+WT0 (all24 cases are unit/capability cases), SSE45. Core includes the three
+explicit real-QUIC cases. This passes the current source integration gate,
+including the new native Setup and the previously failing HTTPS/WSS cases,
+without source/timeout/assertion changes. It does not explain the earlier
+timing failures or establish candidate, platform, public lifecycle or E2E gates.
+Final all-nine unit replay is now running serially, with output in
+/tmp/http-fetch-r38-units-serial.log; initial failed results remain above.
+
+README now explains the three tiers and pinned local Python preparation,
+and fixes the scoped E2E command to include the required `--include e2e` flag.
+
+Final serial default unit run completes with exit0:1679/1679 pass,1605 integration
+cases excluded. ExSSL518, QUIC215, Core339, H3companion109, Runtime90, Fetch303,
+WS51, WT24, SSE30. This revalidates the local default unit gate; it does not erase
+the initial two timing failures or establish their root cause. No timeouts,
+assertions, test concurrency settings or implementation were changed to get green.
+
+R38 private inert Setup/handoff is accepted at this current-source boundary.
+It uses the original typed identities/permits/deadlines and confirms actual peer
+closure plus process/socket DOWN in its new integration cases. Raw TLS attachment,
+connected publication and public I/O remain explicitly refused. P2 overall remains
+open, including complete native transport lifetime, all-error identity, public
+lifecycle/transfer and duplex-control correctness. No candidate/publication,
+performance/soak, supported-runtime matrix, remote CI or production-without-OTP-SSL
+acceptance follows. Changes remain uncommitted; no push or release was performed.
+
+## R39 — native Socket TLS lifetime (private slice accepted)
+
+ROUTE task=R39 agent=sol_worker reason=implement native Socket TLS lifetime under accepted P2 design
+
+Baseline: d770327 plus the accepted uncommitted R38 slice. R39 owns native
+TLS I/O, private Setup orchestration and truthful Socket closure, retaining the
+original actors, typed identities, deadlines and existing Port behavior. Public
+lifecycle/default promotion remain separate acceptance gates. An independent
+read-only Sol audit checks coverage while implementation proceeds; root owns
+consumer private-probe revalidation and serial umbrella gates. No new Agent Note
+scope is inferred from the missing .agents/current.md declaration.
+
+Task record: initial_worker=sol_worker; current_worker=sol_worker;
+sol_escalated=false; astra_escalated=false; sol_repair_rounds=0;
+astra_repair_rounds=0. Initial missing-behavior red tests are TDD evidence,
+not a repair round. No R39 acceptance result yet.
+
+R39 initial TDD red is reproduced by the new integration case
+apps/ex_ssl/test/ssl/lifecycle/native_socket_tls_test.exs: expected private
+Setup.attach=:ok, actual socket_transport_not_implemented (0/1). No repair
+round consumed. Independent read-only audit confirms remaining Port assumptions
+in Setup/Observer/Connection, failure attribution and writer deadlines; it also
+identifies the retained-plaintext peer-close path as requiring distinct handling.
+
+R39 expanded initial matrix runs20 cases:18 pass, two fixture failures remain.
+OTP reference listen rejects integer-only cipher input; empty cacerts fails local
+normalization before the intended wrong-root handshake, leaving the reference
+acceptor unused. These are implementation/test acceptance failures, not an agreed
+TDD red or evidence of a protocol defect. Worker is correcting only those fixture
+inputs. Cumulative sol_repair_rounds=1; astra_repair_rounds=0. No R39 acceptance yet.
+
+R39 repair1 validation stops at test compilation with SystemLimitError: a generated
+test function name interpolates the full wrong-root DER and exceeds the255-byte
+atom limit. No test body executes in that invocation. Repair2 uses fixed short
+wrong_ca/wrong_name labels with the same DER inputs/assertions, then validates the
+bounded native matrix. This is the final Sol repair round for R39; another
+implementation acceptance failure requires a stopped-writer handoff and escalation.
+Current sol_repair_rounds=2; astra_repair_rounds=0. No green repair2 result yet.
+
+R39 repair2 completes26/27, exit2. Command: MIX_ENV=test unbuffer mix test
+apps/ex_ssl/test/ssl/lifecycle/native_socket_tls_test.exs
+apps/ex_ssl/test/ssl/lifecycle/native_socket_setup_test.exs
+apps/ex_ssl/test/ssl/lifecycle/socket_observer_test.exs --include integration --seed101.
+Original output is exec session50962/chunk5d260a; no filesystem log was captured.
+Remaining failure: OTP TLS1.2 native protected-record test receives no
+lifecycle_tls_ready within5000ms; reference server logs CLIENT ALERT Fatal Handshake
+Failure in certify. Root cause unresolved; independent OpenSSL TLS1.2/1.3 and
+the other26 scenarios pass. Original typed resource termination was observed in
+the failing case; that cleanup is not handshake success. Broader gates remain unrun.
+Predecessor confirms all commands finished and all writes stopped; changes retained.
+
+ROUTE task=R39 agent=astra_worker reason=SOL_REPEATED_FAILURE bounded recovery of remaining OTP TLS1.2 native handshake acceptance
+
+astra_gate=SOL_REPEATED_FAILURE: two completed unsuccessful Sol repair/validation
+rounds remain evidenced above (compile atom limit, then real OTP TLS1.2 failure).
+Task record: initial_worker=sol_worker; current_worker=astra_worker;
+sol_escalated=false; astra_escalated=true; sol_repair_rounds=2;
+astra_repair_rounds=0. Recovery must establish exact root cause and preserve the
+original native resource/deadline and independent interoperability checks. A
+proven pre-existing P1 signature gap remains visible; it cannot be called native
+success or silently masked by weakening the test.
+
+Astra read-only diagnosis reproduces the unchanged26/27 matrix in
+/tmp/http-fetch-r39-astra-before.log (exit2). Exact same OTP29 peer/cipher also
+fails ordinary Port TLS in /tmp/http-fetch-r39-port-probe.log. An independent
+HandshakeMachine probe of its real ServerHello reports
+{:fatal_alert, :handshake_failure, :extended_master_secret_required}; extension
+IDs are11 and65281, with23 (EMS) absent. Probe evidence is retained in
+/tmp/http-fetch-r39-hello-probe.log. Thus the new fixture's expected positive
+result contradicts the accepted mandatory-EMS profile; this is an evidenced
+existing policy boundary, not a native transport regression or PKCS1 failure.
+An initial consumed-Task diagnostic failed separately; successful probe commands
+exit0 and do not constitute a source gate.
+
+Coordinator preserves mandatory EMS and authorizes bounded Astra repair1:
+correct the OTP29/no-EMS case to explicit rejection with precise missing-EMS
+evidence and original durable resource cleanup; retain independent OpenSSL TLS1.2
+multi-record protected-traffic success and TLS1.3 success unchanged. No no-EMS
+support, protocol weakening, deadline increase or P1 signature scope expansion.
+Current sol_repair_rounds=2; astra_repair_rounds=1. Repair result remains pending.
+
+Astra repair1 focused validation passes29/29, exit0 in
+/tmp/http-fetch-r39-astra-repair1-focus.log. This includes the unchanged existing
+TLS12MachineTest cases that independently observe missing ServerHello extension23
+and exact extended_master_secret_required. Only the newly authored R39 OTP29
+expectation changes; runtime/protocol source does not change in recovery.
+OpenSSL TLS1.2 multi-record positive remains intact. Full ExSSL source and strict
+compile/scoped-format validation are in progress; overall R39 acceptance remains open.
+
+R39 bounded recovery handoff completes with all commands finished and writes stopped.
+Full ExSSL source suite passes904/904 (20 properties,884 tests), exit0 in105.0s,
+including integration/classic/backpressure cases; log:
+/tmp/http-fetch-r39-astra-exssl.log. MIX_ENV=test compile --warnings-as-errors and
+eight-owned-file format checks pass, with empty compile/format logs. Scoped diff
+check passes. Cumulative counters remain sol_repair_rounds=2 and
+astra_repair_rounds=1. No runtime source changes occurred during Astra recovery.
+
+Coordinator reviews native read/select identity fencing, absolute output deadlines,
+failure publication and original-resource retained-plaintext cleanup against R38.
+The classic Port call bodies, driver preparation and buffered-close fields remain
+compatible with the two HTTP private probes. Their source pins are updated only
+after that review to Connection SHA256
+8cba6246d1d03426d6be2ce817999ecdf9eba82b928ad914b521259919c5db60.
+Their actual43-case consumer replay passes, exit0 in6.3s, using root-scoped
+tls_transport_test.exs and socket_client_http2_test.exs with --include integration
+--seed101; log: /tmp/http-fetch-r39-consumers.log. Existing Elixir1.20 bitstring
+pin warnings occur in those test files; library strict compilation passes separately.
+The private R39 slice is accepted within these evidence boundaries.
+Native blocked-writer/KeyUpdate,
+public lifecycle, unsupported native options and integrated umbrella/package/CI
+gates remain separate open requirements; full ExSSL success does not close P2.
+
+ROUTE task=R40 agent=sol_worker reason=make candidate TLS checks and QUIC/H3 selection automatic for relevant changes
+
+R40 is independent P4 harness preparation allowed alongside P2: selector/workflow
+changes only, using existing candidates and actual dependency graph. Preserve
+manual all-nine/full/historical gates and cheap unrelated documentation changes.
+Task record: initial_worker=sol_worker; current_worker=sol_worker;
+sol_escalated=false; astra_escalated=false; sol_repair_rounds=0;
+astra_repair_rounds=0. No remote CI execution or P4 acceptance result yet.
+
+R40 local implementation is accepted after coordinator diff review. The selector
+now exposes candidate_tls for non-documentation app code/tests/manifests and
+relevant root/harness inputs. Actual dependency closures select affected QUIC/H3
+companions as well as H2 clients. Reusable workflow outputs and CI trigger paths
+match; the existing candidate job is required automatically, and a missing TLS
+feature artifact fails. Full shared checks and historical compatibility remain
+manual-only. Unrelated documentation avoids candidate acceptance.
+
+Executed: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v,
+20/20 pass in14.238s; scoped git diff --check passes. Initial expected red exposed
+the missing output/API, QUIC fanout and workflow gate. Fixtures exercise actual
+Git push/PR ranges, renames/deletes/new branches, malformed input, source/tests/
+manifests/harnesses, docs exclusions, manual outputs and synthetic graph changes.
+No Mix gate or remote workflow ran for R40. This accepts P4 harness preparation,
+not integrated candidate TLS or P4 completion. Sol/Astra repair counters remain0.
+
+## R41 — mixed-package TLS harness (actual traffic pending)
+
+ROUTE task=R41 agent=sol_worker reason=extend existing isolated package traffic with verified ExSSL TLS
+
+Baseline: d770327 plus accepted R38/R40 and in-progress R39. Worker owns the
+existing package-traffic Python/Elixir harness and narrowly scoped automation
+tests. Retain four h2c consumers and add the same four over verified ExSSL+h2,
+including WSS mapping, independent peer ALPN/protocol evidence, exact archives,
+standalone dependency isolation, shared mixed connection and client stop/restart.
+Runtime/package execution waits for stable integrated source; mock record checks
+alone cannot establish encrypted package interoperability.
+
+Task record: initial_worker=sol_worker; current_worker=sol_worker;
+sol_escalated=false; astra_escalated=false; sol_repair_rounds=0;
+astra_repair_rounds=0. No real R41 package traffic executed yet.
+
+R41 implementation/bounded validation is accepted after coordinator review of all
+five files: package traffic Python/Elixir drivers, package-consumer automation test,
+H2 CI evidence validator and its test. One exact archive set serves both four-client
+modes. Verified ExSSL uses fixture CA, verify_peer and localhost SNI/hostname checks;
+HTTPS WebSocket routes use WSS. Peer h2/ALPN, exact per-connection traffic counts,
+clean WebSocket completion, four traffic/startup receipts and isolated provider
+Hex/code-path provenance are required. Aggregate success needs both distinct modes
+and8 consumers/connections; old h2c-only evidence is rejected by CI.
+
+Executed: five new pure/mocked package-harness checks and two CI-evidence checks
+pass; four changed Python files compile; scoped Elixir formatting and git diff
+--check pass. Agreed initial red exposed missing dual-mode APIs/aggregate support.
+No real sockets, package build or traffic gate ran. Sol/Astra repair counters0.
+Integrated acceptance remains pending, using fresh validated archives:
+
+```bash
+HTTP_FETCH_ARCHIVE_DIR="$ARCHIVE_DIR" HTTP_FETCH_RELEASE_VERSION="$VERSION" \
+  python3 scripts/http_runtime_package_traffic_gate.py
+```
+
+## R42 — version-specific TLS1.2 PKCS1 compatibility
+
+ROUTE task=R42 agent=sol_worker reason=prepare required TLS1.2 RSA-PKCS1 compatibility implementation
+
+Diagnosis owns no files and runs no runtime gates while R39 recovery validates.
+The settled P1 target is SHA256/384/512 only for TLS1.2 handshake signatures,
+including client authentication, with independent forced-scheme evidence and
+strict TLS1.3/QUIC exclusion. No static RSA/CBC or explicit-profile reordering.
+Deliverable is the smallest concrete resolver/identity/profile interface and
+unit/integration plan; implementation waits for stable R39 source.
+Task record: initial_worker=sol_worker; current_worker=sol_worker;
+sol_escalated=false; astra_escalated=false; sol_repair_rounds=0;
+astra_repair_rounds=0.
+
+Read-only mapping completes: preserve strict global TLS1.3 registries or explicitly
+filter both QUIC config/capabilities; raw TLS1.2 signatures need their own resolver.
+ClientIdentity currently derives/proves only TLS1.3 schemes, so TLS1.2 mTLS needs
+separate eligibility plus explicit protocol-context selection. Options, identifier
+encoding and ordered profile validation must follow offered versions. Existing
+OpenSSL wrappers lack forced-signature controls; independent server/mTLS tests
+must verify actual scheme IDs and certificate-signature compatibility per hash.
+
+R42 implementation is assigned with unchanged0 repair counters. PhaseA prepares
+fixed-key independent vectors and forced-scheme peer assets only under
+/tmp/http-fetch-r42-prep, without repository edits or Mix execution. PhaseB source
+and test changes wait for the R39 stable-source gate. Planned ownership excludes
+Connection/Writer/lifecycle and root documentation, preserving R39 recovery.
+
+R42 PhaseA independent OpenSSL3.6.5 evidence is ready: fixed-key SHA256/384/512
+PKCS1 vectors verify independently; forced TLS1.2 ECDHE-RSA-AES128-GCM peers record
+server SKE and client CertificateVerify IDs0401/0501/0601 with6738 response bytes
+for each mTLS handshake. Assets and receipts remain under /tmp/http-fetch-r42-prep;
+these are peer/vector preparation, not engine acceptance. All peer processes reaped.
+After the904-case ExSSL and43-case consumer gates, coordinator authorizes PhaseB
+implementation and exclusive Mix validation. Repair counters remain0.
+
+R42 agreed initial red: fixed-vector tests1/3 pass, two fail with
+{:unsupported_signature_scheme,1025}. Initial version-specific implementation
+passes strict compile and179/180 focused units (26 integration excluded).
+One new pure mTLS case requests only SHA384/512 while its static certificate is
+SHA256-signed, so existing certificate policy correctly suppresses selection.
+Initial six integrations also fail before handshake on lazy-module
+String.to_existing_atom inputs. These are retained initial acceptance failures.
+
+Grouped Sol repair1 corrects the test request to permit its SHA256 certificate
+signature while retaining target-scheme-first selection and exact CV assertion,
+uses fixed scheme atoms, and extracts generated-case bodies into a runtime helper
+to remove literal-branch warnings. Production implementation remains unchanged.
+All18 new checks, including six real OpenSSL forced server/mTLS handshakes, then
+pass exit0 in4.1s. Current sol_repair_rounds=1; astra_repair_rounds=0. Full ExSSL,
+affected QUIC and final compile/format gates remain in progress.
+
+R42 final source gate passes922/922 ExSSL (20 properties,902 tests), exit0 in123.5s;
+shared QUIC profile/TLS-driver/phase1 checks14/14 pass, exit0 in0.7s. Final strict
+compile, twelve-owned-file formatting and scoped diff checks pass. Logs:
+/tmp/http-fetch-r42-{exssl,quic,compile,format}.log. Coordinator reviews all eight
+production diffs plus versioned policy/identity/negative and independent-vector
+tests. Global TLS1.3/QUIC registry remains strict; public ordered policy is preserved.
+R42 slice is accepted, with no candidate/remote or whole-umbrella claim.
+Worker confirms all commands/peers finished and writes stopped. Runtime ownership
+transfers to R43; cumulative Sol1 successful repair, Astra0.
+
+## R43 — bounded busy-writer control output accepted source slice
+
+ROUTE task=R43 agent=sol_worker reason=implement required busy-writer control output
+ROUTE task=R43 agent=astra_worker reason=SOL_REPEATED_FAILURE after two failed repair-and-validation rounds
+Task record: initial_worker=sol_worker; current_worker=astra_worker;
+sol_escalated=false; astra_escalated=true; sol_repair_rounds=2;
+astra_repair_rounds=1; astra_gate=SOL_REPEATED_FAILURE. Recovery passed; all
+writers, commands and owned peers stopped before coordinator consumer validation.
+
+Connection retains one immutable application output and at most one protected
+mandatory control. It preserves epochs, exact ciphertext, ACK tokens and original
+absolute deadlines; queue residence consumes the budget, including the250ms
+reciprocal-close cap. Pending control blocks further parsing/encryption. Abandonment
+discards unsent application bytes while preserving these two bounded outputs;
+close/cancel/owner loss retain abort intent. Terminal recv waits for pending peer
+shutdown output to retire. No new actor, Writer queue, re-encryption or replay.
+
+The agreed red failed5/6 before implementation. Expanded source validation exposed
+an actual premature Port terminal-read regression and invalid new fixture oracles;
+the Port assertion and Writer sensitive protection remain intact. Recovery reproduced
+a stale pre-admission token comparison: legitimate ACK advancement was mistaken for
+mutation. The final test instead proves genuine native send blocking overlaps control
+admission, exact saved dispatch, full16MiB delivery and authenticated new-key traffic.
+The earlier no-pending timeout's exact mechanism remains unproven; no separate
+runtime-readiness fix is inferred from that symptom.
+
+Accepted evidence: focused53/53, nearby75/75, strict compile, scoped format and diff
+checks. Coordinator reviewed Connection and both private HTTP probes, updated their
+source pin to33e0dbd7f002bcb52504e8dc7cbc9ca988b7ed9ef44345dd513467105ede1aef,
+and replayed43/43 consumer checks plus scoped formatting. Logs and exact commands:
+/tmp/http-fetch-r43-astra-handoff.txt and /tmp/http-fetch-r43-consumers{,-format}.log.
+Full-stage ExSSL/umbrella/Credo/Dialyzer, public P2 lifecycle and package/remote
+acceptance remain pending; no P2 completion or default promotion is claimed.
+
+## R44 — ordinary TCP verification callback diagnosis
+
+ROUTE task=R44 agent=sol_worker reason=diagnose required verify_fun compatibility preservation
+
+Read-only source mapping while R43 owns implementation/runtime. Locate ordinary
+HTTP usage and pure PKIX/protocol plumbing, supported OTP callback events/state,
+hostname/extension behavior, error/exception handling and cancellation/setup
+evidence. Return minimal fixed interfaces and actual reference/red checks; do not
+implement wholesale PKIX or other advanced-policy extensions. Managed callbacks
+remain excluded and QUIC remains strict. No repository writes or runtime commands.
+Task record: initial_worker=sol_worker; current_worker=sol_worker;
+sol_escalated=false; astra_escalated=false; sol_repair_rounds=0;
+astra_repair_rounds=0. No agreed TDD red yet.
+
+R44 mapping completes without writes/runtime execution. Besides Options/PKIX,
+callback plumbing crosses HandshakeMachine whitelist, HandshakeCore parser/config
+split, TLS12 forwarding and one Connection verifier-option line. That final line
+waits for R43 stopped-writer handoff. Existing trust-anchor-only candidate selection
+cannot deliver unknown_ca; hostname mismatch must replace valid_peer for the user
+callback. Installed OTP29 sources inform the reference plan but are not observed
+event transcripts. Callback failure/exception boundaries must use fixed redacted
+categories and never retain user state in peer evidence, tickets or receipts.
+
+ResumptionContext currently lacks callback partitioning/reverification. Root chooses
+full certificate handshake/cache bypass when verify_fun is present, retaining the
+accepted auto option without serializing arbitrary function/state into cache keys.
+This preserves current callback policy rather than silently resuming around it.
+PhaseA prepares bounded OTP reference probes and drafts only under
+/tmp/http-fetch-r44-prep, with no repository edits or runtime commands while R43
+validates. Real callback transcripts precede any emulation in PhaseB. Full HTTP
+completion/setup adaptation remains a P3 gate until public lifecycle exists.
+Counters remain Sol0/Astra0.
+
+PhaseA preparation is complete in /tmp/http-fetch-r44-prep/MANIFEST.md; drafts and
+OTP reference probes remain uncompiled/unexecuted. Source implementation waits
+behind integrated P2. The user requires complete CRL/OCSP, partial_chain, encrypted
+keys and multiple identities before OTP removal; these are separate required P1
+capabilities, not approved next-major removals.
+
+## R45 — public lifecycle integration; full P2 acceptance remains open
+
+Public `SSL.Lifecycle` now connects the existing observer, authority and receipt to
+ordinary TLS1.3/TLS1.2 dialing, owned STARTTLS and per-attempt prepared upgrades.
+Status separates setup, logical closure and cleanup. Transfer replaces controller
+and application-owner monitors, revokes stale authority and reconciles late ACKs.
+The current Connection source hash is
+`988058dc49bd5d7c3bca70e8293b40ef1c05959b65d7d3b9f3acfa53827dbe63`;
+HTTP consumer source-pin review/replay and full stage gates remain pending.
+
+ROUTE task=R45 agent=astra_worker reason=SOL_REPEATED_FAILURE
+Initial worker Sol; two unsuccessful repair rounds ended at374/376. Bounded Astra
+repair1 corrects two test fixtures: valid reserved DNS name for exact nxdomain,
+and sustained actual native-send quiescence before requesting KeyUpdate. Diagnosis
+observed authenticated KeyUpdate processing during legitimate partial-write progress;
+it did not establish a production protocol defect. No runtime source changed in
+this recovery. Protected ciphertext, epochs, original deadlines, full16MiB/new-key
+peer checks and resource-cleanup assertions remain intact.
+
+Executed: target seed601887 passes3/3; original integrated lifecycle/duplex/nearby/
+TCP/prepared/QUIC selection passes376/376 at seed101. The native case passes six
+consecutive executions; strict compilation, scoped formatting and diff checks pass.
+Evidence: `/tmp/http-fetch-r45-astra-repair1-{two,focus}.log` and the stopped handoff.
+Cumulative R45 counters: Sol2/Astra1. The same native test consumes R43's final
+Astra repair2; R43 counters remain Sol2/Astra2, with no further repair budget.
+
+Two P2 acceptance failures are now reproduced. An isolated file-only resolver
+returns an assigned local interface address followed by loopback; the first
+refuses and the second has a TLS listener. Ordinary ExSSL and OTP authenticate
+and exchange bytes within the same3000ms budget, while lifecycle dialing returns
+the first `:econnrefused`. Its cleanup is confirmed, but address fallback is absent.
+The unchanged native allocator suite also fails3/4 at seed101: the original Socket
+DOWN is missing within1000ms. A trace of that same test shows the exact allocator
+enter `:prim_socket.finalize_close/1` before Observer kills it, with no return from
+finalization. Controls with complete explicit close or owner exit pass; this is
+not evidence that every explicit close suppresses socket monitors.
+
+The stopped diagnosis and commands are in
+`/tmp/http-fetch-p2-followup-diagnosis/HANDOFF.md`. Coordinator accepts bounded
+pre-TLS TCP-candidate rollover only after each original Socket DOWN, with the
+original deadline and cancellation fence retained. The next recovery also removes
+redundant allocator termination close and addresses deliberate candidate-close
+overlap. R39 and R45 each enter their final Astra repair2; R43 remains exhausted.
+Neither reproduced failure is waived by the earlier green batch.
+Full ExSSL/umbrella, Credo, Dialyzer, consumer/package/platform and P3 gates are
+not established by this focused result. OTP remains the production default.
+
+The combined recovery changes allocator exit, sequential address dialing,
+Observer close coordination and bounded ledger rollover. Its initial27/29 result
+exposed a finite-deadline representation error and a pending-proof terminal path
+that could miss the deferred allocator kill. The accepted follow-up changes only
+Observer: retain the original minimum deadline using the helper's tagged argument,
+and perform process termination at every pending-proof grace-expiry exit. Missing
+exact resource DOWN still leaves cleanup unconfirmed; deadlines are unchanged.
+
+The original29 checks pass, and allocator checks pass11 executions of6 cases.
+The current lifecycle/duplex/TCP/prepared/QUIC selection passes384/384, including
+independent TLS12 controls. An initial379/384 run failed before five peer startups:
+Xcode Python's LibreSSL lacks OP_NO_RENEGOTIATION. A child-command PATH selecting
+installed Python3.14/OpenSSL3.6.5 resolves that prerequisite without source, helper
+or global configuration changes; the failed log remains preserved. Strict compile,
+scoped format, configured Credo and whitespace checks pass. All1075 baseline files
+are preserved except the owned Observer change; protected tests and canonical0400
+remain unchanged, and all owned runtime processes exit.
+
+Recovery evidence is in `/tmp/http-fetch-p2-astra-round3-validation/HANDOFF.md`;
+the earlier failed diff remains in `/tmp/http-fetch-p2-final-recovery/HANDOFF.md`.
+The public failure/cancellation slice now passes seven integration checks: killed
+Connection with a genuinely native-blocked Writer, connect after confirmed
+pre-cancel, wrong CA/identity, invalid options, setup cancellation and established
+cancellation. Original resource identities, typed termination evidence, durable
+public receipts and warmed resource baselines are retained. The combined
+provider/lifecycle/duplex/QUIC selection passes391/391; default selection excludes
+all seven new integration cases. Scoped formatting, strict compilation, configured
+and strict Credo, whitespace and source-preservation checks pass.
+
+The new test observes original Setup/Allocator retirement without assuming that
+connect success already implies their absence. The inert expiry module runs
+serially and proves suspension acknowledgement before its unchanged400ms deadline.
+The earlier KeyUpdate observation timeout was not reproduced by one instrumented
+check or the unchanged native test in the combined run; its cause remains unknown.
+No production code, protected native TLS assertion or deadline changed in this
+slice. Formatter-only changes have identical normalized syntax trees.
+
+Evidence is retained in `/tmp/http-fetch-p2-fixture-recovery-astra/HANDOFF.md` and
+`/tmp/http-fetch-p2-format-validation/HANDOFF.md`; the original failed391 run remains
+in `/tmp/http-fetch-p2-coverage-astra-next2/HANDOFF.md`. Full P2 still requires
+integrated ExSSL source acceptance, including the open R44/R51 checks. P3,
+default promotion and publication remain open.
+
+## R46 — encrypted single-client keys; required provider gates remain open
+
+Options and ClientIdentity now accept transient byte-iodata passwords or fun/0
+callbacks for encrypted PEM. Bounded preflight checks precede public
+`:public_key` decryption. Normalized/prepared credentials retain decoded keys,
+with no password, callback, source path or raw PEM. Existing leaf/key proof,
+version-specific schemes, auto-ticket identity rejection and managed/QUIC
+exclusions remain. The accepted callback and finite-work policy is recorded in
+`tls-migration-design.md` and the ExSSL compatibility guide.
+
+Actual focused checks pass:49 ExSSL and17 Fetch tests, plus26 existing ExSSL and11
+managed regressions. Required-mTLS Fetch verifies exact leaf, ALPN, TLS version
+and HTTP200/body for RSA/EC x TLS12/TLS13 x H1/H2 x direct/CONNECT. Public SSL
+prepared snapshots survive certificate/key deletion or replacement and callback
+state mutation across two attaches without reloading. Wrong-password/pre-dial,
+malformed/KDF bounds, negative authentication and privacy checks pass. The three
+new filesystem/socket suites are integration-tagged: default execution runs zero
+of their51 tests; parameter checks remain single-VM units. Strict compile,
+ten-file format, scoped Credo and whitespace checks pass.
+
+The42-format x8-password-form loader matrix distinguishes32 actual positive
+formats from10 unavailable DES/RC2 formats in the default environment. All80
+unavailable cells return finite redacted errors there. Under the isolated
+configuration below, all336 loader/password cells pass, with zero blocked.
+OTP29.0.2 crypto5.9 links OpenSSL3.5.7; CLI OpenSSL3.6.5 with explicit legacy
+provider generates all fixtures. A single process-local `OPENSSL_CONF` and
+`OPENSSL_MODULES` probe activates the installed x86_64 MacPorts3.6.5 legacy module:
+public OTP reports static linked/compiled3.5.7, DES/RC2 available, and all ten
+public decodes equal their clear keys (exit0, empty stderr). The absent build-time
+module directory explains a viable provider-discovery fix; no global provider
+or FIPS configuration changed. Exact evidence is in
+`/tmp/http-fetch-r46-provider-diagnosis/PROBE-HANDOFF.md`.
+
+The same child-only provider configuration subsequently passes49 ExSSL and17
+Fetch focused tests and40 independent required-mTLS exchanges: ten formerly
+blocked formats x TLS12/TLS13 x public host/prepared attach. Every exchange checks
+exact client/server leaf DER, CertificateVerify, Finished, authenticated HTTP and
+peer exit0; all20 TLS12 exchanges negotiate EMS. The first Fetch attempt failed
+before handshake because Xcode Python3.9/LibreSSL lacks `OP_NO_RENEGOTIATION`.
+That failure remains preserved. Prepending a child-only shim for the installed
+MacPorts Python3.14/OpenSSL3.6.5 fixes the peer prerequisite; no dependency install,
+global configuration or source change occurred. Root verifies all113 evidence
+hashes, the1,051-path source snapshot and40 unique actual mTLS rows. All owned
+commands and peers stop. Exact environment, commands, raw logs and original failure
+are retained in `/tmp/http-fetch-r46-provider-acceptance/FINAL-HANDOFF.md`.
+Full encrypted-key acceptance and OTP removal remain open; default-provider,
+remote/platform and package/CI matrices are not run.
+
+An extra post-CONNECT file-deletion probe reproduces the same authenticated H2
+failure for plaintext and encrypted credentials: the existing pool-key path
+re-stats `certfile` and returns `tls_file_unavailable`/`enoent`. This is separate
+from the accepted unchanged-file Fetch matrix and public SSL snapshot guarantee;
+HTTP H2 mutation-safe snapshots are not claimed. No HTTP production source changed.
+
+Handoff, exact diff, E01–E22 mapping and hashes are in
+`/tmp/http-fetch-r46-phase-b/HANDOFF.md` and `final-manifest.json`; detailed failed
+checks remain there. Root verified all ten source and thirteen log hashes.
+Initial/current worker is Sol, cumulative Sol2/Astra0; final repair succeeds.
+All owned commands stop and ownership is released. Full ExSSL/umbrella,
+Dialyzer, package/platform and CI gates are not run for this slice. P2 remains
+unaccepted and P3/default promotion/publication have not begun.
+
+## R47 — bounded ordinary multiple-identity functionality accepted
+
+Public OTP29 references cover190 observations:149 exact HTTP exchanges and41
+malformed/no-identity/rejection outcomes. They establish later actual CA-match
+precedence, EC/restricted-PSS ordering and intermediate-only wire chains in both
+versions. Evidence is in `/tmp/http-fetch-r47-live-20261023-1/` and
+`/tmp/http-fetch-r47-phase-b/intermediate-reference.jsonl`. OTP TLS12 EMS0 is
+reference evidence only; ExSSL positives retain EMS1.
+
+The accepted independent implementation preserves modern source precedence,
+per-map passwords, validation of every candidate before dialing and immutable
+prepared snapshots. Independent peers verify selected DER, wire chains,
+CertificateVerify and authenticated application bytes, including ordinary Fetch
+direct/CONNECT H1/H2 and EventSource/WebSocket. Negative authentication checks
+cover live TLS13 and constructed TLS12 core flows; the latter are not new socket
+mutation evidence. Signature/options/selector regressions and scoped compile,
+format and Credo checks pass. Exact M01–M19 evidence and limits are in
+`/tmp/http-fetch-r47-astra/FINAL-HANDOFF.md`.
+
+Final acceptance fixes an isolated-test tracing initialization dependency and
+checks the actual1,048,576 charged issuer visits with the normal ExUnit timeout:
+the isolated aggregate passes in6.2s and the full seven-case file in22.0s.
+The aggregate charges revisited DERs; the separate per-identity bound retains
+unrelated-issuer decoding coverage. Final evidence and source preservation are in
+`/tmp/http-fetch-r47-astra-round2/FINAL-HANDOFF.md`. Cumulative Sol2/Astra2 used;
+all owned commands and peers stop. M15/M16/M18 public diagnostics, lifecycle,
+cleanup and integrated P3 gates remain blocked. Full migration acceptance is open.
+
+## R44 — ordinary verification callback boundary
+
+The original86 OTP29 observations retain a failed validator with16 oracle or
+certificate-role errors; that result is not overwritten. A separate22-observation
+supplement passes its exact event/role/outcome checks in both TLS versions.
+Together they establish original-state reset on distinct cross-signed paths,
+native DER callback arguments, extension/EKU handling and custom `verify_none`
+validation. Trusted and empty-CA controls both reach `valid_peer`; paired callback
+rejections produce the observed TLS alert instead of an application exchange.
+All peers exit normally. Original and supplemental evidence remain in
+`/tmp/http-fetch-r44-reference-run/actual-20261023T095122Z/` and
+`/tmp/http-fetch-r44-supplement/actual-20261023T101531Z/`.
+The ordinary callback slice passes22 policy/security checks, all seven live
+ExSSL/Core/Fetch checks and the369-check regression selection. Both prepared
+attachments independently assert the complete ordered SAN/SKI/AKI/valid_peer
+events and states0/1/2/3, immutable trust and authenticated HTTP. Callback ticket
+bypass removes the deferred PSK slot before ClientHello materialization.
+Required regressions also restore owned-socket closure for malformed upgrade
+options, preserve foreign-socket ownership and reconcile TLS12 authority hints
+with the accepted R47 fallback policy. The final source passes85 focused
+PKIX/Core/Fetch checks, the391-check P2 selection,21-file formatting/Credo and
+warnings-as-errors compilation. Four existing Fetch test bitstring warnings
+remain recorded; that compile gate does not compile test files.
+Evidence and the retained earlier failures are in
+`/tmp/http-fetch-r44-astra-round4/HANDOFF.md` and
+`/tmp/http-fetch-r44-astra-round5/HANDOFF.md`. Four additional TLS13 integration
+cases cover an actually blocked trusted callback on native dial and prepared
+upgrade, each cancelled explicitly or by its original lifecycle deadline. They
+assert the same callback/Connection identity, exact original resource DOWN,
+confirmed durable receipts, peer termination and callback-state privacy. Native
+and strict Credo, formatting and callback-extraction AST equivalence pass; default
+selection excludes all four. Evidence is in
+`/tmp/http-fetch-r44-callback-astra8/HANDOFF.md`.
+The complete current ExSSL default unit gate executes580 checks with zero failures
+or skips;577 integration/E2E cases are excluded. All1077 source files/modes remain
+unchanged after that run; evidence is in
+`/tmp/http-fetch-p2-source-validation/HANDOFF.md`. A source review matches129 scoped
+files to the accepted391 selection, including shared QUIC TLS contracts, so those
+unchanged checks are reused. Complete ExSSL integration/P1/P2 and P3 acceptance
+remain open. Peer tests require compatible
+Python selected only through a child-process PATH; default Xcode Python lacks
+their TLS prerequisites. No broader migration or release gate is implied.
+
+## R49 — preliminary policy reference blocked during peer cleanup
+
+The pinned tool/probe preflight passes. One subsequent invocation generates
+fixtures and completes independent certificate, CRL and OCSP material oracles.
+Its first TLS12 partial-chain probe reaches `valid_peer` and bounded HTTP200,
+but peer cleanup records `PermissionError` before a complete ledger row is saved.
+Probe shutdown and port checks pass; a later independent check finds all18 owned
+groups absent. The exact syscall/cause remains unknown; no TLS or revocation
+failure is inferred. The remaining23 rows are unrun, including every CRL/OCSP
+policy row. Positive staple transmission/consumption evidence is still missing.
+No retry or permission change occurs. Reproduction and raw evidence are in
+`/tmp/http-fetch-r49-observations-REVIEW1/FINAL-HANDOFF.md`.
+A controlled two-child diagnostic subsequently observes successful signaling of
+a live owned group, `EPERM` for an exited/unreaped owned group and `ESRCH` after
+reaping. This supports a cleanup-order hypothesis; the original row's process
+state/syscall was not recorded, so its cause remains unproven. The matrix is not
+retried. Evidence is in `/tmp/http-fetch-r49-signal-diagnosis/FINAL-HANDOFF.md`.
+
+
+## R51 — remaining-option reference boundary
+
+One pinned OTP29.0.2/ssl11.7.2 invocation completes all42 planned observations;
+its validator reports no errors, and all owned processes stop. Both explicit
+`honor_cipher_order` booleans return the client-role server-only error in TLS12,
+TLS13 and mixed offers. Explicit `middlebox_comp_mode` booleans require an offer
+including TLS13: true produces an initial32-byte compatibility session ID, false
+an empty ID. Explicit `reuse_sessions` true/false/save requires an offer including
+TLS12. Manual bootstrap reaches the initial hello for TLS13/mixed; empty tickets,
+disabled+use_ticket and wrong-SNI material receive distinct configuration errors.
+These are configuration and initial-ClientHello observations only. The synthetic
+sink closes before a server handshake; authentication, CCS placement, ticket
+receipt, session resumption and HTTP remain untested by this reference.
+Preparation, actual results and exact classifications are retained in
+`/tmp/http-fetch-r51-pin-update/FINAL-HANDOFF.md`. Root verifies all18 checkpoint
+and7 actual artifacts against the structured manifest. This reference does not
+complete option support, P1 or the migration gates.
+
+
+## R51 — client-role option acceptance
+
+The bounded `honor_cipher_order` slice now returns the exact OTP29 client-role
+error before trust or dialing, and explicit `:undefined` normalizes as omission.
+Six single-VM checks cover value/version matrices, direct/prepared public entry
+points, payload-free errors, profile equality and existing validation order.
+The related unit selection, strict compilation, formatting, whitespace and native
+configured Credo gates pass. Strict Credo on the new test alone also passes.
+An additional strict-source run retains four pre-existing findings outside the
+patch; its exit6 is preserved rather than presented as passing. Repository config
+uses strict:false and CI runs the native check. Root verifies unchanged bytes
+outside the option-validation block and all1071 baseline files except the owned
+source; the new test is the only added source artifact. Evidence is retained in
+`/tmp/http-fetch-r51-honor-repair1/FINAL-HANDOFF.md` and
+`/tmp/http-fetch-r51-honor-native-lint/FINAL-HANDOFF.md`.
+This completes the rejection-only slice; middlebox, session reuse, manual tickets,
+managed integration and broader migration acceptance remain open.
+
+## R51 — middlebox interoperability blocker
+
+The candidate middlebox change adds boolean/version/profile checks and one literal
+compatibility CCS before CH2 or the ordinary encrypted client flight when the
+actual offered session ID is nonempty. Single-VM option, HRR/transcript, incoming
+CCS and frozen authenticated SID0 controls pass. The independent ordinary TLS13
+true-mode exchange passes with ExSSL and OTP clients, including authenticated HTTP
+and connection, proxy-child, peer and listener shutdown. Full support is not accepted.
+
+The expanded independent matrix stops with a peer-generated `illegal_parameter`
+for ExSSL's ordered `[TLS12,TLS13]` offer, omitted mode and ordinary handshake.
+Installed OTP29.0.2/ssl11.7.2 source identifies the logged rejection branch: the
+TLS13 handler rejects legacy-decoded groups. Its extension decoder uses the first
+offered version, providing a source-backed explanation for this mixed-order case.
+A single-case diagnostic now captures the original221-byte record and216-byte
+ClientHello. Independent decoding confirms versions `[0303,0304]`, groups
+`[001d,0017]`, key share `001d`, session ID32 and the peer's fatal alert47.
+All six loaded-module MD5 values match their disk BEAMs; the three reviewed OTP
+source hashes match. This corroborates the decoder explanation, without proving
+a pre-change baseline, independent upstream reproducer or reproducible build.
+The original connect still fails and its OTP-client counterpart is unreached.
+Peer/proxy/children, VM and listeners stop; all1076 repository files/modes remain
+unchanged. Evidence is in `/tmp/http-fetch-r51-wire-runtime-handoff/HANDOFF.md`.
+Preserve caller preference order; sorting versions would alter the wire contract.
+
+The complete matrix, large mTLS, TLS12 EMS controls, remaining tagged regressions
+and final formatting, compilation and lint gates are unrun. Existing protected and
+wrong-phase CCS rejection still uses its previous `decode_error` mapping; broader
+alert-code conformance is not established. Exact stopped changes and results are
+retained in `/tmp/http-fetch-r51-middlebox-repair2/STOPPED-HANDOFF.md`; source
+diagnosis and the missing-wire discriminator are in
+`/tmp/http-fetch-r51-mixed-offer-diagnosis/REPORT.md`. This blocker leaves middlebox,
+P1 and all later migration gates open.
+
+## Ordinary ExSSL H1 completion and reuse accepted
+
+Direct/pinned HTTPS H1 passes exact TLS1.2/TLS1.3 checks for same-connection reuse,
+completion, stale cancellation, queued abort/deadline without a POST, peer close
+without replay and committed transfer recovery after a lost HTTP acknowledgment.
+Caller waits remain finite while the pool is suspended; expired prepare/activation
+cannot publish. Unknown offers without a returned ticket retain bounded capacity
+and truthful unconfirmed evidence rather than closing or redialing speculatively.
+
+Focused units pass34 checks;14 actual TLS integration cases pass. The exact ten-file
+stable regression passes157 checks across Core, Runtime and Fetch. Warnings-as-errors,
+formatting and native/strict Credo on all eight selected Elixir files pass. Root
+reviewed the production changes and independently verified source preservation and
+all15 command roots reaped, with89 known PIDs and86 process groups absent.
+Evidence: `/tmp/http-fetch-p3-h1-astra-recovery1/HANDOFF.md` and
+`/tmp/http-fetch-p3-h1-coordinator-acceptance.md`. H2, managed/proxy/prepared paths,
+advanced policies, performance, package/CI, OTP removal and publication remain open.
+
+## Ordinary ExSSL H2 completion and reuse accepted
+
+Direct/pinned HTTPS H2 passes exact TLS1.2/TLS1.3 integration checks for request
+completion while the pooled provider stays live, sibling cancellation and later
+same-connection reuse. Admission retains the original deadline through tracker
+registration, provider binding and activation; a caller that dies during transport
+configuration cannot send the H2 preface. Unknown handoff authority retains bounded
+unpublished capacity and unconfirmed cleanup evidence.
+
+Focused units pass37 checks, focused integrations54, stable H2 regressions219 and
+affected H1 regressions161. Compilation with warnings as errors, formatting and
+native/strict Credo on13 selected Elixir files pass. Public SSE/Fetch mixed,
+WebSocket/SSE/Fetch mixed and SSE fault gates pass with exact `--count 10000`
+configuration; their actual observed traffic is105,8 and7 requests respectively.
+The configured count does not establish10000 observed HTTP exchanges.
+
+Root reviewed the changes and independently verified all310 sealed artifacts,
+14 source paths, preservation of1063 unrelated nonkey files and five key-file
+stats, and shutdown of93 command roots,958 PIDs and942 process groups.
+Evidence: `/tmp/http-fetch-p3-h2-astra-recovery/HANDOFF.md` and
+`/tmp/http-fetch-p3-h2-coordinator-acceptance.json`. Managed/proxy/prepared paths,
+advanced policies, performance, package/CI, OTP removal and publication remain open.
+
+
+## Ordinary ExSSL Managed H1/H2 accepted
+
+Explicit ExSSL Managed HTTPS H1/H2 freezes backend and trust/identity material
+once per scope. Request completion can release or hand off its obligation while
+Scope retains authenticated provider proof across request and pool lifetimes.
+Retired capacity remains occupied until public provider await confirms cleanup
+and HTTP obligations end. A 100-handle snapshot uses one absolute deadline.
+
+Thirty real TLS cases pass, including exact TLS1.2/TLS1.3 H1/H2 reuse, blocked
+Writer retirement, sibling cancellation, trust/identity rotation, overlapping
+generations and a 100-connection snapshot with a suspended Observer. Affected H1
+and H2 regressions pass161 and219 checks. Relevant unchanged-module Managed and
+provider checks, scoped formatting, warnings-as-errors and native/strict Credo
+also pass. Earlier unchanged-module checks are retained as scoped evidence; their
+whole-source fingerprints are not claimed as final reruns.
+
+Root reviewed flow and independently verified150 sealed artifacts,16 source pins,
+1,060 unrelated nonkey files, nine private-key metadata records, exact Git state,
+and all39 command roots stopped (372 PIDs/367 process groups absent).
+Evidence: `/tmp/http-fetch-p3-managed-astra-recovery/HANDOFF.md` and
+`/tmp/http-fetch-p3-managed-coordinator-acceptance.json`. Proxy, client durable
+completion, advanced policies, performance and remaining P4-P7 gates remain open.

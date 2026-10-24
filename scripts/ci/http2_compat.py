@@ -17,10 +17,23 @@ def terminal_pass(records, kind):
         if record.get('result') != 'PASS':
             continue
         if kind == 'package':
+            modes = record.get('modes')
+            if not isinstance(modes, list) or len(modes) != 2 or not all(
+                    isinstance(mode, dict) for mode in modes):
+                continue
+            if not all(mode.get('mode') in ('h2c', 'ex_ssl') for mode in modes) or \
+                    {mode.get('mode') for mode in modes} != {'h2c', 'ex_ssl'}:
+                continue
+            if not all(mode.get('verified_tls') is (mode['mode'] == 'ex_ssl') and
+                       mode.get('protocol') == ('h2' if mode['mode'] == 'ex_ssl' else 'h2c') and
+                       mode.get('consumers') == 4 and mode.get('connections') == 4 and
+                       mode.get('completed') is True and mode.get('mixed_shared_connection') is True
+                       for mode in modes):
+                continue
             if all(record.get(key) == value for key, value in {
                     'gate': 'isolated_package_http2_traffic', 'completed': True,
-                    'packages': 9, 'consumers': 4, 'connections': 4,
-                    'mixed_shared_connection': True}.items()):
+                    'packages': 9, 'consumers': 8, 'connections': 8,
+                    'mixed_shared_connection': True, 'verified_tls': True}.items()):
                 return True
         elif (record.get('mode') == 'wire-audit' and record.get('public_client') is True
               and record.get('observations', 0) > 0
@@ -39,8 +52,7 @@ def main():
     env = {**os.environ, 'MIX_ENV': 'test'}
     env.pop('HTTP_FETCH_CI_APP', None)
     report = dict(candidate=candidate, status='RUNNING', gates=[], exclusions=[
-        'This finite gate excludes long soaks; candidate production acceptance runs them separately.',
-        'Package mixed traffic uses h2c; independent source consumers below exercise both TLS backends.'])
+        'This finite gate excludes long soaks; candidate production acceptance runs them separately.'])
 
     def save():
         (args.evidence / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
@@ -109,7 +121,7 @@ def main():
             raise RuntimeError('expected nine candidate package artifacts')
         env.update(HTTP_FETCH_ARCHIVE_DIR=str(archives), HTTP_FETCH_RELEASE_VERSION=version)
         run('candidate-package-traffic', [sys.executable, 'scripts/http_runtime_package_traffic_gate.py'],
-            'hyper-h2', 'h2c', 'package')
+            'hyper-h2', 'h2c+ex_ssl', 'package')
         report['status'] = 'PASS'
     except BaseException as error:
         report.update(status='FAIL', error=str(error))

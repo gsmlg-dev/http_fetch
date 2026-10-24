@@ -8,7 +8,14 @@ defmodule HTTP.HTTP3 do
   def request(%Request{} = request, state, handler) do
     opening = Keyword.get(request.transport_options, :connect_timeout, 5_000)
 
-    case Stream.start(request, self(), opening_timeout: opening) do
+    opts =
+      Keyword.merge(Map.get(state, :http3_runtime_opts, []),
+        opening_timeout: opening,
+        deadline_at: state.deadline_at,
+        request_lifecycle: Map.get(state, :request_lifecycle, HTTP.RequestLifecycle.current())
+      )
+
+    case Stream.start(request, self(), opts) do
       {:ok, stream, generation} ->
         monitor = Process.monitor(stream)
 

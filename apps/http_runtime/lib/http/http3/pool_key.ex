@@ -48,7 +48,13 @@ defmodule HTTP.HTTP3.PoolKey do
         ])
 
       connect =
-        Keyword.merge(connect, host: host, port: port || 443, tls: tls_options, profile: profile)
+        Keyword.merge(connect,
+          host: host,
+          port: port || 443,
+          tls: tls_options,
+          profile: profile,
+          exclusive?: reuse == false
+        )
 
       connect = if endpoint, do: Keyword.put(connect, :endpoint, endpoint), else: connect
       {:ok, key, connect}
