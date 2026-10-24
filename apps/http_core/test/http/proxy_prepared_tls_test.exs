@@ -236,9 +236,15 @@ defmodule HTTP.ProxyPreparedTLSTest do
         forward(client, upstream)
 
       {:tcp, ^upstream, data} ->
-        :ok = :gen_tcp.send(client, data)
-        :ok = :inet.setopts(upstream, active: :once)
-        forward(client, upstream)
+        case :gen_tcp.send(client, data) do
+          :ok ->
+            :ok = :inet.setopts(upstream, active: :once)
+            forward(client, upstream)
+
+          {:error, :closed} ->
+            :gen_tcp.close(client)
+            :gen_tcp.close(upstream)
+        end
 
       {:tcp_closed, _} ->
         :gen_tcp.close(client)
