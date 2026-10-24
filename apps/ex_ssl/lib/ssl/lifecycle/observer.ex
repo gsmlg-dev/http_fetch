@@ -1005,12 +1005,16 @@ defmodule SSL.Lifecycle.Observer do
 
   defp enrollment(state, :tcp, permit, caller, port) when is_port(port) do
     if caller == permit.creator and Port.info(port, :connected) == {:connected, caller} and
-         not duplicate?(state, port), do: :ok, else: {:error, :foreign_or_duplicate_resource}
+         not duplicate?(state, port),
+       do: :ok,
+       else: {:error, :foreign_or_duplicate_resource}
   end
 
   defp enrollment(state, role, _permit, caller, object) when role in @process_roles do
     if object == caller and node(caller) == node() and not prohibited?(state, caller) and
-         not duplicate?(state, caller), do: :ok, else: {:error, :foreign_or_duplicate_resource}
+         not duplicate?(state, caller),
+       do: :ok,
+       else: {:error, :foreign_or_duplicate_resource}
   end
 
   defp enrollment(_, _, _, _, _), do: {:error, :invalid_resource}
@@ -1094,7 +1098,9 @@ defmodule SSL.Lifecycle.Observer do
     instant = now()
 
     if (is_integer(state.expires) and instant >= state.expires) or
-         Handoff.expired?(state.handoff, instant), do: retire(state, :timeout), else: state
+         Handoff.expired?(state.handoff, instant),
+       do: retire(state, :timeout),
+       else: state
   end
 
   defp expire(state), do: state

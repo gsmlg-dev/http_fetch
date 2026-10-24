@@ -127,7 +127,8 @@ defmodule SSL.ClientIdentity.Encryption do
   end
 
   defp iv({:asn1_OPENTYPE, <<4, size, iv::binary-size(size)>>}, %{block: size})
-       when byte_size(iv) == size, do: :ok
+       when byte_size(iv) == size,
+       do: :ok
 
   defp iv(_, _), do: :error
 
