@@ -352,7 +352,7 @@ defmodule Quic.Endpoint do
     with false <- Map.has_key?(data.routes, scid),
          profile <- Keyword.get(data.opts, :profile),
          tls_opts <- profile_tls_options(Keyword.get(data.opts, :tls, []), profile),
-         {:ok, tls} <-
+         {:ok, tls, idle_timeout} <-
            materialize(
              tls_opts,
              data.role,
@@ -360,7 +360,8 @@ defmodule Quic.Endpoint do
              scid,
              retry_scid,
              Keyword.get(data.opts, :streams, []),
-             Keyword.get(data.opts, :datagram, [])
+             Keyword.get(data.opts, :datagram, []),
+             data.opts
            ),
          {:ok, local_parameters} <- TransportParameters.decode(tls[:transport_parameters]),
          opts <- [
@@ -375,7 +376,7 @@ defmodule Quic.Endpoint do
            operation_limit: Keyword.get(data.opts, :operation_limit, 256),
            datagram: Keyword.get(data.opts, :datagram, []),
            handshake_timeout: Keyword.get(data.opts, :handshake_timeout, 10_000),
-           idle_timeout: Keyword.get(data.opts, :idle_timeout, 30_000),
+           idle_timeout: idle_timeout,
            closing_timeout: Keyword.get(data.opts, :closing_timeout),
            draining_timeout: Keyword.get(data.opts, :draining_timeout),
            scheduler:
@@ -435,18 +436,22 @@ defmodule Quic.Endpoint do
     :exit, _ -> {:error, :connection_start_failed}
   end
 
-  defp materialize(tls, role, original, scid, retry_scid, stream_opts, datagram_opts) do
+  defp materialize(tls, role, original, scid, retry_scid, stream_opts, datagram_opts, opts) do
     entries = [%{id: 0x0F, value: scid}]
     entries = if role == :server, do: [%{id: 0, value: original} | entries], else: entries
     entries = if retry_scid, do: [%{id: 0x10, value: retry_scid} | entries], else: entries
 
     with {:ok, stream_entries} <- stream_transport_entries(stream_opts),
          {:ok, datagram_entries} <- datagram_transport_entries(datagram_opts),
+         {:ok, idle_wire} <- idle_timeout_wire(Keyword.get(opts, :idle_timeout, 30_000)),
          {:ok, generated} <-
-           TransportParameters.encode(entries ++ stream_entries ++ datagram_entries, role: role),
-         tls <- apply_profile(tls, generated),
+           TransportParameters.encode(
+             entries ++ stream_entries ++ datagram_entries ++ [%{id: 1, value: idle_wire}],
+             role: role
+           ),
          raw <- Keyword.get(tls, :transport_parameters, generated),
          {:ok, decoded} <- TransportParameters.decode(raw),
+         {:ok, idle_timeout} <- local_idle_timeout(opts, decoded.values),
          :ok <-
            TransportParameters.validate(decoded,
              role: role,
@@ -454,8 +459,24 @@ defmodule Quic.Endpoint do
              retry_source_connection_id: retry_scid,
              original_destination_connection_id: if(role == :server, do: original)
            ) do
-      {:ok, Keyword.put(tls, :transport_parameters, raw)}
+      {:ok, tls |> apply_profile(raw) |> Keyword.put(:transport_parameters, raw), idle_timeout}
     end
+  end
+
+  defp idle_timeout_wire(:infinity), do: Codec.encode_varint(0)
+
+  defp idle_timeout_wire(timeout) when is_integer(timeout) and timeout > 0,
+    do: Codec.encode_varint(timeout)
+
+  defp idle_timeout_wire(_), do: {:error, :invalid_idle_timeout}
+
+  defp local_idle_timeout(opts, values) do
+    advertised = Map.get(values, :max_idle_timeout, 0)
+    local = if advertised == 0, do: :infinity, else: advertised
+
+    if Keyword.has_key?(opts, :idle_timeout) and opts[:idle_timeout] != local,
+      do: {:error, :idle_timeout_transport_parameter_mismatch},
+      else: {:ok, local}
   end
 
   defp datagram_transport_entries(opts) when is_list(opts) do

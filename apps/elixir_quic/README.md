@@ -69,6 +69,25 @@ handle. DATAGRAM payloads are unreliable, message-oriented, congestion-controlle
 and never retransmitted after loss. See the [consumer contract](../../docs/quic/consumer-contract.md)
 for negotiation, size limits, bounded queues and admission semantics.
 
+## Idle expiry and keepalive
+
+Set `idle_timeout: :infinity` on `Quic.listen/1` or `Quic.client/1` to advertise
+RFC 9000's disabled local idle limit (`max_idle_timeout = 0`). The default remains
+30,000 ms and is advertised to the peer. Both endpoints must disable their limits
+for no finite idle timer to be armed; a peer's finite limit still applies.
+There is no absolute connection lifetime imposed by this option. Handshake,
+operation, closing and draining deadlines remain finite.
+
+`Quic.info(connection)` exposes `idle_timeout.local_ms`, `peer_ms`,
+`negotiated_ms`, and `effective_ms` (positive milliseconds or `:infinity`).
+The effective finite period is at least three current PTOs. `Quic.ping/2` admits
+one bounded ack-eliciting PING through normal recovery and operation accounting.
+Applications can choose a finite cadence below the peer's advertised limit;
+there is no automatic keepalive loop. PING admission is not a peer ACK, and
+repeated sends without successfully processing peer packets cannot postpone
+local expiry indefinitely. See the [consumer contract](../../docs/quic/consumer-contract.md#idle-expiry-and-caller-managed-keepalive)
+for reset rules, raw transport parameters and peer-policy limits.
+
 ## Publishing
 
 `elixir_quic` is one of nine packages released together from the `http_fetch` umbrella. See the root release workflow and contributor guidance for validation, dependency order, and publication. HexDocs publication is separate from package publication.
