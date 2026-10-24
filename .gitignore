@@ -47,3 +47,8 @@ http_fetch-*.tar
 
 # Sanitized local ex_ssl feature-gate reports
 /.ex_ssl-results/
+
+# Python bytecode caches
+__pycache__/
+*.pyc
+*.pyo
