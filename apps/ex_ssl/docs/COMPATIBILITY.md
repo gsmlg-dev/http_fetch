@@ -537,11 +537,12 @@ See the ledger for exact executed gates and remaining consumer work.
 ## Opt-in TLS 1.3 resumption and diagnostics
 
 `session_tickets: :disabled | :auto` defaults to `:disabled`. Auto is supported
-only with TLS 1.3-only versions and no configured client certificate/key. Mixed
-versions, TLS 1.2, mTLS auto, manual ticket export/import, PSK-only exchange and
-`early_data` return explicit option errors. Explicit WireProfiles must reserve
-`{:psk_key_exchange_modes, [1]}` and a last `{:pre_shared_key, :deferred}` slot;
-other extension ordering is preserved. A cache miss omits only the PSK slot.
+only with TLS 1.3-only versions, `verify: :verify_peer`, and no configured
+client certificate/key. Mixed versions, TLS 1.2, mTLS auto, manual ticket
+export/import, PSK-only exchange and `early_data` return explicit option errors.
+Explicit WireProfiles must reserve `{:psk_key_exchange_modes, [1]}` and a last
+`{:pre_shared_key, :deferred}` slot; other extension ordering is preserved. A
+cache miss omits only the PSK slot.
 
 Tickets are authenticated post-handshake messages and consume no application
 active-once credit. Up to eight tickets per connection are processed; each PSK is
@@ -551,10 +552,9 @@ one-use checkout and a single expiry timer bound cache lifetime and concurrency.
 Cache calls fail closed after 25 ms; a cache failure takes the full-handshake
 path. There is no persistent state. Each `verify_peer` checkout revalidates the
 saved chain against current time, reference identity, loaded CA content, depth and
-certificate signature policy. Explicit `verify_none` checkout still performs
-bounded certificate/key decoding but skips those trust/identity checks. Partition
-digests include verification mode, so tickets admitted under `verify_none` cannot
-cross into `verify_peer`, as well as the concrete endpoint, hostname, ALPN and
+certificate signature policy. Auto rejects `verify_none`; ordinary `verify_none`
+remains supported with `session_tickets: :disabled`. Partition digests include
+verification mode, the concrete endpoint, hostname, ALPN and
 ordered version/cipher/group/signature/profile policies.
 
 Resumption requires fresh ECDHE, a valid binder, selected identity zero with a

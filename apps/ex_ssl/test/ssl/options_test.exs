@@ -5,6 +5,106 @@ defmodule SSL.OptionsTest do
 
   use ExUnit.Case, async: true
 
+  @tag :ticket_verify_regression
+  test "automatic tickets require peer verification during normalization" do
+    options = [
+      versions: [:"tlsv1.3"],
+      session_tickets: :auto,
+      verify: :verify_none,
+      cacerts: []
+    ]
+
+    for host <- ["mail.example", {127, 0, 0, 1}, :upgrade] do
+      assert {:error, {:options, {:session_tickets, :verify_peer_required}}} =
+               SSL.Options.normalize(host, options)
+    end
+
+    assert {:ok, %{profile: profile}} =
+             SSL.Options.normalize("mail.example", verify: :verify_none, cacerts: [])
+
+    profile = %{
+      profile
+      | extensions:
+          profile.extensions ++ [{:psk_key_exchange_modes, [1]}, {:pre_shared_key, :deferred}]
+    }
+
+    assert {:error, {:options, {:session_tickets, :verify_peer_required}}} =
+             SSL.Options.normalize(
+               "mail.example",
+               Keyword.put(options, :ex_ssl, profile: profile)
+             )
+  end
+
+  @tag :ticket_verify_control
+  test "disabled tickets preserve explicit verify_none without trust or an upgrade identity" do
+    for host <- ["mail.example", {127, 0, 0, 1}, :upgrade],
+        ticket_options <- [[], [session_tickets: :disabled]] do
+      assert {:ok,
+              %{
+                session_tickets: :disabled,
+                verify: :verify_none,
+                trust_source: [],
+                client_identity: nil,
+                profile: profile
+              }} =
+               SSL.Options.normalize(host, [verify: :verify_none, cacerts: []] ++ ticket_options)
+
+      refute List.keymember?(profile.extensions, :psk_key_exchange_modes, 0)
+      refute List.keymember?(profile.extensions, :pre_shared_key, 0)
+    end
+  end
+
+  @tag :integration
+  @tag :ticket_verify_authenticated_control
+  test "automatic TLS13 tickets retain explicit and default peer verification" do
+    options = [
+      versions: [:"tlsv1.3"],
+      session_tickets: :auto,
+      cacerts: :public_key.cacerts_get()
+    ]
+
+    for verification <- [[], [verify: :verify_peer]] do
+      assert {:ok,
+              %{
+                session_tickets: :auto,
+                verify: :verify_peer,
+                client_identity: nil,
+                profile: profile
+              }} = SSL.Options.normalize("mail.example", options ++ verification)
+
+      assert {:psk_key_exchange_modes, [1]} in profile.extensions
+      assert List.last(profile.extensions) == {:pre_shared_key, :deferred}
+
+      assert {:ok, %{profile: ^profile}} =
+               SSL.Options.normalize(
+                 "mail.example",
+                 options ++ verification ++ [ex_ssl: [profile: profile]]
+               )
+    end
+  end
+
+  @tag :ticket_verify_control
+  test "automatic ticket verification policy preserves earlier option and profile errors" do
+    options = [session_tickets: :auto, verify: :verify_none, cacerts: []]
+
+    assert {:error, {:options, {:verify, :unsupported_or_invalid}}} =
+             SSL.Options.normalize("mail.example", Keyword.put(options, :verify, :invalid))
+
+    for versions <- [[:"tlsv1.2"], [:"tlsv1.3", :"tlsv1.2"]] do
+      assert {:error, {:options, {:session_tickets, :tls13_only}}} =
+               SSL.Options.normalize("mail.example", Keyword.put(options, :versions, versions))
+    end
+
+    assert {:ok, %{profile: profile}} =
+             SSL.Options.normalize("mail.example", verify: :verify_none, cacerts: [])
+
+    assert {:error, {:options, {:session_tickets, :profile_conflict}}} =
+             SSL.Options.normalize(
+               "mail.example",
+               Keyword.put(options, :ex_ssl, profile: profile)
+             )
+  end
+
   @tag :integration
   test "explicit none carries policy without system trust or an invented upgrade identity" do
     assert {:ok, %{verify: :verify_none, trust_source: nil, identity: {:dns_id, "example.test"}}} =

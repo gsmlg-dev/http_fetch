@@ -128,13 +128,14 @@ They differ from OTP's defaults. Supported options and receive/upgrade ownership
 rules are documented in the [compatibility matrix](docs/COMPATIBILITY.md).
 
 TLS 1.3 resumption is opt-in with `session_tickets: :auto`; the default is
-`:disabled`. Auto requires TLS 1.3-only versions and no configured client identity.
-Tickets remain in a bounded in-memory cache, partitioned by endpoint and loaded
-trust/security policy. Each use revalidates the saved peer certificate chain and
-performs fresh ECDHE. A server declining PSK continues normal full authentication
-on that connection. No early data, automatic reconnect, or request replay occurs.
-See the [resumption policy](docs/ADR_TLS13_RESUMPTION.md) and
-[compatibility details](docs/COMPATIBILITY.md).
+`:disabled`. Auto requires TLS 1.3-only versions, `verify: :verify_peer`, and no
+configured client identity. Tickets remain in a bounded in-memory cache,
+partitioned by endpoint and loaded trust/security policy. Each use revalidates
+the saved peer certificate chain and performs fresh ECDHE. A server declining
+PSK continues normal full authentication on that connection. No early data,
+automatic reconnect, or request replay occurs. See the [resumption
+policy](docs/ADR_TLS13_RESUMPTION.md) and [compatibility
+details](docs/COMPATIBILITY.md).
 
 The wider roadmap (not implemented API) includes:
 

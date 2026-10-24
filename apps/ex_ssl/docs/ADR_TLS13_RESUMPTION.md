@@ -7,10 +7,11 @@ proceed independently of the remaining Phase4 consumer gate.
 ## Public and authentication boundary
 
 Implement OTP `session_tickets: :disabled | :auto`, disabled by default. Manual
-export/import, early data, PSK-only exchange and persistence remain explicit option
-errors. Initially require TLS1.3-only versions and no configured client identity
-for auto; TLS1.2/mixed and mTLS resumption reject until their identity semantics
-are separately proven. Every connection still uses a fresh ECDHE key share.
+export/import, early data, PSK-only exchange and persistence remain explicit
+option errors. Initially require TLS1.3-only versions, `verify: :verify_peer`,
+and no configured client identity for auto; TLS1.2/mixed and mTLS resumption
+reject until their identity semantics are separately proven. Every connection
+still uses a fresh ECDHE key share.
 
 A server accepting PSK authenticates through the binder/Finished schedule. Bind
 selected identity zero and selected suite hash to the offered ticket. The resumed

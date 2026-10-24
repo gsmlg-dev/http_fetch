@@ -206,10 +206,10 @@ also passes. TLS 1.2 session resumption and full OTP option parity are not claim
 
 `ssl: [versions: [:"tlsv1.3"], session_tickets: :auto]` enables bounded TLS 1.3
 ticket reuse for a fresh connection to the same authenticated context. The
-default is `:disabled`; auto rejects TLS 1.2/mixed offers and configured client
-identity. Early data, persistent tickets, PSK-only key exchange, and automatic
-reconnect/replay are unsupported. An unaccepted ticket follows normal full
-handshake processing on the same socket.
+default is `:disabled`; auto requires `verify: :verify_peer` and rejects TLS
+1.2/mixed offers and configured client identity. Early data, persistent tickets,
+PSK-only key exchange, and automatic reconnect/replay are unsupported. An
+unaccepted ticket follows normal full handshake processing on the same socket.
 
 `scripts/ex_ssl_resumption_test.exs` uses two packaged HTTP/1.1 fetches against
 one Python/OpenSSL context and checks the peer's `session_reused` value is false

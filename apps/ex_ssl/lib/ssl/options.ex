@@ -1,10 +1,9 @@
 defmodule SSL.Options do
   @moduledoc false
-  alias SSL.PKIX.VerifyFun
-  alias SSL.PolicyIO.Bounded
-
   alias SSL.Capabilities
   alias SSL.ClientHello.{Profile, WireProfile}
+  alias SSL.PKIX.VerifyFun
+  alias SSL.PolicyIO.Bounded
 
   @derive {Inspect, only: [:identity]}
   defstruct [
@@ -108,7 +107,8 @@ defmodule SSL.Options do
            SSL.ClientIdentity.load(
              Keyword.take(options, [:cert, :certfile, :key, :keyfile, :password, :certs_keys])
            ),
-         :ok <- ticket_identity(options, client_identity) do
+         :ok <- ticket_identity(options, client_identity),
+         :ok <- ticket_verification(options) do
       {:ok,
        %__MODULE__{
          profile: profile,
@@ -558,6 +558,13 @@ defmodule SSL.Options do
     if Keyword.get(options, :session_tickets, :disabled) == :auto and identity != nil,
       do: option_error({:session_tickets, :client_identity_unsupported}),
       else: :ok
+  end
+
+  defp ticket_verification(options) do
+    if Keyword.get(options, :session_tickets, :disabled) == :auto and
+         Keyword.get(options, :verify, :verify_peer) == :verify_none,
+       do: option_error({:session_tickets, :verify_peer_required}),
+       else: :ok
   end
 
   defp ticket_profile(options, profile, versions) do
