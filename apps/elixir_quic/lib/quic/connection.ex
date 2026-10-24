@@ -74,6 +74,9 @@ defmodule Quic.Connection do
   def send_public_datagram(pid, generation, data, opts \\ []),
     do: operation_call(pid, generation, {:send_datagram, data}, opts)
 
+  def ping(pid, generation, opts \\ []),
+    do: operation_call(pid, generation, {:ping}, opts)
+
   def read_datagrams(pid, generation, max, opts \\ []),
     do: durable_call(pid, {:read_datagrams, max}, generation, opts)
 
@@ -139,7 +142,7 @@ defmodule Quic.Connection do
     operation_limit = Keyword.get(opts, :operation_limit, 256)
 
     if role in [:client, :server] and is_pid(writer) and is_pid(owner) and
-         valid_timeout?(timeout) and valid_timeout?(idle_timeout) and
+         valid_timeout?(timeout) and valid_idle_timeout?(idle_timeout) and
          valid_item_limit?(event_limit) and valid_item_limit?(operation_limit) and
          valid_optional_timeout?(closing_timeout) and valid_optional_timeout?(draining_timeout) do
       case Endpoint.new(Keyword.get(opts, :limits, [])) do
@@ -170,7 +173,10 @@ defmodule Quic.Connection do
             generation: generation,
             deadline: adapter.monotonic_time() + timeout * 1000,
             idle_timeout: idle_timeout,
+            effective_idle_timeout: idle_timeout,
             idle_deadline: nil,
+            idle_last_activity: nil,
+            idle_send_allowed: true,
             closing_timeout: closing_timeout,
             draining_timeout: draining_timeout,
             closing_deadline: nil,
@@ -578,6 +584,8 @@ defmodule Quic.Connection do
       do: stop(data, :handshake_timeout)
 
   def handle_event({:timeout, :idle}, generation, :established, %{generation: generation} = data) do
+    # PTO can grow after the timer was armed (RFC 9000 section 10.1).
+    data = update_idle_deadline(data)
     now = data.adapter.monotonic_time()
 
     if is_integer(data.idle_deadline) and now >= data.idle_deadline do
@@ -681,7 +689,9 @@ defmodule Quic.Connection do
             do: Enum.reject(data.pending, &(&1.level == :initial)),
             else: data.pending
 
-        data = refresh_idle(%{data | scheduler: scheduler, budget: budget, pending: pending})
+        authenticated = scheduler.authenticated_packets > data.scheduler.authenticated_packets
+        data = %{data | scheduler: scheduler, budget: budget, pending: pending}
+        data = if authenticated, do: refresh_idle(%{data | idle_send_allowed: true}), else: data
         data = collect_stream_events(data, events)
         effects = Enum.flat_map(events, &Map.get(&1, :generated, []))
 
@@ -761,7 +771,14 @@ defmodule Quic.Connection do
              ) do
         scheduler = HandshakeScheduler.install_peer_parameters(scheduler, parameters.values)
         timeout = effective_idle_timeout(data.idle_timeout, scheduler.peer_idle_timeout)
-        data = %{data | scheduler: scheduler, idle_timeout: timeout}
+
+        data =
+          refresh_idle(%{
+            data
+            | scheduler: scheduler,
+              effective_idle_timeout: timeout,
+              ready: true
+          })
 
         finish_readiness(data)
       else
@@ -809,11 +826,7 @@ defmodule Quic.Connection do
           {:ok, %{ready: true} = data} ->
             data = notify_ready(data)
 
-            established_data = %{
-              data
-              | idle_deadline:
-                  data.adapter.monotonic_time() + Map.get(data, :idle_timeout, 30_000) * 1000
-            }
+            established_data = data
 
             {:next_state, :established, established_data,
              replies ++
@@ -857,6 +870,8 @@ defmodule Quic.Connection do
             data = observe(%{data | budget: budget})
             {:ok, budget, ^send} = Endpoint.dequeue(budget)
             data = observe(%{data | budget: budget})
+            packet = data.scheduler.recovery.spaces[effect.space].sent[effect.packet_number]
+            ack_eliciting = packet.metadata.ack_eliciting
             {result, at} = local_send(data, effect.bytes)
             {:ok, budget, _receipt} = Endpoint.local_send(budget, send, result, at)
 
@@ -870,6 +885,7 @@ defmodule Quic.Connection do
               {:ok, scheduler, _statuses} ->
                 next = observe(%{data | scheduler: scheduler, budget: budget, pending: rest})
 
+                next = refresh_sent_idle(next, result, ack_eliciting, at)
                 flush_sent(result, next)
 
               {:error, reason} ->
@@ -912,13 +928,33 @@ defmodule Quic.Connection do
   end
 
   defp effective_idle_timeout(local, 0), do: local
-  defp effective_idle_timeout(0, peer), do: peer
+  defp effective_idle_timeout(:infinity, peer), do: peer
   defp effective_idle_timeout(local, peer), do: min(local, peer)
 
-  defp refresh_idle(data) do
-    timeout = Map.get(data, :idle_timeout, 30_000)
-    Map.put(data, :idle_deadline, data.adapter.monotonic_time() + timeout * 1000)
+  defp idle_period(%{effective_idle_timeout: :infinity}), do: :infinity
+
+  defp idle_period(data) do
+    max(data.effective_idle_timeout * 1000, 3 * Recovery.pto_duration(data.scheduler.recovery))
   end
+
+  defp refresh_sent_idle(%{ready: true, idle_send_allowed: true} = data, :ok, true, at),
+    do: refresh_idle(%{data | idle_send_allowed: false}, at)
+
+  defp refresh_sent_idle(data, _result, _ack_eliciting, _at), do: data
+
+  defp refresh_idle(data), do: refresh_idle(data, data.adapter.monotonic_time())
+
+  defp refresh_idle(%{ready: false} = data, _at), do: data
+
+  defp refresh_idle(data, at) do
+    update_idle_deadline(%{data | idle_last_activity: at})
+  end
+
+  defp update_idle_deadline(%{effective_idle_timeout: :infinity} = data),
+    do: %{data | idle_deadline: nil}
+
+  defp update_idle_deadline(data),
+    do: %{data | idle_deadline: data.idle_last_activity + idle_period(data)}
 
   defp lifecycle_timeout(data, kind) do
     pto_ms = div(Recovery.pto_duration(data.scheduler.recovery) * 3 + 999, 1000)
@@ -1064,6 +1100,20 @@ defmodule Quic.Connection do
         send_max_bytes:
           datagram_payload_limit(HandshakeScheduler.effective_datagram_frame_size(data.scheduler)),
         receive_max_bytes: datagram_payload_limit(data.scheduler.local_max_datagram_frame_size)
+      },
+      idle_timeout: %{
+        local_ms: data.idle_timeout,
+        peer_ms:
+          if(data.scheduler.peer_idle_timeout == 0,
+            do: :infinity,
+            else: data.scheduler.peer_idle_timeout
+          ),
+        negotiated_ms: data.effective_idle_timeout,
+        effective_ms:
+          if(idle_period(data) == :infinity,
+            do: :infinity,
+            else: div(idle_period(data) + 999, 1000)
+          )
       },
       resources: resources,
       highwaters:
@@ -1428,6 +1478,8 @@ defmodule Quic.Connection do
     HandshakeScheduler.send_stream(scheduler, id, bytes, fin)
   end
 
+  defp scheduler_operation(scheduler, {:ping}), do: HandshakeScheduler.ping(scheduler)
+
   defp scheduler_operation(scheduler, {:send_datagram, bytes}) do
     HandshakeScheduler.send_datagram(scheduler, bytes)
   end
@@ -1447,6 +1499,9 @@ defmodule Quic.Connection do
   defp scheduler_operation(_scheduler, _) do
     {:error, :invalid_operation}
   end
+
+  defp valid_idle_timeout?(:infinity), do: true
+  defp valid_idle_timeout?(value), do: valid_timeout?(value)
 
   defp valid_timeout?(value), do: is_integer(value) and value > 0
   defp valid_operation_identity?(ref, deadline), do: is_reference(ref) and is_integer(deadline)

@@ -41,6 +41,56 @@ endpoint or writer death terminates dependent connections. Applications should
 serialize operations through their consumer, with a bounded work queue. The API
 does not make arbitrary concurrent local callers' BEAM mailboxes bounded.
 
+## Idle expiry and caller-managed keepalive
+
+Endpoint options for `Quic.listen/1` and `Quic.client/1` include
+`idle_timeout: milliseconds` (positive integer, default `30_000`) or
+`idle_timeout: :infinity`. The explicit sentinel advertises RFC 9000
+`max_idle_timeout = 0`, disabling that endpoint's local limit. `idle_timeout: 0`
+is not an option alias. The default finite policy is advertised as 30 seconds.
+Only when **both** endpoints advertise zero (or omit the transport parameter)
+is negotiated idle expiry disabled; in that case no finite idle timer is armed
+or refreshed. Disabling one endpoint's limit does not override a peer's finite
+limit. There is no absolute connection lifetime added by this option.
+
+The negotiated period is the smaller nonzero advertised timeout. Local expiry
+uses at least three times the current probe timeout (PTO), including when PTO
+grows after an idle timer was armed. Successfully processing an authenticated
+packet restarts idle expiry. Only the first successful ack-eliciting local send
+since the last such receive also restarts it. Local reads, ACK-only sends,
+repeated unacknowledged PINGs, invalid packets and discarded retired packets do
+not keep a connection alive indefinitely.
+
+Ready metadata and `Quic.info/1` include `idle_timeout` with `local_ms`, `peer_ms`,
+`negotiated_ms`, and `effective_ms`. Each is a positive number of milliseconds or
+`:infinity`; `effective_ms` includes the current three-PTO floor, rounded up.
+These fields describe policy, not a remaining-time countdown. Before readiness,
+peer and negotiated values are provisional until authenticated parameters arrive.
+
+`Quic.ping(connection, options \\ [])` admits one ack-eliciting QUIC PING and
+returns `{:ok, ref}` using the same finite operation deadlines, deduplication,
+bounded queues and recovery as stream sends. A caller can choose a finite
+cadence below the peer's advertised `peer_ms`, allowing for scheduling/network
+delay, and stop its task when the connection closes. No automatic periodic task
+or timer is created. Queue pressure and errors use the existing admission
+outcomes. Admission is not peer receipt or an ACK; a reachable, cooperating peer
+must successfully receive packets and respond. Keepalive cannot override peer
+policy or keep an unresponsive path alive indefinitely.
+
+Handshake (default 10 seconds), operation, closing and draining deadlines remain
+finite and independent of disabled idle expiry. Explicit `:infinity` is rejected
+for handshake, closing and draining timeout options. A finite idle expiry closes
+with reason `:idle_timeout`.
+
+Advanced TLS callers providing raw `tls[:transport_parameters]` retain those
+bytes and must supply valid per-connection CIDs. With omitted `idle_timeout`,
+the local policy follows that raw parameter (absent/zero means disabled).
+An explicitly configured idle policy must match it, otherwise admission returns
+`{:error, :idle_timeout_transport_parameter_mismatch}`. When a wire profile and
+raw TLS parameters are both supplied, the selected raw bytes are used for both
+the profile's QUIC extension and the runtime. Standalone profile compilation and
+materialization are unchanged.
+
 ## Readiness and pull delivery
 
 `Quic.ready(connection)` returns `:pending` or `:ready`. The attached consumer

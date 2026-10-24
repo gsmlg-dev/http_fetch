@@ -43,6 +43,7 @@ defmodule Quic.HandshakeScheduler do
             effects: [],
             max_packet_size: @default_max_packet,
             peer_idle_timeout: 0,
+            authenticated_packets: 0,
             local_max_datagram_frame_size: 0,
             peer_max_datagram_frame_size: 0,
             min_initial_size: 1200,
@@ -219,6 +220,20 @@ defmodule Quic.HandshakeScheduler do
   end
 
   def send_datagram(_, _), do: {:error, :invalid_datagram}
+
+  @doc "Admit one ack-eliciting application PING through the bounded recovery scheduler."
+  def ping(%__MODULE__{} = state) do
+    cond do
+      not Map.has_key?(state.keys, :application) ->
+        {:error, :application_unavailable}
+
+      length(Map.get(state.pending_control, :application, [])) >= state.max_queue ->
+        {:blocked, :send_queue_limit}
+
+      true ->
+        schedule(queue_control(state, :application, [%{type: :ping}]))
+    end
+  end
 
   @doc "Effective frame ceiling after peer negotiation and worst-case packet overhead."
   def effective_datagram_frame_size(state) do
@@ -649,18 +664,23 @@ defmodule Quic.HandshakeScheduler do
         {:ok, state, []}
 
       Recovery.received?(state.recovery, packet.space, packet.number) ->
-        # A retained duplicate still needs an ACK if it elicited one, but none
-        # of its STREAM, DATAGRAM, ACK or control effects may run twice.
-        case Codec.decode_frames(packet.plaintext) do
-          {:ok, frames, <<>>} -> {:ok, acknowledge_inbound(state, packet.space, frames), []}
+        # Retained valid duplicates are processed for ACK generation without
+        # repeating STREAM, DATAGRAM or control effects. Discards are not activity.
+        with :ok <- validate_packet_frames(packet.plaintext, packet.level),
+             {:ok, frames, <<>>} <- Codec.decode_frames(packet.plaintext) do
+          next = acknowledge_inbound(state, packet.space, frames)
+          {:ok, %{next | authenticated_packets: next.authenticated_packets + 1}, []}
+        else
           _ -> {:ok, state, []}
         end
 
       true ->
         with :ok <- validate_packet_frames(packet.plaintext, packet.level),
              {:ok, recovery} <-
-               Recovery.note_received(state.recovery, packet.space, packet.number) do
-          dispatch_inbound(learn_peer_cid(%{state | recovery: recovery}, packet), packet, at)
+               Recovery.note_received(state.recovery, packet.space, packet.number),
+             {:ok, next, events} <-
+               dispatch_inbound(learn_peer_cid(%{state | recovery: recovery}, packet), packet, at) do
+          {:ok, %{next | authenticated_packets: next.authenticated_packets + 1}, events}
         end
     end
   end
