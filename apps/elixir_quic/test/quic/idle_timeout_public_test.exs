@@ -1,5 +1,6 @@
 defmodule Quic.IdleTimeoutPublicTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
   alias Quic.{Codec, TransportParameters}
 
   defp credentials do
