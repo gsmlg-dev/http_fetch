@@ -131,7 +131,7 @@ defmodule ExSSL.TestSupport.RevocationPeer do
       {:os_pid, ^pid} ->
         # The bounded -naccept peer can exit between Port.info and kill. Its
         # exit_status message remains the join regardless of that race.
-        _ = System.cmd("/bin/kill", ["-TERM", Integer.to_string(pid)], stderr_to_stdout: true)
+        _ = System.cmd("kill", ["-TERM", Integer.to_string(pid)], stderr_to_stdout: true)
 
         receive do
           {^handle, {:exit_status, _}} -> :ok

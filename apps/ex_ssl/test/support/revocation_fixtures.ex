@@ -671,7 +671,7 @@ defmodule ExSSL.TestSupport.RevocationFixtures do
 
       {:error, _reason} ->
         if Port.info(handle) do
-          _ = System.cmd("/bin/kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
+          _ = System.cmd("kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
 
           receive do
             {^handle, {:exit_status, _}} -> :ok
