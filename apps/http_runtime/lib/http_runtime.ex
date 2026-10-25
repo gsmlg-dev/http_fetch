@@ -4,7 +4,6 @@ defmodule HTTPRuntime.Application do
 
   def start(_type, _args) do
     children = [
-      {Task.Supervisor, name: :http_runtime_task_supervisor, max_children: 2_048},
       {DynamicSupervisor,
        name: :http_managed_transport_supervisor, strategy: :one_for_one, max_children: 2_048},
       {HTTP.HTTP1.Pool, []},

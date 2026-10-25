@@ -31,6 +31,7 @@ defmodule HttpCore.MixProject do
 
   def application do
     [
+      mod: {HTTP.Core.Application, []},
       extra_applications: [:public_key, :ssl]
     ]
   end
