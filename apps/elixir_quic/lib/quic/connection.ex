@@ -11,7 +11,7 @@ defmodule Quic.Connection do
   See `docs/consumer-contract.md` for readiness, admission outcomes and limits.
   """
   @behaviour :gen_statem
-  alias Quic.{HandshakeScheduler, TLSDriver, TransportParameters, Recovery}
+  alias Quic.{HandshakeScheduler, Recovery, TLSDriver, TransportParameters}
   alias Quic.IO.Endpoint
   alias Quic.Runtime.{ConnectionHandle, StreamHandle}
 
@@ -33,11 +33,9 @@ defmodule Quic.Connection do
 
   @doc "Admit bounded application bytes to a connection-owned stream."
   def send_stream(pid, stream_id, data, fin \\ false, timeout \\ 5_000) do
-    try do
-      :gen_statem.call(pid, {:stream_send, stream_id, data, fin}, timeout)
-    catch
-      :exit, {:timeout, _} -> {:unknown, :legacy_send}
-    end
+    :gen_statem.call(pid, {:stream_send, stream_id, data, fin}, timeout)
+  catch
+    :exit, {:timeout, _} -> {:unknown, :legacy_send}
   end
 
   @doc "Consume at most `max_bytes` from a manually delivered stream queue."
@@ -181,14 +179,12 @@ defmodule Quic.Connection do
   defp absolute_deadline(duration), do: System.monotonic_time(:millisecond) + duration
 
   defp safe_call(pid, request, timeout) do
-    try do
-      :gen_statem.call(pid, request, timeout)
-    catch
-      :exit, {:timeout, _} -> {:error, :timeout}
-      :exit, {:noproc, _} -> {:error, :closed}
-      :exit, {:normal, _} -> {:error, :closed}
-      :exit, {reason, _call} -> {:error, {:closed, reason}}
-    end
+    :gen_statem.call(pid, request, timeout)
+  catch
+    :exit, {:timeout, _} -> {:error, :timeout}
+    :exit, {:noproc, _} -> {:error, :closed}
+    :exit, {:normal, _} -> {:error, :closed}
+    :exit, {reason, _call} -> {:error, {:closed, reason}}
   end
 
   @impl true
@@ -266,6 +262,7 @@ defmodule Quic.Connection do
               Keyword.get(Keyword.get(opts, :datagram, []), :max_buffer_bytes, 65_536),
             event_limit: event_limit,
             operations: %{},
+            operation_result_bytes: 0,
             operation_sequence: 0,
             operation_limit: operation_limit,
             highwaters: %{}
@@ -1215,10 +1212,7 @@ defmodule Quic.Connection do
       io_queue_bytes: data.budget.queue_bytes,
       in_flight_sends: map_size(data.budget.in_flight),
       application_crypto_bytes: data.scheduler.tls.levels.application.recv.next,
-      operation_result_bytes:
-        Enum.reduce(data.operations, 0, fn {_, operation}, bytes ->
-          bytes + :erlang.external_size(operation.result)
-        end),
+      operation_result_bytes: data.operation_result_bytes,
       queued_bytes: data.scheduler.queued_bytes,
       datagram_ready_bytes: data.datagram_bytes,
       datagram_ready_items: length(data.datagrams),
@@ -1353,24 +1347,39 @@ defmodule Quic.Connection do
   end
 
   defp record_operation(data, ref, signature, status, result) do
+    result_bytes = :erlang.external_size(result)
+
+    previous_bytes =
+      case data.operations[ref] do
+        nil -> 0
+        previous -> previous.result_bytes
+      end
+
     entry = %{
       signature: signature,
       status: status,
       result: result,
+      result_bytes: result_bytes,
       sequence: data.operation_sequence
     }
 
     operations = Map.put(data.operations, ref, entry)
+    total_bytes = data.operation_result_bytes + result_bytes - previous_bytes
 
-    operations =
+    {operations, total_bytes} =
       if map_size(operations) > data.operation_limit do
-        {oldest, _} = Enum.min_by(operations, fn {_, entry} -> entry.sequence end)
-        Map.delete(operations, oldest)
+        {oldest, removed} = Enum.min_by(operations, fn {_, entry} -> entry.sequence end)
+        {Map.delete(operations, oldest), total_bytes - removed.result_bytes}
       else
-        operations
+        {operations, total_bytes}
       end
 
-    observe(%{data | operations: operations, operation_sequence: data.operation_sequence + 1})
+    observe(%{
+      data
+      | operations: operations,
+        operation_result_bytes: total_bytes,
+        operation_sequence: data.operation_sequence + 1
+    })
   end
 
   defp execute_operation(data, from, ref, signature, {:open, kind}) do
