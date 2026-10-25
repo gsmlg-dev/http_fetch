@@ -836,7 +836,8 @@ defmodule SSL.Lifecycle.Observer do
     with %{caller: ^caller, attempt: ^attempt, epoch: ^epoch, nonce: ^nonce} = grant <-
            state.setup_phase_grant,
          true <- is_reference(nonce),
-         :ok <- setup_failure_caller(state, caller, attempt, epoch, min(deadline, grant.deadline)),
+         :ok <-
+           setup_failure_caller(state, caller, attempt, epoch, min(deadline, grant.deadline)),
          :ok <- Receipt.seal_setup_failure(state.receipt) do
       {:ok, %{state | setup_phase_grant: :committed}}
     else

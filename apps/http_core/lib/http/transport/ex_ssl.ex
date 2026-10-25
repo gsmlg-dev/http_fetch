@@ -76,7 +76,8 @@ defmodule HTTP.Transport.ExSSL do
                [ex_ssl: [lifecycle: descriptor]],
                setup_remaining(deadline)
              ),
-           :ok <- HTTP.RequestLifecycle.adopt_provider(tracker, descriptor, tcp, socket, deadline),
+           :ok <-
+             HTTP.RequestLifecycle.adopt_provider(tracker, descriptor, tcp, socket, deadline),
            do: {:ok, socket}
 
     if match?({:error, _}, result), do: HTTP.RequestLifecycle.provider_failed(tracker)
