@@ -4,6 +4,8 @@
 
 Make `ex_ssl` the sole production TLS implementation used by the HTTP Fetch umbrella. Preserve the supported HTTP client contracts, including cancellation, streaming, pooling, managed transports, and cleanup completion. After migration, the published production dependency graph and a minimal release must operate without the OTP `:ssl` application or its modules.
 
+Performance optimization, comparative latency, throughput, and resource measurements and budgets, and dedicated benchmarks and measurement soaks are TODO outside the current migration goal. This scope decision overrides performance completion requirements elsewhere in this plan; previously failing measurements retain their failure status. Functional timeout and cancellation behavior, lifecycle and resource release, long-lived shutdown, security (including no fallback or replay), compatibility, source and candidate-package acceptance, supported-platform validation, CI, and release gates remain required.
+
 **Repository:** https://github.com/gsmlg-dev/http_fetch  
 **Reviewed branch and commit:** `main` at `6b69bde3f43f2270317c38fbe68d5ac9635d3b36`  
 **Reviewed version:** `0.21.14`  
