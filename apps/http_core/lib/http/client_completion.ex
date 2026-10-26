@@ -24,12 +24,14 @@ defmodule HTTP.ClientCompletion do
           | {:error, :cleanup_pending | :cleanup_unconfirmed | {:unsupported_completion, atom()}}
 
   @doc false
+  @spec new(:request | :client) :: t()
   def new(mode \\ :request) do
     {tracker, latch} = HTTP.RequestLifecycle.start(mode)
     %__MODULE__{tracker: tracker, latch: latch}
   end
 
   @doc false
+  @spec unsupported(atom()) :: t()
   def unsupported(reason), do: %__MODULE__{unsupported: reason}
 
   @doc "Waits for cleanup using one finite timeout in milliseconds."
