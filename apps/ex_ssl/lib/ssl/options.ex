@@ -16,6 +16,7 @@ defmodule SSL.Options do
     :policy,
     :alpn_advertised_protocols,
     session_tickets: :disabled,
+    use_ticket: [],
     verify_fun: :undefined,
     verify: :verify_peer,
     tcp_options: [],
@@ -55,6 +56,7 @@ defmodule SSL.Options do
     :versions,
     :middlebox_comp_mode,
     :session_tickets,
+    :use_ticket,
     :ciphers,
     :signature_algs,
     :signature_algs_cert,
@@ -94,6 +96,7 @@ defmodule SSL.Options do
     with {:ok, options, tcp_options} <- SSL.TCPOptions.extract(host, options),
          {:ok, options} <- option_list(options),
          :ok <- validate_options(options),
+         :ok <- manual_ticket_options(options),
          {:ok, identity, context} <-
            verification_identity(
              host,
@@ -114,6 +117,7 @@ defmodule SSL.Options do
          profile: profile,
          endpoint: host,
          session_tickets: Keyword.get(options, :session_tickets, :disabled),
+         use_ticket: Keyword.get(options, :use_ticket, []),
          verify: Keyword.get(options, :verify, :verify_peer),
          verify_fun: Keyword.get(options, :verify_fun, :undefined),
          identity: identity,
@@ -199,7 +203,9 @@ defmodule SSL.Options do
     end)
   end
 
-  defp valid_option?(:session_tickets, value), do: value in [:disabled, :auto]
+  defp valid_option?(:session_tickets, value), do: value in [:disabled, :auto, :manual]
+
+  defp valid_option?(:use_ticket, values), do: valid_manual_candidates?(values, 0)
   defp valid_option?(:middlebox_comp_mode, value), do: is_boolean(value)
   defp valid_option?(:mode, value), do: value == :binary
   defp valid_option?(:active, value), do: value in [false, :once]
@@ -560,6 +566,20 @@ defmodule SSL.Options do
       else: :ok
   end
 
+  defp valid_manual_candidates?([], count), do: count > 0
+
+  defp valid_manual_candidates?([ticket | rest], count) when count < 8,
+    do: SSL.SessionTicket.validate(ticket) == :ok and valid_manual_candidates?(rest, count + 1)
+
+  defp valid_manual_candidates?(_, _), do: false
+
+  defp manual_ticket_options(options) do
+    if Keyword.has_key?(options, :use_ticket) and
+         Keyword.get(options, :session_tickets, :disabled) != :manual,
+       do: option_error({:use_ticket, :manual_required}),
+       else: :ok
+  end
+
   defp ticket_verification(options) do
     if Keyword.get(options, :session_tickets, :disabled) == :auto and
          Keyword.get(options, :verify, :verify_peer) == :verify_none,
@@ -568,16 +588,20 @@ defmodule SSL.Options do
   end
 
   defp ticket_profile(options, profile, versions) do
-    auto? = Keyword.get(options, :session_tickets, :disabled) == :auto
+    mode = Keyword.get(options, :session_tickets, :disabled)
+    enabled? = mode in [:auto, :manual]
     configured = get_in(options, [:ex_ssl, :profile])
     modes = profile_extension(profile, :psk_key_exchange_modes)
     slot = List.last(profile.extensions)
 
     cond do
-      auto? and versions != [0x0304] ->
+      mode == :auto and versions != [0x0304] ->
         option_error({:session_tickets, :tls13_only})
 
-      auto? and configured in [nil, :default] ->
+      mode == :manual and 0x0304 not in versions ->
+        option_error({:session_tickets, :tls13_required})
+
+      enabled? and configured in [nil, :default] ->
         {:ok,
          %{
            profile
@@ -586,10 +610,10 @@ defmodule SSL.Options do
                  [{:psk_key_exchange_modes, [1]}, {:pre_shared_key, :deferred}]
          }}
 
-      auto? and modes in [[1], [:psk_dhe_ke]] and slot == {:pre_shared_key, :deferred} ->
+      enabled? and modes in [[1], [:psk_dhe_ke]] and slot == {:pre_shared_key, :deferred} ->
         {:ok, profile}
 
-      auto? ->
+      enabled? ->
         option_error({:session_tickets, :profile_conflict})
 
       modes != nil or Enum.any?(profile.extensions, &match?({:pre_shared_key, _}, &1)) ->

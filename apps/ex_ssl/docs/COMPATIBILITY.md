@@ -369,7 +369,7 @@ The experimental `SSL.QUIC` record-free TLS integration has its own
 [role/transport matrix](QUIC_TLS_IMPLEMENTATION.md) and
 [public interface](QUIC_TLS_INTERFACE.md). It does not broaden TCP socket support.
 
-TCP server TLS, DTLS, QUIC networking/HTTP/3, TLS 1.2/mTLS resumption,
+TCP server TLS, DTLS, QUIC networking/HTTP/3, TLS 1.2 resumption and automatic mTLS resumption,
 0-RTT, post-handshake authentication, active true/active-N, packet framing,
 exporters, and full OTP API parity are out of scope. ALPN negotiation alone is
 not evidence of an HTTP/2 request. See
@@ -536,13 +536,33 @@ See the ledger for exact executed gates and remaining consumer work.
 
 ## Opt-in TLS 1.3 resumption and diagnostics
 
-`session_tickets: :disabled | :auto` defaults to `:disabled`. Auto is supported
-only with TLS 1.3-only versions, `verify: :verify_peer`, and no configured
-client certificate/key. Mixed versions, TLS 1.2, mTLS auto, manual ticket
-export/import, PSK-only exchange and `early_data` return explicit option errors.
+`session_tickets: :disabled | :auto | :manual` defaults to `:disabled`. Auto is
+supported only with TLS 1.3-only versions, `verify: :verify_peer`, and no configured
+client certificate/key. Auto with mixed versions, TLS 1.2 or mTLS, PSK-only
+exchange and `early_data` return explicit option errors.
 Explicit WireProfiles must reserve `{:psk_key_exchange_modes, [1]}` and a last
 `{:pre_shared_key, :deferred}` slot; other extension ordering is preserved. A
 cache miss omits only the PSK slot.
+
+Manual mode delivers `{:ssl, :session_ticket, ticket}` to the current connection
+owner. The ticket is a provider-owned map; only its `sni` key is public routing
+metadata. Pass an unchanged ticket in `use_ticket: [ticket]` with manual mode to
+attempt reuse. Up to eight candidates of at most 256 KiB each are accepted;
+malformed or oversized lists return redacted option errors. An explicitly empty
+candidate list is rejected; omit `use_ticket` for an initial full handshake.
+Tickets contain secrets and must remain in memory; OTP ticket maps are not
+interchangeable with ExSSL maps. Manual tickets bypass the automatic cache.
+
+Manual mode supports configured client identities, explicit `verify_none`, and
+mixed TLS 1.3/1.2 offers. A TLS 1.2 peer still performs a full handshake. Each
+candidate is bound to the original endpoint, verification/trust policy, identity
+configuration and ordered wire profile; changed policy and expired candidates
+require a full authenticated handshake on the same connection. Callback,
+partial-chain and revocation policies retain their full-handshake requirement and
+do not deliver or select tickets. The independent OTP 29 reference demonstrates
+manual mTLS reuse and ticket delivery without consuming active-once credit. OTP
+29 returns `{:error, :no_peercert}` for manual resumed connections; ExSSL retains
+its documented cached-DER result and revalidates that chain before reuse.
 
 Tickets are authenticated post-handshake messages and consume no application
 active-once credit. Up to eight tickets per connection are processed; each PSK is
@@ -553,8 +573,8 @@ Cache calls fail closed after 25 ms; a cache failure takes the full-handshake
 path. There is no persistent state. Each `verify_peer` checkout revalidates the
 saved chain against current time, reference identity, loaded CA content, depth and
 certificate signature policy. Auto rejects `verify_none`; ordinary `verify_none`
-remains supported with `session_tickets: :disabled`. Partition digests include
-verification mode, the concrete endpoint, hostname, ALPN and
+remains supported with `session_tickets: :disabled` or `:manual`. Partition digests
+include verification mode, the concrete endpoint, hostname, client identity, ALPN and
 ordered version/cipher/group/signature/profile policies.
 
 Resumption requires fresh ECDHE, a valid binder, selected identity zero with a

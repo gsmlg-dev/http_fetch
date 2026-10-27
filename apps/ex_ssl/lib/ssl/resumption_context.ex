@@ -4,7 +4,8 @@ defmodule SSL.ResumptionContext do
   alias SSL.Protocol.Resumption
 
   @spec prepare(Options.t(), term()) ::
-          {:ok, Options.t(), SessionTicket.t() | nil, binary() | nil}
+          {:ok, Options.t(), SessionTicket.t() | nil,
+           binary() | {:manual, binary(), charlist() | :undefined} | nil}
   def prepare(%{policy: policy} = options, _endpoint) when policy != nil do
     {:ok, prepared, nil} = material(nil, options)
     {:ok, prepared, nil, nil}
@@ -31,14 +32,37 @@ defmodule SSL.ResumptionContext do
     end
   end
 
+  def prepare(%{session_tickets: :manual} = options, endpoint) do
+    key = partition(options, endpoint)
+
+    ticket =
+      Enum.find_value(options.use_ticket, fn
+        %SessionTicket{context: ^key} = candidate -> validate_peer(candidate, options)
+        _ -> nil
+      end)
+
+    sni =
+      case Map.get(options.context, :server_name) do
+        name when is_binary(name) -> String.to_charlist(name)
+        _ -> :undefined
+      end
+
+    {:ok, prepared, selected} = material(ticket, options)
+    {:ok, prepared, selected, {:manual, key, sni}}
+  end
+
   @doc false
   def partition(options, endpoint) do
     :crypto.hash(
       :sha256,
       :erlang.term_to_binary(
-        {:ex_ssl_ticket_policy, 2, options.verify, options.endpoint, endpoint, options.identity,
+        {:ex_ssl_ticket_policy, 3, options.verify, options.endpoint, endpoint, options.identity,
          Map.get(options.context, :server_name), options.trust_source, options.profile,
-         options.depth, options.hostname_check}
+         options.depth, options.hostname_check, options.client_identity,
+         if(options.session_tickets == :manual,
+           do: {:manual, Process.whereis(:init)},
+           else: :auto
+         )}
       )
     )
   end
@@ -101,9 +125,27 @@ defmodule SSL.ResumptionContext do
 
   @spec store(binary(), map()) :: :ok
   def store(key, material) do
+    _ = TicketCache.put(key, new_ticket(material))
+    :ok
+  end
+
+  @doc false
+  def store({:manual, key, sni}, material, owner) do
+    ticket = %{new_ticket(material) | context: key, sni: sni}
+
+    if SessionTicket.validate(ticket) == :ok do
+      send(owner, {:ssl, :session_ticket, ticket})
+    end
+
+    :ok
+  end
+
+  def store(key, material, _owner), do: store(key, material)
+
+  defp new_ticket(material) do
     now = System.monotonic_time(:millisecond)
 
-    ticket = %SessionTicket{
+    %SessionTicket{
       ticket: material.ticket,
       psk: material.psk,
       hash: material.hash,
@@ -113,8 +155,5 @@ defmodule SSL.ResumptionContext do
       peer: material.peer,
       alpn: material.alpn
     }
-
-    _ = TicketCache.put(key, ticket)
-    :ok
   end
 end

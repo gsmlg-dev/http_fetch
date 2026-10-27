@@ -180,13 +180,12 @@ defmodule SSL.ResumptionContextTest do
     assert {:ok, _, nil, ^key} = ResumptionContext.prepare(opts, endpoint)
   end
 
-  test "auto is explicit TLS13-only without credentials and manual early-data options reject", %{
+  test "auto is explicit TLS13-only without credentials and early-data options reject", %{
     fixtures: f
   } do
     assert {:ok, %{session_tickets: :disabled}} = Options.normalize(@host, cacerts: [f.ca.der])
 
     for extra <- [
-          [session_tickets: :manual],
           [use_ticket: []],
           [early_data: "secret"],
           [versions: [:"tlsv1.2"]],
@@ -194,6 +193,56 @@ defmodule SSL.ResumptionContextTest do
           [certfile: f.rsa.certificate, keyfile: f.rsa.key]
         ] do
       assert {:error, {:options, _}} = Options.normalize(@host, Keyword.merge(base(f), extra))
+    end
+  end
+
+  test "manual candidates revalidate certificates and preserve origin and policy partitions", %{
+    fixtures: f
+  } do
+    opts = normalized(f, session_tickets: :manual)
+    endpoint = {@host, 3443}
+    key = ResumptionContext.partition(opts, endpoint)
+    candidate = %{ticket([f.server.der]) | context: key, sni: ~c"exssl.test"}
+    opts = %{opts | use_ticket: [candidate]}
+
+    for _ <- 1..2 do
+      assert {:ok, _, selected, {:manual, ^key, ~c"exssl.test"}} =
+               ResumptionContext.prepare(opts, endpoint)
+
+      assert selected.peer.leaf_der == f.server.der
+      assert :miss = TicketCache.checkout(key)
+    end
+
+    for changed_endpoint <- [{@host, 3444}, {{127, 0, 0, 2}, 3443}] do
+      assert {:ok, _, nil, {:manual, _, _}} = ResumptionContext.prepare(opts, changed_endpoint)
+    end
+
+    for changed <- [
+          %{opts | verify: :verify_none},
+          %{opts | depth: opts.depth + 1},
+          %{opts | trust_source: [f.wrong.der]},
+          %{opts | identity: {:dns_id, "wrong.test"}},
+          %{
+            opts
+            | profile: %{opts.profile | cipher_suites: Enum.reverse(opts.profile.cipher_suites)}
+          },
+          normalized(f, session_tickets: :manual, alpn_advertised_protocols: ["h2"]),
+          normalized(f, session_tickets: :manual, certfile: f.rsa.certificate, keyfile: f.rsa.key)
+        ] do
+      assert {:ok, _, nil, {:manual, _, _}} =
+               ResumptionContext.prepare(%{changed | use_ticket: [candidate]}, endpoint)
+    end
+
+    for chain <- [[f.wrong.der], [f.expired.der], [<<1, 2, 3>>]] do
+      invalid = %{candidate | peer: %{chain: chain}}
+
+      assert {:ok, _, nil, {:manual, ^key, _}} =
+               ResumptionContext.prepare(%{opts | use_ticket: [invalid]}, endpoint)
+
+      assert {:ok, _, selected, {:manual, ^key, _}} =
+               ResumptionContext.prepare(%{opts | use_ticket: [invalid, candidate]}, endpoint)
+
+      assert selected.peer.leaf_der == f.server.der
     end
   end
 

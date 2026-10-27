@@ -3,7 +3,7 @@ defmodule SSL.SessionTicket do
 
   @derive {Inspect, only: [:hash, :issued_at, :expires_at, :alpn]}
   @enforce_keys [:ticket, :psk, :hash, :age_add, :issued_at, :expires_at, :peer, :alpn]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [context: nil, sni: :undefined]
 
   @max_lifetime 604_800_000
   @max_entry_bytes 262_144
@@ -16,7 +16,9 @@ defmodule SSL.SessionTicket do
           issued_at: integer(),
           expires_at: integer(),
           peer: map(),
-          alpn: binary() | nil
+          alpn: binary() | nil,
+          context: binary() | nil,
+          sni: charlist() | :undefined
         }
 
   @spec validate(term()) ::

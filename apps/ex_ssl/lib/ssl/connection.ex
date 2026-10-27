@@ -1223,7 +1223,7 @@ defmodule SSL.Connection do
   defp apply_events(phase, [], state), do: {:ok, phase, state}
 
   defp apply_events(phase, [{:session_ticket, material} | rest], state) do
-    :ok = SSL.ResumptionContext.store(state.ticket_key, material)
+    :ok = SSL.ResumptionContext.store(state.ticket_key, material, state.owner)
     apply_events(phase, rest, state)
   end
 
@@ -2107,7 +2107,8 @@ defmodule SSL.Connection do
                depth: options.depth,
                client_identity: options.client_identity,
                ticket: ticket,
-               enable_tickets: options.session_tickets == :auto and options.policy == nil
+               enable_tickets:
+                 options.session_tickets in [:auto, :manual] and options.policy == nil
              ),
            {:ok, state} <-
              start_output(

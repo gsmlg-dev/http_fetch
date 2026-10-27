@@ -96,8 +96,9 @@ executed coverage. The newly merged HTTPS-over-HTTPS route remains unresolved.
 
 CRL/OCSP/partial-chain and encrypted/multiple-identity P1 acceptance now includes
 source and all three candidate runtimes, under the documented finite limits and
-managed exclusions. TLS1.2 session reuse and TLS1.3 manual tickets/`use_ticket`
-remain unsupported; no full P1/P3/P4 exit or default-promotion claim follows.
+managed exclusions. TLS1.3 manual tickets/`use_ticket` now have the local source
+coverage recorded below; TLS1.2 session reuse remains unsupported. No full
+P1/P3/P4 exit or default-promotion claim follows.
 Manual CI explicitly defers Credo/Dialyzer; all nine compile, format and package
 jobs pass their remaining steps. The latest automatic push run was cancelled
 when manual CI started; final automatic CI remains required after compatibility
@@ -5202,3 +5203,41 @@ and all39 command roots stopped (372 PIDs/367 process groups absent).
 Evidence: `/tmp/http-fetch-p3-managed-astra-recovery/HANDOFF.md` and
 `/tmp/http-fetch-p3-managed-coordinator-acceptance.json`. Proxy, client durable
 completion, advanced policies, performance and remaining P4-P7 gates remain open.
+
+## Manual TLS 1.3 tickets — local source validation, 2026-10-28
+
+The public engine accepts explicit manual mode and delivers provider-owned maps as
+`{:ssl, :session_ticket, ticket}` without consuming application active-once credit.
+`use_ticket` accepts one to eight bounded candidates; wrong-context or expired
+candidates take a full handshake on the original connection. The saved server
+chain is checked against current verification policy. Client identity, concrete
+origin, trust, verification mode, ALPN and ordered profile remain partitioned.
+Automatic tickets retain their previous TLS1.3-only, verify-peer, no-client-identity
+restriction; manual mode supports mTLS and mixed offers without TLS1.2 resumption.
+
+Installed public OTP29 documentation and an independent OpenSSL exchange confirm
+manual message/SNI semantics and resumed mTLS identity. OTP29 returns
+`{:error, :no_peercert}` after manual resumption; ExSSL intentionally retains its
+existing authenticated cached-DER result. OTP29 also rejects explicit
+`use_ticket: []`; omission initiates a full handshake. OpenSSL emits multiple
+initial tickets, so the test helper consumes the remaining tickets after each
+connection closes rather than confusing tickets from successive peers.
+
+Executed locally with Elixir1.18.5/OTP29, existing offline dependencies and peers:
+
+- Manual option/integration, policy-context and PSK verifier checks: **27 passed**.
+- Existing automatic resumption, HRR, cache/resource/closure/blocked-write,
+  callback and connection/client-auth lifecycle checks: **70 passed**.
+- Core TLS transport and contextual-version checks: **49 passed** after refreshing
+  the reviewed Connection source pin. All Port/buffer/tos/priority assertions remain.
+- `mix compile --warnings-as-errors`, root `mix format --check-formatted` and
+  `git diff --check`: passed.
+
+The first regression run exposed the stale Connection pin (70 engine checks and
+48 of49 adapter checks passed); its refresh followed review that the Connection
+diff changes only ticket delivery and ticket enablement. No TCP ownership or driver
+option handling changed. Evidence and exact commands are retained in
+`/private/tmp/http-fetch-manual-ticket-root-20261027T2215Z/astra-*.json` and matching
+logs. Credo/Dialyzer remain user-deferred; performance, the full remote/runtime and
+candidate-package matrices, final CI and release gates were not run for this slice.
+This source result does not complete P1 or authorize default-provider promotion.

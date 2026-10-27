@@ -141,9 +141,13 @@ executed evidence and required work are distinguishable. OTP remains default.
 - [x] Preserve explicit ordered wire profiles; reject real conflicts before I/O.
 - [x] Document/test mixed default vs profile and auto-ticket interaction; tickets stay
       disabled by default and unsupported combinations return explicit errors.
-- [ ] Resolve TLS1.2 `reuse_sessions` and TLS1.3 manual tickets / `use_ticket` before
-      default promotion. OTP accepts these controls; ExSSL currently rejects them.
-      Existing explicit TLS1.3 automatic resumption is separately implemented/tested.
+- [x] Implement TLS1.3 manual ticket delivery and `use_ticket` with bounded opaque
+      maps, independent OTP/OpenSSL full/resumed mTLS checks, origin/trust/identity/
+      profile isolation and unchanged automatic-ticket policy. Local source tests
+      pass; integrated consumer/platform gates remain required.
+- [ ] Resolve TLS1.2 `reuse_sessions` before default promotion. OTP accepts this
+      control; ExSSL currently rejects it. TLS1.3 manual and automatic resumption
+      do not implement TLS1.2 session reuse.
 
 Exit: required option/default table resolved with independent positive/negative
 coverage; no supported endpoint class silently lost.

@@ -437,8 +437,7 @@ defmodule SSL.Protocol.HandshakeCore do
       with %SSL.SessionTicket{hash: ^hash} = ticket <- input.ticket,
            :ok <- SSL.SessionTicket.validate(ticket),
            true <-
-             input.client_identity == nil and offer.psk_count == 1 and
-               offer.psk_key_exchange_modes == [1],
+             offer.psk_count == 1 and offer.psk_key_exchange_modes == [1],
            {41, <<size::16, identity::binary-size(size), _::binary>>} <-
              List.keyfind(offer.extensions, 41, 0),
            <<length::16, bytes::binary-size(length), _age::32>> <- identity,
