@@ -6,7 +6,7 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
   alias ExSSL.TestSupport.LocalTLSPeer, as: Peer
   alias SSL.{Lifecycle, PolicyIO}
 
-  for operation <- [:open, :read], trigger <- [:cancel, :deadline, :actor_down] do
+  for operation <- [:open, :read], trigger <- [:cancel, :deadline, :actor_down, :ack_loss] do
     test "native file #{operation} keeps truthful evidence through #{trigger}", context do
       file_boundary(context.tmp_dir, unquote(operation), unquote(trigger))
     end
@@ -61,6 +61,7 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
     caller = Task.async(fn -> SSL.connect({127, 0, 0, 1}, peer.port, options, :infinity) end)
 
     on_exit(fn ->
+      if trigger == :ack_loss, do: resume_observer(observer)
       Lifecycle.cancel(lease, {:abs_ms, now() + 500})
       stop_process(caller.pid)
       stop_process(peer.task.pid)
@@ -99,6 +100,9 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
 
         :actor_down ->
           Process.exit(actor, :kill)
+
+        :ack_loss ->
+          :ok = :sys.suspend(observer)
       end
 
       # An entered native operation is outstanding even when cancellation or a
@@ -106,12 +110,20 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
       assert {:pending, %{observer: :alive, receipt: :unsealed}} =
                Lifecycle.await(handle, {:abs_ms, now()})
 
+      released_at = now()
       release_file(operation, path, writer, actor, actor_monitor, cutoff)
+
+      if trigger == :ack_loss do
+        # Both real GenServer.call aliases expire while the observer is paused:
+        # native completion, then the single contingent native close/drain.
+        assert now() - released_at >= 2_000
+        assert :ok = :sys.resume(observer)
+      end
 
       assert {:error, _} = Task.await(caller, remaining(cutoff))
       assert_graph_down(graph, cutoff)
 
-      if trigger == :actor_down do
+      if trigger in [:actor_down, :ack_loss] do
         assert {:unconfirmed, _} = result = Lifecycle.await(handle, {:abs_ms, cutoff})
         assert_receive {:DOWN, ^observer_monitor, :process, ^observer, :normal}, remaining(cutoff)
         assert Lifecycle.status(handle) == result
@@ -130,6 +142,7 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
         assert Lifecycle.status(handle) == {:terminal, receipt}
       end
     after
+      if trigger == :ack_loss, do: resume_observer(observer)
       if writer, do: :file.close(writer)
       Lifecycle.cancel(lease, {:abs_ms, now() + 500})
       Task.shutdown(caller, :brutal_kill)
@@ -233,6 +246,12 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
     monitor = Process.monitor(pid)
     Process.exit(pid, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^pid, _}, 1_000
+  end
+
+  defp resume_observer(observer) do
+    if Process.alive?(observer), do: :sys.resume(observer)
+  catch
+    :exit, _ -> :ok
   end
 
   defp now, do: System.monotonic_time(:millisecond)
