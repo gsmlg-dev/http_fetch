@@ -399,6 +399,15 @@ defmodule HTTP.HTTP2.Pool do
       entry.connecting > 0 ->
         {:reply, :wait, state}
 
+      match?({:ok, _}, available_owner(entry)) ->
+        # Capacity may appear between the caller's try_reserve and this claim.
+        {:reply, :wait, state}
+
+      Enum.any?(entry.connections, fn {_owner, connection} ->
+        not connection.draining and connection.max_streams == 0
+      end) ->
+        {:reply, :wait, state}
+
       can_connect?(state, key) ->
         pid = elem(from, 0)
         monitor = Process.monitor(pid)
