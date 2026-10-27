@@ -349,16 +349,20 @@ H3 completion retains its existing `unsupported_completion` boundary.
       WSS/extended CONNECT, managed runtime, current proxies and explicit QUIC/H3.
 - [ ] Execute deterministic independent OTP/OpenSSL/Python/Node/H2/aioquic peers;
       missing prerequisites, zero tests and skipped mandatory scenarios fail the gate.
-- [ ] Candidate Hex consumers use all current archives with equal exact versions.
+- [x] Candidate Hex consumers use all current archives with equal exact versions
+      (`5011eeb`, CI40570196458 and compatibility40570218841; all38 migration files).
 - [x] Extend mixed-package traffic harness to require verified ExSSL TLS plus h2c
       (R41 bounded automation checks pass).
-- [ ] Execute both traffic modes against the integrated current candidate archives.
+- [x] Execute both traffic modes against the integrated current candidate archives
+      (`5011eeb`, H2 artifact12764239557: h2c plus verified ExSSL H2, all19 gates).
 - [x] Implement automatic candidate TLS and affected QUIC/H3 selection for relevant
       changes; R40 local automation suite passes 20 checks. Remote execution remains
       a separate gate below.
 - [ ] Execute relevant automatic CI and manual all-nine regression on integrated source.
-- [ ] Execute supported runtime matrix (baseline 1.18/OTP28; configured 1.19/OTP28
-      and 1.20/OTP29) and retain historical standalone labels separately.
+- [x] Execute supported runtime matrix (baseline 1.18/OTP28; configured 1.19/OTP28
+      and 1.20/OTP29) and retain historical standalone labels separately
+      (`5011eeb`: all47 candidate groups pass2759 checks on each runtime;
+      baseline additionally passes all-nine unit/integration/E2E workflows).
 - [ ] TODO outside this goal: compare workload results against historical P0 budgets.
 
 Exit: integrated explicit ExSSL passes all non-deferred agreed gates. P5 remains

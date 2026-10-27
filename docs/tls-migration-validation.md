@@ -1,5 +1,35 @@
 # TLS migration execution ledger
 
+## Integrated source and candidate matrix — 2026-10-27 UTC
+
+At `5011eeb87624403fa5122d20aabe87b99087f0b6`, all nine app jobs pass
+[unit](https://github.com/gsmlg-dev/http_fetch/actions/runs/40570202181),
+[integration](https://github.com/gsmlg-dev/http_fetch/actions/runs/40570208015)
+and [E2E](https://github.com/gsmlg-dev/http_fetch/actions/runs/40570213833)
+workflows on Elixir 1.18 / OTP 28. The earlier Fetch native-timeout ordering
+failure remains historical; passing focused and integrated runs do not establish
+its cause or prove a production fix.
+
+The current candidate passes 47 feature groups with 2,759 checks on Elixir
+1.18 / OTP 28 in [CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40570196458)
+and on both Elixir 1.19 / OTP 28 and Elixir 1.20 / OTP 29 in
+[compatibility CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40570218841).
+These reports include all 38 selected migration source files, with 2,691 checks,
+zero skipped or excluded cases and the matching source manifest
+`be2c6cb550f934c5ace8fae364c4fad87ca9141af834045d9dcefacbf5bd64fa`.
+The same CI run's 19 H2 gates pass against independent hyper-h2 and Node peers;
+isolated nine-package consumers complete both h2c and verified ExSSL H2 traffic.
+All 19 retained log hashes and nine archive hashes match the report.
+
+The CI run above fails only in the nine Credo jobs; candidate and H2 jobs pass.
+Those failures are retained separately from the explicitly deferred checks.
+P4 exit remains open until the remaining HTTPS-over-HTTPS proxy and explicit
+resumption-option compatibility decisions are resolved and required integrated
+gates pass. OTP is still the default. Default promotion, the actual production
+release without OTP SSL, major publication and cold published consumers have
+not been accepted. Evidence is retained in
+`/private/tmp/http-fetch-static-deferral-root-20261027T1950Z/INTEGRATED-P4-EVIDENCE.json`.
+
 ## Explicit static-analysis deferral — 2026-10-27
 
 The user authorized deferring Credo and Dialyzer during this migration. Manual
@@ -67,7 +97,7 @@ and CRL integration checks, strict compilation and umbrella formatting. All 1,29
 logged independent peers were joined and the command process groups are absent.
 The repaired Linux candidate matrix remains a required separate check.
 
-## Current accepted boundary — 2026-10-24
+## Historical accepted boundary — 2026-10-24
 
 The public provider lifecycle and duplex source slices are accepted locally. The
 original full ExSSL command, with integration, seed101, max_cases24 and unchanged
