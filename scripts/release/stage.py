@@ -32,7 +32,12 @@ def stage_sources(stage_dir):
         target = stage_dir / package
         if target.exists():
             shutil.rmtree(target)
-        shutil.copytree(source, target, ignore=shutil.ignore_patterns("_build", "deps", ".git", "plts", "*.plt"))
+        def ignore_generated(directory, names):
+            ignored = shutil.ignore_patterns("_build", "deps", ".git", "plts", "*.plt")(directory, names)
+            if Path(directory) == source and "tmp" in names:
+                ignored.add("tmp")
+            return ignored
+        shutil.copytree(source, target, ignore=ignore_generated)
         manifest = target / "mix.exs"
         manifest.write_text(portable_manifest(manifest.read_text()))
     return stage_dir
