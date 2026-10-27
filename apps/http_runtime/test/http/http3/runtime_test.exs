@@ -1,25 +1,59 @@
 defmodule HTTP.HTTP3.RuntimeTest do
   use ExUnit.Case, async: true
 
+  # Public certificate from apps/ex_ssl/test/fixtures/pkix/root.pem, embedded to keep this unit test pure.
+  @trust_anchor_der Base.decode64!(
+                      """
+                      MIIDFzCCAf+gAwIBAgIBATANBgkqhkiG9w0BAQsFADAbMRkwFwYDVQQDDBBleF9z
+                      c2wtVGVzdC1Sb290MB4XDTI2MDkxMDA4MTIyNVoXDTM2MDkwNzA4MTIyNVowGzEZ
+                      MBcGA1UEAwwQZXhfc3NsLVRlc3QtUm9vdDCCASIwDQYJKoZIhvcNAQEBBQADggEP
+                      ADCCAQoCggEBALchanJ7iECLuLQCyqF63X2XqxWenDFQpSB/9Qc8M01ee3tqXg/D
+                      IatfELc5CMzXGuGkWBlzVc3wlzL//vzfZMA5jY6uDfI9n/mVlsH4hbCt7cjMbhHH
+                      qYlp84niS3RSKBzuzoNP+n9fe24pfOlbRnOR1gBng7ByRDoGQsoSZx4DU3KCYuUp
+                      oDUkTfyGX40KFuUME36IcF1/LlYM5d/PTjN/TLGG5jtmqh4Be5pGQlSLpu88JzGm
+                      EtQ+0YuXcQ9KBYBFP/g6gXt5VxATSFxbn4phj7fK26eoJp9sPAZLIAo26aDKjs3p
+                      mqe55DehYSubDA76ug6SAWaX+KoWp5xLOKECAwEAAaNmMGQwHwYDVR0jBBgwFoAU
+                      hdlS4cW2w9qjB9P3WyBJCTazRMowEgYDVR0TAQH/BAgwBgEB/wIBATAOBgNVHQ8B
+                      Af8EBAMCAQYwHQYDVR0OBBYEFIXZUuHFtsPaowfT91sgSQk2s0TKMA0GCSqGSIb3
+                      DQEBCwUAA4IBAQAzE5L9eZQyel0/1PDsnhxK3CtNlsgV+9b4vfEDN9an6FPQeEhW
+                      PBiok05Zj0Vidydr3JTyJ1LCyzG/pXzG4l+jPkz7P9LD8yWgGlKb1lA2cMtsf8bN
+                      mnsJ0/SZoVT6XfnWxYOGgRdYr07iuurzxHHtclfU7zV0U3adEXm4btIu2T+gJXDB
+                      Mol55IeSxwAmUNp7z4vLssA+Hw2EPVVKZC2Y3SFEsbbUAVP5S1zjFw+q9AK4miVZ
+                      kte6jgtTfdHL8mZcyrIyFxFh91XEJZVNoGUqUd2KFqAKJXlmX0rPED2pgsqJNxW+
+                      ZXyKoINVpC5VCv3l5WlLzjwONpj4JussZD1r
+                      """,
+                      ignore: :whitespace
+                    )
+
   alias HTTP.HTTP3.{BodyBridge, ConnectionOwner, Pool, PoolKey, ReceiveBudget, Stream}
 
-  setup do
-    fixture = Path.expand("../../../../elixir_quic/test/fixtures/tls", __DIR__)
+  setup context do
+    cond do
+      context[:integration] ->
+        fixture = Path.expand("../../../../elixir_quic/test/fixtures/tls", __DIR__)
 
-    cert = fn name ->
-      [{:Certificate, der, :not_encrypted}] =
-        :public_key.pem_decode(File.read!(Path.join(fixture, name)))
+        cert = fn name ->
+          [{:Certificate, der, :not_encrypted}] =
+            :public_key.pem_decode(File.read!(Path.join(fixture, name)))
 
-      der
+          der
+        end
+
+        [{type, key, :not_encrypted}] =
+          :public_key.pem_decode(File.read!(Path.join(fixture, "leaf-key.pem")))
+
+        tls = [cacerts: [cert.("root.pem")], reference_identity: {:dns_id, "example.test"}]
+        %{tls: tls, cert: cert.("leaf.pem"), key: {type, key}}
+
+      context[:unit_tls] ->
+        %{tls: [cacerts: [@trust_anchor_der], reference_identity: {:dns_id, "example.test"}]}
+
+      true ->
+        :ok
     end
-
-    [{type, key, :not_encrypted}] =
-      :public_key.pem_decode(File.read!(Path.join(fixture, "leaf-key.pem")))
-
-    tls = [cacerts: [cert.("root.pem")], reference_identity: {:dns_id, "example.test"}]
-    %{tls: tls, cert: cert.("leaf.pem"), key: {type, key}}
   end
 
+  @tag :unit_tls
   test "pool identity separates trust, origin, profile and endpoint ownership", %{tls: tls} do
     request = %HTTP.Request{url: URI.parse("https://localhost/"), transport_options: [ssl: tls]}
     assert {:ok, key, _} = PoolKey.build(request)
@@ -585,6 +619,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     GenServer.stop(pool)
   end
 
+  @tag :unit_tls
   test "explicit user transfer encoding fails before connecting", ctx do
     request = %HTTP.Request{
       method: :post,
