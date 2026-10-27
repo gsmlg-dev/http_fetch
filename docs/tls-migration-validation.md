@@ -1,5 +1,28 @@
 # TLS migration execution ledger
 
+## Linux OTP 29 returned file-error qualification — 2026-10-27
+
+The OTP 29.1.2 candidate run
+[40555761698](https://github.com/gsmlg-dev/http_fetch/actions/runs/40555761698)
+failed 88 of 1,252 CRL checks. Hash-directory enumeration reaches a missing
+`.rN` sentinel; the file executor previously rejected its returned ENOENT on
+Linux OTP 29. The same selection passed on Linux OTP 28.
+
+The official OTP-29.1.2 `file`, `raw_file_io`, `prim_file`, `prim_file_nif.c`
+and `unix_prim_file.c` sources are byte-identical to the reviewed OTP-29.0.2
+sources. In `efile_open`, failed `open` returns its errno with no allocated
+file resource; the synchronous wrapper returns that error before any handle
+creation. This qualifies normal returned ENOENT on Linux OTP 29 / ERTS 17.1.1.
+Other runtimes and non-ENOENT errors retain their existing conservative handling;
+actor death during native work still cannot establish completion. This source
+comparison does not establish native binary equivalence. Exact source pins and
+local validation are retained in
+`/private/tmp/http-fetch-otp2912-enoent-root-20261027T1818Z`.
+Local Elixir 1.18.5 / OTP 29.0.2 passes all 1,294 focused policy-file, CRL-cache
+and CRL integration checks, strict compilation and umbrella formatting. All 1,296
+logged independent peers were joined and the command process groups are absent.
+The repaired Linux candidate matrix remains a required separate check.
+
 ## Current accepted boundary — 2026-10-24
 
 The public provider lifecycle and duplex source slices are accepted locally. The

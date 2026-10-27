@@ -257,11 +257,13 @@ defmodule SSL.PolicyIO.FileExecutor do
     do: send(state.connection, {:policy_file, self(), state.capability, state.generation, result})
 
   # Linux/OTP 28 retains its accepted native observations and source-built evidence.
-  # The exact macOS runtime admits normal returned ENOENT from reviewed OTP 29.0.2
-  # source; native binary equivalence is not established. Other runtimes fail closed.
+  # Exact OTP 29 runtimes admit normal returned ENOENT from reviewed source:
+  # macOS 29.0.2 and Linux 29.1.2 have identical raw-open wrappers and native code.
+  # Native binary equivalence is not established. Other runtimes fail closed.
   defp proven_enoent? do
     case {:os.type(), :erlang.system_info(:otp_release)} do
       {{:unix, :linux}, ~c"28"} -> true
+      {{:unix, :linux}, ~c"29"} -> :erlang.system_info(:version) == ~c"17.1.1"
       {{:unix, :darwin}, ~c"29"} -> :erlang.system_info(:version) == ~c"17.0.2"
       _ -> false
     end

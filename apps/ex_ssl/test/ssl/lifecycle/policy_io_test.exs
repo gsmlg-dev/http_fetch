@@ -46,6 +46,8 @@ defmodule SSL.PolicyIOFileIntegrationTest do
 
     qualified_runtime =
       (:os.type() == {:unix, :linux} and :erlang.system_info(:otp_release) == ~c"28") or
+        (:os.type() == {:unix, :linux} and :erlang.system_info(:otp_release) == ~c"29" and
+           :erlang.system_info(:version) == ~c"17.1.1") or
         (:os.type() == {:unix, :darwin} and :erlang.system_info(:otp_release) == ~c"29" and
            :erlang.system_info(:version) == ~c"17.0.2")
 
