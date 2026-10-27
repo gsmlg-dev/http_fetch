@@ -60,7 +60,7 @@ jobs:
           key: integration-${{ matrix.app }}-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs', format('apps/{0}/mix.exs', matrix.app)) }}
 
       - uses: actions/setup-python@v5
-        if: matrix.app == 'ex_ssl' || matrix.app == 'http_fetch' || matrix.app == 'http_event_source' || matrix.app == 'http_web_socket'
+        if: matrix.app == 'ex_ssl' || matrix.app == 'http_runtime' || matrix.app == 'http_fetch' || matrix.app == 'http_event_source' || matrix.app == 'http_web_socket'
         with:
           python-version: '3.12'
 
@@ -69,7 +69,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Install independent admission peer dependencies
-        if: matrix.app == 'ex_ssl' || matrix.app == 'http_fetch' || matrix.app == 'http_event_source' || matrix.app == 'http_web_socket'
+        if: matrix.app == 'ex_ssl' || matrix.app == 'http_runtime' || matrix.app == 'http_fetch' || matrix.app == 'http_event_source' || matrix.app == 'http_web_socket'
         run: python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt
 
       - name: Install dependencies
