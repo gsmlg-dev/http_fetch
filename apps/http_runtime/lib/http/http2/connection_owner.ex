@@ -490,7 +490,14 @@ defmodule HTTP.HTTP2.ConnectionOwner do
           {{:value, bytes}, rest} ->
             case acknowledge_bytes(state, id, bytes) do
               {:ok, state} ->
-                {:reply, :ok, put_in(state.streams[id].deliveries, rest)}
+                state = put_in(state.streams[id].deliveries, rest)
+
+                state =
+                  if :queue.len(rest) < 64,
+                    do: flush_pending_data(state, id),
+                    else: state
+
+                {:reply, :ok, flush_response_events(state)}
 
               {:error, reason, state} ->
                 notify_transport_error(state, reason)
@@ -636,6 +643,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
               pending_write: nil,
               max_write_bytes: Keyword.get(opts, :max_write_bytes, 16_777_230),
               byte_stream?: Keyword.get(opts, :byte_stream, false),
+              pending_data: nil,
               deliveries: :queue.new()
             }),
           refs: Map.put(state.refs, request_ref, stream.id),
@@ -849,21 +857,27 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
     case decode_frames(state, buffer) do
       {:reply, :ok, state} ->
-        state.response_events
-        |> Enum.reverse()
-        |> Enum.each(fn {id, event} -> notify_stream(state, id, event) end)
-
-        {:reply, :ok, %{state | response_events: []}}
+        {:reply, :ok, flush_response_events(state)}
 
       {:reply, error, state} ->
         # Opt-in byte streams keep admitted bytes before a connection terminal
         # error. Ordinary Fetch delivery retains its accepted response policy.
+        state = Enum.reduce(Map.keys(state.streams), state, &flush_pending_data(&2, &1))
+
         state.response_events
         |> Enum.reverse()
         |> Enum.each(fn {id, event} -> flush_terminal_byte_event(state, id, event) end)
 
         {:reply, error, %{state | response_events: []}}
     end
+  end
+
+  defp flush_response_events(state) do
+    state.response_events
+    |> Enum.reverse()
+    |> Enum.each(fn {id, event} -> notify_stream(state, id, event) end)
+
+    %{state | response_events: []}
   end
 
   defp decode_frames(state, buffer) do
@@ -1225,16 +1239,61 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   defp queue_delivery(state, id, payload, flags, wire_bytes) do
-    if :queue.len(state.streams[id].deliveries) >= 128 do
-      fail_stream(state, id, :delivery_buffer_full)
-    else
-      state = %{
-        state
-        | response_events: [{id, {:http2, :data, payload, flags}} | state.response_events]
-      }
+    entry = state.streams[id]
 
-      state = update_in(state.streams[id].deliveries, &:queue.in(wire_bytes, &1))
-      return_connection_credit(state)
+    cond do
+      entry.byte_stream? and (entry.pending_data != nil or :queue.len(entry.deliveries) >= 64) ->
+        defer_data(state, id, payload, flags, wire_bytes)
+
+      :queue.len(entry.deliveries) >= 128 ->
+        fail_stream(state, id, :delivery_buffer_full)
+
+      true ->
+        state = %{
+          state
+          | response_events: [{id, {:http2, :data, payload, flags}} | state.response_events]
+        }
+
+        state = update_in(state.streams[id].deliveries, &:queue.in(wire_bytes, &1))
+        return_connection_credit(state)
+    end
+  end
+
+  # A valid flow-controlled byte stream can split its allowance across any
+  # number of transport callbacks. Keep one deferred delivery once notifications
+  # are occupied; stream credit still returns only on consumer acknowledgement.
+  defp defer_data(state, id, payload, flags, wire_bytes) do
+    {parts, bytes} =
+      case state.streams[id].pending_data do
+        nil -> {[], 0}
+        {parts, _flags, bytes} -> {parts, bytes}
+      end
+
+    parts =
+      case parts do
+        [previous | rest] when byte_size(previous) + byte_size(payload) <= 65_536 ->
+          [previous <> payload | rest]
+
+        _ ->
+          [:binary.copy(payload) | parts]
+      end
+
+    state = put_in(state.streams[id].pending_data, {parts, flags, bytes + wire_bytes})
+    return_connection_credit(state)
+  end
+
+  defp flush_pending_data(state, id) do
+    case get_in(state.streams, [id, :pending_data]) do
+      nil ->
+        state
+
+      {parts, flags, bytes} ->
+        payload = parts |> Enum.reverse() |> IO.iodata_to_binary()
+
+        state
+        |> put_in([:streams, id, :pending_data], nil)
+        |> update_in([:streams, id, :deliveries], &:queue.in(bytes, &1))
+        |> Map.update!(:response_events, &[{id, {:http2, :data, payload, flags}} | &1])
     end
   end
 
@@ -1318,6 +1377,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
                  {:ok, state} <- admit_header_event(state, id, phase, headers) do
               state = %{state | connection: Connection.put_stream(state.connection, stream)}
               state = stop_upload(state, id, upload_phase(stream, phase))
+              state = flush_pending_data(state, id)
 
               {:ok,
                %{
@@ -1770,6 +1830,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
 
   defp flush_byte_stream_events(state, id) do
     if get_in(state, [:streams, id, :byte_stream?]) do
+      state = flush_pending_data(state, id)
       {pending, rest} = Enum.split_with(state.response_events, fn {stream, _} -> stream == id end)
       pending |> Enum.reverse() |> Enum.each(fn {_, event} -> notify_stream(state, id, event) end)
       %{state | response_events: rest}
@@ -1786,8 +1847,10 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   defp notify_transport_error(state, reason),
     do: notify_all(state, {:http2, :transport_error, reason})
 
-  defp notify_all(state, message),
-    do: Enum.each(Map.keys(state.streams), &notify_stream(state, &1, message))
+  defp notify_all(state, message) do
+    state = Enum.reduce(Map.keys(state.streams), state, &flush_byte_stream_events(&2, &1))
+    Enum.each(Map.keys(state.streams), &notify_stream(state, &1, message))
+  end
 
   defp stream_id(state, id) when is_integer(id),
     do: if(Map.has_key?(state.streams, id), do: {:ok, id}, else: :error)
