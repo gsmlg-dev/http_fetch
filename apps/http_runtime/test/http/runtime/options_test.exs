@@ -2,6 +2,23 @@ defmodule HTTP.Runtime.OptionsTest do
   use ExUnit.Case, async: true
   alias HTTP.Runtime.Options
 
+  test "secure Unix routes reject before networking while plain schemes retain H1" do
+    path = "/unused-secure-unix.sock"
+
+    for scheme <- ["https", "wss"], version <- [:http1, :auto, :http2] do
+      assert {:error, :tls_over_unix_socket_not_supported} =
+               Options.validate(URI.parse("#{scheme}://example.test/"),
+                 unix_socket: path,
+                 http_version: version
+               )
+    end
+
+    for scheme <- ["http", "ws"] do
+      assert {:ok, _} =
+               Options.validate(URI.parse("#{scheme}://example.test/"), unix_socket: path)
+    end
+  end
+
   test "defaults preserve HTTP1 and aliases normalize explicit transport identity" do
     assert {:ok, options} = Options.validate(URI.parse("https://example.test/"), [])
     assert options[:http_version] == :http1

@@ -3,6 +3,20 @@ defmodule HTTP.WebSocket.OptionsTest do
 
   alias HTTP.WebSocket.Options
 
+  test "secure Unix options reject including the HTTPS alias" do
+    for scheme <- ["wss", "https"],
+        init <- [
+          [unix_socket: "/unused-websocket.sock"],
+          %{"unix_socket" => "/unused-websocket.sock"}
+        ] do
+      assert {:error, :tls_over_unix_socket_not_supported} =
+               Options.new("#{scheme}://example.test/socket", [], init)
+    end
+
+    assert {:ok, %{unix_socket: "/unused-websocket.sock", uri: %{scheme: "ws"}}} =
+             Options.new("ws://example.test/socket", [], unix_socket: "/unused-websocket.sock")
+  end
+
   test "normalizes http and https schemes to ws and wss" do
     assert {:ok, %{uri: %{scheme: "ws"}, url: "ws://example.com/socket"}} =
              Options.new("http://example.com/socket")

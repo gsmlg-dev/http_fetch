@@ -1,5 +1,23 @@
 # TLS migration execution ledger
 
+## Secure Unix route correction — 2026-10-27
+
+The shared runtime now rejects HTTPS/WSS with `unix_socket` using
+`{:error, :tls_over_unix_socket_not_supported}` before local-socket I/O. Existing
+SSE/WS option validation and SSE redirect validation use that boundary; Fetch
+checks it at every dial, including redirect destinations. Plain HTTP, SSE and WS
+over Unix remain supported. No TLS-over-Unix capability is added.
+
+New pure option scenarios reproduced three failures before the production change.
+On local Elixir 1.18.5 / OTP 29.0.2, the corrected option suites and three real Unix
+integration suites pass 40 checks; existing Unix Fetch and runtime Dialer suites
+pass another 35. Independent listener queues remain empty after direct secure
+attempts and Fetch/SSE secure redirects; plain HTTP responses, SSE events and WS
+frames still arrive. Strict compilation and umbrella formatting pass. These are
+local results; Linux source/candidate CI after this change remains required.
+Commands and original failures are retained in
+`/private/tmp/http-fetch-secure-unix-root-20261027T1930Z`.
+
 ## Linux OTP 29 returned file-error qualification — 2026-10-27
 
 The OTP 29.1.2 candidate run

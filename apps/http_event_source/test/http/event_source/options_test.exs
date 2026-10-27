@@ -3,6 +3,19 @@ defmodule HTTP.EventSource.OptionsTest do
 
   alias HTTP.EventSource.Options
 
+  test "secure Unix options reject without starting a client" do
+    for init <- [
+          [unix_socket: "/unused-events.sock"],
+          %{"unixSocket" => "/unused-events.sock"}
+        ] do
+      assert {:error, :tls_over_unix_socket_not_supported} =
+               Options.new("https://example.test/events", init)
+    end
+
+    assert {:ok, %{unix_socket: "/unused-events.sock", uri: %{scheme: "http"}}} =
+             Options.new("http://example.test/events", unix_socket: "/unused-events.sock")
+  end
+
   @h3_ca Path.expand("../../../../elixir_quic/test/fixtures/tls/root.pem", __DIR__)
 
   test "HTTP3 is explicit, HTTPS-only and preserves QUIC profile and trust options" do

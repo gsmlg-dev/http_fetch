@@ -456,6 +456,11 @@ defmodule HTTP.Runtime.Dialer do
     end
   end
 
+  defp select_origin_transport(%Request{url: %URI{scheme: scheme}}, socket_path)
+       when is_binary(socket_path) and scheme in ["https", "wss"] do
+    {:error, :tls_over_unix_socket_not_supported}
+  end
+
   defp select_origin_transport(_request, socket_path) when is_binary(socket_path) do
     {:ok, HTTP.Transport.Unix, socket_path, 0}
   end

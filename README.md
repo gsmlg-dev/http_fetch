@@ -150,6 +150,11 @@ response =
 IO.puts("Docker Version: #{docker_info["Version"]}")
 ```
 
+Unix sockets support plaintext HTTP and WebSocket connections. Combining
+`unix_socket` with `https` or `wss` returns
+`{:error, :tls_over_unix_socket_not_supported}` before opening the local socket.
+Fetch and EventSource also reject redirects from a plain Unix request to HTTPS.
+
 ## Request and Connection Timeouts
 
 For HTTP/1 fetches, `timeout: :infinity` disables the total request deadline,

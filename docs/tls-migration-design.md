@@ -188,7 +188,7 @@ an immutable managed policy.
 | HTTP via HTTP proxy | TCP to proxy, absolute-form HTTP request, origin Host; no TLS or CONNECT | [proxy](../apps/http_core/lib/http/proxy.ex#L112); core; no origin fallback |
 | HTTPS via HTTP proxy | TCP to proxy → CONNECT origin → strict plaintext boundary → adapter.upgrade using origin identity → H1/H2 | [CONNECT](../apps/http_core/lib/http/proxy.ex#L123); core/runtime; raw phase must join provider lifecycle; option conflicts currently normalize after proxy I/O |
 | HTTP via HTTPS proxy | TLS to proxy identity, forced http/1.1 → absolute-form HTTP | [HTTPS proxy](../apps/http_core/lib/http/proxy.ex#L106); core/runtime; trust/client identity belong to proxy; HTTPS origins reject, no TLS-over-TLS |
-| Unix Fetch/SSE/WS H1 | [Unix](../apps/http_core/lib/http/transport/unix.ex#L7) precedes scheme selection; gen_tcp local-domain connection with plain HTTP/Upgrade | Core/clients; HTTP/ws Unix supported, H2/H3/proxy combinations reject; https/wss currently also selects plaintext, requiring the explicit security correction below |
+| Unix Fetch/SSE/WS H1 | Shared runtime validation rejects secure schemes before [Unix](../apps/http_core/lib/http/transport/unix.ex#L7); plain HTTP/Upgrade uses gen_tcp local-domain connections | HTTP/ws Unix supported; https/wss reject with tls_over_unix_socket_not_supported, including Fetch/SSE secure redirects; H2/H3/proxy combinations retain their rejection boundaries |
 | EventSource | [Connection](../apps/http_event_source/lib/http/event_source/connection.ex#L265) → H1 adapter worker or runtime H2/H3 relay | Backend/raw options retained across reconnect; cross-origin credentials stripped, HTTPS downgrade and client-identity redirects rejected; protocol-only H1 fallback; no supported forward-proxy plumbing |
 | WebSocket | [H1](../apps/http_web_socket/lib/http/web_socket/connection.ex#L463) connects/validates Upgrade before acknowledged transfer; [H2](../apps/http_web_socket/lib/http/web_socket/connection.ex#L420) uses runtime extended CONNECT | Provider/options/deadline retained; one capability-only H1 fallback; no authentication fallback, redirect/reconnect or H3; mode:proxy means frame forwarding, not HTTP proxy routing |
 | Explicit H3 Fetch/SSE | [relay](../apps/http_runtime/lib/http/http3/stream.ex#L21) → key/owner/session → [QUIC](../apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex#L61) → TLSDriver → SSL.QUIC | Separate TLS1.3 beta, explicit CA, origin reference distinct from SNI; global TCP backend ignored, explicit backend/proxy/Unix/socket options reject; no TCP fallback |
@@ -201,10 +201,11 @@ an unconditional prohibition on the caller's supported identity overrides.
 
 The following newly traced boundaries remain named release blockers:
 
-- **Secure Unix correction (core/clients):** reject https/wss with unix_socket before
-  local-socket I/O; preserve plain HTTP/ws. Add direct, redirect-to-secure and WS/SSE
-  negative scenarios beside [HTTP Unix coverage](../apps/http_fetch/test/http_unix_socket_test.exs).
-  Current plaintext selection does not establish TLS-over-Unix support.
+- **Secure Unix correction (implemented; integrated gate pending):** https/wss with
+  unix_socket reject before local-socket I/O; plain HTTP/ws remain supported.
+  Per-client secure_unix_socket_test.exs integration suites cover direct rejection,
+  Fetch/SSE secure redirects, zero additional accepts and plain exchanges. This
+  correction does not add TLS-over-Unix support.
 - **Fetch client-identity redirects (core/clients):** [candidate coverage](../scripts/ex_ssl_mtls_redirects_test.exs#L78)
   deliberately allows OTP cross-origin identity forwarding while ExSSL/H3 reject.
   Promotion therefore needs a named versioned compatibility change and migration
