@@ -5,6 +5,16 @@ defmodule HTTP.InfiniteTimeoutWireTest do
   @fixtures Path.expand("../../../http_web_socket/test/support/fixtures", __DIR__)
   @wait 2_000
 
+  setup_all do
+    # Keep initial option loading outside the short live-handshake deadlines.
+    assert {:ok, _prepared} =
+             HTTP.Transport.ExSSL.prepare_upgrade("localhost",
+               ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
+             )
+
+    :ok
+  end
+
   for backend <- [:tcp, :ssl, :ex_ssl], connect_timeout <- [1_000, :infinity] do
     test "#{backend} infinite request retains a separate #{connect_timeout} connection timeout" do
       {url, peer} = peer(unquote(backend))
@@ -237,6 +247,7 @@ defmodule HTTP.InfiniteTimeoutWireTest do
         HTTP.fetch(
           "https://localhost:#{port}/",
           options(unquote(backend),
+            connect_address: {127, 0, 0, 1},
             timeout: unquote(timeout),
             connect_timeout: unquote(connect_timeout),
             signal: controller
