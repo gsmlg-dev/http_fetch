@@ -165,16 +165,7 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
                      }
                    } = :sys.get_state(observer, remaining(deadline))
 
-            graph =
-              for {role, %{identity: {_, type, object}}} <- state.resources do
-                monitor =
-                  case type do
-                    :process -> Process.monitor(object)
-                    :socket -> :socket.monitor(object)
-                  end
-
-                {role, type, object, monitor}
-              end
+            graph = monitor_graph(state.resources)
 
             assert Enum.sort(Enum.map(graph, &elem(&1, 0))) ==
                      [:allocator, :connection, :setup, :tcp, :writer]
@@ -187,6 +178,18 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
 
       _ ->
         retry_native(observer, operation, deadline)
+    end
+  end
+
+  defp monitor_graph(resources) do
+    for {role, %{identity: {_, type, object}}} <- resources do
+      monitor =
+        case type do
+          :process -> Process.monitor(object)
+          :socket -> :socket.monitor(object)
+        end
+
+      {role, type, object, monitor}
     end
   end
 
