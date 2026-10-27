@@ -28,6 +28,7 @@ MIGRATION_GROUPS = {
         "apps/ex_ssl/test/ssl/identity_completion_integration_test.exs",
     ),
     "tls": (
+        "apps/http_core/test/http/ex_ssl_version_policy_test.exs",
         "apps/ex_ssl/test/ssl/tls_policy_interop_test.exs",
         "apps/ex_ssl/test/ssl/tls12_pkcs1_interop_test.exs",
         "apps/ex_ssl/test/ssl/reference_identity_interop_test.exs",
@@ -37,6 +38,7 @@ MIGRATION_GROUPS = {
         "apps/ex_ssl/test/ssl/middlebox_comp_mode_interop_test.exs",
     ),
     "provider": (
+        "apps/http_core/test/http/ex_ssl_setup_phase_integration_test.exs",
         "apps/ex_ssl/test/ssl/lifecycle/public_test.exs",
         "apps/ex_ssl/test/ssl/lifecycle/public_cleanup_boundaries_test.exs",
         "apps/ex_ssl/test/ssl/lifecycle/public_fatal_alert_test.exs",
