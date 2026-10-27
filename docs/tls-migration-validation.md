@@ -18,6 +18,19 @@ These are orchestration checks. The actual published migration matrix, default
 promotion and production release without OTP SSL remain unexecuted. Evidence is
 in `/private/tmp/http-fetch-published-migration-root-20261027T2005Z`.
 
+The production-release verifier also accepts `--published`. After source/stage/
+archive identity checks, it runs the existing nine-package Hex preflight through
+its bounded command runner. Missing, mismatched, incomplete or failed preflight
+results stop before release construction or peer startup. Published builds use
+fresh Hex configuration/cache paths with offline mode disabled and create no
+candidate registry. Reports identify the dependency source. Candidate mode and
+the full artifact/runtime audit, 35 required scenarios and peer teardown remain
+required. All 118 release-automation tests, strict compilation, umbrella formatting
+and diff checks pass locally; the five new checks mock build, network and peers.
+Neither candidate nor published production traffic was executed in this preparation
+step. That acceptance still depends on P5/P6. Evidence is in
+`/private/tmp/http-fetch-published-no-otp-root-20261027T2010Z`.
+
 ## Integrated source and candidate matrix — 2026-10-27 UTC
 
 At `5011eeb87624403fa5122d20aabe87b99087f0b6`, all nine app jobs pass

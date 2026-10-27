@@ -1,10 +1,14 @@
-"""Build a candidate-only production release and run the no-OTP-SSL gate.
+"""Build an isolated candidate or published release and run the no-OTP-SSL gate.
 
 This command starts real build tools and external peers. Unit tests mock those
 collaborators. A passing mock run is never production removal evidence.
 
 Usage: python3 no_otp_consumer_gate.py VERSION ARCHIVES STAGE --source-root ROOT
        --source-sha SHA --peer-plan PLAN.json --output NEW_DIRECTORY
+       [--published]
+
+Published mode requires all nine Hex archives to match the source-bound release
+archives, then resolves packages with fresh Hex configuration and cache paths.
 
 PLAN schema 1 contains pinned external peers and all REQUIRED scenarios. Peers
 receive NO_OTP_NONCE in their environment. The structured JSON-line peer protocol
@@ -16,7 +20,7 @@ TLS/reset/replay evidence remains unconfirmed, never synthetic success.
 """
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import hashlib
 import io
 import json
@@ -27,6 +31,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tarfile
 import threading
 import time
@@ -438,7 +443,7 @@ def bounded_registry_commands(runner, source=None):
         consumer_gate.ROOT = original_root
 
 
-def run(version, archives, stage, source, source_sha, plan, output, max_seconds=1800):
+def run(version, archives, stage, source, source_sha, plan, output, max_seconds=1800, *, published=False):
     stable_version(version)
     validate_plan(plan)
     require(re.fullmatch(r'[a-f0-9]{40}', source_sha), 'full source SHA required')
@@ -449,9 +454,13 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
     nonce = uuid.uuid4().hex
     project, release = output / 'project', output / 'release'
     env = production_environment(project, os.environ)
+    if published:
+        env.pop('HEX_OFFLINE', None)
+        env.update(HEX_CONFIG_HOME=str(project / 'hex'), HEX_CACHE_HOME=str(project / 'hex-cache'))
     peers = []
     report = dict(gate='no_otp_production_release', status='FAIL', nonce=nonce,
-                  source_sha=source_sha, version=version, output=str(output))
+                  source_sha=source_sha, version=version, output=str(output),
+                  dependency_source='published' if published else 'candidate')
     try:
         head = runner.command(['git', 'rev-parse', 'HEAD'], cwd=source, env=env).strip()
         require(head == source_sha, 'candidate source HEAD mismatch')
@@ -462,6 +471,12 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
         report['staged_source_sha256'] = verify_source(stage, source, archives, version)
         report['archives'] = {package: hashlib.sha256(
             (archives / f'{package}-{version}.tar').read_bytes()).hexdigest() for package in PACKAGES}
+        if published:
+            statuses = runner.command([sys.executable, str(source / 'scripts/release/hex_packages.py'),
+                                       'preflight', version, str(archives)], cwd=source, env=env)
+            require(statuses.strip().splitlines() == [f'{package}: matching' for package in PACKAGES],
+                    'all nine published archives must match before release construction')
+            report['published_archives'] = {package: 'matching' for package in PACKAGES}
         project.joinpath('lib').mkdir(parents=True)
         project.joinpath('mix.exs').write_text(project_source(version))
         for stem in ('no_otp_consumer', 'no_otp_release_audit'):
@@ -471,10 +486,14 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
         # Public CA input only: peer private keys are never read/copied by the gate.
         config = dict(schema=1, nonce=nonce, version=version, scenarios=[])
         with bounded_registry_commands(runner, source):
-            public = consumer_gate.setup_registry(archives, version, output / 'registry', env)
-            with consumer_gate.local_registry(public) as url:
-                runner.command(['unbuffer', 'mix', 'hex.repo', 'set', 'hexpm', '--url', url,
-                                '--public-key', str(public / 'public_key')], env=env)
+            registry = nullcontext(None)
+            if not published:
+                public = consumer_gate.setup_registry(archives, version, output / 'registry', env)
+                registry = consumer_gate.local_registry(public)
+            with registry as url:
+                if url is not None:
+                    runner.command(['unbuffer', 'mix', 'hex.repo', 'set', 'hexpm', '--url', url,
+                                    '--public-key', str(public / 'public_key')], env=env)
                 build_release(project, release, env, runner)
         for name, peer_config in plan['peers'].items():
             peers.append(Peer(name, peer_config, output, env, runner))
@@ -538,10 +557,12 @@ def main():
     parser.add_argument('--peer-plan', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--max-seconds', type=int, default=1800)
+    parser.add_argument('--published', action='store_true')
     args = parser.parse_args()
     require(1 <= args.max_seconds <= 7200, 'bounded gate duration required')
     result = run(args.version, args.archives.resolve(), args.stage.resolve(), args.source_root,
-                 args.source_sha, json.loads(args.peer_plan.read_text()), args.output, args.max_seconds)
+                 args.source_sha, json.loads(args.peer_plan.read_text()), args.output, args.max_seconds,
+                 published=args.published)
     print(json.dumps(dict(gate=result['gate'], status=result['status'], output=result['output'])))
 
 
