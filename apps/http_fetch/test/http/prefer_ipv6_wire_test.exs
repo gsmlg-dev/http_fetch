@@ -99,17 +99,7 @@ defmodule HTTP.PreferIPv6WireTest do
   test "a response on IPv6 never triggers an HTTP replay on IPv4" do
     parent = self()
 
-    {:ok, ipv6} =
-      :gen_tcp.listen(0, [
-        :binary,
-        :inet6,
-        active: false,
-        ip: {0, 0, 0, 0, 0, 0, 0, 1},
-        ipv6_v6only: true
-      ])
-
-    {:ok, port} = :inet.port(ipv6)
-    {:ok, ipv4} = :gen_tcp.listen(port, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {ipv6, ipv4, port} = dual_listeners([])
 
     server =
       spawn_link(fn ->
@@ -134,19 +124,8 @@ defmodule HTTP.PreferIPv6WireTest do
   end
 
   test "cancellation during a blocked IPv6 attempt cannot launch IPv4 fallback" do
-    {:ok, ipv6} =
-      :gen_tcp.listen(0, [
-        :binary,
-        :inet6,
-        active: false,
-        ip: {0, 0, 0, 0, 0, 0, 0, 1},
-        ipv6_v6only: true,
-        backlog: 0
-      ])
-
-    {:ok, port} = :inet.port(ipv6)
+    {ipv6, ipv4, port} = dual_listeners(backlog: 0)
     {:ok, queued} = :gen_tcp.connect(~c"::1", port, [:binary, :inet6, active: false], @wait)
-    {:ok, ipv4} = :gen_tcp.listen(port, [:binary, active: false, ip: {127, 0, 0, 1}])
 
     :erlang.trace_pattern({:gen_tcp, :connect, 4}, [{[:_, port, :_, :_], [], []}], [])
     :erlang.trace(:all, true, [:call, {:tracer, self()}])
@@ -178,6 +157,39 @@ defmodule HTTP.PreferIPv6WireTest do
     refute_receive {:trace, ^worker, :call, {:gen_tcp, :connect, _}}, 0
     assert {:error, :timeout} = :gen_tcp.accept(ipv4, 0)
   end
+
+  defp dual_listeners(options, attempts \\ 8)
+
+  defp dual_listeners(options, attempts) when attempts > 0 do
+    # A v6-only ephemeral port can still be occupied in the IPv4 namespace.
+    # Reserve both before traffic, releasing partial allocations on conflict.
+    {:ok, ipv4} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(ipv4)
+
+    case :gen_tcp.listen(
+           port,
+           [:binary, :inet6, active: false, ip: {0, 0, 0, 0, 0, 0, 0, 1}, ipv6_v6only: true] ++
+             options
+         ) do
+      {:ok, ipv6} ->
+        on_exit(fn ->
+          :gen_tcp.close(ipv6)
+          :gen_tcp.close(ipv4)
+        end)
+
+        {ipv6, ipv4, port}
+
+      {:error, :eaddrinuse} ->
+        :gen_tcp.close(ipv4)
+        dual_listeners(options, attempts - 1)
+
+      {:error, reason} ->
+        :gen_tcp.close(ipv4)
+        flunk("dual loopback listener setup failed: #{inspect(reason)}")
+    end
+  end
+
+  defp dual_listeners(_options, 0), do: flunk("no shared IPv4/IPv6 loopback port available")
 
   defp fetch(url, backend, options \\ []) do
     HTTP.fetch(
