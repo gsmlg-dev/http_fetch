@@ -36,6 +36,25 @@ class MigrationConsumerTests(unittest.TestCase):
                         consumer_gate.migration_project(Path(directory), "1.2.3", {})
                     command.assert_not_called()
 
+    def test_missing_ticket_scenarios_fail_before_staging(self):
+        required = (
+            "apps/ex_ssl/test/ssl/manual_ticket_test.exs",
+            "apps/ex_ssl/test/ssl/manual_ticket_integration_test.exs",
+            "apps/ex_ssl/test/ssl/resumption_context_test.exs",
+            "apps/ex_ssl/test/ssl/protocol/resumption_verifier_test.exs",
+        )
+        for name in required:
+            with self.subTest(name=name):
+                missing = consumer_gate.ROOT / name
+                with patch.object(Path, "exists", new=lambda path: path != missing), \
+                        patch.object(Path, "mkdir"), \
+                        patch.object(consumer_gate.shutil, "copytree") as copytree, \
+                        patch.object(consumer_gate.shutil, "copyfile") as copyfile:
+                    with self.assertRaisesRegex(RuntimeError, "missing migration.*" + name):
+                        consumer_gate.stage_migration_tests(Path("unused"))
+                    copytree.assert_not_called()
+                    copyfile.assert_not_called()
+
     def test_project_resolves_all_nine_packages_and_compiles_only_test_support(self):
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(consumer_gate, "command", side_effect=RuntimeError("stop before Mix")):
