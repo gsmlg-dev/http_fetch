@@ -1,6 +1,8 @@
 """The candidate migration gate must exercise packages without source overrides."""
 
 from pathlib import Path
+from contextlib import redirect_stdout
+import io
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -81,6 +83,27 @@ class MigrationConsumerTests(unittest.TestCase):
             actual = list(logs.glob("*.log"))
             self.assertEqual(len(actual), 2)
             self.assertEqual({log.read_text() for log in actual}, set(outputs))
+
+    def test_failed_file_reports_first_assertion_and_final_summary(self):
+        files = consumer_gate.MIGRATION_GROUPS["policy"][:1]
+        first_failure = "  1) test independent policy\n     left:  :unexpected_policy\n"
+        final_summary = "Result: 1164/1252 passed\nFailed: 88 tests\n"
+        output = "peer progress\n" * 1000 + first_failure + "later progress\n" * 1000 + final_summary
+
+        def finish_test(_args, **kwargs):
+            kwargs["stdout"].write(output)
+            return SimpleNamespace(returncode=2)
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(consumer_gate, "MIGRATION_GROUPS", {"policy": files}), \
+                patch.object(consumer_gate, "command"), \
+                patch.object(consumer_gate.subprocess, "run", side_effect=finish_test):
+            reported = io.StringIO()
+            with redirect_stdout(reported):
+                with self.assertRaisesRegex(RuntimeError, "candidate migration file failed:"):
+                    consumer_gate.migration_project(Path(directory), "1.2.3", {})
+            self.assertIn(first_failure, reported.getvalue())
+            self.assertIn(final_summary, reported.getvalue())
 
 
 if __name__ == "__main__":

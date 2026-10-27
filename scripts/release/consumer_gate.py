@@ -390,6 +390,10 @@ IO.puts("runtime=migration-hex-candidate/#{{expected}}")
             output = log.read_text()
             print(f"candidate migration {group}/{Path(name).name}: {result.returncode}", flush=True)
             if result.returncode or not feature_group_passed(output):
+                first_failure = re.search(r"(?m)^  +\d+\) ", output)
+                start = first_failure.start() if first_failure else 0
+                if start < len(output) - 6000:
+                    print(output[start:start + 6000])
                 print(output[-6000:])
                 raise RuntimeError(f"candidate migration file failed: {name}")
 
