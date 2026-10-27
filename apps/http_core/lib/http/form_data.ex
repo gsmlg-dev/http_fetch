@@ -303,9 +303,7 @@ defmodule HTTP.FormData do
         nil
 
       data ->
-        size = min(byte_size(data), chunk_size)
-        <<chunk::binary-size(size), rest::binary>> = data
-        {chunk, rest}
+        :erlang.split_binary(data, min(byte_size(data), chunk_size))
     end)
   end
 
