@@ -271,6 +271,7 @@ defmodule Quic.KeyRetirementTest do
       event_error: nil,
       highwaters: %{},
       operations: %{},
+      operation_result_bytes: 0,
       events: [],
       datagrams: [],
       datagram_bytes: 0,
