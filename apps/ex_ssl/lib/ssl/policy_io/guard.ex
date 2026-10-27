@@ -17,6 +17,7 @@ defmodule SSL.PolicyIO.Guard do
       ledger: AuxiliaryLedger.new(),
       actor: nil,
       socket: nil,
+      http_closing: nil,
       retirement: nil,
       finished: false
     }
@@ -76,6 +77,12 @@ defmodule SSL.PolicyIO.Guard do
 
   def proof(state), do: AuxiliaryLedger.proof(state.ledger)
 
+  def closing_connection?(%{connection: connection, http_closing: generation}, connection)
+      when is_integer(generation),
+      do: true
+
+  def closing_connection?(_state, _connection), do: false
+
   def settled?(state),
     do:
       match?(
@@ -99,6 +106,26 @@ defmodule SSL.PolicyIO.Guard do
       nil
     end
   end
+
+  defp authorized(state, {:http_begin_close, generation}) do
+    case state.ledger.current do
+      %{kind: :http_socket, generation: ^generation, state: :live}
+      when state.retirement == nil and state.http_closing == nil ->
+        if PolicyIO.remaining(state.deadline) > 0,
+          do: {:ok, %{state | http_closing: generation}},
+          else: {{:error, :admission_closed}, state}
+
+      _ ->
+        {{:error, :invalid_http_close}, state}
+    end
+  end
+
+  defp authorized(%{http_closing: generation} = state, {:http_close_finished, generation})
+       when is_integer(generation),
+       do: {:ok, %{state | http_closing: nil}}
+
+  defp authorized(state, {:http_close_finished, _}),
+    do: {{:error, :invalid_http_close}, state}
 
   defp authorized(state, :finish) do
     if settled?(state) do
@@ -263,6 +290,7 @@ defmodule SSL.PolicyIO.Guard do
   def handle_call({{:policy, capability, operation}, _}, {caller, _}, state) do
     {reply, policy} = operation(state.policy, capability, operation, caller)
     next = %{state | policy: policy}
+    if policy.retirement != nil, do: stop_connection(policy)
 
     if policy.finished do
       _ = if state.timer, do: Process.cancel_timer(state.timer)
@@ -287,28 +315,33 @@ defmodule SSL.PolicyIO.Guard do
     requester_down =
       match?({:DOWN, ref, :process, pid, _} when {ref, :process, pid} == policy.requester, event)
 
-    if owner_down and Process.alive?(policy.connection),
-      do: Process.exit(policy.connection, :kill)
-
     policy =
       if owner_down or requester_down, do: retire(policy, PolicyIO.now() + 1_000), else: policy
+
+    if owner_down, do: stop_connection(policy)
 
     finish_retirement(%{state | policy: policy})
   end
 
   def handle_info(:deadline, state) do
-    Process.exit(state.policy.connection, :kill)
     policy = retire(state.policy, PolicyIO.now() + 1_000)
+    stop_connection(policy)
     Process.send_after(self(), :grace, 1_000)
     finish_retirement(%{state | policy: policy})
   end
 
   def handle_info(:grace, state) do
+    Process.exit(state.policy.connection, :kill)
     kill(state.policy)
     {:stop, :normal, state}
   end
 
   def handle_info(_, state), do: {:noreply, state}
+
+  defp stop_connection(policy) do
+    unless closing_connection?(policy, policy.connection),
+      do: Process.exit(policy.connection, :kill)
+  end
 
   defp finish_retirement(%{policy: %{retirement: grace}} = state) when is_integer(grace) do
     if settled?(state.policy) do

@@ -61,7 +61,7 @@ defmodule SSL.PolicyIO.HTTP do
             _ -> {:error, :policy_http_failed}
           end
         after
-          :socket.close(socket)
+          close(settlement, generation, socket)
         end
 
       case PolicyIO.settled(settlement, generation) do
@@ -83,6 +83,31 @@ defmodule SSL.PolicyIO.HTTP do
     else
       {:error, :auxiliary_limit} -> {:error, :policy_capacity}
       _ -> {:error, :policy_io_unconfirmed}
+    end
+  end
+
+  # Retire the owner only after its acknowledged native close returns. When
+  # admission is already closed, owner exit closes the socket instead of racing
+  # an explicit two-stage close with the observer's kill. Only its original
+  # socket monitor can establish auxiliary cleanup.
+  defp close(context, generation, socket) do
+    cleanup_deadline =
+      case context.deadline do
+        :infinity -> PolicyIO.now() + 1_000
+        deadline -> deadline + 1_000
+      end
+
+    with :ok <- PolicyIO.call(context, {:http_begin_close, generation}),
+         :ok <- :socket.close(socket),
+         :ok <-
+           PolicyIO.request(
+             context.observer,
+             {:policy, context.capability, {:http_close_finished, generation}},
+             cleanup_deadline
+           ) do
+      :ok
+    else
+      _ -> throw(:policy_io_unconfirmed)
     end
   end
 

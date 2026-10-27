@@ -651,7 +651,9 @@ defmodule SSL.Lifecycle.Observer do
   defp operate({:policy, capability, operation}, caller, %{policy: policy} = state)
        when policy != nil do
     {reply, policy} = Guard.operation(policy, capability, operation, caller)
-    {reply, %{state | policy: policy}}
+    next = %{state | policy: policy}
+    next = if next.grace != nil, do: stop_retiring_resources(next), else: next
+    {reply, next}
   end
 
   defp operate({:policy_actor, capability, operation}, caller, %{policy: policy} = state)
@@ -1786,11 +1788,7 @@ defmodule SSL.Lifecycle.Observer do
         grace_timer: grace_timer
     }
 
-    Enum.each(next.resources, fn {_, resource} ->
-      unless closing_owner?(next, resource), do: stop_process(resource)
-    end)
-
-    outcome(next, reason)
+    next |> stop_retiring_resources() |> outcome(reason)
   end
 
   defp retire(state, _reason), do: state
@@ -1807,11 +1805,22 @@ defmodule SSL.Lifecycle.Observer do
   # observer in native close or infer port DOWN from the owner's death.
   defp stop_process(_resource), do: :ok
 
+  defp stop_retiring_resources(state) do
+    Enum.each(state.resources, fn {_, resource} ->
+      unless closing_owner?(state, resource), do: stop_process(resource)
+    end)
+
+    state
+  end
+
   defp closing_owner?(
          %{candidate_close: %{owner: pid, finished: false}},
          %{identity: {_, :process, pid}}
        ),
        do: true
+
+  defp closing_owner?(%{policy: policy}, %{identity: {_, :process, pid}}) when policy != nil,
+    do: Guard.closing_connection?(policy, pid)
 
   defp closing_owner?(_state, _resource), do: false
 
