@@ -133,6 +133,8 @@ defmodule HTTP.WebSocket.ExSSLCompletionIntegrationTest do
         assert_receive {WebSocket, ^socket, %Close{code: 1000, was_clean: true}}, 2_000
         assert {:error, :cleanup_pending} = ClientCompletion.await(receipt, 20)
 
+        assert %{"connection" => 2} = event(peer, &(&1["kind"] == "fallback_tls_closed"))
+
         assert %{"connection" => 2, "alpn" => "http/1.1", "version" => actual} =
                  event(peer, &(&1["kind"] == "fallback_connection"))
 

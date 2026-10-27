@@ -116,8 +116,15 @@ def main():
                 sock = context.wrap_socket(raw, server_side=True)
                 if args.completion_fallback and sock.selected_alpn_protocol() == 'http/1.1':
                     from ex_ssl_tls12_peer import websocket
+                    sock.settimeout(10)
                     log(kind='fallback_connection', connection=cid, alpn='http/1.1', version=sock.version())
                     websocket(sock)
+                    # Drain the initiating client's TLS shutdown before replying;
+                    # unread close_notify bytes can reset TCP and lose our Close frame.
+                    if sock.recv(1):
+                        raise ValueError('application_data_after_websocket_close')
+                    sock.unwrap().close()
+                    log(kind='fallback_tls_closed', connection=cid)
                     return
                 assert sock.selected_alpn_protocol() == 'h2', 'TLS did not negotiate h2'
             sock.settimeout(180)
