@@ -1,9 +1,9 @@
 defmodule HTTP.ManagedTransportAdmissionTest do
   use ExUnit.Case, async: false
 
+  alias HTTP.ClientCompletion
   alias HTTP.ManagedTransport
   alias HTTP.Request
-  alias HTTP.RequestCompletion
   alias HTTP.RequestLifecycle
 
   test "original bind_scope/3 retains its reply and original deadline" do
@@ -108,7 +108,7 @@ defmodule HTTP.ManagedTransportAdmissionTest do
 
     try do
       assert Process.alive?(tracker)
-      assert {:error, :cleanup_pending} = RequestCompletion.await(completion, 0)
+      assert {:error, :cleanup_pending} = ClientCompletion.await(completion, 0)
 
       assert {:error, {:transport_scope_capacity, :requests}} =
                ManagedTransport.prepare(request, [])
@@ -163,7 +163,7 @@ defmodule HTTP.ManagedTransportAdmissionTest do
     try do
       RequestLifecycle.abort(tracker)
       assert :ok = Task.await(owner, 1_000)
-      assert :ok = RequestCompletion.await(completion, 1_000)
+      assert :ok = ClientCompletion.await(completion, 1_000)
       refute Process.alive?(tracker)
       assert {:ok, _replacement} = ManagedTransport.prepare(request, [])
     after
@@ -244,7 +244,7 @@ defmodule HTTP.ManagedTransportAdmissionTest do
       monitor = Process.monitor(tracker)
       Process.exit(tracker, :kill)
       assert_receive {:DOWN, ^monitor, :process, ^tracker, :killed}, 1_000
-      assert {:error, :cleanup_unconfirmed} = RequestCompletion.await(completion, 1_000)
+      assert {:error, :cleanup_unconfirmed} = ClientCompletion.await(completion, 1_000)
 
       assert {:error, {:transport_scope_capacity, :requests}} =
                ManagedTransport.prepare(request, [])
@@ -272,7 +272,7 @@ defmodule HTTP.ManagedTransportAdmissionTest do
       assert :sys.get_state(tracker).uncertain?
       send(owner.pid, :finish)
       assert :ok = Task.await(owner, 1_000)
-      assert {:error, :cleanup_unconfirmed} = RequestCompletion.await(completion, 1_000)
+      assert {:error, :cleanup_unconfirmed} = ClientCompletion.await(completion, 1_000)
       refute Process.alive?(tracker)
 
       assert {:error, {:transport_scope_capacity, :requests}} =
@@ -348,14 +348,14 @@ defmodule HTTP.ManagedTransportAdmissionTest do
       end)
 
     assert_receive {^tag, tracker, latch, prepared}, 1_000
-    completion = %RequestCompletion{tracker: tracker, latch: latch}
+    completion = %ClientCompletion{tracker: tracker, latch: latch}
     {owner, tracker, completion, prepared}
   end
 
   defp finish(owner, completion) do
     send(owner.pid, :finish)
     assert :ok = Task.await(owner, 1_000)
-    assert :ok = RequestCompletion.await(completion, 1_000)
+    assert :ok = ClientCompletion.await(completion, 1_000)
     refute Process.alive?(completion.tracker)
   end
 
