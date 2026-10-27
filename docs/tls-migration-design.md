@@ -216,10 +216,11 @@ The following newly traced boundaries remain named release blockers:
 - **CONNECT preflight (core/runtime):** normalize conflicting TLS profile/version/ALPN
   and unsupported options before contacting proxy. [Direct conflict coverage](../scripts/ex_ssl_options_test.exs#L60)
   does not prove zero proxy accepts; add an independent listener scenario.
-- **SSE/WS proxy options (clients):** endpoint options are not retained by these
-  clients. Explicitly reject unsupported supplied proxy endpoints before an origin
-  dial, with an unreachable-proxy/no-origin-contact test; do not imply Fetch proxy
-  support extends to them or conflate WS frame-proxy mode with HTTP routing.
+- **SSE/WS proxy options (implemented; integrated gate pending):** explicit proxy
+  endpoints reject with proxy_not_supported before an origin dial, including string
+  map keys. Per-client proxy_route_test.exs scenarios use an unreachable proxy and
+  prove zero origin accepts. H3 retains proxy_not_supported_for_quic; WebSocket
+  frame-proxy mode remains supported without an HTTP proxy endpoint.
 - **Policy boundaries (core/runtime):** retain ordinary fresh-dial file/default
   semantics and managed immutable snapshots; mutation tests must establish each
   declared behavior. H3 key materialization followed by raw-option re-normalization

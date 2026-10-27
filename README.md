@@ -155,6 +155,10 @@ Unix sockets support plaintext HTTP and WebSocket connections. Combining
 `{:error, :tls_over_unix_socket_not_supported}` before opening the local socket.
 Fetch and EventSource also reject redirects from a plain Unix request to HTTPS.
 
+EventSource and WebSocket return `{:error, :proxy_not_supported}` for an explicit
+`proxy` endpoint. WebSocket `mode: :proxy` controls frame forwarding and remains
+available without a proxy endpoint.
+
 ## Request and Connection Timeouts
 
 For HTTP/1 fetches, `timeout: :infinity` disables the total request deadline,

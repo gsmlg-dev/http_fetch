@@ -1,5 +1,20 @@
 # TLS migration execution ledger
 
+## Stream-client proxy endpoint rejection — 2026-10-27
+
+EventSource and WebSocket previously ignored a supplied `proxy` endpoint and could
+connect directly to the origin. Shared stream-client option validation now returns
+`{:error, :proxy_not_supported}` before either client starts. Keyword and string
+map forms have the same boundary. Omitted/nil proxy endpoints, WebSocket frame
+forwarding and H3's existing `proxy_not_supported_for_quic` error remain intact.
+
+New pure scenarios reproduced three failures before the implementation change.
+The three option suites, two no-origin-contact integration cases, existing WS
+frame-proxy suite and secure Unix regressions pass 55 checks on local Elixir
+1.18.5 / OTP 29.0.2. Commands and failures are retained in
+`/private/tmp/http-fetch-stream-proxy-root-20261027T1935Z`. Current Linux and
+candidate-package acceptance remains separate from these focused local results.
+
 ## Secure Unix route correction — 2026-10-27
 
 The shared runtime now rejects HTTPS/WSS with `unix_socket` using

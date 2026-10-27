@@ -3,6 +3,20 @@ defmodule HTTP.WebSocket.OptionsTest do
 
   alias HTTP.WebSocket.Options
 
+  test "proxy endpoints reject independently of frame-forwarding mode" do
+    for mode <- [:browser, :proxy],
+        init <- [
+          [proxy: "http://proxy.example.test:8080"],
+          %{"proxy" => "http://proxy.example.test:8080"}
+        ] do
+      init = Map.new(init) |> Map.put(:mode, mode)
+      assert {:error, :proxy_not_supported} = Options.new("ws://example.test/socket", [], init)
+    end
+
+    assert {:ok, %{mode: :proxy}} =
+             Options.new("ws://example.test/socket", [], mode: :proxy, proxy: nil)
+  end
+
   test "secure Unix options reject including the HTTPS alias" do
     for scheme <- ["wss", "https"],
         init <- [

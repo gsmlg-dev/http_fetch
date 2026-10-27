@@ -5,6 +5,7 @@ defmodule HTTP.Runtime.Options do
   alias HTTP.Runtime.Dialer
 
   @keys %{
+    "proxy" => :proxy,
     "http_version" => :http_version,
     "httpVersion" => :http_version,
     "http2_profile" => :http2_profile,
@@ -97,15 +98,21 @@ defmodule HTTP.Runtime.Options do
   defp backend(_version, value), do: HTTP.TLSBackend.resolve(value)
 
   defp protocol_selection(request, init) do
-    if init[:http_version] == :http3 do
-      with :ok <- h3_route(request.url, init),
-           {:ok, _key, _connect} <- HTTP.HTTP3.PoolKey.build(request) do
-        {:ok, %{mode: :http3, alpn_protocols: ["h3"]}}
-      end
-    else
-      with {:ok, transport, _host, _port} <- Dialer.select_transport(request, init[:unix_socket]) do
-        Dialer.protocol_selection(request, transport)
-      end
+    cond do
+      init[:http_version] == :http3 ->
+        with :ok <- h3_route(request.url, init),
+             {:ok, _key, _connect} <- HTTP.HTTP3.PoolKey.build(request) do
+          {:ok, %{mode: :http3, alpn_protocols: ["h3"]}}
+        end
+
+      init[:proxy] != nil ->
+        {:error, :proxy_not_supported}
+
+      true ->
+        with {:ok, transport, _host, _port} <-
+               Dialer.select_transport(request, init[:unix_socket]) do
+          Dialer.protocol_selection(request, transport)
+        end
     end
   end
 

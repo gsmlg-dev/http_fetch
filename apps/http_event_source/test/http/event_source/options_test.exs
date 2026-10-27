@@ -3,6 +3,23 @@ defmodule HTTP.EventSource.OptionsTest do
 
   alias HTTP.EventSource.Options
 
+  test "explicit proxy endpoints reject for keyword and string-map options" do
+    for init <- [
+          [proxy: "http://proxy.example.test:8080"],
+          %{"proxy" => "http://proxy.example.test:8080"}
+        ] do
+      assert {:error, :proxy_not_supported} = Options.new("http://example.test/events", init)
+    end
+
+    assert {:ok, _} = Options.new("http://example.test/events", proxy: nil)
+
+    assert {:error, :proxy_not_supported_for_quic} =
+             Options.new("https://example.test/events", %{
+               "httpVersion" => "h3",
+               "proxy" => "http://proxy.example.test:8080"
+             })
+  end
+
   test "secure Unix options reject without starting a client" do
     for init <- [
           [unix_socket: "/unused-events.sock"],

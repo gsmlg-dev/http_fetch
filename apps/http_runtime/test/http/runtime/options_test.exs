@@ -2,6 +2,18 @@ defmodule HTTP.Runtime.OptionsTest do
   use ExUnit.Case, async: true
   alias HTTP.Runtime.Options
 
+  test "stream clients reject explicit proxy endpoints instead of ignoring the route" do
+    for init <- [
+          [proxy: "http://proxy.example.test:8080"],
+          %{"proxy" => "http://proxy.example.test:8080"}
+        ] do
+      assert {:error, :proxy_not_supported} =
+               Options.validate(URI.parse("https://example.test/"), init)
+    end
+
+    assert {:ok, _} = Options.validate(URI.parse("https://example.test/"), proxy: nil)
+  end
+
   test "secure Unix routes reject before networking while plain schemes retain H1" do
     path = "/unused-secure-unix.sock"
 
