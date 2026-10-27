@@ -88,21 +88,22 @@ defmodule HTTP.ProtocolClient.SessionIntegrationTest do
     parent = self()
     {peer, url} = peer(:http2)
 
-    creator =
-      spawn(fn ->
+    {:ok, creator} =
+      Agent.start(fn ->
         {:ok, client} = Client.connect(url)
         send(parent, {:client, client})
-
-        receive do
-          :exit -> :ok
-        end
+        client
       end)
+
+    on_exit(fn ->
+      if Process.alive?(creator), do: Agent.stop(creator, :normal, 1_000)
+    end)
 
     assert_receive {:client, client}
     monitor = Process.monitor(client.pid)
     assert_receive {:peer_accepted, ^peer}
     assert_receive {:peer_settings, ^peer, _}
-    send(creator, :exit)
+    assert :ok = Agent.stop(creator, :normal, 1_000)
     assert_receive {:DOWN, ^monitor, :process, _, :normal}
     assert_receive {:peer_closed, ^peer, :http2}
     assert {:error, :closed} = Client.connection_info(client)
