@@ -35,6 +35,7 @@ defmodule NoOTP.Consumer do
 
         {:ok, :ex_ssl} = HTTP.TLSBackend.resolve()
         {:error, _legacy_backend_rejected} = HTTP.TLSBackend.resolve(:ssl)
+        # Public client calls below omit backend overrides to verify their defaults.
         scenarios = Enum.map(config["scenarios"], &scenario(&1, config["nonce"]))
         Map.put(report, :scenarios, scenarios)
       rescue
@@ -122,7 +123,6 @@ defmodule NoOTP.Consumer do
         else: remaining(deadline)
 
     options = [
-      tls_backend: :ex_ssl,
       http_version: protocol(case_spec),
       ssl: ssl(case_spec),
       redirect: :manual,
@@ -198,7 +198,6 @@ defmodule NoOTP.Consumer do
         origin: origin,
         connect_address: {127, 0, 0, 1},
         http_version: protocol(case_spec),
-        tls_backend: :ex_ssl,
         ssl: ssl(case_spec),
         max_connections: 1,
         max_requests: 1
@@ -228,7 +227,6 @@ defmodule NoOTP.Consumer do
   defp websocket(case_spec, deadline) do
     socket =
       HTTP.WebSocket.new(case_spec["url"], [],
-        tls_backend: :ex_ssl,
         http_version: :http2,
         http2_reuse: false,
         ssl: ssl(case_spec),
@@ -273,7 +271,6 @@ defmodule NoOTP.Consumer do
   defp event_source(case_spec, deadline) do
     source =
       HTTP.EventSource.new(case_spec["url"],
-        tls_backend: :ex_ssl,
         http_version: :http2,
         http2_reuse: false,
         ssl: ssl(case_spec),
