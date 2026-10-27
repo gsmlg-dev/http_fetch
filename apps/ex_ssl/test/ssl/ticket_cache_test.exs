@@ -25,13 +25,11 @@ defmodule SSL.TicketCacheTest do
   end
 
   defp cache do
-    {:ok, pid} = TicketCache.start_link(name: nil)
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
-    pid
+    start_supervised!({TicketCache, name: nil})
   end
 
   test "small cached slices cannot retain oversized wire backing binaries" do
-    {:ok, cache} = TicketCache.start_link(name: nil)
+    cache = cache()
     backing = :binary.copy(<<9>>, 1_048_576)
     slice = binary_part(backing, 100, 16_000)
     assert :binary.referenced_byte_size(slice) == byte_size(backing)
