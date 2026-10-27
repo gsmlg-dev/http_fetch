@@ -3,8 +3,9 @@
 Execution checklist derived from the accepted 2026-10-21 HTTP Fetch migration plan.
 Baseline: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, nine packages at `0.21.14`.
 Status (2026-10-27): advanced TLS policies, public lifecycle evidence, completion,
-and managed H1/H2 have passed the current local candidate-package selection below.
-Integrated P1–P4 acceptance remains open pending the current CI/runtime matrix.
+and managed H1/H2 pass the current source, candidate and three-runtime selection.
+P2 lifecycle/duplex acceptance is complete. P1/P3/P4 exit remains open for the
+remaining resumption controls, HTTPS-over-HTTPS compatibility and final CI closure.
 P5–P7 have not begun; OTP remains the production default and dependency.
 
 See [design and compatibility table](tls-migration-design.md) and
@@ -22,27 +23,23 @@ the 6,637 discovered source cases into 2,033 and 4,604 executed cases, respectiv
 excluded cases are not counted as executed. E2E passes 52 ExUnit cases plus the
 independent Caddy, QUIC and HTTP/3 checks. Apps without their own suite are
 identified in the [execution ledger](tls-migration-validation.md#current-source-test-tiers--2026-10-27).
-These source results do not close the remaining compatibility and candidate gates.
 
-Commit `f405e7b444632386607274d87a35362727beda3c` extends the existing candidate
-consumer with 31 current test files. All nine `0.21.18` dependencies resolve through
-Hex.SCM; representative production modules load from the isolated consumer build.
-The local Elixir 1.20.1 / OTP 29 run passed 2,641 checks with no zero-test files,
-skips or exclusions: policy 2,039, identity 73, TLS 60, provider lifecycle 167,
-Fetch 209, and SSE/WebSocket 93. The 105 release-automation regressions, strict
-compilation and umbrella formatting also pass. Each file retains its own result
-log, including the two identically named stream-client suites. This accepts the
-selected package matrix, not every P1–P4 exit requirement.
+The same source's [manual CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584575647)
+and [compatibility CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584597757)
+pass 49 candidate groups with 2,809 checks on each of Elixir 1.18 / OTP 28,
+1.19 / OTP 28 and 1.20 / OTP 29. The 40 migration files execute 2,741 checks:
+policy 2,039, identity 73, TLS 82, provider 235, Fetch 209, streams 93 and routes 10.
+All nine `0.21.18` packages resolve through isolated Hex.SCM builds. Each report
+has the exact current fixture manifest, with no zero-test file, skip or exclusion.
+The earlier 31-file/2,641-check selection on `f405e7b` remains historical evidence.
 
-On source commit `db214474c2ec9fe4bd526adcace0b3d7e29775d0`, manual
-[unit tests](https://github.com/gsmlg-dev/http_fetch/actions/runs/40543943526) and
-[integration tests](https://github.com/gsmlg-dev/http_fetch/actions/runs/40543923009)
-passed for all nine apps. Commit `fc7c7554cb9423fc00cb14b4eca4ea56f499a481` passed
-the [automatic candidate and shared H2 jobs](https://github.com/gsmlg-dev/http_fetch/actions/runs/40546729792);
-that overall CI run failed at Credo. The expanded candidate matrix on `f405e7b`
-still needs its [manual full CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40552759413)
-and [1.19/OTP28 plus 1.20/OTP29 compatibility runs](https://github.com/gsmlg-dev/http_fetch/actions/runs/40552777732).
-Those running checks are not recorded as passes here.
+All 19 shared H2 gates pass, including isolated h2c and verified ExSSL package
+traffic. Their 19 log hashes and nine archive hashes match the retained report.
+Three real-QUIC opt-ins are skipped in the H2-only source runner and execute in
+the separate all-nine integration workflow; the H2 source run is not described
+as skip-free. Manual CI explicitly records Credo/Dialyzer as deferred. The current
+automatic push run was cancelled when manual CI started, so final automatic CI
+closure remains separate from these passing manual gates and compatibility work.
 
 User decisions override the historical checklist where noted: performance work,
 including comparative latency/throughput and load/soak budgets, is TODO outside
@@ -131,16 +128,22 @@ executed evidence and required work are distinguishable. OTP remains default.
       focused85/P2-391 and scoped quality pass. Four TLS13 integration cases prove
       cancellation/expiry of an actually blocked callback on dial/prepared routes,
       exact original-resource DOWN, durable receipts and callback-state privacy.
-- [ ] Fully implement CRL/OCSP and partial_chain before OTP removal, with OTP reference
-      and independent positive/negative acceptance.
-- [ ] Fully implement encrypted private keys and multiple client identities before
+- [x] Fully implement CRL/OCSP and partial_chain before OTP removal, with OTP reference
+      and independent positive/negative acceptance (current source plus all three
+      candidate runtimes; finite policy limits remain documented in the design).
+- [x] Fully implement encrypted private keys and multiple client identities before
       OTP removal, preserving ordinary mTLS and HTTP behavior. The user accepted the
       longer migration on 2026-10-23; next-major removal is not an alternative.
-- [ ] Preserve trust precedence, system roots, DNS/IP origin identity, SNI separation,
+      Current source/candidate identity, Fetch and stream-client scenarios pass;
+      managed exclusions and admission limits remain the documented contract.
+- [x] Preserve trust precedence, system roots, DNS/IP origin identity, SNI separation,
       pinned dialing, CONNECT upgrade and mTLS redirect isolation.
-- [ ] Preserve explicit ordered wire profiles; reject real conflicts before I/O.
-- [ ] Document/test mixed default vs profile and auto-ticket interaction; tickets stay
+- [x] Preserve explicit ordered wire profiles; reject real conflicts before I/O.
+- [x] Document/test mixed default vs profile and auto-ticket interaction; tickets stay
       disabled by default and unsupported combinations return explicit errors.
+- [ ] Resolve TLS1.2 `reuse_sessions` and TLS1.3 manual tickets / `use_ticket` before
+      default promotion. OTP accepts these controls; ExSSL currently rejects them.
+      Existing explicit TLS1.3 automatic resumption is separately implemented/tested.
 
 Exit: required option/default table resolved with independent positive/negative
 coverage; no supported endpoint class silently lost.
@@ -313,16 +316,20 @@ coverage; no supported endpoint class silently lost.
       E2E cases excluded and zero skipped; source-matched391 evidence remains valid.
       The complete current ExSSL integration gate now also passes1157 checks with
       zero failures, skips or exclusions. P1 compatibility remains open.
-- [ ] Cover abort/setup/handoff races, wrong trust/identity/options, killed writers,
+- [x] Cover abort/setup/handoff races, wrong trust/identity/options, killed writers,
       KeyUpdate/upload, early response, close_notify/truncation, owner death,
       abandonment, stale acknowledgments, repeated close/await and evidence loss.
+      Current all-nine source and three-runtime candidate gates include the public
+      lifecycle/cleanup suites, 35 native Socket TLS cases and native policy
+      open/read/close cancellation, deadline, actor-loss and ACK-loss boundaries.
 - [x] Shared QUIC TLS-core regressions pass (round5 source: QUIC249, H3 companion113,
       and three real opt-ins; independent H3/package gates remain P4).
 
 Exit: HTTP obtains truthful cleanup evidence with no private TLS field inspection;
 resources return to baseline after deterministic failures/cancellation.
-The accepted local source result does not imply package, runtime-matrix, CI,
-performance or HTTP integration acceptance; those gates remain below.
+Current source and selected candidate/runtime acceptance meet this provider exit.
+Remaining HTTP route/option compatibility, final CI and production release gates
+are tracked below; no performance or whole-migration completion is implied.
 
 ## P3 — Completion and managed H1/H2 (after P1 + P2)
 
@@ -333,36 +340,42 @@ while healthy pools retain TLS authority; queued handoffs retain the original
 deadline. Full-stage acceptance still depends on the current integrated gates.
 H3 completion retains its existing `unsupported_completion` boundary.
 
-- [ ] ExSSL connect/upgrade enroll attempts and return public phase/lifecycle evidence.
-- [ ] Generic HTTP lifecycle accepts evidence; temporary OTP extraction stays isolated.
-- [ ] Enable ExSSL completion only once setup and established cleanup are covered.
-- [ ] Enable managed ExSSL policy with frozen effective trust/identity/socket settings.
-- [ ] Preserve private generation pools, capacity, origin/route and H2 policy isolation.
-- [ ] Preserve structured errors; request_started=false needs positive phase evidence.
-- [ ] H1 handoff/abort and H2 stream cancellation preserve healthy shared connections.
-- [ ] Scope/generation retirement waits for provider termination and cannot redial.
+- [x] ExSSL connect/upgrade enroll attempts and return public phase/lifecycle evidence.
+- [x] Generic HTTP lifecycle accepts evidence; temporary OTP extraction stays isolated.
+- [x] Enable ExSSL completion only once setup and established cleanup are covered.
+- [x] Enable managed ExSSL policy with frozen effective trust/identity/socket settings.
+- [x] Preserve private generation pools, capacity, origin/route and H2 policy isolation.
+- [x] Preserve structured errors; request_started=false needs positive phase evidence.
+- [x] H1 handoff/abort and H2 stream cancellation preserve healthy shared connections.
+- [x] Scope/generation retirement waits for provider termination and cannot redial.
 - [ ] Existing supported proxy routes, unread bodies, abandoned uploads and owner death
       settle truthfully within existing deadlines.
+      Direct/pinned H1/H2, HTTP CONNECT and HTTPS-proxy forwarding to HTTP origins
+      pass current source/candidate gates, including abandonment and owner death.
+      HTTPS origins through HTTPS proxies still require a compatibility decision.
 
 ## P4 — Source, consumer, package and CI acceptance (after P3)
 
 - [ ] Agreed matrix covers TLS1.2/1.3, identity/mTLS/resumption, H1/H2 Fetch, SSE,
       WSS/extended CONNECT, managed runtime, current proxies and explicit QUIC/H3.
-- [ ] Execute deterministic independent OTP/OpenSSL/Python/Node/H2/aioquic peers;
+- [x] Execute deterministic independent OTP/OpenSSL/Python/Node/H2/aioquic peers;
       missing prerequisites, zero tests and skipped mandatory scenarios fail the gate.
 - [x] Candidate Hex consumers use all current archives with equal exact versions
-      (`5011eeb`, CI40570196458 and compatibility40570218841; all38 migration files).
+      (`a38261c`, CI40584575647 and compatibility40584597757; all40 migration files).
 - [x] Extend mixed-package traffic harness to require verified ExSSL TLS plus h2c
       (R41 bounded automation checks pass).
 - [x] Execute both traffic modes against the integrated current candidate archives
-      (`5011eeb`, H2 artifact12764239557: h2c plus verified ExSSL H2, all19 gates).
+      (`a38261c`, H2 artifact12771458002: h2c plus verified ExSSL H2, all19 gates).
 - [x] Implement automatic candidate TLS and affected QUIC/H3 selection for relevant
       changes; R40 local automation suite passes 20 checks. Remote execution remains
       a separate gate below.
 - [ ] Execute relevant automatic CI and manual all-nine regression on integrated source.
+      Current manual CI/unit/integration/E2E gates pass at `a38261c`; Credo/Dialyzer
+      are explicitly deferred. Automatic push CI was cancelled before completion;
+      final automatic execution remains required after compatibility work stabilizes.
 - [x] Execute supported runtime matrix (baseline 1.18/OTP28; configured 1.19/OTP28
       and 1.20/OTP29) and retain historical standalone labels separately
-      (`5011eeb`: all47 candidate groups pass2759 checks on each runtime;
+      (`a38261c`: all49 candidate groups pass2809 checks on each runtime;
       baseline additionally passes all-nine unit/integration/E2E workflows).
 - [ ] TODO outside this goal: compare workload results against historical P0 budgets.
 

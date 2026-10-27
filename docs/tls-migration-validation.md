@@ -1,5 +1,62 @@
 # TLS migration execution ledger
 
+## Current candidate and provider acceptance — 2026-10-27
+
+At source `a38261ce9a540b700ffc99d36cfdab1e77a2301e`, the current selected package
+matrix passes on all supported runtime configurations. Each resolves the same
+coordinated nine `0.21.18` archives through Hex.SCM and checks isolated production
+module paths. Historical feature-fixture labels remain `0.7.2`; the executed
+implementation is the current candidate, with the 40 migration fixtures bound to
+the current source commit.
+
+| Runtime | Workflow | Candidate groups | Executed checks |
+| --- | --- | ---: | ---: |
+| Elixir 1.18 / OTP 28 | [CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584575647) | 49 | 2,809 |
+| Elixir 1.19 / OTP 28 | [Compatibility](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584597757) | 49 | 2,809 |
+| Elixir 1.20 / OTP 29 | [Compatibility](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584597757) | 49 | 2,809 |
+
+Each report's group set matches all nine historical feature suites plus the 40
+current migration files. The latter contribute 2,741 checks: policy 2,039,
+identity 73, TLS 82, provider 235, Fetch 209, streams 93 and routes 10. Every file
+executes a positive number of tests, with zero skips or exclusions. All three
+fixture manifests match
+`7ef81478023c4fdc05ebbc8b6f67ebd0d2a6a5d70e71d5e037eeed71f80b3802`.
+This includes the newly retained 35 native Socket TLS cases and 15 prepared
+CONNECT-policy cases, with their original assertions and deadlines.
+
+The shared H2 report passes all 19 gates against independent Node and hyper-h2
+peers. All 19 log hashes and nine candidate-archive hashes match the retained
+artifact. Package traffic completes both h2c and verified ExSSL H2, each with
+four isolated consumers, four connections and actual mixed-client sharing.
+Three real-QUIC opt-ins are skipped in this H2-only source runner; they are
+executed by the separate all-nine integration job with `HTTP_QUIC_PHASE1_REAL=1`.
+The H2 source runner itself is not skip-free. Long soaks remain excluded under
+the user's performance-scope decision.
+
+This evidence closes P2's provider lifecycle and duplex exit, including public
+preallocation/failure/cancellation/transfer evidence, original-resource cleanup,
+stale or lost ACKs, blocked Writer control output and native policy file operations.
+It also accepts the P3 direct/pinned H1/H2 and managed-completion requirements,
+including immutable policy, generation capacity, sibling isolation and retirement.
+Ordinary HTTP CONNECT and forwarding through HTTP/HTTPS proxies retain their
+executed coverage. The newly merged HTTPS-over-HTTPS route remains unresolved.
+
+CRL/OCSP/partial-chain and encrypted/multiple-identity P1 acceptance now includes
+source and all three candidate runtimes, under the documented finite limits and
+managed exclusions. TLS1.2 session reuse and TLS1.3 manual tickets/`use_ticket`
+remain unsupported; no full P1/P3/P4 exit or default-promotion claim follows.
+Manual CI explicitly defers Credo/Dialyzer; all nine compile, format and package
+jobs pass their remaining steps. The latest automatic push run was cancelled
+when manual CI started; final automatic CI remains required after compatibility
+work stabilizes. Production OTP removal, actual no-OTP release traffic, major
+publication and cold published-consumer acceptance remain unexecuted.
+
+Only documentation changed during this review. The all-nine source gate above
+and the candidate reports use identical production/test sources; no test rerun
+was needed. Metadata, reports, exact group-set checks, manifest comparisons and
+H2 hash verification are retained in
+`/private/tmp/http-fetch-p4-acceptance-continuation-root-20261027T211429Z/INTEGRATED-P4-EVIDENCE.json`.
+
 ## Current source test tiers — 2026-10-27
 
 Source `a38261ce9a540b700ffc99d36cfdab1e77a2301e` passes manual all-nine
