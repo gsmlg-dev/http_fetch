@@ -43,6 +43,7 @@ MIGRATION_GROUPS = {
         "apps/ex_ssl/test/ssl/lifecycle/public_test.exs",
         "apps/ex_ssl/test/ssl/lifecycle/public_cleanup_boundaries_test.exs",
         "apps/ex_ssl/test/ssl/lifecycle/public_fatal_alert_test.exs",
+        "apps/ex_ssl/test/ssl/lifecycle/native_socket_tls_test.exs",
         "apps/ex_ssl/test/ssl/lifecycle/setup_phase_integration_test.exs",
         "apps/ex_ssl/test/ssl/lifecycle/native_policy_file_test.exs",
         "apps/ex_ssl/test/ssl/lifecycle/native_policy_close_test.exs",
