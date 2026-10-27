@@ -62,6 +62,13 @@ MIGRATION_GROUPS = {
         "apps/http_event_source/test/http/ex_ssl_completion_integration_test.exs",
         "apps/http_web_socket/test/http/ex_ssl_completion_integration_test.exs",
     ),
+    "routes": (
+        "apps/http_fetch/test/http/secure_unix_socket_test.exs",
+        "apps/http_event_source/test/http/secure_unix_socket_test.exs",
+        "apps/http_web_socket/test/http/secure_unix_socket_test.exs",
+        "apps/http_event_source/test/http/event_source/proxy_route_test.exs",
+        "apps/http_web_socket/test/http/web_socket/proxy_route_test.exs",
+    ),
 }
 MIGRATION_SUPPORT = (
     "apps/ex_ssl/test/support", "apps/ex_ssl/test/fixtures",
