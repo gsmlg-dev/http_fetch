@@ -13,6 +13,17 @@ reviewed acceptance, not merely a test file or implementation exists.
 
 ## Current accepted evidence and remaining gates
 
+At `a38261ce9a540b700ffc99d36cfdab1e77a2301e`, manual all-nine
+[unit](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584581485),
+[integration](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584586869)
+and [E2E](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584592063)
+workflows pass on Elixir 1.18 / OTP 28. Unit and integration selections partition
+the 6,637 discovered source cases into 2,033 and 4,604 executed cases, respectively;
+excluded cases are not counted as executed. E2E passes 52 ExUnit cases plus the
+independent Caddy, QUIC and HTTP/3 checks. Apps without their own suite are
+identified in the [execution ledger](tls-migration-validation.md#current-source-test-tiers--2026-10-27).
+These source results do not close the remaining compatibility and candidate gates.
+
 Commit `f405e7b444632386607274d87a35362727beda3c` extends the existing candidate
 consumer with 31 current test files. All nine `0.21.18` dependencies resolve through
 Hex.SCM; representative production modules load from the isolated consumer build.
@@ -77,27 +88,17 @@ remain required. Historical evidence and failed invocations remain in the ledger
 - [x] Record numeric regression budgets before default promotion
       (historical v1 targets in design; performance acceptance is deferred).
 
-- [ ] Separate unit, integration and end-to-end suites. Default mix test runs only
+- [x] Separate unit, integration and end-to-end suites. Default mix test runs only
       single-VM unit tests with external collaborators mocked; real external I/O
       belongs to integration tests, and complete user flows to end-to-end tests.
       Align test.yml with the unit-only default and keep explicit integration/E2E
-      gates mandatory. Existing mixed suites are evidence, not tiering acceptance.
-      R34 pilot adds only tags in nine ExSSL lifecycle/inert-birth files: 165 cases
-      partition into 89 default VM units and 76 explicit integration cases. Whole
-      ExSSL/umbrella isolation, mock/input refactors and CI routing remain pending;
-      system trust and generated-fixture setup_all cannot hide inside unit runs.
-      R35 additionally classifies ExSSL trust/filesystem/native peers and extracts
-      seven pure bodies from generated-fixture callbacks, preserving all865 cases.
-      Full umbrella default and mandatory CI tier routing remain unaccepted.
-      R36 implements the remaining eight-app tag boundaries, all-nine default
-      exclusions, separate unit/integration workflows and explicit E2E selection.
-      Release/H2 full-source routes preserve integration inclusion. Local default
-      units pass 1676/1676; integration remains red at 1584/1587. Actual manual
-      full-nine CI and public E2E evidence remain pending; details are in the ledger.
-      Source routing and green units alone do not close this acceptance checkbox.
-      R38 prepared serial replay passes all1679 units and1605 integration cases,
-      zero skips, including the three real-QUIC opt-ins. Earlier failing and
-      environment-incomplete invocations remain recorded. Remote CI/E2E remain open.
+      gates mandatory. Current all-nine unit/integration/E2E CI passes at `a38261c`:
+      2,033 units, 4,604 integration cases and 52 ExUnit E2E cases, plus independent
+      Caddy/QUIC/H3 steps. WebTransport has no integration-tagged source cases;
+      Core and Runtime have no standalone ExUnit E2E suite. Their actual selections
+      are explicit rather than counted as executed scenarios. R34–R38 history and
+      earlier failures remain in the execution ledger; source-tier acceptance does
+      not establish the complete P4 compatibility or production-release matrix.
 
 Exit: every blocker has an owner and acceptance test; current implementation,
 executed evidence and required work are distinguishable. OTP remains default.

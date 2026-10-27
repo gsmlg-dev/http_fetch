@@ -1,5 +1,44 @@
 # TLS migration execution ledger
 
+## Current source test tiers — 2026-10-27
+
+Source `a38261ce9a540b700ffc99d36cfdab1e77a2301e` passes manual all-nine
+[unit](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584581485),
+[integration](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584586869)
+and [E2E](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584592063)
+workflows on Elixir 1.18 / OTP 28. Each source selection compiles its app's runtime
+closure with warnings as errors. Default `mix test` excludes integration/E2E;
+the integration workflow uses `--only integration` and enables the real QUIC
+opt-ins. Counts below include properties and doctests, subtract excluded cases,
+and come from the final per-app ExUnit summaries.
+
+| App | Executed unit cases | Executed integration cases |
+| --- | ---: | ---: |
+| ex_ssl | 661 | 2,789 |
+| elixir_quic | 244 | 68 |
+| elixir_quic_http3 | 117 | 14 |
+| http_core | 382 | 123 |
+| http_runtime | 187 | 101 |
+| http_fetch | 321 | 1,227 |
+| http_event_source | 39 | 115 |
+| http_web_socket | 58 | 167 |
+| http_web_transport | 24 | 0 |
+| Total | 2,033 | 4,604 |
+
+Both selections have zero failures and partition the same 6,637 discovered source
+cases. WebTransport has no integration-tagged source cases; its zero selection
+does not establish integration coverage. E2E executes 52 ExUnit cases across Fetch,
+EventSource, WebSocket, WebTransport and the ExSSL Caddy check. QUIC client/server,
+stream impairment, DATAGRAM and HTTP/3 local UDP checks run as separate successful
+steps. Core and Runtime report no standalone ExUnit E2E suite; client and shared
+H2 gates own their end-to-end coverage. These results close the source-tier
+execution requirement, while current candidate compatibility, unresolved option/
+proxy decisions, default promotion, OTP removal and publication remain separate.
+
+No source or assertion changed during this acceptance review. Earlier failing
+invocations remain historical evidence. Run metadata, raw logs and parsed counts
+are retained in `/private/tmp/http-fetch-p4-acceptance-continuation-root-20261027T211429Z`.
+
 ## Published TLS consumer gate preparation — 2026-10-27
 
 The coordinated consumer runner now supports published Hex packages for package,
