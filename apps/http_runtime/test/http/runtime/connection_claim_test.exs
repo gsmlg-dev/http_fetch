@@ -54,4 +54,38 @@ defmodule HTTP.Runtime.ConnectionClaimTest do
     assert :ok = Pool.fail_connect(pool, :key, :test_cleanup)
     assert :ok = Pool.release(pool, :key, token)
   end
+
+  test "a creator reservation uses its registered owner when a sibling is also available", %{
+    pool: pool,
+    owner: owner
+  } do
+    sibling = start_supervised!({Owner, nil}, id: :sibling)
+    assert :ok = Pool.register(pool, :key, owner, max_streams: 1)
+    assert :ok = Pool.register(pool, :key, sibling, max_streams: 1)
+    assert {:ok, first, probe} = Pool.try_reserve(pool, :key)
+    assert :ok = Pool.release(pool, :key, probe)
+    registered = if first == owner, do: sibling, else: owner
+
+    assert {:ok, ^registered, token} = Pool.reserve(pool, :key, registered_owner: registered)
+    assert :ok = Pool.release(pool, :key, token)
+  end
+
+  test "a creator waits for its saturated registered owner without consuming sibling capacity", %{
+    pool: pool,
+    owner: owner
+  } do
+    assert :ok = Pool.register(pool, :key, owner, max_streams: 1)
+    assert {:ok, ^owner, active} = Pool.reserve(pool, :key)
+    sibling = start_supervised!({Owner, nil}, id: :sibling)
+    assert :ok = Pool.register(pool, :key, sibling, max_streams: 1)
+
+    request = :gen_server.send_request(pool, {:reserve, :key, [registered_owner: owner]})
+    assert %{pending: 1, streams: 1, connecting: 0} = Pool.stats(pool).key
+    assert :timeout = :gen_server.wait_response(request, 0)
+    assert {:ok, ^sibling, ordinary} = Pool.reserve(pool, :key)
+    assert :ok = Pool.release(pool, :key, active)
+    assert {:reply, {:ok, ^owner, token}} = :gen_server.wait_response(request, 1_000)
+    assert :ok = Pool.release(pool, :key, token)
+    assert :ok = Pool.release(pool, :key, ordinary)
+  end
 end

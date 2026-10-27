@@ -770,11 +770,14 @@ defmodule HTTP.HTTP2.Pool do
   defp available_owner(nil, _opts), do: :none
 
   defp available_owner(entry, opts) do
+    registered_owner = Keyword.get(opts, :registered_owner)
+
     if unsupported_capability?(entry, opts) do
       {:error, :extended_connect_not_supported}
     else
-      case Enum.find(entry.connections, fn {_pid, c} ->
-             not c.draining and c.streams < c.max_streams and capability_matches?(c, opts)
+      case Enum.find(entry.connections, fn {pid, c} ->
+             (not is_pid(registered_owner) or pid == registered_owner) and
+               not c.draining and c.streams < c.max_streams and capability_matches?(c, opts)
            end) do
         {owner, _} -> {:ok, owner}
         nil -> :none
