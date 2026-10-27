@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import unittest
 from unittest.mock import patch
@@ -115,6 +116,81 @@ class PublishedNoOTPTests(unittest.TestCase):
                     redirect_stdout(io.StringIO()):
                 gate.main()
                 self.assertEqual(run.call_args.kwargs, {"published": published})
+
+
+class NoOTPReleaseWorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text()
+
+    def step(self, name):
+        matches = re.findall(r"^      - name: " + re.escape(name) +
+                             r"\n(.*?)(?=^      - |\Z)", self.workflow, re.M | re.S)
+        self.assertEqual(len(matches), 1, "exactly one required release step: " + name)
+        return matches[0]
+
+    def test_candidate_release_must_pass_before_tag_or_package_publication(self):
+        name = "Require isolated candidate release without OTP SSL"
+        step = self.step(name)
+        self.assertLess(self.workflow.index(name),
+                        self.workflow.index("name: Commit version and create immutable tag"))
+        self.assertLess(self.workflow.index(name),
+                        self.workflow.index("name: Publish and verify packages in dependency order"))
+        self.assertIn("scripts/release/no_otp_consumer_gate.py", step)
+        self.assertNotIn("--published", step)
+        self.assertNotIn("continue-on-error", step)
+        self.assertNotRegex(step, r"(?m)^        if:")
+        self.assertNotIn("|| true", step)
+        self.assertIn("set -euo pipefail", step)
+
+    def test_published_release_cannot_reuse_candidate_evidence(self):
+        name = "Require isolated published release without OTP SSL"
+        step = self.step(name)
+        self.assertGreater(self.workflow.index(name),
+                           self.workflow.index("name: Publish and verify packages in dependency order"))
+        self.assertLess(self.workflow.index(name),
+                        self.workflow.index("name: Attach and verify all immutable GitHub release archives"))
+        self.assertIn("scripts/release/no_otp_consumer_gate.py", step)
+        self.assertIn("--published", step)
+        self.assertIn("/published-", step)
+        self.assertNotIn("/candidate-", step)
+        self.assertNotIn("continue-on-error", step)
+        self.assertNotRegex(step, r"(?m)^        if:")
+        self.assertNotIn("|| true", step)
+        self.assertIn("set -euo pipefail", step)
+
+    def test_both_modes_cover_tls12_and_tls13_from_the_checked_out_source(self):
+        for mode in ("candidate", "published"):
+            with self.subTest(mode=mode):
+                step = self.step(f"Require isolated {mode} release without OTP SSL")
+                self.assertIn("for tls in TLSv1.2 TLSv1.3; do", step)
+                self.assertIn('--source-root "$GITHUB_WORKSPACE"', step)
+                self.assertIn('--source-sha "$(git rev-parse HEAD)"', step)
+                self.assertIn('--peer-plan "$RUNNER_TEMP/no-otp-plan-$tls.json"', step)
+                self.assertIn(f'--output "$RUNNER_TEMP/no-otp-release/{mode}-$tls"', step)
+
+    def test_peer_plans_bind_pinned_environment_and_existing_verified_fixtures(self):
+        step = self.step("Prepare independent no-OTP SSL peers")
+        self.assertIn('uv venv "$RUNNER_TEMP/no-otp-peer-python" --python 3.12', step)
+        self.assertIn("--requirement scripts/requirements-http2-stream-clients.txt", step)
+        self.assertIn("aioquic==1.2.0", step)
+        self.assertIn('"$RUNNER_TEMP/no-otp-peer-python/bin/python" scripts/release/no_otp_peer.py plan', step)
+        self.assertIn("for tls in TLSv1.2 TLSv1.3; do", step)
+        self.assertIn('--tls "$tls"', step)
+        self.assertIn('--cert "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost.pem"', step)
+        self.assertIn('--key "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost.key"', step)
+        self.assertIn('--ca "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost-ca.pem"', step)
+
+    def test_failed_release_retains_diagnostics_without_archiving_release_or_keys(self):
+        step = self.step("Preserve no-OTP release diagnostics")
+        self.assertIn("if: always()", step)
+        for name in ("gate-report.json", "release-report.json", "commands.json",
+                     "command-*.log", "peer-*.log", "peer-*.json"):
+            self.assertIn("no-otp-release/**/" + name, step)
+        self.assertNotIn("no-otp-peer-python", step)
+        self.assertNotRegex(step, r"(?m)no-otp-release/\*\*\s*$")
+        self.assertNotIn(".key", step)
+        self.assertNotIn(".erlang.cookie", step)
 
 
 if __name__ == "__main__":

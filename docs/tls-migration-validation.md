@@ -1,5 +1,29 @@
 # TLS migration execution ledger
 
+## Required no-OTP release workflow — 2026-10-27
+
+The coordinated release workflow now invokes the existing isolated production
+release gate before creating a tag or publishing any package, then repeats it
+against cold published Hex dependencies before completing GitHub release assets.
+Each phase runs separate TLS1.2 and TLS1.3 plans; H3 retains TLS1.3 in both plans.
+Every invocation retains the full 35-scenario matrix, source/archive identity,
+release closure/import/runtime isolation, independent traffic and cleanup checks.
+Peer environments use the existing pinned HTTP/2/WebSocket requirements plus
+`aioquic==1.2.0`, with the already verified localhost certificate/CA fixtures.
+
+Release automation passes 123 checks and CI automation passes 21. The workflow
+parses as YAML; all three new command blocks pass shell syntax checks. Four
+executed shell controls use an inert gate executable: exit 37 stops each phase
+after its first TLS plan, while exit 0 reaches both plans. Candidate and published
+output directories remain distinct. Failure diagnostics upload only named reports,
+command logs and peer observations, excluding release directories and keys.
+
+This accepts workflow integration only. No real candidate or published no-OTP
+production release was executed: default promotion, production dependency cleanup
+and the remaining compatibility decisions still block that acceptance. The existing
+functional validators and their assertions were not changed. Evidence is retained
+under `/private/tmp/http-fetch-no-otp-release-wiring-root-20261027T2150Z`.
+
 ## Current candidate and provider acceptance — 2026-10-27
 
 At source `a38261ce9a540b700ffc99d36cfdab1e77a2301e`, the current selected package
