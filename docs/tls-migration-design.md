@@ -186,8 +186,8 @@ an immutable managed policy.
 | Fetch direct H1/H2 | [fetch](../apps/http_fetch/lib/http.ex#L328) → options/completion/task → SocketClient → [Dialer](../apps/http_runtime/lib/http/runtime/dialer.ex#L411) → adapter/ALPN → protocol owner | Provider pinned through redirect; fresh-hop route, trust and deadline resolution; core/runtime/client suites |
 | Pinned HTTPS | dial connect_address, retain origin authority/Host and default identity/SNI; explicit SNI/reference override remains an independent option | [connect-address scenarios](../apps/http_fetch/test/http/connect_address_test.exs); core/runtime; no proxy/Unix/H3 or automatic redirect combination |
 | HTTP via HTTP proxy | TCP to proxy, absolute-form HTTP request, origin Host; no TLS or CONNECT | [proxy](../apps/http_core/lib/http/proxy.ex#L112); core; no origin fallback |
-| HTTPS via HTTP proxy | TCP to proxy → CONNECT origin → strict plaintext boundary → adapter.upgrade using origin identity → H1/H2 | [CONNECT](../apps/http_core/lib/http/proxy.ex#L123); core/runtime; raw phase must join provider lifecycle; option conflicts currently normalize after proxy I/O |
-| HTTP via HTTPS proxy | TLS to proxy identity, forced http/1.1 → absolute-form HTTP | [HTTPS proxy](../apps/http_core/lib/http/proxy.ex#L106); core/runtime; trust/client identity belong to proxy; HTTPS origins reject, no TLS-over-TLS |
+| HTTPS via HTTP proxy | ExSSL prepares origin TLS policy → TCP to proxy → CONNECT origin → strict plaintext boundary → prepared TLS upgrade → H1/H2 | [CONNECT](../apps/http_core/lib/http/proxy.ex); raw phase joins provider lifecycle; invalid effective ExSSL configuration rejects before proxy or origin accepts |
+| HTTP via HTTPS proxy | TLS to proxy identity, forced http/1.1 → absolute-form HTTP | [HTTPS proxy](../apps/http_core/lib/http/proxy.ex); core/runtime; trust/client identity belong to proxy. OTP also supports CONNECT to HTTPS origins with independent proxy/origin TLS; ExSSL rejects this nested route pending a next-major compatibility decision. |
 | Unix Fetch/SSE/WS H1 | Shared runtime validation rejects secure schemes before [Unix](../apps/http_core/lib/http/transport/unix.ex#L7); plain HTTP/Upgrade uses gen_tcp local-domain connections | HTTP/ws Unix supported; https/wss reject with tls_over_unix_socket_not_supported, including Fetch/SSE secure redirects; H2/H3/proxy combinations retain their rejection boundaries |
 | EventSource | [Connection](../apps/http_event_source/lib/http/event_source/connection.ex#L265) → H1 adapter worker or runtime H2/H3 relay | Backend/raw options retained across reconnect; cross-origin credentials stripped, HTTPS downgrade and client-identity redirects rejected; protocol-only H1 fallback; no supported forward-proxy plumbing |
 | WebSocket | [H1](../apps/http_web_socket/lib/http/web_socket/connection.ex#L463) connects/validates Upgrade before acknowledged transfer; [H2](../apps/http_web_socket/lib/http/web_socket/connection.ex#L420) uses runtime extended CONNECT | Provider/options/deadline retained; one capability-only H1 fallback; no authentication fallback, redirect/reconnect or H3; mode:proxy means frame forwarding, not HTTP proxy routing |
@@ -213,9 +213,11 @@ The following newly traced boundaries remain named release blockers:
   Target automatic cross-origin identity isolation, retain same-origin behavior,
   and separately test unchanged HTTPS-proxy TLS identity when the HTTP origin changes;
   comparing URI origin alone can be too conservative for that proxy route.
-- **CONNECT preflight (core/runtime):** normalize conflicting TLS profile/version/ALPN
-  and unsupported options before contacting proxy. [Direct conflict coverage](../scripts/ex_ssl_options_test.exs#L60)
-  does not prove zero proxy accepts; add an independent listener scenario.
+- **CONNECT preflight (implemented):** ExSSL normalizes TLS policy and snapshots
+  trust/identity before contacting the proxy. [Prepared CONNECT tests](../apps/http_core/test/http/proxy_prepared_tls_test.exs)
+  cover invalid effective configuration with zero proxy/origin accepts, expiration
+  before raw TCP connect, frozen trust across the CONNECT response and tracked
+  provider adoption. The original deadline also covers preparation and upgrade.
 - **SSE/WS proxy options (implemented; integrated gate pending):** explicit proxy
   endpoints reject with proxy_not_supported before an origin dial, including string
   map keys. Per-client proxy_route_test.exs scenarios use an unreachable proxy and
@@ -226,10 +228,14 @@ The following newly traced boundaries remain named release blockers:
   declared behavior. H3 key materialization followed by raw-option re-normalization
   is a separately tracked consistency gap, not evidence of frozen trust.
 
-Completion eligibility remains narrower than ordinary requests: [RequestCompletion](../apps/http_fetch/lib/http/request_completion.ex#L40)
-excludes ExSSL, automatic protocol/redirect, Unix and H3 today. H1 prepare/ownership/
-activate and H2 handoff-before-registration are existing publication points; the
-provider authority commit below must join them rather than infer transfer from a cast.
+Completion eligibility remains narrower than ordinary requests:
+[RequestCompletion](../apps/http_fetch/lib/http/request_completion.ex) supports explicit
+ExSSL direct/pinned HTTPS H1/H2, managed H1/H2, HTTP-proxy forwarding/CONNECT and
+HTTPS-proxy forwarding to HTTP origins. It still excludes automatic protocol
+selection, followed redirects, Unix and H3; nested HTTPS-proxy completion is OTP-only.
+H1 prepare/ownership/activation and H2 handoff use acknowledged provider authority
+transfer. Request completion releases its reservation or stream while healthy pools
+retain TLS ownership; provider retirement separately requires confirmed cleanup.
 
 ## Provider lifecycle boundary (v1 implementation contract; integration pending)
 
