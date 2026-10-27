@@ -61,7 +61,7 @@ defmodule SSL.PolicyIO.HTTP do
             _ -> {:error, :policy_http_failed}
           end
         after
-          close(settlement, generation, socket)
+          close(socket, settlement, generation)
         end
 
       case PolicyIO.settled(settlement, generation) do
@@ -86,28 +86,36 @@ defmodule SSL.PolicyIO.HTTP do
     end
   end
 
-  # Retire the owner only after its acknowledged native close returns. When
-  # admission is already closed, owner exit closes the socket instead of racing
-  # an explicit two-stage close with the observer's kill. Only its original
-  # socket monitor can establish auxiliary cleanup.
-  defp close(context, generation, socket) do
-    cleanup_deadline =
-      case context.deadline do
-        :infinity -> PolicyIO.now() + 1_000
-        deadline -> deadline + 1_000
-      end
+  # Serialize native close with retirement before entering it. A timed-out
+  # grant is unknown acceptance, so owner exit is the only safe fallback.
+  defp close(socket, context, generation) do
+    deadline = PolicyIO.now() + 1_000
 
-    with :ok <- PolicyIO.call(context, {:http_begin_close, generation}),
-         :ok <- :socket.close(socket),
-         :ok <-
-           PolicyIO.request(
-             context.observer,
-             {:policy, context.capability, {:http_close_finished, generation}},
-             cleanup_deadline
-           ) do
-      :ok
-    else
-      _ -> throw(:policy_io_unconfirmed)
+    deadline =
+      if context.deadline == :infinity, do: deadline, else: min(deadline, context.deadline)
+
+    case PolicyIO.request(
+           context.observer,
+           {:policy, context.capability, {:http_close_begin, generation, socket, deadline}},
+           deadline
+         ) do
+      {:ok, nonce, bound} ->
+        if PolicyIO.now() >= bound, do: Process.exit(self(), :kill)
+        _ = :socket.close(socket)
+
+        # Completion is cleanup-only and may follow the setup deadline. The
+        # observer's original grace remains the authorization bound.
+        case PolicyIO.request(
+               context.observer,
+               {:policy, context.capability, {:http_close_finish, generation, nonce}},
+               PolicyIO.now() + 1_000
+             ) do
+          :ok -> :ok
+          _ -> Process.exit(self(), :kill)
+        end
+
+      _ ->
+        Process.exit(self(), :kill)
     end
   end
 

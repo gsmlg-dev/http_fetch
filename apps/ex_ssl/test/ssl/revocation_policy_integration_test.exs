@@ -2457,30 +2457,39 @@ defmodule SSL.RevocationHTTPCutoffIntegrationTest do
 
       cutoff = trigger_cutoff(trigger, lease, setup_deadline, connection, caller)
 
-      if trigger == :caller_death do
-        caller_pid = caller.pid
-        caller_ref = caller.ref
-        assert_receive {:DOWN, ^caller_ref, :process, ^caller_pid, :killed}, 1_000
-      else
-        assert {:error, :closed} =
-                 Task.await(caller, max(1, cutoff - System.monotonic_time(:millisecond)))
+      # The caller can be descheduled while native cleanup completes. Hold it
+      # through the deadline case so its result cannot act as the cleanup oracle.
+      hold_deadline_caller(trigger, caller)
+
+      try do
+        await_caller_before_cleanup(trigger, caller, cutoff)
+
+        connection_timeout = cleanup_timeout(trigger, cutoff, 500)
+        assert_receive {:DOWN, ^connection_monitor, :process, ^connection, _}, connection_timeout
+        assert :closed = Task.await(server, cleanup_timeout(trigger, cutoff, 2_000))
+        observer_timeout = cleanup_timeout(trigger, cutoff, 500)
+        assert_receive {:DOWN, ^observer_monitor, :process, ^observer, :normal}, observer_timeout
+
+        assert {:ok,
+                %{
+                  version: 2,
+                  logical: :closed,
+                  cleanup: :confirmed,
+                  roles: ^mask,
+                  observed_down: ^mask,
+                  losses: 0,
+                  auxiliary: %{roles: 1, observed_down: 1, losses: 0}
+                }} =
+                 SSL.Lifecycle.await(handle, {:abs_ms, cutoff})
+
+        if trigger == :deadline, do: assert(System.monotonic_time(:millisecond) <= cutoff)
+      after
+        if trigger == :deadline, do: :erlang.resume_process(caller.pid)
       end
 
-      assert_receive {:DOWN, ^connection_monitor, :process, ^connection, _}, 500
-      assert :closed = Task.await(server, 2_000)
-      assert_receive {:DOWN, ^observer_monitor, :process, ^observer, :normal}, 500
-
-      assert {:ok,
-              %{
-                version: 2,
-                logical: :closed,
-                cleanup: :confirmed,
-                roles: ^mask,
-                observed_down: ^mask,
-                losses: 0,
-                auxiliary: %{roles: 1, observed_down: 1, losses: 0}
-              }} =
-               SSL.Lifecycle.await(handle, {:abs_ms, cutoff})
+      # Native cleanup has already met the original cutoff. Result delivery has
+      # its own bounded watchdog after the caller is allowed to run again.
+      if trigger == :deadline, do: assert({:error, :closed} = Task.await(caller, 1_000))
 
       refute_receive {^reference, :connection, _}, 0
       refute_receive {^reference, :bad_cert}, 0
@@ -2494,6 +2503,27 @@ defmodule SSL.RevocationHTTPCutoffIntegrationTest do
   end
 
   defp deadline(ms), do: {:abs_ms, System.monotonic_time(:millisecond) + ms}
+
+  defp hold_deadline_caller(:deadline, caller), do: assert(:erlang.suspend_process(caller.pid))
+  defp hold_deadline_caller(_trigger, _caller), do: :ok
+
+  defp await_caller_before_cleanup(:deadline, _caller, _cutoff), do: :ok
+
+  defp await_caller_before_cleanup(:caller_death, caller, _cutoff) do
+    caller_pid = caller.pid
+    caller_ref = caller.ref
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller_pid, :killed}, 1_000
+  end
+
+  defp await_caller_before_cleanup(_trigger, caller, cutoff) do
+    assert {:error, :closed} =
+             Task.await(caller, max(1, cutoff - System.monotonic_time(:millisecond)))
+  end
+
+  defp cleanup_timeout(:deadline, cutoff, _default),
+    do: max(1, cutoff - System.monotonic_time(:millisecond))
+
+  defp cleanup_timeout(_trigger, _cutoff, default), do: default
 
   defp trigger_cutoff(trigger, lease, setup_deadline, connection, caller) do
     case trigger do
@@ -3220,7 +3250,7 @@ defmodule SSL.CRLDistributionScopeIntegrationTest do
       :public_key.pem_encode([{:CertificateList, der, :not_encrypted}])
     )
 
-    destination = Path.join(File.cwd!(), "public-dp-scope")
+    destination = Path.join(base, "public-dp-scope")
     File.mkdir!(destination)
 
     names =
@@ -3382,7 +3412,7 @@ defmodule SSL.CRLDistributionScopeIntegrationTest do
       assert code == if(scope == :match, do: 0, else: 2)
     end
 
-    destination = Path.join(File.cwd!(), "public-dp-scope")
+    destination = Path.join(base, "public-dp-scope")
     File.mkdir_p!(destination)
 
     names =

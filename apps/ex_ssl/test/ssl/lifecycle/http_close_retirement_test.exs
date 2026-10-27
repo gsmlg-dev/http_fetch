@@ -8,10 +8,11 @@ defmodule SSL.PolicyIOHTTPCloseRetirementTest do
     attempt = attempt(:valid)
 
     try do
-      assert attempt.reply == :ok
+      assert {:ok, nonce, bound} = attempt.reply
+      assert bound <= attempt.deadline
 
       assert {:error, :unauthorized_policy} =
-               PolicyIO.call(attempt.context, {:http_close_finished, attempt.generation})
+               PolicyIO.call(attempt.context, {:http_close_finish, attempt.generation, nonce})
 
       await_deadline(attempt.deadline)
       assert Process.alive?(attempt.owner)
@@ -32,7 +33,7 @@ defmodule SSL.PolicyIOHTTPCloseRetirementTest do
     attempt = attempt(:wrong_generation)
 
     try do
-      assert attempt.reply == {:error, :invalid_http_close}
+      assert attempt.reply == {:error, :http_close_not_permitted}
       assert :killed = assert_owner_down(attempt, remaining(attempt.deadline + 500))
       assert_socket_down(attempt)
       assert_observer_down(attempt)
@@ -45,7 +46,8 @@ defmodule SSL.PolicyIOHTTPCloseRetirementTest do
     attempt = attempt(:valid)
 
     try do
-      assert attempt.reply == :ok
+      assert {:ok, _, bound} = attempt.reply
+      assert bound <= attempt.deadline
       assert :killed = assert_owner_down(attempt, remaining(attempt.deadline + 1_500))
       assert System.monotonic_time(:millisecond) <= attempt.deadline + 1_500
       assert_socket_down(attempt)
@@ -67,16 +69,17 @@ defmodule SSL.PolicyIOHTTPCloseRetirementTest do
         {:ok, socket} = :socket.open(:inet, :stream, :tcp)
         :use = PolicyIO.call(context, {:http_enroll, generation, token, socket})
         requested = if mode == :valid, do: generation, else: generation + 1
-        reply = PolicyIO.call(context, {:http_begin_close, requested})
+        reply = PolicyIO.call(context, {:http_close_begin, requested, socket, deadline})
         send(parent, {reference, context, socket, generation, deadline, reply})
 
         receive do
           {^reference, :close} ->
             :socket.close(socket)
+            {:ok, nonce, _} = reply
 
             PolicyIO.request(
               context.observer,
-              {:policy, context.capability, {:http_close_finished, generation}},
+              {:policy, context.capability, {:http_close_finish, generation, nonce}},
               deadline + 1_000
             )
         end

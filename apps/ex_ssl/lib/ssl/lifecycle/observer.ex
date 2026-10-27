@@ -289,6 +289,23 @@ defmodule SSL.Lifecycle.Observer do
   end
 
   @impl true
+  def handle_call(
+        {{:policy, capability, {:http_close_finish, generation, nonce}}, {:abs_ms, deadline}},
+        from,
+        state
+      )
+      when is_integer(deadline) do
+    state = expire(state)
+
+    if state.policy != nil and now() < deadline do
+      {reply, policy} = Guard.finish_http_close(state.policy, capability, generation, nonce, from)
+      next = %{state | policy: policy}
+      if reply == :deferred, do: settle_info(next), else: settle(reply, next)
+    else
+      settle({:error, :deadline_exceeded}, state)
+    end
+  end
+
   def handle_call({{:finish_candidate_close, nonce}, {:abs_ms, deadline}}, from, state)
       when is_integer(deadline) do
     case state.candidate_close do
@@ -469,6 +486,13 @@ defmodule SSL.Lifecycle.Observer do
 
   def handle_info({:timeout, ref, :candidate_close}, %{candidate_close: %{timer: ref}} = state),
     do: settle_info(retire(state, :timeout))
+
+  def handle_info({:timeout, timer, {:policy_http_close, nonce}}, %{policy: policy} = state)
+      when policy != nil do
+    if Guard.http_close_timer?(policy, timer, nonce),
+      do: settle_info(retire(state, :timeout)),
+      else: {:noreply, state}
+  end
 
   def handle_info({:timeout, ref, :grace}, %{grace_timer: ref} = state),
     do: settle_info(state)
@@ -651,9 +675,7 @@ defmodule SSL.Lifecycle.Observer do
   defp operate({:policy, capability, operation}, caller, %{policy: policy} = state)
        when policy != nil do
     {reply, policy} = Guard.operation(policy, capability, operation, caller)
-    next = %{state | policy: policy}
-    next = if next.grace != nil, do: stop_retiring_resources(next), else: next
-    {reply, next}
+    {reply, %{state | policy: policy}}
   end
 
   defp operate({:policy_actor, capability, operation}, caller, %{policy: policy} = state)
@@ -1755,7 +1777,8 @@ defmodule SSL.Lifecycle.Observer do
     instant = now()
 
     if (is_integer(state.expires) and instant >= state.expires) or
-         Handoff.expired?(state.handoff, instant),
+         Handoff.expired?(state.handoff, instant) or
+         (state.policy != nil and Guard.http_close_expired?(state.policy, instant)),
        do: retire(state, :timeout),
        else: state
   end
@@ -1788,7 +1811,12 @@ defmodule SSL.Lifecycle.Observer do
         grace_timer: grace_timer
     }
 
-    next |> stop_retiring_resources() |> outcome(reason)
+    Enum.each(next.resources, fn {_, resource} ->
+      unless closing_owner?(next, resource) or policy_closing_owner?(next, resource),
+        do: stop_process(resource)
+    end)
+
+    outcome(next, reason)
   end
 
   defp retire(state, _reason), do: state
@@ -1805,22 +1833,29 @@ defmodule SSL.Lifecycle.Observer do
   # observer in native close or infer port DOWN from the owner's death.
   defp stop_process(_resource), do: :ok
 
-  defp stop_retiring_resources(state) do
-    Enum.each(state.resources, fn {_, resource} ->
-      unless closing_owner?(state, resource), do: stop_process(resource)
-    end)
+  defp policy_closing_owner?(%{policy: policy}, %{identity: {_, :process, pid}})
+       when policy != nil,
+       do: Guard.protects_connection?(policy, pid)
+
+  defp policy_closing_owner?(_state, _resource), do: false
+
+  defp continue_policy_retirement(%{grace: grace, policy: policy} = state)
+       when grace != nil and policy != nil do
+    case state.resources[:connection] do
+      nil -> :ok
+      resource -> unless policy_closing_owner?(state, resource), do: stop_process(resource)
+    end
 
     state
   end
+
+  defp continue_policy_retirement(state), do: state
 
   defp closing_owner?(
          %{candidate_close: %{owner: pid, finished: false}},
          %{identity: {_, :process, pid}}
        ),
        do: true
-
-  defp closing_owner?(%{policy: policy}, %{identity: {_, :process, pid}}) when policy != nil,
-    do: Guard.closing_connection?(policy, pid)
 
   defp closing_owner?(_state, _resource), do: false
 
@@ -1887,6 +1922,8 @@ defmodule SSL.Lifecycle.Observer do
   end
 
   defp settle(reply, state) do
+    state = continue_policy_retirement(state)
+
     case terminal(state) do
       :stop -> {:stop, :normal, reply, state}
       :pending -> {:reply, reply, state}
@@ -1894,6 +1931,8 @@ defmodule SSL.Lifecycle.Observer do
   end
 
   defp settle_info(state) do
+    state = continue_policy_retirement(state)
+
     case terminal(state) do
       :stop -> {:stop, :normal, state}
       :pending -> {:noreply, state}

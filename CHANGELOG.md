@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before dialing. Missing TLS setup handles retain unconfirmed cleanup (#149).
 
 ### Fixed
+- Serialize policy HTTP socket close with TLS retirement, preserving exact
+  auxiliary cleanup evidence through cancellation and setup deadline races.
 - Preserve HTTP/1 cancellation when a socket closes during active-once rearming
   after a fragmented response head, retaining actual cleanup confirmation.
 - Normalize HTTP/3 owner deadline expiry to the public request timeout only

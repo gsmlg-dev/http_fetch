@@ -206,9 +206,11 @@ defmodule HTTP.EventSource.ExSSLCompletionIntegrationTest do
                event(peer, &(&1["kind"] == "sse_flow_blocked" and &1["sent"] >= 1_000_000))
 
       assert sent < 4_202_496 and remaining > 0
+      await_raw_buffer(source)
       status = EventSource.status(source)
       assert status.queued_events <= 2 and status.queued_bytes <= 16_384
       assert status.raw_bytes > 0
+      assert :sys.get_state(source.pid).terminal_reason == nil
       assert :ok = EventSource.close(source)
       assert :ok = ClientCompletion.await(EventSource.completion(source), 2_000)
       assert %{"stream" => 1, "code" => 8} = event(peer, &(&1["kind"] == "client_reset"))
@@ -587,6 +589,40 @@ defmodule HTTP.EventSource.ExSSLCompletionIntegrationTest do
 
     on_exit(fn -> EventSource.close(source) end)
     source
+  end
+
+  defp await_raw_buffer(source) do
+    reference = make_ref()
+    test_pid = self()
+
+    observe = fn
+      ref, {:noreply, %{raw_bytes: bytes, terminal_reason: nil}}, _name when bytes > 0 ->
+        send(test_pid, {ref, :buffered})
+        :done
+
+      ref, {:noreply, %{terminal_reason: reason}}, _name when not is_nil(reason) ->
+        send(test_pid, {ref, {:terminal, reason}})
+        :done
+
+      ref, _event, _name ->
+        ref
+    end
+
+    # A peer write does not join the relay or application callback. Observe a
+    # completed callback, then sample after installation to avoid a missed event.
+    :ok = :sys.install(source.pid, {reference, observe, reference})
+
+    try do
+      state = :sys.get_state(source.pid)
+      assert state.terminal_reason == nil
+
+      if state.raw_bytes == 0 do
+        assert_receive {^reference, outcome}, 5_000
+        assert outcome == :buffered
+      end
+    after
+      if Process.alive?(source.pid), do: :sys.remove(source.pid, reference)
+    end
   end
 
   defp source(port, version, extra \\ []) do
