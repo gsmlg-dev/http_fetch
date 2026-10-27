@@ -74,7 +74,9 @@ defmodule HttpFetch.Umbrella.MixProject do
         [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3]
 
       "http_runtime" ->
-        [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime]
+        # Runtime's lifecycle tests exercise Fetch completion receipts.
+        runtime = [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime]
+        if Mix.env() == :test, do: runtime ++ [:http_fetch], else: runtime
 
       "http_fetch" ->
         [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime, :http_fetch]

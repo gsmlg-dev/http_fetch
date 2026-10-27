@@ -41,7 +41,7 @@ defmodule ExSSL.TestSupport.RevocationFixtures do
           File.mkdir!(directory)
 
           try do
-            create!(directory)
+            _ = create!(directory)
 
             ExUnit.after_suite(fn _ ->
               :persistent_term.erase({__MODULE__, :fixtures})
@@ -52,7 +52,7 @@ defmodule ExSSL.TestSupport.RevocationFixtures do
             directory
           rescue
             exception ->
-              File.rm_rf!(directory)
+              _ = File.rm_rf!(directory)
               reraise exception, __STACKTRACE__
           end
 
@@ -148,12 +148,12 @@ defmodule ExSSL.TestSupport.RevocationFixtures do
   defp create!(directory) do
     base = Path.join(directory, "fixtures")
     File.mkdir!(base)
-    create_chain!(base)
-    create_crl_variants!(base)
-    IndirectRevocationFixtures.create!(base)
-    OffpathIntermediateFixtures.create!(base)
-    create_ocsp!(directory, base)
-    create_leaf_variants!(directory, base)
+    _ = create_chain!(base)
+    _ = create_crl_variants!(base)
+    _ = IndirectRevocationFixtures.create!(base)
+    _ = OffpathIntermediateFixtures.create!(base)
+    _ = create_ocsp!(directory, base)
+    _ = create_leaf_variants!(directory, base)
     create_ocsp_mutations!(directory, base)
 
     for name <- ["fixtures", "ocsp-fixtures", "ocsp-extended", "leaf-variants", "ocsp-mutated"] do
@@ -204,112 +204,120 @@ defmodule ExSSL.TestSupport.RevocationFixtures do
       """)
     end
 
-    openssl!(base, [
-      "req",
-      "-new",
-      "-x509",
-      "-newkey",
-      "rsa:2048",
-      "-nodes",
-      "-days",
-      "3",
-      "-subj",
-      "/CN=ExSSL Revocation Root",
-      "-keyout",
-      "root-key.pem",
-      "-out",
-      "root.pem",
-      "-addext",
-      "basicConstraints=critical,CA:TRUE,pathlen:2",
-      "-addext",
-      "keyUsage=critical,keyCertSign,cRLSign"
-    ])
+    _ =
+      openssl!(base, [
+        "req",
+        "-new",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-days",
+        "3",
+        "-subj",
+        "/CN=ExSSL Revocation Root",
+        "-keyout",
+        "root-key.pem",
+        "-out",
+        "root.pem",
+        "-addext",
+        "basicConstraints=critical,CA:TRUE,pathlen:2",
+        "-addext",
+        "keyUsage=critical,keyCertSign,cRLSign"
+      ])
 
     for {name, cn, issuer} <- [
           {"intermediate", "ExSSL Revocation Intermediate", "root"},
           {"leaf", "r49.example", "intermediate"}
         ] do
-      openssl!(base, [
-        "req",
-        "-new",
-        "-newkey",
-        "rsa:2048",
-        "-nodes",
-        "-subj",
-        "/CN=" <> cn,
-        "-keyout",
-        name <> "-key.pem",
-        "-out",
-        name <> ".csr"
-      ])
+      _ =
+        openssl!(base, [
+          "req",
+          "-new",
+          "-newkey",
+          "rsa:2048",
+          "-nodes",
+          "-subj",
+          "/CN=" <> cn,
+          "-keyout",
+          name <> "-key.pem",
+          "-out",
+          name <> ".csr"
+        ])
 
-      openssl!(base, [
-        "ca",
-        "-batch",
-        "-config",
-        issuer <> "-ca.cnf",
-        "-extensions",
-        name,
-        "-in",
-        name <> ".csr",
-        "-out",
-        name <> ".pem",
-        "-notext"
-      ])
+      _ =
+        openssl!(base, [
+          "ca",
+          "-batch",
+          "-config",
+          issuer <> "-ca.cnf",
+          "-extensions",
+          name,
+          "-in",
+          name <> ".csr",
+          "-out",
+          name <> ".pem",
+          "-notext"
+        ])
     end
 
     for {issuer, name} <- [{"root", "root-good"}, {"intermediate", "leaf-good"}] do
-      openssl!(base, [
-        "ca",
-        "-batch",
-        "-config",
-        issuer <> "-ca.cnf",
-        "-gencrl",
-        "-out",
-        name <> ".crl.pem"
-      ])
+      _ =
+        openssl!(base, [
+          "ca",
+          "-batch",
+          "-config",
+          issuer <> "-ca.cnf",
+          "-gencrl",
+          "-out",
+          name <> ".crl.pem"
+        ])
     end
 
     for {issuer, certificate, reason, name} <- [
           {"intermediate", "leaf", "keyCompromise", "leaf-revoked"},
           {"root", "intermediate", "cessationOfOperation", "root-revoked"}
         ] do
-      openssl!(base, [
-        "ca",
-        "-batch",
-        "-config",
-        issuer <> "-ca.cnf",
-        "-revoke",
-        certificate <> ".pem",
-        "-crl_reason",
-        reason
-      ])
+      _ =
+        openssl!(base, [
+          "ca",
+          "-batch",
+          "-config",
+          issuer <> "-ca.cnf",
+          "-revoke",
+          certificate <> ".pem",
+          "-crl_reason",
+          reason
+        ])
 
-      openssl!(base, [
-        "ca",
-        "-batch",
-        "-config",
-        issuer <> "-ca.cnf",
-        "-gencrl",
-        "-out",
-        name <> ".crl.pem"
-      ])
+      _ =
+        openssl!(base, [
+          "ca",
+          "-batch",
+          "-config",
+          issuer <> "-ca.cnf",
+          "-gencrl",
+          "-out",
+          name <> ".crl.pem"
+        ])
     end
 
     for name <- ["root", "intermediate", "leaf"] do
-      openssl!(base, ["x509", "-in", name <> ".pem", "-outform", "DER", "-out", name <> ".der"])
+      _ =
+        openssl!(base, ["x509", "-in", name <> ".pem", "-outform", "DER", "-out", name <> ".der"])
     end
 
     for name <- ["root-good", "root-revoked", "leaf-good", "leaf-revoked"] do
-      openssl!(base, [
-        "crl",
-        "-in",
-        name <> ".crl.pem",
-        "-outform",
-        "DER",
-        "-out",
-        name <> ".crl.der"
-      ])
+      _ =
+        openssl!(base, [
+          "crl",
+          "-in",
+          name <> ".crl.pem",
+          "-outform",
+          "DER",
+          "-out",
+          name <> ".crl.der"
+        ])
     end
 
     for which <- ["good", "revoked", "intermediate-revoked", "missing"] do
@@ -409,103 +417,111 @@ defmodule ExSSL.TestSupport.RevocationFixtures do
           {"revoked", Path.join(base, "intermediate-index")},
           {"unknown", Path.join(target, "empty-index")}
         ] do
-      ocsp_response!(target, base, name, index, "intermediate", "intermediate", "leaf", [
-        "-no_nonce"
-      ])
+      _ =
+        ocsp_response!(target, base, name, index, "intermediate", "intermediate", "leaf", [
+          "-no_nonce"
+        ])
     end
 
-    ocsp_response!(
-      target,
-      base,
-      "wrong-target",
-      Path.join(target, "root-good-index"),
-      "root",
-      "root",
-      "intermediate",
-      ["-no_nonce"]
-    )
+    _ =
+      ocsp_response!(
+        target,
+        base,
+        "wrong-target",
+        Path.join(target, "root-good-index"),
+        "root",
+        "root",
+        "intermediate",
+        ["-no_nonce"]
+      )
 
-    ocsp_response!(
-      target,
-      base,
-      "wrong-signer",
-      Path.join(target, "good-index"),
-      "root",
-      "intermediate",
-      "leaf",
-      ["-no_nonce"]
-    )
+    _ =
+      ocsp_response!(
+        target,
+        base,
+        "wrong-signer",
+        Path.join(target, "good-index"),
+        "root",
+        "intermediate",
+        "leaf",
+        ["-no_nonce"]
+      )
 
-    openssl!(target, [
-      "ocsp",
-      "-issuer",
-      Path.join(base, "intermediate.pem"),
-      "-cert",
-      Path.join(base, "leaf.pem"),
-      "-reqout",
-      "nonce.req"
-    ])
+    _ =
+      openssl!(target, [
+        "ocsp",
+        "-issuer",
+        Path.join(base, "intermediate.pem"),
+        "-cert",
+        Path.join(base, "leaf.pem"),
+        "-reqout",
+        "nonce.req"
+      ])
 
-    openssl!(target, [
-      "ocsp",
-      "-index",
-      "good-index",
-      "-rsigner",
-      Path.join(base, "intermediate.pem"),
-      "-rkey",
-      Path.join(base, "intermediate-key.pem"),
-      "-CA",
-      Path.join(base, "intermediate.pem"),
-      "-reqin",
-      "nonce.req",
-      "-respout",
-      "nonce.ocsp",
-      "-ndays",
-      "2"
-    ])
+    _ =
+      openssl!(target, [
+        "ocsp",
+        "-index",
+        "good-index",
+        "-rsigner",
+        Path.join(base, "intermediate.pem"),
+        "-rkey",
+        Path.join(base, "intermediate-key.pem"),
+        "-CA",
+        Path.join(base, "intermediate.pem"),
+        "-reqin",
+        "nonce.req",
+        "-respout",
+        "nonce.ocsp",
+        "-ndays",
+        "2"
+      ])
 
-    ocsp_response!(
-      extended,
-      base,
-      "cross-intermediate",
-      Path.join(target, "root-good-index"),
-      "other-root",
-      "other-root",
-      "intermediate-cross",
-      ["-no_nonce"]
-    )
+    _ =
+      ocsp_response!(
+        extended,
+        base,
+        "cross-intermediate",
+        Path.join(target, "root-good-index"),
+        "other-root",
+        "other-root",
+        "intermediate-cross",
+        ["-no_nonce"]
+      )
 
     write!(target, "malformed.ocsp", <<0x30, 3, 10, 1, 0>>)
 
-    ocsp_response!(
-      extended,
-      base,
-      "trusted-root",
-      Path.join(target, "good-index"),
-      "root",
-      "intermediate",
-      "leaf",
-      ["-no_nonce"]
-    )
+    _ =
+      ocsp_response!(
+        extended,
+        base,
+        "trusted-root",
+        Path.join(target, "good-index"),
+        "root",
+        "intermediate",
+        "leaf",
+        ["-no_nonce"]
+      )
 
     for {name, eku, authority} <- [
           {"delegated", true, "intermediate"},
           {"no-eku", false, "intermediate"},
           {"unrelated", true, "root"}
         ] do
-      openssl!(extended, [
-        "req",
-        "-new",
-        "-newkey",
-        "rsa:2048",
-        "-nodes",
-        "-keyout",
-        name <> "-key.pem",
-        "-out",
-        name <> ".csr",
-        "-subj",
-        "/CN=ExSSL " <> name
-      ])
+      _ =
+        openssl!(extended, [
+          "req",
+          "-new",
+          "-newkey",
+          "rsa:2048",
+          "-nodes",
+          "-keyout",
+          name <> "-key.pem",
+          "-out",
+          name <> ".csr",
+          "-subj",
+          "/CN=ExSSL " <> name
+        ])
 
       write!(
         extended,
@@ -514,45 +530,47 @@ defmodule ExSSL.TestSupport.RevocationFixtures do
           if(eku, do: "extendedKeyUsage=OCSPSigning\n", else: "")
       )
 
-      openssl!(extended, [
-        "x509",
-        "-req",
-        "-in",
-        name <> ".csr",
-        "-CA",
-        Path.join(base, authority <> ".pem"),
-        "-CAkey",
-        Path.join(base, authority <> "-key.pem"),
-        "-set_serial",
-        Integer.to_string(5_000 + byte_size(name)),
-        "-days",
-        "2",
-        "-extfile",
-        name <> ".ext",
-        "-out",
-        name <> ".pem"
-      ])
+      _ =
+        openssl!(extended, [
+          "x509",
+          "-req",
+          "-in",
+          name <> ".csr",
+          "-CA",
+          Path.join(base, authority <> ".pem"),
+          "-CAkey",
+          Path.join(base, authority <> "-key.pem"),
+          "-set_serial",
+          Integer.to_string(5_000 + byte_size(name)),
+          "-days",
+          "2",
+          "-extfile",
+          name <> ".ext",
+          "-out",
+          name <> ".pem"
+        ])
 
-      openssl!(extended, [
-        "ocsp",
-        "-index",
-        Path.join(target, "good-index"),
-        "-rsigner",
-        name <> ".pem",
-        "-rkey",
-        name <> "-key.pem",
-        "-CA",
-        Path.join(base, "intermediate.pem"),
-        "-issuer",
-        Path.join(base, "intermediate.pem"),
-        "-cert",
-        Path.join(base, "leaf.pem"),
-        "-respout",
-        name <> ".ocsp",
-        "-ndays",
-        "2",
-        "-no_nonce"
-      ])
+      _ =
+        openssl!(extended, [
+          "ocsp",
+          "-index",
+          Path.join(target, "good-index"),
+          "-rsigner",
+          name <> ".pem",
+          "-rkey",
+          name <> "-key.pem",
+          "-CA",
+          Path.join(base, "intermediate.pem"),
+          "-issuer",
+          Path.join(base, "intermediate.pem"),
+          "-cert",
+          Path.join(base, "leaf.pem"),
+          "-respout",
+          name <> ".ocsp",
+          "-ndays",
+          "2",
+          "-no_nonce"
+        ])
     end
 
     [delegated] = :public_key.pem_decode(File.read!(Path.join(extended, "delegated.pem")))
@@ -1179,8 +1197,8 @@ defmodule ExSSL.TestSupport.IndirectRevocationFixtures do
     )
 
     variants!(base, signer_tbs)
-    delta_variants!(base)
-    partial_variants!(base)
+    _ = delta_variants!(base)
+    _ = partial_variants!(base)
     base
   end
 

@@ -122,7 +122,11 @@ defmodule ExSSL.TestSupport.MultiIdentityFixtures do
     try do
       ready =
         receive do
-          {^port, {:data, {:eol, line}}} -> JSON.decode!(line)
+          {^port, {:data, {:eol, line}}} ->
+            JSON.decode!(line)
+
+          {^port, {:exit_status, status}} ->
+            flunk("independent multi-identity peer exited before ready: #{status}")
         after
           2_000 -> flunk("independent multi-identity peer not ready")
         end
@@ -134,10 +138,11 @@ defmodule ExSSL.TestSupport.MultiIdentityFixtures do
       assert not alive?(pid)
       {result, events}
     after
-      if alive?(pid) do
-        System.cmd("kill", ["-TERM", Integer.to_string(pid)], stderr_to_stdout: true)
-        collect(port, [], 1_000)
-      end
+      _ =
+        if alive?(pid) do
+          _ = System.cmd("kill", ["-TERM", Integer.to_string(pid)], stderr_to_stdout: true)
+          _ = collect(port, [], 1_000)
+        end
 
       if Port.info(port), do: Port.close(port)
     end

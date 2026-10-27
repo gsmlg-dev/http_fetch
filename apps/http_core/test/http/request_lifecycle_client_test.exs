@@ -4,6 +4,14 @@ defmodule HTTP.RequestLifecycleClientTest do
   alias HTTP.ClientCompletion
   alias HTTP.RequestLifecycle
 
+  setup_all do
+    unless Process.whereis(:http_runtime_task_supervisor) do
+      start_supervised!({Task.Supervisor, name: :http_runtime_task_supervisor})
+    end
+
+    :ok
+  end
+
   test "late cancellation after confirmed worker completion preserves cleanup proof" do
     receipt = ClientCompletion.new()
     :ok = RequestLifecycle.enter(receipt.tracker, :owner)

@@ -121,7 +121,7 @@ defmodule ExSSL.TestSupport.RevocationPeer do
   def join_tls13(%{task: task}), do: Task.await(task, 5_000)
 
   def stop(%{task: task, listener: listener}) do
-    if Process.alive?(task.pid), do: Task.shutdown(task, :brutal_kill)
+    _ = if Process.alive?(task.pid), do: Task.shutdown(task, :brutal_kill)
     :gen_tcp.close(listener)
     :ok
   end

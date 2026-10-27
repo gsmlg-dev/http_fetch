@@ -273,7 +273,7 @@ defmodule ExSSL.TestSupport.IdentityCompletionFixtures do
     end
 
     reference = proxy.reference
-    assert_receive {^reference, :connect_exact}, 0
+    _ = assert_receive {^reference, :connect_exact}, 0
     refute Process.alive?(pid)
   end
 
@@ -328,11 +328,15 @@ defmodule ExSSL.TestSupport.IdentityCompletionFixtures do
       await_state(owner, now() + 1_000, fn state -> map_size(state.streams) == 0 end)
     after
       if Process.alive?(owner), do: GenServer.stop(owner, :normal, 1_000)
-      assert_receive {:DOWN, monitor, :process, ^owner, _} when monitor == shared.monitor, 1_000
+
+      _ =
+        assert_receive {:DOWN, monitor, :process, ^owner, _} when monitor == shared.monitor, 1_000
+
       assert_graph_down(shared.graph, now() + 2_000)
 
-      assert {:ok, %{cleanup: :confirmed} = receipt} =
-               SSL.Lifecycle.await(handle, {:abs_ms, now() + 1_000})
+      _ =
+        assert {:ok, %{cleanup: :confirmed} = receipt} =
+                 SSL.Lifecycle.await(handle, {:abs_ms, now() + 1_000})
 
       assert {:ok, ^receipt} = SSL.Lifecycle.await(handle, {:abs_ms, now()})
     end
@@ -345,7 +349,7 @@ defmodule ExSSL.TestSupport.IdentityCompletionFixtures do
   end
 
   def block_authentication(peer, handle_or_receipt, fixtures) do
-    event(peer, :tls, "client_hello_gate")
+    _ = event(peer, :tls, "client_hello_gate")
 
     handle =
       case handle_or_receipt do
@@ -366,7 +370,7 @@ defmodule ExSSL.TestSupport.IdentityCompletionFixtures do
     {:handshaking, initial} = initial
     true = :erlang.suspend_process(writer)
     true = command(peer, :tls, "go")
-    event(peer, :tls, "certificate_request")
+    _ = event(peer, :tls, "certificate_request")
 
     try do
       {:handshaking, blocked} =
@@ -439,16 +443,17 @@ defmodule ExSSL.TestSupport.IdentityCompletionFixtures do
     assert Process.read_timer(blocked.output_timer) == false
     assert Process.read_timer(blocked.handshake_timer) == false
 
-    assert {:ok, %{cleanup: :confirmed} = receipt} =
-             SSL.Lifecycle.await(blocked.handle, {:abs_ms, limit})
+    _ =
+      assert {:ok, %{cleanup: :confirmed} = receipt} =
+               SSL.Lifecycle.await(blocked.handle, {:abs_ms, limit})
 
-    assert {:ok, ^receipt} = SSL.Lifecycle.await(blocked.handle, {:abs_ms, now()})
+    _ = assert {:ok, ^receipt} = SSL.Lifecycle.await(blocked.handle, {:abs_ms, now()})
     receipt
   end
 
   defp assert_graph_down(graph, limit) do
     Enum.each(graph, fn {_role, %{type: type, object: object, monitor: monitor}} ->
-      assert_receive {:DOWN, ^monitor, ^type, ^object, _}, max(limit - now(), 0)
+      _ = assert_receive {:DOWN, ^monitor, ^type, ^object, _}, max(limit - now(), 0)
 
       case type do
         :process -> refute Process.alive?(object)
@@ -523,7 +528,7 @@ defmodule ExSSL.TestSupport.IdentityCompletionFixtures do
     assert auth["client_leaf_sha256"] == leaf
     assert auth["verify_result"] == 0
     assert wire["sha256"] == chain
-    assert [%{"scheme" => ^scheme}] = Enum.filter(tls, &(&1["event"] == "client_cv"))
+    _ = assert [%{"scheme" => ^scheme}] = Enum.filter(tls, &(&1["event"] == "client_cv"))
     assert auth["version"] == if(peer.version == "tls12", do: "TLSv1.2", else: "TLSv1.3")
     assert negotiated["alpn"] == alpn(peer.protocol)
     assert negotiated["sni"] == "r47.server"
@@ -553,11 +558,13 @@ defmodule ExSSL.TestSupport.IdentityCompletionFixtures do
     tls = events(peer, :tls)
     application = events(peer, :app)
 
-    assert [%{"client_leaf_sha256" => nil, "verify_result" => 0, "version" => "TLSv1.3"}] =
-             Enum.filter(tls, &(&1["event"] == "authenticated"))
+    _ =
+      assert [%{"client_leaf_sha256" => nil, "verify_result" => 0, "version" => "TLSv1.3"}] =
+               Enum.filter(tls, &(&1["event"] == "authenticated"))
 
-    assert [%{"alpn" => "http/1.1", "sni" => "r47.server"}] =
-             Enum.filter(tls, &(&1["event"] == "negotiated"))
+    _ =
+      assert [%{"alpn" => "http/1.1", "sni" => "r47.server"}] =
+               Enum.filter(tls, &(&1["event"] == "negotiated"))
 
     refute Enum.any?(
              tls,
@@ -567,11 +574,13 @@ defmodule ExSSL.TestSupport.IdentityCompletionFixtures do
     assert Enum.count(tls, &(&1["event"] == "accepted")) == 1
     assert Enum.count(application, &(&1["event"] == "application_connected")) == 1
 
-    assert [%{"request_exact" => true, "authority_exact" => true, "scheme" => "https"}] =
-             Enum.filter(application, &(&1["event"] == "request"))
+    _ =
+      assert [%{"request_exact" => true, "authority_exact" => true, "scheme" => "https"}] =
+               Enum.filter(application, &(&1["event"] == "request"))
 
-    assert [%{"response_written" => true}] =
-             Enum.filter(application, &(&1["event"] == "response"))
+    _ =
+      assert [%{"response_written" => true}] =
+               Enum.filter(application, &(&1["event"] == "response"))
 
     refute Enum.any?(application, &(&1["event"] == "application_error"))
   end

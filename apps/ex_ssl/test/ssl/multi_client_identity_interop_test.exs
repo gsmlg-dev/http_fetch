@@ -27,15 +27,31 @@ defmodule SSL.MultiClientIdentityInteropTest do
          "rsa_pss_pss_sha256:rsa_pss_rsae_sha256"}
       ] do
     test "#{version} independent pair selects #{expected} CV #{scheme}", %{fixtures: m} do
+      schemes =
+        (String.split(unquote(schemes), ":") ++ ["rsa_pkcs1_sha256"])
+        |> Enum.uniq()
+        |> Enum.join(":")
+
       {result, events} =
         F.exchange(m, F.options(m, unquote(names), unquote(version)),
           version: unquote(version),
-          schemes: unquote(schemes) <> ":rsa_pkcs1_sha256"
+          schemes: schemes
         )
 
       assert result == {:ok, F.response()}
       F.assert_authenticated(m, events, unquote(expected), unquote(scheme), unquote(version))
     end
+  end
+
+  test "independent peer startup failure reports its exit status", %{fixtures: m} do
+    error =
+      assert_raise ExUnit.AssertionError, fn ->
+        F.with_peer(m, [schemes: "not-a-signature-scheme"], fn _port ->
+          flunk("failed peer must not begin an exchange")
+        end)
+      end
+
+    assert error.message == "independent multi-identity peer exited before ready: 10"
   end
 
   for version <- ["tls12", "tls13"] do
