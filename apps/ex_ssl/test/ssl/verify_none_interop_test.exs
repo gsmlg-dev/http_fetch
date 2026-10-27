@@ -215,7 +215,7 @@ defmodule SSL.VerifyNoneInteropTest do
     end
   end
 
-  test "none-mode TLS13 resumption remains isolated from default peer trust" do
+  test "none-mode TLS13 rejects auto tickets and ordinary handshakes preserve default peer trust" do
     files = LocalTLSPeer.certificates()
 
     assert {:ok, peer} =
@@ -231,18 +231,26 @@ defmodule SSL.VerifyNoneInteropTest do
       options =
         base(
           verify: :verify_none,
-          session_tickets: :auto,
+          session_tickets: :disabled,
           server_name_indication: ~c"wrong.example.test"
         )
 
-      for resumed <- [false, true] do
+      assert {:error, {:options, {:session_tickets, :verify_peer_required}}} =
+               SSL.connect(
+                 {127, 0, 0, 1},
+                 peer.port,
+                 Keyword.put(options, :session_tickets, :auto),
+                 5_000
+               )
+
+      for _ <- 1..2 do
         assert {:ok, socket} = SSL.connect({127, 0, 0, 1}, peer.port, options, 5_000)
 
         try do
           assert {:ok, handshake} = OpenSSLPeer.event(peer, "handshake", 5_000)
-          assert handshake["resumed"] == resumed
+          assert handshake["resumed"] == false
 
-          assert {:ok, [session_resumption: ^resumed]} =
+          assert {:ok, [session_resumption: false]} =
                    SSL.connection_information(socket, [:session_resumption])
 
           assert :ok = SSL.send(socket, <<4::32, "ping">>)

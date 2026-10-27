@@ -11,11 +11,20 @@ defmodule SSL.ResumptionContextTest do
     %{fixtures: ClientAuthFixtures.create(dir), dir: dir}
   end
 
-  test "none-mode cache entries are partitioned and cannot satisfy peer validation", %{
+  test "automatic tickets reject public none-mode options", %{fixtures: f} do
+    options = Keyword.merge(base(f), verify: :verify_none)
+
+    assert {:error, {:options, {:session_tickets, :verify_peer_required}}} =
+             Options.normalize(@host, options)
+  end
+
+  test "injected internal none-mode cache entries cannot satisfy peer validation", %{
     fixtures: f
   } do
-    none = normalized(f, verify: :verify_none, server_name_indication: ~c"wrong.example.test")
-    peer = %{none | verify: :verify_peer}
+    peer = normalized(f, server_name_indication: ~c"wrong.example.test")
+    # Public normalization rejects none-mode auto tickets. Inject only the internal
+    # verification mode to exercise defensive handling of legacy or misplaced state.
+    none = %{peer | verify: :verify_none}
     endpoint = {@host, 443}
     none_key = ResumptionContext.partition(none, endpoint)
     peer_key = ResumptionContext.partition(peer, endpoint)

@@ -377,7 +377,9 @@ defmodule SSL.IdentityCompletionIntegrationTest do
     encrypted = fixtures.encrypted["rsa2048-a"]
 
     options = [
-      verify: :verify_none,
+      verify: :verify_peer,
+      cacerts: [MultiIdentityFixtures.root(fixtures.manifest, "server-root")],
+      server_name_indication: ~c"r47.server",
       certs_keys: [],
       session_tickets: :auto,
       certfile: encrypted.certificate,
@@ -387,6 +389,11 @@ defmodule SSL.IdentityCompletionIntegrationTest do
 
     assert {:ok, prepared} = SSL.prepare_upgrade(options)
     F.assert_credential_snapshot_redacted(prepared, fixtures)
+
+    assert {:error, {:options, {:session_tickets, :verify_peer_required}}} =
+             result = SSL.prepare_upgrade(Keyword.put(options, :verify, :verify_none))
+
+    F.assert_public_redacted(result, fixtures)
     F.record("A02-auto_ticket_empty_identity_control")
   end
 
