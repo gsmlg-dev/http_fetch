@@ -79,6 +79,21 @@ defmodule SSL.Lifecycle.Authority do
     end
   end
 
+  @doc false
+  @spec recover(t(), ticket(), pid(), integer(), integer()) ::
+          {:ok, t(), lease()}
+          | {:error,
+             :deadline_exceeded | :stale_transfer | :not_recipient | :acceptance_unconfirmed}
+  def recover(state, ticket, caller, now, deadline) do
+    cond do
+      not within_deadline?(now, deadline) -> {:error, :deadline_exceeded}
+      is_nil(state.offer) or state.offer.ticket !== ticket -> {:error, :stale_transfer}
+      caller != state.offer.controller -> {:error, :not_recipient}
+      state.offer.status == :accepted -> {:ok, state, lease(state)}
+      true -> {:error, :acceptance_unconfirmed}
+    end
+  end
+
   # Context is provider-internal, never a caller-supplied public acceptance DTO.
   # A replay recovers the committed lease without changing state or authority.
   @spec accept(t(), ticket(), acceptance_context()) :: {:ok, t(), lease()} | {:error, atom()}

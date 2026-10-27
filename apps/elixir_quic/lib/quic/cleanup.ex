@@ -15,24 +15,82 @@ defmodule Quic.Cleanup do
     @moduledoc false
     @enforce_keys [:observer, :scope, :receipt]
     defstruct [:observer, :scope, :receipt]
-    @opaque t :: %__MODULE__{}
+    @type t :: Quic.Cleanup.handle()
   end
 
   defmodule Lease do
     @moduledoc false
     @enforce_keys [:handle, :secret, :retirement]
     defstruct [:handle, :secret, :retirement]
-    @opaque t :: %__MODULE__{}
+    @type t :: Quic.Cleanup.lease()
   end
 
   defmodule Permit do
     @moduledoc false
     @enforce_keys [:lease, :ref, :deadline]
     defstruct [:lease, :ref, :deadline]
-    @opaque t :: %__MODULE__{}
+    @type t :: Quic.Cleanup.permit()
   end
 
+  # The facade constructs and interprets these values; callers retain opaque aliases.
+  @opaque handle :: %Handle{observer: pid(), scope: reference(), receipt: :atomics.atomics_ref()}
+  @opaque lease :: %Lease{
+            handle: handle(),
+            secret: reference(),
+            retirement: (handle(), reference() -> :ok | {:error, :invalid_lease})
+          }
+  @opaque permit :: %Permit{lease: lease(), ref: reference(), deadline: integer()}
+  @type snapshot :: %{
+          version: 1,
+          scope: :exclusive_endpoint,
+          generation: reference(),
+          admission: :open | :closed,
+          enrolled: integer(),
+          down: integer(),
+          unresolved_births: integer(),
+          unresolved_operations: integer(),
+          native_outcome: :resolved | :indeterminate,
+          roles: %{endpoint: integer(), io: integer(), port: integer(), connection: integer()}
+        }
+  @type terminal_snapshot(cleanup) :: %{
+          version: 1,
+          scope: :exclusive_endpoint,
+          generation: reference(),
+          admission: :open | :closed,
+          enrolled: integer(),
+          down: integer(),
+          unresolved_births: integer(),
+          unresolved_operations: integer(),
+          native_outcome: :resolved | :indeterminate,
+          roles: %{endpoint: integer(), io: integer(), port: integer(), connection: integer()},
+          cleanup: cleanup
+        }
+  @type result ::
+          {:pending, snapshot()}
+          | {:ok, terminal_snapshot(:confirmed)}
+          | {:error,
+             {:cleanup_unconfirmed,
+              :birth_unresolved | :observation_cap | :observer_lost | :unsupported_native_socket},
+             terminal_snapshot(:unconfirmed)}
+
+  @doc false
+  @spec observer(Handle.t()) :: pid()
+  def observer(%Handle{observer: observer}), do: observer
+
   @type deadline :: {:abs_ms, integer()}
+  @type descriptor :: %{handle: handle(), lease: lease()}
+
+  @doc false
+  @spec descriptor(term()) :: {:ok, descriptor()} | {:error, :invalid_cleanup_descriptor}
+  def descriptor(%{handle: %Handle{} = handle, lease: %Lease{handle: handle} = lease}),
+    do: {:ok, %{handle: handle, lease: lease}}
+
+  def descriptor(_), do: {:error, :invalid_cleanup_descriptor}
+
+  @doc false
+  @spec retire_descriptor(term(), deadline()) :: result() | :ok
+  def retire_descriptor(%{lease: %Lease{} = lease}, bound), do: retire(lease, bound)
+  def retire_descriptor(_, _), do: :ok
 
   @spec new(keyword()) :: {:ok, Handle.t(), Lease.t()} | {:error, term()}
   def new(opts \\ []) do
@@ -63,7 +121,7 @@ defmodule Quic.Cleanup do
     end
   end
 
-  @spec status(Handle.t()) :: tuple()
+  @spec status(Handle.t()) :: result()
   def status(%Handle{} = handle) do
     if Process.alive?(handle.observer) do
       {:pending, snapshot(handle)}
@@ -80,7 +138,7 @@ defmodule Quic.Cleanup do
     end
   end
 
-  @spec await(Handle.t(), deadline()) :: tuple()
+  @spec await(Handle.t(), deadline()) :: result()
   def await(%Handle{} = handle, {:abs_ms, deadline}) when is_integer(deadline) do
     case status(handle) do
       {:pending, _} = pending ->
@@ -105,7 +163,7 @@ defmodule Quic.Cleanup do
     end
   end
 
-  @spec retire(Lease.t(), deadline()) :: tuple()
+  @spec retire(Lease.t(), deadline()) :: result()
   def retire(%Lease{handle: handle} = lease, {:abs_ms, deadline} = bound)
       when is_integer(deadline) do
     # The authenticated latch closes admission before returning, even when the
@@ -188,7 +246,7 @@ defmodule Quic.Cleanup do
 
   @doc false
   def fence(receipt) do
-    :atomics.compare_exchange(receipt, 8, 0, elapsed() + @observation_cap)
+    _ = :atomics.compare_exchange(receipt, 8, 0, elapsed() + @observation_cap)
     :ok
   end
 

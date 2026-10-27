@@ -1383,11 +1383,16 @@ defmodule HTTP.SocketClient do
 
   defp maybe_cancel_http2_bridge(_state), do: :ok
 
-  defp cancel_http2_stream(state),
-    do:
+  defp cancel_http2_stream(state) do
+    # Reset is best effort. finish_http2 separately joins stream/pool release or
+    # retains the dedicated owner obligation until its termination is observed.
+    _reset =
       safe_http2_cleanup(fn ->
         ConnectionOwner.cancel(state.owner, state.stream_id)
       end)
+
+    :ok
+  end
 
   defp acknowledge_http2_data(state, end_stream?) do
     result =

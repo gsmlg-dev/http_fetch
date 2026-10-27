@@ -34,14 +34,17 @@ defmodule SSL.Lifecycle.Setup do
   end
 
   @type context :: %{
-          receipt: Receipt.t(),
-          permit: reference(),
-          allocator_permit: reference(),
-          endpoint: {:inet.ip4_address(), 1..65_535},
-          classic:
+          required(:receipt) => Receipt.t(),
+          required(:permit) => reference(),
+          required(:allocator_permit) => reference() | nil,
+          required(:endpoint) =>
+            {:inet.ip_address() | String.t() | charlist(), 1..65_535} | {:upgrade, port()},
+          required(:classic) =>
             {pid(), reference(), :atomics.atomics_ref(), Options.t(), integer() | :infinity},
-          control_deadline: {:abs_ms, integer()},
-          ready: {pid(), reference()}
+          required(:control_deadline) => {:abs_ms, integer()},
+          required(:ready) => {pid(), reference()},
+          optional(:public) => boolean(),
+          optional(:attempt) => reference()
         }
   @spec start(context()) :: GenServer.on_start()
   def start(context), do: start_mode(context, :port)
@@ -52,7 +55,7 @@ defmodule SSL.Lifecycle.Setup do
   defp start_mode(
          %{
            public: true,
-           receipt: %Receipt{} = receipt,
+           receipt: receipt,
            permit: permit,
            classic: {owner, ref, status, %Options{}, original},
            control_deadline: {:abs_ms, control},
@@ -63,16 +66,20 @@ defmodule SSL.Lifecycle.Setup do
        when is_reference(permit) and is_reference(ref) and is_reference(status) and
               (is_integer(original) or original == :infinity) and is_integer(control) and
               is_reference(nonce) do
-    observer = Receipt.observer(receipt)
+    if Receipt.valid?(receipt) do
+      observer = Receipt.observer(receipt)
 
-    if owner == self() and recipient == self() and node(observer) == node(),
-      do: start_before_deadline(context, observer, mode),
-      else: {:error, :invalid_lifecycle_context}
+      if owner == self() and recipient == self() and node(observer) == node(),
+        do: start_before_deadline(context, observer, mode),
+        else: {:error, :invalid_lifecycle_context}
+    else
+      {:error, :invalid_lifecycle_context}
+    end
   end
 
   defp start_mode(
          %{
-           receipt: %Receipt{observer: observer, cell: cell},
+           receipt: receipt,
            permit: permit,
            allocator_permit: allocation,
            endpoint: {{_, _, _, _}, port},
@@ -82,12 +89,14 @@ defmodule SSL.Lifecycle.Setup do
          } = context,
          mode
        )
-       when map_size(context) == 7 and is_pid(observer) and
-              is_reference(cell) and is_reference(permit) and is_reference(allocation) and
+       when map_size(context) == 7 and
+              is_reference(permit) and is_reference(allocation) and
               is_reference(ref) and is_reference(status) and is_reference(nonce) and
               is_integer(control) and (is_integer(original) or original == :infinity) and
               is_integer(port) do
-    admit(context, observer, owner, recipient, mode)
+    if Receipt.valid?(receipt),
+      do: admit(context, Receipt.observer(receipt), owner, recipient, mode),
+      else: {:error, :invalid_lifecycle_context}
   end
 
   defp start_mode(_, _mode), do: {:error, :invalid_lifecycle_context}

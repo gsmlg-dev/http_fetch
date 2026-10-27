@@ -131,7 +131,7 @@ defmodule HTTP.WebSocket do
           %__MODULE__{pid: pid, ref: ref, url: options.url, completion: receipt}
 
         error ->
-          Kernel.send(receipt.tracker, :launch_failed)
+          Kernel.send(HTTP.ClientCompletion.tracker(receipt), :launch_failed)
           error
       end
     end

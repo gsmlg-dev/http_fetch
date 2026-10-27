@@ -251,7 +251,7 @@ defmodule SSL.PolicyIO.Guard do
         {caller, _},
         %{policy: %{capability: capability, connection: caller}} = state
       ) do
-    if state.timer, do: Process.cancel_timer(state.timer)
+    _ = if state.timer, do: Process.cancel_timer(state.timer)
     policy = retire(state.policy, PolicyIO.now() + 1_000)
 
     case finish_retirement(%{state | policy: policy, timer: nil}) do
@@ -265,7 +265,7 @@ defmodule SSL.PolicyIO.Guard do
     next = %{state | policy: policy}
 
     if policy.finished do
-      if state.timer, do: Process.cancel_timer(state.timer)
+      _ = if state.timer, do: Process.cancel_timer(state.timer)
       {:stop, :normal, reply, next}
     else
       {:reply, reply, next}

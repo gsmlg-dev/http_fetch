@@ -111,7 +111,9 @@ defmodule HTTP.EventSource do
           }
 
         error ->
-          if receipt.tracker, do: send(receipt.tracker, :launch_failed)
+          if HTTP.ClientCompletion.tracker(receipt),
+            do: send(HTTP.ClientCompletion.tracker(receipt), :launch_failed)
+
           error
       end
     end

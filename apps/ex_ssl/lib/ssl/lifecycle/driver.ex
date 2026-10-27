@@ -106,7 +106,16 @@ defmodule SSL.Lifecycle.Driver do
     observer_monitor = Process.monitor(observer)
 
     try do
-      await(helper, nonce, observer, receipt.cell, monitor, observer_monitor, endpoint, deadline)
+      await(
+        helper,
+        nonce,
+        observer,
+        Receipt.failure_tag(receipt),
+        monitor,
+        observer_monitor,
+        endpoint,
+        deadline
+      )
     after
       Process.demonitor(monitor, [:flush])
       Process.demonitor(observer_monitor, [:flush])

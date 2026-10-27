@@ -79,10 +79,12 @@ defmodule SSL.Connection do
   @typep classic_init ::
            {pid(), reference(), :atomics.atomics_ref(), Options.t(), integer() | :infinity}
   @typep inert_context :: %{
-           receipt: Receipt.t(),
-           permit: reference(),
-           control_deadline: {:abs_ms, integer()},
-           ready: {pid(), reference()}
+           required(:receipt) => Receipt.t(),
+           required(:permit) => reference(),
+           required(:control_deadline) => {:abs_ms, integer()},
+           required(:ready) => {pid(), reference()},
+           optional(:public) => boolean(),
+           optional(:attempt) => reference() | nil
          }
 
   # Private unlinked birth only; every post-entry failure keeps allocation unknown.
@@ -91,18 +93,19 @@ defmodule SSL.Connection do
   def start_inert(
         {:inert, {owner, ref, status, %Options{}, setup},
          %{
-           receipt: %Receipt{observer: observer, cell: cell},
+           receipt: receipt,
            permit: permit,
            control_deadline: {:abs_ms, control},
            ready: {recipient, nonce}
          }} = args
       )
       when is_pid(owner) and is_reference(ref) and
-             is_reference(status) and is_pid(observer) and
-             is_reference(cell) and is_reference(permit) and is_integer(control) and
+             is_reference(status) and is_reference(permit) and is_integer(control) and
              is_pid(recipient) and is_reference(nonce) and
              (is_integer(setup) or setup == :infinity) do
-    admit_inert(args, owner, observer, recipient, setup, control)
+    if Receipt.valid?(receipt),
+      do: admit_inert(args, owner, Receipt.observer(receipt), recipient, setup, control),
+      else: {:error, :invalid_lifecycle_context}
   end
 
   def start_inert(_), do: {:error, :invalid_lifecycle_context}
@@ -136,15 +139,18 @@ defmodule SSL.Connection do
   def start_link(
         {:inert, _classic,
          %{
-           receipt: %Receipt{observer: observer, cell: cell},
+           receipt: receipt,
            permit: permit,
            control_deadline: {:abs_ms, control},
            ready: {recipient, nonce}
          }} = args
       )
-      when is_pid(observer) and is_reference(cell) and is_reference(permit) and
-             is_integer(control) and is_pid(recipient) and is_reference(nonce),
-      do: :gen_statem.start_link(__MODULE__, args, [])
+      when is_reference(permit) and is_integer(control) and is_pid(recipient) and
+             is_reference(nonce) do
+    if Receipt.valid?(receipt),
+      do: :gen_statem.start_link(__MODULE__, args, []),
+      else: {:error, :invalid_lifecycle_context}
+  end
 
   def start_link({:inert, _classic, _context}), do: {:error, :invalid_lifecycle_context}
   def start_link(args), do: :gen_statem.start_link(__MODULE__, args, [])

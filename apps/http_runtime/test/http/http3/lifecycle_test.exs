@@ -273,6 +273,99 @@ defmodule HTTP.HTTP3.LifecycleTest do
     end
   end
 
+  for delivery <- [:terminal_event, :monitor_down],
+      cause <- [:deadline_expired, :connection_closed],
+      expired? <- [false, true] do
+    test "#{delivery} maps #{cause} with request expired=#{expired?} without replay", %{
+      controller: controller
+    } do
+      owner = owner(controller)
+      Process.unlink(owner)
+      owner_monitor = Process.monitor(owner)
+      pool = start_supervised!({Pool, []}, restart: :temporary)
+
+      request = %HTTP.Request{
+        method: :post,
+        body: self(),
+        duplex: :half,
+        url: URI.parse("https://test/deadline"),
+        transport_options: [
+          timeout: 5_000,
+          ssl: [
+            cacertfile: Path.expand("../../../../elixir_quic/test/fixtures/tls/root.pem", __DIR__)
+          ]
+        ]
+      }
+
+      {:ok, key, _} = PoolKey.build(request)
+      :ok = Pool.register(pool, key, owner)
+      deadline = System.monotonic_time(:millisecond) + 1_000
+
+      assert {:ok, stream, generation} =
+               Stream.start(request, self(), pool: pool, deadline_at: deadline)
+
+      stream_monitor = Process.monitor(stream)
+      assert_receive {:native_send, 0, _headers, false}
+      # Producer demand proves the relay has installed its owner monitor.
+      assert_receive {:read_chunk, bridge, :ack}
+      send(bridge, {:stream_end, self()})
+      assert_receive {:native_send, 0, _fin, true}
+      assert %{requests: 1} = ConnectionOwner.status(owner)
+
+      if unquote(expired?) do
+        suspend_receiving(stream, deadline)
+      end
+
+      reason = {:shutdown, unquote(cause)}
+
+      case unquote(delivery) do
+        :terminal_event -> GenServer.stop(owner, reason)
+        :monitor_down -> Process.exit(owner, reason)
+      end
+
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, ^reason}, 1_000
+
+      if unquote(expired?) do
+        # The owner outcome is queued before the receive timeout becomes eligible.
+        marker = make_ref()
+        Process.send_after(self(), marker, max(deadline - System.monotonic_time(:millisecond), 0))
+        assert_receive ^marker, 2_000
+        true = :erlang.resume_process(stream)
+      end
+
+      expected =
+        unquote(
+          Macro.escape(
+            if cause == :deadline_expired and expired?,
+              do: :request_timeout,
+              else: {:owner_down, {:shutdown, cause}}
+          )
+        )
+
+      assert_receive {:http_runtime, ^generation, ^stream, {:error, ^expected}}, 1_000
+      assert_receive {:DOWN, ^stream_monitor, :process, ^stream, :normal}, 1_000
+      assert Agent.get(controller, & &1.id) == 4
+      refute_receive {:native_send, 0, _, _}, 0
+    end
+  end
+
+  defp suspend_receiving(stream, deadline) do
+    case Process.info(stream, [:current_function, :status, :message_queue_len]) do
+      [current_function: {Stream, :receive_messages, 1}, status: :waiting, message_queue_len: 0] ->
+        true = :erlang.suspend_process(stream)
+
+        on_exit(fn ->
+          if Process.info(stream, :status) == {:status, :suspended},
+            do: :erlang.resume_process(stream)
+        end)
+
+      _ ->
+        assert System.monotonic_time(:millisecond) < deadline
+        :erlang.yield()
+        suspend_receiving(stream, deadline)
+    end
+  end
+
   test "rotation counts critical allocation and drains before further admission", %{
     controller: controller
   } do

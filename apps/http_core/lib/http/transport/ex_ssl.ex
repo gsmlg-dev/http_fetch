@@ -252,8 +252,6 @@ defmodule HTTP.Transport.ExSSL do
     end
   end
 
-  defp finish_attempt(result, _opts, _deadline, _descriptor), do: result
-
   defp setup_failure_result(error, reason, opts, {handle, _lease}) do
     if Keyword.get(opts, :tls_setup_evidence) === true and
          is_pid(Keyword.get(opts, :request_lifecycle)) and

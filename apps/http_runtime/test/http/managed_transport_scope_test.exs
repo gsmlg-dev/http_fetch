@@ -122,8 +122,10 @@ defmodule HTTP.ManagedTransport.ScopeTest do
       for _ <- 1..100 do
         {tracker, prepared, token} = connector(request)
 
+        # No native setup starts in this observation test. Retain each inert
+        # provider until explicit cancellation, independently of snapshot waits.
         assert {:ok, {handle, _lease}} =
-                 HTTP.RequestLifecycle.begin_provider(tracker, :ex_ssl, now() + 1_000)
+                 HTTP.RequestLifecycle.begin_provider(tracker, :ex_ssl, :infinity)
 
         assert :ok = ManagedTransport.connect_done(prepared, token)
         {tracker, handle}

@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Preserve HTTP/1 cancellation when a socket closes during active-once rearming
   after a fragmented response head, retaining actual cleanup confirmation.
+- Normalize HTTP/3 owner deadline expiry to the public request timeout only
+  after the total request deadline, preserving earlier operation failures.
+- Preserve OTP OCSP and certificate callback error normalization when runtime
+  values exceed upstream typespecs.
+- Preserve opaque TLS/QUIC cleanup capabilities across module boundaries and
+  declare accurate completion/transport contracts for strict Dialyzer checks.
+- Make integration fixtures observe the matching transport, provider lifetime
+  and pool notification, and bound TLS receive batches for blocked-write tests.
 
 ## [0.21.17] - 2026-10-24
 

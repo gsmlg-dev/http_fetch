@@ -90,7 +90,7 @@ defmodule HTTP.WebSocket.Connection do
 
   @impl true
   def init({%Options{} = options, receipt}) do
-    :ok = RequestLifecycle.enter(receipt.tracker, :owner)
+    :ok = RequestLifecycle.enter(HTTP.ClientCompletion.tracker(receipt), :owner)
     Process.flag(:trap_exit, true)
     owner_guard = HTTP.OwnerMonitor.start(self(), options.owner)
 
@@ -143,27 +143,32 @@ defmodule HTTP.WebSocket.Connection do
   defp admit_attempt(state) do
     deadline = control_deadline(state.opening_deadline)
 
-    with {:ok, permit} <- RequestLifecycle.reserve_attempt(state.completion.tracker, deadline) do
+    with {:ok, permit} <-
+           RequestLifecycle.reserve_attempt(
+             HTTP.ClientCompletion.tracker(state.completion),
+             deadline
+           ) do
       receipt = ClientCompletion.new()
 
       result =
         with :ok <-
                RequestLifecycle.retain_attempt(
-                 state.completion.tracker,
+                 HTTP.ClientCompletion.tracker(state.completion),
                  permit,
                  receipt,
                  deadline
                ),
-             :ok <- RequestLifecycle.enter(receipt.tracker, :owner, deadline),
-             do: {:ok, %{state | attempt_tracker: receipt.tracker}}
+             :ok <-
+               RequestLifecycle.enter(HTTP.ClientCompletion.tracker(receipt), :owner, deadline),
+             do: {:ok, %{state | attempt_tracker: HTTP.ClientCompletion.tracker(receipt)}}
 
       case result do
         {:ok, _} ->
           result
 
         error ->
-          RequestLifecycle.abort(receipt.tracker)
-          RequestLifecycle.retire_owner(receipt.tracker)
+          RequestLifecycle.abort(HTTP.ClientCompletion.tracker(receipt))
+          RequestLifecycle.retire_owner(HTTP.ClientCompletion.tracker(receipt))
           error
       end
     end
@@ -454,7 +459,7 @@ defmodule HTTP.WebSocket.Connection do
         _kind, _private_reason -> exit(:shutdown)
       end
 
-    RequestLifecycle.complete(state.completion.tracker, now())
+    RequestLifecycle.complete(HTTP.ClientCompletion.tracker(state.completion), now())
 
     # OTP can report the original exception and queued messages independently
     # of format_status/1. A literal shutdown prevents those crash reports.

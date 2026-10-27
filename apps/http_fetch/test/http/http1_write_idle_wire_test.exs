@@ -261,6 +261,9 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
         active: false,
         reuseaddr: true,
         recbuf: 65_536,
+        # Bound each TLS receive batch so OTP buffering cannot absorb the
+        # complete finite pressure upload before the sustained-write assertion.
+        buffer: 4_096,
         ip: {127, 0, 0, 1}
       ])
 
