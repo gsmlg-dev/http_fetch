@@ -5,6 +5,54 @@ defmodule HTTP.Transport.ExSSL do
 
   @impl true
   def connect(host, port, opts, timeout) do
+    if HTTP.Transport.AddressFamily.preferred?(opts),
+      do: connect_preferred(host, port, opts, timeout),
+      else: connect_direct(host, port, opts, timeout)
+  end
+
+  defp connect_preferred(host, port, opts, timeout) do
+    deadline = setup_deadline(timeout)
+    socket_opts = [:binary, packet: :raw, active: false] ++ Keyword.get(opts, :socket_opts, [])
+
+    with {:ok, prepared} <- prepare_upgrade(host, opts),
+         {:ok, tcp} <- preferred_tcp(host, port, socket_opts, opts, deadline) do
+      HTTP.RequestLifecycle.track_socket(opts, tcp)
+
+      result =
+        with {:ok, attempt} <- prepared_attempt(prepared, opts, deadline) do
+          case upgrade_prepared_attempt(tcp, attempt, opts) do
+            {:ok, _socket} = connected ->
+              connected
+
+            error ->
+              cancel_prepared(attempt)
+              error
+          end
+        end
+
+      if match?({:error, _}, result), do: close_owned_tcp(tcp)
+      result
+    end
+  end
+
+  defp preferred_tcp(host, port, socket_opts, opts, deadline) do
+    case HTTP.Transport.AddressFamily.connect(
+           host,
+           port,
+           socket_opts,
+           opts,
+           setup_remaining(deadline)
+         ) do
+      {:ok, _tcp} = connected -> connected
+      {:error, reason} -> HTTP.Transport.connect_error(opts, reason)
+    end
+  end
+
+  defp close_owned_tcp(tcp) do
+    if Port.info(tcp, :connected) == {:connected, self()}, do: :gen_tcp.close(tcp)
+  end
+
+  defp connect_direct(host, port, opts, timeout) do
     deadline = setup_deadline(timeout)
 
     with {:ok, ssl_opts} <- tls_options(opts),
@@ -52,7 +100,11 @@ defmodule HTTP.Transport.ExSSL do
   @doc false
   def prepare_upgrade(host, opts, deadline) do
     with {:ok, prepared} <- prepare_upgrade(host, opts),
-         {:ok, attempt_opts} <- lifecycle_options([], opts, deadline) do
+         do: prepared_attempt(prepared, opts, deadline)
+  end
+
+  defp prepared_attempt(prepared, opts, deadline) do
+    with {:ok, attempt_opts} <- lifecycle_options([], opts, deadline) do
       {:ok,
        {:prepared_attempt, prepared, Keyword.get(attempt_opts, :ex_ssl, [])[:lifecycle],
         Keyword.get(opts, :request_lifecycle), deadline}}
@@ -63,11 +115,20 @@ defmodule HTTP.Transport.ExSSL do
   def upgrade_prepared(tcp, {:prepared_attempt, prepared, nil, _tracker, deadline}, _timeout),
     do: SSL.connect_prepared(tcp, prepared, setup_remaining(deadline))
 
-  def upgrade_prepared(
-        tcp,
-        {:prepared_attempt, prepared, descriptor, tracker, deadline},
-        _timeout
-      ) do
+  def upgrade_prepared(tcp, {:prepared_attempt, _, _, _, _} = attempt, _timeout),
+    do: upgrade_prepared_attempt(tcp, attempt, [])
+
+  def upgrade_prepared(tcp, prepared, timeout),
+    do: SSL.connect_prepared(tcp, prepared, timeout)
+
+  defp upgrade_prepared_attempt(tcp, {:prepared_attempt, prepared, nil, _, deadline}, _opts),
+    do: SSL.connect_prepared(tcp, prepared, setup_remaining(deadline))
+
+  defp upgrade_prepared_attempt(
+         tcp,
+         {:prepared_attempt, prepared, descriptor, tracker, deadline},
+         opts
+       ) do
     result =
       with {:ok, socket} <-
              SSL.connect_prepared(
@@ -76,15 +137,20 @@ defmodule HTTP.Transport.ExSSL do
                [ex_ssl: [lifecycle: descriptor]],
                setup_remaining(deadline)
              ),
-           :ok <- HTTP.RequestLifecycle.adopt_provider(tracker, descriptor, tcp, socket, deadline),
+           :ok <-
+             HTTP.RequestLifecycle.adopt_provider(tracker, descriptor, tcp, socket, deadline),
            do: {:ok, socket}
 
-    if match?({:error, _}, result), do: HTTP.RequestLifecycle.provider_failed(tracker)
-    result
-  end
+    case result do
+      {:error, reason} = error ->
+        classified = setup_failure_result(error, reason, opts, descriptor)
+        HTTP.RequestLifecycle.provider_failed(tracker)
+        classified
 
-  def upgrade_prepared(tcp, prepared, timeout),
-    do: SSL.connect_prepared(tcp, prepared, timeout)
+      connected ->
+        connected
+    end
+  end
 
   @doc false
   def cancel_prepared({:prepared_attempt, _prepared, _descriptor, tracker, _deadline}),

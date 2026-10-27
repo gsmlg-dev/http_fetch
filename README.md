@@ -500,6 +500,89 @@ other transfer codings, and explicit chunked framing on buffered bodies are
 rejected. HTTP/2 and HTTP/3 prohibit Transfer-Encoding headers. HTTP/2 supports
 bounded request trailers; HTTP/3 rejects them explicitly.
 
+## Request-local response budgets and address preference
+
+Ordinary HTTP/1 requests accept `response_header_limits: [...]` as a keyword list
+or atom-keyed map. Each value must be a positive integer. Explicit budgets require
+`http_version: :http1`; callers omitting them retain legacy head-limit errors.
+
+| Limit | Default |
+| --- | ---: |
+| `max_head_bytes` | 65,540 |
+| `max_field_bytes` | 65,536 |
+| `max_fields` | 32,768 |
+| `max_connect_head_bytes` | 16,384 |
+| `max_informational_responses` | 16 |
+| `max_informational_bytes` | 1,048,576 |
+
+Head bytes include the status line and terminating CRLFs. Field bytes exclude
+CRLF; same-read body bytes are excluded. Informational counts and bytes accumulate
+through the final response, including CONNECT responses. Exceeding an explicit
+budget returns `{:response_header_limit, %{stage: :response | :connect,
+limit: key, maximum: n, observed: n}}`, without disclosing header contents.
+
+`prefer_ipv6: true` opts into an IPv6 TCP attempt followed by IPv4 only if native
+connection establishment fails, within one connection deadline. TLS verification,
+HTTP failures and sent requests never trigger fallback or replay. Explicit
+`connect_address` pins and `:inet`/`:inet6` socket options stay strict. With a proxy,
+the preference applies to its endpoint. This is a serial connection preference;
+it does not race connections. Cancellation is checked before admitting fallback.
+
+## Fixed-length streaming multipart
+
+Use `HTTP.FormData.to_stream/2` for a lazy multipart envelope with exact byte
+length. Regular file paths are statted at construction and opened only during
+enumeration; reads and emitted chunks are bounded. Keep files unchanged during
+upload. Unsupported encoded/compressed file streams fail explicitly.
+
+```elixir
+form = HTTP.FormData.new()
+  |> HTTP.FormData.append_field("title", "Report")
+  |> HTTP.FormData.append_file("file", "report.pdf", File.stream!("report.pdf"))
+{:ok, envelope} = HTTP.FormData.to_stream(form, chunk_size: 32_768)
+{:ok, upload} = HTTP.Stream.from_enumerable(envelope.body)
+HTTP.fetch("https://origin.example/upload", method: :post, body: upload,
+  duplex: :half, headers: [{"Content-Type", envelope.content_type},
+                          {"Content-Length", to_string(envelope.content_length)}])
+|> HTTP.Promise.await()
+```
+
+Cancellation, early response and source completion retain Fetch's bounded upload
+cleanup. `to_body/1` and direct FormData request bodies retain buffered behavior.
+
+## Connection-scoped protocol peers
+
+`HTTP.ProtocolClient` in `http_runtime` opens one cleartext HTTP/1 or
+prior-knowledge HTTP/2 connection. It supports `connect/2`, `request/5`, `recv/2`,
+`cancel/2`, `acknowledge/2`, `put_settings/2`, `connection_info/1` and `close/2`.
+It never reconnects, retries, redirects or replays. Connection information exposes
+a stable ID and actual TCP endpoints. HTTP/1 accepts sequential requests;
+HTTP/2 cancellation resets one stream while retaining its siblings.
+
+```elixir
+{:ok, client} = HTTP.ProtocolClient.connect("http://127.0.0.1:8080",
+  protocol: :http2, settings: [initial_window_size: 1])
+{:ok, request} = HTTP.ProtocolClient.request(client, :get, "/audio")
+{:ok, events} = HTTP.ProtocolClient.recv(client, 1_000)
+:ok = HTTP.ProtocolClient.cancel(client, request)
+:ok = HTTP.ProtocolClient.put_settings(client, initial_window_size: 65_535)
+{:ok, health} = HTTP.ProtocolClient.request(client, :get, "/health")
+:ok = HTTP.ProtocolClient.close(client)
+```
+
+Consume headers/data/trailers through `done` or `error` events for each request.
+HTTP/2 DATA returns stream credit only after `acknowledge(client, request)`;
+withholding it creates actual stream backpressure. Live settings affect existing
+streams on the same connection. A successful settings call confirms the local
+write. Receive timeouts leave requests active. HTTP/1 cancellation closes its
+connection. Finite close joins owned protocol processes and closes TCP; uncertain
+completion returns an error. Creator exit also closes the session.
+
+Bodies must be buffered binaries, and HTTP/2 bodies must fit current peer credit.
+Sessions admit at most 16 requests and buffer 256 events / 1 MiB; exhausting a
+buffer closes the connection. TLS, proxies, HTTP/3 and pipelining are outside this
+API. See `HTTP.ProtocolClient` for event shapes and cleanup/error details.
+
 ## Explicit Proxies
 
 ```elixir
@@ -520,10 +603,23 @@ the tunnel. Proxy credentials appear only on the proxy hop; they are removed
 from tunneled origin requests. The same route remains selected across redirects.
 
 An HTTPS proxy supports HTTP origins using TLS to the proxy and absolute-form
-HTTP/1 forwarding. `tls_backend` and `ssl` configure proxy TLS; trust and hostname
-verification use the proxy host. Scheme, endpoint, credentials, and TLS policy
-isolate pooled connections. HTTPS origins through HTTPS proxies are rejected
-with `:https_proxy_requires_http_origin` before dialing.
+HTTP/1 forwarding. HTTPS origins use authenticated CONNECT followed by a second,
+independently verified TLS session, with HTTP/1 or HTTP/2 inside the tunnel.
+Nested TLS requires `tls_backend: :ssl`; ExSSL requests fail before dialing with
+`:nested_tls_requires_otp_ssl`. Proxy `opts[:ssl]` configures proxy trust and SNI;
+top-level `ssl` configures origin TLS (and proxy TLS when no separate policy is
+provided). Both identities are checked against their own host. Scheme, endpoint,
+credentials, and both TLS policies isolate pooled connections.
+
+```elixir
+HTTP.fetch("https://origin.example/resource",
+  tls_backend: :ssl, http_version: :http1, redirect: :manual,
+  ssl: [cacertfile: "origin-ca.pem"],
+  proxy: {:https, "proxy.example", 443,
+    [ssl: [cacertfile: "proxy-ca.pem"],
+     headers: [{"Proxy-Authorization", "Basic credentials"}]]})
+|> HTTP.Promise.await()
+```
 
 ```elixir
 HTTP.fetch("http://origin.example/resource",
@@ -533,7 +629,8 @@ HTTP.fetch("http://origin.example/resource",
 
 Connecting and establishing the tunnel share the smaller of the proxy timeout,
 request timeout, and connect timeout. CONNECT response headers are bounded to
-16,384 bytes; malformed responses, failed status codes, framing indicating a
+16,384 bytes by default (`response_header_limits[:max_connect_head_bytes]`);
+malformed responses, failed status codes, framing indicating a
 body, and plaintext buffered at the TLS boundary fail closed. Abort cancels an
 unfinished tunnel. Proxy failure never retries through a direct-origin route.
 
@@ -563,7 +660,7 @@ uncertain deadline outcomes remain unconfirmed. TLS setup evidence excludes
 reuse, proxies, managed scopes, H2/H3, and custom handshake or early-data options.
 Automatic redirect chains and ExSSL never provide positive pre-send evidence.
 
-Fetch performs no automatic address failover or HTTP retry. A caller may try
+Explicit address pins perform no automatic address failover or HTTP retry. A caller may try
 another independently validated `connect_address` only after positive evidence,
 while checking its original absolute deadline and cancellation signal. Set each
 attempt's `timeout` to the remaining total budget and keep the same authority,
@@ -1430,12 +1527,15 @@ and safe pooled return:
 | `{:http, host, port, opts}` | HTTP | `:http1` (absolute-form forwarding) |
 | `{:http, host, port, opts}` | HTTPS | `:http1` or `:http2` (CONNECT tunnel) |
 | `{:https, host, port, opts}` | HTTP | `:http1` (TLS to proxy, absolute form) |
+| `{:https, host, port, opts}` | HTTPS | `:http1` or `:http2` (OTP nested TLS) |
 
 Proxy endpoint, authentication and TLS policy isolate pooled connections.
 Proxy authorization is excluded from origin requests inside CONNECT tunnels.
 For example, adding `proxy: {:http, "proxy.example", 3128, []}` to the example
-above retains the same completion contract. HTTPS proxies to HTTPS origins
-(nested TLS), proxy `:h2c`, ExSSL, Unix routes, redirects followed internally,
+above retains the same completion contract. Both TLS sessions and the raw socket
+participate in nested cleanup. A setup failure before OTP exposes a TLS handle
+retains `:cleanup_unconfirmed`; a finite wait may first return `:cleanup_pending`.
+Proxy `:h2c`, ExSSL, Unix routes, redirects followed internally,
 `:auto`, and HTTP/3 return
 `{:error, {:unsupported_completion, reason}}`. Existing asynchronous
 `HTTP.AbortController.abort/1` is unchanged; its cancellation can be followed by

@@ -239,7 +239,7 @@ defmodule HTTP.HTTP2.PoolKey do
   defp option_identity(value, name), do: safe_identity(value, name)
 
   defp connection_options(options) do
-    Keyword.take(options, [:connect_timeout, :tls_backend, :http_version])
+    Keyword.take(options, [:connect_timeout, :tls_backend, :http_version, :prefer_ipv6])
   end
 
   defp scope_identity(options) do

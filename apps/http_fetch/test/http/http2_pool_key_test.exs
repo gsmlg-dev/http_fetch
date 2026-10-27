@@ -17,6 +17,12 @@ defmodule HTTP.HTTP2PoolKeyTest do
     assert left.port == 443
   end
 
+  test "IPv6 preference isolates reusable connection policy" do
+    assert {:ok, first} = PoolKey.build(request(prefer_ipv6: false), WireProfile.native_v1(), :h2)
+    assert {:ok, second} = PoolKey.build(request(prefer_ipv6: true), WireProfile.native_v1(), :h2)
+    refute first == second
+  end
+
   test "ordered settings and profile contents participate in the key" do
     first = %{id: "ordered", settings: [{1, 4096}, {4, 65_535}, {2, 0}]}
     second = %{id: "ordered", settings: [{4, 65_535}, {1, 4096}, {2, 0}]}

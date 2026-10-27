@@ -559,6 +559,8 @@ defmodule HTTP.Runtime.Dialer do
       request_lifecycle: Keyword.get(request.transport_options, :request_lifecycle),
       managed_coordinator: Keyword.get(request.transport_options, :managed_coordinator),
       connect_address: Keyword.get(request.transport_options, :connect_address),
+      response_header_limits: Keyword.get(request.transport_options, :response_header_limits),
+      prefer_ipv6: Keyword.get(request.transport_options, :prefer_ipv6, false),
       ssl:
         request.transport_options
         |> Keyword.get(:ssl, [])

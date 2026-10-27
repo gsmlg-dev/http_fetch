@@ -18,6 +18,32 @@ defmodule HTTP.FetchOptionsTest do
       end
     end
 
+    test "normalizes request-local header budgets and IPv6 preference in flat options" do
+      for input <- [
+            [response_header_limits: [max_fields: 10], prefer_ipv6: true],
+            %{"response_header_limits" => %{max_fields: 10}, "prefer_ipv6" => true},
+            %{"responseHeaderLimits" => %{max_fields: 10}, "preferIPv6" => true}
+          ] do
+        options = HTTP.FetchOptions.new(input)
+        assert options.response_header_limits.max_fields == 10
+        assert options.response_header_limits.max_head_bytes == 65_540
+        assert options.prefer_ipv6
+        transport = HTTP.FetchOptions.to_transport_options(options)
+        assert transport[:response_header_limits] == options.response_header_limits
+        assert transport[:prefer_ipv6]
+      end
+
+      assert HTTP.FetchOptions.new([]).response_header_limits == nil
+      refute HTTP.FetchOptions.new([]).prefer_ipv6
+      assert_raise ArgumentError, fn -> HTTP.FetchOptions.new(prefer_ipv6: :yes) end
+
+      for version <- [:http2, :h2c, :http3, :auto] do
+        assert_raise ArgumentError, fn ->
+          HTTP.FetchOptions.new(http_version: version, response_header_limits: [max_fields: 1])
+        end
+      end
+    end
+
     test "creates from keyword list" do
       options = HTTP.FetchOptions.new(method: "GET", timeout: 5_000)
       assert %HTTP.FetchOptions{method: :get, timeout: 5_000} = options

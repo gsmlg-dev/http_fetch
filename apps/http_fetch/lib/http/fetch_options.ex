@@ -79,6 +79,11 @@ defmodule HTTP.FetchOptions do
     original IP verification identity is currently unsupported.
   - `http_version` - protocol selection, one of `:http1`, `:http2`, `:http3`,
     `:h2c`, or `:auto`; defaults to `:http1`
+  - `prefer_ipv6` - Prefer IPv6 with IPv4 fallback only during TCP establishment.
+    Explicit `connect_address` pins and `:inet`/`:inet6` socket options remain strict.
+    For a proxy route this policy selects the proxy endpoint address family.
+  - `response_header_limits` - Request-local HTTP/1 and CONNECT budgets; see
+    `HTTP.ResponseHeaderLimits`. Also applies to informational and redirect heads.
   - `tls_backend` - TLS implementation, `:ssl` or `:ex_ssl`; defaults to the
     shared `:http_core, :tls_backend` configuration
   - `ssl` - TLS options passed to the selected TLS backend
@@ -167,6 +172,11 @@ defmodule HTTP.FetchOptions do
     "method" => :method,
     "redirect" => :redirect,
     "signal" => :signal,
+    "response_header_limits" => :response_header_limits,
+    "responseHeaderLimits" => :response_header_limits,
+    "prefer_ipv6" => :prefer_ipv6,
+    "preferIpv6" => :prefer_ipv6,
+    "preferIPv6" => :prefer_ipv6,
     "socket_opts" => :socket_opts,
     "socketOpts" => :socket_opts,
     "ssl" => :ssl,
@@ -201,8 +211,10 @@ defmodule HTTP.FetchOptions do
             response_stream_idle_timeout: nil,
             response_stream_ack_timeout: nil,
             connect_address: nil,
+            prefer_ipv6: false,
             ssl: nil,
             socket_opts: nil,
+            response_header_limits: nil,
             proxy: nil,
             http1_reuse: false,
             http1_scope: nil,
@@ -242,8 +254,10 @@ defmodule HTTP.FetchOptions do
           response_stream_idle_timeout: pos_integer() | :infinity | nil,
           response_stream_ack_timeout: pos_integer() | :infinity | nil,
           connect_address: :inet.ip_address() | nil,
+          prefer_ipv6: boolean(),
           ssl: list() | nil,
           socket_opts: list() | nil,
+          response_header_limits: map() | nil,
           http1_reuse: boolean(),
           http1_scope: atom() | String.t() | nil,
           http1_pool_size: pos_integer(),
@@ -294,8 +308,10 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:response_stream_idle_timeout, options.response_stream_idle_timeout)
     |> maybe_add(:response_stream_ack_timeout, options.response_stream_ack_timeout)
     |> maybe_add(:connect_address, options.connect_address)
+    |> maybe_add(:prefer_ipv6, if(options.prefer_ipv6, do: true, else: nil))
     |> maybe_add(:ssl, options.ssl)
     |> maybe_add(:socket_opts, options.socket_opts)
+    |> maybe_add(:response_header_limits, options.response_header_limits)
     |> maybe_add(:proxy, options.proxy)
     |> maybe_add(:redirect, options.redirect)
     |> maybe_add(:http_version, options.http_version)
@@ -410,6 +426,9 @@ defmodule HTTP.FetchOptions do
       {:response_stream_idle_timeout, timeout}, acc ->
         %{acc | response_stream_idle_timeout: timeout}
 
+      {:prefer_ipv6, value}, acc ->
+        %{acc | prefer_ipv6: value}
+
       {:connect_address, connect_address}, acc ->
         %{acc | connect_address: connect_address}
 
@@ -418,6 +437,9 @@ defmodule HTTP.FetchOptions do
 
       {:proxy, proxy}, acc ->
         %{acc | proxy: proxy}
+
+      {:response_header_limits, limits}, acc ->
+        %{acc | response_header_limits: limits}
 
       {:socket_opts, socket_opts}, acc ->
         %{acc | socket_opts: socket_opts}
@@ -461,6 +483,15 @@ defmodule HTTP.FetchOptions do
     end)
   end
 
+  defp normalize_prefer_ipv6(value) when is_boolean(value), do: value
+  defp normalize_prefer_ipv6(_value), do: raise(ArgumentError, "prefer_ipv6 must be a boolean")
+
+  defp validate_response_header_protocol(%{response_header_limits: nil} = options), do: options
+  defp validate_response_header_protocol(%{http_version: :http1} = options), do: options
+
+  defp validate_response_header_protocol(_options),
+    do: raise(ArgumentError, "response_header_limits requires explicit http_version: :http1")
+
   defp normalize_key(key) when is_binary(key), do: Map.get(@string_keys, key, key)
   defp normalize_key(key), do: key
 
@@ -483,6 +514,9 @@ defmodule HTTP.FetchOptions do
         telemetry: normalize_telemetry(options.telemetry),
         error_mode: normalize_error_mode(options.error_mode),
         http_version: http_version,
+        prefer_ipv6: normalize_prefer_ipv6(options.prefer_ipv6),
+        response_header_limits:
+          HTTP.ResponseHeaderLimits.normalize(options.response_header_limits),
         read_idle_timeout: normalize_idle_timeout(options.read_idle_timeout, :read_idle_timeout),
         write_idle_timeout:
           normalize_idle_timeout(options.write_idle_timeout, :write_idle_timeout),
@@ -502,6 +536,7 @@ defmodule HTTP.FetchOptions do
         http2_scope: normalize_http2_scope(options.http2_scope),
         http2_priority: normalize_http2_priority(options.http2_priority)
     }
+    |> validate_response_header_protocol()
     |> validate_connect_address()
     |> validate_idle_protocol()
     |> validate_response_stream_idle_protocol()

@@ -1823,7 +1823,7 @@ defmodule HTTP.SocketClient do
   end
 
   defp rearm(state) do
-    case state.transport.setopts(state.socket, active: :once) do
+    case activate_socket(state) do
       :ok -> owner_loop(arm_read_idle(state))
       {:error, :closed} -> handle_closed(state)
       {:error, reason} -> fail(state, reason)
@@ -2024,7 +2024,11 @@ defmodule HTTP.SocketClient do
           {:buffer, [head, body]}
       end
 
-    {:ok, HTTP.HTTP1, HTTP.HTTP1.new(request.method), prepared_request}
+    {:ok, HTTP.HTTP1,
+     HTTP.HTTP1.new(
+       request.method,
+       Keyword.get(request.transport_options, :response_header_limits)
+     ), prepared_request}
   rescue
     error -> {:error, error}
   end
