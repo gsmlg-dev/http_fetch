@@ -209,9 +209,15 @@ defmodule HTTP.HTTP3.LifecycleTest do
     test "watchdog reports indeterminate #{@stage} HEADERS admission without replay", %{
       controller: controller
     } do
-      owner = owner(controller, operation_timeout: 100)
+      owner = owner(controller)
       Process.unlink(owner)
       owner_monitor = Process.monitor(owner)
+
+      # Bound the stalled HEADERS operation after initialization has completed.
+      :sys.replace_state(owner, fn state ->
+        %{state | timeout: 100, session: %{state.session | timeout: 100}}
+      end)
+
       {:ok, pool} = Pool.start_link(max_connections: 1)
       on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
 
