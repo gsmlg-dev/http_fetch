@@ -506,6 +506,10 @@ defmodule HTTP.Runtime.StreamTest do
     monitor = Process.monitor(stream)
 
     assert_receive {:http_runtime, ^generation, ^stream, {:opened, %{owner: owner}}}, 5_000
+
+    assert_receive {:http_runtime, ^generation, ^stream, {:headers, [{":status", "200"}], 4}},
+                   5_000
+
     Process.exit(owner, :kill)
 
     assert_receive {:http_runtime, ^generation, ^stream, {:error, {:owner_down, :killed}}}, 5_000
