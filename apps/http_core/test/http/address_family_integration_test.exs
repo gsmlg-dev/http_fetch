@@ -74,7 +74,7 @@ defmodule HTTP.Transport.AddressFamilyIntegrationTest do
   end
 
   test "strict inet6 and connect_address pinning never fall back" do
-    port = tcp_peer({127, 0, 0, 1})
+    {_ipv6, ipv4, port} = dual_listeners([])
 
     {result, attempts} =
       connect(HTTP.Transport.TCP, "127.0.0.1", port,
@@ -84,32 +84,23 @@ defmodule HTTP.Transport.AddressFamilyIntegrationTest do
 
     assert {:error, :nxdomain} = result
     assert_families(attempts, [:inet6])
+    assert {:error, :timeout} = :gen_tcp.accept(ipv4, 0)
+
+    :ok = :gen_tcp.close(ipv4)
 
     {result, attempts} =
       connect(HTTP.Transport.TCP, "unresolvable.invalid", port,
         prefer_ipv6: true,
-        connect_address: {127, 0, 0, 2}
+        connect_address: {127, 0, 0, 1}
       )
 
     assert {:error, :econnrefused} = result
-    assert [{_, ^port, _socket_opts, _timeout}] = attempts
-    assert elem(hd(attempts), 0) == {127, 0, 0, 2}
+    assert [{{127, 0, 0, 1}, ^port, _socket_opts, _timeout}] = attempts
   end
 
   test "a spent IPv6 connection budget cannot start a fresh IPv4 attempt" do
-    {:ok, ipv6} =
-      :gen_tcp.listen(0, [
-        :binary,
-        :inet6,
-        active: false,
-        ip: {0, 0, 0, 0, 0, 0, 0, 1},
-        ipv6_v6only: true,
-        backlog: 0
-      ])
-
-    {:ok, port} = :inet.port(ipv6)
-    {:ok, queued} = :gen_tcp.connect(~c"::1", port, [:binary, :inet6, active: false], @wait)
-    {:ok, ipv4} = :gen_tcp.listen(port, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {ipv6, ipv4, port} = dual_listeners(backlog: 1)
+    queued = saturate_ipv6(port)
 
     try do
       started = System.monotonic_time(:millisecond)
@@ -126,9 +117,60 @@ defmodule HTTP.Transport.AddressFamilyIntegrationTest do
       assert System.monotonic_time(:millisecond) - started < 1_000
       assert {:error, :timeout} = :gen_tcp.accept(ipv4, 0)
     after
-      :gen_tcp.close(queued)
+      Enum.each(queued, &:gen_tcp.close/1)
       :gen_tcp.close(ipv6)
       :gen_tcp.close(ipv4)
+    end
+  end
+
+  defp dual_listeners(options, attempts \\ 8)
+
+  defp dual_listeners(options, attempts) when attempts > 0 do
+    # The same numeric port has separate IPv4 and v6-only availability.
+    # Reserve both before traffic and release partial allocations on conflict.
+    {:ok, ipv4} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(ipv4)
+
+    case :gen_tcp.listen(
+           port,
+           [:binary, :inet6, active: false, ip: {0, 0, 0, 0, 0, 0, 0, 1}, ipv6_v6only: true] ++
+             options
+         ) do
+      {:ok, ipv6} ->
+        on_exit(fn ->
+          :gen_tcp.close(ipv6)
+          :gen_tcp.close(ipv4)
+        end)
+
+        {ipv6, ipv4, port}
+
+      {:error, :eaddrinuse} ->
+        :gen_tcp.close(ipv4)
+        dual_listeners(options, attempts - 1)
+
+      {:error, reason} ->
+        :gen_tcp.close(ipv4)
+        flunk("dual loopback listener setup failed: #{inspect(reason)}")
+    end
+  end
+
+  defp dual_listeners(_options, 0), do: flunk("no shared IPv4/IPv6 loopback port available")
+
+  defp saturate_ipv6(port, queued \\ [], remaining \\ 32) do
+    case :gen_tcp.connect(~c"::1", port, [:binary, :inet6, active: false], 100) do
+      {:ok, socket} when remaining > 0 ->
+        on_exit(fn -> :gen_tcp.close(socket) end)
+        saturate_ipv6(port, [socket | queued], remaining - 1)
+
+      {:error, :timeout} ->
+        assert {:error, :timeout} =
+                 :gen_tcp.connect(~c"::1", port, [:binary, :inet6, active: false], 100)
+
+        queued
+
+      other ->
+        if match?({:ok, _}, other), do: :gen_tcp.close(elem(other, 1))
+        flunk("could not establish saturated native IPv6 backlog: #{inspect(other)}")
     end
   end
 
