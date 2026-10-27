@@ -1241,8 +1241,9 @@ defmodule SSL.OCSPWireSizeIntegrationTest do
 
     peer_options =
       if version == :"tlsv1.2" do
-        # OTP 28 caps OCSP DER at 100 KiB; OTP 29 accepts the signed N+1 input.
-        # The provider retains its own 100 KiB boundary on both runtimes.
+        # public_key 1.21.2 accepts signed N+1 input. Current OTP 28 and
+        # OTP 29.1.2/public_key 1.21.8 cap OCSP DER at 100 KiB.
+        # The provider retains its own 100 KiB boundary on every runtime.
         response = RevocationFixtures.padded_ocsp!(base, :leaf, 102_400 + delta)
         assert_signed(response, issuer)
 
@@ -1253,7 +1254,7 @@ defmodule SSL.OCSPWireSizeIntegrationTest do
           delta <= 0 ->
             assert {:ok, _} = oracle
 
-          :erlang.system_info(:otp_release) == ~c"29" ->
+          Application.spec(:public_key, :vsn) == ~c"1.21.2" ->
             assert {:ok, []} = oracle
 
           true ->
