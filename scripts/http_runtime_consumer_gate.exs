@@ -170,7 +170,6 @@ defmodule HTTPRuntimeConsumerGate do
     assert!(
       Enum.sort(Enum.map(children, &elem(&1, 0))) ==
         Enum.sort([
-          :http_runtime_task_supervisor,
           :http_managed_transport_supervisor,
           HTTP.HTTP1.Pool,
           HTTP.HTTP2.ConnectionSupervisor,
@@ -179,6 +178,14 @@ defmodule HTTPRuntimeConsumerGate do
           HTTP.HTTP3.Pool
         ]),
       "runtime has unexpected supervision owners"
+    )
+
+    assert!(
+      Supervisor.which_children(HTTP.Core.Application) == [
+        {:http_runtime_task_supervisor, runtime[:http_runtime_task_supervisor], :supervisor,
+         [Task.Supervisor]}
+      ],
+      "core has unexpected completion supervision owners"
     )
 
     assert!(
