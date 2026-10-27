@@ -36,6 +36,7 @@ defmodule HTTP.EventSource.Connection do
             redirects: 0,
             raw_queue: :queue.new(),
             raw_bytes: 0,
+            raw_refs: 0,
             remote_end?: false,
             terminal_reason: nil,
             opening_timer: nil,
@@ -665,7 +666,8 @@ defmodule HTTP.EventSource.Connection do
         | terminal_reason: {:fatal, reason},
           remote_end?: true,
           raw_queue: :queue.new(),
-          raw_bytes: 0
+          raw_bytes: 0,
+          raw_refs: 0
       }
     else
       fatal_now(state, reason)
@@ -700,7 +702,14 @@ defmodule HTTP.EventSource.Connection do
   defp close_transport(state) do
     state = detach_transport(state)
 
-    %{state | raw_queue: :queue.new(), raw_bytes: 0, remote_end?: false, terminal_reason: nil}
+    %{
+      state
+      | raw_queue: :queue.new(),
+        raw_bytes: 0,
+        raw_refs: 0,
+        remote_end?: false,
+        terminal_reason: nil
+    }
   end
 
   defp detach_transport(state) do
@@ -960,10 +969,11 @@ defmodule HTTP.EventSource.Connection do
       state = %{
         state
         | raw_queue: pack_raw(state.raw_queue, :binary.copy(data), ref),
-          raw_bytes: state.raw_bytes + byte_size(data)
+          raw_bytes: state.raw_bytes + byte_size(data),
+          raw_refs: state.raw_refs + raw_ref_count(ref)
       }
 
-      if :queue.len(state.raw_queue) > 128,
+      if :queue.len(state.raw_queue) > 128 or state.raw_refs > 128,
         do: fatal(state, :consumer_overloaded),
         else: drain_raw(state)
     end
@@ -980,17 +990,25 @@ defmodule HTTP.EventSource.Connection do
 
   defp admit_credit(_state, _data, nil), do: nil
 
-  defp pack_raw(queue, data, nil) do
+  defp pack_raw(queue, data, ref) do
     case :queue.out_r(queue) do
-      {{:value, {previous, nil}}, rest} when byte_size(previous) + byte_size(data) <= 65_536 ->
-        :queue.in({previous <> data, nil}, rest)
+      {{:value, {previous, previous_ref}}, rest}
+      when byte_size(previous) + byte_size(data) <= 65_536 ->
+        :queue.in({previous <> data, merge_raw_refs(previous_ref, ref)}, rest)
 
       _ ->
-        :queue.in({data, nil}, queue)
+        :queue.in({data, ref}, queue)
     end
   end
 
-  defp pack_raw(queue, data, ref), do: :queue.in({data, ref}, queue)
+  defp merge_raw_refs(nil, ref), do: ref
+  defp merge_raw_refs(ref, nil), do: ref
+
+  defp merge_raw_refs({stream, previous}, {stream, ref}),
+    do: {stream, [ref | List.wrap(previous)]}
+
+  defp raw_ref_count(nil), do: 0
+  defp raw_ref_count({_stream, refs}), do: length(List.wrap(refs))
 
   defp raw_limit(%{options: %{http_version: :http3}}), do: 1_048_576 + 16_384
 
@@ -1014,7 +1032,12 @@ defmodule HTTP.EventSource.Connection do
   defp parse_raw(state, {:empty, _}), do: state
 
   defp parse_raw(state, {{:value, {data, ref}}, queue}) do
-    state = %{state | raw_queue: queue, raw_bytes: state.raw_bytes - byte_size(data)}
+    state = %{
+      state
+      | raw_queue: queue,
+        raw_bytes: state.raw_bytes - byte_size(data),
+        raw_refs: state.raw_refs - raw_ref_count(ref)
+    }
 
     case Parser.parse_some(state.parser, data) do
       {:ok, parser, events, rest} ->
@@ -1027,7 +1050,13 @@ defmodule HTTP.EventSource.Connection do
   end
 
   defp settle_raw(state, <<>>, ref) do
-    if ref, do: stream_module(state).acknowledge(elem(ref, 0), elem(ref, 1))
+    if ref do
+      {stream, refs} = ref
+
+      for delivery_ref <- Enum.reverse(List.wrap(refs)),
+          do: stream_module(state).acknowledge(stream, delivery_ref)
+    end
+
     state
   end
 
@@ -1035,7 +1064,8 @@ defmodule HTTP.EventSource.Connection do
     %{
       state
       | raw_queue: :queue.in_r({rest, ref}, state.raw_queue),
-        raw_bytes: state.raw_bytes + byte_size(rest)
+        raw_bytes: state.raw_bytes + byte_size(rest),
+        raw_refs: state.raw_refs + raw_ref_count(ref)
     }
   end
 
