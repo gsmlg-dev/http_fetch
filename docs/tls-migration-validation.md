@@ -1,5 +1,16 @@
 # TLS migration execution ledger
 
+## Explicit static-analysis deferral — 2026-10-27
+
+The user authorized deferring Credo and Dialyzer during this migration. Manual
+CI and Release now accept `defer_static_analysis: true` to omit only those two
+checks and record each as `DEFERRED` in the job summary. The input defaults to
+false; automatic CI continues to require both checks. Formatting, strict
+compilation, source tests, independent peers, candidate consumers, package
+identity and publication checks retain their existing requirements. A deferred
+check is not passing evidence. The final migration release will explicitly
+record any use of this accepted exception.
+
 ## Stream-client proxy endpoint rejection — 2026-10-27
 
 EventSource and WebSocket previously ignored a supplied `proxy` endpoint and could

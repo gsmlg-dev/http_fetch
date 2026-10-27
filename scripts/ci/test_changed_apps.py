@@ -204,6 +204,41 @@ class SelectionTest(unittest.TestCase):
 
 
 class WorkflowContractTest(unittest.TestCase):
+    def test_static_analysis_deferral_is_explicit_manual_and_keeps_other_gates_required(self):
+        root = SCRIPT.parents[2]
+        strict = "if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis) }}"
+        deferred = "if: github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis"
+        for filename, lint_names, required_names in (
+            ("ci.yml", ("Check selected app with Credo", "Check selected app with Dialyzer"),
+             ("Check selected app formatting", "Compile selected closure",
+              "Build selected portable Hex package", "Check git diff")),
+            ("release.yml", ("Check source with Credo", "Check source with Dialyzer"),
+             ("Validate all source and automation", "Build and run Go HTTP E2E server",
+              "Build, inspect, and independently consume all nine archives",
+              "Preflight Hex and GitHub immutability before any remote write")),
+        ):
+            with self.subTest(workflow=filename):
+                text = (root / ".github/workflows" / filename).read_text()
+                dispatch = text.split("  workflow_dispatch:", 1)[1].split("\n\n", 1)[0]
+                self.assertRegex(dispatch, r"(?m)^      defer_static_analysis:\n"
+                                 r"        description: [^\n]+\n"
+                                 r"        required: false\n"
+                                 r"        default: false\n"
+                                 r"        type: boolean$")
+                steps = text.split("      - name: ")[1:]
+                by_name = {step.split("\n", 1)[0]: step for step in steps}
+                for name in lint_names:
+                    self.assertIn(strict, by_name[name])
+                    self.assertNotIn("continue-on-error", by_name[name])
+                summary = by_name["Record deferred static analysis"]
+                self.assertIn(deferred, summary)
+                self.assertIn("Credo: DEFERRED", summary)
+                self.assertIn("Dialyzer: DEFERRED", summary)
+                self.assertIn('"$GITHUB_STEP_SUMMARY"', summary)
+                for name in required_names:
+                    self.assertNotIn("defer_static_analysis", by_name[name])
+                    self.assertNotIn("continue-on-error", by_name[name])
+
     def test_candidate_tls_is_automatic_required_and_retains_feature_evidence(self):
         root = SCRIPT.parents[2]
         ci = (root / ".github/workflows/ci.yml").read_text()
@@ -227,7 +262,10 @@ class WorkflowContractTest(unittest.TestCase):
         for workflow in WORKFLOWS:
             text = (root / ".github/workflows" / workflow).read_text()
             with self.subTest(workflow=workflow):
-                self.assertRegex(text, r"(?m)^  workflow_dispatch: \{\}$")
+                if workflow == "ci.yml":
+                    self.assertRegex(text, r"(?m)^  workflow_dispatch:$")
+                else:
+                    self.assertRegex(text, r"(?m)^  workflow_dispatch: \{\}$")
                 for event in ("push", "pull_request"):
                     block = re.search(rf"(?m)^  {event}:\n((?:    .*\n)+)", text).group(1)
                     self.assertIn("'apps/**'", block)

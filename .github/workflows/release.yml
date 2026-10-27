@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      defer_static_analysis:
+        description: Defer Credo and Dialyzer only; record both as DEFERRED
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -112,12 +117,24 @@ jobs:
           mix run scripts/phase1/admission_test.exs
           mix test --seed 28092026 --include integration
           mix test apps/ex_ssl/test --include integration --seed 743209
-          mix credo
-          mix dialyzer --format github
           python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
           python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
           git diff --check
           git diff --exit-code -- mix.lock
+
+      - name: Record deferred static analysis
+        if: github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis
+        run: |
+          printf '%s\n' 'Credo: DEFERRED (explicit manual input)' 'Dialyzer: DEFERRED (explicit manual input)' >> "$GITHUB_STEP_SUMMARY"
+          echo '::notice::Credo and Dialyzer deferred by explicit manual input; other gates remain required.'
+
+      - name: Check source with Credo
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis) }}
+        run: mix credo
+
+      - name: Check source with Dialyzer
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis) }}
+        run: mix dialyzer --format github
 
       - name: Build and run Go HTTP E2E server
         run: |

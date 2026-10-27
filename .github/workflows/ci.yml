@@ -8,7 +8,13 @@ on:
     branches: [main]
     paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
 
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      defer_static_analysis:
+        description: Defer Credo and Dialyzer only; record both as DEFERRED
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -62,9 +68,16 @@ jobs:
           esac
       - name: Compile selected closure
         run: mix compile --warnings-as-errors
+      - name: Record deferred static analysis
+        if: github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis
+        run: |
+          printf '%s\n' 'Credo: DEFERRED (explicit manual input)' 'Dialyzer: DEFERRED (explicit manual input)' >> "$GITHUB_STEP_SUMMARY"
+          echo '::notice::Credo and Dialyzer deferred by explicit manual input; other gates remain required.'
       - name: Check selected app with Credo
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis) }}
         run: mix credo --files-included "apps/${HTTP_FETCH_CI_APP}/**/*.{ex,exs}"
       - name: Check selected app with Dialyzer
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis) }}
         run: mix dialyzer --force-check --format github
       - name: Build selected portable Hex package
         run: |
