@@ -3250,7 +3250,7 @@ defmodule SSL.CRLDistributionScopeIntegrationTest do
       :public_key.pem_encode([{:CertificateList, der, :not_encrypted}])
     )
 
-    destination = Path.join(File.cwd!(), "public-dp-scope")
+    destination = Path.join(base, "public-dp-scope")
     File.mkdir!(destination)
 
     names =
@@ -3412,7 +3412,7 @@ defmodule SSL.CRLDistributionScopeIntegrationTest do
       assert code == if(scope == :match, do: 0, else: 2)
     end
 
-    destination = Path.join(File.cwd!(), "public-dp-scope")
+    destination = Path.join(base, "public-dp-scope")
     File.mkdir_p!(destination)
 
     names =

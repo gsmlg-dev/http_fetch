@@ -17,6 +17,7 @@ defmodule SSL.PolicyIO.Guard do
       ledger: AuxiliaryLedger.new(),
       actor: nil,
       socket: nil,
+      http_close: nil,
       retirement: nil,
       finished: false
     }
@@ -38,6 +39,25 @@ defmodule SSL.PolicyIO.Guard do
     end
   end
 
+  def finish_http_close(state, capability, generation, nonce, {caller, _} = from) do
+    if capability == state.capability and caller == state.connection do
+      case state.http_close do
+        %{generation: ^generation, nonce: ^nonce, finished: false} = closing ->
+          if state.retirement == nil or PolicyIO.now() < state.retirement do
+            next = %{state | http_close: %{closing | finished: true, from: from}}
+            {:deferred, release_http_close(next)}
+          else
+            {{:error, :http_close_not_permitted}, state}
+          end
+
+        _ ->
+          {{:error, :http_close_not_permitted}, state}
+      end
+    else
+      {{:error, :unauthorized_policy}, state}
+    end
+  end
+
   def actor_operation(
         %{actor: %{pid: caller, capability: capability}} = state,
         capability,
@@ -54,11 +74,11 @@ defmodule SSL.PolicyIO.Guard do
 
   def down(state, {:DOWN, _, :process, _, _} = event) do
     ledger = state.ledger |> AuxiliaryLedger.creator_down(event) |> AuxiliaryLedger.down(event)
-    %{state | ledger: ledger}
+    release_http_close(%{state | ledger: ledger})
   end
 
   def down(state, {:DOWN, _, :socket, _, _} = event),
-    do: %{state | ledger: AuxiliaryLedger.down(state.ledger, event)}
+    do: release_http_close(%{state | ledger: AuxiliaryLedger.down(state.ledger, event)})
 
   def down(state, _), do: state
 
@@ -70,9 +90,27 @@ defmodule SSL.PolicyIO.Guard do
   def retire(state, _grace), do: state
 
   def kill(state) do
+    if protects_connection?(state, state.connection), do: Process.exit(state.connection, :kill)
     if state.actor && Process.alive?(state.actor.pid), do: Process.exit(state.actor.pid, :kill)
     :ok
   end
+
+  # A close acknowledgement never substitutes for the original native DOWN.
+  # The closer is protected only from our retirement kill, through fixed grace.
+  def protects_connection?(%{http_close: closing, connection: pid}, pid),
+    do: closing != nil
+
+  def protects_connection?(_state, _pid), do: false
+
+  def http_close_expired?(%{http_close: %{deadline: deadline}}, instant),
+    do: instant >= deadline
+
+  def http_close_expired?(_state, _instant), do: false
+
+  def http_close_timer?(%{http_close: %{timer: timer, nonce: nonce}}, timer, nonce),
+    do: true
+
+  def http_close_timer?(_state, _timer, _nonce), do: false
 
   def proof(state), do: AuxiliaryLedger.proof(state.ledger)
 
@@ -101,7 +139,7 @@ defmodule SSL.PolicyIO.Guard do
   end
 
   defp authorized(state, :finish) do
-    if settled?(state) do
+    if state.http_close == nil and settled?(state) do
       {:ok, %{state | ledger: AuxiliaryLedger.close_admission(state.ledger), finished: true}}
     else
       {{:error, :resources_pending}, state}
@@ -114,10 +152,46 @@ defmodule SSL.PolicyIO.Guard do
       else: {{:error, :unknown_generation}, state}
   end
 
+  defp authorized(state, {:http_close_begin, generation, socket, deadline}) do
+    instant = PolicyIO.now()
+
+    with true <- is_integer(deadline) and instant < deadline,
+         true <- state.retirement == nil and PolicyIO.remaining(state.deadline) > 0,
+         nil <- state.http_close,
+         %{
+           generation: ^generation,
+           kind: :http_socket,
+           state: :live,
+           identity: {_, :socket, ^socket} = identity
+         } <- state.ledger.current,
+         %{owner: owner} when owner == state.connection <- :socket.info(socket) do
+      bound = min(deadline, instant + 1_000)
+      bound = if state.deadline == :infinity, do: bound, else: min(bound, state.deadline)
+      nonce = make_ref()
+      timer = :erlang.start_timer(bound, self(), {:policy_http_close, nonce}, abs: true)
+
+      closing = %{
+        generation: generation,
+        identity: identity,
+        nonce: nonce,
+        deadline: bound,
+        timer: timer,
+        from: nil,
+        finished: false
+      }
+
+      {{:ok, nonce, bound}, %{state | http_close: closing}}
+    else
+      _ -> {{:error, :http_close_not_permitted}, state}
+    end
+  end
+
   defp authorized(state, :http) do
     token = make_ref()
 
-    with true <- state.retirement == nil and PolicyIO.remaining(state.deadline) > 0,
+    with true <-
+           state.retirement == nil and state.http_close == nil and
+             PolicyIO.remaining(state.deadline) > 0,
          {:ok, ledger, generation} <-
            AuxiliaryLedger.reserve(state.ledger, :http_socket, state.requester, token) do
       {{:ok, generation, token}, %{state | ledger: ledger}}
@@ -156,7 +230,9 @@ defmodule SSL.PolicyIO.Guard do
   defp authorized(state, :file) do
     token = make_ref()
 
-    with true <- state.retirement == nil and PolicyIO.remaining(state.deadline) > 0,
+    with true <-
+           state.retirement == nil and state.http_close == nil and
+             PolicyIO.remaining(state.deadline) > 0,
          {:ok, ledger, generation} <-
            AuxiliaryLedger.reserve(state.ledger, :file_executor, state.requester, token) do
       capability = make_ref()
@@ -182,6 +258,21 @@ defmodule SSL.PolicyIO.Guard do
   end
 
   defp authorized(state, _), do: {{:error, :invalid_policy_operation}, state}
+
+  defp release_http_close(%{http_close: %{finished: true, identity: identity} = closing} = state) do
+    case state.ledger.current do
+      %{identity: ^identity, state: :down} ->
+        _ = Process.cancel_timer(closing.timer)
+        reply = if state.retirement == nil, do: :ok, else: {:error, :admission_closed}
+        GenServer.reply(closing.from, reply)
+        %{state | http_close: nil}
+
+      _ ->
+        state
+    end
+  end
+
+  defp release_http_close(state), do: state
 
   defp actor_authorized(state, :open) do
     operation = make_ref()
@@ -260,7 +351,24 @@ defmodule SSL.PolicyIO.Guard do
     end
   end
 
+  def handle_call(
+        {{:policy, capability, {:http_close_finish, generation, nonce}}, _},
+        from,
+        state
+      ) do
+    state = expire_http_close(state)
+    {reply, policy} = finish_http_close(state.policy, capability, generation, nonce, from)
+    next = %{state | policy: policy}
+
+    case {reply, finish_retirement(next)} do
+      {:deferred, transition} -> transition
+      {result, {:noreply, next}} -> {:reply, result, next}
+      {result, {:stop, reason, next}} -> {:stop, reason, result, next}
+    end
+  end
+
   def handle_call({{:policy, capability, operation}, _}, {caller, _}, state) do
+    state = expire_http_close(state)
     {reply, policy} = operation(state.policy, capability, operation, caller)
     next = %{state | policy: policy}
 
@@ -268,7 +376,10 @@ defmodule SSL.PolicyIO.Guard do
       _ = if state.timer, do: Process.cancel_timer(state.timer)
       {:stop, :normal, reply, next}
     else
-      {:reply, reply, next}
+      case finish_retirement(next) do
+        {:stop, reason, next} -> {:stop, reason, reply, next}
+        {:noreply, next} -> {:reply, reply, next}
+      end
     end
   end
 
@@ -287,9 +398,6 @@ defmodule SSL.PolicyIO.Guard do
     requester_down =
       match?({:DOWN, ref, :process, pid, _} when {ref, :process, pid} == policy.requester, event)
 
-    if owner_down and Process.alive?(policy.connection),
-      do: Process.exit(policy.connection, :kill)
-
     policy =
       if owner_down or requester_down, do: retire(policy, PolicyIO.now() + 1_000), else: policy
 
@@ -297,10 +405,15 @@ defmodule SSL.PolicyIO.Guard do
   end
 
   def handle_info(:deadline, state) do
-    Process.exit(state.policy.connection, :kill)
     policy = retire(state.policy, PolicyIO.now() + 1_000)
     Process.send_after(self(), :grace, 1_000)
     finish_retirement(%{state | policy: policy})
+  end
+
+  def handle_info({:timeout, timer, {:policy_http_close, nonce}}, state) do
+    if http_close_timer?(state.policy, timer, nonce),
+      do: finish_retirement(expire_http_close(state)),
+      else: {:noreply, state}
   end
 
   def handle_info(:grace, state) do
@@ -311,7 +424,11 @@ defmodule SSL.PolicyIO.Guard do
   def handle_info(_, state), do: {:noreply, state}
 
   defp finish_retirement(%{policy: %{retirement: grace}} = state) when is_integer(grace) do
-    if settled?(state.policy) do
+    unless protects_connection?(state.policy, state.policy.connection),
+      do: Process.exit(state.policy.connection, :kill)
+
+    if settled?(state.policy) and
+         (state.policy.http_close == nil or not Process.alive?(state.policy.connection)) do
       {:stop, :normal, state}
     else
       Process.send_after(self(), :grace, max(0, grace - PolicyIO.now()))
@@ -320,4 +437,12 @@ defmodule SSL.PolicyIO.Guard do
   end
 
   defp finish_retirement(state), do: {:noreply, state}
+
+  defp expire_http_close(state) do
+    if http_close_expired?(state.policy, PolicyIO.now()) do
+      %{state | policy: retire(state.policy, PolicyIO.now() + 1_000)}
+    else
+      state
+    end
+  end
 end

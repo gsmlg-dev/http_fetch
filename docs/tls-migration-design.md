@@ -377,6 +377,20 @@ and receiver-side original deadline checks prevent late authorization. Timers ar
 reference-fenced. Live snapshots expose finite enum/mask/epoch state, no resource or
 capability identities; Reader alone establishes terminal evidence after actor absence.
 
+Policy HTTP sockets serialize explicit close with retirement through a private
+close grant bound to the existing Connection, capability, auxiliary generation and
+native socket identity. A fresh nonce and finite begin deadline are required before
+entering close. Expired or uncertain admission terminates the owner without entering
+explicit close. Retirement fences allocation immediately, but defers its own kill of
+the granted closer until both close completion and the original exact socket DOWN
+are observed. A completion acknowledgment alone never proves cleanup. Completion is
+cleanup-only and remains admissible after the setup deadline within the already fixed
+grace; its RPC reply waits for exact socket DOWN. Retirement then ends the Connection
+without returning success into policy validation. Completion cannot extend grace or
+reopen allocation. A stalled closer is killed at
+grace expiry and missing native evidence remains unconfirmed. The standalone policy
+Guard and lifecycle Observer use the same grant state and native evidence rules.
+
 These are private cooperative runtime components. The tagged private Connection
 constructor now returns from init before its enrollment RPC, without a writer,
 handshake timer, record/TLS state or native socket. After its original Observer
