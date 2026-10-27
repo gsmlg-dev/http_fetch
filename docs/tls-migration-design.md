@@ -1,7 +1,10 @@
 # TLS migration design and compatibility contract
 
-Status: P0 is recorded; public provider lifecycle and the current ExSSL source gate
-are accepted locally. P1 compatibility and P3 HTTP integration remain incomplete.
+Status (2026-10-27): current candidate packages pass the selected advanced-policy,
+identity, provider, managed H1/H2 and stream-client matrix. Integrated P1–P4
+acceptance remains open pending current CI; OTP remains the production default.
+See the [current execution checklist](tls-migration-plan.md#current-accepted-evidence-and-remaining-gates)
+for exact source/package boundaries, executed results and pending runtime checks.
 Historical foundation sections retain their original implementation boundaries.
 Execution baseline: `main`, `6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, all nine packages
 `0.21.14`, initially clean worktree, 2026-10-21 (Asia/Shanghai).
@@ -40,17 +43,17 @@ Test paths below are relative to the repository root.
 | TLS 1.2 endpoint profile | OTP policy | ECDHE AES-GCM, EMS, initial secure renegotiation and version-specific RSA-PKCS1 SHA256/384/512 | Forced OpenSSL server/mTLS plus independent raw vectors; TLS1.3/QUIC stay strict (R42 source slice accepted) | ex_ssl | `apps/ex_ssl/test/ssl/tls12_pkcs1_interop_test.exs` and TLS1.2 suites | Integrated consumer/platform gate remains |
 | CA precedence / reference identity | System roots unless explicit CA; origin verification | Explicit cacerts, then file, then roots; DNS/IP identity and SNI | Preserve system/custom trust, pinned and tunnel-origin identity (supported subset) | core, ex_ssl | `tls_transport_test.exs`, `reference_identity_interop_test.exs` under respective app tests | Additional route matrix |
 | `verify_none` | Public adapter passes through; managed allows | Explicit TCP mode skips path/identity policy; verify_peer remains default | Preserve CV/SKE/Finished/AEAD and TLS credential constraints; auto tickets partition verification mode; QUIC still rejects none | ex_ssl, core | engine verify_none interop/authentication negatives and core transport references | Proxy-specific cases, package/runtime matrix and managed lifecycle remain open |
-| Verification callbacks, partial chain, CRL/OCSP, encrypted keys, identities | Ordinary OTP backend accepts backend-specific options; managed policy explicitly excludes callbacks/revocation/encrypted keys | Bounded verified subset, explicit unsupported errors | Preserve ordinary verify_fun and fully implement CRL/OCSP, partial_chain, encrypted keys and multiple identities before OTP removal (user decision, 2026-10-23); existing managed exclusions remain | ex_ssl | OTP references plus independent positive/negative policy and mTLS consumers; `apps/http_fetch/test/http/tls_setup_evidence_test.exs` | Yes until implemented and accepted |
+| Verification callbacks, partial chain, CRL/OCSP, encrypted keys, identities | Ordinary OTP backend accepts backend-specific options; managed policy explicitly excludes callbacks/revocation/encrypted keys | Implemented with bounded policy I/O and provider cleanup; current candidate policy/identity selection passes | Preserve ordinary verify_fun and the required extensions before OTP removal (user decision, 2026-10-23); existing managed exclusions remain | ex_ssl | Current revocation, OCSP, partial-chain, encrypted/multiple-identity and identity-completion integration suites selected by `scripts/release/consumer_gate.py` | Integrated current-runtime acceptance remains |
 | Safe TCP/send options | OTP options | Adapter allowlist; defaults < ssl < socket options | Preserve explicit precedence and mutation/binding rules (supported) | core, ex_ssl | `scripts/ex_ssl_options_test.exs` | Required matrix |
-| Managed H1/H2 | OTP only | Rejected before dial | Enable after provider lifecycle and policy are complete (required) | runtime, core | `apps/http_fetch/test/http/managed_otp_tls_lifecycle_test.exs` adapted to ExSSL | Yes |
-| Managed internal `buffer: 65_536` | Injected into socket options | Adapter/engine now preserve explicit driver value | Native driver support implemented; managed enablement still needs lifecycle integration | runtime, core, ex_ssl | [TCP option references](../apps/ex_ssl/test/ssl/tcp_options_test.exs), core direct/upgrade precedence tests | P3 managed gate remains |
+| Managed H1/H2 | Existing OTP route remains available | Frozen ExSSL policy and lifecycle integration implemented; selected candidate cases pass | Preserve policy isolation, transfer and retirement through the full runtime matrix | runtime, core | `apps/http_fetch/test/http/managed_ex_ssl_tls_lifecycle_test.exs` | Integrated current-runtime acceptance remains |
+| Managed internal `buffer: 65_536` | Injected into socket options | Adapter/engine preserve the driver value through managed setup | Keep driver behavior separate from protocol safety bounds | runtime, core, ex_ssl | [TCP option references](../apps/ex_ssl/test/ssl/tcp_options_test.exs), core precedence and managed ExSSL tests | Integrated current-runtime acceptance remains |
 | Explicit tos/tclass/priority | Platform-dependent driver semantics | Passed to driver with validation; platform errors/rounding retained | Actual IPv4/IPv6 + OTP references; macOS priority :ok/read0 is not effective QoS support | core, ex_ssl | TCP option references above | Supported-platform CI still required |
 | Explicit middlebox_comp_mode/honor_cipher_order | Managed policy accepts | Middlebox wire behavior implemented; client-role honor_cipher_order rejection matches OTP | Independent TLS12/TLS13, mixed-order, HRR and mTLS matrix accepted locally | runtime, ex_ssl | `middlebox_comp_mode_interop_test.exs`, `honor_cipher_order_test.exs` | Managed/package/runtime gates remain |
 | Explicit reuse_sessions/manual tickets | Managed policy accepts | Unsupported controls rejected | Per-option implementation or versioned compatibility decision (decision) | runtime, ex_ssl | OTP initial-hello references; full handshake/consumer coverage required | Yes |
 | Ordered ClientHello profiles | Backend-specific | Exact version/ALPN/policy matching | Preserve wire order; resolve TLS1.3 profiles against future mixed HTTP default without silently rewriting them (decision) | core, ex_ssl | `scripts/ex_ssl_options_test.exs`, engine options/profile golden tests | Yes |
 | Tickets / resumption | OTP behavior | Disabled default; auto only TLS1.3 and no identity | Preserve explicit TLS1.3 opt-in; do not ignore auto under mixed default (decision) | core, ex_ssl | `scripts/ex_ssl_resumption*_test.exs` | Yes |
-| Completion / failed setup cleanup | Current barrier, conservative unconfirmed setup failures | Explicitly unsupported | Public provider evidence before allocation; preserve pending/unconfirmed semantics (required) | ex_ssl, core, Fetch | `apps/http_fetch/test/http/*request_completion_test.exs` | Yes |
-| H1 handoff / H2 cancellation | Managed ownership and capacity invariants | Managed path disabled | Handoff transfers cancellation rights; one H2 stream cancel preserves others (required) | runtime, core | Managed and pooled completion tests | Yes |
+| Completion / failed setup cleanup | Current barrier, conservative unconfirmed setup failures | Public phase/lifecycle evidence and H1/H2 completion implemented; selected candidate cases pass | Preserve pending/unconfirmed semantics and original cleanup deadlines | ex_ssl, core, Fetch | Current setup-phase, pooled/H2 completion and proxy-completion integration suites | Integrated current-runtime acceptance remains |
+| H1 handoff / H2 cancellation | Managed ownership and capacity invariants | Managed ExSSL path implemented and selected candidate cases pass | Handoff transfers cancellation rights; one H2 stream cancel preserves others | runtime, core | Managed and pooled completion tests | Integrated current-runtime acceptance remains |
 | Busy writer + inbound control | OTP handles its implementation | Bounded pending control output implemented | Provider/duplex source acceptance preserves ciphertext, epoch and absolute deadline | ex_ssl | Independent KeyUpdate/upload and close-race tests | Integrated HTTP/package gates remain |
 | Fetch / SSE / WSS | Existing supported H1/H2 APIs | Explicit ExSSL ordinary paths exist | Preserve streaming, reconnect pinning, Upgrade, timeouts, abort and proxies (supported subset) | clients, runtime | Existing client suites + feature candidate groups | Full integrated acceptance |
 | Explicit H3 / QUIC | Separate path | Public SSL.QUIC path | Preserve current explicit static/literal QPACK beta; no new support claim | ex_ssl, QUIC, H3 | Existing QUIC/H3 source and candidate gates | Shared-core regression |
@@ -90,12 +93,13 @@ Test paths below are relative to the repository root.
 These decisions establish required compatibility, not completed support. Outstanding
 implementation or acceptance of these capabilities blocks OTP removal and release.
 
-For the required CRL work, ExSSL will own bounded default and hash-directory cache
+For CRL support, ExSSL owns bounded default and hash-directory cache
 implementations. Legacy built-in `crl_cache` module identifiers are compatibility
 selectors; production must not invoke or shadow OTP SSL cache modules. A public
-`SSL.CRLCache` facade will replace direct OTP cache population calls, with that
+`SSL.CRLCache` facade replaces direct OTP cache population calls, with that
 namespace migration documented explicitly. Custom cache callbacks retain their
-reference-validated public contract. This interface direction is not implemented.
+reference-validated public contract. Current candidate policy tests exercise this
+implementation; the full current runtime matrix remains an acceptance gate.
 
 Verification callbacks, partial-chain trust, enabled CRL checks and requested
 stapling require a full certificate handshake rather than ticket reuse that skips
@@ -848,11 +852,16 @@ limits. Existing historical consumer counts remain scoped to their original vers
 
 ## Performance and acceptance budgets
 
+The user has deferred performance work outside this goal. The following budgets
+remain historical targets for that TODO; they do not block the current migration
+and have not passed. Functional cancellation deadlines, bounded buffers, and
+truthful resource cleanup remain mandatory throughout migration and release.
+
 The measured H1 diagnostic baseline and full samples are recorded in
 [tls-migration-validation.md](tls-migration-validation.md) and
 [tls-migration-p0-http-baseline.json](tls-migration-p0-http-baseline.json). They do not
-cover the entire target matrix. The following v1 engineering budgets are promotion
-targets, established before lifecycle/provider changes are accepted. Changing them
+cover the entire target matrix. The following historical v1 engineering budgets
+were established before lifecycle/provider changes were accepted. Changing them
 requires a recorded rationale and fresh comparative evidence; do not relax a
 threshold merely to make a candidate pass.
 

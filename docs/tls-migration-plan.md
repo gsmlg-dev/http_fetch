@@ -2,13 +2,43 @@
 
 Execution checklist derived from the accepted 2026-10-21 HTTP Fetch migration plan.
 Baseline: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, nine packages at `0.21.14`.
-Status: P0 is recorded and the public provider/current ExSSL source gate is accepted
-locally. P1 compatibility remains active; ordinary P3 integration is next. No
-production default or dependency removal has been made.
+Status (2026-10-27): advanced TLS policies, public lifecycle evidence, completion,
+and managed H1/H2 have passed the current local candidate-package selection below.
+Integrated P1–P4 acceptance remains open pending the current CI/runtime matrix.
+P5–P7 have not begun; OTP remains the production default and dependency.
 
 See [design and compatibility table](tls-migration-design.md) and
 [execution evidence](tls-migration-validation.md). A checkbox means executed and
 reviewed acceptance, not merely a test file or implementation exists.
+
+## Current accepted evidence and remaining gates
+
+Commit `f405e7b444632386607274d87a35362727beda3c` extends the existing candidate
+consumer with 31 current test files. All nine `0.21.18` dependencies resolve through
+Hex.SCM; representative production modules load from the isolated consumer build.
+The local Elixir 1.20.1 / OTP 29 run passed 2,641 checks with no zero-test files,
+skips or exclusions: policy 2,039, identity 73, TLS 60, provider lifecycle 167,
+Fetch 209, and SSE/WebSocket 93. The 105 release-automation regressions, strict
+compilation and umbrella formatting also pass. Each file retains its own result
+log, including the two identically named stream-client suites. This accepts the
+selected package matrix, not every P1–P4 exit requirement.
+
+On source commit `db214474c2ec9fe4bd526adcace0b3d7e29775d0`, manual
+[unit tests](https://github.com/gsmlg-dev/http_fetch/actions/runs/40543943526) and
+[integration tests](https://github.com/gsmlg-dev/http_fetch/actions/runs/40543923009)
+passed for all nine apps. Commit `fc7c7554cb9423fc00cb14b4eca4ea56f499a481` passed
+the [automatic candidate and shared H2 jobs](https://github.com/gsmlg-dev/http_fetch/actions/runs/40546729792);
+that overall CI run failed at Credo. The expanded candidate matrix on `f405e7b`
+still needs its [manual full CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40552759413)
+and [1.19/OTP28 plus 1.20/OTP29 compatibility runs](https://github.com/gsmlg-dev/http_fetch/actions/runs/40552777732).
+Those running checks are not recorded as passes here.
+
+User decisions override the historical checklist where noted: performance work,
+including comparative latency/throughput and load/soak budgets, is TODO outside
+this goal. Credo and Dialyzer issues are deferred and must be reported separately
+from functional gate results. No performance or deferred-quality pass is claimed.
+Cancellation deadlines, resource cleanup, security and functional release gates
+remain required. Historical evidence and failed invocations remain in the ledger.
 
 ## P0 — Baseline and contract
 
@@ -42,9 +72,10 @@ reviewed acceptance, not merely a test file or implementation exists.
 - [x] Measure OTP and explicit ExSSL HTTP workloads: handshake/request p95/p99,
       upload/download throughput, process/port counts, 60-second reuse memory and
       cleanup observations; unsupported public evidence remains explicit.
-      Full load/30-minute soak and stable tail acceptance remain P4/P5 gates.
+      Full load/30-minute soak and stable tail acceptance are now deferred TODOs
+      outside this goal, following the user's performance-scope decision.
 - [x] Record numeric regression budgets before default promotion
-      (v1 targets in design; full load/soak validator remains required).
+      (historical v1 targets in design; performance acceptance is deferred).
 
 - [ ] Separate unit, integration and end-to-end suites. Default mix test runs only
       single-VM unit tests with external collaborators mocked; real external I/O
@@ -294,10 +325,12 @@ performance or HTTP integration acceptance; those gates remain below.
 
 ## P3 — Completion and managed H1/H2 (after P1 + P2)
 
-Ordinary direct/pinned ExSSL H1 completion and reuse are accepted locally on
-TLS1.2 and TLS1.3. Request completion releases request ownership while the healthy
-pool retains TLS authority; queued handoffs respect the original deadline.
-H2, managed scopes, proxy/prepared routes and full-stage acceptance remain open.
+The current local candidate selection passes direct/pinned and CONNECT H1/H2
+completion, managed scopes, identity cleanup, and stream-client completion on
+the tested TLS1.2/TLS1.3 routes. Request completion releases request ownership
+while healthy pools retain TLS authority; queued handoffs retain the original
+deadline. Full-stage acceptance still depends on the current integrated gates.
+H3 completion retains its existing `unsupported_completion` boundary.
 
 - [ ] ExSSL connect/upgrade enroll attempts and return public phase/lifecycle evidence.
 - [ ] Generic HTTP lifecycle accepts evidence; temporary OTP extraction stays isolated.
@@ -326,9 +359,10 @@ H2, managed scopes, proxy/prepared routes and full-stage acceptance remain open.
 - [ ] Execute relevant automatic CI and manual all-nine regression on integrated source.
 - [ ] Execute supported runtime matrix (baseline 1.18/OTP28; configured 1.19/OTP28
       and 1.20/OTP29) and retain historical standalone labels separately.
-- [ ] Compare workload results against budgets set from P0.
+- [ ] TODO outside this goal: compare workload results against historical P0 budgets.
 
-Exit: integrated explicit ExSSL passes all agreed gates. P5 remains blocked until then.
+Exit: integrated explicit ExSSL passes all non-deferred agreed gates. P5 remains
+blocked until then; deferred performance and quality checks must not be called passes.
 
 ## P5 — Promote default (release boundary B)
 
@@ -358,7 +392,8 @@ actual versions with repository tooling; no guessed reserved versions.
 
 ## P7 — Coordinated release and published verification (after P6)
 
-- [ ] Full umbrella regression, formatting, Credo, Dialyzer and required CI pass.
+- [ ] Full umbrella regression, formatting and required functional CI pass.
+      Report user-deferred Credo/Dialyzer separately; retain their actual failures.
 - [ ] Commit the completed migration and push the reviewed source to GitHub before
       releasing the next coordinated major version through existing version tooling;
       all source, candidate, CI and release gates must pass first.
