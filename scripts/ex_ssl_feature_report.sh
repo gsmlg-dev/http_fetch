@@ -17,7 +17,7 @@ report="$EX_SSL_RESULTS_DIR/ex_ssl_feature_gate-${EX_SSL_DEP_MODE}.txt"
   printf 'seed=%s\n' "${EX_SSL_TEST_SEED:-36}"
   printf 'exit_status=%s\n' "${EX_SSL_GATE_STATUS:-unknown}"
   if [[ -f "$EX_SSL_PROVENANCE_LOG" ]]; then
-    grep -E '^(runtime|resolved_scm|resolved_destination|resolved_build|resolved_from|hex_inner_checksum|hex_outer_checksum|loaded_ssl_connection|package_source_commit|source_commit|source_dirty)=' \
+    grep -E '^(runtime|resolved_scm|resolved_destination|resolved_build|resolved_from|hex_inner_checksum|hex_outer_checksum|loaded_ssl_connection|package_source_commit|source_commit|source_dirty|migration_fixture_source|migration_test_manifest_sha256)=' \
       "$EX_SSL_PROVENANCE_LOG" | sed -E 's#/(tmp|var/folders)/[^ ]+#<temporary-path>#g'
   else
     printf 'provenance=not-produced\n'

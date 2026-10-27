@@ -16,6 +16,62 @@ from urllib.request import urlopen
 from stage import PACKAGES, ROOT
 
 
+MIGRATION_GROUPS = {
+    "policy": (
+        "apps/ex_ssl/test/ssl/revocation_policy_integration_test.exs",
+        "apps/ex_ssl/test/ssl/ocsp_policy_integration_test.exs",
+        "apps/ex_ssl/test/ssl/partial_chain_integration_test.exs",
+    ),
+    "identity": (
+        "apps/ex_ssl/test/ssl/encrypted_client_identity_mtls_test.exs",
+        "apps/ex_ssl/test/ssl/multi_client_identity_interop_test.exs",
+        "apps/ex_ssl/test/ssl/identity_completion_integration_test.exs",
+    ),
+    "tls": (
+        "apps/ex_ssl/test/ssl/tls_policy_interop_test.exs",
+        "apps/ex_ssl/test/ssl/tls12_pkcs1_interop_test.exs",
+        "apps/ex_ssl/test/ssl/reference_identity_interop_test.exs",
+        "apps/ex_ssl/test/ssl/verify_none_interop_test.exs",
+        "apps/ex_ssl/test/ssl/verify_fun_interop_test.exs",
+        "apps/ex_ssl/test/ssl/verify_fun_lifecycle_test.exs",
+        "apps/ex_ssl/test/ssl/middlebox_comp_mode_interop_test.exs",
+    ),
+    "provider": (
+        "apps/ex_ssl/test/ssl/lifecycle/public_test.exs",
+        "apps/ex_ssl/test/ssl/lifecycle/public_cleanup_boundaries_test.exs",
+        "apps/ex_ssl/test/ssl/lifecycle/public_fatal_alert_test.exs",
+        "apps/ex_ssl/test/ssl/lifecycle/setup_phase_integration_test.exs",
+        "apps/ex_ssl/test/ssl/lifecycle/native_policy_file_test.exs",
+        "apps/ex_ssl/test/ssl/lifecycle/native_policy_close_test.exs",
+        "apps/ex_ssl/test/ssl/lifecycle/policy_http_close_test.exs",
+        "apps/ex_ssl/test/ssl/lifecycle/http_close_retirement_test.exs",
+        "apps/ex_ssl/test/ssl/lifecycle/per_write_timeout_integration_test.exs",
+        "apps/ex_ssl/test/ssl/duplex_protocol_bounds_test.exs",
+    ),
+    "fetch": (
+        "apps/http_fetch/test/http/ex_ssl_setup_phase_integration_test.exs",
+        "apps/http_fetch/test/http/ex_ssl_pooled_completion_test.exs",
+        "apps/http_fetch/test/http/ex_ssl_http2_completion_test.exs",
+        "apps/http_fetch/test/http/managed_ex_ssl_tls_lifecycle_test.exs",
+        "apps/http_fetch/test/http/ex_ssl_proxy_completion_test.exs",
+        "apps/http_fetch/test/http/identity_completion_integration_test.exs",
+    ),
+    "streams": (
+        "apps/http_event_source/test/http/ex_ssl_completion_integration_test.exs",
+        "apps/http_web_socket/test/http/ex_ssl_completion_integration_test.exs",
+    ),
+}
+MIGRATION_SUPPORT = (
+    "apps/ex_ssl/test/support", "apps/ex_ssl/test/fixtures",
+    "apps/http_fetch/test/support", "apps/http_event_source/test/support",
+    "apps/http_web_socket/test/support",
+)
+MIGRATION_PEERS = (
+    "scripts/tls_migration_performance_peer.py",
+    "scripts/http2_websocket_peer.py", "scripts/ex_ssl_tls12_peer.py",
+)
+
+
 class QuietHandler(SimpleHTTPRequestHandler):
     def log_message(self, *_args):
         pass
@@ -31,7 +87,8 @@ def telemetry_archive(directory):
     if not match:
         raise RuntimeError("expected locked telemetry package")
     name = f"telemetry-{match.group(1)}.tar"
-    source = Path.home() / ".hex/packages/hexpm" / name
+    cache = Path(os.environ.get("HEX_CACHE_HOME", os.environ.get("HEX_HOME", str(Path.home() / ".hex"))))
+    source = cache / "packages/hexpm" / name
     if source.is_file():
         data = source.read_bytes()
     else:
@@ -250,6 +307,93 @@ IO.puts("loaded_ssl_connection=" <> to_string(:code.which(SSL.Connection)))
             raise RuntimeError(f"candidate TLS feature group failed: {group.name}")
 
 
+def stage_migration_tests(project):
+    """Keep source tests and peer assets separate from the packaged implementation."""
+    files = [name for group in MIGRATION_GROUPS.values() for name in group]
+    for name in (*files, *MIGRATION_SUPPORT, *MIGRATION_PEERS):
+        if not (ROOT / name).exists():
+            raise RuntimeError(f"missing migration test or support: {name}")
+    for name in MIGRATION_SUPPORT:
+        shutil.copytree(ROOT / name, project / name,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    for name in (*files, *MIGRATION_PEERS):
+        target = project / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, target)
+    return MIGRATION_GROUPS
+
+
+def migration_project(directory, version, env):
+    project = directory / "migration"
+    groups = stage_migration_tests(project)
+    provenance_file = os.environ.get("EX_SSL_PROVENANCE_LOG")
+    if provenance_file:
+        source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        tests = sorted(name for files in groups.values() for name in files)
+        pins = "\n".join(f"{name} {hashlib.sha256((project / name).read_bytes()).hexdigest()}"
+                         for name in tests)
+        with Path(provenance_file).open("a") as provenance:
+            provenance.write(f"migration_fixture_source=umbrella-current/{source}\n")
+            provenance.write(f"migration_test_manifest_sha256={hashlib.sha256(pins.encode()).hexdigest()}\n")
+    deps = ", ".join(f'{{:{app}, "== {version}"}}' for app in PACKAGES)
+    support = ", ".join(f'"{name}"' for name in MIGRATION_SUPPORT if name.endswith("/support"))
+    (project / "mix.exs").write_text(f'''defmodule MigrationConsumer.MixProject do
+  use Mix.Project
+  def project, do: [app: :migration_consumer, version: "0.0.0", deps: [{deps}],
+    elixirc_paths: [{support}]]
+  def application, do: [extra_applications: [:logger, :ssl, :public_key]]
+end
+''')
+    (project / "test").mkdir()
+    (project / "test/test_helper.exs").write_text("ExUnit.start()\n")
+    (project / "provenance.exs").write_text(f'''expected = "{version}"
+project = Path.expand(__DIR__)
+for app <- ~w({" ".join(PACKAGES)})a do
+  dep = Enum.find(Mix.Dep.cached(), &(&1.app == app)) || raise("missing package #{{app}}")
+  unless dep.scm == Hex.SCM and dep.opts[:hex] == Atom.to_string(app) and
+           dep.status == {{:ok, expected}} and
+           Path.expand(dep.opts[:dest]) == Path.join([project, "deps", Atom.to_string(app)]),
+         do: raise("migration consumer requires isolated exact Hex package #{{app}}")
+  {{:ok, _}} = Application.ensure_all_started(app)
+  unless to_string(Application.spec(app, :vsn)) == expected,
+         do: raise("migration consumer loaded wrong version of #{{app}}")
+end
+for {{module, app}} <- [{{SSL.Connection, :ex_ssl}}, {{SSL.Lifecycle, :ex_ssl}},
+                       {{HTTP.Transport.ExSSL, :http_core}}, {{HTTP, :http_fetch}},
+                       {{HTTP.HTTP2.ConnectionOwner, :http_runtime}},
+                       {{HTTP.EventSource, :http_event_source}},
+                       {{HTTP.WebSocket, :http_web_socket}}] do
+  Code.ensure_loaded!(module)
+  beam = :code.which(module) |> to_string() |> Path.expand()
+  prefix = Path.join([project, "build", "lib", Atom.to_string(app), "ebin"]) <> "/"
+  unless String.starts_with?(beam, prefix),
+         do: raise("migration consumer loaded source implementation #{{inspect(module)}}: #{{beam}}")
+  IO.puts("migration_module=#{{inspect(module)}} path=#{{beam}}")
+end
+IO.puts("runtime=migration-hex-candidate/#{{expected}}")
+''')
+    test_env = {**env, "MIX_ENV": "test", "MIX_BUILD_PATH": str(project / "build"),
+                "MIX_DEPS_PATH": str(project / "deps")}
+    command(["mix", "deps.get"], cwd=project, env=test_env)
+    command(["mix", "compile", "--warnings-as-errors"], cwd=project, env=test_env)
+    command(["mix", "run", "provenance.exs"], cwd=project, env=test_env)
+    logs = Path(os.environ.get("EX_SSL_GROUP_LOG_DIR", directory / "groups"))
+    logs.mkdir(parents=True, exist_ok=True)
+    seed = os.environ.get("EX_SSL_TEST_SEED", "36")
+    for group, files in groups.items():
+        for name in files:
+            log = logs / f"ex_ssl_migration_{group}_{Path(name).parts[1]}_{Path(name).stem}.log"
+            with log.open("w") as output_file:
+                result = subprocess.run(["mix", "test", name, "--include", "integration", "--seed", seed],
+                                        cwd=project, env=test_env, stdout=output_file,
+                                        stderr=subprocess.STDOUT, text=True)
+            output = log.read_text()
+            print(f"candidate migration {group}/{Path(name).name}: {result.returncode}", flush=True)
+            if result.returncode or not feature_group_passed(output):
+                print(output[-6000:])
+                raise RuntimeError(f"candidate migration file failed: {name}")
+
+
 def http3_project(directory, version, env, *, canary_sha=None):
     project = directory / "http3"
     project.mkdir(parents=True)
@@ -345,6 +489,7 @@ def run(version, archive_dir=None, *, mode="all", keep=False, published=False, s
                 http2_project(directory, version, env)
             elif mode == "feature":
                 feature_project(directory, version, env)
+                migration_project(directory, version, env)
             elif mode == "http3":
                 http3_project(directory, version, env)
             elif mode == "http3-canary":

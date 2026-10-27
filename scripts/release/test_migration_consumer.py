@@ -1,0 +1,87 @@
+"""The candidate migration gate must exercise packages without source overrides."""
+
+from pathlib import Path
+import tempfile
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+import consumer_gate
+
+
+class MigrationConsumerTests(unittest.TestCase):
+    def test_staging_retains_test_paths_and_never_copies_production_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "consumer"
+            groups = consumer_gate.stage_migration_tests(project)
+
+            self.assertTrue(groups)
+            for files in groups.values():
+                self.assertTrue(files)
+                for name in files:
+                    self.assertEqual((project / name).read_bytes(),
+                                     (consumer_gate.ROOT / name).read_bytes())
+            self.assertTrue((project / "apps/ex_ssl/test/support/local_tls_peer.ex").is_file())
+            self.assertTrue((project / "scripts/tls_migration_performance_peer.py").is_file())
+            self.assertEqual(list(project.glob("apps/*/lib")), [])
+            self.assertEqual(list(project.glob("apps/*/mix.exs")), [])
+
+    def test_missing_mandatory_suite_fails_before_launching_mix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(consumer_gate, "ROOT", Path(directory) / "missing"):
+                with patch.object(consumer_gate, "command") as command:
+                    with self.assertRaisesRegex(RuntimeError, "missing migration"):
+                        consumer_gate.migration_project(Path(directory), "1.2.3", {})
+                    command.assert_not_called()
+
+    def test_project_resolves_all_nine_packages_and_compiles_only_test_support(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(consumer_gate, "command", side_effect=RuntimeError("stop before Mix")):
+                with self.assertRaisesRegex(RuntimeError, "stop before Mix"):
+                    consumer_gate.migration_project(Path(directory), "1.2.3", {})
+            project = Path(directory) / "migration"
+            source = (project / "mix.exs").read_text()
+            for package in consumer_gate.PACKAGES:
+                self.assertIn(f'{{:{package}, "== 1.2.3"}}', source)
+            for forbidden in ("path:", "override:", "in_umbrella:", '"lib"'):
+                self.assertNotIn(forbidden, source)
+            self.assertIn('"apps/ex_ssl/test/support"', source)
+
+    def test_a_zero_test_file_cannot_hide_behind_another_passing_file(self):
+        files = consumer_gate.MIGRATION_GROUPS["policy"][:2]
+        outputs = iter(("1 test, 0 failures\n", "0 tests, 0 failures\n"))
+
+        def finish_test(_args, **kwargs):
+            kwargs["stdout"].write(next(outputs))
+            return SimpleNamespace(returncode=0)
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(consumer_gate, "MIGRATION_GROUPS", {"policy": files}), \
+                patch.object(consumer_gate, "command"), \
+                patch.object(consumer_gate.subprocess, "run", side_effect=finish_test):
+            with self.assertRaisesRegex(RuntimeError, "candidate migration file failed:.*ocsp"):
+                consumer_gate.migration_project(Path(directory), "1.2.3", {})
+
+    def test_same_named_client_suites_keep_separate_result_logs(self):
+        files = consumer_gate.MIGRATION_GROUPS["streams"]
+        outputs = ("2 tests, 0 failures\n", "3 tests, 0 failures\n")
+        remaining = iter(outputs)
+
+        def finish_test(_args, **kwargs):
+            kwargs["stdout"].write(next(remaining))
+            return SimpleNamespace(returncode=0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            logs = Path(directory) / "groups"
+            with patch.object(consumer_gate, "MIGRATION_GROUPS", {"streams": files}), \
+                    patch.object(consumer_gate, "command"), \
+                    patch.object(consumer_gate.subprocess, "run", side_effect=finish_test), \
+                    patch.dict(consumer_gate.os.environ, {"EX_SSL_GROUP_LOG_DIR": str(logs)}):
+                consumer_gate.migration_project(Path(directory), "1.2.3", {})
+            actual = list(logs.glob("*.log"))
+            self.assertEqual(len(actual), 2)
+            self.assertEqual({log.read_text() for log in actual}, set(outputs))
+
+
+if __name__ == "__main__":
+    unittest.main()
