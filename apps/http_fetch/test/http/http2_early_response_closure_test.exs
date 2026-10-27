@@ -40,6 +40,22 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
       coordinator_monitor = Process.monitor(coordinator)
       bridge_monitor = Process.monitor(bridge)
 
+      # Request headers can arrive before the coordinator grants initial credit.
+      # Join its first upload chunk so suspension cannot block initial credit.
+      1 = :erlang.trace(owner, true, [:receive, {:tracer, self()}])
+
+      try do
+        case :sys.get_state(owner).streams[3].pending_body do
+          {^bridge, _chunk, _ack_ref} ->
+            :ok
+
+          nil ->
+            assert_receive {:trace, ^owner, :receive, {:body_chunk, ^bridge, _, _}}, 5_000
+        end
+      after
+        :erlang.trace(owner, false, [:receive])
+      end
+
       assert %{end_stream_sent?: false, send_window: 0} =
                :sys.get_state(owner).connection.streams[3]
 
