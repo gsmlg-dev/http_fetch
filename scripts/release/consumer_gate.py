@@ -273,6 +273,7 @@ def feature_group_passed(output):
 
 def feature_project(directory, version, env):
     project = directory / "feature"
+    source = env.get("HTTP_FETCH_CONSUMER_SOURCE", "candidate")
     (project / "test").mkdir(parents=True)
     clients = ("http_fetch", "http_web_socket", "http_event_source", "http_web_transport", "ex_ssl")
     deps = ", ".join(f'{{:{app}, "== {version}"}}' for app in clients)
@@ -294,7 +295,7 @@ end
     command(["mix", "compile", "--warnings-as-errors"], cwd=project, env=test_env)
     provenance = subprocess.run(["mix", "run", "-e", f'''dep = Enum.find(Mix.Dep.cached(), &(&1.app == :ex_ssl)) || raise("missing ex_ssl")
 unless dep.scm == Hex.SCM and dep.status == {{:ok, "{version}"}}, do: raise("candidate ex_ssl is not Hex SCM")
-IO.puts("runtime=hex-candidate/{version}")
+IO.puts("runtime=hex-{source}/{version}")
 IO.puts("resolved_scm=Hex.SCM")
 IO.puts("loaded_ssl_connection=" <> to_string(:code.which(SSL.Connection)))
 '''], cwd=project, env=test_env, capture_output=True, text=True, check=True)
@@ -334,15 +335,16 @@ def stage_migration_tests(project):
 
 def migration_project(directory, version, env):
     project = directory / "migration"
+    source = env.get("HTTP_FETCH_CONSUMER_SOURCE", "candidate")
     groups = stage_migration_tests(project)
     provenance_file = os.environ.get("EX_SSL_PROVENANCE_LOG")
     if provenance_file:
-        source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        source_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         tests = sorted(name for files in groups.values() for name in files)
         pins = "\n".join(f"{name} {hashlib.sha256((project / name).read_bytes()).hexdigest()}"
                          for name in tests)
         with Path(provenance_file).open("a") as provenance:
-            provenance.write(f"migration_fixture_source=umbrella-current/{source}\n")
+            provenance.write(f"migration_fixture_source=umbrella-current/{source_sha}\n")
             provenance.write(f"migration_test_manifest_sha256={hashlib.sha256(pins.encode()).hexdigest()}\n")
     deps = ", ".join(f'{{:{app}, "== {version}"}}' for app in PACKAGES)
     support = ", ".join(f'"{name}"' for name in MIGRATION_SUPPORT if name.endswith("/support"))
@@ -379,7 +381,7 @@ for {{module, app}} <- [{{SSL.Connection, :ex_ssl}}, {{SSL.Lifecycle, :ex_ssl}},
          do: raise("migration consumer loaded source implementation #{{inspect(module)}}: #{{beam}}")
   IO.puts("migration_module=#{{inspect(module)}} path=#{{beam}}")
 end
-IO.puts("runtime=migration-hex-candidate/#{{expected}}")
+IO.puts("runtime=migration-hex-{source}/#{{expected}}")
 ''')
     test_env = {**env, "MIX_ENV": "test", "MIX_BUILD_PATH": str(project / "build"),
                 "MIX_DEPS_PATH": str(project / "deps")}
@@ -459,8 +461,8 @@ def run(version, archive_dir=None, *, mode="all", keep=False, published=False, s
         verify_canary_source(version, source_sha)
     elif source_sha is not None:
         raise ValueError("source SHA is restricted to the post-release canary")
-    if published and mode not in ("http3", "http3-canary"):
-        raise ValueError("published mode is restricted to the HTTP3 consumer")
+    if published and archive_dir is None and mode not in ("http3", "http3-canary"):
+        raise ValueError("published TLS consumers require release archives")
     if not published and archive_dir is None:
         raise ValueError("candidate archive directory is required")
     archive_dir = Path(archive_dir).resolve() if archive_dir is not None else None
@@ -469,10 +471,14 @@ def run(version, archive_dir=None, *, mode="all", keep=False, published=False, s
     env.pop("HTTP_FETCH_CI_APP", None)
     env.pop("MIX_BUILD_PATH", None)
     env.pop("MIX_DEPS_PATH", None)
+    env["HTTP_FETCH_CONSUMER_SOURCE"] = "published" if published else "candidate"
     env["HTTP3_CONSUMER_SOURCE"] = "published" if published else "candidate"
     if published:
-        env.pop("HEX_MIRROR", None)
-        env.pop("HEX_TRUSTED_MIRROR", None)
+        env.update(HEX_CONFIG_HOME=str(directory / "hex"),
+                   HEX_CACHE_HOME=str(directory / "hex-cache"))
+        for key in ("HEX_MIRROR", "HEX_TRUSTED_MIRROR", "HEX_OFFLINE",
+                    "HEX_UNSAFE_REGISTRY", "HEX_UNSAFE_HTTPS"):
+            env.pop(key, None)
     try:
         if published:
             if archive_dir is not None:

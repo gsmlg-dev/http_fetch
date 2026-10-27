@@ -273,6 +273,17 @@ jobs:
           HTTP3_GATE_LOG_DIR: ${{ runner.temp }}/http3-release-logs/published
         run: python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode http3 --published
 
+      - name: Verify published isolated TLS migration consumers
+        env:
+          EX_SSL_FIXTURE_DIR: ${{ github.workspace }}/apps/ex_ssl
+          EX_SSL_GROUP_LOG_DIR: ${{ runner.temp }}/tls-release-logs/published/groups
+          EX_SSL_PROVENANCE_LOG: ${{ runner.temp }}/tls-release-logs/published/provenance.log
+        run: |
+          mkdir -p "$RUNNER_TEMP/tls-release-logs/published"
+          for mode in all external feature; do
+            python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode "$mode" --published
+          done
+
       - name: Attach and verify all immutable GitHub release archives
         env:
           GH_TOKEN: ${{ github.token }}
@@ -290,4 +301,12 @@ jobs:
         with:
           name: http3-release-peer-logs
           path: ${{ runner.temp }}/http3-release-logs
+          if-no-files-found: warn
+
+      - name: Preserve published TLS consumer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tls-release-published-consumer-logs
+          path: ${{ runner.temp }}/tls-release-logs
           if-no-files-found: warn

@@ -1,5 +1,23 @@
 # TLS migration execution ledger
 
+## Published TLS consumer gate preparation — 2026-10-27
+
+The coordinated consumer runner now supports published Hex packages for package,
+external-client, runtime, H2 and TLS-feature checks. New TLS modes require all nine
+release archives; every published archive must match before any consumer starts.
+Published resolution uses fresh private Hex configuration/cache paths and removes
+inherited mirrors, offline settings and unsafe registry/HTTPS settings. Candidate
+resolution and the existing published HTTP3 checks retain their gates.
+
+The release workflow now repeats package, external-client and TLS-feature consumers
+after publication and before completing the GitHub release. TLS checks include the
+existing 38-file migration matrix; their logs distinguish published resolution from
+the current source fixtures. Local validation passes 113 release-automation tests,
+21 CI-automation tests, strict compilation, umbrella formatting and YAML parsing.
+These are orchestration checks. The actual published migration matrix, default
+promotion and production release without OTP SSL remain unexecuted. Evidence is
+in `/private/tmp/http-fetch-published-migration-root-20261027T2005Z`.
+
 ## Integrated source and candidate matrix — 2026-10-27 UTC
 
 At `5011eeb87624403fa5122d20aabe87b99087f0b6`, all nine app jobs pass
