@@ -293,8 +293,8 @@ defmodule HTTP.Runtime.DialerTest do
   defp queued_error(opts \\ []) do
     {caller, worker, monitor} = start_connect(0, opts)
     true = :erlang.suspend_process(caller)
-    send(worker, {:error, :timeout})
     worker_monitor = Process.monitor(worker)
+    send(worker, {:error, :timeout})
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 1_000
 
     assert {:messages,
