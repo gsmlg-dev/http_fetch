@@ -38,17 +38,28 @@ defmodule HTTP.HTTP2EarlyResponseClosureTest do
       owner = owner_for(url)
       %{streams: %{3 => %{body_bridge: bridge, pid: coordinator}}} = :sys.get_state(owner)
       coordinator_monitor = Process.monitor(coordinator)
+      bridge_monitor = Process.monitor(bridge)
 
       assert %{end_stream_sent?: false, send_window: 0} =
                :sys.get_state(owner).connection.streams[3]
 
-      send(peer, :respond)
-      response = Task.await(task, 5_000)
-      assert response.status == status
-      assert HTTP.Response.read_all(response) == ""
-      assert_receive {:request_closed, ^peer}, 5_000
-      assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :normal}, 5_000
-      refute Process.alive?(bridge)
+      # Bridge shutdown is asynchronous. Hold it through coordinator termination
+      # to prove that only the bridge's own DOWN joins its cleanup.
+      :ok = :sys.suspend(bridge)
+
+      try do
+        send(peer, :respond)
+        response = Task.await(task, 5_000)
+        assert response.status == status
+        assert HTTP.Response.read_all(response) == ""
+        assert_receive {:request_closed, ^peer}, 5_000
+        assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :normal}, 5_000
+        refute_receive {:DOWN, ^bridge_monitor, :process, ^bridge, _}, 0
+      after
+        :ok = :sys.resume(bridge)
+      end
+
+      assert_receive {:DOWN, ^bridge_monitor, :process, ^bridge, :normal}, 5_000
 
       assert %{active_streams: 0, protocol_streams: 0, pending_upload_bytes: 0} =
                ConnectionOwner.status(owner)
