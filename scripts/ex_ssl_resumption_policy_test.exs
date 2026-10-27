@@ -22,7 +22,7 @@ defmodule CandidateResumptionPolicyTest do
   end
 
   for family <- [:http1, :http2, :wss, :sse] do
-    test "#{family} forwards unsupported ticket combinations as explicit pre-I/O option errors",
+    test "#{family} forwards unsupported automatic and manual ticket combinations as pre-I/O errors",
          %{fixtures: f} do
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
       on_exit(fn -> :gen_tcp.close(listener) end)
@@ -32,7 +32,8 @@ defmodule CandidateResumptionPolicyTest do
             [versions: [:"tlsv1.2"]],
             [versions: [:"tlsv1.3", :"tlsv1.2"]],
             [certfile: f.rsa.certificate, keyfile: f.rsa.key],
-            [session_tickets: :manual]
+            [session_tickets: :manual, versions: [:"tlsv1.2"]],
+            [session_tickets: :manual, use_ticket: []]
           ] do
         assert {:error, {:options, _}} =
                  rejected_client(
