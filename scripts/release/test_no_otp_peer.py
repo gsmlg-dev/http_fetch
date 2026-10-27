@@ -148,6 +148,142 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(len(gate.validate_plan(json.loads(stdout.getvalue()))["scenarios"]), 35)
 
 
+class ServerHelloObservationTests(unittest.TestCase):
+    @staticmethod
+    def hello(tls="TLSv1.2", extensions=None):
+        if extensions is None:
+            extensions = b"\x00\x2b\x00\x02\x03\x04" if tls == "TLSv1.3" else b""
+        body = (b"\x03\x03" + b"r" * 32 + b"\x00\x13\x02\x00" +
+                len(extensions).to_bytes(2, "big") + extensions)
+        handshake = b"\x02" + len(body).to_bytes(3, "big") + body
+        return b"\x16\x03\x03" + len(handshake).to_bytes(2, "big") + handshake
+
+    def test_version_comes_from_complete_server_hello_under_any_fragmentation(self):
+        for tls in ("TLSv1.2", "TLSv1.3"):
+            encoded = self.hello(tls)
+            for size in range(1, len(encoded) + 1):
+                with self.subTest(tls=tls, fragment=size):
+                    observed = peer.ServerHelloObserver()
+                    for start in range(0, len(encoded), size):
+                        observed.feed(encoded[start:start + size])
+                    self.assertEqual(observed.version, tls)
+                    observed.feed(b"application bytes are no longer retained")
+                    self.assertEqual(observed.version, tls)
+                    self.assertFalse(observed.records)
+                    self.assertFalse(observed.handshakes)
+
+    def test_fragmented_handshake_across_tls_records_and_no_policy_guess(self):
+        handshake = self.hello("TLSv1.3")[5:]
+        observed = peer.ServerHelloObserver()
+        for part in (handshake[:3], handshake[3:9], handshake[9:]):
+            observed.feed(b"\x16\x03\x03" + len(part).to_bytes(2, "big") + part)
+        self.assertEqual(observed.version, "TLSv1.3")
+        missing = peer.ServerHelloObserver()
+        missing.feed(self.hello("TLSv1.3")[:-1])
+        self.assertIsNone(missing.version)
+
+    def test_invalid_duplicate_or_unbounded_hello_is_never_observation_evidence(self):
+        for data in (self.hello(extensions=b"\x00\x2b\x00\x02\x03\x05"),
+                     self.hello(extensions=b"\x00\x2b\x00\x02\x03\x04" * 2),
+                     self.hello(extensions=b"\x00\x2b\x00\x03\x03\x04"),
+                     b"\x16\x03\x03\xff\xff", b"x" * (peer.MAX_HEADERS + 1)):
+            with self.subTest(data=data[:12]), self.assertRaises(peer.PeerError):
+                peer.ServerHelloObserver().feed(data)
+
+    def test_public_bio_driver_preserves_selected_version_before_failed_finished(self):
+        class BIO:
+            def __init__(self):
+                self.data = bytearray()
+
+            @property
+            def pending(self):
+                return len(self.data)
+
+            def read(self, size):
+                chunk = bytes(self.data[:size])
+                del self.data[:size]
+                return chunk
+
+        api = SimpleNamespace(MemoryBIO=BIO)
+        for tls in ("TLSv1.2", "TLSv1.3"):
+            with self.subTest(tls=tls):
+                raw, context = MagicMock(), MagicMock()
+                context.wrap_bio.return_value.version.return_value = None
+                stream = peer.TLSStream(raw, context, api)
+                stream.outgoing.data.extend(self.hello(tls))
+                stream.flush()
+                self.assertEqual(stream.version(), tls)
+                raw.sendall.assert_called_once_with(self.hello(tls))
+                context.wrap_bio.return_value.version.return_value = "TLSv1.3" if tls == "TLSv1.2" else "TLSv1.2"
+                with self.assertRaises(peer.PeerError):
+                    stream.version()
+
+    def test_public_bio_driver_handles_fragmented_io_short_writes_and_received_eof(self):
+        class SSLError(Exception):
+            pass
+
+        class WantRead(SSLError):
+            pass
+
+        class WantWrite(SSLError):
+            pass
+
+        class EOF(SSLError):
+            pass
+
+        class BIO:
+            def __init__(self):
+                self.data, self.eof = bytearray(), False
+
+            @property
+            def pending(self):
+                return len(self.data)
+
+            def read(self, size):
+                data = bytes(self.data[:size])
+                del self.data[:size]
+                return data
+
+            def write(self, data):
+                self.data.extend(data)
+
+            def write_eof(self):
+                self.eof = True
+
+        api = SimpleNamespace(MemoryBIO=BIO, SSLError=SSLError, SSLWantReadError=WantRead,
+                              SSLWantWriteError=WantWrite, SSLEOFError=EOF)
+        raw, context = MagicMock(), MagicMock()
+        raw.gettimeout.return_value = 1.0
+        raw.recv.side_effect = [b"fragment one", b"fragment two", b""]
+        tls = context.wrap_bio.return_value
+        tls.do_handshake.side_effect = [WantWrite(), WantRead(), WantRead(), None]
+        stream = peer.TLSStream(raw, context, api)
+        stream.outgoing.data.extend(self.hello("TLSv1.3"))
+        stream.do_handshake()
+        self.assertEqual(stream.incoming.data, b"fragment onefragment two")
+        self.assertEqual(stream.observed.version, "TLSv1.3")
+        tls.write.side_effect = [2, 3]
+        stream.sendall(b"hello")
+        self.assertEqual([bytes(call.args[0]) for call in tls.write.call_args_list],
+                         [b"hello", b"llo"])
+        tls.read.side_effect = [WantRead(), EOF()]
+        self.assertEqual(stream.recv(16384), b"")
+        self.assertTrue(stream.incoming.eof)
+        raw.settimeout.assert_called_with(1.0)
+
+        with patch.object(peer.time, "monotonic", side_effect=[0.0, 1.1]):
+            with self.assertRaises(TimeoutError):
+                stream.do_handshake()
+        raw.settimeout.assert_called_with(1.0)
+
+        stream = peer.TLSStream(raw, context, api)
+        stream.outgoing.data.extend(self.hello())
+        raw.sendall.side_effect = BrokenPipeError("not transmitted")
+        with self.assertRaises(BrokenPipeError):
+            stream.flush()
+        self.assertIsNone(stream.observed.version)
+
+
 class ObservationTests(unittest.TestCase):
     def good(self, action="success"):
         value, records, gates = oracle("h1", action)
@@ -543,6 +679,12 @@ class ManualHandshakeTests(unittest.TestCase):
         class SSLFailure(Exception):
             reason = "CERTIFICATE_UNKNOWN"
 
+        class WantRead(SSLFailure):
+            pass
+
+        class WantWrite(SSLFailure):
+            pass
+
         class InlineThread:
             def __init__(self, target, args):
                 self.target, self.args = target, args
@@ -562,11 +704,16 @@ class ManualHandshakeTests(unittest.TestCase):
                 listener, raw, wrapped, context = (MagicMock() for _ in range(4))
                 listener.accept.return_value = (raw, ("127.0.0.1", 1))
                 listener.getsockname.return_value = ("127.0.0.1", 443)
+                raw.gettimeout.return_value = 7.0
                 wrapped.do_handshake.side_effect = SSLFailure("certificate alert from client")
                 wrapped.version.return_value, wrapped.selected_alpn_protocol.return_value = selection
-                context.wrap_socket.return_value = wrapped
+                context.wrap_bio.return_value = wrapped
+                incoming, outgoing = MagicMock(), MagicMock()
+                outgoing.pending = 0
                 fake_ssl = SimpleNamespace(SSLContext=MagicMock(return_value=context),
                     PROTOCOL_TLS_SERVER=1, TLSVersion=SimpleNamespace(TLSv1_2=2, TLSv1_3=3),
+                    MemoryBIO=MagicMock(side_effect=[incoming, outgoing]),
+                    SSLWantReadError=WantRead, SSLWantWriteError=WantWrite,
                     SSLError=SSLFailure, OPENSSL_VERSION="mock OpenSSL; no native invocation")
                 fake_socket = SimpleNamespace(socket=MagicMock(return_value=listener),
                     AF_INET=1, SOCK_STREAM=2, SOL_SOCKET=3, SO_REUSEADDR=4, SHUT_RDWR=5)
@@ -581,8 +728,7 @@ class ManualHandshakeTests(unittest.TestCase):
                      patch("sys.stdin", stdin):
                     ready = MagicMock()
                     peer.run_tcp(args, value, ready)
-                context.wrap_socket.assert_called_once_with(raw, server_side=True,
-                                                          do_handshake_on_connect=False)
+                context.wrap_bio.assert_called_once_with(incoming, outgoing, server_side=True)
                 self.assertEqual(context.minimum_version, context.maximum_version)
                 scenario = next(record for record in records if record["kind"] == "scenario")
                 self.assertEqual(scenario["tls"], selection[0])

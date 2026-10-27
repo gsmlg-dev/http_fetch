@@ -1,5 +1,34 @@
 # TLS migration execution ledger
 
+## No-OTP peer identity-rejection evidence — 2026-10-27
+
+The independent TCP peer now uses OpenSSL's public MemoryBIO API and retains the
+version from the actual outbound ServerHello before a certificate alert can clear
+`SSLObject.version()`. ALPN still comes from OpenSSL's public selection API. A
+bounded parser handles fragmented records/handshakes, rejects malformed or
+duplicate extensions and cross-checks any completed API version. Requested TLS
+policy never supplies missing observation evidence. Existing scenario, identity,
+request-count and cleanup validators are unchanged.
+
+The original failure reproduced for TLS1.2 and TLS1.3: Python clients rejected a
+wrong hostname with verification code 62, but the peer failed because its version
+was absent. Both negatives and their success controls now pass. Two independent
+Python/OpenSSL configurations, 3.15/4.1.0 and 3.12.15/3.5.9, each pass 24 owned
+loopback scenarios: TLS1.2/1.3 success and identity rejection for H1, H2, WSS, SSE
+and the managed H1/H2 peer routes. Every peer records one connection, zero live
+connections, and exactly zero or one HTTP requests as appropriate. Owned peer
+processes and output-reader threads are joined after observation.
+
+All 128 release-automation checks, 21 CI-automation checks, strict umbrella
+compilation and root formatting pass. The 36 pure peer tests cover fragmentation,
+missing/conflicting evidence, BIO I/O, short writes, EOF and finite deadlines.
+These are peer-tool checks with independent Python clients; they do not establish
+HTTP client migration or an actual no-OTP production release. H3 and the remaining
+timeout/cancellation/shutdown release cells were not rerun for this change.
+Evidence is under `/private/tmp/http-fetch-no-otp-peer-identity-diagnosis-root-20261027T2155Z`,
+`/private/tmp/http-fetch-no-otp-peer-tcp-matrix-root-20261027T2212Z` and
+`/private/tmp/http-fetch-no-otp-peer-tcp-matrix-python312-root-20261027T2218Z`.
+
 ## Required no-OTP release workflow — 2026-10-27
 
 The coordinated release workflow now invokes the existing isolated production

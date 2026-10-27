@@ -432,6 +432,156 @@ def command(line, oracle):
     return value["command"]
 
 
+class ServerHelloObserver:
+    """Retain only the actual plaintext ServerHello, before Finished can fail."""
+
+    def __init__(self):
+        self.records, self.handshakes = bytearray(), bytearray()
+        self.version = None
+
+    def feed(self, data):
+        if self.version is not None:
+            return
+        require(len(self.records) + len(data) <= MAX_HEADERS,
+                "ServerHello record retention bound exceeded")
+        self.records.extend(data)
+        while len(self.records) >= 5:
+            length = int.from_bytes(self.records[3:5], "big")
+            require(self.records[0] == 22 and self.records[1:3] in
+                    (b"\x03\x01", b"\x03\x02", b"\x03\x03") and 0 < length <= 16384,
+                    "invalid plaintext ServerHello record")
+            if len(self.records) < length + 5:
+                return
+            self.handshakes.extend(self.records[5:length + 5])
+            del self.records[:length + 5]
+            require(len(self.handshakes) <= MAX_HEADERS,
+                    "ServerHello handshake retention bound exceeded")
+            if len(self.handshakes) < 4:
+                continue
+            size = int.from_bytes(self.handshakes[1:4], "big")
+            require(self.handshakes[0] == 2 and 38 <= size <= MAX_HEADERS - 4,
+                    "invalid ServerHello handshake")
+            if len(self.handshakes) < size + 4:
+                continue
+            self.version = self.selected_version(bytes(self.handshakes[4:size + 4]))
+            self.records.clear()
+            self.handshakes.clear()
+            return
+
+    @staticmethod
+    def selected_version(body):
+        require(body[:2] == b"\x03\x03" and body[34] <= 32,
+                "invalid ServerHello legacy version/session id")
+        offset = 35 + body[34]
+        require(len(body) >= offset + 3 and body[offset + 2] == 0,
+                "invalid ServerHello cipher/compression fields")
+        offset += 3
+        if len(body) == offset:
+            return "TLSv1.2"
+        require(len(body) >= offset + 2 and
+                int.from_bytes(body[offset:offset + 2], "big") == len(body) - offset - 2,
+                "invalid ServerHello extension length")
+        offset += 2
+        seen, version = set(), "TLSv1.2"
+        while offset < len(body):
+            require(len(body) - offset >= 4, "truncated ServerHello extension")
+            kind = int.from_bytes(body[offset:offset + 2], "big")
+            size = int.from_bytes(body[offset + 2:offset + 4], "big")
+            offset += 4
+            require(kind not in seen and size <= len(body) - offset,
+                    "duplicate/truncated ServerHello extension")
+            seen.add(kind)
+            if kind == 43:
+                require(body[offset:offset + size] == b"\x03\x04",
+                        "invalid ServerHello supported version")
+                version = "TLSv1.3"
+            offset += size
+        return version
+
+
+class TLSStream:
+    """Public OpenSSL MemoryBIO driver; no private SSL state or policy inference."""
+
+    def __init__(self, raw, context, api):
+        self.raw, self.api = raw, api
+        self.incoming, self.outgoing = api.MemoryBIO(), api.MemoryBIO()
+        self.tls = context.wrap_bio(self.incoming, self.outgoing, server_side=True)
+        self.observed = ServerHelloObserver()
+
+    def remaining(self, deadline):
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("independent TLS operation timed out")
+            self.raw.settimeout(remaining)
+
+    def flush(self, deadline=None):
+        while self.outgoing.pending:
+            self.remaining(deadline)
+            data = self.outgoing.read(min(self.outgoing.pending, 16384))
+            self.raw.sendall(data)
+            self.observed.feed(data)
+
+    def drive(self, operation):
+        timeout = self.raw.gettimeout()
+        deadline = None if timeout is None else time.monotonic() + timeout
+        try:
+            while True:
+                self.remaining(deadline)
+                try:
+                    result = operation()
+                except self.api.SSLWantReadError:
+                    self.flush(deadline)
+                    self.remaining(deadline)
+                    data = self.raw.recv(16384)
+                    if data:
+                        self.incoming.write(data)
+                    else:
+                        self.incoming.write_eof()
+                except self.api.SSLWantWriteError:
+                    self.flush(deadline)
+                except self.api.SSLError:
+                    self.flush(deadline)
+                    raise
+                else:
+                    self.flush(deadline)
+                    return result
+        finally:
+            self.raw.settimeout(timeout)
+
+    def do_handshake(self):
+        return self.drive(self.tls.do_handshake)
+
+    def recv(self, size):
+        try:
+            return self.drive(lambda: self.tls.read(size))
+        except self.api.SSLEOFError:
+            # Match SSLSocket's default suppress_ragged_eofs behavior. The
+            # oracle still distinguishes received EOF from local teardown.
+            return b""
+
+    def sendall(self, data):
+        remaining = memoryview(data)
+
+        def write():
+            nonlocal remaining
+            while remaining:
+                size = self.tls.write(remaining)
+                require(0 < size <= len(remaining), "invalid TLS write progress")
+                remaining = remaining[size:]
+
+        self.drive(write)
+
+    def version(self):
+        actual, observed = self.tls.version(), self.observed.version
+        require(actual is None or observed is None or actual == observed,
+                "conflicting actual TLS version evidence")
+        return actual or observed
+
+    def selected_alpn_protocol(self):
+        return self.tls.selected_alpn_protocol()
+
+
 def run_tcp(args, oracle, ready):
     import select
     import socket
@@ -456,26 +606,26 @@ def run_tcp(args, oracle, ready):
     deadline = time.monotonic() + args.lifetime
 
     def serve(raw, cid):
-        sock = raw
         observation = "local_stop"
         try:
             raw.settimeout(args.timeout_ms / 1000 + 2)
-            sock = context.wrap_socket(raw, server_side=True, do_handshake_on_connect=False)
-            sockets.append(sock)
+            sock = TLSStream(raw, context, ssl)
             try:
                 sock.do_handshake()
             except ssl.SSLError as error:
                 actual_tls, actual_alpn = sock.version(), sock.selected_alpn_protocol()
                 with oracle.lock:
                     if actual_tls is not None or actual_alpn is not None:
-                        oracle.negotiated(cid, actual_tls, actual_alpn, "SSLSocket after handshake error")
+                        oracle.negotiated(cid, actual_tls, actual_alpn,
+                                          "OpenSSL MemoryBIO/ServerHello after handshake error")
                     reason = str(getattr(error, "reason", error))
                     oracle.handshake_failed(cid, str(error), identity_alert=any(
                         token in reason.upper() for token in ("CERTIFICATE", "UNKNOWN_CA")))
                 observation = "tls_alert"
                 return
             with oracle.lock:
-                oracle.negotiated(cid, sock.version(), sock.selected_alpn_protocol(), "SSLSocket")
+                oracle.negotiated(cid, sock.version(), sock.selected_alpn_protocol(),
+                                  "OpenSSL MemoryBIO/ServerHello")
             if oracle.case["alpn"] == "h2":
                 from h2.config import H2Configuration
                 from h2.connection import H2Connection
@@ -526,7 +676,6 @@ def run_tcp(args, oracle, ready):
         finally:
             with oracle.lock:
                 oracle.closed(cid, observation)
-            sock.close()
             raw.close()
 
     try:
