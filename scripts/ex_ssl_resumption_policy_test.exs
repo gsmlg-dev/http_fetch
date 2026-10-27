@@ -32,7 +32,7 @@ defmodule CandidateResumptionPolicyTest do
             [versions: [:"tlsv1.2"]],
             [versions: [:"tlsv1.3", :"tlsv1.2"]],
             [certfile: f.rsa.certificate, keyfile: f.rsa.key],
-            [verify: :verify_none]
+            [session_tickets: :manual]
           ] do
         assert {:error, {:options, _}} =
                  rejected_client(
