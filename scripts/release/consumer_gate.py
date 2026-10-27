@@ -39,6 +39,7 @@ MIGRATION_GROUPS = {
     ),
     "provider": (
         "apps/http_core/test/http/ex_ssl_setup_phase_integration_test.exs",
+        "apps/http_core/test/http/proxy_prepared_tls_test.exs",
         "apps/ex_ssl/test/ssl/lifecycle/public_test.exs",
         "apps/ex_ssl/test/ssl/lifecycle/public_cleanup_boundaries_test.exs",
         "apps/ex_ssl/test/ssl/lifecycle/public_fatal_alert_test.exs",
