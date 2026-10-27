@@ -6,7 +6,8 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
   alias ExSSL.TestSupport.LocalTLSPeer, as: Peer
   alias SSL.{Lifecycle, PolicyIO}
 
-  for operation <- [:open, :read], trigger <- [:cancel, :deadline, :actor_down, :ack_loss] do
+  for operation <- [:open, :read],
+      trigger <- [:cancel, :deadline, :actor_down, :ack_loss, :late_ack] do
     test "native file #{operation} keeps truthful evidence through #{trigger}", context do
       file_boundary(context.tmp_dir, unquote(operation), unquote(trigger))
     end
@@ -61,7 +62,7 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
     caller = Task.async(fn -> SSL.connect({127, 0, 0, 1}, peer.port, options, :infinity) end)
 
     on_exit(fn ->
-      if trigger == :ack_loss, do: resume_observer(observer)
+      if trigger in [:ack_loss, :late_ack], do: resume_observer(observer)
       Lifecycle.cancel(lease, {:abs_ms, now() + 500})
       stop_process(caller.pid)
       stop_process(peer.task.pid)
@@ -101,7 +102,7 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
         :actor_down ->
           Process.exit(actor, :kill)
 
-        :ack_loss ->
+        paused when paused in [:ack_loss, :late_ack] ->
           :ok = :sys.suspend(observer)
       end
 
@@ -111,7 +112,13 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
                Lifecycle.await(handle, {:abs_ms, now()})
 
       released_at = now()
-      release_file(operation, path, writer, actor, actor_monitor, cutoff)
+
+      after_release = fn ->
+        if trigger == :late_ack,
+          do: resume_after_ack_timeout(observer, actor, released_at, expiry)
+      end
+
+      release_file(operation, path, writer, actor, actor_monitor, cutoff, after_release)
 
       if trigger == :ack_loss do
         # Both real GenServer.call aliases expire while the observer is paused:
@@ -142,7 +149,7 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
         assert Lifecycle.status(handle) == {:terminal, receipt}
       end
     after
-      if trigger == :ack_loss, do: resume_observer(observer)
+      if trigger in [:ack_loss, :late_ack], do: resume_observer(observer)
       if writer, do: :file.close(writer)
       Lifecycle.cancel(lease, {:abs_ms, now() + 500})
       Task.shutdown(caller, :brutal_kill)
@@ -216,19 +223,41 @@ defmodule SSL.Lifecycle.NativePolicyFileTest do
     end
   end
 
-  defp release_file(:open, path, _writer, actor, monitor, deadline) do
+  defp release_file(:open, path, _writer, actor, monitor, deadline, after_release) do
     writer = open_writer(path)
 
     try do
+      after_release.()
       assert_receive {:DOWN, ^monitor, :process, ^actor, _}, remaining(deadline)
     after
       assert :ok = :file.close(writer)
     end
   end
 
-  defp release_file(:read, _path, writer, actor, monitor, deadline) do
+  defp release_file(:read, _path, writer, actor, monitor, deadline, after_release) do
     assert :ok = :file.close(writer)
+    after_release.()
     assert_receive {:DOWN, ^monitor, :process, ^actor, _}, remaining(deadline)
+  end
+
+  defp resume_after_ack_timeout(observer, actor, released_at, deadline) do
+    # The paused observer has no periodic work before the original expiry.
+    # The second queued call is the real drain after the first alias expires.
+    # Inspect only the count; native results and policy bytes remain private.
+    assert remaining(deadline) > 0
+
+    case Process.info(observer, :message_queue_len) do
+      {:message_queue_len, count} when count >= 2 ->
+        assert now() - released_at >= 1_000
+        assert Process.alive?(actor)
+        assert :ok = :sys.resume(observer)
+
+      _ ->
+        receive do
+        after
+          1 -> resume_after_ack_timeout(observer, actor, released_at, deadline)
+        end
+    end
   end
 
   defp assert_graph_down(graph, deadline) do
