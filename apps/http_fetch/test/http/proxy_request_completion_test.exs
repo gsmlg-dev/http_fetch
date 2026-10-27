@@ -112,7 +112,7 @@ defmodule HTTP.ProxyRequestCompletionTest do
 
   test "unsupported proxy families keep an explicit completion fallback" do
     for {url, options} <- [
-          {"https://localhost/", [proxy: {:https, "localhost", 3128, []}]},
+          {"https://localhost/", [proxy: {:https, "localhost", 3128, []}, tls_backend: :ex_ssl]},
           {"http://localhost/", [proxy: {:http, "localhost", 3128, []}, http_version: :h2c]},
           {"http://localhost/", [proxy: {:https, "localhost", 3128, []}, http_version: :http2]}
         ] do

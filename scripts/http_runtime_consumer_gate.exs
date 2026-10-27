@@ -311,13 +311,12 @@ defmodule HTTPRuntimeConsumerGate do
          [
            http_version: :http2,
            tls_backend: :ex_ssl,
+           # The adapter supplies HTTPS hostname verification. A caller callback
+           # intentionally makes the pool key non-reusable, defeating this sharing gate.
            ssl: [
              cacertfile: System.fetch_env!("HTTP_RUNTIME_CONSUMER_CA"),
              verify: :verify_peer,
-             server_name_indication: ~c"localhost",
-             customize_hostname_check: [
-               match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
-             ]
+             server_name_indication: ~c"localhost"
            ]
          ] ++ common}
 
@@ -341,11 +340,7 @@ defmodule HTTPRuntimeConsumerGate do
 
     owners = DynamicSupervisor.which_children(:http_fetch_http2_connection_supervisor)
 
-    active? =
-      Enum.any?(owners, fn {_, pid, _, _} ->
-        status = apply(HTTP.HTTP2.ConnectionOwner, :status, [pid])
-        status.active_streams != 0 or status.protocol_streams != 0
-      end)
+    active? = Enum.any?(owners, fn {_, pid, _, _} -> owner_active?(pid) end)
 
     if active? or Task.Supervisor.children(:http_runtime_task_supervisor) != [] or
          Enum.any?(stats, fn {_key, value} -> value.streams != 0 or value.pending != 0 end) do
@@ -358,6 +353,15 @@ defmodule HTTPRuntimeConsumerGate do
 
       await_release!(deadline)
     end
+  end
+
+  defp owner_active?(pid) do
+    status = apply(HTTP.HTTP2.ConnectionOwner, :status, [pid])
+    status.active_streams != 0 or status.protocol_streams != 0
+  catch
+    :exit, {reason, {GenServer, :call, [^pid, :status, _]}} when reason in [:normal, :noproc] ->
+      # Teardown invalidated this snapshot; require fresh owner/pool/task observations.
+      true
   end
 
   defp runtime_processes! do

@@ -100,7 +100,7 @@ defmodule HTTP.ManagedTransport do
   """
   alias HTTP.ManagedTransport.{Policy, Scope}
 
-  @opaque t :: %__MODULE__{coordinator: pid(), latch: reference(), identity: binary()}
+  @opaque t :: %__MODULE__{coordinator: pid(), latch: :atomics.atomics_ref(), identity: binary()}
   defstruct [:coordinator, :latch, :identity, :ingress, :configuration, :gate, :max_requests]
 
   defmodule Receipt do
@@ -110,7 +110,7 @@ defmodule HTTP.ManagedTransport do
     Pass it to `HTTP.ManagedTransport.await_retired/2` for repeated or concurrent
     finite waits, including after the generation coordinator has terminated.
     """
-    @opaque t :: %__MODULE__{coordinator: pid(), latch: reference()}
+    @opaque t :: %__MODULE__{coordinator: pid(), latch: :atomics.atomics_ref()}
     defstruct [:coordinator, :latch]
   end
 
@@ -343,7 +343,7 @@ defmodule HTTP.ManagedTransport do
   defp reclaim_completed(ingress, id, replacement) do
     case :ets.lookup(ingress, id) do
       [{^id, _token, {_owner, completion}, :active, tracker} = entry]
-      when is_pid(tracker) and is_reference(completion) ->
+      when is_pid(tracker) ->
         # The same durable latch used by RequestCompletion proves request cleanup.
         # Scope's independent monitor/provider obligations remain until processed.
         not Process.alive?(tracker) and :atomics.get(completion, 1) == 2 and

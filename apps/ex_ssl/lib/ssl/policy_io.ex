@@ -100,6 +100,7 @@ defmodule SSL.PolicyIO do
   def now, do: System.monotonic_time(:millisecond)
   def enabled?(%{policy: policy}), do: policy != nil
 
+  @spec fail!(:policy_capacity | :invalid_policy_material | :policy_io_failed) :: no_return()
   def fail!(reason)
       when reason in [:policy_capacity, :invalid_policy_material, :policy_io_failed] do
     Process.put({__MODULE__, :failure}, reason)
@@ -435,19 +436,29 @@ defmodule SSL.PolicyIO do
     _, _ -> :unknown_ca
   end
 
-  defp sanitize_policy({:bad_cert, {:revoked, reason}}) when is_atom(reason),
+  # With an atom path error, OTP returns a verify_fun failure unwrapped even
+  # though pkix_path_validation's spec only declares {:bad_cert, reason}.
+  @doc false
+  @spec sanitize_policy(
+          {:bad_cert, term()}
+          | {:verify_fun, :rejected | :invalid_return | :exception}
+        ) ::
+          {:bad_cert, atom() | {:revoked, atom()}}
+          | {:verify_fun, :rejected | :invalid_return | :exception}
+          | :policy_validation_failed
+  def sanitize_policy({:bad_cert, {:revoked, reason}}) when is_atom(reason),
     do: {:bad_cert, {:revoked, reason}}
 
-  defp sanitize_policy({:bad_cert, {reason, _}}) when reason == :revocation_status_undetermined,
+  def sanitize_policy({:bad_cert, {reason, _}}) when reason == :revocation_status_undetermined,
     do: {:bad_cert, :revocation_status_undetermined}
 
-  defp sanitize_policy({:bad_cert, reason}) when is_atom(reason), do: {:bad_cert, reason}
+  def sanitize_policy({:bad_cert, reason}) when is_atom(reason), do: {:bad_cert, reason}
 
-  defp sanitize_policy({:verify_fun, reason})
-       when reason in [:rejected, :invalid_return, :exception],
-       do: {:verify_fun, reason}
+  def sanitize_policy({:verify_fun, reason})
+      when reason in [:rejected, :invalid_return, :exception],
+      do: {:verify_fun, reason}
 
-  defp sanitize_policy(_), do: :policy_validation_failed
+  def sanitize_policy(_), do: :policy_validation_failed
 
   defp verify_selections(selections, context, policy, authorization, identity, options, peer) do
     Enum.reduce_while(

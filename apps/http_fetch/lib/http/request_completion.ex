@@ -6,7 +6,9 @@ defmodule HTTP.RequestCompletion do
   redirects, and direct TCP or OTP TLS transport, including explicit HTTP and
   HTTPS proxies. HTTP proxies support HTTP/1 forwarding and HTTP/1 or HTTP/2
   CONNECT tunnels to HTTPS origins. HTTPS proxies support HTTP/1 forwarding to
-  HTTP origins. Nested TLS and proxy h2c routes remain unsupported.
+  HTTP origins, and OTP TLS CONNECT tunnels to HTTPS origins with independently
+  verified proxy and origin TLS. Nested TLS with ExSSL and proxy h2c routes
+  remain unsupported.
   Explicit ExSSL supports direct or pinned HTTPS HTTP/1 and HTTP/2, including reuse,
   and the proxy routes described above.
   Awaiting the Promise or monitoring its response stream alone does not
@@ -84,7 +86,9 @@ defmodule HTTP.RequestCompletion do
           (request.url.scheme == "https" and options.http_version in [:http1, :http2])
 
       {:ok, %{scheme: :https}} ->
-        request.url.scheme == "http" and options.http_version == :http1
+        (request.url.scheme == "http" and options.http_version == :http1) or
+          (request.url.scheme == "https" and options.tls_backend == :ssl and
+             options.http_version in [:http1, :http2])
 
       _ ->
         false

@@ -12,12 +12,7 @@ defmodule HTTP.Transport.TCP do
         active: false
       ] ++ Keyword.get(opts, :socket_opts, [])
 
-    case :gen_tcp.connect(
-           Keyword.get(opts, :connect_address, String.to_charlist(host)),
-           port,
-           socket_opts,
-           timeout
-         ) do
+    case HTTP.Transport.AddressFamily.connect(host, port, socket_opts, opts, timeout) do
       {:ok, socket} -> {:ok, HTTP.RequestLifecycle.track_socket(opts, socket)}
       {:error, reason} -> HTTP.Transport.connect_error(opts, reason)
     end

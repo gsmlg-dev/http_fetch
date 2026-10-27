@@ -40,14 +40,8 @@ defmodule SSL.PKIX.OCSP do
               report_missing_nonce(details)
               event
 
-            {:error, {:bad_cert, {:revoked, reason}}} ->
-              {:bad_cert, {:revoked, revoked_reason(reason)}}
-
-            {:error, {:bad_cert, reason}} when is_atom(reason) ->
-              {:bad_cert, reason}
-
-            {:error, {:bad_cert, _}} ->
-              {:bad_cert, :revocation_status_undetermined}
+            {:error, {:bad_cert, reason}} ->
+              normalize_error(reason)
           end
         else
           {:error, :policy_capacity} -> PolicyIO.fail!(:policy_capacity)
@@ -55,6 +49,25 @@ defmodule SSL.PKIX.OCSP do
         end
     end
   end
+
+  # OTP 28's pkix_ocsp_validate spec omits the RevokedInfo record returned by
+  # its implementation. Keep the runtime compatibility boundary independently
+  # typed so upstream success typing cannot discard required normalization.
+  @doc false
+  @spec normalize_error(
+          :public_key.bad_cert_reason()
+          | {:revoked, {:RevokedInfo, charlist(), atom()}}
+        ) :: {:bad_cert, atom() | {:revoked, atom()}}
+  def normalize_error({:revoked, reason}), do: {:bad_cert, {:revoked, revoked_reason(reason)}}
+  def normalize_error(reason) when is_atom(reason), do: {:bad_cert, reason}
+  def normalize_error(_), do: {:bad_cert, :revocation_status_undetermined}
+
+  defp revoked_reason({:RevokedInfo, _time, reason})
+       when is_atom(reason) and reason != :asn1_NOVALUE,
+       do: reason
+
+  defp revoked_reason(reason) when is_atom(reason), do: reason
+  defp revoked_reason(_), do: :unspecified
 
   defp report_missing_nonce(details) do
     if {:missing, :ocsp_nonce} in details do
@@ -64,13 +77,6 @@ defmodule SSL.PKIX.OCSP do
       )
     end
   end
-
-  defp revoked_reason({:RevokedInfo, _time, reason})
-       when is_atom(reason) and reason != :asn1_NOVALUE,
-       do: reason
-
-  defp revoked_reason(reason) when is_atom(reason), do: reason
-  defp revoked_reason(_), do: :unspecified
 
   defp issuer(der, selected) do
     path = PartialChain.full_path(selected)

@@ -209,7 +209,7 @@ defmodule HTTP.HTTP2.Pool do
         state = put_in(state.providers[owner], provider)
         state = put_entry(state, key, Map.get(state.entries, key, new_entry()))
         state = if opts[:connecting?], do: finish_connect(state, key), else: state
-        if map_size(state.providers) == 1, do: Process.send_after(self(), :poll_providers, 10)
+        _ = if map_size(state.providers) == 1, do: Process.send_after(self(), :poll_providers, 10)
         {:reply, :ok, state}
     end
   end
@@ -564,7 +564,7 @@ defmodule HTTP.HTTP2.Pool do
   @impl true
   def handle_info(:poll_providers, state) do
     state = Enum.reduce(Map.keys(state.providers), state, &poll_provider/2)
-    if map_size(state.providers) > 0, do: Process.send_after(self(), :poll_providers, 10)
+    _ = if map_size(state.providers) > 0, do: Process.send_after(self(), :poll_providers, 10)
     {:noreply, state}
   end
 
@@ -1348,11 +1348,12 @@ defmodule HTTP.HTTP2.Pool do
       provider = recover_provider(%{provider | phase: :retiring})
       state = put_in(state.providers[owner], provider)
 
-      if provider.lease do
-        SSL.Lifecycle.cancel(provider.lease, {:abs_ms, now_ms() + 250})
-      else
-        RequestLifecycle.provider_failed(provider.tracker)
-      end
+      _ =
+        if provider.lease do
+          SSL.Lifecycle.cancel(provider.lease, {:abs_ms, now_ms() + 250})
+        else
+          RequestLifecycle.provider_failed(provider.tracker)
+        end
 
       case provider.carrier do
         nil ->

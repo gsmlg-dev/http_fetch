@@ -41,14 +41,14 @@ defmodule AppClosuresTest do
     end
   end
 
-  test "test closures add fetch only for consumers that exercise shared HTTP traffic" do
+  test "test closures add fetch for runtime lifecycle and shared HTTP traffic tests" do
     Mix.env(:test)
 
     for {app, runtime} <- @closures do
       System.put_env("HTTP_FETCH_CI_APP", app)
 
       expected =
-        if app in ["http_web_socket", "http_event_source"],
+        if app in ["http_runtime", "http_web_socket", "http_event_source"],
           do: MapSet.new([:http_fetch | runtime]),
           else: MapSet.new(runtime)
 

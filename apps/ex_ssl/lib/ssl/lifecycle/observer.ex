@@ -479,7 +479,7 @@ defmodule SSL.Lifecycle.Observer do
         finish_accept(state, transfer, nonce, owner, accepted_at)
 
       {:reply, {:error, reason}} ->
-        Process.cancel_timer(transfer.timer)
+        _ = Process.cancel_timer(transfer.timer)
         if transfer.from, do: GenServer.reply(transfer.from, {:error, reason})
         settle_info(%{state | transfer: nil})
 
@@ -497,15 +497,6 @@ defmodule SSL.Lifecycle.Observer do
   defp begin_accept(ticket, deadline, from, state) do
     offer = state.authority.offer
 
-    context = %{
-      caller: elem(from, 0),
-      owner_ack: nil,
-      monitor: nil,
-      capability: nil,
-      now: now(),
-      deadline: deadline
-    }
-
     cond do
       state.transfer != nil ->
         settle({:error, :acceptance_unconfirmed}, state)
@@ -514,7 +505,7 @@ defmodule SSL.Lifecycle.Observer do
         settle({:error, :stale_transfer}, state)
 
       offer.status == :accepted ->
-        case Authority.accept(state.authority, ticket, context) do
+        case Authority.recover(state.authority, ticket, elem(from, 0), now(), deadline) do
           {:ok, _, lease} -> settle({:ok, lease}, state)
           error -> settle(error, state)
         end
@@ -1771,7 +1762,7 @@ defmodule SSL.Lifecycle.Observer do
 
   defp retire(%{grace: nil} = state, reason) do
     if state.transfer do
-      Process.cancel_timer(state.transfer.timer)
+      _ = Process.cancel_timer(state.transfer.timer)
       if state.transfer.from, do: GenServer.reply(state.transfer.from, {:error, :cancelled})
     end
 
@@ -1882,7 +1873,7 @@ defmodule SSL.Lifecycle.Observer do
   defp complete_candidate_close(state), do: state
 
   defp clear_candidate_close(state) do
-    Process.cancel_timer(state.candidate_close.timer)
+    _ = Process.cancel_timer(state.candidate_close.timer)
     %{state | candidate_close: nil}
   end
 

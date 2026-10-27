@@ -37,7 +37,13 @@ defmodule SSL.Lifecycle.NativeSocket do
   defp setopt(socket, {:priority, value}), do: :socket.setopt(socket, :socket, :priority, value)
   defp setopt(_socket, option), do: {:error, {:options, {option, :private_socket_unsupported}}}
 
-  @spec receive_nowait(:socket.socket()) :: term()
+  @type receive_result ::
+          {:ok, binary()}
+          | {:select, :socket.select_info() | {:socket.select_info(), binary()}}
+          | {:select_read, {:socket.select_info(), binary()}}
+          | {:completion, :socket.completion_info()}
+          | {:error, atom() | :socket.invalid() | {atom() | :socket.invalid(), term()}}
+  @spec receive_nowait(:socket.socket()) :: receive_result()
   def receive_nowait(socket), do: :socket.recv(socket, 0, :nowait)
 
   @spec cancel_read(:socket.socket(), term()) :: term()
@@ -69,7 +75,7 @@ defmodule SSL.Lifecycle.NativeSocket do
   @doc false
   def sockname(socket), do: endpoint(:socket.sockname(socket))
 
-  @spec abort_on_close(:socket.socket()) :: :ok | {:error, term()}
+  @spec abort_on_close(:socket.socket()) :: :ok | {:error, atom() | :socket.invalid()}
   def abort_on_close(socket),
     do: :socket.setopt(socket, :socket, :linger, %{onoff: true, linger: 0})
 

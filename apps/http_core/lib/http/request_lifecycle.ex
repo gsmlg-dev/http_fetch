@@ -5,6 +5,7 @@ defmodule HTTP.RequestLifecycle do
   alias HTTP.Transport.SSL, as: OTPTLS
 
   # The latch outlives the coordinator. No request process owns the evidence.
+  @spec start(:request | :client) :: {pid(), :atomics.atomics_ref()}
   def start(mode \\ :request) when mode in [:request, :client] do
     latch = :atomics.new(1, [])
     :atomics.put(latch, 1, 1)
@@ -27,8 +28,10 @@ defmodule HTTP.RequestLifecycle do
   def reserve_attempt(tracker, deadline),
     do: client_call(tracker, {:reserve_attempt, make_ref(), deadline}, deadline)
 
-  def retain_attempt(tracker, permit, %{tracker: child, latch: latch}, deadline),
-    do: client_call(tracker, {:retain_attempt, permit, child, latch, deadline}, deadline)
+  def retain_attempt(tracker, permit, receipt, deadline) do
+    {child, latch} = HTTP.ClientCompletion.retention(receipt)
+    client_call(tracker, {:retain_attempt, permit, child, latch, deadline}, deadline)
+  end
 
   defp client_call(tracker, message, deadline) do
     # Even expired publication is enqueued: a known child must remain retained.
@@ -871,7 +874,10 @@ defmodule HTTP.RequestLifecycle do
 
   def handle_info(:poll_providers, state) do
     state = Enum.reduce(Map.keys(state.providers), state, &poll_provider/2)
-    if map_size(state.providers) != 0, do: Process.send_after(self(), :poll_providers, 10)
+
+    _timer =
+      if map_size(state.providers) != 0, do: Process.send_after(self(), :poll_providers, 10)
+
     settle(state)
   end
 
@@ -999,7 +1005,9 @@ defmodule HTTP.RequestLifecycle do
     case SSL.Lifecycle.accept(provider.incoming.transfer, {:abs_ms, deadline}) do
       {:ok, lease} ->
         state = put_in(state.providers[handle].lease, lease)
-        if state.aborted?, do: SSL.Lifecycle.cancel(lease, {:abs_ms, now() + 250})
+        # Cancellation only requests retirement; poll_provider retains the handle
+        # until public await confirms cleanup, including a lost cancel reply.
+        _cancel = if state.aborted?, do: SSL.Lifecycle.cancel(lease, {:abs_ms, now() + 250})
         {:ok, state}
 
       {:error, _} = error ->

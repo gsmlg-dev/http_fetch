@@ -92,7 +92,7 @@ defmodule HTTP.HTTPSProxyWireTest do
     end
   end
 
-  test "proxy TLS verifies proxy identity and rejects TLS-over-TLS origins before dialing" do
+  test "proxy TLS verifies proxy identity and rejects native nested TLS before dialing" do
     {port, _peer} = proxy_peer()
 
     assert {:error, _reason} =
@@ -106,9 +106,10 @@ defmodule HTTP.HTTPSProxyWireTest do
 
     refute_receive {:proxy_request, _, _, _}, 0
 
-    assert {:error, :https_proxy_requires_http_origin} =
+    assert {:error, :nested_tls_requires_otp_ssl} =
              HTTP.fetch("https://origin.invalid/",
                proxy: {:https, "localhost", port, []},
+               tls_backend: :ex_ssl,
                redirect: :manual
              )
              |> HTTP.Promise.await(2_000)

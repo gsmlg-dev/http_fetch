@@ -130,8 +130,13 @@ defmodule HTTP.HTTP2.Connection do
 
   def update_local_settings(%__MODULE__{} = c, entries) do
     with {:ok, local} <- Settings.begin_local(c.local, entries),
-         {:ok, payload} <- Settings.encode(entries) do
-      {:ok, %{c | local: local}, [{:settings, payload}]}
+         {:ok, payload} <- Settings.encode(entries),
+         {:ok, streams} <-
+           apply_receive_delta(
+             c.streams,
+             local.values.initial_window_size - c.local.values.initial_window_size
+           ) do
+      {:ok, %{c | local: local, streams: streams}, [{:settings, payload}]}
     end
   end
 
@@ -488,6 +493,16 @@ defmodule HTTP.HTTP2.Connection do
       if value > @max_window,
         do: {:halt, {:error, :flow_control_error}},
         else: {:cont, {:ok, Map.put(acc, id, %{s | send_window: value})}}
+    end)
+  end
+
+  defp apply_receive_delta(streams, delta) do
+    Enum.reduce_while(streams, {:ok, %{}}, fn {id, stream}, {:ok, acc} ->
+      window = stream.receive_window + delta
+
+      if window > @max_window,
+        do: {:halt, {:error, :flow_control_error}},
+        else: {:cont, {:ok, Map.put(acc, id, %{stream | receive_window: window})}}
     end)
   end
 

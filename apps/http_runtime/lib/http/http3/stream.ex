@@ -256,14 +256,14 @@ defmodule HTTP.HTTP3.Stream do
             result
 
           failure ->
-            retire(cleanup)
+            _ = retire(cleanup)
             safe(fn -> Pool.release(pool, lease) end)
             Process.exit(owner, :kill)
             failure
         end
 
       failure ->
-        retire(cleanup)
+        _ = retire(cleanup)
         safe(fn -> Pool.release(pool, lease) end)
         failure
     end
@@ -291,16 +291,11 @@ defmodule HTTP.HTTP3.Stream do
     end
   end
 
-  defp validate_descriptor(
-         %{handle: %Quic.Cleanup.Handle{}, lease: %Quic.Cleanup.Lease{}} = descriptor
-       ) do
-    case QuicHttp3.Session.new(cleanup: descriptor) do
-      {:ok, _} -> {:ok, descriptor}
-      {:error, _} = error -> error
-    end
+  defp validate_descriptor(descriptor) do
+    with {:ok, cleanup} <- Quic.Cleanup.descriptor(descriptor),
+         {:ok, _} <- QuicHttp3.Session.new(cleanup: cleanup),
+         do: {:ok, cleanup}
   end
-
-  defp validate_descriptor(_), do: {:error, :invalid_cleanup_descriptor}
 
   # Both workers are retained before callback invocation. The callback retains
   # its native descriptor in the external tracker before returning it; no
@@ -433,7 +428,7 @@ defmodule HTTP.HTTP3.Stream do
             result
 
           error ->
-            retire(descriptor)
+            _ = retire(descriptor)
             error
         end
 
@@ -459,10 +454,7 @@ defmodule HTTP.HTTP3.Stream do
     end
   end
 
-  defp retire(%{lease: %Quic.Cleanup.Lease{} = lease}),
-    do: Quic.Cleanup.retire(lease, {:abs_ms, now()})
-
-  defp retire(_), do: :ok
+  defp retire(descriptor), do: Quic.Cleanup.retire_descriptor(descriptor, {:abs_ms, now()})
 
   defp ready(owner, deadline, monitor) do
     case opening_call(owner, :await_ready, deadline, monitor) do
@@ -706,6 +698,15 @@ defmodule HTTP.HTTP3.Stream do
   defp queue(%{terminal_event: terminal} = state, _event) when terminal != nil, do: state
 
   defp queue(state, event) do
+    event =
+      case event do
+        {:error, {:owner_down, {:shutdown, :deadline_expired}}} ->
+          if request_expired?(state), do: {:error, :request_timeout}, else: event
+
+        _ ->
+          event
+      end
+
     bytes =
       case event do
         {:data, data} -> byte_size(data)

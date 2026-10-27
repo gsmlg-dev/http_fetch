@@ -14,7 +14,7 @@ defmodule HTTP.ClientCompletion do
   """
   @opaque t :: %__MODULE__{
             tracker: pid() | nil,
-            latch: reference() | nil,
+            latch: :atomics.atomics_ref() | nil,
             unsupported: atom() | nil
           }
   defstruct [:tracker, :latch, :unsupported]
@@ -33,6 +33,14 @@ defmodule HTTP.ClientCompletion do
   @doc false
   @spec unsupported(atom()) :: t()
   def unsupported(reason), do: %__MODULE__{unsupported: reason}
+
+  @doc false
+  @spec tracker(t()) :: pid() | nil
+  def tracker(%__MODULE__{tracker: tracker}), do: tracker
+
+  @doc false
+  @spec retention(t()) :: {pid() | nil, :atomics.atomics_ref() | nil}
+  def retention(%__MODULE__{tracker: tracker, latch: latch}), do: {tracker, latch}
 
   @doc "Waits for cleanup using one finite timeout in milliseconds."
   @spec await(t(), non_neg_integer()) :: result()

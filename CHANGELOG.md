@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.18] - 2026-10-27
+
+### Added
+- Request-local HTTP/1 response head, field, count, informational-response and
+  CONNECT budgets with structured, content-free limit errors (#145).
+- Lazy fixed-length multipart envelopes with bounded regular-file reads and
+  upload cancellation/source-finalization coverage (#146).
+- Opt-in IPv6 preference with connection-only IPv4 fallback under one deadline,
+  strict address/family pins and no retry after TLS or HTTP begins (#147).
+- Public `HTTP.ProtocolClient` for retained cleartext HTTP/1 and HTTP/2 sessions,
+  stream reset, explicit receive credit and live SETTINGS on one connection (#148).
+- Independently verified HTTPS origin TLS inside authenticated HTTPS proxy
+  CONNECT, including HTTP/1 and HTTP/2, isolated credentials and completion
+  accounting for both TLS layers. Nested routes require OTP `:ssl`; ExSSL fails
+  before dialing. Missing TLS setup handles retain unconfirmed cleanup (#149).
+
+### Fixed
+- Preserve HTTP/1 cancellation when a socket closes during active-once rearming
+  after a fragmented response head, retaining actual cleanup confirmation.
+- Normalize HTTP/3 owner deadline expiry to the public request timeout only
+  after the total request deadline, preserving earlier operation failures.
+- Preserve OTP OCSP and certificate callback error normalization when runtime
+  values exceed upstream typespecs.
+- Preserve opaque TLS/QUIC cleanup capabilities across module boundaries and
+  declare accurate completion/transport contracts for strict Dialyzer checks.
+- Make integration fixtures observe the matching transport, provider lifetime
+  and pool notification, and bound TLS receive batches for blocked-write tests.
+
 ## [0.21.17] - 2026-10-24
 
 ### Added

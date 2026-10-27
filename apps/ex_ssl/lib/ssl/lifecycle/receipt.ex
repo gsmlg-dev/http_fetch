@@ -95,6 +95,16 @@ defmodule SSL.Lifecycle.Receipt do
 
   def setup_failure(_), do: :unknown
 
+  @doc false
+  def valid?(%__MODULE__{observer: observer, cell: cell}),
+    do: is_pid(observer) and is_reference(cell)
+
+  def valid?(_), do: false
+
+  @doc false
+  @spec failure_tag(t()) :: reference()
+  def failure_tag(%__MODULE__{cell: cell}), do: cell
+
   @spec observer(t()) :: pid()
   def observer(%__MODULE__{observer: observer}), do: observer
 

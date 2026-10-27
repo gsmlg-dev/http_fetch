@@ -3,8 +3,8 @@ defmodule HTTP.Proxy do
 
   alias HTTP.{Headers, Request}
   alias HTTP.Transport.{ExSSL, TCP}
+  alias HTTP.Transport.SSL, as: OTPTLS
 
-  @max_head_bytes 16_384
   @max_auth_bytes 8_192
 
   def normalize(nil), do: {:ok, nil}
@@ -13,18 +13,22 @@ defmodule HTTP.Proxy do
     if valid_host?(host) and is_integer(port) and port in 1..65_535 and
          Keyword.keyword?(opts) and
          length(Keyword.keys(opts)) == length(Enum.uniq(Keyword.keys(opts))) and
-         Enum.all?(Keyword.keys(opts), &(&1 in [:headers, :timeout])) do
+         Enum.all?(Keyword.keys(opts), &(&1 in [:headers, :timeout, :ssl])) do
       headers = Keyword.get(opts, :headers, [])
       timeout = Keyword.get(opts, :timeout, 30_000)
 
-      if valid_auth?(headers) and is_integer(timeout) and timeout > 0 do
+      ssl = Keyword.get(opts, :ssl)
+
+      if valid_auth?(headers) and is_integer(timeout) and timeout > 0 and
+           (is_nil(ssl) or (scheme == :https and Keyword.keyword?(ssl))) do
         {:ok,
          %{
            scheme: scheme,
            host: String.downcase(host),
            port: port,
            headers: headers,
-           timeout: timeout
+           timeout: timeout,
+           ssl: ssl
          }}
       else
         {:error, :invalid_proxy_configuration}
@@ -39,7 +43,7 @@ defmodule HTTP.Proxy do
   def route(%Request{} = request, unix_socket \\ nil) do
     with {:ok, proxy} <- normalize(Keyword.get(request.transport_options, :proxy)),
          :ok <- compatible(request, proxy, unix_socket) do
-      {:ok, proxy}
+      {:ok, if(proxy, do: Map.put(proxy, :origin_scheme, request.url.scheme))}
     end
   end
 
@@ -53,8 +57,10 @@ defmodule HTTP.Proxy do
       request.url.scheme not in ["http", "https"] ->
         {:error, :unsupported_proxy_scheme}
 
-      proxy.scheme == :https and request.url.scheme != "http" ->
-        {:error, :https_proxy_requires_http_origin}
+      proxy.scheme == :https and request.url.scheme == "https" and
+          HTTP.TLSBackend.resolve(Keyword.get(request.transport_options, :tls_backend)) !=
+            {:ok, :ssl} ->
+        {:error, :nested_tls_requires_otp_ssl}
 
       not is_integer(request.url.port) or request.url.port not in 1..65_535 ->
         {:error, :invalid_proxy_origin}
@@ -104,10 +110,23 @@ defmodule HTTP.Proxy do
     end
   end
 
-  def connect(transport, _host, _port, opts, timeout, %{scheme: :https} = proxy) do
-    ssl = opts |> Keyword.get(:ssl, []) |> Keyword.put(:alpn_advertised_protocols, ["http/1.1"])
-    opts = opts |> Keyword.put(:ssl, ssl) |> Keyword.put(:cancellable, true)
-    transport.connect(proxy.host, proxy.port, opts, min(timeout, proxy.timeout))
+  def connect(transport, host, port, opts, timeout, %{scheme: :https} = proxy) do
+    deadline = System.monotonic_time(:millisecond) + min(timeout, proxy.timeout)
+
+    ssl =
+      (Map.get(proxy, :ssl) || Keyword.get(opts, :ssl, []))
+      |> Keyword.put(:alpn_advertised_protocols, ["http/1.1"])
+
+    proxy_opts = opts |> Keyword.put(:ssl, ssl) |> Keyword.put(:cancellable, true)
+
+    with {:ok, outer} <-
+           transport.connect(proxy.host, proxy.port, proxy_opts, remaining(deadline)) do
+      if Map.get(proxy, :origin_scheme) == "https" do
+        nested_connect(transport, outer, host, port, opts, proxy, deadline)
+      else
+        {:ok, outer}
+      end
+    end
   end
 
   def connect(transport, host, port, opts, timeout, proxy) do
@@ -119,7 +138,15 @@ defmodule HTTP.Proxy do
         if transport == TCP do
           {:ok, tcp}
         else
-          with :ok <- establish_tunnel(tcp, host, port, proxy, deadline),
+          with :ok <-
+                 establish_tunnel(
+                   tcp,
+                   host,
+                   port,
+                   proxy,
+                   deadline,
+                   Keyword.get(opts, :response_header_limits)
+                 ),
                do: upgrade_tunnel(upgrade, tcp, remaining(deadline))
         end
 
@@ -133,6 +160,29 @@ defmodule HTTP.Proxy do
           result
       end
     end
+  end
+
+  defp nested_connect(OTPTLS, outer, host, port, opts, proxy, deadline) do
+    result =
+      with :ok <-
+             establish_tunnel(
+               outer,
+               host,
+               port,
+               proxy,
+               deadline,
+               Keyword.get(opts, :response_header_limits),
+               OTPTLS
+             ),
+           do: HTTP.Transport.NestedTLS.upgrade(outer, host, opts, remaining(deadline))
+
+    if match?({:error, _}, result), do: OTPTLS.abort(outer)
+    result
+  end
+
+  defp nested_connect(transport, outer, _host, _port, _opts, _proxy, _deadline) do
+    transport.close(outer)
+    {:error, :nested_tls_requires_otp_ssl}
   end
 
   defp prepare_tunnel_upgrade(ExSSL, host, opts, deadline) do
@@ -180,10 +230,14 @@ defmodule HTTP.Proxy do
     socket_opts =
       opts |> Keyword.get(:socket_opts, []) |> Keyword.delete(:active) |> Keyword.delete(:packet)
 
-    [socket_opts: socket_opts, request_lifecycle: Keyword.get(opts, :request_lifecycle)]
+    [
+      socket_opts: socket_opts,
+      request_lifecycle: Keyword.get(opts, :request_lifecycle),
+      prefer_ipv6: Keyword.get(opts, :prefer_ipv6, false)
+    ]
   end
 
-  defp establish_tunnel(tcp, host, port, proxy, deadline) do
+  defp establish_tunnel(tcp, host, port, proxy, deadline, limits, transport \\ TCP) do
     host = if String.contains?(host, ":"), do: "[#{host}]", else: host
     authority = host <> ":" <> to_string(port)
 
@@ -191,7 +245,7 @@ defmodule HTTP.Proxy do
       Enum.map(proxy.headers, fn {_name, value} -> ["Proxy-Authorization: ", value, "\r\n"] end)
 
     with :ok <-
-           :gen_tcp.send(tcp, [
+           transport.send(tcp, [
              "CONNECT ",
              authority,
              " HTTP/1.1\r\nHost: ",
@@ -200,28 +254,53 @@ defmodule HTTP.Proxy do
              headers,
              "\r\n"
            ]),
-         {:ok, head} <- read_head(tcp, "", deadline),
+         {:ok, head} <- read_head(tcp, "", deadline, limits, 0, 0, transport),
          :ok <- validate_head(head),
-         do: plaintext_boundary(tcp)
+         do: plaintext_boundary(tcp, transport)
   end
 
-  defp read_head(_tcp, bytes, _deadline) when byte_size(bytes) > @max_head_bytes,
-    do: {:error, :proxy_response_too_large}
-
-  defp read_head(tcp, bytes, deadline) do
+  defp read_head(tcp, bytes, deadline, limits, info_count, info_bytes, transport) do
     case :binary.match(bytes, "\r\n\r\n") do
-      {index, 4} when byte_size(bytes) == index + 4 ->
-        {:ok, binary_part(bytes, 0, index)}
-
-      {_index, 4} ->
-        {:error, :proxy_buffered_plaintext}
+      {index, 4} ->
+        with :ok <- HTTP.ResponseHeaderLimits.check(limits, bytes, :connect, index) do
+          head = binary_part(bytes, 0, index)
+          rest = binary_part(bytes, index + 4, byte_size(bytes) - index - 4)
+          next_proxy_head(tcp, head, rest, deadline, limits, info_count, info_bytes, transport)
+        end
 
       :nomatch ->
-        case :gen_tcp.recv(tcp, 0, remaining(deadline)) do
-          {:ok, chunk} -> read_head(tcp, bytes <> chunk, deadline)
-          {:error, :timeout} -> {:error, :proxy_tunnel_timeout}
-          {:error, reason} -> {:error, reason}
+        with :ok <- HTTP.ResponseHeaderLimits.check(limits, bytes, :connect) do
+          case transport.recv(tcp, 0, remaining(deadline)) do
+            {:ok, chunk} ->
+              read_head(tcp, bytes <> chunk, deadline, limits, info_count, info_bytes, transport)
+
+            {:error, :timeout} ->
+              {:error, :proxy_tunnel_timeout}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
         end
+    end
+  end
+
+  defp next_proxy_head(tcp, head, rest, deadline, limits, info_count, info_bytes, transport) do
+    case validate_head(head) do
+      {:informational, _status} ->
+        count = info_count + 1
+        size = info_bytes + byte_size(head) + 4
+
+        with :ok <- HTTP.ResponseHeaderLimits.informational(limits, :connect, count, size),
+             do: read_head(tcp, rest, deadline, limits, count, size, transport)
+
+      :ok when rest == "" ->
+        {:ok, head}
+
+      :ok ->
+        {:error, :proxy_buffered_plaintext}
+
+      error ->
+        error
     end
   end
 
@@ -233,9 +312,10 @@ defmodule HTTP.Proxy do
         code = String.to_integer(code)
 
         cond do
-          code not in 200..299 -> {:error, {:proxy_connect_status, code}}
-          Enum.all?(fields, &valid_response_field?/1) -> :ok
-          true -> {:error, :invalid_proxy_response}
+          not Enum.all?(fields, &valid_response_field?/1) -> {:error, :invalid_proxy_response}
+          code in 100..199 and code != 101 -> {:informational, code}
+          code in 200..299 -> :ok
+          true -> {:error, {:proxy_connect_status, code}}
         end
 
       _ ->
@@ -255,8 +335,8 @@ defmodule HTTP.Proxy do
     end
   end
 
-  defp plaintext_boundary(tcp) do
-    case :gen_tcp.recv(tcp, 0, 0) do
+  defp plaintext_boundary(tcp, transport) do
+    case transport.recv(tcp, 0, 0) do
       {:error, :timeout} -> :ok
       {:ok, _} -> {:error, :proxy_buffered_plaintext}
       {:error, reason} -> {:error, reason}

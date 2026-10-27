@@ -72,6 +72,13 @@ defmodule HTTP.FormData do
           boundary: String.t() | nil
         }
 
+  @type stream_envelope :: %{
+          body: Enumerable.t(),
+          content_length: non_neg_integer(),
+          content_type: String.t(),
+          boundary: String.t()
+        }
+
   @doc """
   Creates a new empty FormData struct.
 
@@ -144,6 +151,162 @@ defmodule HTTP.FormData do
     else
       encode_url_encoded(form)
     end
+  end
+
+  @doc """
+  Builds a lazy multipart envelope with an exact byte length.
+
+  Returns `{:ok, %{body: enumerable, content_length: bytes, content_type: type,
+  boundary: boundary}}`. Construction stats regular file paths but does not open
+  or read them. Enumeration opens one file at a time and emits binary chunks of
+  at most `:chunk_size` bytes (default 32,768; maximum 65,536). Halting enumeration
+  closes the current file. The existing `to_body/1` buffered API is unchanged.
+
+  For Fetch uploads, adapt the enumerable through `HTTP.Stream.from_enumerable/1`
+  and provide the matching length and content type:
+
+      {:ok, multipart} = HTTP.FormData.to_stream(form)
+      {:ok, upload} = HTTP.Stream.from_enumerable(multipart.body)
+      HTTP.fetch(url,
+        method: :post,
+        body: upload,
+        duplex: :half,
+        content_type: multipart.content_type,
+        headers: [{"Content-Length", Integer.to_string(multipart.content_length)}]
+      )
+
+  File inputs must be local regular `File.Stream` paths with byte-preserving
+  modes. Default line-mode streams are reopened in binary chunks. Encoded,
+  compressed, remote-node and write-mode streams are rejected because their
+  output length cannot be obtained from file metadata alone. Field values and
+  in-memory file content must be binaries.
+
+  Keep files unchanged until upload completion. Fetch's fixed-length upload
+  checks reject underflow or overflow if a file's size changes. Creating the
+  envelope starts no producer; Fetch's upload stream owns enumeration and its
+  existing cancellation, failed-connection and owner-exit cleanup applies. The
+  serializer does not retry uploads.
+  """
+  @spec to_stream(t(), keyword()) :: {:ok, stream_envelope()} | {:error, term()}
+  def to_stream(%__MODULE__{} = form, options \\ []) do
+    boundary = form.boundary || generate_boundary()
+
+    with {:ok, chunk_size} <- stream_chunk_size(options),
+         {:ok, segments, length} <- stream_segments(form.parts, boundary, chunk_size) do
+      closing = "--#{boundary}--\r\n"
+
+      body =
+        (segments ++ [{:data, closing}])
+        |> Stream.flat_map(fn
+          {:data, data} -> binary_chunks(data, chunk_size)
+          {:file, stream} -> stream
+        end)
+
+      {:ok,
+       %{
+         body: body,
+         content_length: length + byte_size(closing),
+         content_type: "multipart/form-data; boundary=#{boundary}",
+         boundary: boundary
+       }}
+    end
+  end
+
+  defp stream_chunk_size(options) do
+    if Keyword.keyword?(options) and Keyword.keys(options) -- [:chunk_size] == [] do
+      case Keyword.get(options, :chunk_size, 32_768) do
+        size when is_integer(size) and size > 0 and size <= 65_536 -> {:ok, size}
+        _ -> {:error, :invalid_multipart_chunk_size}
+      end
+    else
+      {:error, :invalid_multipart_options}
+    end
+  end
+
+  defp stream_segments(parts, boundary, chunk_size) do
+    Enum.reduce_while(parts, {:ok, [], 0}, fn part, {:ok, segments, length} ->
+      case stream_part(part, boundary, chunk_size) do
+        {:ok, next, bytes} -> {:cont, {:ok, [next | segments], length + bytes}}
+        error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, segments, length} -> {:ok, segments |> Enum.reverse() |> List.flatten(), length}
+      error -> error
+    end
+  end
+
+  defp stream_part({:field, name, value}, boundary, _chunk_size)
+       when is_binary(name) and is_binary(value) do
+    data = IO.iodata_to_binary([encode_multipart_field(boundary, name, value), "\r\n"])
+    {:ok, [{:data, data}], byte_size(data)}
+  end
+
+  defp stream_part({:file, name, filename, content_type, content}, boundary, chunk_size)
+       when is_binary(name) and is_binary(filename) and is_binary(content_type) do
+    head =
+      IO.iodata_to_binary(
+        encode_multipart_file_content(boundary, name, filename, content_type, "")
+      )
+
+    with {:ok, segment, length} <- stream_content(content, chunk_size) do
+      {:ok, [{:data, head}, segment, {:data, "\r\n"}], byte_size(head) + length + 2}
+    end
+  end
+
+  defp stream_part(_part, _boundary, _chunk_size), do: {:error, :invalid_multipart_part}
+
+  defp stream_content(content, _chunk_size) when is_binary(content),
+    do: {:ok, {:data, content}, byte_size(content)}
+
+  defp stream_content(%File.Stream{} = stream, chunk_size) do
+    if stream.node == node() and Enum.all?(stream.modes, &byte_preserving_mode?/1) do
+      case File.stat(stream.path) do
+        {:ok, %File.Stat{type: :regular, size: size}} ->
+          source = file_chunks(stream.path, chunk_size)
+          {:ok, {:file, source}, size}
+
+        {:ok, %File.Stat{type: type}} ->
+          {:error, {:unsupported_multipart_file_type, stream.path, type}}
+
+        {:error, reason} ->
+          {:error, {:multipart_file_stat, stream.path, reason}}
+      end
+    else
+      {:error, :unsupported_multipart_file_stream}
+    end
+  end
+
+  defp stream_content(_content, _chunk_size), do: {:error, :invalid_multipart_part}
+
+  defp byte_preserving_mode?(mode) when mode in [:raw, :binary, :read, :read_ahead], do: true
+  defp byte_preserving_mode?({:read_ahead, size}) when is_integer(size) and size >= 0, do: true
+  defp byte_preserving_mode?(_mode), do: false
+
+  defp file_chunks(path, chunk_size) do
+    Stream.resource(
+      fn -> File.open!(path, [:read, :binary]) end,
+      fn file ->
+        case IO.binread(file, chunk_size) do
+          :eof -> {:halt, file}
+          {:error, reason} -> raise File.Error, reason: reason, action: "read file", path: path
+          bytes -> {[bytes], file}
+        end
+      end,
+      &File.close/1
+    )
+  end
+
+  defp binary_chunks(data, chunk_size) do
+    Stream.unfold(data, fn
+      "" ->
+        nil
+
+      data ->
+        size = min(byte_size(data), chunk_size)
+        <<chunk::binary-size(size), rest::binary>> = data
+        {chunk, rest}
+    end)
   end
 
   @doc """

@@ -96,20 +96,13 @@ defmodule QuicHttp3.Session do
 
   defp validate_cleanup(nil, _), do: :ok
 
-  defp validate_cleanup(
-         %{
-           handle: %Quic.Cleanup.Handle{} = handle,
-           lease: %Quic.Cleanup.Lease{handle: lease_handle}
-         },
-         transport
-       )
-       when handle == lease_handle do
-    if transport == QuicTransport,
-      do: :ok,
-      else: {:error, :cleanup_requires_quic_transport}
+  defp validate_cleanup(cleanup, transport) do
+    with {:ok, _descriptor} <- Quic.Cleanup.descriptor(cleanup) do
+      if transport == QuicTransport,
+        do: :ok,
+        else: {:error, :cleanup_requires_quic_transport}
+    end
   end
-
-  defp validate_cleanup(_, _), do: {:error, :invalid_cleanup_descriptor}
 
   def connect(session, remote, port, opts) do
     if session.connection == nil do
@@ -319,10 +312,11 @@ defmodule QuicHttp3.Session do
       (session.work != nil and now() >= session.work.deadline) or
         (session.deadline != nil and now() >= elem(session.deadline, 1))
 
-    if session.cleanup && expired? do
-      # Resource retirement remains possible after the application budget ends.
-      Quic.Cleanup.retire(session.cleanup.lease, {:abs_ms, now()})
-    end
+    _retirement =
+      if session.cleanup && expired? do
+        # Resource retirement remains possible after the application budget ends.
+        Quic.Cleanup.retire(session.cleanup.lease, {:abs_ms, now()})
+      end
 
     abandoned =
       if session.pending,

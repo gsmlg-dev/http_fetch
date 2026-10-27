@@ -4,7 +4,6 @@ defmodule HTTP.HTTP1 do
   alias HTTP.Headers
   alias HTTP.Request
 
-  @max_head_bytes 64 * 1024
   @max_line_bytes 8 * 1024
   @max_chunk_emit_bytes 64 * 1024
 
@@ -15,7 +14,10 @@ defmodule HTTP.HTTP1 do
             status: nil,
             headers: %Headers{},
             remaining: nil,
-            chunk_size: nil
+            chunk_size: nil,
+            response_header_limits: nil,
+            informational_count: 0,
+            informational_bytes: 0
 
   @type event ::
           {:headers, non_neg_integer(), Headers.t()}
@@ -25,7 +27,11 @@ defmodule HTTP.HTTP1 do
   @type t :: %__MODULE__{}
 
   @spec new(atom()) :: t()
-  def new(method), do: %__MODULE__{method: method}
+  def new(method, limits \\ nil),
+    do: %__MODULE__{
+      method: method,
+      response_header_limits: HTTP.ResponseHeaderLimits.normalize(limits)
+    }
 
   @spec serialize_request(Request.t()) :: iolist()
   def serialize_request(%Request{} = request) do
@@ -89,24 +95,26 @@ defmodule HTTP.HTTP1 do
   defp parse(%__MODULE__{state: :head, buffer: buffer} = conn, events) do
     case :binary.match(buffer, "\r\n\r\n") do
       {index, 4} ->
-        if index > @max_head_bytes do
-          {:error, :headers_too_large}
-        else
-          head = binary_part(buffer, 0, index)
-          body = binary_part(buffer, index + 4, byte_size(buffer) - index - 4)
+        head = binary_part(buffer, 0, index)
+        body = binary_part(buffer, index + 4, byte_size(buffer) - index - 4)
 
-          with {:ok, status, headers, version} <- parse_head(head),
-               :ok <- validate_response_framing(conn.method, status, headers) do
-            parse_head_response(%{conn | version: version}, status, headers, body, events)
-          end
+        with :ok <-
+               HTTP.ResponseHeaderLimits.check(
+                 conn.response_header_limits,
+                 buffer,
+                 :response,
+                 index
+               ),
+             {:ok, status, headers, version} <- parse_head(head),
+             :ok <- validate_response_framing(conn.method, status, headers),
+             {:ok, conn} <- record_informational(conn, status, index + 4) do
+          parse_head_response(%{conn | version: version}, status, headers, body, events)
         end
 
       :nomatch ->
-        if byte_size(buffer) > @max_head_bytes do
-          {:error, :headers_too_large}
-        else
-          {:ok, conn, Enum.reverse(events)}
-        end
+        with :ok <-
+               HTTP.ResponseHeaderLimits.check(conn.response_header_limits, buffer, :response),
+             do: {:ok, conn, Enum.reverse(events)}
     end
   end
 
@@ -214,6 +222,22 @@ defmodule HTTP.HTTP1 do
         {:error, reason}
     end
   end
+
+  defp record_informational(conn, status, size) when status in 100..199 do
+    count = conn.informational_count + 1
+    bytes = conn.informational_bytes + size
+
+    with :ok <-
+           HTTP.ResponseHeaderLimits.informational(
+             conn.response_header_limits,
+             :response,
+             count,
+             bytes
+           ),
+         do: {:ok, %{conn | informational_count: count, informational_bytes: bytes}}
+  end
+
+  defp record_informational(conn, _status, _size), do: {:ok, conn}
 
   defp parse_head_response(_conn, 101, _headers, _body, _events) do
     {:error, :unsupported_protocol_switch}

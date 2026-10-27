@@ -823,7 +823,7 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   end
 
   defp retire_native(%{lease: lease}) do
-    Quic.Cleanup.retire(lease, {:abs_ms, now()})
+    _ = Quic.Cleanup.retire(lease, {:abs_ms, now()})
     :ok
   end
 

@@ -523,10 +523,23 @@ defmodule HTTP.HTTP3.RuntimeTest do
     assert {:ok, {_, _, _initial_packet}} = :gen_udp.recv(socket, 0, 2_000)
     # The inert owner is retained before authenticated readiness begins.
     assert %{leases: 1, owners: 1} = Pool.status(pool)
+    [owner] = Map.keys(:sys.get_state(pool).owners)
+    owner_monitor = Process.monitor(owner)
     monitor = Process.monitor(stream)
-    Stream.close(stream)
-    assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 500
-    assert %{leases: 0, pending: 0, owners: 0} = Pool.status(pool)
+    :erlang.trace(pool, true, [:receive, {:tracer, self()}])
+
+    try do
+      Stream.close(stream)
+      assert_receive {:DOWN, ^monitor, :process, ^stream, :normal}, 500
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _}, 500
+      # Owner DOWN and relay DOWN have independent recipients. Observe the
+      # pool's actual notification before asking it for the settled counts.
+      assert_receive {:trace, ^pool, :receive, {:DOWN, _, :process, ^owner, _}}, 500
+      assert %{leases: 0, pending: 0, owners: 0} = Pool.status(pool)
+    after
+      :erlang.trace(pool, false, [:receive])
+    end
+
     refute_receive {:read_chunk, _, :ack}, 0
   end
 

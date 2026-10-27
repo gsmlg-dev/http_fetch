@@ -17,6 +17,12 @@ spec.loader.exec_module(package_traffic)
 
 
 class HTTPRuntimeTrafficEvidenceTests(unittest.TestCase):
+    def test_runtime_release_gate_retries_owner_teardown_without_losing_reservation_proof(self):
+        result = subprocess.run(
+            ['elixir', str(ROOT / 'scripts/release/test_http_runtime_release.exs')],
+            cwd=ROOT, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def evidence(self, mode):
         tls = mode == 'ex_ssl'
         records = [dict(kind='ready', port=8443, tls=tls)]
@@ -106,8 +112,9 @@ class HTTPRuntimeTrafficEvidenceTests(unittest.TestCase):
         driver = (ROOT / 'scripts/http_runtime_consumer_gate.exs').read_text()
         for required in ('tls_backend: :ex_ssl', 'verify: :verify_peer',
                          'server_name_indication: ~c"localhost"',
-                         '"https://", "wss://"', ':public_key.pkix_verify_hostname_match_fun(:https)'):
+                         '"https://", "wss://"'):
             self.assertIn(required, driver)
+        self.assertNotIn('customize_hostname_check:', driver)
         self.assertNotIn(':verify_none', driver)
 
     def test_runtime_projects_keep_exact_hex_graph_and_transport_environment(self):

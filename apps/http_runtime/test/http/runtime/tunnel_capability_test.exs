@@ -9,6 +9,15 @@ defmodule HTTP.Runtime.TunnelCapabilityTest do
   @preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
   @enabled <<3::16, 10::32, 8::16, 1::32>>
 
+  test "owner lookup ignores an unrelated provider socket" do
+    owner =
+      start_supervised!(
+        {ConnectionOwner, [transport: HTTP.Transport.ExSSL, socket: make_ref(), activate?: false]}
+      )
+
+    assert owner_socket_port(owner) == nil
+  end
+
   test "exclusive CONNECT waits for peer permission and emits exact raw tunnel headers" do
     parent = self()
 
@@ -309,9 +318,15 @@ defmodule HTTP.Runtime.TunnelCapabilityTest do
   end
 
   defp owner_socket_port(owner) do
-    case :inet.peername(:sys.get_state(owner).socket) do
-      {:ok, {_, port}} -> port
-      _ -> nil
+    case :sys.get_state(owner) do
+      %{transport: HTTP.Transport.TCP, socket: socket} when is_port(socket) ->
+        case :inet.peername(socket) do
+          {:ok, {_, port}} -> port
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end
   catch
     :exit, _ -> nil

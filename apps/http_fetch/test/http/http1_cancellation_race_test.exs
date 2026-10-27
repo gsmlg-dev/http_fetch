@@ -11,11 +11,9 @@ defmodule HTTP.HTTP1CancellationRaceTest do
       key = {__MODULE__, operation}
 
       case :persistent_term.get(__MODULE__, nil) do
-        {test, ^module, mode} when mode in [:activation, :send_return, :send_failure] ->
-          selected? =
-            (mode == :activation and operation == :setopts and
-               List.last(args) == [active: :once]) or
-              (mode in [:send_return, :send_failure] and operation == :send)
+        {test, ^module, mode}
+        when mode in [:activation, :response_rearm, :send_return, :send_failure] ->
+          selected? = selected?(operation, args, mode)
 
           if selected? and not Process.get(key, false) do
             Process.put(key, true)
@@ -28,6 +26,26 @@ defmodule HTTP.HTTP1CancellationRaceTest do
           fun.()
       end
     end
+
+    defp selected?(:setopts, [{:cancellable_ssl, _, _}, _], :response_rearm), do: false
+
+    defp selected?(:setopts, args, :response_rearm) do
+      if List.last(args) == [active: :once] do
+        key = {__MODULE__, :activation_count}
+        count = Process.get(key, 0) + 1
+        Process.put(key, count)
+        count == 2
+      else
+        false
+      end
+    end
+
+    defp selected?(operation, args, mode),
+      do:
+        (mode == :activation and operation == :setopts and List.last(args) == [active: :once]) or
+          (mode in [:send_return, :send_failure] and operation == :send)
+
+    defp run(test, :response_rearm, args, fun), do: run(test, :activation, args, fun)
 
     defp run(test, :activation, _args, fun) do
       gate(test, nil)
@@ -111,6 +129,32 @@ defmodule HTTP.HTTP1CancellationRaceTest do
   setup do
     on_exit(fn -> :persistent_term.erase(Gate) end)
     :ok
+  end
+
+  for backend <- [:tcp, :ssl] do
+    test "#{backend}: cancellation during partial-head rearm preserves abort and joins actual closure" do
+      backend = unquote(backend)
+      :persistent_term.put(Gate, {self(), transport(backend), :response_rearm})
+      {peer, url} = peer(backend, :held)
+      promise = fetch(url, response_header_limits: [max_head_bytes: 262_144])
+      completion = Promise.completion(promise)
+      assert_receive :complete_request_headers, 3_000
+      send(peer.pid, {:respond, "HTTP/1.1 200 OK\r\nX-Pad: " <> String.duplicate("x", 12_000)})
+      assert_receive {:transport_gate, owner, gate, nil}, 3_000
+
+      try do
+        assert {:error, :cleanup_pending} = RequestCompletion.abort_and_await(completion, 0)
+        assert_receive :peer_closed, 3_000
+      after
+        send(owner, {:release_transport, gate})
+      end
+
+      assert_receive {:native_activation_result, {:error, reason}}, 3_000
+      assert reason in [:closed, :einval]
+      assert :ok = RequestCompletion.await(completion, 3_000)
+      assert {:error, :aborted} = Promise.await(promise, 3_000)
+      join_peer(peer)
+    end
   end
 
   for backend <- [:tcp, :ssl] do

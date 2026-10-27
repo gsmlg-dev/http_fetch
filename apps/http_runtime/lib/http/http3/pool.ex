@@ -297,7 +297,7 @@ defmodule HTTP.HTTP3.Pool do
   defp retire_released_owner(state, _lease, _token), do: state
 
   defp retire_native(%{lease: lease}) do
-    Quic.Cleanup.retire(lease, {:abs_ms, System.monotonic_time(:millisecond)})
+    _ = Quic.Cleanup.retire(lease, {:abs_ms, System.monotonic_time(:millisecond)})
     :ok
   end
 

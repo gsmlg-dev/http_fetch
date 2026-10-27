@@ -15,6 +15,22 @@ defmodule HTTP.Transport.SSL do
       when is_port(tcp) and is_pid(receiver) and is_pid(sender),
       do: {:ok, tcp, [receiver, sender]}
 
+  def lifecycle_resources(
+        {:sslsocket, outer, receiver, sender, HTTP.Transport.NestedTLS, _, _, _}
+      )
+      when is_pid(receiver) and is_pid(sender) do
+    with {:ok, tcp, outer_pids} <- lifecycle_resources(outer),
+         do: {:ok, tcp, [receiver, sender | outer_pids]}
+  end
+
+  def lifecycle_resources(
+        {:sslsocket, {HTTP.Transport.NestedTLS, outer, _, _}, [receiver, sender]}
+      )
+      when is_pid(receiver) and is_pid(sender) do
+    with {:ok, tcp, outer_pids} <- lifecycle_resources(outer),
+         do: {:ok, tcp, [receiver, sender | outer_pids]}
+  end
+
   def lifecycle_resources(_socket), do: :error
 
   # Retain the TCP handle through the public TLS upgrade API. OTP's graceful
@@ -26,12 +42,7 @@ defmodule HTTP.Transport.SSL do
     socket_opts = [:binary, packet: :raw, active: false] ++ Keyword.get(opts, :socket_opts, [])
     ssl_opts = ssl_options(host, Keyword.get(opts, :ssl, []))
 
-    case :gen_tcp.connect(
-           Keyword.get(opts, :connect_address, String.to_charlist(host)),
-           port,
-           socket_opts,
-           timeout
-         ) do
+    case HTTP.Transport.AddressFamily.connect(host, port, socket_opts, opts, timeout) do
       {:ok, tcp} ->
         HTTP.RequestLifecycle.track_socket(opts, tcp)
         remaining = if deadline == :infinity, do: :infinity, else: max(deadline - now(), 0)
@@ -167,6 +178,35 @@ defmodule HTTP.Transport.SSL do
   end
 
   defp connect_unmanaged(host, port, opts, timeout) do
+    if HTTP.Transport.AddressFamily.preferred?(opts),
+      do: connect_unmanaged_preferred(host, port, opts, timeout),
+      else: connect_unmanaged_direct(host, port, opts, timeout)
+  end
+
+  defp connect_unmanaged_preferred(host, port, opts, timeout) do
+    deadline = if timeout == :infinity, do: :infinity, else: now() + timeout
+    socket_opts = [:binary, packet: :raw, active: false] ++ Keyword.get(opts, :socket_opts, [])
+
+    with {:ok, tcp} <-
+           HTTP.Transport.AddressFamily.connect(host, port, socket_opts, opts, timeout) do
+      case :ssl.connect(
+             tcp,
+             [:binary, packet: :raw, active: false] ++
+               ssl_options(host, Keyword.get(opts, :ssl, [])) ++
+               Keyword.get(opts, :socket_opts, []),
+             remaining(deadline)
+           ) do
+        {:ok, _socket} = connected ->
+          connected
+
+        error ->
+          :gen_tcp.close(tcp)
+          error
+      end
+    end
+  end
+
+  defp connect_unmanaged_direct(host, port, opts, timeout) do
     ssl_opts = ssl_options(host, Keyword.get(opts, :ssl, []))
 
     socket_opts =
@@ -241,7 +281,8 @@ defmodule HTTP.Transport.SSL do
     ]
   end
 
-  defp ssl_options(host, user_ssl_opts) do
+  @doc false
+  def ssl_options(host, user_ssl_opts) do
     user_ssl_opts = normalize_user_ssl_options(user_ssl_opts)
 
     host

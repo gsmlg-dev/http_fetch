@@ -447,22 +447,20 @@ defmodule HTTP.ProxyWireTest do
     end
   end
 
-  test "HTTPS proxy plus HTTPS origin is rejected before either endpoint accepts" do
+  test "ExSSL nested HTTPS proxy route is rejected before either endpoint accepts" do
     {origin, origin_port} = listener()
     {proxy, proxy_port} = listener()
 
-    for backend <- [:ssl, :ex_ssl] do
-      assert {:error, :https_proxy_requires_http_origin} =
-               HTTP.fetch("https://localhost:#{origin_port}/private",
-                 tls_backend: backend,
-                 proxy: {:https, "127.0.0.1", proxy_port, []},
-                 timeout: 500
-               )
-               |> HTTP.Promise.await(2_000)
+    assert {:error, :nested_tls_requires_otp_ssl} =
+             HTTP.fetch("https://localhost:#{origin_port}/private",
+               tls_backend: :ex_ssl,
+               proxy: {:https, "127.0.0.1", proxy_port, []},
+               timeout: 500
+             )
+             |> HTTP.Promise.await(2_000)
 
-      assert {:error, :timeout} = :gen_tcp.accept(proxy, 20)
-      assert {:error, :timeout} = :gen_tcp.accept(origin, 20)
-    end
+    assert {:error, :timeout} = :gen_tcp.accept(proxy, 20)
+    assert {:error, :timeout} = :gen_tcp.accept(origin, 20)
   end
 
   defp serve_tls(socket, :http1, parent) do

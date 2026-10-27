@@ -87,6 +87,10 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   @spec send_event(pid(), term()) :: :ok | {:error, term()}
   def send_event(owner, event), do: GenServer.call(owner, {:event, event})
 
+  @doc "Writes live local SETTINGS and updates existing stream receive windows."
+  @spec put_settings(pid(), list()) :: :ok | {:error, term()}
+  def put_settings(owner, entries), do: GenServer.call(owner, {:put_settings, entries})
+
   @spec status(pid()) :: map()
   def status(owner), do: GenServer.call(owner, :status)
 
@@ -365,6 +369,29 @@ defmodule HTTP.HTTP2.ConnectionOwner do
   end
 
   @impl true
+  def handle_call({:put_settings, _entries}, _from, %{lifecycle: lifecycle} = state)
+      when lifecycle != :ready,
+      do: {:reply, {:error, lifecycle}, state}
+
+  def handle_call({:put_settings, entries}, _from, state) do
+    with {:ok, connection, effects} <-
+           Connection.update_local_settings(state.connection, entries),
+         {:ok, state} <- write_effects(%{state | connection: connection}, effects) do
+      timer =
+        state.settings_timer ||
+          Process.send_after(self(), :settings_timeout, state.settings_timeout)
+
+      {:reply, :ok, %{state | settings_timer: timer}}
+    else
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+
+      {:error, reason, state} ->
+        notify_transport_error(state, reason)
+        {:stop, :normal, {:error, reason}, %{state | lifecycle: :closed, close_reason: reason}}
+    end
+  end
+
   def handle_call(:status, _from, state) do
     {:reply,
      Map.take(state, [
