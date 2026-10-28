@@ -48,6 +48,12 @@ MIGRATION_GROUPS = {
         "apps/ex_ssl/test/ssl/tls12_session_integration_test.exs",
         "apps/ex_ssl/test/ssl/protocol/tls12_session_test.exs",
     ),
+    "nested": (
+        "apps/ex_ssl/test/ssl/nested_tls_carrier_integration_test.exs",
+        "apps/ex_ssl/test/ssl/lifecycle/nested_tls_test.exs",
+        "apps/ex_ssl/test/ssl/lifecycle/pair_test.exs",
+        "apps/http_fetch/test/http/nested_ex_ssl_https_proxy_test.exs",
+    ),
     "provider": (
         "apps/http_core/test/http/ex_ssl_setup_phase_integration_test.exs",
         "apps/http_core/test/http/proxy_prepared_tls_test.exs",

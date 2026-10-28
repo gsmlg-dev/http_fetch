@@ -73,6 +73,25 @@ class MigrationConsumerTests(unittest.TestCase):
                 self.assertNotIn(forbidden, source)
             self.assertIn('"apps/ex_ssl/test/support"', source)
 
+    def test_missing_nested_tls_scenarios_fail_before_staging(self):
+        required = (
+            "apps/ex_ssl/test/ssl/nested_tls_carrier_integration_test.exs",
+            "apps/ex_ssl/test/ssl/lifecycle/nested_tls_test.exs",
+            "apps/ex_ssl/test/ssl/lifecycle/pair_test.exs",
+            "apps/http_fetch/test/http/nested_ex_ssl_https_proxy_test.exs",
+        )
+        for name in required:
+            with self.subTest(name=name):
+                missing = consumer_gate.ROOT / name
+                with patch.object(Path, "exists", new=lambda path: path != missing), \
+                        patch.object(Path, "mkdir"), \
+                        patch.object(consumer_gate.shutil, "copytree") as copytree, \
+                        patch.object(consumer_gate.shutil, "copyfile") as copyfile:
+                    with self.assertRaisesRegex(RuntimeError, "missing migration.*" + name):
+                        consumer_gate.stage_migration_tests(Path("unused"))
+                    copytree.assert_not_called()
+                    copyfile.assert_not_called()
+
     def test_a_zero_test_file_cannot_hide_behind_another_passing_file(self):
         files = consumer_gate.MIGRATION_GROUPS["policy"][:2]
         outputs = iter(("1 test, 0 failures\n", "0 tests, 0 failures\n"))
