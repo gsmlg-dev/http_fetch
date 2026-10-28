@@ -662,18 +662,20 @@ NO_PROXY selection remain caller responsibilities.
 Use `error_mode: :structured` to receive `{:error, %HTTP.RequestError{}}`.
 The default keeps existing raw error reasons. `error.reason` contains the
 original reason; `HTTP.RequestError.pre_send?(error)` is true when direct
-TCP or OTP TLS dialing failed before TCP establishment (`phase: :connect`),
-using manual/error redirects. Ordinary direct HTTP/1 with OTP TLS can also
-report `phase: :tls_setup` for a confirmed TLS alert after ServerHello, before
-any HTTP bytes are sent. This path registers the TLS receiver and sender before
-continuing the handshake, so the request completion barrier can wait for both.
+TCP or HTTPS dialing failed before TCP establishment (`phase: :connect`),
+using manual/error redirects. Ordinary direct, unpooled HTTP/1 TLS requests can
+also report `phase: :tls_setup` for a confirmed fatal handshake or certificate
+alert after ServerHello, before any HTTP bytes are sent. ExSSL supplies this
+phase evidence through its public lifecycle handle from the original attempt;
+request completion separately waits for enrolled provider resources.
 A fresh request-local token ties evidence to that attempt.
 
 TLS failures before ServerHello, interrupted or uncertain negotiation, pooled
 requests, partial uploads, source/send/response errors, cancellation, and
 uncertain deadline outcomes remain unconfirmed. TLS setup evidence excludes
 reuse, proxies, managed scopes, H2/H3, and custom handshake or early-data options.
-Automatic redirect chains and ExSSL never provide positive pre-send evidence.
+Automatic redirect chains never provide positive pre-send evidence. ExSSL also
+keeps the result unconfirmed when its public attempt evidence is unavailable.
 
 Explicit address pins perform no automatic address failover or HTTP retry. A caller may try
 another independently validated `connect_address` only after positive evidence,
@@ -682,8 +684,8 @@ attempt's `timeout` to the remaining total budget and keep the same authority,
 TLS verification policy, and signal. Require
 `HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), remaining_budget)`
 to return `:ok` before another attempt, then recheck cancellation and the original
-absolute deadline. A TLS failure without known receiver/sender handles leaves
-cleanup unconfirmed. Terminal attempt errors stop an upload stream, which must
+absolute deadline. Missing or lost cleanup evidence remains unconfirmed.
+Terminal attempt errors stop an upload stream, which must
 be replaced before another attempt. Completion confirms tracked logical
 resources, not native ERTS reclamation or remote receipt.
 

@@ -4,13 +4,13 @@ defmodule HTTP.RequestError do
 
   `reason` retains the original error. `phase: :connect` and
   `request_started: false` prove that the TCP connection failed before it was
-  established, for direct TCP and OTP TLS routes using `redirect: :manual` or
+  established, for direct TCP and HTTPS routes using `redirect: :manual` or
   `:error`. Automatic redirect chains always give conservative evidence.
   `phase: :tls_setup` confirms a fatal handshake or certificate alert after
   accepted ServerHello and before HTTP transmission on a direct, unpooled
   HTTP/1 TLS route. It requires the ordinary handshake (no custom `handshake`
-  or `early_data` option). OTP tracks both TLS processes before continuation;
-  ExSSL supplies authenticated public evidence from the original attempt.
+  or `early_data` option). ExSSL supplies provider-owned phase evidence through
+  its public lifecycle handle from the original attempt.
   Await cleanup separately before trying another validated pin.
 
   All other failures report
