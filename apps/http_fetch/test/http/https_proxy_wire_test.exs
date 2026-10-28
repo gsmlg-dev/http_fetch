@@ -92,7 +92,7 @@ defmodule HTTP.HTTPSProxyWireTest do
     end
   end
 
-  test "proxy TLS verifies proxy identity and rejects native nested TLS before dialing" do
+  test "untrusted proxy TLS sends no forwarding or nested CONNECT request" do
     {port, _peer} = proxy_peer()
 
     assert {:error, _reason} =
@@ -105,14 +105,20 @@ defmodule HTTP.HTTPSProxyWireTest do
              |> HTTP.Promise.await(3_000)
 
     refute_receive {:proxy_request, _, _, _}, 0
+    assert_receive {:proxy_handshake_error, {:tls_alert, {:unknown_ca, _}}}, 2_000
 
-    assert {:error, :nested_tls_requires_otp_ssl} =
+    assert {:error, {:tls_alert, {:unknown_ca, _}}} =
              HTTP.fetch("https://origin.invalid/",
                proxy: {:https, "localhost", port, []},
                tls_backend: :ex_ssl,
+               ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")],
+               timeout: 2_000,
                redirect: :manual
              )
              |> HTTP.Promise.await(2_000)
+
+    assert_receive {:proxy_handshake_error, {:tls_alert, {:unknown_ca, _}}}, 2_000
+    refute_receive {:proxy_request, _, _, _}, 0
   end
 
   test "unreachable TLS proxy never falls back to the origin" do

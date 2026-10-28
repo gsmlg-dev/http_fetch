@@ -112,16 +112,44 @@ defmodule HTTP.ProxyRequestCompletionTest do
 
   test "unsupported proxy families keep an explicit completion fallback" do
     for {url, options} <- [
-          {"https://localhost/", [proxy: {:https, "localhost", 3128, []}, tls_backend: :ex_ssl]},
           {"http://localhost/", [proxy: {:http, "localhost", 3128, []}, http_version: :h2c]},
           {"http://localhost/", [proxy: {:https, "localhost", 3128, []}, http_version: :http2]}
         ] do
-      promise = fetch(url, options[:proxy], Keyword.delete(options, :proxy))
+      options = HTTP.FetchOptions.new(Keyword.put(options, :redirect, :manual))
+
+      request = %HTTP.Request{
+        url: URI.parse(url),
+        transport_options: HTTP.FetchOptions.to_transport_options(options)
+      }
 
       assert {:error, {:unsupported_completion, :proxy}} =
-               RequestCompletion.await(Promise.completion(promise), 0)
+               options |> RequestCompletion.new(request) |> RequestCompletion.await(0)
+    end
+  end
 
-      assert {:error, _} = Promise.await(promise)
+  test "nested ExSSL HTTPS routes admit HTTP/1 and HTTP/2 completion without dialing" do
+    for version <- [:http1, :http2] do
+      options =
+        HTTP.FetchOptions.new(
+          proxy: {:https, "localhost", 3128, []},
+          tls_backend: :ex_ssl,
+          http_version: version,
+          redirect: :manual
+        )
+
+      request = %HTTP.Request{
+        url: URI.parse("https://localhost/"),
+        transport_options: HTTP.FetchOptions.to_transport_options(options)
+      }
+
+      handle = RequestCompletion.new(options, request)
+      assert %RequestCompletion{unsupported: nil, tracker: tracker} = handle
+
+      try do
+        assert {:error, :cleanup_pending} = RequestCompletion.await(handle, 0)
+      after
+        GenServer.stop(tracker)
+      end
     end
   end
 

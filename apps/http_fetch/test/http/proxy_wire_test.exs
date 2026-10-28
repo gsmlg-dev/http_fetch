@@ -447,13 +447,14 @@ defmodule HTTP.ProxyWireTest do
     end
   end
 
-  test "ExSSL nested HTTPS proxy route is rejected before either endpoint accepts" do
+  test "invalid ExSSL nested origin policy is rejected before either endpoint accepts" do
     {origin, origin_port} = listener()
     {proxy, proxy_port} = listener()
 
-    assert {:error, :nested_tls_requires_otp_ssl} =
+    assert {:error, {:options, {:versions, :unsupported_or_invalid}}} =
              HTTP.fetch("https://localhost:#{origin_port}/private",
                tls_backend: :ex_ssl,
+               ssl: [versions: [:invalid]],
                proxy: {:https, "127.0.0.1", proxy_port, []},
                timeout: 500
              )
