@@ -1,5 +1,51 @@
 # TLS migration execution ledger
 
+## P4 integrated acceptance — 2026-10-28
+
+P0–P4 are accepted at `3c561646b7f1bc9042c5cadbc37ed7c6b48fae15` with OTP
+still the production default. Required advanced policies, TLS1.3 manual tickets,
+TLS1.2 EMS reuse, nested HTTPS proxies, public lifecycle, completion and managed
+H1/H2 pass the integrated source and candidate gates. H3 completion retains
+`unsupported_completion`. Performance is outside this goal; Credo/Dialyzer remain
+explicitly deferred, without a quality-pass claim.
+
+| Gate | Workflow | Executed result |
+| --- | --- | --- |
+| All-nine units | [40620226704](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620226704) | 2,063 executed; 4,699 integration cases excluded; zero failures |
+| All-nine integration | [40620230336](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620230336) | 4,699 executed; 2,063 units excluded; zero failures |
+| All-nine E2E | [40620233581](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620233581) | 52 ExUnit cases plus independent Caddy/QUIC/H3 checks |
+| Automatic functional CI | [40620203449](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620203449) | Every functional job passes; overall failure is deferred Credo |
+| Manual full CI | [40621971812](https://github.com/gsmlg-dev/http_fetch/actions/runs/40621971812) | All jobs pass; every app explicitly records Credo/Dialyzer as deferred |
+| Candidate Elixir1.19/OTP28 and 1.20/OTP29 | [40620237216](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620237216) | Both runtime selections pass |
+| Independent public H3 | [40620203412](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620203412) | Pass |
+
+Units and integration completely partition the 6,762 discovered source cases.
+WebTransport has no integration-tagged source cases: its 24 units are excluded
+from integration, not executed as integration. Core and Runtime have no standalone
+ExUnit E2E suites; their behavior is exercised by the dependent-client gates.
+
+Each candidate runtime (including manual CI's Elixir1.18/OTP28) passes 62 groups
+and 2,944 checks with zero failures, skips or exclusions. The exact 53-file
+migration selection contributes 2,876 checks. All nine `0.21.18` archives resolve
+through isolated Hex.SCM builds; the implementation is the current candidate,
+while `fixture_version=0.7.2` remains a historical fixture label. The source-bound
+test manifest SHA256 is
+`1182291a112f1b7e4dba1984bf3efbd7d32c70f8c0200b5ee2c9eb2301741700`.
+The final manual candidate report was downloaded and independently checked
+against frozen Git blobs, rather than the prepared, uncommitted P5 tests.
+
+All 19 shared H2 gates pass, including h2c and verified ExSSL package traffic.
+The retained report's 19 log hashes and nine archive hashes match. Its H2-only
+source runner skips three real-QUIC opt-ins; those run in the separate all-nine
+integration gate. Historical published `ex_ssl 0.7.2` compatibility also passes
+as a separate job and does not substitute for the current candidate.
+
+Evidence, raw job logs, source partition and candidate/H2 audits are retained at
+`/private/tmp/http-fetch-p4-nested-candidate-root-20261028T0215Z/linux-current`.
+Earlier failed invocations and older source boundaries remain below. P5 has only
+prepared expected-red promotion checks at this acceptance point; P6 removal and
+P7 publication remain unexecuted.
+
 ## ExSSL nested HTTPS proxy source acceptance — 2026-10-28
 
 Ordinary HTTPS origins through HTTPS proxies now use two independently prepared

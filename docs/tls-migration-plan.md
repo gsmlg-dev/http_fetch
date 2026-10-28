@@ -2,11 +2,10 @@
 
 Execution checklist derived from the accepted 2026-10-21 HTTP Fetch migration plan.
 Baseline: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, nine packages at `0.21.14`.
-Status (2026-10-28): advanced TLS policies, public lifecycle evidence, completion,
-and managed H1/H2 pass the current source, candidate and three-runtime selection.
-P2 lifecycle/duplex acceptance is complete. P1/P3/P4 exit remains open for the
-integrated resumption/nested-proxy candidate and platform evidence and final CI closure.
-P5–P7 have not begun; OTP remains the production default and dependency.
+Status (2026-10-28): P0–P4 acceptance is complete at `3c561646b7f1bc9042c5cadbc37ed7c6b48fae15`,
+including resumption, nested HTTPS proxies, public lifecycle, completion and
+managed H1/H2. P5 has prepared failing default-promotion tests; OTP remains the
+production default and dependency. P6/P7 have not begun.
 
 See [design and compatibility table](tls-migration-design.md) and
 [execution evidence](tls-migration-validation.md). A checkbox means executed and
@@ -14,32 +13,35 @@ reviewed acceptance, not merely a test file or implementation exists.
 
 ## Current accepted evidence and remaining gates
 
-At `a38261ce9a540b700ffc99d36cfdab1e77a2301e`, manual all-nine
-[unit](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584581485),
-[integration](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584586869)
-and [E2E](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584592063)
+At `3c561646b7f1bc9042c5cadbc37ed7c6b48fae15`, manual all-nine
+[unit](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620226704),
+[integration](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620230336)
+and [E2E](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620233581)
 workflows pass on Elixir 1.18 / OTP 28. Unit and integration selections partition
-the 6,637 discovered source cases into 2,033 and 4,604 executed cases, respectively;
+the 6,762 discovered source cases into 2,063 and 4,699 executed cases, respectively;
 excluded cases are not counted as executed. E2E passes 52 ExUnit cases plus the
 independent Caddy, QUIC and HTTP/3 checks. Apps without their own suite are
-identified in the [execution ledger](tls-migration-validation.md#current-source-test-tiers--2026-10-27).
+identified in the [execution ledger](tls-migration-validation.md#p4-integrated-acceptance--2026-10-28).
 
-The same source's [manual CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584575647)
-and [compatibility CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40584597757)
-pass 49 candidate groups with 2,809 checks on each of Elixir 1.18 / OTP 28,
-1.19 / OTP 28 and 1.20 / OTP 29. The 40 migration files execute 2,741 checks:
-policy 2,039, identity 73, TLS 82, provider 235, Fetch 209, streams 93 and routes 10.
+The same source's [manual CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40621971812)
+and [compatibility CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620237216)
+pass 62 candidate groups with 2,944 checks on each of Elixir 1.18 / OTP 28,
+1.19 / OTP 28 and 1.20 / OTP 29. The 53 migration files execute 2,876 checks,
+including manual TLS1.3 tickets, TLS1.2 EMS reuse and nested HTTPS proxy cleanup.
 All nine `0.21.18` packages resolve through isolated Hex.SCM builds. Each report
 has the exact current fixture manifest, with no zero-test file, skip or exclusion.
-The earlier 31-file/2,641-check selection on `f405e7b` remains historical evidence.
+Earlier selections, including `a38261c` and `f405e7b`, remain historical evidence.
 
 All 19 shared H2 gates pass, including isolated h2c and verified ExSSL package
 traffic. Their 19 log hashes and nine archive hashes match the retained report.
 Three real-QUIC opt-ins are skipped in the H2-only source runner and execute in
 the separate all-nine integration workflow; the H2 source run is not described
 as skip-free. Manual CI explicitly records Credo/Dialyzer as deferred. The current
-automatic push run was cancelled when manual CI started, so final automatic CI
-closure remains separate from these passing manual gates and compatibility work.
+[automatic CI](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620203449)
+passes every functional job; its overall failure is the deferred Credo result.
+The separate [public H3 gate](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620203412)
+also passes. These results close P4's non-deferred gates; they do not establish P5
+default behavior or production OTP removal.
 
 User decisions override the historical checklist where noted: performance work,
 including comparative latency/throughput and load/soak budgets, is TODO outside
@@ -89,8 +91,8 @@ remain required. Historical evidence and failed invocations remain in the ledger
       single-VM unit tests with external collaborators mocked; real external I/O
       belongs to integration tests, and complete user flows to end-to-end tests.
       Align test.yml with the unit-only default and keep explicit integration/E2E
-      gates mandatory. Current all-nine unit/integration/E2E CI passes at `a38261c`:
-      2,033 units, 4,604 integration cases and 52 ExUnit E2E cases, plus independent
+      gates mandatory. Current all-nine unit/integration/E2E CI passes at `3c561646`:
+      2,063 units, 4,699 integration cases and 52 ExUnit E2E cases, plus independent
       Caddy/QUIC/H3 steps. WebTransport has no integration-tagged source cases;
       Core and Runtime have no standalone ExUnit E2E suite. Their actual selections
       are explicit rather than counted as executed scenarios. R34–R38 history and
@@ -143,15 +145,15 @@ executed evidence and required work are distinguishable. OTP remains default.
       disabled by default and unsupported combinations return explicit errors.
 - [x] Implement TLS1.3 manual ticket delivery and `use_ticket` with bounded opaque
       maps, independent OTP/OpenSSL full/resumed mTLS checks, origin/trust/identity/
-      profile isolation and unchanged automatic-ticket policy. Local source tests
-      pass; integrated consumer/platform gates remain required.
-- [ ] Resolve TLS1.2 `reuse_sessions` before default promotion. OTP accepts this
+      profile isolation and unchanged automatic-ticket policy. Current source and
+      all three candidate runtime selections pass.
+- [x] Resolve TLS1.2 `reuse_sessions` before default promotion. OTP accepts this
       control. ExSSL now implements opt-in EMS abbreviated handshakes and bounded
       saved IDs and VM-local opaque capabilities (true/false/save), with 55 focused
       native checks passing, including renegotiated ALPN on resumed connections.
       Raw reuse remains disabled by default. OTP29 public tuple references pass;
-      native automatic/ID cache misses remain diagnostic. Integrated candidate/platform
-      gates remain open; TLS1.3 ticket support is separate.
+      native automatic/ID cache misses remain diagnostic. Integrated source and
+      all three candidate runtime selections pass; TLS1.3 tickets remain separate.
 
 Exit: required option/default table resolved with independent positive/negative
 coverage; no supported endpoint class silently lost.
@@ -356,7 +358,7 @@ H3 completion retains its existing `unsupported_completion` boundary.
 - [x] Preserve structured errors; request_started=false needs positive phase evidence.
 - [x] H1 handoff/abort and H2 stream cancellation preserve healthy shared connections.
 - [x] Scope/generation retirement waits for provider termination and cannot redial.
-- [ ] Existing supported proxy routes, unread bodies, abandoned uploads and owner death
+- [x] Existing supported proxy routes, unread bodies, abandoned uploads and owner death
       settle truthfully within existing deadlines.
       Direct/pinned H1/H2, HTTP CONNECT and HTTPS-proxy forwarding to HTTP origins
       pass current source/candidate gates, including abandonment and owner death.
@@ -364,35 +366,35 @@ H3 completion retains its existing `unsupported_completion` boundary.
       H1/H2 pooled ownership, all four TLS1.2/TLS1.3 combinations, byte-preserving
       upload, credentials, independent verification and cancellation at each phase.
       Both provider obligations precede TCP allocation and require independent
-      cleanup receipts. Current candidate/platform and final source gates remain open.
+      cleanup receipts. Current source, all three candidate runtimes and final
+      functional CI pass at `3c561646`.
 
 ## P4 — Source, consumer, package and CI acceptance (after P3)
 
-- [ ] Agreed matrix covers TLS1.2/1.3, identity/mTLS/resumption, H1/H2 Fetch, SSE,
+- [x] Agreed matrix covers TLS1.2/1.3, identity/mTLS/resumption, H1/H2 Fetch, SSE,
       WSS/extended CONNECT, managed runtime, current proxies and explicit QUIC/H3.
 - [x] Execute deterministic independent OTP/OpenSSL/Python/Node/H2/aioquic peers;
       missing prerequisites, zero tests and skipped mandatory scenarios fail the gate.
 - [x] Candidate Hex consumers use all current archives with equal exact versions
-      (`a38261c`, CI40584575647 and compatibility40584597757; all40 migration files).
+      (`3c561646`, CI40621971812 and compatibility40620237216; all53 migration files).
 - [x] Extend mixed-package traffic harness to require verified ExSSL TLS plus h2c
       (R41 bounded automation checks pass).
 - [x] Execute both traffic modes against the integrated current candidate archives
-      (`a38261c`, H2 artifact12771458002: h2c plus verified ExSSL H2, all19 gates).
+      (`3c561646`: h2c plus verified ExSSL H2, all19 gates and retained hash audit).
 - [x] Implement automatic candidate TLS and affected QUIC/H3 selection for relevant
       changes; R40 local automation suite passes 20 checks. Remote execution remains
       a separate gate below.
-- [ ] Execute relevant automatic CI and manual all-nine regression on integrated source.
-      Current manual CI/unit/integration/E2E gates pass at `a38261c`; Credo/Dialyzer
-      are explicitly deferred. Automatic push CI was cancelled before completion;
-      final automatic execution remains required after compatibility work stabilizes.
+- [x] Execute relevant automatic CI and manual all-nine regression on integrated source.
+      Manual CI/unit/integration/E2E pass at `3c561646`; Credo/Dialyzer are explicitly
+      deferred. Automatic CI passes all functional jobs and fails only deferred Credo.
 - [x] Execute supported runtime matrix (baseline 1.18/OTP28; configured 1.19/OTP28
       and 1.20/OTP29) and retain historical standalone labels separately
-      (`a38261c`: all49 candidate groups pass2809 checks on each runtime;
+      (`3c561646`: all62 candidate groups pass2944 checks on each runtime;
       baseline additionally passes all-nine unit/integration/E2E workflows).
 - [ ] TODO outside this goal: compare workload results against historical P0 budgets.
 
-Exit: integrated explicit ExSSL passes all non-deferred agreed gates. P5 remains
-blocked until then; deferred performance and quality checks must not be called passes.
+Exit accepted at `3c561646`: integrated explicit ExSSL passes all non-deferred agreed
+gates. P5 may proceed; deferred performance and quality checks are not passes.
 
 ## P5 — Promote default (release boundary B)
 

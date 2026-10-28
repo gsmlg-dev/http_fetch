@@ -1,8 +1,8 @@
 # TLS migration design and compatibility contract
 
-Status (2026-10-27): current candidate packages pass the selected advanced-policy,
-identity, provider, managed H1/H2 and stream-client matrix. Integrated P1–P4
-acceptance remains open pending current CI; OTP remains the production default.
+Status (2026-10-28): integrated P0–P4 acceptance is complete at `3c561646`,
+including advanced policies, resumption, nested proxies, lifecycle and managed
+H1/H2. OTP remains the production default until the separate P5 promotion.
 See the [current execution checklist](tls-migration-plan.md#current-accepted-evidence-and-remaining-gates)
 for exact source/package boundaries, executed results and pending runtime checks.
 Historical foundation sections retain their original implementation boundaries.
