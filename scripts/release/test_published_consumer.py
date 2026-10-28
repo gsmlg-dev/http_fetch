@@ -73,6 +73,20 @@ class PublishedConsumerTests(unittest.TestCase):
                         "HEX_UNSAFE_HTTPS", "MIX_BUILD_PATH", "MIX_DEPS_PATH"):
                 self.assertNotIn(key, env)
 
+    def test_current_feature_consumers_override_inherited_historical_default(self):
+        for source in ("candidate", "published"):
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(consumer_gate, "command", side_effect=RuntimeError("stop before Mix")) as command:
+                with self.assertRaisesRegex(RuntimeError, "stop before Mix"):
+                    consumer_gate.feature_project(Path(directory), "1.2.3", {
+                        "HTTP_FETCH_CONSUMER_SOURCE": source,
+                        "EX_SSL_EXPECTED_DEFAULT_BACKEND": "ssl",
+                    })
+                self.assertEqual(command.call_args.kwargs["env"]["EX_SSL_EXPECTED_DEFAULT_BACKEND"],
+                                 "ex_ssl")
+                self.assertEqual(command.call_args.kwargs["env"]["HTTP_FETCH_CONSUMER_SOURCE"],
+                                 source)
+
     def test_published_feature_failure_propagates_before_migration(self):
         with tempfile.TemporaryDirectory() as directory, \
                 patch("hex_packages.release_status", return_value="matching"), \

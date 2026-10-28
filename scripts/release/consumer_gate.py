@@ -320,7 +320,9 @@ end
     for group in groups:
         shutil.copyfile(group, project / "test" / group.name)
     shutil.copyfile(ROOT / "scripts/ex_ssl_tls12_peer.py", project / "test/ex_ssl_tls12_peer.py")
-    test_env = {**env, "MIX_ENV": "test"}
+    # Both candidate and newly published coordinated packages use the current
+    # default. The historical ex_ssl 0.7.2 gate is wired separately by the shell.
+    test_env = {**env, "MIX_ENV": "test", "EX_SSL_EXPECTED_DEFAULT_BACKEND": "ex_ssl"}
     command(["mix", "deps.get"], cwd=project, env=test_env)
     command(["mix", "compile", "--warnings-as-errors"], cwd=project, env=test_env)
     provenance = subprocess.run(["mix", "run", "-e", f'''dep = Enum.find(Mix.Dep.cached(), &(&1.app == :ex_ssl)) || raise("missing ex_ssl")

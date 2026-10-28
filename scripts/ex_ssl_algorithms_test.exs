@@ -1,4 +1,4 @@
-# Run only through scripts/ex_ssl_source_smoke.sh with a pinned fixture checkout.
+# Run through the feature gates with an explicit current or historical default.
 Code.require_file(
   Path.join(System.fetch_env!("EX_SSL_FIXTURE_DIR"), "test/support/signature_fixtures.ex")
 )
@@ -86,8 +86,14 @@ defmodule CandidateAlgorithmsTest do
     end
   end
 
-  test "default backend remains OTP" do
-    assert HTTP.FetchOptions.new([]).tls_backend == :ssl
+  test "default backend matches the selected current or historical consumer" do
+    expected =
+      case System.fetch_env!("EX_SSL_EXPECTED_DEFAULT_BACKEND") do
+        "ex_ssl" -> :ex_ssl
+        "ssl" -> :ssl
+      end
+
+    assert HTTP.FetchOptions.new([]).tls_backend == expected
   end
 
   defp profile(scheme, protocol) do

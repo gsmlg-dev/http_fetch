@@ -1,6 +1,7 @@
 """Regressions for the historical Hex consumer source boundary."""
 
 from pathlib import Path
+import os
 import subprocess
 import tempfile
 import unittest
@@ -51,6 +52,22 @@ class HistoricalSourceTests(unittest.TestCase):
         self.assertIn("steps.published_feature.outcome != 'skipped'", workflow)
         self.assertIn("steps.candidate_feature.outcome != 'skipped'", workflow)
         self.assertEqual(workflow.count("if-no-files-found: error"), 2)
+
+    def test_historical_runner_pins_default_independently_of_inherited_environment(self):
+        source = (ROOT / "scripts/ex_ssl_source_smoke.sh").read_text()
+        start = source.index("EX_SSL_EXPECTED_DEFAULT_BACKEND=ex_ssl")
+        end = source.index("export EX_SSL_EXPECTED_DEFAULT_BACKEND", start)
+        setup = source[start:end] + 'printf "%s" "$EX_SSL_EXPECTED_DEFAULT_BACKEND"'
+        for mode, expected in (("source", "ex_ssl"), ("candidate", "ex_ssl"), ("published", "ssl")):
+            with self.subTest(mode=mode):
+                env = {**os.environ, "EX_SSL_DEP_MODE": mode,
+                       "EX_SSL_EXPECTED_DEFAULT_BACKEND": "invalid-inherited-value"}
+                result = subprocess.run(["bash", "-eu", "-c", setup], env=env,
+                                        capture_output=True, text=True, check=True)
+                self.assertEqual(result.stdout, expected)
+        self.assertIn(HISTORICAL_COMMIT, source)
+        fixture = (ROOT / "scripts/ex_ssl_fixture_manifest.env").read_text()
+        self.assertIn("EX_SSL_FIXTURE_VERSION=0.7.2", fixture)
 
     def test_exunit_120_result_format_requires_all_tests_to_pass(self):
         from sys import path

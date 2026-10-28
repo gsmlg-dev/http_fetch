@@ -26,6 +26,14 @@ if (( $# != 0 )); then
   exit 2
 fi
 
+# Only published mode stages the pinned e844ce03 HTTP source with ex_ssl 0.7.2.
+# Current source/candidate packages must keep the promoted ExSSL default.
+EX_SSL_EXPECTED_DEFAULT_BACKEND=ex_ssl
+if [[ "$EX_SSL_DEP_MODE" == published ]]; then
+  EX_SSL_EXPECTED_DEFAULT_BACKEND=ssl
+fi
+export EX_SSL_EXPECTED_DEFAULT_BACKEND
+
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/http-fetch-ex-ssl.XXXXXXXX")
 mkdir -p "$work_dir/tmp"
 export TMPDIR="$work_dir/tmp"
