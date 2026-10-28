@@ -3,6 +3,7 @@ defmodule HTTP.ProxyCompletionAcceptanceTest do
   @moduletag :integration
 
   import Bitwise
+  alias ExSSL.TestSupport.ManagedLifecycleProbe, as: Probe
   alias HTTP.{Promise, RequestCompletion}
   alias HTTP.Test.HTTP2ScriptedPeer, as: Frames
 
@@ -192,7 +193,7 @@ defmodule HTTP.ProxyCompletionAcceptanceTest do
     opts = [
       proxy: {:http, "127.0.0.1", port, [headers: [{"Proxy-Authorization", "Basic tunnel"}]]},
       http_version: :http2,
-      tls_backend: :ssl,
+      tls_backend: :ex_ssl,
       ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
       redirect: :manual,
       stream_response: true,
@@ -239,17 +240,41 @@ defmodule HTTP.ProxyCompletionAcceptanceTest do
     assert_receive {:peer_complete, ^peer}, 1_000
   end
 
-  test "proxy identity failure leaves TLS cleanup unconfirmed without origin fallback or replay" do
+  test "proxy identity failure joins provider cleanup without origin fallback or replay" do
     {origin, origin_port} = listener()
     {listener, port} = listener()
 
     peer =
       peer(fn parent ->
         {:ok, tcp} = :gen_tcp.accept(listener, 2_000)
+        deadline = System.monotonic_time(:millisecond) + 2_000
 
-        assert {:error, {:tls_alert, {:bad_certificate, _}}} =
-                 :ssl.handshake(tcp, tls_options("pinned", "http/1.1"), 2_000)
+        assert {:ok, hello, _extensions} =
+                 :ssl.handshake(
+                   tcp,
+                   [handshake: :hello] ++ tls_options("pinned", "http/1.1"),
+                   2_000
+                 )
 
+        # The reference server has received ClientHello, so the original
+        # provider resources exist before their termination monitors are armed.
+        send(parent, :proxy_tls_accepted)
+
+        receive do
+          :handshake -> :ok
+        after
+          max(deadline - System.monotonic_time(:millisecond), 0) ->
+            flunk("proxy identity handshake gate expired")
+        end
+
+        assert {:error, {:tls_alert, {:certificate_unknown, _}}} =
+                 :ssl.handshake_continue(
+                   hello,
+                   [],
+                   max(deadline - System.monotonic_time(:millisecond), 0)
+                 )
+
+        :gen_tcp.close(tcp)
         send(parent, :wrong_proxy_identity_rejected)
       end)
 
@@ -263,14 +288,22 @@ defmodule HTTP.ProxyCompletionAcceptanceTest do
         )
       )
 
-    assert {:error, {:tls_alert, {:bad_certificate, description}}} = Promise.await(promise, 3_000)
-    assert to_string(description) =~ "hostname_check_failed"
+    completion = Promise.completion(promise)
+    assert_receive :proxy_tls_accepted, 1_000
+    [handle] = completion.tracker |> :sys.get_state() |> Map.fetch!(:providers) |> Map.keys()
+    graph = Probe.graph_handle(handle)
+    on_exit(fn -> Probe.release_monitors(graph) end)
+    send(peer, :handshake)
 
-    assert {:error, :cleanup_unconfirmed} =
-             RequestCompletion.await(Promise.completion(promise), 1_000)
+    # Hostname mismatch maps to certificate_unknown; the public description is
+    # sanitized by ExSSL rather than exposing OTP's private verification detail.
+    assert {:error, {:tls_alert, {:certificate_unknown, ~c"TLS protocol error"}}} =
+             Promise.await(promise, 3_000)
 
-    assert {:error, :cleanup_unconfirmed} =
-             RequestCompletion.abort_and_await(Promise.completion(promise), 0)
+    Probe.await_down(graph, [:connection, :writer, :tcp, :observer], 1_000)
+    assert :ok = RequestCompletion.await(completion, 1_000)
+    assert :ok = RequestCompletion.abort_and_await(completion, 0)
+    Probe.release_monitors(graph)
 
     assert_receive :wrong_proxy_identity_rejected, 1_000
     assert_receive {:peer_complete, ^peer}, 1_000
@@ -285,7 +318,7 @@ defmodule HTTP.ProxyCompletionAcceptanceTest do
           {:https, "localhost", port,
            [headers: [{"Proxy-Authorization", "Basic " <> credential}]]},
         http_version: :http1,
-        tls_backend: :ssl,
+        tls_backend: :ex_ssl,
         ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
         http1_scope: "proxy-completion-#{port}",
         redirect: :manual,
