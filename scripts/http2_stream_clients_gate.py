@@ -16,7 +16,7 @@ import time
 parser = argparse.ArgumentParser()
 parser.add_argument('--peer', choices=['hyper-h2', 'node'], required=True)
 parser.add_argument('--tls', action='store_true')
-parser.add_argument('--backend', choices=['ssl', 'ex_ssl'], default='ex_ssl')
+parser.add_argument('--backend', choices=['ex_ssl'], default='ex_ssl')
 parser.add_argument('--mode', choices=['sse', 'mixed', 'faults', 'churn'], default='sse')
 parser.add_argument('--count', type=int, default=10000)
 parser.add_argument('--limit', type=int, default=16)

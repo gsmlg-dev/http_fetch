@@ -64,15 +64,13 @@ def main():
     env.setdefault('ERL_FLAGS', '+S 4:4')
     gates = {}
     for peer in ('hyper-h2', 'node'):
-        for route, flags in (('h2c', []), ('ssl', ['--tls', '--backend', 'ssl']),
-                             ('ex_ssl', ['--tls', '--backend', 'ex_ssl'])):
+        for route, flags in (('h2c', []), ('ex_ssl', ['--tls', '--backend', 'ex_ssl'])):
             for mode in ('sse', 'mixed', 'faults'):
                 gates[f'sse-{peer}-{route}-{mode}'] = [sys.executable, 'scripts/http2_stream_clients_gate.py',
                                                      '--peer', peer, *flags, '--mode', mode]
         gates[f'sse-{peer}-churn'] = [sys.executable, 'scripts/http2_stream_clients_gate.py',
                                     '--peer', peer, '--mode', 'churn', '--count', '1001']
-    for route, flags in (('h2c', []), ('ssl', ['--tls', '--backend', 'ssl']),
-                         ('ex_ssl', ['--tls', '--backend', 'ex_ssl'])):
+    for route, flags in (('h2c', []), ('ex_ssl', ['--tls', '--backend', 'ex_ssl'])):
         for mode in ('echo', 'mixed', 'faults'):
             gates[f'ws-{route}-{mode}'] = [sys.executable, 'scripts/http2_websocket_gate.py',
                                          *flags, '--mode', mode]

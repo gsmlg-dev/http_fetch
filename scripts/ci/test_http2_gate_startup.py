@@ -76,10 +76,9 @@ class GateStartupTests(unittest.TestCase):
                     if "backend" in record:
                         self.assertIsNone(record["backend"])
 
-    def test_tls_defaults_to_ex_ssl_and_preserves_both_explicit_reference_routes(self):
+    def test_tls_defaults_to_ex_ssl_and_preserves_explicit_selection(self):
         for name, prefix in GATES:
-            for selection, expected in (([], "ex_ssl"), (["--backend", "ex_ssl"], "ex_ssl"),
-                                        (["--backend", "ssl"], "ssl")):
+            for selection, expected in (([], "ex_ssl"), (["--backend", "ex_ssl"], "ex_ssl")):
                 with self.subTest(gate=name, backend=expected, flags=selection):
                     launches, _records = self.startup(name, prefix, ["--tls", *selection])
                     self.assertIn("--tls", launches[0][0])
@@ -90,15 +89,15 @@ class GateStartupTests(unittest.TestCase):
 
     def test_plaintext_never_selects_a_provider_even_with_tls_only_backend_argument(self):
         for name, prefix in GATES:
-            for backend in ("ex_ssl", "ssl"):
+            for backend in ("ex_ssl",):
                 with self.subTest(gate=name, backend=backend):
                     launches, _records = self.startup(name, prefix, ["--backend", backend])
                     self.assertFalse(prefix + "_BACKEND" in launches[1][1]["env"], prefix + "_BACKEND")
                     self.assertFalse(prefix + "_CA" in launches[1][1]["env"], prefix + "_CA")
 
-    def test_node_peer_routes_preserve_plaintext_and_both_tls_provider_modes(self):
+    def test_node_peer_routes_preserve_plaintext_and_verified_tls(self):
         routes = (([], False, None), (["--tls"], True, "ex_ssl"),
-                  (["--tls", "--backend", "ssl"], True, "ssl"))
+                  (["--tls", "--backend", "ex_ssl"], True, "ex_ssl"))
         for name, prefix in GATES:
             for flags, tls, backend in routes:
                 with self.subTest(gate=name, tls=tls, backend=backend):
@@ -106,6 +105,28 @@ class GateStartupTests(unittest.TestCase):
                     self.assertEqual(launches[0][0][0], "node")
                     self.assertEqual(launches[0][1]["env"]["H2_PEER_TLS"], "1" if tls else "0")
                     self.assertEqual(launches[1][1]["env"].get(prefix + "_BACKEND"), backend)
+
+    def test_removed_tls_backend_rejects_before_starting_collaborators(self):
+        modules = {}
+        for name, version in {"h2": "4.2.0", "hpack": "4.1.0", "hyperframe": "6.1.0",
+                              "wsproto": "1.2.0"}.items():
+            modules[name] = types.ModuleType(name)
+            modules[name].__version__ = version
+        for name in ("http2_stream_clients_gate", "http2_websocket_gate", "http2_interop_gate"):
+            with self.subTest(gate=name), \
+                 patch.object(sys, "argv", [name + ".py", "--peer", "hyper-h2", "--tls",
+                                            "--backend", "ssl"]), \
+                 patch.dict(sys.modules, modules), patch("signal.signal"), \
+                 patch("subprocess.Popen", side_effect=AssertionError("removed provider started peer")) as launch, \
+                 patch("subprocess.check_output", side_effect=AssertionError("removed provider ran command")) as output, \
+                 patch("socket.create_connection") as connect, \
+                 patch("sys.stderr", new_callable=io.StringIO):
+                with self.assertRaises(SystemExit) as raised:
+                    runpy.run_path(str(ROOT / "scripts" / (name + ".py")), run_name="__main__")
+                self.assertEqual(raised.exception.code, 2)
+                launch.assert_not_called()
+                output.assert_not_called()
+                connect.assert_not_called()
 
     def test_acceptance_count_and_duration_thresholds_still_reject_before_peers(self):
         cases = [

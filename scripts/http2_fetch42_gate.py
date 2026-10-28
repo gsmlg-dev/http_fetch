@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Reproduce the accepted 42 Fetch gates without historical /tmp dependencies.
+"""Run current Fetch gates without historical temporary-directory dependencies.
 
 Run with the pinned independent-peer Python environment. Source must be an
 immutable exported candidate; pass its verified Git tree and separate evidence.
-No workload size, original regression assertion, or backend is reduced.
+The historical filename is retained. Current traffic covers h2c and ExSSL TLS;
+workload sizes and regression assertions remain unchanged.
 """
 import argparse
 import concurrent.futures
@@ -36,7 +37,7 @@ def commands(evidence):
                                         'bash', 'scripts/ex_ssl_source_smoke.sh'],
         'final-tls-lifecycle-ci': ['mix', 'test',
                                  'apps/http_fetch/test/http/socket_client_http2_test.exs',
-                                 '--seed', '36'],
+                                 '--include', 'integration', '--seed', '36'],
         'final-runtime-regressions': ['env', 'ERL_FLAGS=+S 4:4', 'mix', 'test',
             'apps/http_core/test/http/http2_scheduler_test.exs',
             'apps/http_core/test/http/owner_monitor_test.exs',
@@ -44,7 +45,7 @@ def commands(evidence):
                 'http2_early_response_closure', 'http2_pool_progress',
                 'http2_queue_socket_progress', 'http2_production_lifecycle',
                 'http2_runtime_telemetry', 'http2_failed_open_cleanup')],
-            '--seed', '342781', '--max-cases', '8'],
+            '--include', 'integration', '--seed', '342781', '--max-cases', '8'],
         'final-environment': [sys.executable, str(Path(__file__).resolve()), '--environment'],
     }
     for repeat in range(1, 4):
@@ -53,8 +54,7 @@ def commands(evidence):
             '--seed', '342781', '--max-cases', '8']
     interop = [sys.executable, 'scripts/http2_interop_gate.py']
     for peer in ('hyper-h2', 'node'):
-        for transport, opts in (('h2c', []), ('tls-ssl', ['--tls', '--backend', 'ssl']),
-                                ('tls-ex_ssl', ['--tls', '--backend', 'ex_ssl'])):
+        for transport, opts in (('h2c', []), ('tls-ex_ssl', ['--tls', '--backend', 'ex_ssl'])):
             for mode in ('smoke', 'transfer', 'concurrent'):
                 gates[f'final-{mode}-{peer}-{transport}'] = [
                     *interop, '--peer', peer, *opts, '--mode', mode]
@@ -62,13 +62,12 @@ def commands(evidence):
             gates[f'final-reuse-{peer}-limit-{limit}'] = [
                 *interop, '--peer', peer, '--mode', 'reuse', '--count', '10000',
                 '--limit', str(limit)]
-    for backend in ('ssl', 'ex_ssl'):
-        gates[f'final-package-tls-{backend}'] = [
-            'env', '-u', 'MIX_DEPS_PATH', *interop, '--peer', 'hyper-h2',
-            '--tls', '--backend', backend, '--mode', 'smoke', '--package']
+    gates['final-package-tls-ex_ssl'] = [
+        'env', '-u', 'MIX_DEPS_PATH', *interop, '--peer', 'hyper-h2',
+        '--tls', '--backend', 'ex_ssl', '--mode', 'smoke', '--package']
     gates['final-soak'] = [*interop, '--peer', 'node', '--tls', '--backend', 'ex_ssl',
                            '--mode', 'soak', '--seconds', '1800']
-    assert len(gates) == 42
+    assert len(gates) == 35
     return gates
 
 

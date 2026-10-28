@@ -105,8 +105,7 @@ def main():
                                'apps/http_fetch/test', 'apps/http_event_source/test',
                                'apps/http_web_socket/test', '--include', 'integration', '--seed', '36'])
         for peer in ('hyper-h2', 'node'):
-            for route, flags in (('h2c', []), ('ssl', ['--tls', '--backend', 'ssl']),
-                                 ('ex_ssl', ['--tls', '--backend', 'ex_ssl'])):
+            for route, flags in (('h2c', []), ('ex_ssl', ['--tls', '--backend', 'ex_ssl'])):
                 run(f'fetch-sse-{peer}-{route}', [sys.executable, 'scripts/http2_stream_clients_gate.py',
                     '--peer', peer, *flags, '--mode', 'mixed'], peer, route, 'sse')
                 run(f'fetch-sse-ws-{peer}-{route}', [sys.executable, 'scripts/http2_websocket_gate.py',
