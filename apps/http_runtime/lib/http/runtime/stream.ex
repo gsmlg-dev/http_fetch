@@ -107,6 +107,7 @@ defmodule HTTP.Runtime.Stream do
     case HTTP.Proxy.route(request) do
       {:ok, nil} -> true
       {:ok, %{scheme: :http}} -> true
+      {:ok, %{scheme: :https}} -> true
       _ -> false
     end
   end

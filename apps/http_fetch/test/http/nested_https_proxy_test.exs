@@ -189,15 +189,16 @@ defmodule HTTP.NestedHTTPSProxyTest do
     end
   end
 
-  test "native ExSSL nested routes fail before proxy authentication or dialing" do
+  test "invalid native ExSSL origin policy fails before proxy authentication or dialing" do
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     on_exit(fn -> :gen_tcp.close(listener) end)
     {:ok, {_, port}} = :inet.sockname(listener)
 
-    assert {:error, :nested_tls_requires_otp_ssl} =
+    assert {:error, {:options, {:versions, :unsupported_or_invalid}}} =
              HTTP.fetch("https://origin.invalid/",
                proxy: {:https, "127.0.0.1", port, []},
                tls_backend: :ex_ssl,
+               ssl: [versions: [:invalid]],
                redirect: :manual,
                telemetry: false
              )

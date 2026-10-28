@@ -49,18 +49,13 @@ defmodule HTTP.Proxy do
 
   defp compatible(_request, nil, _unix_socket), do: :ok
 
-  defp compatible(request, proxy, unix_socket) do
+  defp compatible(request, _proxy, unix_socket) do
     cond do
       unix_socket != nil ->
         {:error, :proxy_not_supported_for_unix_socket}
 
       request.url.scheme not in ["http", "https"] ->
         {:error, :unsupported_proxy_scheme}
-
-      proxy.scheme == :https and request.url.scheme == "https" and
-          HTTP.TLSBackend.resolve(Keyword.get(request.transport_options, :tls_backend)) !=
-            {:ok, :ssl} ->
-        {:error, :nested_tls_requires_otp_ssl}
 
       not is_integer(request.url.port) or request.url.port not in 1..65_535 ->
         {:error, :invalid_proxy_origin}
@@ -107,6 +102,30 @@ defmodule HTTP.Proxy do
 
       {:error, reason} ->
         raise ArgumentError, "invalid proxy route: #{reason}"
+    end
+  end
+
+  def connect(ExSSL, host, port, opts, timeout, %{scheme: :https, origin_scheme: "https"} = proxy) do
+    deadline = System.monotonic_time(:millisecond) + min(timeout, proxy.timeout)
+
+    ssl =
+      (Map.get(proxy, :ssl) || Keyword.get(opts, :ssl, []))
+      |> Keyword.put(:alpn_advertised_protocols, ["http/1.1"])
+
+    proxy_opts = Keyword.put(opts, :ssl, ssl)
+
+    with {:ok, attempt} <- ExSSL.prepare_nested(proxy.host, proxy_opts, host, opts, deadline),
+         {:ok, tcp} <- connect_proxy_tcp_attempt(proxy, opts, deadline, {:ex_ssl_nested, attempt}) do
+      result =
+        with {:ok, outer} <- ExSSL.upgrade_nested(tcp, attempt, :outer, proxy_opts),
+             do: nested_ex_ssl_connect(outer, attempt, host, port, opts, proxy, deadline)
+
+      if match?({:error, _}, result) do
+        ExSSL.cancel_nested(attempt)
+        close_owned_tcp(tcp)
+      end
+
+      result
     end
   end
 
@@ -185,6 +204,24 @@ defmodule HTTP.Proxy do
     {:error, :nested_tls_requires_otp_ssl}
   end
 
+  defp nested_ex_ssl_connect(outer, attempt, host, port, opts, proxy, deadline) do
+    result =
+      with :ok <-
+             establish_tunnel(
+               outer,
+               host,
+               port,
+               proxy,
+               deadline,
+               Keyword.get(opts, :response_header_limits),
+               ExSSL
+             ),
+           do: ExSSL.upgrade_nested(outer, attempt, :inner, opts)
+
+    if match?({:error, _}, result), do: ExSSL.close(outer)
+    result
+  end
+
   defp prepare_tunnel_upgrade(ExSSL, host, opts, deadline) do
     with {:ok, prepared} <- ExSSL.prepare_upgrade(host, opts, deadline),
          do: {:ok, {:ex_ssl, prepared}}
@@ -200,6 +237,7 @@ defmodule HTTP.Proxy do
     do: transport.upgrade(tcp, host, opts, timeout)
 
   defp cancel_upgrade({:ex_ssl, attempt}), do: ExSSL.cancel_prepared(attempt)
+  defp cancel_upgrade({:ex_ssl_nested, attempt}), do: ExSSL.cancel_nested(attempt)
   defp cancel_upgrade(_upgrade), do: :ok
 
   defp connect_proxy_tcp_attempt(proxy, opts, deadline, upgrade) do
@@ -245,19 +283,29 @@ defmodule HTTP.Proxy do
       Enum.map(proxy.headers, fn {_name, value} -> ["Proxy-Authorization: ", value, "\r\n"] end)
 
     with :ok <-
-           transport.send(tcp, [
-             "CONNECT ",
-             authority,
-             " HTTP/1.1\r\nHost: ",
-             authority,
-             "\r\n",
-             headers,
-             "\r\n"
-           ]),
+           send_tunnel(
+             transport,
+             tcp,
+             [
+               "CONNECT ",
+               authority,
+               " HTTP/1.1\r\nHost: ",
+               authority,
+               "\r\n",
+               headers,
+               "\r\n"
+             ],
+             deadline
+           ),
          {:ok, head} <- read_head(tcp, "", deadline, limits, 0, 0, transport),
          :ok <- validate_head(head),
          do: plaintext_boundary(tcp, transport)
   end
+
+  defp send_tunnel(ExSSL, socket, bytes, deadline),
+    do: ExSSL.send(socket, bytes, {:abs_ms, deadline})
+
+  defp send_tunnel(transport, socket, bytes, _deadline), do: transport.send(socket, bytes)
 
   defp read_head(tcp, bytes, deadline, limits, info_count, info_bytes, transport) do
     case :binary.match(bytes, "\r\n\r\n") do

@@ -2,10 +2,10 @@
 
 Execution checklist derived from the accepted 2026-10-21 HTTP Fetch migration plan.
 Baseline: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, nine packages at `0.21.14`.
-Status (2026-10-27): advanced TLS policies, public lifecycle evidence, completion,
+Status (2026-10-28): advanced TLS policies, public lifecycle evidence, completion,
 and managed H1/H2 pass the current source, candidate and three-runtime selection.
 P2 lifecycle/duplex acceptance is complete. P1/P3/P4 exit remains open for the
-remaining resumption controls, HTTPS-over-HTTPS compatibility and final CI closure.
+integrated resumption/nested-proxy candidate and platform evidence and final CI closure.
 P5–P7 have not begun; OTP remains the production default and dependency.
 
 See [design and compatibility table](tls-migration-design.md) and
@@ -360,7 +360,11 @@ H3 completion retains its existing `unsupported_completion` boundary.
       settle truthfully within existing deadlines.
       Direct/pinned H1/H2, HTTP CONNECT and HTTPS-proxy forwarding to HTTP origins
       pass current source/candidate gates, including abandonment and owner death.
-      HTTPS origins through HTTPS proxies still require a compatibility decision.
+      HTTPS origins through HTTPS proxies now pass 23 local source cases, including
+      H1/H2 pooled ownership, all four TLS1.2/TLS1.3 combinations, byte-preserving
+      upload, credentials, independent verification and cancellation at each phase.
+      Both provider obligations precede TCP allocation and require independent
+      cleanup receipts. Current candidate/platform and final source gates remain open.
 
 ## P4 — Source, consumer, package and CI acceptance (after P3)
 

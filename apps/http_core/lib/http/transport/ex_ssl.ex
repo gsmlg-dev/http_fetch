@@ -103,6 +103,76 @@ defmodule HTTP.Transport.ExSSL do
          do: prepared_attempt(prepared, opts, deadline)
   end
 
+  @doc false
+  def prepare_nested(proxy_host, proxy_opts, host, opts, deadline) do
+    tracker = Keyword.get(opts, :request_lifecycle)
+
+    with {:ok, inner} <- prepare_upgrade(host, opts),
+         {:ok, outer} <- prepare_upgrade(proxy_host, proxy_opts),
+         {:ok, layers} <- nested_layers(tracker, deadline) do
+      {:ok, {:nested_attempt, outer, inner, layers, tracker, deadline}}
+    end
+  end
+
+  defp nested_layers(nil, _deadline), do: {:ok, %{outer: nil, inner: nil}}
+
+  defp nested_layers(tracker, deadline) do
+    with {:ok, descriptor} <-
+           HTTP.RequestLifecycle.begin_provider(tracker, :ex_ssl_pair, deadline),
+         do: SSL.Lifecycle.layers(descriptor)
+  end
+
+  @doc false
+  def upgrade_nested(tcp, {:nested_attempt, outer, inner, layers, tracker, deadline}, layer, opts)
+      when layer in [:outer, :inner] do
+    prepared = if layer == :outer, do: outer, else: inner
+    descriptor = Map.fetch!(layers, layer)
+
+    result =
+      with {:ok, socket} <- nested_attach(tcp, prepared, descriptor, deadline),
+           :ok <- nested_adopt(layer, tracker, descriptor, tcp, socket, deadline),
+           do: {:ok, socket}
+
+    case result do
+      {:error, reason} = error ->
+        # A TLS attach timeout is still the HTTP connection phase, including
+        # when the provider's original deadline wins the dialer timer race.
+        {error, reason} =
+          if reason == :timeout,
+            do: {{:error, :connect_timeout}, :connect_timeout},
+            else: {error, reason}
+
+        result = setup_failure_result(error, reason, opts, descriptor)
+        HTTP.RequestLifecycle.provider_failed(tracker)
+        result
+
+      connected ->
+        connected
+    end
+  end
+
+  defp nested_attach(tcp, prepared, nil, deadline),
+    do: SSL.connect_prepared(tcp, prepared, setup_remaining(deadline))
+
+  defp nested_attach(tcp, prepared, descriptor, deadline),
+    do:
+      SSL.connect_prepared(
+        tcp,
+        prepared,
+        [ex_ssl: [lifecycle: descriptor]],
+        setup_remaining(deadline)
+      )
+
+  defp nested_adopt(:outer, tracker, descriptor, tcp, _socket, deadline),
+    do: HTTP.RequestLifecycle.adopt_outer_provider(tracker, descriptor, tcp, deadline)
+
+  defp nested_adopt(:inner, tracker, _descriptor, _tcp, socket, deadline),
+    do: HTTP.RequestLifecycle.bind_provider(tracker, socket, deadline)
+
+  @doc false
+  def cancel_nested({:nested_attempt, _, _, _, tracker, _}),
+    do: HTTP.RequestLifecycle.provider_failed(tracker)
+
   defp prepared_attempt(prepared, opts, deadline) do
     with {:ok, attempt_opts} <- lifecycle_options([], opts, deadline) do
       {:ok,

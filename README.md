@@ -614,8 +614,9 @@ from tunneled origin requests. The same route remains selected across redirects.
 An HTTPS proxy supports HTTP origins using TLS to the proxy and absolute-form
 HTTP/1 forwarding. HTTPS origins use authenticated CONNECT followed by a second,
 independently verified TLS session, with HTTP/1 or HTTP/2 inside the tunnel.
-Nested TLS requires `tls_backend: :ssl`; ExSSL requests fail before dialing with
-`:nested_tls_requires_otp_ssl`. Proxy `opts[:ssl]` configures proxy trust and SNI;
+Nested TLS supports `tls_backend: :ssl` and `:ex_ssl`. ExSSL prepares both policies
+and reserves both cleanup obligations before dialing. Proxy `opts[:ssl]` configures
+proxy trust and SNI;
 top-level `ssl` configures origin TLS (and proxy TLS when no separate policy is
 provided). Both identities are checked against their own host. Scheme, endpoint,
 credentials, and both TLS policies isolate pooled connections.
@@ -1527,8 +1528,8 @@ owned by the caller and must respond to their stream's termination themselves.
 
 The barrier supports direct TCP and the default OTP TLS backend, including TLS
 handshake cancellation, explicit `:http1`, `:http2`, and direct `:h2c` selection.
-Explicit proxies with the OTP TLS backend support the following routes, including
-pending TCP connection, CONNECT and TLS negotiation, uploads, response streams,
+Explicit proxies with the OTP or ExSSL TLS backend support the following routes,
+including pending TCP connection, CONNECT and TLS negotiation, uploads, response streams,
 and safe pooled return:
 
 | Proxy | Origin | HTTP version |
@@ -1536,7 +1537,7 @@ and safe pooled return:
 | `{:http, host, port, opts}` | HTTP | `:http1` (absolute-form forwarding) |
 | `{:http, host, port, opts}` | HTTPS | `:http1` or `:http2` (CONNECT tunnel) |
 | `{:https, host, port, opts}` | HTTP | `:http1` (TLS to proxy, absolute form) |
-| `{:https, host, port, opts}` | HTTPS | `:http1` or `:http2` (OTP nested TLS) |
+| `{:https, host, port, opts}` | HTTPS | `:http1` or `:http2` (nested TLS) |
 
 Proxy endpoint, authentication and TLS policy isolate pooled connections.
 Proxy authorization is excluded from origin requests inside CONNECT tunnels.
@@ -1544,7 +1545,9 @@ For example, adding `proxy: {:http, "proxy.example", 3128, []}` to the example
 above retains the same completion contract. Both TLS sessions and the raw socket
 participate in nested cleanup. A setup failure before OTP exposes a TLS handle
 retains `:cleanup_unconfirmed`; a finite wait may first return `:cleanup_pending`.
-Proxy `:h2c`, ExSSL, Unix routes, redirects followed internally,
+ExSSL joins independent inner and outer lifecycle receipts; request completion
+does not retire a healthy pooled connection. Managed scopes retain their proxy
+exclusion. Proxy `:h2c`, Unix routes, redirects followed internally,
 `:auto`, and HTTP/3 return
 `{:error, {:unsupported_completion, reason}}`. Existing asynchronous
 `HTTP.AbortController.abort/1` is unchanged; its cancellation can be followed by

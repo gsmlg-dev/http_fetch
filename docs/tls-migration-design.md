@@ -188,7 +188,8 @@ an immutable managed policy.
 | Pinned HTTPS | dial connect_address, retain origin authority/Host and default identity/SNI; explicit SNI/reference override remains an independent option | [connect-address scenarios](../apps/http_fetch/test/http/connect_address_test.exs); core/runtime; no proxy/Unix/H3 or automatic redirect combination |
 | HTTP via HTTP proxy | TCP to proxy, absolute-form HTTP request, origin Host; no TLS or CONNECT | [proxy](../apps/http_core/lib/http/proxy.ex#L112); core; no origin fallback |
 | HTTPS via HTTP proxy | ExSSL prepares origin TLS policy → TCP to proxy → CONNECT origin → strict plaintext boundary → prepared TLS upgrade → H1/H2 | [CONNECT](../apps/http_core/lib/http/proxy.ex); raw phase joins provider lifecycle; invalid effective ExSSL configuration rejects before proxy or origin accepts |
-| HTTP via HTTPS proxy | TLS to proxy identity, forced http/1.1 → absolute-form HTTP | [HTTPS proxy](../apps/http_core/lib/http/proxy.ex); core/runtime; trust/client identity belong to proxy. OTP also supports CONNECT to HTTPS origins with independent proxy/origin TLS; ExSSL rejects this nested route pending a next-major compatibility decision. |
+| HTTP via HTTPS proxy | TLS to proxy identity, forced http/1.1 → absolute-form HTTP | [HTTPS proxy](../apps/http_core/lib/http/proxy.ex); core/runtime; trust/client identity belong to proxy. |
+| HTTPS via HTTPS proxy | Prepare independent origin/proxy policies → TLS to proxy with http/1.1 → CONNECT → inner origin TLS → H1/H2 | OTP and ExSSL; ExSSL reserves a lifecycle pair before TCP allocation and transfers both obligations to H1/H2 pools. Local source coverage includes all four TLS1.2/TLS1.3 combinations; integrated candidate/platform evidence remains required. Managed proxy exclusion is unchanged. |
 | Unix Fetch/SSE/WS H1 | Shared runtime validation rejects secure schemes before [Unix](../apps/http_core/lib/http/transport/unix.ex#L7); plain HTTP/Upgrade uses gen_tcp local-domain connections | HTTP/ws Unix supported; https/wss reject with tls_over_unix_socket_not_supported, including Fetch/SSE secure redirects; H2/H3/proxy combinations retain their rejection boundaries |
 | EventSource | [Connection](../apps/http_event_source/lib/http/event_source/connection.ex#L265) → H1 adapter worker or runtime H2/H3 relay | Backend/raw options retained across reconnect; cross-origin credentials stripped, HTTPS downgrade and client-identity redirects rejected; protocol-only H1 fallback; no supported forward-proxy plumbing |
 | WebSocket | [H1](../apps/http_web_socket/lib/http/web_socket/connection.ex#L463) connects/validates Upgrade before acknowledged transfer; [H2](../apps/http_web_socket/lib/http/web_socket/connection.ex#L420) uses runtime extended CONNECT | Provider/options/deadline retained; one capability-only H1 fallback; no authentication fallback, redirect/reconnect or H3; mode:proxy means frame forwarding, not HTTP proxy routing |
@@ -232,8 +233,8 @@ The following newly traced boundaries remain named release blockers:
 Completion eligibility remains narrower than ordinary requests:
 [RequestCompletion](../apps/http_fetch/lib/http/request_completion.ex) supports explicit
 ExSSL direct/pinned HTTPS H1/H2, managed H1/H2, HTTP-proxy forwarding/CONNECT and
-HTTPS-proxy forwarding to HTTP origins. It still excludes automatic protocol
-selection, followed redirects, Unix and H3; nested HTTPS-proxy completion is OTP-only.
+HTTPS-proxy forwarding and nested HTTPS origins. It still excludes automatic protocol
+selection, followed redirects, Unix and H3. Managed scopes retain their proxy exclusion.
 H1 prepare/ownership/activation and H2 handoff use acknowledged provider authority
 transfer. Request completion releases its reservation or stream while healthy pools
 retain TLS ownership; provider retirement separately requires confirmed cleanup.

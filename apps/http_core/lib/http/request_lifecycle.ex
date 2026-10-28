@@ -148,12 +148,13 @@ defmodule HTTP.RequestLifecycle do
 
   # The controller stores the obligation before acknowledging admission. A dial
   # worker that dies before receiving the reply cannot orphan provider evidence.
-  def begin_provider(tracker, :ex_ssl, deadline) do
+  def begin_provider(tracker, backend, deadline) when backend in [:ex_ssl, :ex_ssl_pair] do
     timeout = if deadline == :infinity, do: 1_000, else: remaining(deadline)
+    operation = if backend == :ex_ssl_pair, do: :begin_provider_pair, else: :begin_provider
 
     if timeout == 0,
       do: {:error, :request_timeout},
-      else: GenServer.call(tracker, {:begin_provider, deadline}, timeout)
+      else: GenServer.call(tracker, {operation, deadline}, timeout)
   catch
     :exit, {:timeout, _} ->
       unconfirmed(tracker)
@@ -193,6 +194,14 @@ defmodule HTTP.RequestLifecycle do
   def adopt_provider(tracker, descriptor, tcp, socket, deadline),
     do: deadline_call(tracker, {:adopt_provider, descriptor, tcp, socket, deadline}, deadline)
 
+  # The pair is already retained before TCP allocation. Only the acknowledged
+  # outer scalar adoption can discharge that exact pre-TLS Port; the final
+  # provider socket remains unset until the independently verified inner attach.
+  def adopt_outer_provider(nil, _descriptor, _tcp, _deadline), do: :ok
+
+  def adopt_outer_provider(tracker, descriptor, tcp, deadline),
+    do: deadline_call(tracker, {:adopt_outer_provider, descriptor, tcp, deadline}, deadline)
+
   def offer_provider(tracker, socket, target, deadline),
     do: provider_call(tracker, {:offer_provider, socket, target, deadline}, deadline)
 
@@ -212,6 +221,21 @@ defmodule HTTP.RequestLifecycle do
 
   # Public fields correlate one opaque offer; epochs alone cannot prove handoff.
   def transfer_state(carrier), do: transfer_state(carrier, SSL.Lifecycle.status(carrier.handle))
+
+  def transfer_state(
+        %{epoch: {outer_epoch, inner_epoch}, nonce: {outer_nonce, inner_nonce}},
+        {:pending, %{layers: %{outer: outer, inner: inner}}}
+      ) do
+    outer = transfer_state(%{epoch: outer_epoch, nonce: outer_nonce}, {:pending, outer})
+    inner = transfer_state(%{epoch: inner_epoch, nonce: inner_nonce}, {:pending, inner})
+
+    case {outer, inner} do
+      {:accepted, :accepted} -> :accepted
+      {:unconfirmed, _} -> :unconfirmed
+      {_, :unconfirmed} -> :unconfirmed
+      _ -> :pending
+    end
+  end
 
   def transfer_state(%{epoch: epoch, nonce: nonce}, {:pending, snapshot})
       when is_integer(epoch) and is_reference(nonce) do
@@ -592,19 +616,23 @@ defmodule HTTP.RequestLifecycle do
   def handle_call({:bind_connector, token}, _, state),
     do: {:reply, :ok, %{state | connector: token}}
 
-  def handle_call({:begin_provider, _deadline}, _, %{aborted?: true} = state),
-    do: {:reply, {:error, :aborted}, state}
+  def handle_call({operation, _deadline}, _, %{aborted?: true} = state)
+      when operation in [:begin_provider, :begin_provider_pair],
+      do: {:reply, {:error, :aborted}, state}
 
-  def handle_call({:begin_provider, _deadline}, _, %{providers: providers} = state)
-      when map_size(providers) != 0,
+  def handle_call({operation, _deadline}, _, %{providers: providers} = state)
+      when operation in [:begin_provider, :begin_provider_pair] and map_size(providers) != 0,
       do: {:reply, {:error, :provider_already_registered}, state}
 
-  def handle_call({:begin_provider, deadline}, _, state) do
+  def handle_call({operation, deadline}, _, state)
+      when operation in [:begin_provider, :begin_provider_pair] do
     deadline = if state.deadline, do: min(deadline, state.deadline), else: deadline
     setup_deadline = if deadline == :infinity, do: :infinity, else: {:abs_ms, deadline}
     state = %{state | constructor_entered?: true}
 
-    case SSL.Lifecycle.new(controller: self(), deadline: setup_deadline) do
+    constructor = if operation == :begin_provider_pair, do: :new_pair, else: :new
+
+    case apply(SSL.Lifecycle, constructor, [[controller: self(), deadline: setup_deadline]]) do
       {:ok, handle, lease} ->
         Process.send_after(self(), :poll_providers, 10)
         provider = %{lease: lease, socket: nil, outgoing: nil, incoming: nil}
@@ -659,6 +687,22 @@ defmodule HTTP.RequestLifecycle do
 
   def handle_call({:adopt_provider, _descriptor, _tcp, _socket, _deadline}, _, state),
     do: {:reply, {:error, :adoption_unconfirmed}, state}
+
+  def handle_call({:adopt_outer_provider, descriptor, tcp, deadline}, {caller, _}, state) do
+    with false <- state.aborted?,
+         true <- remaining(deadline) > 0 and is_port(tcp),
+         [{handle, %{lease: lease, socket: nil}}] <- Map.to_list(state.providers),
+         {:ok, %{outer: ^descriptor}} <- SSL.Lifecycle.layers({handle, lease}),
+         true <- resource_kind(state, caller) == :dial,
+         true <- resource_kind(state, tcp) == :socket,
+         {:pending, %{scope: :upgrade, bound?: true, setup: :connected}} <-
+           SSL.Lifecycle.status(elem(descriptor, 0), {:abs_ms, deadline}),
+         true <- remaining(deadline) > 0 do
+      handle_call({:handoff, [tcp]}, {caller, nil}, state)
+    else
+      _ -> {:reply, {:error, :adoption_unconfirmed}, %{state | uncertain?: true}}
+    end
+  end
 
   def handle_call({:offer_provider, _, _, _}, _, %{aborted?: true} = state),
     do: {:reply, {:error, :aborted}, state}

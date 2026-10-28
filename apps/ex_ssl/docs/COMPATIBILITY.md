@@ -364,8 +364,13 @@ the source can discharge its obligation. After partial acceptance, the retained
 source inner lease can still retire the inner owner and consequently the outer
 session. Accepted tickets can recover the same leases without advancing epochs.
 
-HTTP HTTPS-over-HTTPS routing and its consumer acceptance remain required before
-default promotion or production OTP SSL removal.
+The HTTP adapter prepares both policies and reserves a pair before proxy TCP
+allocation. Authenticated CONNECT uses the outer session; the final HTTP socket
+binds only after the inner handshake. Ordinary H1/H2 completion and pooled
+ownership transfer cover all four TLS1.2/TLS1.3 combinations against independent
+OpenSSL peers. Managed scopes retain their proxy exclusion. Integrated candidate
+and supported-runtime acceptance remain required before default promotion or
+production OTP SSL removal.
 
 ## Prepared upgrade configuration
 
@@ -395,8 +400,9 @@ applying the origin reference/SNI, before allocating the raw proxy TCP socket.
 The CONNECT deadline starts before preparation. The same snapshot is consumed
 only after the proxy response and plaintext boundary are validated. Supported
 one-TLS-leg routes remain HTTPS origin through an HTTP proxy and HTTP origin
-through an HTTPS proxy. Nested HTTPS-proxy plus HTTPS-origin routes remain
-explicitly rejected before dialing.
+through an HTTPS proxy. HTTPS origins through HTTPS proxies prepare independent
+origin/proxy policies before dialing and attach two ExSSL sessions within the
+original deadline. Proxy credentials remain outside the inner session.
 
 A configuration snapshot is not a durable connection-attempt/adoption or cleanup
 receipt. It does not enable managed/completion paths, establish cancellation or

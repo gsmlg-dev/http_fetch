@@ -1,5 +1,38 @@
 # TLS migration execution ledger
 
+## ExSSL nested HTTPS proxy source acceptance — 2026-10-28
+
+Ordinary HTTPS origins through HTTPS proxies now use two independently prepared
+ExSSL policies and one lifecycle pair reserved before proxy TCP allocation. The
+outer session forces HTTP/1.1 for CONNECT; origin ALPN, trust and identity remain
+independent. CONNECT writes, TLS attachments and ownership admission consume the
+original deadline. Raw TCP leaves the HTTP ledger only after acknowledged outer
+provider adoption; the final socket binds after the inner handshake succeeds.
+
+The new integration suite passes 23 cases. Independent OpenSSL peers cover all
+four TLS1.2/TLS1.3 combinations for H1 pooled ownership and H2 reuse after stream
+cancellation. Each records one connection, exact TLS/ALPN, no replay and confirmed
+retirement of both layers. OTP TLS1.3 peers cover credential separation, identity
+negatives, CONNECT refusal, streaming and phase-specific cancellation/deadlines.
+The existing OTP TLS1.2-without-EMS rejection remains intentional; those peers
+cannot serve as positive references for ExSSL's required EMS profile. An initial
+H1 fixture failure came from requiring ALPN without advertising it; the fixture
+now explicitly offers HTTP/1.1 and retains exact peer ALPN assertions.
+
+The affected Core, Runtime and Fetch selection passes 42, 29 and 117 cases,
+respectively. Strict umbrella compilation, root formatting and diff checks pass.
+The default-tier control executes six allocation-free lifecycle unit cases and
+excludes all 23 new socket/process integration cases.
+
+The original OTP nested-route suite retains its assertions and deadlines except
+the obsolete ExSSL-rejection case, which now rejects invalid origin policy before
+proxy dialing. Its IP-alias-dependent positive cases still need Linux execution.
+Current candidate packages, supported-platform integration and final source gates
+remain pending. P5–P7 remain unopened; performance is outside this goal and
+Credo/Dialyzer are user-deferred. Evidence is under
+`/private/tmp/http-fetch-tls12-candidate-suite-root-20261027T2340Z` and
+`/private/tmp/http-fetch-nested-tls-root-20261027T2345Z`.
+
 ## No-OTP peer identity-rejection evidence — 2026-10-27
 
 The independent TCP peer now uses OpenSSL's public MemoryBIO API and retains the

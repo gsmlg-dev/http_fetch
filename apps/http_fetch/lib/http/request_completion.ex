@@ -87,7 +87,7 @@ defmodule HTTP.RequestCompletion do
 
       {:ok, %{scheme: :https}} ->
         (request.url.scheme == "http" and options.http_version == :http1) or
-          (request.url.scheme == "https" and options.tls_backend == :ssl and
+          (request.url.scheme == "https" and options.tls_backend in [:ssl, :ex_ssl] and
              options.http_version in [:http1, :http2])
 
       _ ->

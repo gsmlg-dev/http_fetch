@@ -17,10 +17,13 @@ def main():
     parser.add_argument('--key', required=True)
     parser.add_argument('--tls', choices=['TLSv1.2', 'TLSv1.3'], required=True)
     parser.add_argument('--protocol', choices=['http/1.1', 'h2'], required=True)
-    parser.add_argument('--route', choices=['connect', 'forward'], default='connect')
+    parser.add_argument('--route', choices=['connect', 'forward', 'nested'], default='connect')
+    parser.add_argument('--upstream-port', type=int)
     parser.add_argument('--mode', default='normal')
     parser.add_argument('--lifetime', type=int, default=120)
     args = parser.parse_args()
+    if args.route == 'nested' and args.upstream_port not in range(1, 65536):
+        parser.error('nested route requires a valid upstream port')
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     version = getattr(ssl.TLSVersion, args.tls.replace('.', '_'))
     context.minimum_version = context.maximum_version = version
@@ -130,6 +133,31 @@ def main():
             if pending:
                 conn.sendall(pending)
 
+    def nested(conn, cid):
+        request = head(conn)
+        if request is None or not request.startswith(
+                f'CONNECT localhost:{args.upstream_port} HTTP/1.1\r\n'.encode()):
+            raise ValueError('unexpected CONNECT target')
+        with lock:
+            state['connects'].append(dict(connection=cid, head=request.decode('ascii')))
+        with socket.create_connection(('127.0.0.1', args.upstream_port), timeout=2) as upstream:
+            upstream.settimeout(.2)
+            conn.sendall(b'HTTP/1.1 200 Connection Established\r\n\r\n')
+            forwarded = 0
+            while not stop.is_set() and time.monotonic() < expires:
+                ready = [conn] if conn.pending() else select.select([conn, upstream], [], [], .1)[0]
+                for source in ready:
+                    try:
+                        data = source.recv(65536)
+                    except socket.timeout:
+                        continue
+                    if not data:
+                        return
+                    forwarded += len(data)
+                    if forwarded > 4 * 1024 * 1024:
+                        raise ValueError('nested tunnel byte bound exceeded')
+                    (upstream if source is conn else conn).sendall(data)
+
     def serve(raw, cid):
         conn = raw
         tls_started = tls_completed = False
@@ -166,7 +194,9 @@ def main():
                     cipher=conn.cipher()[0]))
             if conn.version() != args.tls or conn.selected_alpn_protocol() != args.protocol:
                 raise ValueError('exact TLS/ALPN prerequisite failed')
-            if args.protocol == 'h2':
+            if args.route == 'nested':
+                nested(conn, cid)
+            elif args.protocol == 'h2':
                 h2(conn, cid)
             else:
                 h1(conn, cid)
