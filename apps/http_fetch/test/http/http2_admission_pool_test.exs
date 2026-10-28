@@ -94,6 +94,131 @@ defmodule HTTP.HTTP2AdmissionPoolTest do
     end
   end
 
+  for cleanup <- [:confirmed, :pending, :unconfirmed, :missing],
+      key <- [:key, :other],
+      queued? <- if(cleanup == :confirmed, do: [false, true], else: [false]) do
+    @tag cleanup: cleanup, replacement_key: key, queued?: queued?
+    test "#{cleanup} provider cleanup preserves bounded replacement admission for #{key}, queued: #{queued?}",
+         %{
+           cleanup: cleanup,
+           replacement_key: key,
+           queued?: queued?
+         } do
+      {:ok, handle, lease} = SSL.Lifecycle.new(controller: self(), deadline: :infinity)
+      {owner, owner_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
+      on_exit(fn -> if Process.alive?(owner), do: Process.exit(owner, :kill) end)
+
+      try do
+        case cleanup do
+          :confirmed ->
+            assert :ok = SSL.Lifecycle.cancel(lease, lifecycle_deadline())
+
+            assert {:ok, %{cleanup: :confirmed}} =
+                     SSL.Lifecycle.await(handle, lifecycle_deadline())
+
+          :unconfirmed ->
+            observer = handle.receipt.observer
+            monitor = Process.monitor(observer)
+            Process.exit(observer, :kill)
+            assert_receive {:DOWN, ^monitor, :process, ^observer, :killed}, 1_000
+
+            assert {:unconfirmed, :observer_unsealed} =
+                     SSL.Lifecycle.await(handle, lifecycle_deadline())
+
+          _ ->
+            assert {:pending, _} =
+                     SSL.Lifecycle.await(handle, {:abs_ms, System.monotonic_time(:millisecond)})
+        end
+
+        max_pending = if queued?, do: 1, else: 0
+
+        {:ok, initial} =
+          Pool.init(max_connections: 1, max_total_connections: 1, max_pending: max_pending)
+
+        from = {self(), make_ref()}
+        deadline = System.monotonic_time(:millisecond) + 1_000
+
+        {:reply, :ok, prepared} =
+          Pool.handle_call(
+            {:prepare_provider, :key, owner, [request_lifecycle: self()], deadline},
+            from,
+            initial
+          )
+
+        carrier = if cleanup == :missing, do: nil, else: %{handle: handle}
+        prepared = put_in(prepared.providers[owner].carrier, carrier)
+        {:noreply, retained} = Pool.handle_cast({:retire_provider, owner}, prepared)
+        send(owner, :stop)
+        assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 1_000
+
+        # Invoke callbacks directly so the housekeeping timer cannot erase the
+        # stale capacity between the genuine cleanup receipt and admission.
+        if cleanup == :confirmed do
+          token = make_ref()
+          reply_tag = make_ref()
+
+          retained =
+            if queued? do
+              assert {:noreply, queued} =
+                       Pool.handle_call(
+                         {:reserve, :key, [connect?: true, token: token]},
+                         {self(), reply_tag},
+                         retained
+                       )
+
+              refute_receive {^reply_tag, _}, 0
+              queued
+            else
+              retained
+            end
+
+          expected = if queued?, do: :wait, else: :start
+          admitted_key = if queued?, do: :key, else: key
+
+          assert {:reply, ^expected, admitted} =
+                   Pool.handle_call({:claim_connect, key}, from, retained)
+
+          if queued?, do: assert_receive({^reply_tag, {:connect, ^token}}, 1_000)
+          assert admitted.providers == %{}
+          assert map_size(admitted.entries) == 1
+          assert admitted.entries[admitted_key].connecting == 1
+          assert admitted.max_connections == 1
+          assert admitted.max_total_connections == 1
+          assert admitted.max_pending == max_pending
+
+          {:reply, :ok, settled} =
+            Pool.handle_call({:complete_connect, admitted_key}, from, admitted)
+
+          assert settled.entries == %{}
+          assert settled.monitors == %{}
+          assert settled.callers == %{}
+          assert settled.promotions == %{}
+        else
+          assert {:reply, :wait, ^retained} =
+                   Pool.handle_call({:claim_connect, key}, from, retained)
+
+          assert map_size(retained.providers) == 1
+          Process.demonitor(retained.providers[owner].monitor, [:flush])
+
+          if cleanup in [:pending, :missing] do
+            assert {:pending, _} =
+                     SSL.Lifecycle.await(handle, {:abs_ms, System.monotonic_time(:millisecond)})
+          end
+        end
+      after
+        if cleanup in [:pending, :missing] do
+          assert :ok = SSL.Lifecycle.cancel(lease, lifecycle_deadline())
+        end
+
+        if cleanup != :unconfirmed do
+          assert {:ok, %{cleanup: :confirmed}} = SSL.Lifecycle.await(handle, lifecycle_deadline())
+        end
+      end
+    end
+  end
+
+  defp lifecycle_deadline, do: {:abs_ms, System.monotonic_time(:millisecond) + 1_000}
+
   defp await_pending(pool, count, deadline \\ nil) do
     deadline = deadline || System.monotonic_time(:millisecond) + 5_000
 

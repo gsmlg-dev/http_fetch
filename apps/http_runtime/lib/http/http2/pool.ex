@@ -393,6 +393,7 @@ defmodule HTTP.HTTP2.Pool do
   end
 
   def handle_call({:claim_connect, key}, from, state) do
+    state = reconcile_provider_capacity(state)
     entry = Map.get(state.entries, key, new_entry())
 
     cond do
@@ -1379,12 +1380,7 @@ defmodule HTTP.HTTP2.Pool do
                  SSL.Lifecycle.await(carrier.handle, {:abs_ms, now_ms()})
                ) do
             :confirmed ->
-              send(owner, :http2_shutdown_exclusive)
-              Process.demonitor(provider.monitor, [:flush])
-
-              %{state | providers: Map.delete(state.providers, owner)}
-              |> prune_key(provider.key)
-              |> dispatch_all()
+              release_provider(state, owner, provider)
 
             _ ->
               state
@@ -1393,6 +1389,33 @@ defmodule HTTP.HTTP2.Pool do
     else
       state
     end
+  end
+
+  defp reconcile_provider_capacity(state) do
+    Enum.reduce(state.providers, state, fn {owner, provider}, acc ->
+      detached? = is_nil(get_in(acc.entries, [provider.key, :connections, owner]))
+      retiring? = provider.phase == :retiring or not Process.alive?(owner)
+
+      # Admission only reads completed cleanup; cancellation and transfer recovery
+      # remain in housekeeping and must not block a new caller's deadline.
+      if detached? and retiring? and provider.carrier != nil and
+           RequestLifecycle.provider_cleanup(
+             SSL.Lifecycle.await(provider.carrier.handle, {:abs_ms, now_ms()})
+           ) == :confirmed do
+        release_provider(acc, owner, provider)
+      else
+        acc
+      end
+    end)
+  end
+
+  defp release_provider(state, owner, provider) do
+    send(owner, :http2_shutdown_exclusive)
+    Process.demonitor(provider.monitor, [:flush])
+
+    %{state | providers: Map.delete(state.providers, owner)}
+    |> prune_key(provider.key)
+    |> dispatch_all()
   end
 
   defp recover_provider(%{lease: nil, carrier: carrier} = provider) when carrier != nil do
