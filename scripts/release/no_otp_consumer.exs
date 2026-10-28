@@ -446,8 +446,19 @@ defmodule NoOTP.Consumer do
         Process.sleep(1)
         wait_ready(session, deadline)
 
+      {:error, :closed} ->
+        h3_closed_reason(session, deadline)
+
       result ->
         result
+    end
+  end
+
+  defp h3_closed_reason(%{connection: %{handle: handle}}, deadline) do
+    receive do
+      {:quic_closed, ^handle, reason} -> {:error, reason}
+    after
+      remaining(deadline) -> {:error, :closed}
     end
   end
 
