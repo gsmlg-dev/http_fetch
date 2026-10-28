@@ -171,6 +171,8 @@ class NoOTPReleaseWorkflowTests(unittest.TestCase):
 
     def test_peer_plans_bind_pinned_environment_and_existing_verified_fixtures(self):
         step = self.step("Prepare independent no-OTP SSL peers")
+        self.assertIn("sudo apt-get install --yes expect", step)
+        self.assertIn("command -v unbuffer", step)
         self.assertIn('uv venv "$RUNNER_TEMP/no-otp-peer-python" --python 3.12', step)
         self.assertIn("--requirement scripts/requirements-http2-stream-clients.txt", step)
         self.assertIn("aioquic==1.2.0", step)

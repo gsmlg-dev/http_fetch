@@ -243,6 +243,9 @@ jobs:
       - name: Prepare independent no-OTP SSL peers
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes expect
+          command -v unbuffer
           uv venv "$RUNNER_TEMP/no-otp-peer-python" --python 3.12
           uv pip install --python "$RUNNER_TEMP/no-otp-peer-python/bin/python" \
             --requirement scripts/requirements-http2-stream-clients.txt aioquic==1.2.0
