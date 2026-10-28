@@ -105,12 +105,16 @@ defmodule NoOTP.Consumer do
     host =
       if case_spec["action"] == "invalid_identity", do: ~c"wrong.invalid", else: ~c"localhost"
 
-    [
+    options = [
       verify: :verify_peer,
       cacertfile: case_spec["ca_file"],
       versions: [version],
       server_name_indication: host
     ]
+
+    if protocol(case_spec) == :http1,
+      do: Keyword.put(options, :alpn_advertised_protocols, ["http/1.1"]),
+      else: options
   end
 
   defp protocol(%{"client" => client}) when client in ["h1", "managed_h1"], do: :http1
@@ -130,10 +134,13 @@ defmodule NoOTP.Consumer do
       redirect: :manual,
       timeout: timeout,
       connect_timeout: timeout,
-      http1_reuse: false,
-      http2_reuse: false,
       signal: controller
     ]
+
+    options =
+      if protocol(case_spec) == :http1,
+        do: Keyword.put(options, :http1_reuse, false),
+        else: Keyword.put(options, :http2_reuse, false)
 
     options =
       if scope do

@@ -70,6 +70,8 @@ def build_plan(script, script_sha, cert, key, ca, *, tls="TLSv1.3", timeout_ms=5
             name = client + "-" + action
             version = "TLSv1.3" if client == "h3" else tls
             expected = "no-otp:" + identifier
+            host = ("wrong.invalid" if client in ("managed_h1", "managed_h2") and
+                    action == "invalid_identity" else "localhost")
             argv = [python, script, "serve", "--id", identifier, "--client", client,
                     "--action", action, "--tls", version, "--cert", cert, "--key", key,
                     "--run", "{run}", "--expected", expected,
@@ -78,7 +80,7 @@ def build_plan(script, script_sha, cert, key, ca, *, tls="TLSv1.3", timeout_ms=5
             case = dict(id=identifier, client=client, action=action, peer=name,
                         tls=version, alpn=protocol(client), expected=expected,
                         url=("wss" if client == "wss" else "https") +
-                        "://localhost:{port}/no-otp/" + identifier,
+                        "://" + host + ":{port}/no-otp/" + identifier,
                         ca_file=ca, timeout_ms=timeout_ms)
             if needs_gate(case):
                 case["gate_file"] = "{run}/" + identifier + ".gate.json"

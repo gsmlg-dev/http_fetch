@@ -111,6 +111,32 @@ H2_EVENTS = SimpleNamespace(RequestReceived=RequestReceived, StreamReset=StreamR
 
 
 class PlanTests(unittest.TestCase):
+    def test_managed_identity_failure_uses_a_pinned_invalid_origin_only(self):
+        generated = plan()
+        for spec in generated["scenarios"]:
+            invalid_origin = (spec["client"] in ("managed_h1", "managed_h2") and
+                              spec["action"] == "invalid_identity")
+            host = "wrong.invalid" if invalid_origin else "localhost"
+            scheme = "wss" if spec["client"] == "wss" else "https"
+            self.assertTrue(spec["url"].startswith(scheme + "://" + host + ":{port}/"))
+        gate.validate_plan(generated)
+        for client in peer.CLIENTS:
+            for action in peer.ACTIONS:
+                if client in ("managed_h1", "managed_h2") and action == "invalid_identity":
+                    continue
+                bad = plan()
+                spec = next(c for c in bad["scenarios"]
+                            if (c["client"], c["action"]) == (client, action))
+                spec["url"] = spec["url"].replace("localhost", "wrong.invalid")
+                with self.subTest(client=client, action=action), self.assertRaises(gate.GateError):
+                    gate.validate_plan(bad)
+        for host in ("other.invalid", "example.com", "user@wrong.invalid"):
+            bad = plan()
+            spec = next(c for c in bad["scenarios"] if c["id"] == "managed_h1.invalid_identity")
+            spec["url"] = "https://" + host + ":{port}/no-otp/" + spec["id"]
+            with self.subTest(host=host), self.assertRaises(gate.GateError):
+                gate.validate_plan(bad)
+
     def test_exact_complete_plan_passes_actual_accepted_validator(self):
         for tls in ("TLSv1.2", "TLSv1.3"):
             generated = gate.validate_plan(plan(tls))

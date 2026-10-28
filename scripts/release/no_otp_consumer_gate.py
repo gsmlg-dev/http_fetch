@@ -125,9 +125,13 @@ def validate_plan(plan):
                 and not any(ord(char) <= 32 or ord(char) == 127 for char in url),
                 'verified peer URL with one port placeholder required')
         parsed = urlsplit(url.replace('{port}', '1'))
-        require(parsed.netloc == 'localhost:1' and not parsed.fragment and
+        allowed_netlocs = {'localhost:1'}
+        if case['client'] in ('managed_h1', 'managed_h2') and case['action'] == 'invalid_identity':
+            # The consumer pins this reserved invalid origin to its owned loopback peer.
+            allowed_netlocs.add('wrong.invalid:1')
+        require(parsed.netloc in allowed_netlocs and not parsed.fragment and
                 '{' not in parsed.path + parsed.query and '}' not in parsed.path + parsed.query,
-                'owned localhost peer route without credentials/fragment required')
+                'owned peer route without credentials/fragment required')
         needs_gate = (case['action'] == 'cancellation' and case['client'] in
                       ('h1', 'h2', 'managed_h1', 'managed_h2')) or (
                           case['client'] == 'h3' and case['action'] in
