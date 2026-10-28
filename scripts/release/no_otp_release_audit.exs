@@ -623,9 +623,54 @@ defmodule NoOTP.ReleaseAudit do
     environment =
       if shadow, do: Map.drop(environment, pattern_variables(patterns)), else: environment
 
+    body_environment = successful_guard_environment(guards, environment)
     guards = Enum.map(guards, fn guard -> elem(resolve_sequence(guard, environment), 0) end)
-    {body, environment, value} = resolve_sequence(body, environment)
+    {body, environment, value} = resolve_sequence(body, body_environment)
     {{:clause, line, patterns, guards, body}, environment, value}
+  end
+
+  # A successful clause supplies facts only from positive atom equalities.
+  # Guard sequences are alternatives; every alternative must establish a fact.
+  # Existing domains stay conservative, and the original guards are still scanned.
+  defp successful_guard_environment([], environment), do: environment
+
+  defp successful_guard_environment(guards, environment) do
+    if :erlang.external_size(guards) <= @max_finite_bytes do
+      guards
+      |> Enum.map(fn sequence -> Enum.reduce(sequence, environment, &guard_atom_fact/2) end)
+      |> join_environments()
+    else
+      environment
+    end
+  end
+
+  defp guard_atom_fact({:op, _, :andalso, left, right}, environment) do
+    guard_atom_fact(right, guard_atom_fact(left, environment))
+  end
+
+  defp guard_atom_fact({:op, _, :orelse, left, right}, environment) do
+    join_environments([
+      guard_atom_fact(left, environment),
+      guard_atom_fact(right, environment)
+    ])
+  end
+
+  defp guard_atom_fact({:op, _, operator, {:var, _, name}, {:atom, _, _} = value}, environment)
+       when operator in [:==, :"=:="] do
+    guard_atom_binding(name, value, environment)
+  end
+
+  defp guard_atom_fact({:op, _, operator, {:atom, _, _} = value, {:var, _, name}}, environment)
+       when operator in [:==, :"=:="] do
+    guard_atom_binding(name, value, environment)
+  end
+
+  defp guard_atom_fact(_guard, environment), do: environment
+
+  defp guard_atom_binding(name, value, environment) do
+    if Map.get(environment, name, :unknown) == :unknown,
+      do: Map.put(environment, name, value),
+      else: environment
   end
 
   defp resolve_sequence(expressions, environment) do
@@ -747,6 +792,28 @@ defmodule NoOTP.ReleaseAudit do
     callee = if variable_callee?, do: {:audit_fun_value, line, callee}, else: callee
     {args, environment, _} = resolve_sequence(args, environment)
     {{:call, line, callee, args}, environment, :unknown}
+  end
+
+  # Track tuple components independently without inventing values for unknown
+  # components. Keep the executable elements (including closure bodies) intact.
+  defp resolve_expression({:tuple, line, elements}, environment) do
+    {elements, environment} =
+      Enum.map_reduce(elements, environment, fn element, scope ->
+        {element, scope, value} = resolve_expression(element, scope)
+        {{element, value}, scope}
+      end)
+
+    {elements, values} = Enum.unzip(elements)
+    expression = {:tuple, line, elements}
+    value = {:tuple, line, values}
+
+    value =
+      if :erlang.external_size(expression) <= @max_finite_bytes and
+           :erlang.external_size(value) <= @max_finite_bytes,
+         do: value,
+         else: :unknown
+
+    {expression, environment, value}
   end
 
   defp resolve_expression(expression, environment) when is_tuple(expression) do

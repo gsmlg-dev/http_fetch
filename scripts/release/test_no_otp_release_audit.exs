@@ -640,6 +640,227 @@ defmodule NoOTP.ReleaseAuditTest do
     assert unsafe?(changed)
   end
 
+  test "A01 successful atom equality guards resolve either operand order", context do
+    for guard <- ["M == lists", "M =:= lists", "lists == M", "lists =:= M"] do
+      assert erlang(context, "run(M) when " <> guard <> " -> M:reverse([]).").unresolved_dispatch ==
+               [],
+             guard
+    end
+  end
+
+  test "A02 conjunctive successful guard facts remain local to the body", context do
+    for guard <- [
+          "is_list(X), M == lists",
+          "M == lists, is_list(X)",
+          "is_list(X) andalso M == lists",
+          "M == lists andalso is_list(X)"
+        ] do
+      assert erlang(context, "run(M,X) when " <> guard <> " -> M:reverse(X).").unresolved_dispatch ==
+               [],
+             guard
+    end
+  end
+
+  test "A03 every successful guard alternative contributes its finite target", context do
+    for guard <- [
+          "M == lists; M == maps",
+          "M == lists orelse M == maps",
+          "(M == lists orelse M == maps) andalso is_list(X)"
+        ] do
+      assert erlang(context, "run(M,X) when " <> guard <> " -> M:reverse(X).").unresolved_dispatch ==
+               [],
+             guard
+    end
+  end
+
+  test "A04 unknown SSL and metadispatch guard alternatives remain findings", context do
+    for body <- [
+          "run(M) when M == lists; is_atom(M) -> M:reverse([]).",
+          "run(M) when M == lists orelse is_atom(M) -> M:reverse([]).",
+          "run(M) when M == lists; M == ssl -> M:connect(localhost,443,[]).",
+          "run(M) when M == lists orelse M == ssl -> M:connect(localhost,443,[]).",
+          "run(M) when M == ssl -> M:connect(localhost,443,[]).",
+          "run(F) when F == length; F == apply -> erlang:F([])."
+        ] do
+      assert unsafe?(erlang(context, body)), body
+    end
+  end
+
+  test "A05 guard facts do not enter sibling clauses or shadowing fun parameters", context do
+    for body <- [
+          "run(M,F) when M == lists -> (fun(M) -> M:reverse([]) end)(F).",
+          "run(M) when M == lists -> ok; run(M) -> M:reverse([]).",
+          "run(M) -> case M of X when X == lists -> X:reverse([]); X -> X:reverse([]) end.",
+          "run(M,F) when M == lists -> (fun Loop(M) -> M:reverse([]), Loop(M) end)(F)."
+        ] do
+      assert unsafe?(erlang(context, body)), body
+    end
+  end
+
+  test "A06 type negative numeric and variable equality tests prove no module", context do
+    for body <- [
+          "run(M) when is_atom(M) -> M:reverse([]).",
+          "run(M) when M =/= ssl -> M:reverse([]).",
+          "run(M) when not (M == ssl) -> M:reverse([]).",
+          "run(M) when M == 1 -> M:reverse([]).",
+          "run(M,N) when M =:= N -> M:reverse([]).",
+          "run(M) -> case erlang:function_exported(M,reverse,1) of true -> M:reverse([]); false -> ok end."
+        ] do
+      assert unsafe?(erlang(context, body)), body
+    end
+  end
+
+  test "A07 actual Elixir equality guard lowering closes both Dialer shaped sinks", context do
+    on_exit(fn ->
+      :code.purge(NoOTPAuditGuardFixture)
+      :code.delete(NoOTPAuditGuardFixture)
+    end)
+
+    [{module, bytes}] =
+      Code.compile_string("""
+      defmodule NoOTPAuditGuardFixture do
+        def connected_protocol(transport, socket, %{mode: :force_h2})
+            when transport == HTTP.Transport.ExSSL do
+          transport.negotiated_protocol(socket)
+        end
+
+        def connected_protocol(transport, socket, %{mode: :auto_https})
+            when transport == HTTP.Transport.ExSSL do
+          transport.negotiated_protocol(socket)
+        end
+      end
+      """)
+
+    assert audit(context, module, bytes).unresolved_dispatch == []
+  end
+
+  test "A08 a tuple unknown data component does not discard a known callable", context do
+    for body <- [
+          "run(X) -> {_,F}={X,fun() -> ok end}, F().",
+          "run(X) -> {_,F}={X,fun lists:reverse/1}, F([]).",
+          "run(X) -> {_,{_,F}}={X,{X,fun() -> ok end}}, F().",
+          "run(X) -> {_,M}={X,lists}, M:reverse([])."
+        ] do
+      assert erlang(context, body).unresolved_dispatch == [], body
+    end
+  end
+
+  test "A09 actual Elixir tuple branches retain each WebTransport shaped closure", context do
+    on_exit(fn ->
+      :code.purge(NoOTPAuditTupleFixture)
+      :code.delete(NoOTPAuditTupleFixture)
+    end)
+
+    [{module, bytes}] =
+      Code.compile_string("""
+      defmodule NoOTPAuditTupleFixture do
+        def run(kind, state, removal_result) do
+          {_waiters, put_fun} =
+            case kind do
+              :datagram ->
+                {state.datagram_waiters,
+                 fn session, waiters -> %{session | datagram_waiters: waiters} end}
+
+              :incoming_bidirectional ->
+                {state.incoming_bidi_waiters,
+                 fn session, waiters -> %{session | incoming_bidi_waiters: waiters} end}
+
+              :incoming_unidirectional ->
+                {state.incoming_uni_waiters,
+                 fn session, waiters -> %{session | incoming_uni_waiters: waiters} end}
+            end
+
+          case removal_result do
+            {:ok, waiter, waiters} -> {:ok, waiter, put_fun.(state, waiters)}
+            :not_found -> :not_found
+          end
+        end
+      end
+      """)
+
+    assert audit(context, module, bytes).unresolved_dispatch == []
+  end
+
+  test "A10 unknown callable tuple components and alternatives stay unresolved", context do
+    for body <- [
+          "run(X,C) -> {_,F}={X,C}, F().",
+          "run(X,C) -> {_,F}=case X of a -> {X,fun() -> ok end}; _ -> {X,C} end, F().",
+          "run(X,C) -> {_,{_,F}}={X,{X,C}}, F().",
+          "run(X,C) -> {F,_}={C,fun() -> ok end}, F()."
+        ] do
+      assert unsafe?(erlang(context, body)), body
+    end
+  end
+
+  test "A11 partial tuple proof keeps each original nested callback obligation", context do
+    result =
+      erlang(
+        context,
+        "run(X,C) ->\n {_,F}={X,fun() -> C() end},\n F()."
+      )
+
+    findings = Enum.filter(result.unresolved_dispatch, &(&1.kind == "unresolved_fun_invocation"))
+    assert Enum.map(findings, & &1.line) == [2]
+    assert length(result.unresolved_dispatch) == 1
+
+    nested =
+      erlang(
+        context,
+        "run(C) ->\n {_,F}={C(),fun() -> ok end},\n F()."
+      )
+
+    assert Enum.map(nested.unresolved_dispatch, & &1.line) == [2]
+  end
+
+  test "A12 partial tuple SSL and metadispatch components cannot become safe", context do
+    for body <- [
+          "run(X) -> {_,M}={X,ssl}, M:connect(localhost,443,[]).",
+          "run(X) -> {_,F}={X,fun ssl:connect/3}, F(localhost,443,[]).",
+          "run(X) -> {_,F}={X,fun() -> ssl:connect(localhost,443,[]) end}, F().",
+          "run(X) -> {_,F}={X,fun erlang:apply/3}, F(ssl,connect,[]).",
+          "run(X) -> {{_,M},F}={{X,ssl},fun() -> ok end}, M:connect(localhost,443,[]), F()."
+        ] do
+      assert unsafe?(erlang(context, body)), body
+    end
+  end
+
+  test "A13 tuple shape gaps and nested formal shadowing remain unknown", context do
+    for body <- [
+          "run(X,C) -> {_,F}=case X of a -> {X,fun() -> ok end}; _ -> C end, F().",
+          "run(X) -> {_,F}=case X of a -> {X,fun() -> ok end}; _ -> {X,fun() -> ok end,extra} end, F().",
+          "run(X,C) -> {_,F}={X,fun() -> ok end}, (fun(F) -> F() end)(C)."
+        ] do
+      assert unsafe?(erlang(context, body)), body
+    end
+  end
+
+  test "A14 guard and tuple proof budgets and mutated producers fail closed", context do
+    for count <- [16, 17] do
+      guards = Enum.map_join(1..count, "; ", fn n -> "M == m#{n}" end)
+      result = erlang(context, "run(M) when " <> guards <> " -> M:f().")
+      assert result.unresolved_dispatch == [] == (count == 16)
+    end
+
+    alternatives =
+      Enum.map_join(1..17, "; ", fn n -> "#{n} -> {X,fun m#{n}:f/0}" end)
+
+    assert unsafe?(erlang(context, "run(X) -> {_,F}=case X of " <> alternatives <> " end, F()."))
+
+    huge = Enum.map_join(1..9_000, ",", &Integer.to_string/1)
+
+    assert unsafe?(
+             erlang(context, "run(M,X) when M == lists, X =:= {" <> huge <> "} -> M:reverse([]).")
+           )
+
+    assert unsafe?(erlang(context, "run(X) -> {F,_}={fun() -> ok end,{" <> huge <> "}}, F(), X."))
+
+    safe = erlang(context, "run(X,C) -> {_,F}={X,fun() -> ok end}, F(), C.")
+    changed = erlang(context, "run(X,C) -> {_,F}={X,C}, F().")
+    assert safe.unresolved_dispatch == []
+    assert safe.sha256 != changed.sha256
+    assert unsafe?(changed)
+  end
+
   defp unsafe?(result),
     do: result.unresolved_dispatch != [] or result.otp_ssl_imports != []
 
