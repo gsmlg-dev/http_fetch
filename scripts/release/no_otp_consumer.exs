@@ -12,6 +12,8 @@ defmodule NoOTP.Consumer do
       end)
 
     true = :code.set_path(release_paths)
+    # `release eval` boots without starting the consumer's application tree.
+    {:ok, _applications} = Application.ensure_all_started(:no_otp_consumer)
     config = System.fetch_env!("NO_OTP_CONFIG") |> File.read!() |> JSON.decode!()
 
     report = %{
