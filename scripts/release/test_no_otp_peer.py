@@ -810,5 +810,87 @@ class ManualHandshakeTests(unittest.TestCase):
                 context.load_cert_chain.assert_called_once_with("/cert", "/key")
 
 
+class QuicStatsTests(unittest.TestCase):
+    setup_protocol = QuicAdapterTests.setup_protocol
+
+    def test_stats_wait_for_complete_public_termination_for_every_h3_action(self):
+        for action in peer.ACTIONS:
+            with self.subTest(action=action):
+                value, records, _, _, protocol = self.setup_protocol(action)
+                protocol.quic_event_received(ProtocolNegotiated())
+                if action != "invalid_identity":
+                    protocol.quic_event_received(HeadersReceived(value.case))
+                peer.command('{"command":"stats"}', value)
+                self.assertFalse(any(row["kind"] in ("scenario", "stats") for row in records))
+                self.assertEqual(value.errors, [])
+                terminal = (ConnectionTerminated(0x12E, frame_type=6) if action == "invalid_identity"
+                            else ConnectionTerminated(0x100, frame_type=None))
+                protocol.quic_event_received(terminal)
+                scenarios = [row for row in records if row["kind"] == "scenario"]
+                stats = [row for row in records if row["kind"] == "stats"]
+                self.assertEqual(len(scenarios), 1)
+                self.assertEqual(scenarios[0]["result"], "PASS")
+                self.assertEqual(len(stats), 1)
+                self.assertEqual(stats[0]["active_connections"], 0)
+                self.assertEqual(stats[0]["errors"], [])
+
+    def test_live_connection_and_nonterminal_events_cannot_publish_stats(self):
+        value, records, _, _, protocol = self.setup_protocol("success")
+        protocol.quic_event_received(ProtocolNegotiated())
+        protocol.quic_event_received(HeadersReceived(value.case))
+        value.stats()
+        protocol.quic_event_received(DataReceived(data=b"", stream_id=0))
+        self.assertTrue(value.connections[1]["active"])
+        self.assertEqual(value.closures, [])
+        self.assertFalse(any(row["kind"] in ("scenario", "stats") for row in records))
+
+    def test_each_pending_stats_command_has_one_reply_and_one_shared_scenario(self):
+        value, records, _, _, protocol = self.setup_protocol("success")
+        protocol.quic_event_received(ProtocolNegotiated())
+        protocol.quic_event_received(HeadersReceived(value.case))
+        value.stats()
+        value.stats()
+        protocol.quic_event_received(ConnectionTerminated(0x100, frame_type=None))
+        value.stats()
+        self.assertEqual(sum(row["kind"] == "scenario" for row in records), 1)
+        self.assertEqual(sum(row["kind"] == "stats" for row in records), 3)
+        self.assertTrue(all(row["errors"] == [] for row in records if row["kind"] == "stats"))
+
+    def test_pending_stats_bound_fails_without_fabricating_a_reply(self):
+        value, records, _, _, protocol = self.setup_protocol("success")
+        protocol.quic_event_received(ProtocolNegotiated())
+        protocol.quic_event_received(HeadersReceived(value.case))
+        for _ in range(peer.MAX_EVENTS):
+            value.stats()
+        with self.assertRaisesRegex(peer.PeerError, "pending stats bound exceeded"):
+            value.stats()
+        self.assertFalse(any(row["kind"] in ("scenario", "stats") for row in records))
+
+    def test_failure_later_in_terminal_callback_is_included_before_pending_verdict(self):
+        value, records, _, http, protocol = self.setup_protocol("success")
+        protocol.quic_event_received(ProtocolNegotiated())
+        protocol.quic_event_received(HeadersReceived(value.case))
+        value.stats()
+        http.handle_event.side_effect = RuntimeError("late adapter failure")
+        protocol.quic_event_received(ConnectionTerminated(0x100, frame_type=None))
+        scenarios = [row for row in records if row["kind"] == "scenario"]
+        self.assertEqual(len(scenarios), 1)
+        self.assertEqual(scenarios[0]["result"], "FAIL")
+        self.assertIn("RuntimeError: late adapter failure", scenarios[0]["errors"])
+        self.assertIn("RuntimeError: late adapter failure", records[-1]["errors"])
+
+    def test_local_stop_remains_a_failed_observation_after_stats_are_requested(self):
+        value, records, _, _, protocol = self.setup_protocol("success")
+        protocol.quic_event_received(ProtocolNegotiated())
+        protocol.quic_event_received(HeadersReceived(value.case))
+        value.stats()
+        value.stopping = True
+        protocol.quic_event_received(ConnectionTerminated(0x100, frame_type=None))
+        scenario = next(row for row in records if row["kind"] == "scenario")
+        self.assertEqual(scenario["result"], "FAIL")
+        self.assertEqual(scenario["closure_observations"], ["local_stop"])
+        self.assertTrue(records[-1]["errors"])
+
+
 if __name__ == "__main__":
     unittest.main()

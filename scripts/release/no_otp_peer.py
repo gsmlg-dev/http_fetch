@@ -126,6 +126,7 @@ class Oracle:
         self.identity_errors, self.last_event_id, self.sse_ids = [], None, []
         self.ws_messages, self.ws_closes, self.masked_frames = 0, 0, 0
         self.emitted, self.stopping = False, False
+        self.pending_stats = 0
 
     def error(self, message):
         message = str(message)[:1024]
@@ -254,7 +255,17 @@ class Oracle:
                     masked_frames=self.masked_frames, errors=list(self.errors),
                     observation_scope="owned independent peer endpoint")
 
+    def flush_stats(self):
+        if self.pending_stats and not any(entry["active"] for entry in self.connections.values()):
+            pending, self.pending_stats = self.pending_stats, 0
+            for _ in range(pending):
+                self.stats()
+
     def stats(self):
+        if self.case["client"] == "h3" and any(entry["active"] for entry in self.connections.values()):
+            require(self.pending_stats < MAX_EVENTS, "pending stats bound exceeded")
+            self.pending_stats += 1
+            return
         record = self.finish()
         if not self.emitted:
             self.emit(record)
@@ -773,6 +784,9 @@ def quic_protocol(api, oracle):
                 oracle.error(type(error).__name__ + ": " + str(error))
                 self.locally_closed = True
                 self.close(error_code=0x100, reason_phrase="independent peer rejected scenario")
+            # Flush only after all handling of the public terminal event, so
+            # a later adapter failure in this callback remains part of verdict.
+            oracle.flush_stats()
     return Protocol
 
 
