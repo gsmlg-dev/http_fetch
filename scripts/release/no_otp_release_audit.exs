@@ -185,7 +185,7 @@ defmodule NoOTP.ReleaseAudit do
   # lstat-ing every absolute component and rejecting symlink traversal entirely.
   # A missing/unreadable component is unconfirmed, never a lexical-path success.
   defp canonical_path(path) do
-    if Path.type(path) != :absolute or Regex.match?(~r"(?:^|/)\.{1,2}(?:/|$)", path) do
+    if Path.type(path) != :absolute do
       %{raw: path, resolved: nil, error: %{reason: "noncanonical_lexical_path"}}
     else
       canonical_components(path)
@@ -208,7 +208,10 @@ defmodule NoOTP.ReleaseAudit do
             {:halt, {:error, %{reason: "symlink_component", component: current, target: target}}}
 
           {:ok, _} ->
-            {:cont, {:ok, current}}
+            # Standard releases use lib/../releases for consolidated modules.
+            # Normalize only after lstat has checked the traversed component;
+            # expanding first would hide a symlink immediately before "..".
+            {:cont, {:ok, Path.expand(current)}}
 
           {:error, reason} ->
             {:halt, {:error, %{reason: inspect(reason), component: current}}}
