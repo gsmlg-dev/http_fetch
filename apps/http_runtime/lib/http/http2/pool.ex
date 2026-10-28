@@ -1283,7 +1283,7 @@ defmodule HTTP.HTTP2.Pool do
     end
   end
 
-  defp start_deadline(state, _token, nil), do: state
+  defp start_deadline(state, _token, deadline) when deadline in [nil, :infinity], do: state
 
   defp start_deadline(state, token, deadline) when is_integer(deadline) do
     timer =

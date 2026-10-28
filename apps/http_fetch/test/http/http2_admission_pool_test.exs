@@ -58,10 +58,46 @@ defmodule HTTP.HTTP2AdmissionPoolTest do
     Task.shutdown(blocker, :brutal_kill)
   end
 
+  for deadline <- [nil, :infinity], terminal <- [:cancel, :caller_down] do
+    test "#{inspect(deadline)} queued deadline retains capacity bounds and settles on #{terminal}" do
+      {:ok, pool} = start_supervised({Pool, max_connections: 0, max_pending: 1})
+      token = make_ref()
+
+      caller =
+        Task.async(fn ->
+          Pool.reserve(pool, :key, token: token, deadline_at: unquote(deadline))
+        end)
+
+      await_pending(pool, 1)
+      assert {:error, :pending_capacity} = Pool.reserve(pool, :key)
+      assert :sys.get_state(pool).deadlines == %{}
+
+      case unquote(terminal) do
+        :cancel ->
+          assert :ok = Pool.cancel(pool, token)
+          assert Pool.stats(pool) == %{}
+          assert :sys.get_state(pool).callers == %{}
+          assert :sys.get_state(pool).monitors == %{}
+          assert nil == Task.shutdown(caller, :brutal_kill)
+
+        :caller_down ->
+          assert nil == Task.shutdown(caller, :brutal_kill)
+          await_pending(pool, 0)
+      end
+
+      assert Pool.stats(pool) == %{}
+      state = :sys.get_state(pool)
+      assert state.callers == %{}
+      assert state.monitors == %{}
+      assert state.deadlines == %{}
+      assert {:error, :unknown_reservation} = Pool.cancel(pool, token)
+    end
+  end
+
   defp await_pending(pool, count, deadline \\ nil) do
     deadline = deadline || System.monotonic_time(:millisecond) + 5_000
 
-    if Pool.stats(pool)[:key].pending != count do
+    if (get_in(Pool.stats(pool), [:key, :pending]) || 0) != count do
       assert System.monotonic_time(:millisecond) < deadline,
              "pending count did not reach #{count}: #{inspect(Pool.stats(pool))}"
 
