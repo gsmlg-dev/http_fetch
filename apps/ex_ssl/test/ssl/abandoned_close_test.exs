@@ -117,6 +117,136 @@ defmodule SSL.AbandonedCloseTest do
     end
   end
 
+  test "native sender death between records aborts an unfinished logical upload" do
+    install_between_records_gate()
+    parent = self()
+    ref = make_ref()
+    peer = start_peer(parent, ref)
+    bridge = start_bridge(peer.port, parent, ref)
+
+    {:ok, handle, lease} =
+      SSL.Lifecycle.new(controller: self(), deadline: {:abs_ms, now() + 5_000})
+
+    on_exit(fn ->
+      SSL.Lifecycle.cancel(lease, {:abs_ms, now() + 1_000})
+      for pid <- [bridge.task.pid, peer.task.pid], do: Process.exit(pid, :kill)
+      :gen_tcp.close(bridge.listener)
+      :ssl.close(peer.listener)
+    end)
+
+    options = Peer.client_options() ++ [send_timeout: 5_000, ex_ssl: [lifecycle: {handle, lease}]]
+    assert {:ok, socket} = SSL.connect({127, 0, 0, 1}, bridge.port, options, 5_000)
+    assert_receive {^ref, :peer_ready}, 5_000
+    graph = ExSSL.TestSupport.ManagedLifecycleProbe.graph_handle(handle)
+    on_exit(fn -> ExSSL.TestSupport.ManagedLifecycleProbe.release_monitors(graph) end)
+    send(peer.task.pid, {ref, :respond})
+    assert {:ok, @response} = SSL.recv(socket, byte_size(@response), 1_000)
+    assert :ok = bridge_command(bridge, :observe)
+    :persistent_term.put({__MODULE__, :between_records}, {socket.pid, self(), ref})
+    payload = @prefix <> :binary.copy("d", @logical_size - byte_size(@prefix))
+
+    {sender, sender_monitor} =
+      spawn_monitor(fn -> send(parent, {ref, :send_result, SSL.send(socket, payload)}) end)
+
+    assert_receive {^ref, :between_records, connection, ^sender, tcp}, 1_000
+    assert connection == socket.pid
+    assert tcp == graph.tcp
+    assert_receive {^ref, :record_forwarded, wire_size}, 1_000
+    assert wire_size > byte_size(@prefix)
+    assert :ok = bridge_command(bridge, :seal)
+    deadline = now() + 1_000
+    Process.exit(sender, :kill)
+    assert_receive {:DOWN, ^sender_monitor, :process, ^sender, :killed}, remaining(deadline)
+    send(connection, {ref, :resume_boundary})
+
+    ExSSL.TestSupport.ManagedLifecycleProbe.await_down(
+      graph,
+      [:connection, :writer, :tcp],
+      remaining(deadline)
+    )
+
+    assert {:ok, _} = SSL.Lifecycle.await(handle, {:abs_ms, deadline})
+    assert_receive {^ref, :client_terminal, actual_terminal}, remaining(deadline)
+    drain_deadline = now() + 2_000
+    send(peer.task.pid, {ref, :drain, drain_deadline})
+    assert_receive {^ref, :prefix_received, prefix_size}, remaining(drain_deadline)
+    assert prefix_size == byte_size(@prefix)
+    assert :ok = bridge_command(bridge, :release_final)
+    assert_receive {^ref, :peer_closed, ^prefix_size}, remaining(drain_deadline)
+    assert :ok = Peer.stop(peer)
+    assert :ok = bridge_command(bridge, :stop)
+    assert :ok = Task.await(bridge.task, 1_000)
+    assert actual_terminal == :reset
+  end
+
+  # Suspend one real Connection only after its first encrypted record was
+  # acknowledged locally. Keep its unfinished logical write and original actors;
+  # no fabricated DOWN or state replacement is used to select this interleaving.
+  @doc false
+  def pause_between_records(state) do
+    case :persistent_term.get({__MODULE__, :between_records}, nil) do
+      {connection, observer, ref} when connection == self() ->
+        unless Process.get({__MODULE__, ref}, false) do
+          Process.put({__MODULE__, ref}, true)
+          send(observer, {ref, :between_records, self(), state.write.owner, state.tcp})
+
+          receive do
+            {^ref, :resume_boundary} -> :ok
+          after
+            1_000 -> raise "between-records control was not released"
+          end
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp install_between_records_gate do
+    module = SSL.Connection
+    {^module, binary, filename} = :code.get_object_code(module)
+    source = module.module_info(:compile)[:source] |> List.to_string()
+    quoted = source |> File.read!() |> Code.string_to_quoted!()
+
+    {instrumented, 1} =
+      Macro.prewalk(quoted, 0, fn
+        {:defmodule, _, [{:__aliases__, _, [:State]}, _]}, count ->
+          # Keep the already compiled struct and its consolidated Inspect impl.
+          {quote(do: alias(SSL.Connection.State)), count}
+
+        {:defp, meta, [{:complete_output, _, _} = call, [do: body]]} = node, count ->
+          if Macro.to_string(call) ==
+               "complete_output(phase, %{continuation: :application}, %{write: write} = state)" do
+            body =
+              quote do
+                unquote(__MODULE__).pause_between_records(unquote({:state, [], nil}))
+                unquote(body)
+              end
+
+            {{:defp, meta, [call, [do: body]]}, count + 1}
+          else
+            {node, count}
+          end
+
+        node, count ->
+          {node, count}
+      end)
+
+    on_exit(fn ->
+      :persistent_term.erase({__MODULE__, :between_records})
+      :code.purge(module)
+      {:module, ^module} = :code.load_binary(module, filename, binary)
+    end)
+
+    previous = Code.compiler_options(ignore_module_conflict: true)
+
+    try do
+      Code.compile_quoted(instrumented, source)
+    after
+      Code.compiler_options(previous)
+    end
+  end
+
   defp start_peer(parent, ref) do
     {:ok, peer} =
       Peer.start(

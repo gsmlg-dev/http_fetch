@@ -1973,7 +1973,12 @@ defmodule SSL.Connection do
     _ = if state.output, do: cancel_timer(state.output.timer)
     _ = if state.pending_control, do: cancel_timer(state.pending_control.timer)
     _ = NativeSocket.cancel_read(tcp, state.native_read)
-    _ = if state.write_abandoned? or state.output != nil, do: NativeSocket.abort_on_close(tcp)
+    # A sender can die between records, after output was acknowledged but before
+    # its logical write completed. Kernel-queued bytes still require abort there.
+    _ =
+      if state.write_abandoned? or state.write != nil or state.output != nil,
+        do: NativeSocket.abort_on_close(tcp)
+
     %{state | machine: nil, armed: false, native_read: nil, output: nil, pending_control: nil}
   end
 
