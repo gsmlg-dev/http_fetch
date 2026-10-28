@@ -15,6 +15,35 @@ defmodule Quic.Connection do
   alias Quic.IO.Endpoint
   alias Quic.Runtime.{ConnectionHandle, StreamHandle}
 
+  @tls_alert_codes %{
+    unexpected_message: 10,
+    bad_record_mac: 20,
+    record_overflow: 22,
+    handshake_failure: 40,
+    bad_certificate: 42,
+    unsupported_certificate: 43,
+    certificate_revoked: 44,
+    certificate_expired: 45,
+    certificate_unknown: 46,
+    illegal_parameter: 47,
+    unknown_ca: 48,
+    access_denied: 49,
+    decode_error: 50,
+    decrypt_error: 51,
+    protocol_version: 70,
+    insufficient_security: 71,
+    internal_error: 80,
+    inappropriate_fallback: 86,
+    user_canceled: 90,
+    missing_extension: 109,
+    unsupported_extension: 110,
+    unrecognized_name: 112,
+    bad_certificate_status_response: 113,
+    unknown_psk_identity: 115,
+    certificate_required: 116,
+    no_application_protocol: 120
+  }
+
   def start_link(opts) do
     :gen_statem.start_link(__MODULE__, Keyword.put_new(opts, :owner, self()), [])
   end
@@ -808,6 +837,20 @@ defmodule Quic.Connection do
       {:error, {:key_update_error, _} = reason, scheduler} ->
         close_transport_error(%{data | scheduler: scheduler}, from, reason, 0x0E, 0)
 
+      {:error, %SSL.QUIC.Error{kind: :tls} = error, scheduler} ->
+        reason = {:tls, error.kind, error.alert, error.reason}
+        code = 0x100 + Map.get(@tls_alert_codes, error.alert, 80)
+
+        # Fatal TLS failures retain their terminal lifecycle. Emit the alert before
+        # stopping; the endpoint retires the connection's routes on quic_closed.
+        next =
+          case begin_closing(%{data | scheduler: scheduler}, {:transport, code, 0x06}) do
+            {:ok, next, _actions} -> next
+            {:error, _close_reason, next} -> next
+          end
+
+        stop_with_replies(next, reason, [{:reply, from, {:error, reason}}])
+
       {:error, %SSL.QUIC.Error{} = error, _scheduler} ->
         reason = {:tls, error.kind, error.alert, error.reason}
         {:stop_and_reply, :normal, [{:reply, from, {:error, reason}}], %{data | reason: reason}}
@@ -1100,7 +1143,13 @@ defmodule Quic.Connection do
               %{type: :application_close, error_code: 0, reason: <<>>}
           end
         else
-          %{type: :connection_close, error_code: 0, frame_type: 0, reason: <<>>}
+          {code, frame_type} =
+            case reason do
+              {:transport, code, frame_type} -> {code, frame_type}
+              _ -> {0, 0}
+            end
+
+          %{type: :connection_close, error_code: code, frame_type: frame_type, reason: <<>>}
         end
 
       scheduler = %{
