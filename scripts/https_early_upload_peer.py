@@ -6,6 +6,7 @@ receiver. Its only control command is `drain`; all input and runtime waits are b
 """
 
 import argparse
+import errno
 import json
 import socket
 import ssl
@@ -15,6 +16,26 @@ import time
 
 def event(kind, **fields):
     print(json.dumps({"kind": kind, **fields}), flush=True)
+
+
+def probe_once(connection, drain_deadline):
+    """One bounded application write; the caller must still prove terminal recv."""
+    probe_deadline = min(drain_deadline, time.monotonic() + 0.1)
+    remaining = probe_deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("peer probe has no remaining drain budget")
+    connection.settimeout(remaining)
+    try:
+        sent = connection.send(b"\x00")
+    except (ConnectionResetError, BrokenPipeError, ssl.SSLEOFError,
+            ssl.SSLZeroReturnError):
+        # Already-terminal writes still require the original recv assertion.
+        pass
+    else:
+        if sent != 1:
+            raise OSError("peer probe did not send its one application byte")
+    if time.monotonic() > probe_deadline:
+        raise TimeoutError("peer probe exceeded its clipped send budget")
 
 
 def main():
@@ -57,13 +78,22 @@ def main():
                 raise ValueError("unexpected control command")
             total = 0
             deadline = time.monotonic() + 2
+            probe_once(connection, deadline)
             while total <= 16 * 1024 * 1024:
                 try:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise TimeoutError
                     connection.settimeout(remaining)
-                    data = connection.recv(65536)
+                    try:
+                        data = connection.recv(65536)
+                    except BrokenPipeError as error:
+                        if error.errno != errno.EPIPE:
+                            raise
+                        # SSL reads can fail with a native EPIPE. This is a
+                        # terminal receive error, not proof of peer cleanup.
+                        event("closed", drained_bytes=total)
+                        return
                 except TimeoutError:
                     event("drain_timeout", drained_bytes=total,
                           receive_buffer=connection.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF))
