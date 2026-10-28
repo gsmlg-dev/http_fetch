@@ -4,9 +4,10 @@ Execution checklist derived from the accepted 2026-10-21 HTTP Fetch migration pl
 Baseline: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, nine packages at `0.21.14`.
 Status (2026-10-28): P0–P4 acceptance is complete at `3c561646b7f1bc9042c5cadbc37ed7c6b48fae15`,
 including resumption, nested HTTPS proxies, public lifecycle, completion and
-managed H1/H2. P5 now selects ExSSL by default and passes local source checks;
-current candidate/runtime and full CI acceptance remain pending. Explicit OTP
-remains transitional until P6. P6/P7 have not begun.
+managed H1/H2. P5 default promotion is accepted at
+`0f4b3dd0f37caadc71b6db7bdc9fff74e9170825` after source, candidate and configured
+runtime gates pass. Explicit OTP remains transitional until P6. P6/P7 remain open;
+the default promotion has not been published.
 
 See [design and compatibility table](tls-migration-design.md) and
 [execution evidence](tls-migration-validation.md). A checkbox means executed and
@@ -43,6 +44,11 @@ passes every functional job; its overall failure is the deferred Credo result.
 The separate [public H3 gate](https://github.com/gsmlg-dev/http_fetch/actions/runs/40620203412)
 also passes. These results close P4's non-deferred gates; they do not establish P5
 default behavior or production OTP removal.
+
+P5's later [acceptance boundary](tls-migration-validation.md#p5-default-promotion-acceptance--2026-10-28)
+adds the complete default matrix, current all-nine integration and three candidate
+runtime selections, each passing 71 groups and 3,061 checks. Source/archive identity
+is verified; P6 production removal and P7 publication remain required.
 
 User decisions override the historical checklist where noted: performance work,
 including comparative latency/throughput and load/soak budgets, is TODO outside
@@ -403,11 +409,12 @@ gates. P5 may proceed; deferred performance and quality checks are not passes.
 - [x] Preserve explicit ExSSL; keep temporary explicit OTP with named removal boundary C.
 - [x] Redirect/reconnect/proxy/pool contexts retain resolved backend and policy.
 - [x] No fallback, verification relaxation, weaker retry or uncertain body replay.
-- [ ] Default matrix, fresh consumers and representative downstream workloads pass.
-      Source checks pass 2,076 units with `ERL_FLAGS="+S 4:4"` and all173 cases in
-      the four affected completion suites, including14 new default TLS1.2/TLS1.3
-      scenarios and14 explicit controls. Unrestricted-scheduler timing failures
-      remain recorded. Current candidate and full source/runtime CI are next.
+- [x] Default matrix, fresh consumers and representative downstream workloads pass.
+      Accepted at `0f4b3dd`: source unit, full integration and E2E gates pass;
+      the three configured candidate runtimes each pass 71 groups/3,061 checks.
+      All 19 shared H2 gates and nine archives pass identity review. The final
+      QUIC test synchronization preserves exact cleanup counts and original waits.
+      Earlier local timing failures remain recorded; no performance pass is claimed.
 
 Release boundary A is P0–P4 compatibility completion with OTP still default. Select
 actual versions with repository tooling; no guessed reserved versions.

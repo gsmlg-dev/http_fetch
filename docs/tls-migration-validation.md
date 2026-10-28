@@ -1,6 +1,6 @@
 # TLS migration execution ledger
 
-## P5 default promotion — source validation, 2026-10-28
+## P5 default promotion acceptance — 2026-10-28
 
 The shared resolver, Fetch, EventSource, WebSocket and managed H1/H2 now default
 to ExSSL. Explicit OTP remains transitional until P6. H2 pool keys use the shared
@@ -10,27 +10,49 @@ Direct HTTP/H2c and invalid-scheme requests retain their cleanup tracking when
 the TLS selector is ExSSL; an invalid scheme still fails before dialing and joins
 an attached upload source. Internal no-request completion admission stays bounded.
 
-Local Elixir1.18.5/OTP29.0.2 source validation passes strict compilation, root
-formatting and 130 release-automation checks. The full nine-app unit run with
-`ERL_FLAGS="+S 4:4"` executes 2,076 cases with zero failures; its 4,713 integration
-cases are excluded. All173 cases in the four affected completion integration
-suites pass, including14 new default scenarios and14 explicit ExSSL controls.
-Independent peers retain exact TLS1.2/TLS1.3, connection reuse, provider identity,
-cleanup, SSE reconnect/backpressure and WebSocket sharing assertions.
+P5's non-deferred gates are accepted at
+`0f4b3dd0f37caadc71b6db7bdc9fff74e9170825`. Independent peers retain exact
+TLS1.2/TLS1.3, connection reuse, provider identity, cleanup, SSE reconnect and
+backpressure, WebSocket sharing and nested proxy assertions.
 
-Three unrestricted-scheduler unit invocations retain startup/checkout timing
-failures. Diagnostics observed first loading of completion/lifecycle modules
-inside a 100ms fixture wait. That fixture now preloads both modules; its original
-wait and all resource assertions remain. The unrestricted full run then passed
-Core but still failed a separate pool expiry assertion. The complete four-scheduler
-run passes without changing any test deadline. These results do not establish an
-unrestricted-scheduler pass or prove a single cause for every timing failure.
+| Gate | Workflow | Executed result |
+| --- | --- | --- |
+| All-nine units | [40644849041](https://github.com/gsmlg-dev/http_fetch/actions/runs/40644849041) | All app jobs pass at `7021474`; final correction changes one integration test only |
+| All-nine integration | [40647177489](https://github.com/gsmlg-dev/http_fetch/actions/runs/40647177489) | All jobs pass at `0f4b3dd`, including QUIC and complete nested proxy suites |
+| E2E | [40644856812](https://github.com/gsmlg-dev/http_fetch/actions/runs/40644856812) | All configured suites pass at unchanged production source `7021474` |
+| Manual full CI | [40644845034](https://github.com/gsmlg-dev/http_fetch/actions/runs/40644845034) | Nine strict compile/format/package jobs, shared H2, current candidates and historical compatibility pass |
+| Candidate runtime matrix | [40644860571](https://github.com/gsmlg-dev/http_fetch/actions/runs/40644860571) | Elixir1.19/OTP28 and Elixir1.20/OTP29 pass; manual CI supplies Elixir1.18/OTP28 |
+| Independent public H3 | [40647124858](https://github.com/gsmlg-dev/http_fetch/actions/runs/40647124858) | Pass at `0f4b3dd`; supported H3/completion boundaries retained |
 
-The candidate gate now requires nine additional default/configuration/admission
-files alongside the53 accepted P4 migration files. Fresh candidate consumers,
-all-nine integration/E2E and the configured runtime matrix remain pending for
-this default change. P6 production removal and P7 publication have not begun.
-Receipts, failed logs and diagnostics are retained at
+Each candidate runtime executes all 71 groups and 3,061 checks with zero failures,
+skips or exclusions. Its 62 migration files include the nine default/configuration
+and admission files. The frozen-source manifest SHA256 is
+`fd40d79dd37d50d32e31eb53fc0391e75efe23f964c1d5c6b4539725027d7ab3`.
+All nine archives resolve through isolated Hex.SCM builds. The `0.21.18` candidate
+labels do not establish publication of the default promotion.
+
+Independent artifact review verifies 19 H2 log hashes, nine archive hashes, all
+271 packaged files, 246 runtime source files and nine portable manifests against
+fixed Git objects. The three Fetch documentation symlinks resolve to their exact
+frozen target blobs. The uploader omits ExSSL's hidden formatter from stage;
+its archived bytes are still verified against Git. No packaged file is skipped.
+The H2 source runner retains three real-QUIC opt-in skips; the separate complete
+integration gate executes the applicable QUIC cases. Apps without a dedicated
+suite retain the P4 boundaries recorded below.
+
+The production and candidate migration sources are identical from `7021474` to
+`0f4b3dd`; only the QUIC cleanup integration test changes. Its independent resource
+monitors could precede the cleanup observer's own receipt update. The correction
+waits for that observer to handle the exact IO/Port DOWN messages, preserving
+the original waits, exact intermediate counts, final cleanup and linked caller.
+Its deterministic red/green check and all 47 related cases pass before the fresh
+full integration gate. Earlier failed local timing and peer-close invocations
+remain historical evidence; no unrestricted macOS suite pass is inferred here.
+
+Credo/Dialyzer remain user-deferred, including their automatic CI failures;
+performance remains TODO outside this goal. P6 production removal and P7
+publication remain open. Receipts, failed diagnostics and the final artifact
+identity review are retained at
 `/private/tmp/http-fetch-p5-default-root-20261028T0238Z`.
 
 ## P4 integrated acceptance — 2026-10-28
