@@ -263,6 +263,111 @@ defmodule SSL.Lifecycle.NestedTLSTest do
             }} = Lifecycle.await(handle, deadline(2_000))
   end
 
+  for terminal <- [:timeout, :cancel, :peer_close, :observer_down] do
+    @tag terminal: terminal
+    test "queued observer DOWN preserves #{terminal} during nested setup", %{terminal: terminal} do
+      parent = self()
+
+      {:ok, peer} =
+        LocalTLSPeer.start(
+          fn socket ->
+            assert {:ok, <<22, _::binary>>} = :ssl.recv(socket, 0, 2_000)
+            send(parent, :nested_hello)
+
+            receive do
+              :close -> :ok
+              :await_closed -> assert {:error, :closed} = :ssl.recv(socket, 0, 2_000)
+            after
+              2_000 -> flunk("nested peer was not released")
+            end
+
+            :ssl.close(socket)
+          end,
+          ssl_options: [alpn_preferred_protocols: ["proxy"]]
+        )
+
+      on_exit(fn ->
+        stop_owned(peer.task.pid)
+        :ssl.close(peer.listener)
+      end)
+
+      {outer_handle, outer_lease} = attempt()
+
+      caller =
+        Task.async(fn ->
+          assert {:ok, outer} =
+                   SSL.connect(
+                     {127, 0, 0, 1},
+                     peer.port,
+                     options(:"tlsv1.3", "proxy", {outer_handle, outer_lease}),
+                     3_000
+                   )
+
+          {:ok, inner_handle, inner_lease} =
+            Lifecycle.new(controller: parent, deadline: deadline(500))
+
+          send(parent, {:nested_attempt, inner_handle, inner_lease})
+          SSL.connect(outer, options(:"tlsv1.3", "origin", {inner_handle, inner_lease}), 500)
+        end)
+
+      on_exit(fn -> stop_owned(caller.pid) end)
+      assert_receive {:nested_attempt, inner_handle, inner_lease}, 2_000
+      assert_receive :nested_hello, 2_000
+      observer = inner_handle.receipt.observer
+      monitor = Process.monitor(observer)
+      assert :erlang.suspend_process(caller.pid)
+
+      try do
+        assert {:current_function, {SSL.Lifecycle.Driver, :await, 8}} =
+                 Process.info(caller.pid, :current_function)
+
+        send(peer.task.pid, if(terminal == :peer_close, do: :close, else: :await_closed))
+
+        case terminal do
+          :timeout -> :ok
+          :cancel -> assert :ok = Lifecycle.cancel(inner_lease, deadline(1_000))
+          :peer_close -> :ok
+          :observer_down -> Process.exit(observer, :kill)
+        end
+
+        assert_receive {:DOWN, ^monitor, :process, ^observer, _}, 2_000
+
+        case terminal do
+          :timeout ->
+            assert {:ok, %{setup_failure: :timeout, cleanup: :confirmed}} =
+                     Lifecycle.await(inner_handle, deadline(0))
+
+          :cancel ->
+            assert {:ok, %{setup_failure: :cancelled, cleanup: :confirmed}} =
+                     Lifecycle.await(inner_handle, deadline(0))
+
+          :peer_close ->
+            assert {:ok, %{setup: :failed, setup_failure: :tls, cleanup: :confirmed}} =
+                     Lifecycle.await(inner_handle, deadline(0))
+
+          :observer_down ->
+            assert {:unconfirmed, :observer_unsealed} = Lifecycle.await(inner_handle, deadline(0))
+        end
+      after
+        :erlang.resume_process(caller.pid)
+      end
+
+      expected =
+        case terminal do
+          :timeout -> :timeout
+          :peer_close -> :econnreset
+          _ -> :closed
+        end
+
+      assert {:error, ^expected} = Task.await(caller, 1_000)
+
+      assert {:ok, %{scope: :dial, cleanup: :confirmed, roles: 31, observed_down: 31}} =
+               Lifecycle.await(outer_handle, deadline(2_000))
+
+      assert :ok = Task.await(peer.task, 1_000)
+    end
+  end
+
   test "pair acceptance preserves the outer carrier owner and recovers both accepted leases" do
     {_outer, inner, handle, lease, _layers} = pair_connected()
     recipient = recipient()
@@ -464,6 +569,12 @@ defmodule SSL.Lifecycle.NestedTLSTest do
     end)
 
     {handle, lease}
+  end
+
+  defp stop_owned(pid) do
+    monitor = Process.monitor(pid)
+    if Process.alive?(pid), do: Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^pid, _}, 1_000
   end
 
   defp options(version, protocol, descriptor \\ nil) do

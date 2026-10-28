@@ -133,7 +133,7 @@ defmodule SSL.Lifecycle.Driver do
         helper,
         nonce,
         observer,
-        Receipt.failure_tag(receipt),
+        receipt,
         monitor,
         observer_monitor,
         endpoint,
@@ -145,12 +145,14 @@ defmodule SSL.Lifecycle.Driver do
     end
   end
 
-  defp await(helper, nonce, observer, cell, monitor, observer_monitor, endpoint, deadline) do
+  defp await(helper, nonce, observer, receipt, monitor, observer_monitor, endpoint, deadline) do
+    cell = Receipt.failure_tag(receipt)
+
     receive do
       {:lifecycle_native_owned, ^helper, ^nonce, ^observer, _socket, _tcp} ->
         case Setup.attach(helper, nonce, budget(deadline)) do
           :ok ->
-            await(helper, nonce, observer, cell, monitor, observer_monitor, endpoint, deadline)
+            await(helper, nonce, observer, receipt, monitor, observer_monitor, endpoint, deadline)
 
           error ->
             error
@@ -162,7 +164,7 @@ defmodule SSL.Lifecycle.Driver do
         with :ok <- transfer(tcp, socket.pid, deadline),
              :ok <- Setup.adopt(helper, nonce, tcp, budget(deadline)),
              :ok <- Setup.attach(helper, nonce, budget(deadline)) do
-          await(helper, nonce, observer, cell, monitor, observer_monitor, endpoint, deadline)
+          await(helper, nonce, observer, receipt, monitor, observer_monitor, endpoint, deadline)
         end
 
       {:lifecycle_tls_ready, ^helper, ^nonce, ^observer, socket} ->
@@ -175,10 +177,15 @@ defmodule SSL.Lifecycle.Driver do
         error
 
       {:DOWN, ^monitor, :process, ^helper, _} ->
-        await(helper, nonce, observer, cell, nil, observer_monitor, endpoint, deadline)
+        await(helper, nonce, observer, receipt, nil, observer_monitor, endpoint, deadline)
 
       {:DOWN, ^observer_monitor, :process, ^observer, _} ->
-        {:error, :closed}
+        # Observer expiry can queue DOWN before this receive's timeout. Preserve
+        # its sealed cause without treating cancellation or lost evidence as expiry.
+        case Receipt.read(receipt) do
+          {:sealed, %{setup_failure: :timeout}} -> {:error, :timeout}
+          _ -> {:error, :closed}
+        end
     after
       Options.remaining(deadline) -> {:error, :timeout}
     end
