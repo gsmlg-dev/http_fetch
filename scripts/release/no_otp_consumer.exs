@@ -16,9 +16,19 @@ defmodule NoOTP.Consumer do
     {:ok, _applications} = Application.ensure_all_started(:no_otp_consumer)
     config = System.fetch_env!("NO_OTP_CONFIG") |> File.read!() |> JSON.decode!()
 
+    transport_targets = [HTTP.Transport.TCP, HTTP.Transport.ExSSL]
+
+    parameter_invariants = %{
+      HTTP.Proxy => [
+        {{:establish_tunnel, 7}, 6, transport_targets},
+        {{:read_head, 7}, 6, transport_targets},
+        {{:next_proxy_head, 8}, 7, transport_targets}
+      ]
+    }
+
     report = %{
       nonce: config["nonce"],
-      artifacts: NoOTP.ReleaseAudit.artifacts(),
+      artifacts: NoOTP.ReleaseAudit.artifacts(parameter_invariants: parameter_invariants),
       before: NoOTP.ReleaseAudit.runtime(),
       initial_code_paths: initial_paths,
       scenarios: [],

@@ -1950,4 +1950,222 @@ defmodule NoOTP.ReleaseAuditTest do
     assert private_erlang(context, body, "run/1").unresolved_dispatch == []
     assert Process.get(:audit_case_producer_executed) == nil
   end
+
+  # I: explicit checked induction. Original controls never request this proof.
+  test "I01 explicit identity SCC proof requires a finite seed", context do
+    body = "run() -> first(lists). first(M) -> M:f(), second(M). second(M) -> first(M)."
+    assert unsafe?(private_erlang(context, body))
+    result = i_run(context, body, i_domains())
+    assert result.unresolved_dispatch == []
+    assert result.parameter_invariant_derivation.status == "checked"
+    assert length(result.parameter_invariant_derivation.checked_slots) == 2
+  end
+
+  test "I02 renamed functions and modules use the same derivation", context do
+    body = "run() -> alpha(maps). alpha(T) -> T:f(), beta(T). beta(T) -> alpha(T)."
+    domains = [{{:alpha, 1}, 0, [:maps]}, {{:beta, 1}, 0, [:maps]}]
+    assert i_run(context, body, domains).unresolved_dispatch == []
+  end
+
+  test "I03 Proxy shaped entry and two recursive helpers preserve unrelated unknowns", context do
+    body = """
+    run(X) -> entry(X,lists).
+    entry(X,M) -> read(X,M).
+    read(X,M) -> M:recv(X,0,1), case X of a -> read(b,M); _ -> next(X,M) end.
+    next(X,M) -> read(X,M).
+    """
+
+    domains = for name <- [:entry, :read, :next], do: {{name, 2}, 1, [:lists]}
+    assert i_run(context, body, domains, "run/1").unresolved_dispatch == []
+  end
+
+  test "I04 unsafe finite seeds remain unsafe even when included in the domain", context do
+    body = "run() -> first(ssl). first(M) -> M:connect(a,1,[]), second(M). second(M) -> first(M)."
+    result = i_run(context, body, i_domains([:ssl]))
+    assert unsafe?(result)
+    assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+  end
+
+  test "I05 missing domain alternatives and unknown seeds invalidate the proof", context do
+    for body <- [
+          "run() -> first(ssl). first(M) -> M:f(), second(M). second(M) -> first(M).",
+          "run(X) -> first(X). first(M) -> M:f(), second(M). second(M) -> first(M)."
+        ] do
+      exports = if String.starts_with?(body, "run(X)"), do: "run/1", else: "run/0"
+      assert unsafe?(i_run(context, body, i_domains(), exports))
+    end
+  end
+
+  test "I06 computed or replaced recursive arguments cannot assert identity", context do
+    for argument <- ["external:value(M)", "ssl", "lists"] do
+      body =
+        "run() -> first(lists). first(M) -> M:f(), second(M). second(M) -> first(#{argument})."
+
+      assert unsafe?(i_run(context, body, i_domains([:lists, :ssl])))
+    end
+  end
+
+  test "I07 every alternate branch is checked", context do
+    body = """
+    run(X) -> first(X,lists).
+    first(X,M) -> M:f(), second(X,M).
+    second(X,M) -> case X of a -> first(X,M); _ -> first(X,X) end.
+    """
+
+    domains = for name <- [:first, :second], do: {{name, 2}, 1, [:lists]}
+    assert unsafe?(i_run(context, body, domains, "run/1"))
+  end
+
+  test "I08 added unknown caller remains an obligation", context do
+    body = """
+    run(X) -> first(lists), extra(X).
+    extra(X) -> first(X).
+    first(M) -> M:f(), second(M).
+    second(M) -> first(M).
+    """
+
+    assert unsafe?(i_run(context, body, i_domains(), "run/1"))
+  end
+
+  test "I09 returning passing or remote capturing a private target blocks induction", context do
+    for escape <- ["fun first/1", "lists:map(fun first/1,[])", "fun no_otp_audit_fixture:first/1"] do
+      body =
+        "run() -> first(lists), #{escape}. first(M) -> M:f(), second(M). second(M) -> first(M)."
+
+      assert unsafe?(i_run(context, body, i_domains()))
+    end
+  end
+
+  test "I10 export metadata cannot be overridden by a certificate", context do
+    body = "run() -> first(lists). first(M) -> M:f(), second(M). second(M) -> first(M)."
+    assert unsafe?(i_run(context, body, i_domains(), "run/0,first/1"))
+    assert unsafe?(i_run(context, body, i_domains(), "run/0", "-compile(export_all). "))
+  end
+
+  test "I11 anonymous named fun and comprehension shadowing stay unknown", context do
+    for edge <- [
+          "fun(M) -> first(M) end",
+          "fun Again(M) -> first(M), Again(M) end",
+          "[first(M) || M <- external:values()]"
+        ] do
+      body = "run() -> first(lists). first(M) -> M:f(), second(M). second(M) -> #{edge}."
+      assert unsafe?(i_run(context, body, i_domains()))
+    end
+  end
+
+  test "I12 an unseeded cycle cannot invent a finite parameter", context do
+    body = "run() -> ok. first(M) -> M:f(), second(M). second(M) -> first(M)."
+    assert unsafe?(i_run(context, body, i_domains()))
+  end
+
+  test "I13 missing debug data cannot be replaced with a certificate", context do
+    body = "run() -> first(lists). first(M) -> M:f(), second(M). second(M) -> first(M)."
+    private_erlang(context, body)
+    path = Path.join(context.ebin, "no_otp_audit_fixture.beam")
+    {:ok, {_, stripped}} = :beam_lib.strip(File.read!(path))
+    File.write!(path, stripped)
+
+    [result] =
+      NoOTP.ReleaseAudit.artifacts(parameter_invariants: %{no_otp_audit_fixture: i_domains()}).beam_inspections
+
+    assert result.missing_abstract_code
+    assert result.parameter_invariant_derivation.status == "missing_debug"
+  end
+
+  test "I14 changed selected artifact must rederive every seed", context do
+    body = "run(X) -> first(lists). first(M) -> M:f(), second(M). second(M) -> first(M)."
+    safe = i_run(context, body, i_domains(), "run/1")
+    assert safe.unresolved_dispatch == []
+
+    changed =
+      i_run(context, String.replace(body, "first(lists)", "first(X)"), i_domains(), "run/1")
+
+    assert safe.sha256 != changed.sha256
+    assert unsafe?(changed)
+  end
+
+  test "I15 malformed duplicate oversized and absent slots fail closed", context do
+    body = "run() -> first(lists). first(M) -> M:f(), second(M). second(M) -> first(M)."
+    wide = for n <- 1..17, do: String.to_atom("audit_invariant_target_#{n}")
+
+    for domains <- [
+          :invalid,
+          [{{:first, 1}, 0, []}],
+          [{{:first, 1}, 0, ["lists"]}],
+          [{{:first, 1}, 1, [:lists]}],
+          [{{:absent, 1}, 0, [:lists]}],
+          i_domains() ++ i_domains(),
+          i_domains(wide),
+          List.duplicate({{:first, 1}, 0, [:lists]}, 257)
+        ] do
+      result = i_run(context, body, domains)
+      assert unsafe?(result)
+      assert result.parameter_invariant_derivation == %{status: "rejected", checked_slots: []}
+    end
+  end
+
+  test "I16 proof never executes seeds backedges or scanned callback bodies", context do
+    Process.delete(:audit_invariant_executed)
+
+    body = """
+    run() -> erlang:put(audit_invariant_executed,true), first(lists).
+    first(M) -> M:f(), second(M), fun() -> erlang:put(audit_invariant_executed,true) end.
+    second(M) -> erlang:put(audit_invariant_executed,true), first(M).
+    """
+
+    assert i_run(context, body, i_domains()).unresolved_dispatch == []
+    assert Process.get(:audit_invariant_executed) == nil
+  end
+
+  test "I17 two finite seeds join without dropping an unsafe alternative", context do
+    body =
+      "run() -> first(lists), first(ssl). first(M) -> M:f(), second(M). second(M) -> first(M)."
+
+    assert unsafe?(i_run(context, body, i_domains([:lists, :ssl])))
+    assert unsafe?(i_run(context, body, i_domains([:lists])))
+
+    assert i_run(context, String.replace(body, "ssl", "maps"), i_domains([:lists, :maps])).unresolved_dispatch ==
+             []
+  end
+
+  test "I18 independent product components and unknown callable parameters stay unknown",
+       context do
+    body = """
+    run(X) -> first(X,lists).
+    first(X,M) -> {A,B}={X,M}, A:f(), B:f(), second(X,M).
+    second(X,M) -> first(X,M).
+    """
+
+    domains = for name <- [:first, :second], do: {{name, 2}, 1, [:lists]}
+    result = i_run(context, body, domains, "run/1")
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["unresolved_module_dispatch"]
+  end
+
+  test "I19 captured finite identity retains nested unsafe callback obligations", context do
+    body = """
+    run() -> first(lists).
+    first(M) -> M:f(), second(M), fun() -> N=ssl, N:connect(a,1,[]) end.
+    second(M) -> fun() -> first(M) end.
+    """
+
+    result = i_run(context, body, i_domains())
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["literal_module_ssl"]
+  end
+
+  test "I20 partial certificates cannot assume an omitted forwarding function", context do
+    body = "run() -> first(lists). first(M) -> M:f(), second(M). second(M) -> first(M)."
+    assert unsafe?(i_run(context, body, [{{:first, 1}, 0, [:lists]}]))
+  end
+
+  defp i_domains(atoms \\ [:lists]),
+    do: [{{:first, 1}, 0, atoms}, {{:second, 1}, 0, atoms}]
+
+  defp i_run(context, body, entries, exports \\ "run/0", extra \\ "") do
+    private_erlang(context, body, exports, extra)
+
+    [result] =
+      NoOTP.ReleaseAudit.artifacts(parameter_invariants: %{no_otp_audit_fixture: entries}).beam_inspections
+
+    result
+  end
 end

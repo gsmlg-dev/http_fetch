@@ -75,7 +75,7 @@ defmodule NoOTP.ReleaseAudit do
   ]
   @otp_apps ~w(kernel stdlib elixir logger crypto asn1 public_key sasl compiler eex iex runtime_tools syntax_tools tools parsetools)
 
-  def artifacts do
+  def artifacts(options \\ []) do
     release = System.fetch_env!("NO_OTP_RELEASE") |> Path.expand()
     project = System.fetch_env!("NO_OTP_PROJECT") |> Path.expand()
     app_files = Path.wildcard("#{release}/lib/*/ebin/*.app")
@@ -91,7 +91,8 @@ defmodule NoOTP.ReleaseAudit do
     roots = applications |> Enum.map(& &1.name) |> Enum.uniq() |> Enum.reject(&(&1 in @otp_apps))
     beams = Enum.flat_map(roots, &Path.wildcard("#{release}/lib/#{&1}-*/ebin/*.beam"))
     context = return_context(release)
-    inspections = Enum.map(beams, &inspect_beam(&1, context))
+    invariants = Keyword.get(options, :parameter_invariants, %{})
+    inspections = Enum.map(beams, &inspect_beam(&1, context, invariants))
 
     versions =
       applications
@@ -315,7 +316,7 @@ defmodule NoOTP.ReleaseAudit do
 
   defp walk_boot(_term, _path), do: []
 
-  defp inspect_beam(path, context) do
+  defp inspect_beam(path, context, invariants) do
     {:ok, {module, chunks}} =
       :beam_lib.chunks(String.to_charlist(path), [:imports, :exports, :abstract_code])
 
@@ -326,7 +327,7 @@ defmodule NoOTP.ReleaseAudit do
       for {:ssl, function, arity} <- imports,
           do: %{beam: path, module: inspect(module), function: to_string(function), arity: arity}
 
-    {dynamic, missing} =
+    {dynamic, missing, invariant_proof} =
       case Keyword.fetch!(chunks, :abstract_code) do
         {:raw_abstract_v1, forms} ->
           prepared =
@@ -335,13 +336,14 @@ defmodule NoOTP.ReleaseAudit do
             |> qualify_named_dispatches(imports)
             |> prove_selector_returns()
 
-          {walk_calls(
-             resolve_lexical(prepared, exports),
-             path
-           ), false}
+          {resolved, proof} =
+            resolve_lexical(prepared, exports, Map.get(invariants, module, []))
+
+          {walk_calls(resolved, path), false, proof}
 
         :no_abstract_code ->
-          {[], true}
+          {[], true,
+           parameter_invariant_proof(Map.get(invariants, module, []), %{}, "missing_debug")}
       end
 
     %{
@@ -354,7 +356,8 @@ defmodule NoOTP.ReleaseAudit do
         end),
       otp_ssl_imports: direct,
       unresolved_dispatch: dynamic,
-      missing_abstract_code: missing
+      missing_abstract_code: missing,
+      parameter_invariant_derivation: invariant_proof
     }
   end
 
@@ -1211,7 +1214,7 @@ defmodule NoOTP.ReleaseAudit do
   # targets require acyclic callers; literal closure parameters also admit a
   # separately checked acyclic argument-dependency proof. Exports and captures
   # remain open; neither rule infers function returns or global state.
-  defp resolve_lexical(forms, beam_exports) do
+  defp resolve_lexical(forms, beam_exports, invariant_entries) do
     definitions =
       Map.new(for {:function, _, name, arity, _} = form <- forms, do: {{name, arity}, form})
 
@@ -1231,9 +1234,9 @@ defmodule NoOTP.ReleaseAudit do
       calls: 0
     }
 
-    resolved =
+    {resolved, checked} =
       if :export_all in options or map_size(definitions) > @max_parameter_functions do
-        %{}
+        {%{}, %{}}
       else
         analysis =
           Enum.reduce(definitions, analysis, fn {owner, {:function, _, _, _, clauses}}, state ->
@@ -1248,26 +1251,261 @@ defmodule NoOTP.ReleaseAudit do
 
           closures = independent_closure_parameters(definitions, exported, analysis)
 
-          closed_parameters(definitions, callers, exported, analysis.captures, %{}, %{}, closures)
+          checked =
+            checked_parameter_invariants(invariant_entries, definitions, exported, analysis)
+
+          resolved =
+            closed_parameters(
+              definitions,
+              callers,
+              exported,
+              analysis.captures,
+              %{},
+              %{},
+              closures,
+              checked
+            )
+
+          {resolved, checked}
         else
-          %{}
+          {%{}, %{}}
         end
       end
 
-    Enum.map(forms, fn
-      {:function, _, name, arity, _} = form ->
-        Map.get_lazy(resolved, {name, arity}, fn ->
-          resolve_function(form, List.duplicate(:unknown, arity))
-        end)
+    forms =
+      Enum.map(forms, fn
+        {:function, _, name, arity, _} = form ->
+          Map.get_lazy(resolved, {name, arity}, fn ->
+            resolve_function(form, List.duplicate(:unknown, arity))
+          end)
 
-      form ->
-        form
+        form ->
+          form
+      end)
+
+    {forms, parameter_invariant_proof(invariant_entries, checked, "rejected")}
+  end
+
+  defp parameter_invariant_proof(entries, checked, rejected_status) do
+    status =
+      cond do
+        entries == [] -> "not_requested"
+        map_size(checked) > 0 -> "checked"
+        true -> rejected_status
+      end
+
+    slots =
+      for {{{name, arity}, index}, value} <- checked do
+        targets = for {:atom, _, atom} <- finite_choices(value), do: to_string(atom)
+
+        %{
+          function: to_string(name),
+          arity: arity,
+          parameter_index: index,
+          targets: Enum.sort(targets)
+        }
+      end
+
+    %{
+      status: status,
+      checked_slots: Enum.sort_by(slots, &{&1.function, &1.arity, &1.parameter_index})
+    }
+  end
+
+  # Opt-in derivations contain finite atom domains, never trusted caller lists.
+  # Check all compiled calls before using the induction hypothesis at any sink.
+  # Existing recursive closure controls do not opt in and retain their semantics.
+  defp checked_parameter_invariants([], _definitions, _exported, _analysis), do: %{}
+
+  defp checked_parameter_invariants(entries, definitions, exported, analysis) do
+    with true <- is_list(entries),
+         true <- length(entries) <= @max_parameter_functions,
+         true <- :erlang.external_size(entries) <= @max_finite_bytes,
+         {:ok, domains} <- invariant_domains(entries, definitions, exported, analysis.captures),
+         origins <- invariant_call_origins(definitions, domains),
+         true <- invariant_origins_valid?(origins, domains),
+         true <- invariant_seeded?(origins, MapSet.new()) do
+      Map.new(domains, fn {slot, atoms} ->
+        {slot, common_value(Enum.map(atoms, &{:atom, 0, &1}))}
+      end)
+    else
+      _ -> %{}
+    end
+  end
+
+  defp invariant_domains(entries, definitions, exported, captures) do
+    Enum.reduce_while(entries, {:ok, %{}}, fn
+      {{name, arity} = key, index, atoms}, {:ok, domains}
+      when is_atom(name) and is_integer(arity) and arity >= 0 and
+             is_integer(index) and index >= 0 and index < arity and is_list(atoms) ->
+        slot = {key, index}
+
+        valid? =
+          atoms != [] and length(atoms) <= @max_finite_targets and
+            Enum.all?(atoms, &is_atom/1) and length(Enum.uniq(atoms)) == length(atoms) and
+            Map.has_key?(definitions, key) and not Map.has_key?(domains, slot) and
+            not MapSet.member?(exported, key) and not MapSet.member?(captures, key) and
+            invariant_formals?(Map.get(definitions, key), index)
+
+        if valid?,
+          do: {:cont, {:ok, Map.put(domains, slot, atoms)}},
+          else: {:halt, :unknown}
+
+      _, _ ->
+        {:halt, :unknown}
+    end)
+  end
+
+  defp invariant_formals?({:function, _, _, _, clauses}, index) do
+    clauses != [] and
+      Enum.all?(clauses, fn
+        {:clause, _, patterns, _, _} ->
+          case Enum.at(patterns, index) do
+            {:var, _, name} -> name != :_
+            _ -> false
+          end
+
+        _ ->
+          false
+      end)
+  end
+
+  defp invariant_formals?(_form, _index), do: false
+
+  defp invariant_call_origins(definitions, domains) do
+    slots =
+      Enum.reduce(domains, %{}, fn {{key, index}, _}, acc ->
+        Map.update(acc, key, [index], &[index | &1])
+      end)
+
+    initial = Map.new(domains, fn {slot, _} -> {slot, []} end)
+
+    Enum.reduce(definitions, initial, fn {owner, {:function, _, _, _, clauses}}, origins ->
+      Enum.reduce(clauses, origins, fn {:clause, _, patterns, guards, body}, acc ->
+        scope =
+          Map.new(Map.get(slots, owner, []), fn index ->
+            {:var, _, name} = Enum.at(patterns, index)
+            {name, {owner, index}}
+          end)
+
+        invariant_origins([guards, body], owner, scope, slots, acc)
+      end)
+    end)
+  end
+
+  defp invariant_origins({:audit_selector, _, call, _}, owner, scope, slots, origins),
+    do: invariant_origins(call, owner, scope, slots, origins)
+
+  defp invariant_origins({:audit_return, _, call, _}, owner, scope, slots, origins),
+    do: invariant_origins(call, owner, scope, slots, origins)
+
+  defp invariant_origins({:call, _, {:atom, _, name}, args} = term, owner, scope, slots, origins) do
+    key = {name, length(args)}
+
+    origins =
+      Enum.reduce(Map.get(slots, key, []), origins, fn index, acc ->
+        origin =
+          case Enum.at(args, index) do
+            {:var, _, variable} ->
+              case Map.fetch(scope, variable) do
+                {:ok, slot} -> {:identity, slot}
+                :error -> :unknown
+              end
+
+            {:atom, _, atom} ->
+              if Map.has_key?(slots, owner), do: :unknown, else: {:seed, atom}
+
+            _ ->
+              :unknown
+          end
+
+        Map.update!(acc, {key, index}, &[origin | &1])
+      end)
+
+    term |> Tuple.to_list() |> invariant_origins(owner, scope, slots, origins)
+  end
+
+  # Erlang fun parameters shadow outer variables; case/receive patterns do not.
+  # Comprehension forwarding is deliberately unsupported, including aliases.
+  defp invariant_origins({:fun, _, {:clauses, clauses}}, owner, scope, slots, origins),
+    do: invariant_fun_origins(clauses, owner, scope, slots, origins)
+
+  defp invariant_origins({:named_fun, _, name, clauses}, owner, scope, slots, origins),
+    do: invariant_fun_origins(clauses, owner, Map.delete(scope, name), slots, origins)
+
+  defp invariant_origins(term, owner, _scope, slots, origins)
+       when is_tuple(term) and tuple_size(term) >= 1 and elem(term, 0) in [:lc, :bc, :mc],
+       do: term |> Tuple.to_list() |> invariant_origins(owner, %{}, slots, origins)
+
+  defp invariant_origins(term, owner, scope, slots, origins) when is_tuple(term),
+    do: term |> Tuple.to_list() |> invariant_origins(owner, scope, slots, origins)
+
+  defp invariant_origins(terms, owner, scope, slots, origins) when is_list(terms),
+    do: Enum.reduce(terms, origins, &invariant_origins(&1, owner, scope, slots, &2))
+
+  defp invariant_origins(_term, _owner, _scope, _slots, origins), do: origins
+
+  defp invariant_fun_origins(clauses, owner, scope, slots, origins) do
+    Enum.reduce(clauses, origins, fn {:clause, _, patterns, guards, body}, acc ->
+      scope = Map.drop(scope, pattern_variables(patterns))
+      invariant_origins([guards, body], owner, scope, slots, acc)
+    end)
+  end
+
+  defp invariant_origins_valid?(origins, domains) do
+    Enum.all?(origins, fn {slot, inputs} ->
+      target = Map.fetch!(domains, slot)
+
+      inputs != [] and
+        Enum.all?(inputs, fn
+          {:seed, atom} -> atom in target
+          {:identity, source} -> Enum.all?(Map.fetch!(domains, source), &(&1 in target))
+          _ -> false
+        end)
+    end)
+  end
+
+  # Reachability is not a fixed-point value guess: every step removes at least
+  # one finite vertex, and all seeds/backedges were checked before this step.
+  defp invariant_seeded?(origins, reached) when map_size(origins) == 0,
+    do: MapSet.size(reached) > 0
+
+  defp invariant_seeded?(origins, reached) do
+    ready =
+      for {slot, inputs} <- origins,
+          Enum.any?(inputs, fn
+            {:seed, _} -> true
+            {:identity, source} -> MapSet.member?(reached, source)
+          end),
+          do: slot
+
+    ready != [] and
+      invariant_seeded?(
+        Map.drop(origins, ready),
+        Enum.reduce(ready, reached, &MapSet.put(&2, &1))
+      )
+  end
+
+  defp checked_parameter_values(values, key, checked) do
+    values
+    |> Enum.with_index()
+    |> Enum.map(fn {value, index} ->
+      if value == :unknown, do: Map.get(checked, {key, index}, value), else: value
     end)
   end
 
   # Remove ready vertices, never iterate a recursive proof to an arbitrary cap.
   # Cycles retain unknown general targets; checked closure seeds are independent.
-  defp closed_parameters(remaining, callers, exported, captures, incoming, resolved, closures) do
+  defp closed_parameters(
+         remaining,
+         callers,
+         exported,
+         captures,
+         incoming,
+         resolved,
+         closures,
+         checked
+       ) do
     ready =
       Enum.reject(remaining, fn {key, _form} ->
         Enum.any?(Map.get(callers, key, MapSet.new()), &Map.has_key?(remaining, &1))
@@ -1275,7 +1513,11 @@ defmodule NoOTP.ReleaseAudit do
 
     if ready == [] do
       Enum.reduce(remaining, resolved, fn {{_, arity} = key, form}, output ->
-        values = closure_parameter_values(key, List.duplicate(:unknown, arity), closures)
+        values =
+          key
+          |> closure_parameter_values(List.duplicate(:unknown, arity), closures)
+          |> checked_parameter_values(key, checked)
+
         Map.put(output, key, resolve_function(form, values))
       end)
     else
@@ -1286,13 +1528,27 @@ defmodule NoOTP.ReleaseAudit do
               do: Map.get(args, key, List.duplicate(:unknown, arity)),
               else: List.duplicate(:unknown, arity)
 
-          values = closure_parameter_values(key, values, closures)
+          values =
+            key
+            |> closure_parameter_values(values, closures)
+            |> checked_parameter_values(key, checked)
+
           form = resolve_function(form, values)
           {collect_local_arguments(form, remaining, args), Map.put(output, key, form)}
         end)
 
       remaining = Map.drop(remaining, Enum.map(ready, &elem(&1, 0)))
-      closed_parameters(remaining, callers, exported, captures, incoming, resolved, closures)
+
+      closed_parameters(
+        remaining,
+        callers,
+        exported,
+        captures,
+        incoming,
+        resolved,
+        closures,
+        checked
+      )
     end
   end
 
