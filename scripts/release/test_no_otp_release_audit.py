@@ -12,7 +12,7 @@ HERE = Path(__file__).resolve().parent
 
 class CompiledLexicalAuditTests(unittest.TestCase):
     def test_real_lexical_and_adversarial_beam_controls(self):
-        argv = ["unbuffer", "elixir", str(HERE / "test_no_otp_release_audit.exs")]
+        argv = ["elixir", str(HERE / "test_no_otp_release_audit.exs")]
         child = subprocess.Popen(argv, cwd=HERE.parent.parent, text=True,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                  start_new_session=True)
