@@ -94,7 +94,12 @@ defmodule SSL.Protocol.HandshakeMachine do
   defp callback_options(opts) do
     if Keyword.get(opts, :certificate_policy) != nil or
          VerifyFun.enabled?(Keyword.get(opts, :verify_fun, :undefined)),
-       do: opts |> Keyword.delete(:ticket) |> Keyword.put(:enable_tickets, false),
+       do:
+         opts
+         |> Keyword.delete(:ticket)
+         |> Keyword.delete(:tls12_session)
+         |> Keyword.put(:enable_session, false)
+         |> Keyword.put(:enable_tickets, false),
        else: opts
   end
 
@@ -207,7 +212,14 @@ defmodule SSL.Protocol.HandshakeMachine do
     if HandshakeFramer.buffered_size(framer) == 0 do
       case ClientHandshake.decode_server_hello(handshake, state.offer, state.hrr) do
         {:ok, hello} ->
-          accept_server_hello(%{state | framer: HandshakeFramer.new()}, hello)
+          accept_server_hello(
+            %{
+              state
+              | framer: HandshakeFramer.new(),
+                options: Keyword.drop(state.options, [:tls12_session, :enable_session])
+            },
+            hello
+          )
 
         {:error, {:fatal_alert, _, _}} = error ->
           error

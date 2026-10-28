@@ -22,12 +22,16 @@ defmodule SSL.Protocol.TLS12 do
     :key_pair,
     :premaster,
     :master_secret,
+    :session,
+    :session_id,
     :read_state,
     :write_state,
     :request,
     :negotiated_protocol,
     :transcript,
     :framer,
+    resumed: false,
+    save_session: false,
     phase: :await_server_hello,
     options: []
   ]
@@ -51,7 +55,9 @@ defmodule SSL.Protocol.TLS12 do
          identity: identity,
          client_random: random,
          client_identity: Keyword.get(options, :client_identity),
-         options: Keyword.delete(options, :client_identity),
+         session: Keyword.get(options, :tls12_session),
+         save_session: Keyword.get(options, :enable_session, false),
+         options: Keyword.drop(options, [:client_identity, :tls12_session, :enable_session]),
          transcript: Transcript.new(:sha256) |> Transcript.append(hello),
          framer: HandshakeFramer.new()
        }}
@@ -185,11 +191,12 @@ defmodule SSL.Protocol.TLS12 do
           server_random: hello.random,
           negotiated_protocol: alpn,
           status_negotiated: {5, <<>>} in hello.extensions,
+          session_id: hello.session_id,
           transcript: %{state.transcript | hash: suite.hash},
           phase: :await_certificate
       }
 
-      {:ok, append(next, hello.encoded), [], []}
+      select_session(append(next, hello.encoded), hello)
     else
       {:error, {:fatal_alert, _, _}} = error -> error
       {:error, reason} -> fatal(:illegal_parameter, reason)
@@ -263,29 +270,110 @@ defmodule SSL.Protocol.TLS12 do
        when phase in [:await_request_or_done, :await_server_hello_done],
        do: client_flight(append(state, message.encoded))
 
-  defp process(%{phase: :await_server_finished} = state, %{type: :finished, verify_data: received}) do
+  defp process(
+         %{phase: :await_server_finished} = state,
+         %{type: :finished, verify_data: received} = message
+       ) do
     with {:ok, expected} <-
            TLS12KeySchedule.finished(state.suite.id, state.master_secret, :server, bytes(state)),
          true <- :crypto.hash_equals(expected, received) do
-      {:ok,
-       %{
-         state
-         | phase: :connected,
-           master_secret: nil,
-           transcript: nil,
-           trust: nil,
-           client_identity: nil,
-           key_pair: nil,
-           premaster: nil,
-           request: nil,
-           options: Keyword.drop(state.options, [:verify_fun, :certificate_policy])
-       }, [], [{:connected, state.negotiated_protocol}]}
+      finish_connection(state, message.encoded)
     else
       _ -> fatal(:decrypt_error, :invalid_finished)
     end
   end
 
   defp process(_, _), do: fatal(:unexpected_message, :unexpected_tls12_handshake)
+
+  defp select_session(state, hello) do
+    if hello.session_id != <<>> and hello.session_id == state.offer.legacy_session_id do
+      case state.session do
+        %SSL.TLS12Session{id: id, suite: suite} = session
+        when id == hello.session_id and suite == hello.cipher_suite ->
+          with :ok <- SSL.TLS12Session.validate(session),
+               {:ok, keys} <-
+                 TLS12KeySchedule.resume(
+                   suite,
+                   session.master_secret,
+                   state.client_random,
+                   state.server_random
+                 ) do
+            {:ok,
+             %{
+               state
+               | read_state: keys.read_state,
+                 write_state: keys.write_state,
+                 master_secret: keys.master_secret,
+                 peer: session.peer,
+                 # RFC 7301 section 3.1: only this handshake's ALPN applies.
+                 session: %{session | alpn: state.negotiated_protocol},
+                 client_identity: nil,
+                 resumed: true,
+                 phase: :await_server_ccs
+             }, [], []}
+          else
+            _ -> fatal(:illegal_parameter, :invalid_tls12_session)
+          end
+
+        _ ->
+          fatal(:illegal_parameter, :tls12_session_mismatch)
+      end
+    else
+      {:ok, %{state | session: nil}, [], []}
+    end
+  end
+
+  defp finish_connection(%{resumed: true} = state, server_finished) do
+    state = append(state, server_finished)
+
+    with {:ok, finished} <-
+           TLS12KeySchedule.finished(state.suite.id, state.master_secret, :client, bytes(state)),
+         {:ok, encoded} <- TLS12Codec.encode_finished(finished),
+         {:ok, protected, write} <- TLS12Record.encrypt(state.write_state, :handshake, encoded) do
+      saved = if state.save_session, do: [{:tls12_session, state.session}], else: []
+
+      {:ok, complete(%{state | write_state: write}), [@ccs, protected],
+       saved ++ [{:connected, state.negotiated_protocol}]}
+    else
+      {:error, reason} -> fatal(:handshake_failure, reason)
+    end
+  end
+
+  defp finish_connection(state, _server_finished) do
+    events =
+      if state.save_session and is_binary(state.session_id) and state.session_id != <<>> do
+        [
+          {:tls12_session,
+           %{
+             id: state.session_id,
+             master_secret: state.master_secret,
+             suite: state.suite.id,
+             peer: state.peer,
+             alpn: state.negotiated_protocol
+           }}
+        ]
+      else
+        []
+      end
+
+    {:ok, complete(state), [], events ++ [{:connected, state.negotiated_protocol}]}
+  end
+
+  defp complete(state) do
+    %{
+      state
+      | phase: :connected,
+        master_secret: nil,
+        session: nil,
+        transcript: nil,
+        trust: nil,
+        client_identity: nil,
+        key_pair: nil,
+        premaster: nil,
+        request: nil,
+        options: Keyword.drop(state.options, [:verify_fun, :certificate_policy])
+    }
+  end
 
   defp verify_certificate(state, chain, staples) do
     options =
@@ -409,7 +497,8 @@ defmodule SSL.Protocol.TLS12 do
 
   defp validate_hello(state, hello) do
     cond do
-      hello.session_id != <<>> and hello.session_id == state.offer.legacy_session_id ->
+      hello.session_id != <<>> and hello.session_id == state.offer.legacy_session_id and
+          state.session == nil ->
         {:error, :tls12_resumption_unsupported}
 
       hello.cipher_suite not in state.offer.cipher_suites ->

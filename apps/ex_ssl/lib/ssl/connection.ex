@@ -42,6 +42,10 @@ defmodule SSL.Connection do
       :deadline,
       :machine,
       :ticket_key,
+      :session_key,
+      :session_material,
+      :session_timer,
+      :session_token,
       :connect_from,
       :recv,
       :write,
@@ -595,6 +599,9 @@ defmodule SSL.Connection do
   def handle_event(:info, :handshake_timeout, phase, state) when phase != :connected,
     do: fail(state, :timeout)
 
+  def handle_event(:info, {:session_expired, token}, _phase, %{session_token: token} = state),
+    do: {:keep_state, forget_session(state)}
+
   def handle_event(:info, {:recv_timeout, token}, :connected, %{recv: %{token: token}} = state) do
     state = finish_recv(state, {:error, :timeout})
     drain_or_continue(:connected, state)
@@ -871,7 +878,22 @@ defmodule SSL.Connection do
          %{closed: false, tcp: tcp} = state
        )
        when not is_nil(tcp) do
-    reply(from, Diagnostics.connection_information(state.machine, keys))
+    case session_information(keys, state) do
+      {:ok, data, state} ->
+        result =
+          with {:ok, information} <- Diagnostics.connection_information(state.machine, keys) do
+            {:ok,
+             if(:session_data in keys,
+               do: Keyword.replace!(information, :session_data, data),
+               else: information
+             )}
+          end
+
+        {:keep_state, state, [{:reply, from, result}]}
+
+      {:error, reason} ->
+        reply(from, {:error, reason})
+    end
   end
 
   defp socket_call({:call, from}, {_ref, request}, _phase, _state)
@@ -1146,6 +1168,7 @@ defmodule SSL.Connection do
   def terminate(_reason, _phase, state) do
     Socket.mark_terminal(state.socket, false)
     _ = cancel_timer(state.handshake_timer)
+    _ = cancel_timer(state.session_timer)
 
     if state.recv do
       _ = cancel_timer(state.recv.timer)
@@ -1210,17 +1233,57 @@ defmodule SSL.Connection do
       else: process_records(phase, rest, state)
   end
 
-  defp prepare_resumption(%{session_tickets: :disabled} = options, _tcp),
-    do: SSL.ResumptionContext.prepare(options, nil)
-
   defp prepare_resumption(options, tcp) do
     result = if is_port(tcp), do: :inet.peername(tcp), else: NativeSocket.peername(tcp)
 
     with {:ok, endpoint} <- result,
-         do: SSL.ResumptionContext.prepare(options, endpoint)
+         {:ok, options, ticket, ticket_key} <- SSL.ResumptionContext.prepare(options, endpoint),
+         {:ok, options, session, session_key} <-
+           SSL.TLS12ResumptionContext.prepare(options, endpoint),
+         do: {:ok, options, ticket, ticket_key, session, session_key}
+  end
+
+  defp remember_session(state, nil), do: forget_session(state)
+
+  defp remember_session(state, session) do
+    _ = cancel_timer(state.session_timer)
+    token = make_ref()
+    delay = max(0, session.expires_at - System.monotonic_time(:millisecond))
+    timer = Process.send_after(self(), {:session_expired, token}, delay)
+    %{state | session_material: session, session_timer: timer, session_token: token}
+  end
+
+  defp forget_session(state) do
+    _ = cancel_timer(state.session_timer)
+    %{state | session_material: nil, session_timer: nil, session_token: nil}
+  end
+
+  defp session_information(keys, state) do
+    if :session_data in keys and is_struct(state.machine, SSL.Protocol.TLS12) do
+      case {state.session_key, state.session_material} do
+        {{key, _mode}, %SSL.TLS12Session{} = session} ->
+          case SSL.TLS12ResumptionContext.export(key, session) do
+            {:ok, data, retained} ->
+              {:ok, data, %{state | session_material: retained}}
+
+            {:error, _} = error ->
+              error
+          end
+
+        _ ->
+          {:error, :no_session}
+      end
+    else
+      {:ok, <<>>, state}
+    end
   end
 
   defp apply_events(phase, [], state), do: {:ok, phase, state}
+
+  defp apply_events(phase, [{:tls12_session, material} | rest], state) do
+    session = SSL.TLS12ResumptionContext.retain(state.session_key, material)
+    apply_events(phase, rest, remember_session(state, session))
+  end
 
   defp apply_events(phase, [{:session_ticket, material} | rest], state) do
     :ok = SSL.ResumptionContext.store(state.ticket_key, material, state.owner)
@@ -1471,6 +1534,8 @@ defmodule SSL.Connection do
   end
 
   defp do_fail(state, reason) do
+    state = forget_session(state)
+
     if match?({:tls_alert, {_alert, _description}}, reason) and state.output == nil do
       case begin_fatal_alert(state, reason) do
         {:ok, state} -> {:next_state, :closing, state}
@@ -1753,6 +1818,8 @@ defmodule SSL.Connection do
        do: {:abort, state}
 
   defp begin_shutdown(state, kind, waiters) do
+    state = forget_session(state)
+
     case HandshakeMachine.encrypt(state.machine, :alert, <<1, 0>>) do
       {:ok, record, machine} ->
         {:ok, deadline} = Options.deadline(@shutdown_timeout)
@@ -1797,7 +1864,9 @@ defmodule SSL.Connection do
   # may leave bounded authenticated plaintext to drain. In that state reads are
   # disarmed, the TLS machine/output are discarded and writes stay closed. Cancel
   # and owner loss still terminate the same enrolled controller and writer.
-  defp close_transport(%{lifecycle: lifecycle, tcp: tcp} = state)
+  defp close_transport(state), do: do_close_transport(forget_session(state))
+
+  defp do_close_transport(%{lifecycle: lifecycle, tcp: tcp} = state)
        when not is_nil(lifecycle) and not is_nil(tcp) and not is_port(tcp) do
     if lifecycle.public, do: Observer.logical_closed(lifecycle.receipt)
     _ = if state.output, do: cancel_timer(state.output.timer)
@@ -1812,7 +1881,7 @@ defmodule SSL.Connection do
   # retire and kill this controller before the application can drain that data.
   # Keep the actual owned port and controller live until explicit close/cancel
   # or owner loss; neither logical closure nor this return certifies cleanup.
-  defp close_transport(
+  defp do_close_transport(
          %{lifecycle: %{public: true} = lifecycle, tcp: tcp, closed: true, size: size} = state
        )
        when is_port(tcp) and size > 0 do
@@ -1823,7 +1892,7 @@ defmodule SSL.Connection do
     %{state | machine: nil, armed: false, output: nil, pending_control: nil}
   end
 
-  defp close_transport(state) do
+  defp do_close_transport(state) do
     _ = if state.output, do: cancel_timer(state.output.timer)
     _ = if state.pending_control, do: cancel_timer(state.pending_control.timer)
 
@@ -2086,7 +2155,8 @@ defmodule SSL.Connection do
       fail(state, :timeout)
     else
       with :ok <- prepare_transport(tcp, state),
-           {:ok, options, ticket, ticket_key} <- prepare_resumption(state.options, tcp),
+           {:ok, options, ticket, ticket_key, session, session_key} <-
+             prepare_resumption(state.options, tcp),
            {:ok, policy_context, certificate_policy} <-
              SSL.PolicyIO.prepare(options, state.lifecycle, state.owner, state.deadline),
            {:ok, materialized} <-
@@ -2107,6 +2177,8 @@ defmodule SSL.Connection do
                depth: options.depth,
                client_identity: options.client_identity,
                ticket: ticket,
+               tls12_session: session,
+               enable_session: session_key != nil,
                enable_tickets:
                  options.session_tickets in [:auto, :manual] and options.policy == nil
              ),
@@ -2117,6 +2189,7 @@ defmodule SSL.Connection do
                  | machine: machine,
                    options: nil,
                    ticket_key: ticket_key,
+                   session_key: session_key,
                    policy_context: policy_context
                },
                outbound,

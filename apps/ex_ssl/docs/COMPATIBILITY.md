@@ -369,7 +369,7 @@ The experimental `SSL.QUIC` record-free TLS integration has its own
 [role/transport matrix](QUIC_TLS_IMPLEMENTATION.md) and
 [public interface](QUIC_TLS_INTERFACE.md). It does not broaden TCP socket support.
 
-TCP server TLS, DTLS, QUIC networking/HTTP/3, TLS 1.2 resumption and automatic mTLS resumption,
+TCP server TLS, DTLS, QUIC networking/HTTP/3, TLS 1.3 automatic mTLS resumption,
 0-RTT, post-handshake authentication, active true/active-N, packet framing,
 exporters, and full OTP API parity are out of scope. ALPN negotiation alone is
 not evidence of an HTTP/2 request. See
@@ -508,9 +508,10 @@ the [current ledger](EX_SSL_HTTP_FETCH_PROGRESS.md) records actual runtime and
 provider versions separately from configured CI. Missing capable peers fail
 the mandatory gate rather than weakening EMS or skipping positive scenarios.
 Static RSA, CBC, RC4, compression, TLS1.0/1.1,
-renegotiation and TLS1.2 session resumption remain unsupported. A nonempty echoed
-session ID rejects as unsupported resumption. Generated TLS1.2-only hellos use an
-empty session ID; mixed offers retain TLS1.3 compatibility behavior.
+renegotiation and TLS1.2 session tickets remain unsupported. Generated TLS1.2-only
+hellos use an empty session ID until an authenticated cached EMS session is selected;
+mixed offers retain TLS1.3 compatibility behavior. An echoed ID without matching
+saved authenticated material still rejects.
 
 Explicit profiles must agree with ordered versions and include typed EMS and
 renegotiation extensions for TLS1.2. Only TLS1.3 offers require key shares. Mixed
@@ -612,3 +613,79 @@ errors preserve shared-core TLS alert categories. TCP defaults, authentication,
 resumption and fingerprint observation are unchanged. See
 [the interface](QUIC_TLS_INTERFACE.md) for precise inbound/outbound limit scope
 and [the ledger](QUIC_TLS_IMPLEMENTATION.md) for actual regression results.
+
+
+## TLS1.2 EMS session-ID reuse
+
+Explicit `reuse_sessions: true | false | :save` and `reuse_session: session_id`
+or `reuse_session: {session_id, session_data}`
+require TLS1.2 in the configured offer. The raw engine retains its previous
+full-handshake default (`reuse_sessions: false`); enabling reuse is explicit.
+`true` selects a compatible automatic session if available and saves newly
+completed sessions. `false` neither selects automatically nor caches a newly
+completed session until the caller explicitly requests `:session_data`. `:save`
+starts a new full handshake and saves its session without selecting automatically.
+An explicit saved ID selects that session independently of automatic selection,
+including with `reuse_sessions: false`. Unknown, evicted or expired IDs continue
+with one full handshake. The public ID is available through
+`SSL.connection_information(socket, [:session_id])`; TLS1.3 returns an empty ID
+through this additive query. The existing default diagnostic key list is unchanged.
+Explicit `:session_data` returns a 40-byte ExSSL-owned opaque capability for use
+as `{session_id, session_data}`. It is a credential, valid only in this VM and
+the original authentication partition, cache retention and absolute lifetime.
+It contains no master secret and is not portable OTP serialized session data;
+foreign formats fail option validation, while a well-formed forged or evicted
+capability takes one full handshake. Repeated exports remain stable while the
+entry exists. Successful explicit reuse with `true` makes that session eligible
+for later automatic reuse without renewing its lifetime; `false`/`:save` do not
+demote an existing automatic session. TLS1.3 returns empty ID/data binaries and
+continues using the separate ticket API.
+
+The separate memory-only TLS1.2 cache retains at most128 sessions, four MiB total,
+256 KiB per session, and an absolute ten-minute lifetime. Resuming does not extend
+that lifetime. Cached binary material is copied, secret inspection/status is
+redacted, and one tokened timer removes expired material. Cache unavailability
+uses a bounded miss and a full handshake. TLS1.3 ticket storage is unchanged.
+
+Partitions include the original ordered profile, requested host/origin, actual
+TCP endpoint, reference identity, SNI, trust snapshot, verification mode/depth,
+hostname policy, and complete configured client identities. Current PKIX validation
+runs again before offering an ID. A changed configuration authenticates afresh;
+advanced CRL/OCSP/partial-chain policies and `verify_fun` always take full
+certificate handshakes and bypass session lookup/saving; `:session_data` then
+returns `{:error, :no_session}`. `verify_none` retains
+its explicit untrusted-certificate semantics and a distinct partition. A caller's
+fixed profile session ID is never replaced with a different cached ID.
+
+Only an EMS session with the saved cipher can resume. ALPN is negotiated afresh
+from the current offer, including a different selection on resumption, as required
+by RFC 7301 section 3.1. The live session records the current selection without
+renewing its lifetime. true/save refresh cached metadata; false does not create
+or revive cache entries to refresh informational ALPN. Changes to the configured
+offer retain partition isolation.
+Fresh connection randoms derive fresh record keys; the server Finished authenticates the exact
+abbreviated transcript before client CCS/Finished is written and the public
+connection succeeds. The server may decline an offered ID and select a full
+handshake on that same connection. Failure never reconnects or replays application
+bytes. Ordinary mTLS reuse retains the independently observed server-side identity;
+a changed client credential selects a separate full handshake.
+
+The focused native selection passes55 checks, including independent OpenSSL
+full/resumed HTTP for all four suites, exact request digests, server-observed
+mTLS identity, save/false/default controls, current PKIX/context isolation,
+cache limits/expiry/privacy, independently computed SHA256/SHA384 vectors,
+fragmentation and negative Finished/AEAD/EMS checks. Installed OTP29.0.2 public
+references accept the controls and expose32-byte IDs; explicit public opaque
+`{id, session_data}` resumes against OpenSSL, including exported false/save
+sessions reused with true. Subsequent automatic reuse still performs a full
+handshake. The same runtime's automatic and saved-ID cache references have not
+resumed, including with valid server-observed mTLS identity and the documented
+public cache callback; that reference gap and integrated candidate/platform acceptance
+remain open. OTP documents automatic reuse as "if possible"; a full-handshake
+fallback alone does not establish an ExSSL implementation failure. This evidence
+does not promote the default HTTP provider or complete
+migration/release gates.
+
+Final source regression passes20 properties/3485 tests with integration included;
+Core transport/source-pin checks pass27/27, strict compile and root formatting pass.
+This does not replace the remaining candidate/package/platform and release gates.

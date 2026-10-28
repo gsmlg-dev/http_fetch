@@ -17,6 +17,8 @@ defmodule SSL.Options do
     :alpn_advertised_protocols,
     session_tickets: :disabled,
     use_ticket: [],
+    reuse_sessions: false,
+    reuse_session: nil,
     verify_fun: :undefined,
     verify: :verify_peer,
     tcp_options: [],
@@ -57,6 +59,8 @@ defmodule SSL.Options do
     :middlebox_comp_mode,
     :session_tickets,
     :use_ticket,
+    :reuse_sessions,
+    :reuse_session,
     :ciphers,
     :signature_algs,
     :signature_algs_cert,
@@ -118,6 +122,8 @@ defmodule SSL.Options do
          endpoint: host,
          session_tickets: Keyword.get(options, :session_tickets, :disabled),
          use_ticket: Keyword.get(options, :use_ticket, []),
+         reuse_sessions: Keyword.get(options, :reuse_sessions, false),
+         reuse_session: Keyword.get(options, :reuse_session),
          verify: Keyword.get(options, :verify, :verify_peer),
          verify_fun: Keyword.get(options, :verify_fun, :undefined),
          identity: identity,
@@ -204,6 +210,9 @@ defmodule SSL.Options do
   end
 
   defp valid_option?(:session_tickets, value), do: value in [:disabled, :auto, :manual]
+  defp valid_option?(:reuse_sessions, value), do: value in [true, false, :save]
+
+  defp valid_option?(:reuse_session, value), do: SSL.TLS12Session.valid_reference?(value)
 
   defp valid_option?(:use_ticket, values), do: valid_manual_candidates?(values, 0)
   defp valid_option?(:middlebox_comp_mode, value), do: is_boolean(value)
@@ -504,6 +513,7 @@ defmodule SSL.Options do
          :ok <- require_version_match(profile, versions),
          :ok <- require_policy_match(profile, policy),
          :ok <- require_middlebox_match(options, profile, versions),
+         :ok <- require_reuse_version(options, versions),
          {:ok, profile} <- stapling_profile(options, profile),
          {:ok, profile} <- ticket_profile(options, profile, versions) do
       validate_profile(profile)
@@ -564,6 +574,13 @@ defmodule SSL.Options do
     if Keyword.get(options, :session_tickets, :disabled) == :auto and identity != nil,
       do: option_error({:session_tickets, :client_identity_unsupported}),
       else: :ok
+  end
+
+  defp require_reuse_version(options, versions) do
+    case Enum.find([:reuse_sessions, :reuse_session], &Keyword.has_key?(options, &1)) do
+      nil -> :ok
+      key -> if 0x0303 in versions, do: :ok, else: option_error({key, :tls12_required})
+    end
   end
 
   defp valid_manual_candidates?([], count), do: count > 0

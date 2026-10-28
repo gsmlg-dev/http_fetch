@@ -212,7 +212,15 @@ defmodule SSL do
   @spec negotiated_protocol(Socket.t()) :: {:ok, binary()} | {:error, term()}
   def negotiated_protocol(socket), do: call(socket, :negotiated_protocol)
 
-  @doc "Returns the supported non-secret connection metadata."
+  @doc """
+  Returns supported connection metadata. The default keys contain no secrets.
+
+  Explicit `:session_data` returns a bounded ExSSL-owned TLS1.2 resumption
+  capability. Treat it as a credential; it is valid only within this VM, its
+  original authentication context, cache retention and absolute session lifetime.
+  Pass it as `reuse_session: {session_id, session_data}`. OTP-private serialized
+  session bytes are not accepted. TLS1.3 uses the separate session-ticket API.
+  """
   @spec connection_information(Socket.t()) :: {:ok, keyword()} | {:error, term()}
   def connection_information(socket), do: connection_information(socket, SSL.Diagnostics.keys())
 

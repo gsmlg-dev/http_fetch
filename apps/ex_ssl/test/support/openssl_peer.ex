@@ -93,6 +93,7 @@ defmodule ExSSL.TestSupport.OpenSSLPeer do
       :max_version,
       :cipher,
       :alpn,
+      :alpn_after_first,
       :verify,
       :mode,
       :max_connections,
@@ -130,7 +131,9 @@ defmodule ExSSL.TestSupport.OpenSSLPeer do
          to_string(Keyword.get(options, :abrupt_close, false))
        ] ++
          optional("--group", options[:group]) ++
-         optional("--cafile", options[:cafile]) ++ optional("--alpn", alpn(options[:alpn]))}
+         optional("--cafile", options[:cafile]) ++
+         optional("--alpn", alpn(options[:alpn])) ++
+         optional("--alpn-after-first", alpn(options[:alpn_after_first]))}
     else
       {:error, :invalid_options}
     end

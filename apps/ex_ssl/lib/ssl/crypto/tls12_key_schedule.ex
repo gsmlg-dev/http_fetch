@@ -59,7 +59,21 @@ defmodule SSL.Crypto.TLS12KeySchedule do
              "extended master secret",
              :crypto.hash(suite.hash, transcript),
              48
-           ),
+           ) do
+      resume(id, master, client_random, server_random)
+    end
+  end
+
+  @doc "Derives fresh record states from a saved EMS master and this connection's randoms."
+  @spec resume(term(), binary(), binary(), binary()) ::
+          {:ok,
+           %{master_secret: binary(), read_state: TLS12Record.t(), write_state: TLS12Record.t()}}
+          | {:error, term()}
+  def resume(id, master, client_random, server_random) do
+    with {:ok, suite} <- suite(id),
+         true <- is_binary(master) and byte_size(master) == 48,
+         :ok <- validate_random(client_random, :client_random),
+         :ok <- validate_random(server_random, :server_random),
          {:ok, block} <-
            prf(
              suite.hash,
@@ -77,6 +91,9 @@ defmodule SSL.Crypto.TLS12KeySchedule do
            {:ok, read} <- TLS12Record.new(suite.cipher, server_key, server_iv) do
         {:ok, %{master_secret: master, read_state: read, write_state: write}}
       end
+    else
+      false -> {:error, :invalid_master_secret}
+      {:error, _} = error -> error
     end
   end
 

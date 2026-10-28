@@ -146,8 +146,12 @@ executed evidence and required work are distinguishable. OTP remains default.
       profile isolation and unchanged automatic-ticket policy. Local source tests
       pass; integrated consumer/platform gates remain required.
 - [ ] Resolve TLS1.2 `reuse_sessions` before default promotion. OTP accepts this
-      control; ExSSL currently rejects it. TLS1.3 manual and automatic resumption
-      do not implement TLS1.2 session reuse.
+      control. ExSSL now implements opt-in EMS abbreviated handshakes and bounded
+      saved IDs and VM-local opaque capabilities (true/false/save), with 55 focused
+      native checks passing, including renegotiated ALPN on resumed connections.
+      Raw reuse remains disabled by default. OTP29 public tuple references pass;
+      native automatic/ID cache misses remain diagnostic. Integrated candidate/platform
+      gates remain open; TLS1.3 ticket support is separate.
 
 Exit: required option/default table resolved with independent positive/negative
 coverage; no supported endpoint class silently lost.

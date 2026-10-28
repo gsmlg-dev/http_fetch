@@ -5241,3 +5241,71 @@ option handling changed. Evidence and exact commands are retained in
 logs. Credo/Dialyzer remain user-deferred; performance, the full remote/runtime and
 candidate-package matrices, final CI and release gates were not run for this slice.
 This source result does not complete P1 or authorize default-provider promotion.
+
+
+## P1 — TLS1.2 EMS session reuse (source acceptance)
+
+The independently implemented EMS abbreviated path passes55 focused checks on
+Elixir1.18.5 / OTP29.0.2. OpenSSL peers observe a full then resumed exchange for
+each existing ECDHE RSA/ECDSA AES128/256 GCM suite, with exact once-only HTTP request
+hashes and fresh record keys. The selection covers automatic opt-in, false/default
+no-cache behavior, save-only public IDs, false/save opaque capability exports,
+forged/evicted capabilities, explicit-true promotion without lifetime renewal,
+server-observed mTLS identity and credential changes, callback full handshakes,
+profile/ALPN partitions, trust/reference rejection, same-connection cache decline,
+bad-master failure without replay, mixed TLS12/TLS13, current PKIX revalidation,
+bounded cache expiry/privacy, live secret/timer cleanup, and independent
+Finished/key-expansion vectors with fragmentation and negative AEAD/Finished/EMS.
+Raw reuse remains disabled by default.
+
+RFC7301 section3.1 requires ALPN to be negotiated for the current handshake.
+An agreed red check reproduced `tls12_session_mismatch` when a saved h2 session
+selected offered http/1.1. The corrected path accepts this selection and refreshes
+live saved metadata without renewing lifetime; unoffered or malformed ALPN still
+fails. An independent OpenSSL context preserves its session cache while changing
+preference from h2 to http/1.1: the server confirms actual reuse, both sides report
+the new ALPN, absolute lifetime stays fixed and record keys differ. This is a TLS
+framed-echo scenario, not an HTTP/2 application-readiness claim. Root independently
+recomputed all12 existing fixed Finished/key-block vector values and found matches.
+
+The separate TLS1.2 cache holds128 entries/four MiB/256 KiB per entry, with a
+ten-minute absolute lifetime, owned binaries, redacted state and one cleanup timer.
+Explicit `:session_id` and `:session_data` diagnostics leave default keys unchanged.
+Session data is a40-byte VM-local ExSSL capability; no OTP-private serialization or
+master secret is exported. false does not cache a fresh session until explicit
+export. Advanced policies bypass lookup/saving and cannot export a session.
+Default-provider promotion, candidate/platform integration and release gates are
+not claimed; performance is outside this goal, Credo/Dialyzer user-deferred.
+
+Installed OTP29.0.2/ssl11.7.2 public references accept true/false/save and expose
+32-byte IDs. Public opaque tuples resume against OpenSSL, including false/save
+exports followed by explicit true. Automatic and saved-ID references have not
+resumed, including clean close, open sockets, OTP server, Python/CLI OpenSSL,
+valid server-observed mTLS identities and a documented public cache callback that
+stores only opaque terms. Subsequent auto after explicit-true reuse also remains
+full in that runtime. Loaded modules and compile metadata confirm the intended
+installed OTP29 artifacts. No private OTP session structures are copied or
+accepted by production. This observed reference difference remains unresolved.
+OTP documents automatic reuse as "if possible", so a full fallback alone is not
+an ExSSL implementation failure; independent ExSSL positive interoperability and
+reference observations are separate evidence.
+
+Strict umbrella compile passes. Round3 focused receipt is `repair3-focused.json`;
+the agreed red receipt is `repair3-alpn-red.json`. The earlier full ExSSL run
+reached its600s process cap and recorded a native setup400ms control deadline
+failure before TLS attach; isolated unchanged current and original Connection
+runs each pass4/4, which does not establish aggregate causality. The capped run
+is not a passing suite; its process audit confirms owned children stopped. An
+adequate1800s aggregate run subsequently passes20 properties/3485 tests,0 failures
+in677.9s (679.566s process wall). All1836 ledgered OpenSSL peers join and the
+post-run process audit finds no owned run/peer remaining. Core source-pin/transport
+checks pass27/27, and the complete Fetch H2 source suite passes43/43 with unchanged
+assertions/deadlines after its audited Connection pin update. Root formatter and
+diff checks pass. The earlier isolated setup
+passes and final aggregate green do not prove the cause of the original deadline.
+The whitelisted OTP cache-config read finds no configured cache overrides.
+Commands, actual terminal receipts,
+booleans/length-only OTP output, and independent vector recipe remain under
+`/private/tmp/http-fetch-tls12-session-reuse-sol-20261027T2320Z/`.
+The H2, vector and pin-audit receipts are retained under
+`/private/tmp/http-fetch-tls12-candidate-suite-root-20261027T2340Z/`.

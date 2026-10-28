@@ -98,6 +98,7 @@ def main():
     parser.add_argument("--max-version", choices=["tls12", "tls13"], required=True)
     parser.add_argument("--cipher", default="ECDHE-RSA-AES128-GCM-SHA256")
     parser.add_argument("--alpn", default="")
+    parser.add_argument("--alpn-after-first", default="")
     parser.add_argument("--verify", choices=["none", "optional", "required"], default="none")
     parser.add_argument("--mode", choices=["echo", "http1"], default="echo")
     parser.add_argument("--max-connections", type=int, default=1)
@@ -133,6 +134,10 @@ def main():
         raw.settimeout(10)
         if args.restart_context == "true" and accepted > 1:
             context = make_context(args, versions)
+        if args.alpn_after_first and accepted > 1:
+            # Preserve the same OpenSSL session cache while changing the current
+            # handshake's ALPN preference, as RFC 7301 permits on resumption.
+            context.set_alpn_protocols(args.alpn_after_first.split(","))
         try:
             with context.wrap_socket(raw, server_side=True) as connection:
                 der = connection.getpeercert(binary_form=True)

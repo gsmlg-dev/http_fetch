@@ -21,7 +21,7 @@ defmodule SSL.Diagnostics do
 
   defp validate_keys([], _seen), do: :ok
 
-  defp validate_keys([key | rest], seen) when key in @keys do
+  defp validate_keys([key | rest], seen) when key in [:session_id, :session_data | @keys] do
     if Map.has_key?(seen, key) do
       {:error, {:options, :duplicate_connection_information_key}}
     else
@@ -46,7 +46,9 @@ defmodule SSL.Diagnostics do
           mac: :aead,
           prf: suite.hash
         },
-        session_resumption: Map.get(machine, :resumed, false) == true
+        session_resumption: Map.get(machine, :resumed, false) == true,
+        session_id: if(is_struct(machine, TLS12), do: machine.session_id, else: <<>>),
+        session_data: <<>>
       }
 
       {:ok, Enum.map(keys, &{&1, Map.fetch!(values, &1)})}
