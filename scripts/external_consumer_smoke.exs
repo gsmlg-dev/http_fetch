@@ -181,9 +181,19 @@ defmodule ExternalConsumerSmoke do
       :ssl.close(listen)
     end)
 
+    # Each selector must establish its own connection, even when both resolve to ExSSL.
     for {label, options} <- [
-          default: [http_version: :http2, ssl: [cacertfile: cacertfile]],
-          ex_ssl: [http_version: :http2, tls_backend: :ex_ssl, ssl: [cacertfile: cacertfile]]
+          default: [
+            http_version: :http2,
+            http2_scope: :external_consumer_default,
+            ssl: [cacertfile: cacertfile]
+          ],
+          ex_ssl: [
+            http_version: :http2,
+            http2_scope: :external_consumer_ex_ssl,
+            tls_backend: :ex_ssl,
+            ssl: [cacertfile: cacertfile]
+          ]
         ] do
       response = HTTP.fetch("https://localhost:#{port}/", options) |> HTTP.Promise.await()
 
