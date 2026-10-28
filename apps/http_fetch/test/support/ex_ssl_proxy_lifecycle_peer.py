@@ -11,6 +11,57 @@ import threading
 import time
 
 
+def request_body(conn, headers, max_body=4 * 1024 * 1024):
+    def exact(size):
+        data = bytearray()
+        while len(data) < size:
+            part = conn.recv(min(65536, size - len(data)))
+            if not part:
+                raise EOFError('incomplete request body')
+            data.extend(part)
+        return bytes(data)
+
+    if 'transfer-encoding' not in headers:
+        try:
+            return exact(int(headers.get('content-length', 0)))
+        except EOFError:
+            # Preserve the original fixed-length peer's incomplete-upload exit.
+            return None
+    if headers['transfer-encoding'].lower() != 'chunked' or 'content-length' in headers:
+        raise ValueError('unsupported or ambiguous transfer coding')
+
+    framing = 0
+
+    def line():
+        nonlocal framing
+        data = bytearray()
+        while not data.endswith(b'\r\n'):
+            data.extend(exact(1))
+            framing += 1
+            if len(data) > 8192 or framing > 32768:
+                raise ValueError('chunk framing bound exceeded')
+        return bytes(data[:-2])
+
+    body = bytearray()
+    while True:
+        size = line()
+        if not size or any(byte not in b'0123456789abcdefABCDEF' for byte in size):
+            raise ValueError('invalid chunk size')
+        size = int(size, 16)
+        if len(body) + size > max_body:
+            raise ValueError('chunked body bound exceeded')
+        if size == 0:
+            while True:
+                trailer = line()
+                if not trailer:
+                    return bytes(body)
+                if b':' not in trailer:
+                    raise ValueError('invalid chunk trailer')
+        body.extend(exact(size))
+        if exact(2) != b'\r\n':
+            raise ValueError('invalid chunk terminator')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cert', required=True)
@@ -74,13 +125,9 @@ def main():
             lines = data.decode('ascii').split('\r\n')
             method, target, _ = lines[0].split(' ')
             headers = [tuple(line.split(': ', 1)) for line in lines[1:-2]]
-            size = int(dict((k.lower(), v) for k, v in headers).get('content-length', 0))
-            body = bytearray()
-            while len(body) < size:
-                part = conn.recv(min(65536, size-len(body)))
-                if not part:
-                    return
-                body.extend(part)
+            body = request_body(conn, dict((k.lower(), v) for k, v in headers))
+            if body is None:
+                return
             record(cid, 0, method, target, headers, bytes(body))
             if '/hold' in target:
                 while not stop.is_set():

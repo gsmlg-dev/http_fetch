@@ -1,10 +1,13 @@
 defmodule HTTP.TLSSetupEvidenceTest do
   use ExUnit.Case, async: true
 
+  alias ExSSL.TestSupport.ManagedLifecycleProbe, as: Probe
+
   @fixtures Path.expand("../support/fixtures", __DIR__)
+  @tls12_peer Path.expand("../support/ex_ssl_proxy_lifecycle_peer.py", __DIR__)
 
   @tag :integration
-  test "certificate rejection after ServerHello proves no HTTP and cleanup observes TLS processes" do
+  test "certificate rejection proves no HTTP while cleanup joins the original provider resources" do
     {listener, second, port} = paired_listeners()
     parent = self()
 
@@ -29,29 +32,47 @@ defmodule HTTP.TLSSetupEvidenceTest do
       )
 
     handle = HTTP.Promise.completion(promise)
-    assert_receive {:verify_ready, receiver}, 3_000
+    assert_receive {:verify_ready, verifier}, 3_000
     assert_receive {:bad_certificate, :unknown_ca}, 3_000
-    tls = for {_, {pid, :tls}} <- :sys.get_state(handle.tracker).resources, do: pid
-    assert receiver in tls
-    assert length(tls) == 2
-    sender = Enum.find(tls, &(&1 != receiver))
-    monitors = Enum.map(tls, &{&1, Process.monitor(&1)})
-    true = :erlang.suspend_process(sender)
-    on_exit(fn -> if Process.alive?(sender), do: :erlang.resume_process(sender) end)
-    send(receiver, :reject)
+    graph = provider_graph(handle)
+    assert verifier == graph.connection
+    assert true = Probe.suspend(graph, :writer)
 
-    assert {:error, %HTTP.RequestError{phase: :tls_setup, request_started: false} = error} =
+    on_exit(fn ->
+      Probe.resume(graph, :writer)
+      Probe.resume(graph, :observer)
+      Probe.release_monitors(graph)
+    end)
+
+    send(verifier, :reject)
+    await_setup_proof(graph.handle, deadline)
+    assert Probe.alive?(graph, :writer)
+    assert {:pending, _} = SSL.Lifecycle.await(graph.handle, {:abs_ms, now()})
+    assert {:error, :cleanup_pending} = HTTP.RequestCompletion.await(handle, 0)
+    assert Task.yield(promise.task, 0) == nil
+
+    # ExSSL eagerly terminates Writer after its bounded fatal alert. Hold the
+    # original Observer instead to prove that the returned TLS error still does
+    # not authorize cleanup until the provider's final evidence is joined.
+    assert true = Probe.suspend(graph, :observer)
+    Probe.resume(graph, :writer)
+
+    assert {:error,
+            %HTTP.RequestError{
+              phase: :tls_setup,
+              request_started: false,
+              reason: {:tls_alert, {:unknown_ca, _}}
+            } = error} =
              HTTP.Promise.await(promise, 3_000)
 
     assert HTTP.RequestError.pre_send?(error)
-    assert Process.alive?(sender)
+    Probe.await_down(graph, [:connection, :writer, :tcp], 3_000)
+    assert Probe.alive?(graph, :observer)
     assert {:error, :cleanup_pending} = HTTP.RequestCompletion.await(handle, 0)
-    true = :erlang.resume_process(sender)
-
-    for {pid, monitor} <- monitors,
-        do: assert_receive({:DOWN, ^monitor, :process, ^pid, _}, 3_000)
-
+    Probe.resume(graph, :observer)
+    Probe.await_down(graph, [:observer], 3_000)
     assert :ok = HTTP.RequestCompletion.await(handle, 3_000)
+    Probe.release_monitors(graph)
     assert_receive {:peer_result, {:error, {:tls_alert, _}}}, 3_000
     Task.await(peer)
     assert_receive {:DOWN, ^upload_monitor, :process, ^upload, _}, 3_000
@@ -106,26 +127,41 @@ defmodule HTTP.TLSSetupEvidenceTest do
   end
 
   @tag :integration
-  test "fatal alert before ServerHello remains unknown and cleanup unconfirmed" do
+  test "fatal alert before ServerHello has unknown request phase and confirmed provider cleanup" do
     {listener, port} = listener()
+    parent = self()
 
     peer =
       Task.async(fn ->
         {:ok, tcp} = :gen_tcp.accept(listener, 2_000)
         assert {:ok, _hello} = :gen_tcp.recv(tcp, 0, 2_000)
+        send(parent, {:before_alert, self()})
+
+        receive do
+          :fatal_alert -> :ok
+        after
+          2_000 -> flunk("fatal alert gate expired")
+        end
+
         :ok = :gen_tcp.send(tcp, <<21, 3, 3, 0, 2, 2, 40>>)
         :gen_tcp.close(tcp)
       end)
 
     promise = HTTP.fetch("https://pinned.invalid:#{port}/", options())
+    handle = HTTP.Promise.completion(promise)
+    assert_receive {:before_alert, peer_pid}, 2_000
+    graph = provider_graph(handle)
+    on_exit(fn -> Probe.release_monitors(graph) end)
+    send(peer_pid, :fatal_alert)
 
     assert {:error, %HTTP.RequestError{phase: :unknown} = error} =
              HTTP.Promise.await(promise, 3_000)
 
     refute HTTP.RequestError.pre_send?(error)
 
-    assert {:error, :cleanup_unconfirmed} =
-             HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 3_000)
+    Probe.await_down(graph, [:connection, :writer, :tcp, :observer], 3_000)
+    assert :ok = HTTP.RequestCompletion.await(handle, 3_000)
+    Probe.release_monitors(graph)
 
     Task.await(peer)
   end
@@ -170,11 +206,10 @@ defmodule HTTP.TLSSetupEvidenceTest do
     end
   end
 
-  for {name, request_opts, ssl_opts} <- [
-        {:pooled, [http1_reuse: true], []},
-        {:http2, [http_version: :http2], []},
-        {:custom_handshake, [], [handshake: :full]},
-        {:raw, [error_mode: :raw], []}
+  for {name, request_opts} <- [
+        {:pooled, [http1_reuse: true]},
+        {:http2, [http_version: :http2]},
+        {:raw, [error_mode: :raw]}
       ] do
     @tag :integration
     test "#{name} does not expose confirmed TLS setup evidence" do
@@ -183,13 +218,13 @@ defmodule HTTP.TLSSetupEvidenceTest do
       peer =
         Task.async(fn ->
           {:ok, tcp} = :gen_tcp.accept(listener, 2_000)
-          result = :ssl.handshake(tcp, server_options(), 3_000)
+          assert {:error, {:tls_alert, _}} = :ssl.handshake(tcp, server_options(), 3_000)
           :gen_tcp.close(tcp)
-          result
         end)
 
-      # An untrusted CA makes verification fail without custom test callbacks.
-      ssl_opts = [cacerts: []] ++ unquote(ssl_opts)
+      # Empty trust is an option error in ExSSL. A valid unrelated CA reaches
+      # the certificate rejection that these excluded-route cases exercise.
+      ssl_opts = [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
       request_opts = Keyword.merge(options(), unquote(request_opts))
       request_opts = Keyword.put(request_opts, :ssl, ssl_opts)
       promise = HTTP.fetch("https://pinned.invalid:#{port}/", request_opts)
@@ -198,35 +233,42 @@ defmodule HTTP.TLSSetupEvidenceTest do
 
       if unquote(name) == :raw do
         refute match?(%HTTP.RequestError{}, error)
-        assert match?({:tls_alert, _}, error)
+        assert {:tls_alert, {:unknown_ca, _}} = error
       else
-        assert %HTTP.RequestError{phase: :unknown} = error
+        assert %HTTP.RequestError{
+                 phase: :unknown,
+                 request_started: :unknown,
+                 reason: {:tls_alert, {:unknown_ca, _}}
+               } = error
       end
 
       Task.await(peer, 4_000)
+      assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 3_000)
+      assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
     end
   end
 
-  @tag :integration
-  test "early_data does not expose confirmed TLS setup evidence" do
-    {_listener, port} = listener()
-    request_opts = Keyword.put(options(), :ssl, cacerts: [], early_data: <<"must not transmit">>)
+  for {name, option} <- [
+        {:custom_handshake, {:handshake, :full}},
+        {:early_data, {:early_data, "must not transmit"}}
+      ] do
+    @tag :integration
+    test "unsupported #{name} grants no setup evidence and makes no connection" do
+      {listener, port} = listener()
+      key = unquote(elem(option, 0))
+      promise = HTTP.fetch("https://pinned.invalid:#{port}/", options([unquote(option)]))
 
-    # OTP rejects early_data with disabled session tickets before starting TLS.
-    # The raw TCP connect may already have been aborted when a peer accepts it;
-    # requiring a successful accept/handshake here races that option rejection.
-    # No peer task is needed: keep the listener owned until the public result,
-    # and assert this option failure never grants caller-managed replay evidence.
-    promise = HTTP.fetch("https://pinned.invalid:#{port}/", request_opts)
+      assert {:error,
+              %HTTP.RequestError{
+                reason: {:options, {^key, :unsupported_or_invalid}},
+                phase: :unknown,
+                request_started: :unknown
+              } = error} = HTTP.Promise.await(promise, 3_000)
 
-    assert {:error,
-            %HTTP.RequestError{
-              reason: {:options, :incompatible, [:early_data, {:session_tickets, :disabled}]},
-              phase: :unknown,
-              request_started: :unknown
-            } = error} = HTTP.Promise.await(promise, 3_000)
-
-    refute HTTP.RequestError.pre_send?(error)
+      refute HTTP.RequestError.pre_send?(error)
+      assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 3_000)
+      assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
+    end
   end
 
   @tag :integration
@@ -390,45 +432,155 @@ defmodule HTTP.TLSSetupEvidenceTest do
   for version <- [:"tlsv1.2", :"tlsv1.3"] do
     @tag :integration
     test "ordinary successful #{version} preserves verified authority and supports a rebuilt upload" do
-      {listener, port} = listener()
-      parent = self()
       version = unquote(version)
-
-      peer =
-        Task.async(fn ->
-          {:ok, tcp} = :gen_tcp.accept(listener, 2_000)
-          {:ok, socket} = :ssl.handshake(tcp, [versions: [version]] ++ server_options(), 2_000)
-          {:ok, info} = :ssl.connection_information(socket, [:sni_hostname, :protocol])
-          send(parent, {:identity, info})
-          request = receive_request(socket, "")
-          send(parent, {:request, request})
-
-          :ok =
-            :ssl.send(socket, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-
-          :ssl.close(socket)
-        end)
-
+      {peer, port} = success_peer(version)
       {:ok, upload} = HTTP.Stream.from_enumerable(["once"], telemetry: false)
+      upload_monitor = Process.monitor(upload)
 
       promise =
         HTTP.fetch(
           "https://pinned.invalid:#{port}/mutation",
-          options(versions: [version]) ++ [method: :post, body: upload, duplex: "half"]
+          options(versions: [version], alpn_advertised_protocols: ["http/1.1"]) ++
+            [method: :post, body: upload, duplex: "half"]
         )
 
       assert %HTTP.Response{status: 200} = HTTP.Promise.await(promise, 3_000)
       assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 3_000)
-      assert_receive {:identity, info}
-      assert info[:sni_hostname] == ~c"pinned.invalid"
-      assert info[:protocol] == version
-      assert_receive {:request, bytes}
-      assert bytes =~ "Host: pinned.invalid:#{port}\r\n"
-      assert bytes =~ "POST /mutation HTTP/1.1\r\n"
-      assert length(:binary.matches(bytes, "once")) == 1
-      Task.await(peer)
+      assert_receive {:DOWN, ^upload_monitor, :process, ^upload, _}, 3_000
+      assert_successful_peer(peer, port, version)
     end
   end
+
+  defp provider_graph(completion) do
+    [handle] = completion.tracker |> :sys.get_state() |> Map.fetch!(:providers) |> Map.keys()
+    Probe.graph_handle(handle)
+  end
+
+  defp await_setup_proof(handle, deadline) do
+    case SSL.Lifecycle.setup_failure(handle) do
+      {:ok, %{phase: :tls_setup}} ->
+        :ok
+
+      :unknown ->
+        assert now() < deadline
+
+        receive do
+        after
+          1 -> await_setup_proof(handle, deadline)
+        end
+    end
+  end
+
+  # The OTP TLS1.2 reference lacks EMS. Keep its TLS1.3 control and use the
+  # existing independent peer for TLS1.2 with the same chunked upload/authority.
+  defp success_peer(:"tlsv1.2") do
+    peer =
+      Port.open({:spawn_executable, System.find_executable("python3")}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        {:line, 65_536},
+        args: [
+          "-B",
+          @tls12_peer,
+          "--cert",
+          Path.join(@fixtures, "pinned.pem"),
+          "--key",
+          Path.join(@fixtures, "pinned.key"),
+          "--tls",
+          "TLSv1.2",
+          "--protocol",
+          "http/1.1",
+          "--route",
+          "forward"
+        ]
+      ])
+
+    on_exit(fn -> if Port.info(peer), do: Port.close(peer) end)
+    assert %{"event" => "ready", "port" => port} = peer_event(peer, 2_000)
+    {{:openssl, peer}, port}
+  end
+
+  defp success_peer(:"tlsv1.3" = version) do
+    {listener, port} = listener()
+    parent = self()
+
+    peer =
+      Task.async(fn ->
+        {:ok, tcp} = :gen_tcp.accept(listener, 2_000)
+        {:ok, socket} = :ssl.handshake(tcp, [versions: [version]] ++ server_options(), 2_000)
+        {:ok, info} = :ssl.connection_information(socket, [:sni_hostname, :protocol])
+        send(parent, {:identity, info})
+        send(parent, {:request, receive_request(socket, "")})
+
+        :ok =
+          :ssl.send(socket, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+
+        :ssl.close(socket)
+      end)
+
+    {{:otp, peer}, port}
+  end
+
+  defp assert_successful_peer({:otp, peer}, port, version) do
+    assert_receive {:identity, info}
+    assert info[:sni_hostname] == ~c"pinned.invalid"
+    assert info[:protocol] == version
+    assert_receive {:request, bytes}
+    assert bytes =~ "Host: pinned.invalid:#{port}\r\n"
+    assert bytes =~ "POST /mutation HTTP/1.1\r\n"
+    assert length(:binary.matches(bytes, "once")) == 1
+    Task.await(peer)
+  end
+
+  defp assert_successful_peer({:openssl, peer}, port, :"tlsv1.2") do
+    state = peer_closed(peer, now() + 2_000)
+    assert state["accepted_connections"] == 1
+    assert state["closed_connections"] == 1
+    assert state["active_connections"] == 0
+    assert state["errors"] == []
+
+    assert [%{"tls" => "TLSv1.2", "sni" => "pinned.invalid", "alpn" => "http/1.1"}] =
+             state["handshakes"]
+
+    assert [%{"method" => "POST", "target" => "/mutation", "body" => body, "headers" => headers}] =
+             state["requests"]
+
+    assert Base.decode64!(body) == "once"
+    headers = Map.new(headers, fn {key, value} -> {String.downcase(key), value} end)
+    assert headers["host"] == "pinned.invalid:#{port}"
+    assert headers["transfer-encoding"] == "chunked"
+    refute Map.has_key?(headers, "content-length")
+    assert Port.command(peer, JSON.encode!(%{command: "stop"}) <> "\n")
+    assert %{"event" => "stop"} = peer_event(peer, 2_000)
+    assert_receive {^peer, {:exit_status, 0}}, 3_000
+  end
+
+  defp peer_closed(peer, deadline) do
+    assert now() < deadline
+    assert Port.command(peer, JSON.encode!(%{command: "stats"}) <> "\n")
+    state = peer_event(peer, max(deadline - now(), 0))
+
+    if state["closed_connections"] == 1 do
+      state
+    else
+      receive do
+      after
+        2 -> peer_closed(peer, deadline)
+      end
+    end
+  end
+
+  defp peer_event(peer, timeout) do
+    receive do
+      {^peer, {:data, {:eol, line}}} -> JSON.decode!(line)
+      {^peer, {:exit_status, code}} -> flunk("TLS1.2 setup peer exited with #{code}")
+    after
+      timeout -> flunk("TLS1.2 setup peer event timeout")
+    end
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
 
   defp receive_request(socket, bytes) do
     if String.ends_with?(bytes, "0\r\n\r\n") do
@@ -444,7 +596,7 @@ defmodule HTTP.TLSSetupEvidenceTest do
       connect_address: {127, 0, 0, 1},
       redirect: :manual,
       error_mode: :structured,
-      tls_backend: :ssl,
+      tls_backend: :ex_ssl,
       telemetry: false,
       timeout: 4_000,
       ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")] ++ extra

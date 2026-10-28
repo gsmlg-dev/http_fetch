@@ -51,21 +51,20 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
     retire(compact)
   end
 
-  for backend <- [:default, :ssl],
+  for backend <- [:default, :ex_ssl],
       version <- [:"tlsv1.2", :"tlsv1.3"],
       {host, ca_file, rejection} <- [
         {"localhost", "pinned-ca.pem", :wrong_ca},
         {"wrong.invalid", "localhost-ca.pem", :wrong_identity}
       ] do
     alert =
-      case {backend, version, rejection} do
-        {:default, :"tlsv1.2", _} -> :bad_certificate
-        {:default, :"tlsv1.3", :wrong_identity} -> :certificate_unknown
-        {_, _, :wrong_ca} -> :unknown_ca
-        {:ssl, _, :wrong_identity} -> :bad_certificate
+      case {version, rejection} do
+        {:"tlsv1.2", _} -> :bad_certificate
+        {:"tlsv1.3", :wrong_identity} -> :certificate_unknown
+        {:"tlsv1.3", :wrong_ca} -> :unknown_ca
       end
 
-    cleanup = if backend == :ssl, do: {:error, :cleanup_unconfirmed}, else: :ok
+    cleanup = :ok
 
     test "#{backend} #{version} borrowed CA keeps #{rejection} #{alert} refusal without HTTP bytes or replay" do
       {origin, peer} = rejection_peer(unquote(host), unquote(backend), unquote(version))
@@ -94,7 +93,7 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
   end
 
   # OTP's TLS 1.2 peer lacks required EMS, so it cannot reach ExSSL certificate checks.
-  defp rejection_peer(host, :default, :"tlsv1.2") do
+  defp rejection_peer(host, backend, :"tlsv1.2") when backend in [:default, :ex_ssl] do
     port =
       Port.open({:spawn_executable, System.find_executable("python3")}, [
         :binary,
