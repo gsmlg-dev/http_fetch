@@ -25,21 +25,35 @@ context.load_cert_chain(args.cert, args.key)
 context.set_alpn_protocols(['http/1.1' if args.protocol == 'http/1.1' else 'h2'])
 handshake = threading.Event()
 responses = threading.Event()
+stopping = threading.Event()
 lock = threading.Lock()
+resources_lock = threading.Lock()
+connections = set()
+workers = []
 counts = {'accepted': 0, 'handshakes': 0, 'requests': 0, 'settings_acks': 0,
           'inflight_handshakes': 0, 'peak_inflight_handshakes': 0,
           'negotiation_us_total': 0, 'negotiation_us_max': 0}
 
 
+def write_report(event, **fields):
+    if stopping.is_set():
+        return
+    try:
+        print(json.dumps({'event': event, **counts, **fields}), flush=True)
+    except BrokenPipeError:
+        stopping.set()
+        sys.stdout = None
+
+
 def report(event, **fields):
     with lock:
-        print(json.dumps({'event': event, **counts, **fields}), flush=True)
+        write_report(event, **fields)
 
 
 def increment(name):
     with lock:
         counts[name] += 1
-        print(json.dumps({'event': name, **counts}), flush=True)
+        write_report(name)
 
 
 def finish_handshake(start, success):
@@ -50,55 +64,72 @@ def finish_handshake(start, success):
             counts['handshakes'] += 1
             counts['negotiation_us_total'] += elapsed
             counts['negotiation_us_max'] = max(counts['negotiation_us_max'], elapsed)
-        print(json.dumps({'event': 'handshake_settled', **counts}), flush=True)
+        write_report('handshake_settled')
 
 
 def serve(raw, started):
     settled = False
+    sock = raw
     try:
         handshake.wait()
-        if args.protocol == 'fail':
-            raw.close()
+        if stopping.is_set() or args.protocol == 'fail':
             return
-        with context.wrap_socket(raw, server_side=True) as sock:
-            sock.settimeout(15)
-            finish_handshake(started, True)
-            settled = True
-            if args.protocol == 'http/1.1':
-                data = b''
-                while b'\r\n\r\n' not in data:
-                    data += sock.recv(65536)
-                increment('requests')
-                responses.wait()
-                sock.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok')
-                # Wait for the consumer to close after parsing the complete reply.
-                while sock.recv(65536):
-                    pass
+        with resources_lock:
+            if stopping.is_set():
                 return
-            conn = H2Connection(config=H2Configuration(client_side=False))
-            conn.local_settings = Settings(client=False, initial_values={SettingCodes.MAX_CONCURRENT_STREAMS: args.limit})
-            conn.initiate_connection()
-            sock.sendall(conn.data_to_send())
-            while True:
-                data = sock.recv(65536)
-                if not data:
+            sock = context.wrap_socket(raw, server_side=True, do_handshake_on_connect=False)
+            connections.remove(raw)
+            connections.add(sock)
+        sock.settimeout(15)
+        sock.do_handshake()
+        finish_handshake(started, True)
+        settled = True
+        if args.protocol == 'http/1.1':
+            data = b''
+            while b'\r\n\r\n' not in data:
+                chunk = sock.recv(65536)
+                if not chunk:
                     return
-                for event in conn.receive_data(data):
-                    if isinstance(event, SettingsAcknowledged):
-                        increment('settings_acks')
-                    if isinstance(event, StreamEnded):
-                        increment('requests')
-                        responses.wait()
-                        conn.send_headers(event.stream_id, [(':status', '200'), ('content-length', '2')])
-                        conn.send_data(event.stream_id, b'ok', end_stream=True)
-                output = conn.data_to_send()
-                if output:
-                    sock.sendall(output)
+                data += chunk
+            increment('requests')
+            responses.wait()
+            if stopping.is_set():
+                return
+            sock.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok')
+            # Wait for the consumer to close after parsing the complete reply.
+            while sock.recv(65536):
+                pass
+            return
+        conn = H2Connection(config=H2Configuration(client_side=False))
+        conn.local_settings = Settings(client=False, initial_values={SettingCodes.MAX_CONCURRENT_STREAMS: args.limit})
+        conn.initiate_connection()
+        sock.sendall(conn.data_to_send())
+        while True:
+            data = sock.recv(65536)
+            if not data:
+                return
+            for event in conn.receive_data(data):
+                if isinstance(event, SettingsAcknowledged):
+                    increment('settings_acks')
+                if isinstance(event, StreamEnded):
+                    increment('requests')
+                    responses.wait()
+                    if stopping.is_set():
+                        return
+                    conn.send_headers(event.stream_id, [(':status', '200'), ('content-length', '2')])
+                    conn.send_data(event.stream_id, b'ok', end_stream=True)
+            output = conn.data_to_send()
+            if output:
+                sock.sendall(output)
     except (OSError, ssl.SSLError, TimeoutError):
-        raw.close()
+        pass
     except Exception as error:
         report('error', detail=repr(error))
     finally:
+        with resources_lock:
+            sock.close()
+            connections.discard(sock)
+            connections.discard(raw)
         if not settled:
             finish_handshake(started, False)
 
@@ -106,22 +137,38 @@ def serve(raw, started):
 listener = socket.socket()
 listener.bind(('127.0.0.1', 0))
 listener.listen(128)
+listener.settimeout(0.2)
 report('ready', port=listener.getsockname()[1], peer='hyper-h2', version=h2.__version__)
 
 
 def accept():
-    while True:
-        sock, _ = listener.accept()
+    while not stopping.is_set():
+        try:
+            sock, _ = listener.accept()
+        except socket.timeout:
+            continue
+        except OSError:
+            if stopping.is_set():
+                return
+            raise
         started = time.monotonic_ns()
+        with resources_lock:
+            if stopping.is_set():
+                sock.close()
+                return
+            connections.add(sock)
         with lock:
             counts['accepted'] += 1
             counts['inflight_handshakes'] += 1
             counts['peak_inflight_handshakes'] = max(counts['peak_inflight_handshakes'], counts['inflight_handshakes'])
-            print(json.dumps({'event': 'accepted', **counts}), flush=True)
-        threading.Thread(target=serve, args=(sock, started), daemon=True).start()
+            write_report('accepted')
+        worker = threading.Thread(target=serve, args=(sock, started))
+        workers.append(worker)
+        worker.start()
 
 
-threading.Thread(target=accept, daemon=True).start()
+acceptor = threading.Thread(target=accept)
+acceptor.start()
 for line in sys.stdin:
     command = line.strip()
     if command == 'handshake':
@@ -132,4 +179,20 @@ for line in sys.stdin:
         report('snapshot')
     elif command == 'stop':
         break
+stopping.set()
 listener.close()
+handshake.set()
+responses.set()
+acceptor.join()
+with resources_lock:
+    for sock in connections:
+        # Wake native I/O without mutating the SSL object owned by its worker.
+        native = socket.socket(fileno=sock.fileno())
+        try:
+            native.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        finally:
+            native.detach()
+for worker in workers:
+    worker.join()
