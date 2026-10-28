@@ -283,7 +283,7 @@ defmodule NoOTP.ReleaseAudit do
     {dynamic, missing} =
       case Keyword.fetch!(chunks, :abstract_code) do
         {:raw_abstract_v1, forms} ->
-          {walk_calls(qualify_named_dispatches(forms, imports), path), false}
+          {walk_calls(resolve_lexical(qualify_named_dispatches(forms, imports)), path), false}
 
         :no_abstract_code ->
           {[], true}
@@ -362,6 +362,255 @@ defmodule NoOTP.ReleaseAudit do
 
   defp qualify_named_calls(term, _targets), do: term
 
+  # Resolve only values established by the abstract code's lexical bindings.
+  # This never evaluates scanned expressions. Anonymous bodies are scanned once
+  # at their definition under the captured environment; uses carry a body-free
+  # proof of literal fun identity, avoiding recursive/exponential substitution.
+  defp resolve_lexical(forms) do
+    Enum.map(forms, fn
+      {:function, line, name, arity, clauses} ->
+        clauses = Enum.map(clauses, fn clause -> elem(resolve_clause(clause, %{}, true), 0) end)
+        {:function, line, name, arity, clauses}
+
+      form ->
+        form
+    end)
+  end
+
+  defp resolve_clause({:clause, line, patterns, guards, body}, environment, shadow) do
+    environment =
+      if shadow, do: Map.drop(environment, pattern_variables(patterns)), else: environment
+
+    guards = Enum.map(guards, fn guard -> elem(resolve_sequence(guard, environment), 0) end)
+    {body, environment, value} = resolve_sequence(body, environment)
+    {{:clause, line, patterns, guards, body}, environment, value}
+  end
+
+  defp resolve_sequence(expressions, environment) do
+    {resolved, {environment, value}} =
+      Enum.map_reduce(expressions, {environment, :unknown}, fn expression, {scope, _value} ->
+        {expression, scope, value} = resolve_expression(expression, scope)
+        {expression, {scope, value}}
+      end)
+
+    {resolved, environment, value}
+  end
+
+  defp resolve_expression({:var, _, name} = expression, environment) do
+    value = Map.get(environment, name, :unknown)
+    {if(value == :unknown, do: expression, else: value), environment, value}
+  end
+
+  defp resolve_expression({:match, line, pattern, expression}, environment) do
+    {expression, environment, value} = resolve_expression(expression, environment)
+    environment = bind_pattern(pattern, value, environment)
+    {{:match, line, pattern, expression}, environment, value}
+  end
+
+  defp resolve_expression({:block, line, body}, environment) do
+    {body, environment, value} = resolve_sequence(body, environment)
+    {{:block, line, body}, environment, value}
+  end
+
+  defp resolve_expression({:fun, line, {:clauses, clauses}}, environment) do
+    clauses =
+      Enum.map(clauses, fn clause -> elem(resolve_clause(clause, environment, true), 0) end)
+
+    {{:fun, line, {:clauses, clauses}}, environment, {:fun, line, {:clauses, []}}}
+  end
+
+  defp resolve_expression({:named_fun, line, name, clauses}, environment) do
+    captured = Map.delete(environment, name)
+    clauses = Enum.map(clauses, fn clause -> elem(resolve_clause(clause, captured, true), 0) end)
+    {{:named_fun, line, name, clauses}, environment, :unknown}
+  end
+
+  defp resolve_expression({:case, line, expression, clauses}, environment) do
+    {expression, environment, _value} = resolve_expression(expression, environment)
+    {clauses, environment, value} = resolve_branches(clauses, environment)
+    {{:case, line, expression, clauses}, environment, value}
+  end
+
+  defp resolve_expression({:if, line, clauses}, environment) do
+    {clauses, environment, value} = resolve_branches(clauses, environment)
+    {{:if, line, clauses}, environment, value}
+  end
+
+  defp resolve_expression({:receive, line, clauses}, environment) do
+    {clauses, environment, value} = resolve_branches(clauses, environment)
+    {{:receive, line, clauses}, environment, value}
+  end
+
+  defp resolve_expression({:receive, line, clauses, timeout, body}, environment) do
+    {timeout, environment, _value} = resolve_expression(timeout, environment)
+    branches = Enum.map(clauses, &resolve_clause(&1, environment, false))
+    {body, after_environment, after_value} = resolve_sequence(body, environment)
+    environments = [after_environment | Enum.map(branches, &elem(&1, 1))]
+    values = [after_value | Enum.map(branches, &elem(&1, 2))]
+
+    {{:receive, line, Enum.map(branches, &elem(&1, 0)), timeout, body},
+     join_environments(environments), common_value(values)}
+  end
+
+  defp resolve_expression({:try, line, body, clauses, catches, after_body}, environment) do
+    {body, body_environment, _value} = resolve_sequence(body, environment)
+    clauses = Enum.map(clauses, &elem(resolve_clause(&1, body_environment, false), 0))
+    catches = Enum.map(catches, &elem(resolve_clause(&1, environment, false), 0))
+    {after_body, _, _} = resolve_sequence(after_body, environment)
+    {{:try, line, body, clauses, catches, after_body}, environment, :unknown}
+  end
+
+  defp resolve_expression({:catch, line, expression}, environment) do
+    {expression, _, _} = resolve_expression(expression, environment)
+    {{:catch, line, expression}, environment, :unknown}
+  end
+
+  defp resolve_expression({kind, line, expression, qualifiers}, environment)
+       when kind in [:lc, :bc, :mc] do
+    {qualifiers, scope} =
+      Enum.map_reduce(qualifiers, environment, fn
+        {generator, annotation, pattern, source}, scope
+        when generator in [
+               :generate,
+               :b_generate,
+               :m_generate,
+               :generate_strict,
+               :b_generate_strict,
+               :m_generate_strict
+             ] ->
+          {source, scope, _} = resolve_expression(source, scope)
+          {{generator, annotation, pattern, source}, Map.drop(scope, pattern_variables(pattern))}
+
+        filter, scope ->
+          {filter, scope, _} = resolve_expression(filter, scope)
+          {filter, scope}
+      end)
+
+    {expression, _, _} = resolve_expression(expression, scope)
+    {{kind, line, expression, qualifiers}, environment, :unknown}
+  end
+
+  defp resolve_expression({:op, line, operator, left, right}, environment)
+       when operator in [:andalso, :orelse] do
+    {left, environment, _} = resolve_expression(left, environment)
+    {right, _, _} = resolve_expression(right, environment)
+    {{:op, line, operator, left, right}, environment, :unknown}
+  end
+
+  defp resolve_expression({:call, line, callee, args}, environment) do
+    {callee, environment, _} = resolve_expression(callee, environment)
+    {args, environment, _} = resolve_sequence(args, environment)
+    {{:call, line, callee, args}, environment, :unknown}
+  end
+
+  defp resolve_expression(expression, environment) when is_tuple(expression) do
+    # Remaining constructors have no special lexical scope. Literal values are
+    # deliberately limited; computed return values stay unknown.
+    {parts, environment, _} = resolve_sequence(Tuple.to_list(expression), environment)
+    expression = List.to_tuple(parts)
+    {expression, environment, literal_value(expression)}
+  end
+
+  defp resolve_expression(expressions, environment) when is_list(expressions),
+    do: resolve_sequence(expressions, environment)
+
+  defp resolve_expression(expression, environment), do: {expression, environment, :unknown}
+
+  defp resolve_branches(clauses, environment) do
+    branches = Enum.map(clauses, &resolve_clause(&1, environment, false))
+
+    {Enum.map(branches, &elem(&1, 0)), join_environments(Enum.map(branches, &elem(&1, 1))),
+     common_value(Enum.map(branches, &elem(&1, 2)))}
+  end
+
+  defp join_environments([]), do: %{}
+
+  defp join_environments([first | rest]) do
+    Map.new(first, fn {name, value} ->
+      {name, common_value([value | Enum.map(rest, &Map.get(&1, name, :unknown))])}
+    end)
+    |> Map.reject(fn {_name, value} -> value == :unknown end)
+  end
+
+  defp common_value([]), do: :unknown
+
+  defp common_value([first | rest]) do
+    if first != :unknown and
+         Enum.all?(rest, &(&1 != :unknown and canonical_value(&1) == canonical_value(first))),
+       do: first,
+       else: :unknown
+  end
+
+  defp canonical_value(value), do: :erl_parse.map_anno(fn _ -> 0 end, value)
+
+  defp literal_value({kind, _, value} = expression)
+       when kind in [:atom, :integer] and (is_atom(value) or is_integer(value)),
+       do: expression
+
+  defp literal_value({nil, _} = expression), do: expression
+
+  defp literal_value({:fun, _, {:function, name, arity}} = expression)
+       when is_atom(name) and is_integer(arity),
+       do: expression
+
+  defp literal_value(
+         {:fun, _, {:function, {:atom, _, _}, {:atom, _, _}, {:integer, _, _}}} = expression
+       ),
+       do: expression
+
+  defp literal_value({:tuple, _, elements} = expression),
+    do: bounded_literal(expression, elements)
+
+  defp literal_value({:cons, _, head, tail} = expression),
+    do: bounded_literal(expression, [head, tail])
+
+  defp literal_value(_expression), do: :unknown
+
+  defp bounded_literal(expression, children) do
+    if :erlang.external_size(expression) <= 65_536 and
+         Enum.all?(children, &(literal_value(&1) != :unknown)),
+       do: expression,
+       else: :unknown
+  end
+
+  defp bind_pattern({:var, _, :_}, _value, environment), do: environment
+
+  defp bind_pattern({:var, _, name}, :unknown, environment),
+    do: environment |> Map.put_new(name, :unknown)
+
+  defp bind_pattern({:var, _, name}, value, environment),
+    do: Map.put_new(environment, name, value)
+
+  defp bind_pattern({:tuple, _, patterns}, {:tuple, _, values}, environment)
+       when length(patterns) == length(values),
+       do:
+         Enum.zip(patterns, values)
+         |> Enum.reduce(environment, fn {p, v}, env -> bind_pattern(p, v, env) end)
+
+  defp bind_pattern({:cons, _, head, tail}, {:cons, _, value, rest}, environment),
+    do: bind_pattern(tail, rest, bind_pattern(head, value, environment))
+
+  defp bind_pattern(pattern, _value, environment),
+    do: Enum.reduce(pattern_variables(pattern), environment, &Map.put_new(&2, &1, :unknown))
+
+  defp pattern_variables({:var, _, name}), do: [name]
+
+  defp pattern_variables(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.flat_map(&pattern_variables/1)
+
+  defp pattern_variables(term) when is_list(term), do: Enum.flat_map(term, &pattern_variables/1)
+  defp pattern_variables(_term), do: []
+
+  # apply/2 invokes a function value rather than selecting a module. Only literal
+  # syntax (including lexically resolved proofs) closes that target; its body or
+  # captured MFA still passes through the same recursive unsafe-dispatch checks.
+  defp walk_calls(
+         {:call, _line, {:remote, _, {:atom, _, :erlang}, {:atom, _, :apply}},
+          [{:fun, _, _}, _arguments]} = term,
+         path
+       ),
+       do: walk_children(term, path)
+
   # Literal module and function targets are closed except executable metadispatch.
   # Variable module/function/apply dispatch is retained
   # as unconfirmed evidence, even when traffic happened to avoid its OTP branch.
@@ -415,6 +664,9 @@ defmodule NoOTP.ReleaseAudit do
   defp walk_calls({:call, line, {:remote, _, target, function}, _args} = term, path) do
     finding =
       cond do
+        match?({:atom, _, :ssl}, target) ->
+          [finding(path, line, "literal_module_ssl")]
+
         not match?({:atom, _, _}, target) ->
           [finding(path, line, "unresolved_module_dispatch")]
 
