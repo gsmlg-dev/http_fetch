@@ -50,7 +50,7 @@ defmodule HTTP.EventSource.Options do
             idle_timeout: :infinity,
             ssl: [],
             socket_opts: [],
-            tls_backend: :ssl,
+            tls_backend: :ex_ssl,
             unix_socket: nil,
             max_line_size: @default_max_line_size,
             http_version: :http1,

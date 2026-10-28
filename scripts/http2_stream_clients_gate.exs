@@ -27,7 +27,7 @@ defmodule HTTPStreamClientsGate do
   def run do
     metrics = HTTP2GateMetrics.start()
     url = System.fetch_env!("HTTP_STREAM_GATE_URL")
-    backend = String.to_existing_atom(System.get_env("HTTP_STREAM_GATE_BACKEND", "ssl"))
+    backend = String.to_existing_atom(System.get_env("HTTP_STREAM_GATE_BACKEND", "ex_ssl"))
     mode = System.get_env("HTTP_STREAM_GATE_MODE", "sse")
     count = String.to_integer(System.get_env("HTTP_STREAM_GATE_COUNT", "10000"))
     protocol = if String.starts_with?(url, "https"), do: :http2, else: :h2c

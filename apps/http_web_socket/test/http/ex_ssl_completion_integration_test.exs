@@ -507,26 +507,29 @@ defmodule HTTP.WebSocket.ExSSLCompletionIntegrationTest do
       Probe.release_monitors(graph)
     end
 
-    test "#{version} H1 exact Upgrade, echoed payload and clean close join public completion" do
-      version = unquote(version)
-      {peer, port} = peer(:wss, version)
-      socket = socket(port, version)
-      receipt = WebSocket.completion(socket)
-      assert_receive {WebSocket, ^socket, %Open{target: ^socket}}, 5_000
-      assert_receive {WebSocket, ^socket, %Message{data: "hello"}}, 5_000
+    for backend <- [:ex_ssl, nil] do
+      @tag if(backend == nil, do: :p5_default_route, else: :p5_explicit_route)
+      test "#{backend || :default} #{version} H1 exact Upgrade, echoed payload and clean close join public completion" do
+        version = unquote(version)
+        {peer, port} = peer(:wss, version)
+        socket = socket(port, version, tls_backend: unquote(backend))
+        receipt = WebSocket.completion(socket)
+        assert_receive {WebSocket, ^socket, %Open{target: ^socket}}, 5_000
+        assert_receive {WebSocket, ^socket, %Message{data: "hello"}}, 5_000
 
-      assert %{"version" => expected, "alpn" => "http/1.1"} =
-               event(peer, &(&1["kind"] == "handshake"))
+        assert %{"version" => expected, "alpn" => "http/1.1"} =
+                 event(peer, &(&1["kind"] == "handshake"))
 
-      assert expected == wire(version)
-      assert {:error, :cleanup_pending} = ClientCompletion.await(receipt, 0)
-      assert :ok = WebSocket.send(socket, "tls12-echo")
-      assert_receive {WebSocket, ^socket, %Message{data: "echo:tls12-echo"}}, 5_000
-      assert :ok = WebSocket.close(socket, 1000)
-      assert_receive {WebSocket, ^socket, %Close{code: 1000, was_clean: true}}, 5_000
-      assert :ok = ClientCompletion.await(receipt, 2_000)
-      assert :ok = ClientCompletion.await(WebSocket.completion(socket), 0)
-      assert %{"frames" => 1, "bytes" => 10} = event(peer, &(&1["kind"] == "exchange"))
+        assert expected == wire(version)
+        assert {:error, :cleanup_pending} = ClientCompletion.await(receipt, 0)
+        assert :ok = WebSocket.send(socket, "tls12-echo")
+        assert_receive {WebSocket, ^socket, %Message{data: "echo:tls12-echo"}}, 5_000
+        assert :ok = WebSocket.close(socket, 1000)
+        assert_receive {WebSocket, ^socket, %Close{code: 1000, was_clean: true}}, 5_000
+        assert :ok = ClientCompletion.await(receipt, 2_000)
+        assert :ok = ClientCompletion.await(WebSocket.completion(socket), 0)
+        assert %{"frames" => 1, "bytes" => 10} = event(peer, &(&1["kind"] == "exchange"))
+      end
     end
 
     test "#{version} H1 retained blocked write outlives logical close until writer and observer join" do
@@ -648,46 +651,49 @@ defmodule HTTP.WebSocket.ExSSLCompletionIntegrationTest do
       assert %{"kind" => "setup_closed"} = event(peer, &(&1["kind"] == "setup_closed"))
     end
 
-    test "#{version} H2 shared sibling and later socket reuse exact physical connection" do
-      version = unquote(version)
-      {peer, port} = peer(:h2, version)
-      scope = "completion-#{System.unique_integer([:positive])}"
-      first = h2_socket(port, version, scope)
-      assert_receive {WebSocket, ^first, %Open{}}, 5_000
-      %{stream_handle: %{owner: owner}} = WebSocket.status(first)
-      sibling = h2_socket(port, version, scope)
-      assert_receive {WebSocket, ^sibling, %Open{}}, 5_000
-      assert %{stream_handle: %{owner: ^owner}} = WebSocket.status(sibling)
-      assert :ok = WebSocket.close(first)
-      assert_receive {WebSocket, ^first, %Close{was_clean: true}}, 5_000
-      assert :ok = ClientCompletion.await(WebSocket.completion(first), 2_000)
-      assert Process.alive?(owner)
-      assert :ok = WebSocket.send(sibling, "sibling-proof")
-      assert_receive {WebSocket, ^sibling, %Message{data: "sibling-proof"}}, 5_000
-      later = h2_socket(port, version, scope)
-      assert_receive {WebSocket, ^later, %Open{}}, 5_000
-      assert %{stream_handle: %{owner: ^owner}} = WebSocket.status(later)
-      assert :ok = WebSocket.send(later, "later-proof")
-      assert_receive {WebSocket, ^later, %Message{data: "later-proof"}}, 5_000
+    for backend <- [:ex_ssl, nil] do
+      @tag if(backend == nil, do: :p5_default_route, else: :p5_explicit_route)
+      test "#{backend || :default} #{version} H2 shared sibling and later socket reuse exact physical connection" do
+        version = unquote(version)
+        {peer, port} = peer(:h2, version)
+        scope = "completion-#{System.unique_integer([:positive])}"
+        first = h2_socket(port, version, scope, tls_backend: unquote(backend))
+        assert_receive {WebSocket, ^first, %Open{}}, 5_000
+        %{stream_handle: %{owner: owner}} = WebSocket.status(first)
+        sibling = h2_socket(port, version, scope, tls_backend: unquote(backend))
+        assert_receive {WebSocket, ^sibling, %Open{}}, 5_000
+        assert %{stream_handle: %{owner: ^owner}} = WebSocket.status(sibling)
+        assert :ok = WebSocket.close(first)
+        assert_receive {WebSocket, ^first, %Close{was_clean: true}}, 5_000
+        assert :ok = ClientCompletion.await(WebSocket.completion(first), 2_000)
+        assert Process.alive?(owner)
+        assert :ok = WebSocket.send(sibling, "sibling-proof")
+        assert_receive {WebSocket, ^sibling, %Message{data: "sibling-proof"}}, 5_000
+        later = h2_socket(port, version, scope, tls_backend: unquote(backend))
+        assert_receive {WebSocket, ^later, %Open{}}, 5_000
+        assert %{stream_handle: %{owner: ^owner}} = WebSocket.status(later)
+        assert :ok = WebSocket.send(later, "later-proof")
+        assert_receive {WebSocket, ^later, %Message{data: "later-proof"}}, 5_000
 
-      assert %{"connection" => 1, "alpn" => "h2", "version" => expected} =
-               event(peer, &(&1["kind"] == "connection"))
+        assert %{"connection" => 1, "alpn" => "h2", "version" => expected} =
+                 event(peer, &(&1["kind"] == "connection"))
 
-      assert expected == wire(version)
+        assert expected == wire(version)
 
-      assert %{"connection" => 1, "wire_oracle" => "PASS"} =
-               event(peer, &(&1["kind"] == "connect" and &1["stream"] == 5))
+        assert %{"connection" => 1, "wire_oracle" => "PASS"} =
+                 event(peer, &(&1["kind"] == "connect" and &1["stream"] == 5))
 
-      for current <- [sibling, later] do
-        assert :ok = WebSocket.close(current)
-        assert_receive {WebSocket, ^current, %Close{was_clean: true}}, 5_000
-        assert :ok = ClientCompletion.await(WebSocket.completion(current), 2_000)
+        for current <- [sibling, later] do
+          assert :ok = WebSocket.close(current)
+          assert_receive {WebSocket, ^current, %Close{was_clean: true}}, 5_000
+          assert :ok = ClientCompletion.await(WebSocket.completion(current), 2_000)
+        end
+
+        refute Enum.any?(
+                 Process.get({__MODULE__, peer}, []),
+                 &(&1["kind"] == "connection" and &1["connection"] != 1)
+               )
       end
-
-      refute Enum.any?(
-               Process.get({__MODULE__, peer}, []),
-               &(&1["kind"] == "connection" and &1["connection"] != 1)
-             )
     end
   end
 

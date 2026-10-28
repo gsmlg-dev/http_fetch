@@ -35,6 +35,7 @@ defmodule HTTP.Runtime.OptionsTest do
     assert {:ok, options} = Options.validate(URI.parse("https://example.test/"), [])
     assert options[:http_version] == :http1
     assert options[:delivery] == :legacy
+    assert options[:tls_backend] == :ex_ssl
 
     assert {:ok, h2} =
              Options.validate(URI.parse("wss://example.test/"), %{

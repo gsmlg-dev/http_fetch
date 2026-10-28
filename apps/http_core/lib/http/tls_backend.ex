@@ -6,7 +6,7 @@ defmodule HTTP.TLSBackend do
   @spec resolve(term()) :: {:ok, t()} | {:error, :invalid_tls_backend}
   def resolve(value \\ nil)
 
-  def resolve(nil), do: normalize(Application.get_env(:http_core, :tls_backend, :ssl))
+  def resolve(nil), do: normalize(Application.get_env(:http_core, :tls_backend, :ex_ssl))
   def resolve(value), do: normalize(value)
 
   @spec transport(t()) :: HTTP.Transport.SSL | HTTP.Transport.ExSSL

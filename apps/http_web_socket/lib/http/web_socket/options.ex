@@ -54,7 +54,7 @@ defmodule HTTP.WebSocket.Options do
             connect_timeout: @default_connect_timeout,
             ssl: [],
             socket_opts: [],
-            tls_backend: :ssl,
+            tls_backend: :ex_ssl,
             max_message_size: @default_max_message_size,
             max_send_queue: @default_max_send_queue,
             http_version: :http1,

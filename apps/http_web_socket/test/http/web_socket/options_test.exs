@@ -96,6 +96,8 @@ defmodule HTTP.WebSocket.OptionsTest do
   end
 
   test "selects TLS backends from atom and string map options" do
+    assert {:ok, %{tls_backend: :ex_ssl}} = Options.new("wss://example.com/socket")
+
     assert {:ok, %{tls_backend: :ssl}} =
              Options.new("wss://example.com/socket", [], tls_backend: :ssl)
 

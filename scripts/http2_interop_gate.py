@@ -11,7 +11,7 @@ import sys
 parser = argparse.ArgumentParser()
 parser.add_argument('--peer', choices=['hyper-h2', 'node'], required=True)
 parser.add_argument('--tls', action='store_true')
-parser.add_argument('--backend', choices=['ssl', 'ex_ssl'], default='ssl')
+parser.add_argument('--backend', choices=['ssl', 'ex_ssl'], default='ex_ssl')
 parser.add_argument('--mode', choices=['smoke', 'reuse', 'transfer', 'concurrent', 'soak'], default='smoke')
 parser.add_argument('--limit', type=int, default=100)
 parser.add_argument('--count', type=int, default=10000)

@@ -159,6 +159,8 @@ defmodule HTTP.EventSource.OptionsTest do
   end
 
   test "selects TLS backends from atom and string map options" do
+    assert {:ok, %{tls_backend: :ex_ssl}} = Options.new("https://example.com/events")
+
     assert {:ok, %{tls_backend: :ssl}} =
              Options.new("https://example.com/events", tls_backend: :ssl)
 

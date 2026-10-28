@@ -205,7 +205,7 @@ defmodule HTTP.FetchOptionsTest do
     end
 
     test "normalizes TLS backend selection" do
-      assert %HTTP.FetchOptions{tls_backend: :ssl} = HTTP.FetchOptions.new([])
+      assert %HTTP.FetchOptions{tls_backend: :ex_ssl} = HTTP.FetchOptions.new([])
       assert %HTTP.FetchOptions{tls_backend: :ssl} = HTTP.FetchOptions.new(tls_backend: "ssl")
 
       assert %HTTP.FetchOptions{tls_backend: :ex_ssl} =

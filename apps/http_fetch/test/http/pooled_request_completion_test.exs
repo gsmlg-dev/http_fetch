@@ -8,7 +8,9 @@ defmodule HTTP.PooledRequestCompletionTest do
   test "pooled HTTP1 and HTTP2 expose a pending public handle before dialing" do
     for opts <- [[http1_reuse: true], [http_version: :http2], [http_version: :h2c]] do
       options = HTTP.FetchOptions.new(Keyword.merge([redirect: :manual], opts))
-      handle = RequestCompletion.new(options)
+      scheme = if options.http_version == :http2, do: "https", else: "http"
+      request = %HTTP.Request{url: URI.parse("#{scheme}://example.test/")}
+      handle = RequestCompletion.new(options, request)
       assert {:error, :cleanup_pending} = RequestCompletion.await(handle, 0)
       send(handle.tracker, :launch_failed)
       assert {:error, :cleanup_unconfirmed} = RequestCompletion.await(handle, 1_000)

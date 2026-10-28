@@ -181,41 +181,44 @@ defmodule HTTP.EventSource.ExSSLCompletionIntegrationTest do
       refute_receive {EventSource, ^client, %Open{}}, 30
     end
 
-    test "#{version} H2 application backpressure bounds output and closing joins cleanup" do
-      version = unquote(version)
-      {peer, port} = peer(:h2, version)
+    for backend <- [:ex_ssl, nil] do
+      @tag if(backend == nil, do: :p5_default_route, else: :p5_explicit_route)
+      test "#{backend || :default} #{version} H2 application backpressure bounds output and closing joins cleanup" do
+        version = unquote(version)
+        {peer, port} = peer(:h2, version)
 
-      source =
-        EventSource.new("https://localhost:#{port}/sse/pressure",
-          tls_backend: :ex_ssl,
-          ssl: tls(version),
-          http_version: :http2,
-          http2_scope: "pressure-#{System.unique_integer([:positive])}",
-          delivery: :ack,
-          max_event_size: 8_192,
-          max_queue_bytes: 16_384,
-          max_queue_events: 2,
-          reconnect_time: 5_000
-        )
+        source =
+          EventSource.new("https://localhost:#{port}/sse/pressure",
+            tls_backend: unquote(backend),
+            ssl: tls(version),
+            http_version: :http2,
+            http2_scope: "pressure-#{System.unique_integer([:positive])}",
+            delivery: :ack,
+            max_event_size: 8_192,
+            max_queue_bytes: 16_384,
+            max_queue_events: 2,
+            reconnect_time: 5_000
+          )
 
-      on_exit(fn -> EventSource.close(source) end)
-      assert_receive {EventSource, ^source, %Message{data: data}, _ref}, 5_000
-      assert data == String.duplicate("x", 4_096)
+        on_exit(fn -> EventSource.close(source) end)
+        assert_receive {EventSource, ^source, %Message{data: data}, _ref}, 5_000
+        assert data == String.duplicate("x", 4_096)
 
-      assert %{"sent" => sent, "remaining" => remaining} =
-               event(peer, &(&1["kind"] == "sse_flow_blocked" and &1["sent"] >= 1_000_000))
+        assert %{"sent" => sent, "remaining" => remaining} =
+                 event(peer, &(&1["kind"] == "sse_flow_blocked" and &1["sent"] >= 1_000_000))
 
-      assert sent < 4_202_496 and remaining > 0
-      await_raw_buffer(source)
-      status = EventSource.status(source)
-      assert status.queued_events <= 2 and status.queued_bytes <= 16_384
-      assert status.raw_bytes > 0
-      assert :sys.get_state(source.pid).terminal_reason == nil
-      assert :ok = EventSource.close(source)
-      assert :ok = ClientCompletion.await(EventSource.completion(source), 2_000)
-      assert %{"stream" => 1, "code" => 8} = event(peer, &(&1["kind"] == "client_reset"))
-      assert %{"alpn" => "h2", "version" => actual} = event(peer, &(&1["kind"] == "connection"))
-      assert actual == wire(version)
+        assert sent < 4_202_496 and remaining > 0
+        await_raw_buffer(source)
+        status = EventSource.status(source)
+        assert status.queued_events <= 2 and status.queued_bytes <= 16_384
+        assert status.raw_bytes > 0
+        assert :sys.get_state(source.pid).terminal_reason == nil
+        assert :ok = EventSource.close(source)
+        assert :ok = ClientCompletion.await(EventSource.completion(source), 2_000)
+        assert %{"stream" => 1, "code" => 8} = event(peer, &(&1["kind"] == "client_reset"))
+        assert %{"alpn" => "h2", "version" => actual} = event(peer, &(&1["kind"] == "connection"))
+        assert actual == wire(version)
+      end
     end
 
     test "#{version} H2 retained owner and pool handoff confirms before queued release" do
@@ -392,34 +395,37 @@ defmodule HTTP.EventSource.ExSSLCompletionIntegrationTest do
       Probe.release_monitors(graph)
     end
 
-    test "#{version} H1 reconnect retains fresh provider identity and Last-Event-ID" do
-      version = unquote(version)
-      {peer, port} = peer(:sse, version)
-      source = source(port, version)
-      receipt = EventSource.completion(source)
-      assert_receive {EventSource, ^source, %Open{target: ^source}}, 5_000
-      assert_receive {EventSource, ^source, %Message{data: "first", last_event_id: "41"}}, 5_000
-      first = handle(receipt)
+    for backend <- [:ex_ssl, nil] do
+      @tag if(backend == nil, do: :p5_default_route, else: :p5_explicit_route)
+      test "#{backend || :default} #{version} H1 reconnect retains fresh provider identity and Last-Event-ID" do
+        version = unquote(version)
+        {peer, port} = peer(:sse, version)
+        source = source(port, version, tls_backend: unquote(backend))
+        receipt = EventSource.completion(source)
+        assert_receive {EventSource, ^source, %Open{target: ^source}}, 5_000
+        assert_receive {EventSource, ^source, %Message{data: "first", last_event_id: "41"}}, 5_000
+        first = handle(receipt)
 
-      assert %{"version" => expected, "alpn" => "http/1.1"} =
-               event(peer, &(&1["kind"] == "handshake" and &1["index"] == 1))
+        assert %{"version" => expected, "alpn" => "http/1.1"} =
+                 event(peer, &(&1["kind"] == "handshake" and &1["index"] == 1))
 
-      assert expected == wire(version)
-      assert {:error, :cleanup_pending} = ClientCompletion.await(receipt, 0)
-      Port.command(peer, "go\n")
-      assert_receive {EventSource, ^source, %Message{data: "second"}}, 5_000
-      refute handle(receipt) == first
+        assert expected == wire(version)
+        assert {:error, :cleanup_pending} = ClientCompletion.await(receipt, 0)
+        Port.command(peer, "go\n")
+        assert_receive {EventSource, ^source, %Message{data: "second"}}, 5_000
+        refute handle(receipt) == first
 
-      assert %{"last_id_ok" => true} =
-               event(peer, &(&1["kind"] == "request" and &1["index"] == 2))
+        assert %{"last_id_ok" => true} =
+                 event(peer, &(&1["kind"] == "request" and &1["index"] == 2))
 
-      assert %{"version" => ^expected, "alpn" => "http/1.1"} =
-               event(peer, &(&1["kind"] == "handshake" and &1["index"] == 2))
+        assert %{"version" => ^expected, "alpn" => "http/1.1"} =
+                 event(peer, &(&1["kind"] == "handshake" and &1["index"] == 2))
 
-      assert :ok = EventSource.close(source)
-      Port.command(peer, "stop\n")
-      assert :ok = ClientCompletion.await(receipt, 2_000)
-      assert :ok = ClientCompletion.await(EventSource.completion(source), 0)
+        assert :ok = EventSource.close(source)
+        Port.command(peer, "stop\n")
+        assert :ok = ClientCompletion.await(receipt, 2_000)
+        assert :ok = ClientCompletion.await(EventSource.completion(source), 0)
+      end
     end
 
     test "#{version} H1 close retains suspended writer and independent observer cleanup" do

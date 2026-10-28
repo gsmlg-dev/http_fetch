@@ -14,14 +14,20 @@ defmodule HTTP.ExSSLHTTP2CompletionTest do
   for {version, wire, tag} <- [
         {:"tlsv1.2", "TLSv1.2", :p3_ex_ssl_h2_tls12},
         {:"tlsv1.3", "TLSv1.3", :p3_ex_ssl_h2_tls13}
-      ] do
+      ],
+      backend <- [:ex_ssl, nil] do
     @tag :p3_ex_ssl_h2_red
     @tag tag
-    test "authenticated #{version} first completion settles with a live sibling" do
+    @tag if(backend == nil, do: :p5_default_route, else: :p5_explicit_route)
+    test "#{backend || :default} authenticated #{version} first completion settles with a live sibling" do
       {peer, origin} = peer(unquote(wire))
 
       try do
         options = options(unquote(version))
+
+        options =
+          if unquote(backend) == nil, do: Keyword.delete(options, :tls_backend), else: options
+
         first = HTTP.fetch(origin <> "/perf/m-first/reuse", options)
         assert %Response{status: 200} = response = Promise.await(first, 5_000)
         assert Response.read_all(response) == "ok"

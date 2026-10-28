@@ -15,8 +15,8 @@ defmodule HTTP.TLSBackendTest do
     end)
   end
 
-  test "defaults to OTP and resolves explicit atoms and strings" do
-    assert {:ok, :ssl} = TLSBackend.resolve()
+  test "defaults to ExSSL and retains explicit transitional OTP selection" do
+    assert {:ok, :ex_ssl} = TLSBackend.resolve()
     assert {:ok, :ssl} = TLSBackend.resolve("ssl")
     assert {:ok, :ex_ssl} = TLSBackend.resolve(:ex_ssl)
     assert {:ok, :ex_ssl} = TLSBackend.resolve("ex_ssl")

@@ -11,12 +11,14 @@ defmodule HTTP.ManagedExSSLTLSLifecycleTest do
   @peer Path.expand("../../../../scripts/tls_migration_performance_peer.py", __DIR__)
 
   for {version, wire} <- [{:"tlsv1.2", "TLSv1.2"}, {:"tlsv1.3", "TLSv1.3"}],
-      {protocol, alpn} <- [{:http1, "http/1.1"}, {:http2, "h2"}] do
-    test "#{version} #{protocol} managed completion retains one provider through exact connection reuse" do
+      {protocol, alpn} <- [{:http1, "http/1.1"}, {:http2, "h2"}],
+      backend <- [:ex_ssl, nil] do
+    @tag if(backend == nil, do: :p5_default_route, else: :p5_explicit_route)
+    test "#{backend || :default} #{version} #{protocol} managed completion retains one provider through exact connection reuse" do
       version = unquote(version)
       protocol = unquote(protocol)
       {peer, origin} = peer(unquote(wire), unquote(alpn))
-      scope = open(origin, protocol, version)
+      scope = open(origin, protocol, version, tls_backend: unquote(backend))
 
       try do
         first = fetch(origin, scope, "m-first")

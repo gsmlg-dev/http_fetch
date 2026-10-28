@@ -2,7 +2,8 @@
 
 Status (2026-10-28): integrated P0–P4 acceptance is complete at `3c561646`,
 including advanced policies, resumption, nested proxies, lifecycle and managed
-H1/H2. OTP remains the production default until the separate P5 promotion.
+H1/H2. P5 now defaults to ExSSL and passes local source validation; current
+candidate/runtime and full CI acceptance remain pending before P6 removal.
 See the [current execution checklist](tls-migration-plan.md#current-accepted-evidence-and-remaining-gates)
 for exact source/package boundaries, executed results and pending runtime checks.
 Historical foundation sections retain their original implementation boundaries.

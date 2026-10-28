@@ -51,7 +51,7 @@ defmodule HTTP.EventSource.Connection do
             idle_timeout: :infinity,
             ssl: [],
             socket_opts: [],
-            tls_backend: :ssl,
+            tls_backend: :ex_ssl,
             unix_socket: nil,
             max_line_size: 64 * 1024,
             transport: nil,

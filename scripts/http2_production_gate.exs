@@ -3,7 +3,7 @@ Code.require_file("http2_metrics.exs", __DIR__)
 url = System.fetch_env!("HTTP_FETCH_GATE_URL")
 
 backend =
-  case System.get_env("HTTP_FETCH_GATE_BACKEND", "ssl") do
+  case System.get_env("HTTP_FETCH_GATE_BACKEND", "ex_ssl") do
     "ssl" -> :ssl
     "ex_ssl" -> :ex_ssl
   end

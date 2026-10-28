@@ -67,7 +67,8 @@ defmodule HTTP.RequestCompletion do
   @spec tracker(t()) :: pid() | nil
   def tracker(%__MODULE__{tracker: tracker}), do: tracker
 
-  defp supported_ex_ssl?(%{proxy: nil} = options, %HTTP.Request{url: %URI{scheme: "http"}}) do
+  defp supported_ex_ssl?(%{proxy: nil} = options, %HTTP.Request{url: %URI{scheme: scheme}})
+       when scheme != "https" do
     options.http_version in [:http1, :http2, :h2c] and
       (options.transport_scope == nil or
          match?(%HTTP.ManagedTransport{}, options.transport_scope))

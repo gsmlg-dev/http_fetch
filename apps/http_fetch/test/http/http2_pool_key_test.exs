@@ -15,6 +15,7 @@ defmodule HTTP.HTTP2PoolKeyTest do
     assert left == right
     assert left.host == "example.com"
     assert left.port == 443
+    assert left.tls.backend == :ex_ssl
   end
 
   test "IPv6 preference isolates reusable connection policy" do

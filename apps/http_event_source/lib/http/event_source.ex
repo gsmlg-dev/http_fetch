@@ -57,7 +57,8 @@ defmodule HTTP.EventSource do
 
   For HTTP/1 and HTTP/2 `https` connections, pass `tls_backend: :ssl | :ex_ssl` (or the equivalent
   string in a map). When omitted, the shared `:http_core` TLS backend setting is
-  captured when the source is created and retained across reconnects.
+  defaults to `:ex_ssl`, is captured when the source is created and is retained
+  across reconnects.
   """
 
   alias HTTP.EventSource.Connection

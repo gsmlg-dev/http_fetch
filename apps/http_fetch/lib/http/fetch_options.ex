@@ -85,7 +85,7 @@ defmodule HTTP.FetchOptions do
   - `response_header_limits` - Request-local HTTP/1 and CONNECT budgets; see
     `HTTP.ResponseHeaderLimits`. Also applies to informational and redirect heads.
   - `tls_backend` - TLS implementation, `:ssl` or `:ex_ssl`; defaults to the
-    shared `:http_core, :tls_backend` configuration
+    shared `:http_core, :tls_backend` configuration, falling back to `:ex_ssl`
   - `ssl` - TLS options passed to the selected TLS backend
   - `socket_opts` - socket options passed to the underlying transport
   - `unix_socket` - Unix Domain Socket path
@@ -106,10 +106,10 @@ defmodule HTTP.FetchOptions do
     origin TLS/ALPN. H2 over HTTPS and ExSSL IP-origin tunnels are supported;
     H2c, HTTP/3 and Unix socket proxy routes are rejected explicitly. Environment/NO_PROXY
     selection belongs to the caller.
-    HTTPS proxies support HTTP origins only, using TLS to the proxy and
-    absolute-form HTTP/1 forwarding. `ssl` and `tls_backend` apply to the proxy;
-    its hostname is the certificate/SNI identity. TLS-over-TLS origins are
-    rejected. Proxy scheme, endpoint, credentials, and TLS policy isolate pools.
+    HTTPS proxies support HTTP/1 forwarding to HTTP origins and CONNECT tunnels
+    to HTTPS origins. Proxy `ssl` settings verify the proxy independently from
+    origin `ssl` settings; `tls_backend` selects the provider for both layers.
+    Proxy scheme, endpoint, credentials and both TLS policies isolate pools.
   - `http2_profile` - versioned HTTP/2 wire profile (only used by HTTP/2)
   - `http2_reuse` - whether an HTTP/2 connection may be reused; defaults to `true`
   - `http3_profile` - QUIC wire profile; defaults to `:ordered`

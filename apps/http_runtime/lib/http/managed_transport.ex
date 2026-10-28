@@ -42,8 +42,8 @@ defmodule HTTP.ManagedTransport do
   (HTTP). Optional capacity is `max_requests: 1..2048` (default 100),
   `max_connections: 1..256` (default 2), `max_pending: 0`, and
   `idle_timeout: 1..60000` milliseconds (default 30000). `ssl` and `socket_opts`
-  freeze supported TLS/socket settings. `tls_backend: :ssl` (the current default)
-  and explicit `:ex_ssl` support HTTPS H1/H2; only `http2_profile: :native_v1`
+  freeze supported TLS/socket settings. Default `tls_backend: :ex_ssl` and the
+  transitional explicit `:ssl` selection support HTTPS H1/H2; only `http2_profile: :native_v1`
   is accepted. TLS files and system CAs are captured
   once at open; rotated policy requires a new scope. For explicit HTTPS `:http1`,
   `ssl: [alpn_advertised_protocols: ["http/1.1"]]` optionally advertises the single

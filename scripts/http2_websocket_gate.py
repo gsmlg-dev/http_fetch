@@ -164,7 +164,7 @@ def main():
     parser.add_argument('--peer', choices=['hyper-h2', 'node'], default='hyper-h2')
     parser.add_argument('--count', type=int, default=10000)
     parser.add_argument('--tls', action='store_true')
-    parser.add_argument('--backend', choices=['ssl', 'ex_ssl'], default='ssl')
+    parser.add_argument('--backend', choices=['ssl', 'ex_ssl'], default='ex_ssl')
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--peer-check', action='store_true')
     parser.add_argument('--seconds', type=int, default=1800)

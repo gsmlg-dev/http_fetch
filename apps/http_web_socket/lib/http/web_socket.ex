@@ -80,7 +80,7 @@ defmodule HTTP.WebSocket do
 
   For `wss` connections, pass `tls_backend: :ssl | :ex_ssl` (or the equivalent
   string in a map). When omitted, the shared `:http_core` TLS backend setting is
-  captured when the socket is created.
+  defaults to `:ex_ssl` and is captured when the socket is created.
   """
 
   alias HTTP.WebSocket.ArrayBuffer

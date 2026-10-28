@@ -34,7 +34,7 @@ defmodule ExternalConsumerSmoke do
 
     assert_package_metadata!()
 
-    {:ok, :ssl} = HTTP.TLSBackend.resolve()
+    {:ok, :ex_ssl} = HTTP.TLSBackend.resolve()
     fetch_http1!(certfile, keyfile, cacertfile)
     fetch_h2!(certfile, keyfile, cacertfile)
     web_socket!(certfile, keyfile, cacertfile)

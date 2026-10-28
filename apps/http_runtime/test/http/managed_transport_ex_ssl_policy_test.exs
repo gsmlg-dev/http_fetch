@@ -11,7 +11,7 @@ defmodule HTTP.ManagedTransportExSSLPolicyTest do
     assert {:ok, otp} = freeze(:ssl)
     refute policy.identity == otp.identity
     assert {:ok, default} = Policy.freeze(options() ++ [ssl: [cacerts: []]])
-    assert default.transport[:tls_backend] == :ssl
+    assert default.transport[:tls_backend] == :ex_ssl
   end
 
   test "inline CA cert key and socket policy are copied without changing explicit settings" do

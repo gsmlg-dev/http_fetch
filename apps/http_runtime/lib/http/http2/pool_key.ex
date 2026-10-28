@@ -148,18 +148,14 @@ defmodule HTTP.HTTP2.PoolKey do
   end
 
   defp tls_identity(options, origin) do
-    backend = Keyword.get(options, :tls_backend, :ssl)
+    backend = Keyword.get(options, :tls_backend)
     ssl_options = Keyword.get(options, :ssl, [])
 
-    with {:ok, backend} <- normalize_backend(backend),
+    with {:ok, backend} <- HTTP.TLSBackend.resolve(backend),
          {:ok, identity, reusable?} <- ssl_identity(ssl_options, origin) do
       {:ok, %{backend: backend, options: identity}, reusable?}
     end
   end
-
-  defp normalize_backend(backend) when backend in [:ssl, "ssl"], do: {:ok, :ssl}
-  defp normalize_backend(backend) when backend in [:ex_ssl, "ex_ssl"], do: {:ok, :ex_ssl}
-  defp normalize_backend(_backend), do: {:error, :invalid_tls_backend}
 
   defp ssl_identity(options, origin) when is_list(options) do
     if Keyword.keyword?(options) do

@@ -17,6 +17,17 @@ from stage import PACKAGES, ROOT
 
 
 MIGRATION_GROUPS = {
+    "defaults": (
+        "apps/http_core/test/http/tls_backend_test.exs",
+        "apps/http_runtime/test/http/runtime/options_test.exs",
+        "apps/http_runtime/test/http/managed_transport_ex_ssl_policy_test.exs",
+        "apps/http_fetch/test/http/fetch_options_test.exs",
+        "apps/http_fetch/test/http/http2_pool_key_test.exs",
+        "apps/http_fetch/test/http/http2_pool_key_configuration_test.exs",
+        "apps/http_fetch/test/http/request_completion_admission_test.exs",
+        "apps/http_event_source/test/http/event_source/options_test.exs",
+        "apps/http_web_socket/test/http/web_socket/options_test.exs",
+    ),
     "policy": (
         "apps/ex_ssl/test/ssl/revocation_policy_integration_test.exs",
         "apps/ex_ssl/test/ssl/ocsp_policy_integration_test.exs",
@@ -270,7 +281,7 @@ end
 
 IO.puts(JSON.encode!(%{{gate: "h2_package_provenance", packages: packages,
   version: expected, scm: "Hex.SCM", loaded_modules: Map.new(loaded),
-  backend: System.get_env("HTTP_FETCH_GATE_BACKEND", "ssl"),
+  backend: System.get_env("HTTP_FETCH_GATE_BACKEND", "ex_ssl"),
   route: if(String.starts_with?(System.fetch_env!("HTTP_FETCH_GATE_URL"), "https://"),
             do: "h2_tls", else: "h2c")}}))
 ''')

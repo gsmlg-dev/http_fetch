@@ -1,5 +1,38 @@
 # TLS migration execution ledger
 
+## P5 default promotion — source validation, 2026-10-28
+
+The shared resolver, Fetch, EventSource, WebSocket and managed H1/H2 now default
+to ExSSL. Explicit OTP remains transitional until P6. H2 pool keys use the shared
+resolver, reject invalid effective configuration and retain the backend frozen
+when a request is constructed. Existing H3 selector/completion boundaries remain.
+Direct HTTP/H2c and invalid-scheme requests retain their cleanup tracking when
+the TLS selector is ExSSL; an invalid scheme still fails before dialing and joins
+an attached upload source. Internal no-request completion admission stays bounded.
+
+Local Elixir1.18.5/OTP29.0.2 source validation passes strict compilation, root
+formatting and 130 release-automation checks. The full nine-app unit run with
+`ERL_FLAGS="+S 4:4"` executes 2,076 cases with zero failures; its 4,713 integration
+cases are excluded. All173 cases in the four affected completion integration
+suites pass, including14 new default scenarios and14 explicit ExSSL controls.
+Independent peers retain exact TLS1.2/TLS1.3, connection reuse, provider identity,
+cleanup, SSE reconnect/backpressure and WebSocket sharing assertions.
+
+Three unrestricted-scheduler unit invocations retain startup/checkout timing
+failures. Diagnostics observed first loading of completion/lifecycle modules
+inside a 100ms fixture wait. That fixture now preloads both modules; its original
+wait and all resource assertions remain. The unrestricted full run then passed
+Core but still failed a separate pool expiry assertion. The complete four-scheduler
+run passes without changing any test deadline. These results do not establish an
+unrestricted-scheduler pass or prove a single cause for every timing failure.
+
+The candidate gate now requires nine additional default/configuration/admission
+files alongside the53 accepted P4 migration files. Fresh candidate consumers,
+all-nine integration/E2E and the configured runtime matrix remain pending for
+this default change. P6 production removal and P7 publication have not begun.
+Receipts, failed logs and diagnostics are retained at
+`/private/tmp/http-fetch-p5-default-root-20261028T0238Z`.
+
 ## P4 integrated acceptance — 2026-10-28
 
 P0–P4 are accepted at `3c561646b7f1bc9042c5cadbc37ed7c6b48fae15` with OTP

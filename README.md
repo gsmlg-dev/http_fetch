@@ -35,7 +35,7 @@ Current HTTP/3 beta acceptance and publication evidence are tracked in the
 - **Promise-based**: Async operations with chaining support
 - **Request cancellation**: AbortController support for cancelling requests
 - **Automatic JSON parsing**: Built-in JSON response handling
-- **Selectable TLS**: OTP `:ssl` by default, with opt-in `:ex_ssl` for verified TLS 1.3
+- **Selectable TLS**: ExSSL by default, with verified TLS 1.3 and supported TLS 1.2
 - **HTTP/2 wire profiles**: Versioned native and synthetic profiles can control
   ordered SETTINGS and header serialization; use `http2_profile` only with an
   explicit HTTP/2 or h2c request.
@@ -314,14 +314,16 @@ successful completion. `HTTP.RequestCompletion` remains the cleanup barrier.
 ## TLS Backend Selection
 
 HTTPS fetch (HTTP/1.1 and HTTP/2), secure WebSocket, and HTTPS EventSource share
-one TLS default. OTP `:ssl` remains the default when no configuration is set:
+one TLS default: `:ex_ssl` when no configuration is set. Explicit configuration
+is optional:
 
 ```elixir
 # config/config.exs or config/runtime.exs
 config :http_core, tls_backend: :ex_ssl
 ```
 
-A flat per-call option overrides that default:
+A flat per-call option overrides that default. Explicit OTP `:ssl` remains
+available during the transition and is removed at migration boundary C:
 
 ```elixir
 HTTP.fetch("https://example.com", tls_backend: :ssl)
@@ -346,11 +348,14 @@ at the exact coordinated package version. Current artifact and publication
 evidence is recorded in the implementation audit. Consumers do not need to add
 those dependencies separately. `ssl: [...]` supplies TLS settings
 to the selected backend. The `ex_ssl` backend uses its own `SSL` protocol engine
-and requires peer verification. TLS 1.3 is the default; verified TLS 1.2 is
-explicitly selectable. It uses system CA certificates unless `cacerts` or
-`cacertfile` is supplied. DNS names and IP addresses are verified against the
-peer certificate. `verify: :verify_none` and unsupported TLS or TCP options
-return errors; connections never fall back to another backend automatically.
+and offers TLS 1.3 plus the supported TLS 1.2 profile in one handshake by default.
+TLS 1.2 requires EMS, initial secure renegotiation and ECDHE/AES-GCM. Explicit
+version and wire-profile policies remain authoritative. It uses system CA
+certificates unless `cacerts` or `cacertfile` is supplied. Peer verification is
+the default and checks DNS names or IP addresses against the certificate. Explicit
+TCP `verify: :verify_none` is supported; signature, Finished and record integrity
+checks remain mandatory. Unsupported TLS or TCP options return errors; connections
+never fall back to another backend automatically.
 
 A complete HTTP/2 response remains deliverable if the peer closes before the
 client can write its remaining WINDOW_UPDATE or acknowledgement frames. This
@@ -623,7 +628,7 @@ credentials, and both TLS policies isolate pooled connections.
 
 ```elixir
 HTTP.fetch("https://origin.example/resource",
-  tls_backend: :ssl, http_version: :http1, redirect: :manual,
+  tls_backend: :ex_ssl, http_version: :http1, redirect: :manual,
   ssl: [cacertfile: "origin-ca.pem"],
   proxy: {:https, "proxy.example", 443,
     [ssl: [cacertfile: "proxy-ca.pem"],
@@ -928,7 +933,7 @@ otherwise construction returns `{:error, :http2_options_require_http2}`.
 
 ```elixir
 socket = HTTP.WebSocket.new("wss://example.com/socket", [],
-  http_version: :http2, delivery: :ack, tls_backend: :ssl)
+  http_version: :http2, delivery: :ack)
 
 receive do
   {HTTP.WebSocket, ^socket, %HTTP.WebSocket.Event.Message{data: data}, ref} ->
@@ -1002,8 +1007,7 @@ HTTP/2 uses the shared runtime and can share an eligible connection with Fetch.
 An explicit `http2_profile` requires h2; `http2_scope` and `http2_reuse` retain
 the same isolation rules. With TLS `:auto`, a custom scope or
 `http2_reuse: false` requires an explicit H2 profile; otherwise construction
-returns `{:error, :http2_options_require_http2}`. OTP `:ssl` remains the default
-TLS backend.
+returns `{:error, :http2_options_require_http2}`. ExSSL is the default TLS backend.
 
 For bounded consumer delivery, use opaque acknowledgements:
 
@@ -1526,7 +1530,7 @@ owner/task termination or loss of the coordinator returns `:cleanup_unconfirmed`
 when the cleanup evidence is insufficient. User-created producer processes are
 owned by the caller and must respond to their stream's termination themselves.
 
-The barrier supports direct TCP and the default OTP TLS backend, including TLS
+The barrier supports direct TCP and the default ExSSL TLS backend, including TLS
 handshake cancellation, explicit `:http1`, `:http2`, and direct `:h2c` selection.
 Explicit proxies with the OTP or ExSSL TLS backend support the following routes,
 including pending TCP connection, CONNECT and TLS negotiation, uploads, response streams,

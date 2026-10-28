@@ -4,8 +4,9 @@ Execution checklist derived from the accepted 2026-10-21 HTTP Fetch migration pl
 Baseline: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, nine packages at `0.21.14`.
 Status (2026-10-28): P0–P4 acceptance is complete at `3c561646b7f1bc9042c5cadbc37ed7c6b48fae15`,
 including resumption, nested HTTPS proxies, public lifecycle, completion and
-managed H1/H2. P5 has prepared failing default-promotion tests; OTP remains the
-production default and dependency. P6/P7 have not begun.
+managed H1/H2. P5 now selects ExSSL by default and passes local source checks;
+current candidate/runtime and full CI acceptance remain pending. Explicit OTP
+remains transitional until P6. P6/P7 have not begun.
 
 See [design and compatibility table](tls-migration-design.md) and
 [execution evidence](tls-migration-validation.md). A checkbox means executed and
@@ -398,11 +399,15 @@ gates. P5 may proceed; deferred performance and quality checks are not passes.
 
 ## P5 — Promote default (release boundary B)
 
-- [ ] Update selector, all implicit client/managed paths, examples and smoke assertions.
-- [ ] Preserve explicit ExSSL; keep temporary explicit OTP with named removal boundary C.
-- [ ] Redirect/reconnect/proxy/pool contexts retain resolved backend and policy.
-- [ ] No fallback, verification relaxation, weaker retry or uncertain body replay.
+- [x] Update selector, all implicit client/managed paths, examples and smoke assertions.
+- [x] Preserve explicit ExSSL; keep temporary explicit OTP with named removal boundary C.
+- [x] Redirect/reconnect/proxy/pool contexts retain resolved backend and policy.
+- [x] No fallback, verification relaxation, weaker retry or uncertain body replay.
 - [ ] Default matrix, fresh consumers and representative downstream workloads pass.
+      Source checks pass 2,076 units with `ERL_FLAGS="+S 4:4"` and all173 cases in
+      the four affected completion suites, including14 new default TLS1.2/TLS1.3
+      scenarios and14 explicit controls. Unrestricted-scheduler timing failures
+      remain recorded. Current candidate and full source/runtime CI are next.
 
 Release boundary A is P0–P4 compatibility completion with OTP still default. Select
 actual versions with repository tooling; no guessed reserved versions.
