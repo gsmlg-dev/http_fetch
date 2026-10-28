@@ -37,14 +37,15 @@ defmodule HTTP.ManagedH1ALPNTest do
       assert :ok = RequestCompletion.await(Promise.completion(first), 3_000)
 
       conflicting = Keyword.put(options, :alpn_advertised_protocols, ["h2"])
+      conflicting_versions = Keyword.put(options, :versions, [:"tlsv1.3"])
 
-      for overrides <- [[ssl: conflicting], [http_version: :http2], [tls_backend: :ex_ssl]] do
+      for overrides <- [[ssl: conflicting], [http_version: :http2], [ssl: conflicting_versions]] do
         assert {:error, :transport_scope_policy_mismatch} =
                  Promise.await(fetch(origin <> "/override", scope, overrides))
       end
 
       body = <<0, 13, 10, 255, 42>>
-      second = fetch(origin <> "/second", scope, method: :post, body: body)
+      second = fetch(origin <> "/second", scope, method: :post, body: body, tls_backend: :ex_ssl)
       assert %Response{status: 200} = response = Promise.await(second, 5_000)
 
       assert event(peer, "request") == %{
@@ -115,7 +116,7 @@ defmodule HTTP.ManagedH1ALPNTest do
                origin: origin,
                connect_address: {127, 0, 0, 1},
                http_version: :http1,
-               tls_backend: :ssl,
+               tls_backend: :ex_ssl,
                max_connections: 2,
                max_requests: 32,
                max_pending: 0,

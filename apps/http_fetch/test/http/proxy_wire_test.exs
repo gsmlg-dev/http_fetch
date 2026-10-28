@@ -58,14 +58,14 @@ defmodule HTTP.ProxyWireTest do
   end
 
   for {backend, origin_host, fixture, sni} <- [
-        {:ssl, "localhost", "localhost", nil},
+        {nil, "localhost", "localhost", nil},
         {:ex_ssl, "localhost", "localhost", nil},
-        {:ssl, "127.0.0.1", "localhost", nil},
+        {nil, "127.0.0.1", "localhost", nil},
         {:ex_ssl, "127.0.0.1", "localhost", nil},
         {:ex_ssl, "127.0.0.1", "pinned", ~c"pinned.invalid"}
       ],
       protocol <- [:http1, :http2, :auto] do
-    test "HTTPS #{protocol} #{origin_host} tunnels with #{backend} using #{fixture} and keeps proxy auth outside TLS" do
+    test "HTTPS #{protocol} #{origin_host} tunnels with #{backend || :default} using #{fixture} and keeps proxy auth outside TLS" do
       parent = self()
       {origin, origin_port} = listener()
       {proxy, proxy_port} = listener()
@@ -106,10 +106,9 @@ defmodule HTTP.ProxyWireTest do
       ssl =
         if unquote(sni), do: Keyword.put(ssl, :server_name_indication, unquote(sni)), else: ssl
 
-      response =
-        HTTP.fetch("https://#{unquote(origin_host)}:#{origin_port}/private",
+      options =
+        [
           http_version: unquote(protocol),
-          tls_backend: unquote(backend),
           ssl: ssl,
           proxy:
             {:http, "127.0.0.1", proxy_port,
@@ -119,7 +118,10 @@ defmodule HTTP.ProxyWireTest do
             {"Authorization", "Bearer origin-secret"}
           ],
           timeout: 5_000
-        )
+        ] ++ unquote(if backend, do: [tls_backend: backend], else: [])
+
+      response =
+        HTTP.fetch("https://#{unquote(origin_host)}:#{origin_port}/private", options)
         |> HTTP.Promise.await(7_000)
 
       assert %HTTP.Response{status: 200} = response
