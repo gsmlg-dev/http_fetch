@@ -137,9 +137,10 @@ defmodule SSL.VerifyFunLifecycleTest do
       end
 
     # Infinite connect timeout isolates the original Lifecycle setup deadline:
-    # both retirement causes resolve the existing connect call as :closed.
+    # sealed expiry remains distinct from explicit cancellation.
     result = Task.await(caller, max(cutoff - absolute(0), 0))
-    assert {:error, :closed} = result
+    expected_reason = if trigger == :deadline, do: :timeout, else: :closed
+    assert {:error, ^expected_reason} = result
     assert_graph_closed(graph, cutoff)
     failure = if trigger == :cancel, do: :cancelled, else: :timeout
     receipt = terminal_receipt(:cancelled, failure, roles) |> Map.put(:scope, scope)

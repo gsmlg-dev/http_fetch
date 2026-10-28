@@ -829,7 +829,9 @@ defmodule SSL.PartialSelectionControlsIntegrationTest do
             expiry + 1_000
         end
 
-      assert {:error, :closed} =
+      expected_reason = if trigger == :deadline, do: :timeout, else: :closed
+
+      assert {:error, ^expected_reason} =
                Task.await(caller, max(0, cutoff - System.monotonic_time(:millisecond)))
 
       assert_receive {:DOWN, ^monitor, :process, ^connection, _}, 500

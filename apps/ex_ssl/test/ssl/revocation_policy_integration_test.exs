@@ -2479,17 +2479,21 @@ defmodule SSL.RevocationHTTPCutoffIntegrationTest do
                   observed_down: ^mask,
                   losses: 0,
                   auxiliary: %{roles: 1, observed_down: 1, losses: 0}
-                }} =
+                } = receipt} =
                  SSL.Lifecycle.await(handle, {:abs_ms, cutoff})
 
-        if trigger == :deadline, do: assert(System.monotonic_time(:millisecond) <= cutoff)
+        if trigger == :deadline do
+          assert receipt.setup == :cancelled
+          assert receipt.setup_failure == :timeout
+          assert System.monotonic_time(:millisecond) <= cutoff
+        end
       after
         if trigger == :deadline, do: :erlang.resume_process(caller.pid)
       end
 
       # Native cleanup has already met the original cutoff. Result delivery has
       # its own bounded watchdog after the caller is allowed to run again.
-      if trigger == :deadline, do: assert({:error, :closed} = Task.await(caller, 1_000))
+      if trigger == :deadline, do: assert({:error, :timeout} = Task.await(caller, 1_000))
 
       refute_receive {^reference, :connection, _}, 0
       refute_receive {^reference, :bad_cert}, 0
@@ -2673,14 +2677,25 @@ defmodule SSL.RevocationConcurrentSurvivalIntegrationTest do
             expiry + 1_000
         end
 
-      assert {:error, :closed} =
+      expected_reason = if trigger == :deadline, do: :timeout, else: :closed
+
+      assert {:error, ^expected_reason} =
                Task.await(caller, max(1, cutoff - System.monotonic_time(:millisecond)))
 
       assert_receive {:DOWN, ^monitor, :process, ^connection, _}, 500
       mask = if route == :direct, do: 31, else: 30
+      failure = if trigger == :deadline, do: :timeout, else: :cancelled
 
       assert {:ok,
-              %{version: 1, cleanup: :confirmed, roles: ^mask, observed_down: ^mask, losses: 0}} =
+              %{
+                version: 1,
+                setup: :cancelled,
+                setup_failure: ^failure,
+                cleanup: :confirmed,
+                roles: ^mask,
+                observed_down: ^mask,
+                losses: 0
+              }} =
                SSL.Lifecycle.await(handle, {:abs_ms, cutoff})
 
       refute_receive {^reference, :entered, _}, 0
