@@ -42,6 +42,11 @@ class MigrationConsumerTests(unittest.TestCase):
             "apps/ex_ssl/test/ssl/manual_ticket_integration_test.exs",
             "apps/ex_ssl/test/ssl/resumption_context_test.exs",
             "apps/ex_ssl/test/ssl/protocol/resumption_verifier_test.exs",
+            "apps/ex_ssl/test/ssl/tls12_session_options_test.exs",
+            "apps/ex_ssl/test/ssl/tls12_session_cache_test.exs",
+            "apps/ex_ssl/test/ssl/tls12_session_context_test.exs",
+            "apps/ex_ssl/test/ssl/tls12_session_integration_test.exs",
+            "apps/ex_ssl/test/ssl/protocol/tls12_session_test.exs",
         )
         for name in required:
             with self.subTest(name=name):

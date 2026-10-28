@@ -42,6 +42,11 @@ MIGRATION_GROUPS = {
         "apps/ex_ssl/test/ssl/manual_ticket_integration_test.exs",
         "apps/ex_ssl/test/ssl/resumption_context_test.exs",
         "apps/ex_ssl/test/ssl/protocol/resumption_verifier_test.exs",
+        "apps/ex_ssl/test/ssl/tls12_session_options_test.exs",
+        "apps/ex_ssl/test/ssl/tls12_session_cache_test.exs",
+        "apps/ex_ssl/test/ssl/tls12_session_context_test.exs",
+        "apps/ex_ssl/test/ssl/tls12_session_integration_test.exs",
+        "apps/ex_ssl/test/ssl/protocol/tls12_session_test.exs",
     ),
     "provider": (
         "apps/http_core/test/http/ex_ssl_setup_phase_integration_test.exs",
