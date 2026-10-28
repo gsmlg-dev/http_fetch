@@ -1,5 +1,7 @@
 defmodule NoOTP.ReleaseAudit do
   @moduledoc false
+  @max_finite_targets 16
+  @max_finite_bytes 65_536
   @named_dispatches [
     make_fun: 3,
     spawn: 3,
@@ -423,9 +425,10 @@ defmodule NoOTP.ReleaseAudit do
   end
 
   defp resolve_expression({:named_fun, line, name, clauses}, environment) do
-    captured = Map.delete(environment, name)
+    identity = {:fun, line, {:clauses, []}}
+    captured = Map.put(environment, name, identity)
     clauses = Enum.map(clauses, fn clause -> elem(resolve_clause(clause, captured, true), 0) end)
-    {{:named_fun, line, name, clauses}, environment, :unknown}
+    {{:named_fun, line, name, clauses}, environment, identity}
   end
 
   defp resolve_expression({:case, line, expression, clauses}, environment) do
@@ -501,7 +504,10 @@ defmodule NoOTP.ReleaseAudit do
   end
 
   defp resolve_expression({:call, line, callee, args}, environment) do
+    variable_callee? = match?({:var, _, _}, callee)
     {callee, environment, _} = resolve_expression(callee, environment)
+    # Data atoms obtained from variables are not source-level local calls.
+    callee = if variable_callee?, do: {:audit_fun_value, line, callee}, else: callee
     {args, environment, _} = resolve_sequence(args, environment)
     {{:call, line, callee, args}, environment, :unknown}
   end
@@ -535,16 +541,50 @@ defmodule NoOTP.ReleaseAudit do
     |> Map.reject(fn {_name, value} -> value == :unknown end)
   end
 
-  defp common_value([]), do: :unknown
+  # A union is a conservative domain, not a correlated set of branch bindings.
+  # Unknown alternatives or exhausted bounds always discard the proof.
+  defp common_value(values) do
+    values = Enum.flat_map(values, &finite_choices/1)
 
-  defp common_value([first | rest]) do
-    if first != :unknown and
-         Enum.all?(rest, &(&1 != :unknown and canonical_value(&1) == canonical_value(first))),
-       do: first,
-       else: :unknown
+    case bounded_choices(values) do
+      {:ok, []} -> :unknown
+      {:ok, [value]} -> value
+      {:ok, values} -> {:audit_union, 0, values}
+      :overflow -> :unknown
+    end
   end
 
-  defp canonical_value(value), do: :erl_parse.map_anno(fn _ -> 0 end, value)
+  defp finite_choices({:audit_union, _, values}), do: values
+  defp finite_choices(value), do: [value]
+
+  defp bounded_choices(values) do
+    values = Enum.uniq_by(values, &canonical_value/1)
+
+    if :unknown not in values and length(values) <= @max_finite_targets and
+         :erlang.external_size(values) <= @max_finite_bytes,
+       do: {:ok, values},
+       else: :overflow
+  end
+
+  # Only proof constructors carry annotations; the function descriptor's
+  # second element is data, and must not be erased during canonicalization.
+  defp canonical_value({kind, _annotation, value})
+       when kind in [:atom, :integer, :fun, :tuple, :audit_union],
+       do: {kind, 0, canonical_value(value)}
+
+  defp canonical_value({nil, _annotation}), do: {nil, 0}
+
+  defp canonical_value({:cons, _annotation, head, tail}),
+    do: {:cons, 0, canonical_value(head), canonical_value(tail)}
+
+  defp canonical_value(value) when is_tuple(value),
+    do: value |> Tuple.to_list() |> Enum.map(&canonical_value/1) |> List.to_tuple()
+
+  defp canonical_value(value) when is_list(value), do: Enum.map(value, &canonical_value/1)
+  defp canonical_value(value), do: value
+
+  defp literal_value({:audit_union, _, _} = expression), do: expression
+  defp literal_value({:fun, _, {:clauses, []}} = expression), do: expression
 
   defp literal_value({kind, _, value} = expression)
        when kind in [:atom, :integer] and (is_atom(value) or is_integer(value)),
@@ -556,10 +596,8 @@ defmodule NoOTP.ReleaseAudit do
        when is_atom(name) and is_integer(arity),
        do: expression
 
-  defp literal_value(
-         {:fun, _, {:function, {:atom, _, _}, {:atom, _, _}, {:integer, _, _}}} = expression
-       ),
-       do: expression
+  defp literal_value({:fun, _, {:function, module, function, arity}} = expression),
+    do: bounded_literal(expression, [module, function, arity])
 
   defp literal_value({:tuple, _, elements} = expression),
     do: bounded_literal(expression, elements)
@@ -570,10 +608,16 @@ defmodule NoOTP.ReleaseAudit do
   defp literal_value(_expression), do: :unknown
 
   defp bounded_literal(expression, children) do
-    if :erlang.external_size(expression) <= 65_536 and
+    if :erlang.external_size(expression) <= @max_finite_bytes and
          Enum.all?(children, &(literal_value(&1) != :unknown)),
        do: expression,
        else: :unknown
+  end
+
+  defp bind_pattern(pattern, {:audit_union, _, values}, environment) do
+    values
+    |> Enum.map(&bind_pattern(pattern, &1, environment))
+    |> join_environments()
   end
 
   defp bind_pattern({:var, _, :_}, _value, environment), do: environment
@@ -604,23 +648,119 @@ defmodule NoOTP.ReleaseAudit do
   defp pattern_variables(term) when is_list(term), do: Enum.flat_map(term, &pattern_variables/1)
   defp pattern_variables(_term), do: []
 
+  # Assess each bounded target, but scan the original nested syntax only once.
+  # Expansion never substitutes closure bodies or evaluates the inspected code.
+  defp walk_calls({:call, line, _callee, _args} = term, path) do
+    findings =
+      case call_candidates(term) do
+        {:ok, calls} -> Enum.flat_map(calls, &call_findings(&1, path))
+        :overflow -> [finding(path, line, "unresolved_finite_dispatch")]
+      end
+
+    Enum.uniq_by(findings, & &1.kind) ++ walk_children(term, path)
+  end
+
+  defp walk_calls({:fun, line, {:function, _, _, _}} = term, path) do
+    findings =
+      case expand_finite(term) do
+        {:ok, captures} -> Enum.flat_map(captures, &capture_findings(&1, path))
+        :overflow -> [finding(path, line, "unresolved_fun_dispatch")]
+      end
+
+    Enum.uniq_by(findings, & &1.kind) ++ walk_children(term, path)
+  end
+
+  defp walk_calls(term, path) when is_tuple(term), do: walk_children(term, path)
+  defp walk_calls(term, path) when is_list(term), do: Enum.flat_map(term, &walk_calls(&1, path))
+  defp walk_calls(_term, _path), do: []
+
+  defp call_candidates({:call, line, callee, args}) do
+    with {:ok, callees} <- expand_finite(callee) do
+      Enum.reduce_while(callees, {:ok, []}, fn callee, {:ok, calls} ->
+        arguments =
+          case callee do
+            {:remote, _, {:atom, _, :erlang}, {:atom, _, function}}
+            when function == :apply or {function, length(args)} in @dispatches ->
+              expand_finite(args)
+
+            _ ->
+              {:ok, [args]}
+          end
+
+        case arguments do
+          {:ok, alternatives} ->
+            candidates = Enum.map(alternatives, &{:call, line, callee, &1})
+
+            if length(calls) + length(candidates) <= @max_finite_targets,
+              do: {:cont, {:ok, calls ++ candidates}},
+              else: {:halt, :overflow}
+
+          :overflow ->
+            {:halt, :overflow}
+        end
+      end)
+    end
+  end
+
+  defp expand_finite({:audit_union, _, values}) do
+    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, expanded} ->
+      case expand_finite(value) do
+        {:ok, choices} -> bounded_continue(bounded_choices(expanded ++ choices))
+        :overflow -> {:halt, :overflow}
+      end
+    end)
+  end
+
+  defp expand_finite({:fun, _, {:clauses, _}} = value), do: {:ok, [value]}
+  defp expand_finite({:named_fun, _, _, _} = value), do: {:ok, [value]}
+  defp expand_finite({:call, _, _, _} = value), do: {:ok, [value]}
+
+  defp expand_finite(value) when is_tuple(value) do
+    with {:ok, choices} <- expand_finite(Tuple.to_list(value)),
+         do: {:ok, Enum.map(choices, &List.to_tuple/1)}
+  end
+
+  defp expand_finite(values) when is_list(values) do
+    result =
+      Enum.reduce_while(values, {:ok, [[]]}, fn value, {:ok, prefixes} ->
+        case expand_finite(value) do
+          {:ok, choices} ->
+            product = for prefix <- prefixes, choice <- choices, do: [choice | prefix]
+            bounded_continue(bounded_choices(product))
+
+          :overflow ->
+            {:halt, :overflow}
+        end
+      end)
+
+    case result do
+      {:ok, choices} -> {:ok, Enum.map(choices, &Enum.reverse/1)}
+      :overflow -> :overflow
+    end
+  end
+
+  defp expand_finite(value), do: {:ok, [value]}
+
+  defp bounded_continue({:ok, choices}), do: {:cont, {:ok, choices}}
+  defp bounded_continue(:overflow), do: {:halt, :overflow}
+
   # apply/2 invokes a function value rather than selecting a module. Only literal
   # syntax (including lexically resolved proofs) closes that target; its body or
   # captured MFA still passes through the same recursive unsafe-dispatch checks.
-  defp walk_calls(
+  defp call_findings(
          {:call, _line, {:remote, _, {:atom, _, :erlang}, {:atom, _, :apply}},
-          [{:fun, _, _}, _arguments]} = term,
-         path
+          [{:fun, _, _}, _arguments]},
+         _path
        ),
-       do: walk_children(term, path)
+       do: []
 
   # Literal module and function targets are closed except executable metadispatch.
   # Variable module/function/apply dispatch is retained
   # as unconfirmed evidence, even when traffic happened to avoid its OTP branch.
   # Protocol atoms, option keys and compatibility function names are not calls.
-  defp walk_calls(
+  defp call_findings(
          {:call, line, {:remote, _, {:atom, _, :erlang}, {:atom, _, :apply}},
-          [{:atom, _, target}, function, args]} = term,
+          [{:atom, _, target}, function, args]},
          path
        ) do
     finding =
@@ -644,27 +784,27 @@ defmodule NoOTP.ReleaseAudit do
           []
       end
 
-    finding ++ walk_children(term, path)
+    finding
   end
 
-  defp walk_calls(
-         {:call, line, {:remote, _, {:atom, _, :erlang}, {:atom, _, :apply}}, _args} = term,
+  defp call_findings(
+         {:call, line, {:remote, _, {:atom, _, :erlang}, {:atom, _, :apply}}, _args},
          path
        ),
-       do: [finding(path, line, "unresolved_apply") | walk_children(term, path)]
+       do: [finding(path, line, "unresolved_apply")]
 
-  defp walk_calls({:call, line, {:atom, _, :apply}, _args} = term, path),
-    do: [finding(path, line, "unresolved_apply") | walk_children(term, path)]
+  defp call_findings({:call, line, {:atom, _, :apply}, _args}, path),
+    do: [finding(path, line, "unresolved_apply")]
 
-  defp walk_calls(
-         {:call, line, {:remote, _, {:atom, _, :erlang}, {:atom, _, function}}, args} = term,
+  defp call_findings(
+         {:call, line, {:remote, _, {:atom, _, :erlang}, {:atom, _, function}}, args},
          path
        )
        when {function, length(args)} in @dispatches do
-    dispatch_findings(function, args, path, line) ++ walk_children(term, path)
+    dispatch_findings(function, args, path, line)
   end
 
-  defp walk_calls({:call, line, {:remote, _, target, function}, _args} = term, path) do
+  defp call_findings({:call, line, {:remote, _, target, function}, _args}, path) do
     finding =
       cond do
         match?({:atom, _, :ssl}, target) ->
@@ -680,19 +820,25 @@ defmodule NoOTP.ReleaseAudit do
           []
       end
 
-    finding ++ walk_children(term, path)
+    finding
   end
 
-  defp walk_calls({:call, _line, {:atom, _, _}, _args} = term, path),
-    do: walk_children(term, path)
+  defp call_findings({:call, _line, {:atom, _, _}, _args}, _path),
+    do: []
 
-  defp walk_calls({:call, _line, {:fun, _, _}, _args} = term, path),
-    do: walk_children(term, path)
+  defp call_findings({:call, _line, {:fun, _, _}, _args}, _path),
+    do: []
 
-  defp walk_calls({:call, line, _callee, _args} = term, path),
-    do: [finding(path, line, "unresolved_fun_invocation") | walk_children(term, path)]
+  defp call_findings({:call, _line, {:audit_fun_value, _, {:fun, _, _}}, _args}, _path),
+    do: []
 
-  defp walk_calls({:fun, line, {:function, target, function, arity}} = term, path) do
+  defp call_findings({:call, _line, {:named_fun, _, _, _}, _args}, _path),
+    do: []
+
+  defp call_findings({:call, line, _callee, _args}, path),
+    do: [finding(path, line, "unresolved_fun_invocation")]
+
+  defp capture_findings({:fun, line, {:function, target, function, arity}}, path) do
     finding =
       cond do
         match?({:atom, _, :ssl}, target) ->
@@ -711,12 +857,8 @@ defmodule NoOTP.ReleaseAudit do
           []
       end
 
-    finding ++ walk_children(term, path)
+    finding
   end
-
-  defp walk_calls(term, path) when is_tuple(term), do: walk_children(term, path)
-  defp walk_calls(term, path) when is_list(term), do: Enum.flat_map(term, &walk_calls(&1, path))
-  defp walk_calls(_term, _path), do: []
 
   defp named_dispatch_function?({:atom, _, function}),
     do: Keyword.has_key?(@named_dispatches, function)

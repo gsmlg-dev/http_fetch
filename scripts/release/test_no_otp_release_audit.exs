@@ -124,8 +124,7 @@ defmodule NoOTP.ReleaseAuditTest do
           "run(F) -> lists:F([]).",
           "run(F) -> erlang:apply(F,[]).",
           "run(M,F) -> erlang:apply(M,F,[]).",
-          "run(X,F) -> G=case X of a -> fun() -> ok end; _ -> F end, G().",
-          "run(X) -> M=case X of a -> lists; _ -> maps end, M:reverse([])."
+          "run(X,F) -> G=case X of a -> fun() -> ok end; _ -> F end, G()."
         ] do
       result = erlang(context, body)
       assert result.unresolved_dispatch != [], body
@@ -133,11 +132,10 @@ defmodule NoOTP.ReleaseAuditTest do
     end
   end
 
-  test "fun parameters and named recursive funs cannot inherit outer target bindings", context do
+  test "fun parameters cannot inherit outer target bindings", context do
     for body <- [
           "run() -> F=fun() -> ok end, G=fun(F) -> F() end, G(fun() -> ssl:connect(localhost,443,[]) end).",
-          "run() -> M=lists, F=fun(M) -> M:connect(localhost,443,[]) end, F(ssl).",
-          "run() -> F=fun Loop(N) -> case N of 0 -> ok; _ -> Loop(N-1) end end, F(1)."
+          "run() -> M=lists, F=fun(M) -> M:connect(localhost,443,[]) end, F(ssl)."
         ] do
       assert unsafe?(erlang(context, body)), body
     end
@@ -235,6 +233,171 @@ defmodule NoOTP.ReleaseAuditTest do
              "run() -> spawn(ssl,connect,[]). spawn(_,_,_) -> ok.",
              "-compile({no_auto_import,[{spawn,3}]}). "
            ).unresolved_dispatch == []
+  end
+
+  test "named self identities close direct and nested recursion without executing bodies",
+       context do
+    for body <- [
+          "run() -> F=fun Loop(N) -> case N of 0 -> ok; _ -> Loop(N-1) end end, F(1).",
+          "run() -> (fun Loop(0) -> ok; Loop(N) -> Loop(N-1) end)(1).",
+          "run() -> F=fun Outer(N) -> G=fun Inner(0) -> ok; Inner(K) -> Inner(K-1) end, case N of 0 -> G(1); _ -> Outer(N-1) end end, F(2).",
+          "run() -> Loop=ssl, F=fun Loop(0) -> ok; Loop(N) -> Loop(N-1) end, {Loop,F(1)}.",
+          "run() -> F=fun Loop(N) -> erlang:error(audit_must_not_execute), Loop(N) end, F(0)."
+        ] do
+      assert erlang(context, body).unresolved_dispatch == [], body
+    end
+  end
+
+  test "recursive bodies retain captured callback SSL and nested shadowing obligations",
+       context do
+    for body <- [
+          "run(C) -> F=fun Loop(0) -> C(); Loop(N) -> Loop(N-1) end, F(1).",
+          "run() -> F=fun Loop(0) -> ssl:connect(localhost,443,[]); Loop(N) -> Loop(N-1) end, F(1).",
+          "run() -> M=ssl, F=fun Loop(0) -> M:connect(localhost,443,[]); Loop(N) -> Loop(N-1) end, F(1).",
+          "run(C) -> F=fun Loop(N) -> (fun(Loop) -> Loop() end)(C), Loop(N) end, F(1).",
+          "run(C) -> F=fun Outer(N) -> G=fun Inner(0) -> C(); Inner(K) -> Inner(K-1) end, G(N), Outer(N) end, F(1).",
+          "run(C) -> fun Loop(0) -> fun() -> C() end; Loop(N) -> Loop(N-1) end."
+        ] do
+      assert unsafe?(erlang(context, body)), body
+    end
+  end
+
+  test "actual Erlang comprehension lowering preserves safe and open targets", context do
+    assert erlang(context, "run(Xs) -> [lists:reverse(X) || X <- Xs].").unresolved_dispatch == []
+    assert unsafe?(erlang(context, "run(Xs,F) -> [F(X) || X <- Xs]."))
+  end
+
+  test "actual Elixir literal collectors close while external collectors remain open", context do
+    on_exit(fn ->
+      :code.purge(NoOTPAuditCollectorFixture)
+      :code.delete(NoOTPAuditCollectorFixture)
+    end)
+
+    for {source, closed?} <- [
+          {"def run(xs), do: for(x <- xs, do: {x,x})", true},
+          {"def run(xs), do: for(x <- xs, into: %{}, do: {x,x})", true},
+          {"def run(xs), do: for(<<x <- xs>>, into: <<>>, do: <<x>>)", true},
+          {"def run(xs, sink), do: for(x <- xs, into: sink, do: x)", false},
+          {"def run(xs, f), do: for(x <- xs, do: f.(x))", false}
+        ] do
+      module = NoOTPAuditCollectorFixture
+      :code.purge(module)
+      :code.delete(module)
+
+      [{^module, bytes}] =
+        Code.compile_string("defmodule NoOTPAuditCollectorFixture do " <> source <> " end")
+
+      result = audit(context, module, bytes)
+      assert result.unresolved_dispatch == [] == closed?, source
+    end
+  end
+
+  test "finite module function capture and destructured branch domains close", context do
+    for body <- [
+          "run(X) -> M=case X of a -> lists; _ -> maps end, M:reverse([]).",
+          "run(X) -> F=case X of a -> reverse; _ -> flatten end, lists:F([]).",
+          "run(X) -> F=case X of a -> fun lists:reverse/1; _ -> fun lists:flatten/1 end, F([]).",
+          "run(X) -> {M,F}=case X of a -> {lists,reverse}; _ -> {maps,to_list} end, M:F([]).",
+          "run(X) -> [M,F]=case X of a -> [lists,reverse]; _ -> [maps,to_list] end, erlang:apply(M,F,[[]]).",
+          "run(X) -> M=case X of a -> lists; _ -> maps end, F=fun M:reverse/1, F([]).",
+          "run(X) -> F=case X of a -> fun lists:reverse/1; _ -> fun lists:flatten/1 end, erlang:apply(F,[[]]).",
+          "run(X) -> A=case X of a -> [lists,reverse,[[]]]; _ -> [maps,to_list,[[]]] end, erlang:apply(erlang,spawn,A)."
+        ] do
+      assert erlang(context, body).unresolved_dispatch == [], body
+    end
+  end
+
+  test "finite domains retain SSL unknown and metadispatch alternatives", context do
+    for body <- [
+          "run(X) -> M=case X of a -> lists; _ -> ssl end, M:connect(localhost,443,[]).",
+          "run(X,M) -> N=case X of a -> lists; _ -> M end, N:reverse([]).",
+          "run(X) -> F=case X of a -> fun lists:reverse/1; _ -> fun ssl:connect/3 end, F([]).",
+          "run(X) -> F=case X of a -> length; _ -> apply end, erlang:F([]).",
+          "run(X) -> F=case X of a -> fun lists:reverse/1; _ -> fun erlang:apply/3 end, F([]).",
+          "run(X) -> A=case X of a -> [lists,reverse,[[]]]; _ -> [ssl,connect,[]] end, erlang:apply(erlang,spawn,A).",
+          "run(X,T) -> A=case X of a -> [lists,reverse,[]]; _ -> [lists,reverse|T] end, erlang:apply(erlang,spawn,A)."
+        ] do
+      assert unsafe?(erlang(context, body)), body
+    end
+  end
+
+  test "independent projection conservatively retains unsafe cross branch combinations",
+       context do
+    result =
+      erlang(
+        context,
+        "run(X) -> {M,F}=case X of a -> {erlang,length}; _ -> {lists,apply} end, M:F([])."
+      )
+
+    assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "unresolved_apply"))
+  end
+
+  test "data atoms and tuples never become proven callable identities", context do
+    for body <- [
+          "run() -> F=some_atom, F().",
+          "run() -> F={lists,reverse}, F([]).",
+          "run(X) -> F=case X of a -> some_atom; _ -> fun() -> ok end end, F().",
+          "run(X) -> F=case X of a -> fun() -> ok end; _ -> {lists,reverse} end, F()."
+        ] do
+      assert Enum.any?(
+               erlang(context, body).unresolved_dispatch,
+               &(&1.kind == "unresolved_fun_invocation")
+             ),
+             body
+    end
+  end
+
+  test "finite choice count Cartesian product and byte bounds fail closed", context do
+    seventeen = Enum.map_join(1..17, "; ", fn n -> "#{n} -> m#{n}" end)
+    assert unsafe?(erlang(context, "run(X) -> M=case X of " <> seventeen <> " end, M:f()."))
+
+    modules = Enum.map_join(1..5, "; ", fn n -> "#{n} -> m#{n}" end)
+    functions = Enum.map_join(1..5, "; ", fn n -> "#{n} -> f#{n}" end)
+
+    assert unsafe?(
+             erlang(
+               context,
+               "run(X,Y) -> M=case X of " <>
+                 modules <> " end, F=case Y of " <> functions <> " end, M:F()."
+             )
+           )
+
+    huge = Enum.map_join(1..9_000, ",", &Integer.to_string/1)
+
+    assert unsafe?(
+             erlang(
+               context,
+               "run(X) -> {M,_}=case X of a -> {lists,{" <>
+                 huge <> "}}; _ -> {maps,{" <> huge <> "}} end, M:reverse([])."
+             )
+           )
+  end
+
+  test "union expansion scans nested unsafe occurrences once with exact source lines", context do
+    result =
+      erlang(
+        context,
+        "run(X,C) ->\n M=case X of a -> lists; _ -> maps end,\n M:reverse(C()),\n C()."
+      )
+
+    findings = Enum.filter(result.unresolved_dispatch, &(&1.kind == "unresolved_fun_invocation"))
+    assert Enum.map(findings, & &1.line) == [3, 4]
+    assert length(result.unresolved_dispatch) == 2
+  end
+
+  test "compiled producer mutation changes the hash and retains its nested obligation", context do
+    safe = erlang(context, "run() -> fun Loop(0) -> ok; Loop(N) -> Loop(N-1) end.")
+
+    unsafe =
+      erlang(
+        context,
+        "run() -> fun Loop(0) -> ssl:connect(localhost,443,[]); Loop(N) -> Loop(N-1) end."
+      )
+
+    assert safe.unresolved_dispatch == []
+    assert safe.sha256 != unsafe.sha256
+    assert unsafe?(unsafe)
+    assert Enum.any?(unsafe.unresolved_dispatch, &(&1.line == 1))
   end
 
   defp unsafe?(result),
