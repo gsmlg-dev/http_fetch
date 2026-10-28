@@ -2,6 +2,44 @@ defmodule NoOTP.ReleaseAudit do
   @moduledoc false
   @max_finite_targets 16
   @max_finite_bytes 65_536
+  @max_parameter_functions 256
+  @max_parameter_calls 4_096
+  @max_parameter_nodes 100_000
+  @parameter_ast_nodes [
+    :clause,
+    :atom,
+    :integer,
+    :float,
+    :char,
+    :string,
+    nil,
+    :var,
+    :cons,
+    :tuple,
+    :map,
+    :map_field_assoc,
+    :map_field_exact,
+    :bin,
+    :match,
+    :block,
+    :case,
+    :if,
+    :receive,
+    :try,
+    :catch,
+    :op,
+    :remote,
+    :named_fun,
+    :lc,
+    :bc,
+    :mc,
+    :generate,
+    :b_generate,
+    :m_generate,
+    :generate_strict,
+    :b_generate_strict,
+    :m_generate_strict
+  ]
   @named_dispatches [
     make_fun: 3,
     spawn: 3,
@@ -277,9 +315,10 @@ defmodule NoOTP.ReleaseAudit do
 
   defp inspect_beam(path) do
     {:ok, {module, chunks}} =
-      :beam_lib.chunks(String.to_charlist(path), [:imports, :abstract_code])
+      :beam_lib.chunks(String.to_charlist(path), [:imports, :exports, :abstract_code])
 
     imports = Keyword.fetch!(chunks, :imports)
+    exports = Keyword.fetch!(chunks, :exports)
 
     direct =
       for {:ssl, function, arity} <- imports,
@@ -288,7 +327,8 @@ defmodule NoOTP.ReleaseAudit do
     {dynamic, missing} =
       case Keyword.fetch!(chunks, :abstract_code) do
         {:raw_abstract_v1, forms} ->
-          {walk_calls(resolve_lexical(qualify_named_dispatches(forms, imports)), path), false}
+          {walk_calls(resolve_lexical(qualify_named_dispatches(forms, imports), exports), path),
+           false}
 
         :no_abstract_code ->
           {[], true}
@@ -367,19 +407,216 @@ defmodule NoOTP.ReleaseAudit do
 
   defp qualify_named_calls(term, _targets), do: term
 
-  # Resolve only values established by the abstract code's lexical bindings.
-  # This never evaluates scanned expressions. Anonymous bodies are scanned once
-  # at their definition under the captured environment; uses carry a body-free
-  # proof of literal fun identity, avoiding recursive/exponential substitution.
-  defp resolve_lexical(forms) do
+  # Only an acyclic, complete compiled caller domain can seed private parameters.
+  # Exports and captures remain open; no function return or global-state inference.
+  defp resolve_lexical(forms, beam_exports) do
+    definitions =
+      Map.new(for {:function, _, name, arity, _} = form <- forms, do: {{name, arity}, form})
+
+    exports = for {:attribute, _, :export, entries} <- forms, entry <- entries, do: entry
+
+    options =
+      for {:attribute, _, :compile, values} <- forms, value <- List.wrap(values), do: value
+
+    exported = MapSet.new(beam_exports ++ exports)
+
+    analysis = %{
+      definitions: definitions,
+      edges: MapSet.new(),
+      captures: MapSet.new(),
+      complete: true,
+      nodes: 0,
+      calls: 0
+    }
+
+    resolved =
+      if :export_all in options or map_size(definitions) > @max_parameter_functions do
+        %{}
+      else
+        analysis =
+          Enum.reduce(definitions, analysis, fn {owner, {:function, _, _, _, clauses}}, state ->
+            caller_syntax(clauses, owner, state)
+          end)
+
+        if analysis.complete do
+          callers =
+            Enum.reduce(analysis.edges, %{}, fn {caller, callee}, acc ->
+              Map.update(acc, callee, MapSet.new([caller]), &MapSet.put(&1, caller))
+            end)
+
+          closed_parameters(definitions, callers, exported, analysis.captures, %{}, %{})
+        else
+          %{}
+        end
+      end
+
     Enum.map(forms, fn
-      {:function, line, name, arity, clauses} ->
-        clauses = Enum.map(clauses, fn clause -> elem(resolve_clause(clause, %{}, true), 0) end)
-        {:function, line, name, arity, clauses}
+      {:function, _, name, arity, _} = form ->
+        Map.get_lazy(resolved, {name, arity}, fn ->
+          resolve_function(form, List.duplicate(:unknown, arity))
+        end)
 
       form ->
         form
     end)
+  end
+
+  # Remove ready vertices, never iterate a recursive proof to an arbitrary cap.
+  # Cycles and vertices depending on them fall back to unknown parameters.
+  defp closed_parameters(remaining, callers, exported, captures, incoming, resolved) do
+    ready =
+      Enum.reject(remaining, fn {key, _form} ->
+        Enum.any?(Map.get(callers, key, MapSet.new()), &Map.has_key?(remaining, &1))
+      end)
+
+    if ready == [] do
+      resolved
+    else
+      {incoming, resolved} =
+        Enum.reduce(ready, {incoming, resolved}, fn {{_, arity} = key, form}, {args, output} ->
+          values =
+            if not MapSet.member?(exported, key) and not MapSet.member?(captures, key),
+              do: Map.get(args, key, List.duplicate(:unknown, arity)),
+              else: List.duplicate(:unknown, arity)
+
+          form = resolve_function(form, values)
+          {collect_local_arguments(form, remaining, args), Map.put(output, key, form)}
+        end)
+
+      remaining = Map.drop(remaining, Enum.map(ready, &elem(&1, 0)))
+      closed_parameters(remaining, callers, exported, captures, incoming, resolved)
+    end
+  end
+
+  defp resolve_function({:function, line, name, arity, clauses}, values) do
+    clauses =
+      Enum.map(clauses, fn {:clause, _, patterns, _, _} = clause ->
+        scope =
+          Enum.zip(patterns, values)
+          |> Enum.reduce(%{}, fn {pattern, value}, env -> bind_pattern(pattern, value, env) end)
+          |> Map.reject(fn {_name, value} -> value == :unknown end)
+
+        elem(resolve_clause(clause, scope, false), 0)
+      end)
+
+    {:function, line, name, arity, clauses}
+  end
+
+  # Count and recognize executable AST constructors before claiming completeness.
+  # Unsupported nodes make the entire added parameter proof unavailable.
+  defp caller_syntax(_term, _owner, %{complete: false} = state), do: state
+
+  defp caller_syntax(term, owner, state) do
+    state = %{state | nodes: state.nodes + 1}
+
+    if state.nodes > @max_parameter_nodes,
+      do: %{state | complete: false},
+      else: caller_node(term, owner, state)
+  end
+
+  defp caller_node({:call, _, callee, args}, owner, state) do
+    state = %{state | calls: state.calls + 1}
+
+    state =
+      case callee do
+        {:atom, _, name} ->
+          key = {name, length(args)}
+
+          if Map.has_key?(state.definitions, key),
+            do: %{state | edges: MapSet.put(state.edges, {owner, key})},
+            else: state
+
+        _ ->
+          state
+      end
+
+    if state.calls > @max_parameter_calls,
+      do: %{state | complete: false},
+      else: caller_syntax([callee, args], owner, state)
+  end
+
+  # Even a non-escaping local capture is deliberately open in this small batch.
+  defp caller_node({:fun, _, {:function, name, arity}}, _owner, state)
+       when is_atom(name) and is_integer(arity),
+       do: %{state | captures: MapSet.put(state.captures, {name, arity})}
+
+  defp caller_node(
+         {:fun, _, {:function, module, {:atom, _, name}, {:integer, _, arity}}},
+         owner,
+         state
+       ) do
+    # Conservatively include same-named remote captures, even if a remote module
+    # would need an exported function. Unknown names/arities disable this proof.
+    state = %{state | captures: MapSet.put(state.captures, {name, arity})}
+    caller_syntax(module, owner, state)
+  end
+
+  defp caller_node({:fun, _, {:clauses, clauses}}, owner, state),
+    do: caller_syntax(clauses, owner, state)
+
+  defp caller_node({:bin_element, _, value, size, _types}, owner, state),
+    do: caller_syntax([value, size], owner, state)
+
+  defp caller_node(term, owner, state)
+       when is_tuple(term) and tuple_size(term) >= 2 and
+              elem(term, 0) in @parameter_ast_nodes,
+       do: term |> Tuple.to_list() |> Enum.drop(2) |> caller_syntax(owner, state)
+
+  defp caller_node(term, owner, state) when is_list(term),
+    do: Enum.reduce(term, state, &caller_syntax(&1, owner, &2))
+
+  defp caller_node(term, _owner, state) when is_tuple(term), do: %{state | complete: false}
+  defp caller_node(_term, _owner, state), do: state
+
+  defp collect_local_arguments({:call, _, {:atom, _, name}, args} = term, definitions, incoming) do
+    key = {name, length(args)}
+
+    incoming =
+      if Map.has_key?(definitions, key) do
+        # Reuse only lexical expression values; never execute or infer a return.
+        # Literal closure bodies stay in the original AST, not in these domains.
+        values =
+          Enum.map(args, fn arg -> common_value([caller_argument_value(arg)]) end)
+          |> bounded_arguments()
+
+        Map.update(incoming, key, values, fn previous ->
+          Enum.zip(previous, values)
+          |> Enum.map(fn {a, b} -> common_value([a, b]) end)
+          |> bounded_arguments()
+        end)
+      else
+        incoming
+      end
+
+    term
+    |> Tuple.to_list()
+    |> Enum.reduce(incoming, &collect_local_arguments(&1, definitions, &2))
+  end
+
+  defp collect_local_arguments(term, definitions, incoming) when is_tuple(term),
+    do: term |> Tuple.to_list() |> collect_local_arguments(definitions, incoming)
+
+  defp collect_local_arguments(term, definitions, incoming) when is_list(term),
+    do: Enum.reduce(term, incoming, &collect_local_arguments(&1, definitions, &2))
+
+  defp collect_local_arguments(_term, _definitions, incoming), do: incoming
+
+  defp caller_argument_value({:fun, line, {:clauses, _}}),
+    do: {:fun, line, {:clauses, []}}
+
+  defp caller_argument_value({:named_fun, line, _name, _clauses}),
+    do: {:fun, line, {:clauses, []}}
+
+  defp caller_argument_value(expression) do
+    if :erlang.external_size(expression) <= @max_finite_bytes,
+      do: elem(resolve_expression(expression, %{}), 2),
+      else: :unknown
+  end
+
+  defp bounded_arguments(values) do
+    if :erlang.external_size(values) <= @max_finite_bytes,
+      do: values,
+      else: List.duplicate(:unknown, length(values))
   end
 
   defp resolve_clause({:clause, line, patterns, guards, body}, environment, shadow) do

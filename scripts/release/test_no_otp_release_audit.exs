@@ -400,11 +400,260 @@ defmodule NoOTP.ReleaseAuditTest do
     assert Enum.any?(unsafe.unresolved_dispatch, &(&1.line == 1))
   end
 
+  test "complete private callers establish literal closures including nested and transitive calls",
+       context do
+    for body <- [
+          "run() -> helper(fun() -> ok end). helper(F) -> F().",
+          "run() -> F=fun() -> ok end, helper(F). helper(F) -> F().",
+          "run() -> helper(fun lists:reverse/1). helper(F) -> F([]).",
+          "run() -> helper(fun Loop(0) -> ok; Loop(N) -> Loop(N-1) end). helper(F) -> F(1).",
+          "run() -> F=fun() -> helper(fun() -> ok end) end, F(). helper(F) -> F().",
+          "run() -> first(fun() -> ok end). first(F) -> second(F). second(F) -> F().",
+          "run() -> first(lists). first(M) -> second(M). second(M) -> M:reverse([])."
+        ] do
+      assert private_erlang(context, body).unresolved_dispatch == [], body
+    end
+  end
+
+  test "every finite private caller contributes module and function targets", context do
+    for body <- [
+          "run(X) -> case X of a -> helper(lists); _ -> helper(maps) end. helper(M) -> M:reverse([]).",
+          "run(X) -> case X of a -> helper(reverse); _ -> helper(flatten) end. helper(F) -> lists:F([]).",
+          "run(X) -> M=case X of a -> lists; _ -> maps end, helper(M). helper(M) -> M:reverse([]).",
+          "run(X) -> helper(case X of a -> lists; _ -> maps end). helper(M) -> M:reverse([]).",
+          "run(X) -> case X of a -> helper(fun lists:reverse/1); _ -> helper(fun lists:flatten/1) end. helper(F) -> F([])."
+        ] do
+      assert private_erlang(context, body, "run/1").unresolved_dispatch == [], body
+    end
+  end
+
+  test "actual Elixir compiled private helper parameters use complete literal callers", context do
+    on_exit(fn ->
+      :code.purge(NoOTPAuditPrivateFixture)
+      :code.delete(NoOTPAuditPrivateFixture)
+    end)
+
+    [{module, bytes}] =
+      Code.compile_string("""
+      defmodule NoOTPAuditPrivateFixture do
+        def run(flag) do
+          if flag, do: invoke(fn -> :ok end), else: invoke(fn -> :done end)
+        end
+        defp invoke(callback), do: callback.()
+      end
+      """)
+
+    assert audit(context, module, bytes).unresolved_dispatch == []
+  end
+
+  test "an unknown caller poisons a private parameter despite other safe callers", context do
+    for body <- [
+          "run(M) -> helper(lists), helper(M).\nhelper(M) -> M:reverse([]).",
+          "run(F) -> helper(fun() -> ok end), helper(F).\nhelper(F) -> F().",
+          "run(F) -> helper(fun() -> ok end), W=fun(G) -> helper(G) end, W(F).\nhelper(F) -> F().",
+          "run(M) -> first(lists), first(M). first(M) -> helper(M).\nhelper(M) -> M:reverse([])."
+        ] do
+      result = private_erlang(context, body, "run/1")
+      assert Enum.any?(result.unresolved_dispatch, &(&1.line == 2)), body
+    end
+  end
+
+  test "SSL and metadispatch private caller alternatives remain findings", context do
+    for body <- [
+          "run(X) -> case X of a -> helper(lists); _ -> helper(ssl) end. helper(M) -> M:connect(localhost,443,[]).",
+          "run(X) -> case X of a -> helper(length); _ -> helper(apply) end. helper(F) -> erlang:F([]).",
+          "run(X) -> case X of a -> helper(fun() -> ok end); _ -> helper(fun() -> ssl:connect(localhost,443,[]) end) end. helper(F) -> F().",
+          "run(X) -> case X of a -> helper(fun lists:reverse/1); _ -> helper(fun erlang:apply/3) end. helper(F) -> F([])."
+        ] do
+      assert unsafe?(private_erlang(context, body, "run/1")), body
+    end
+  end
+
+  test "private captures keep parameter domains open including returned and passed captures",
+       context do
+    for body <- [
+          "run() -> helper(fun() -> ok end), fun helper/1.\nhelper(F) -> F().",
+          "run() -> helper(fun() -> ok end), lists:map(fun helper/1, []).\nhelper(F) -> F().",
+          "run() -> erlang:apply(fun helper/1, [fun() -> ok end]).\nhelper(F) -> F().",
+          "run() -> helper(fun() -> ok end), wrapper(). wrapper() -> fun helper/1.\nhelper(F) -> F()."
+        ] do
+      result = private_erlang(context, body)
+      assert Enum.any?(result.unresolved_dispatch, &(&1.line == 2)), body
+    end
+  end
+
+  test "explicit exports and both export_all forms prevent private parameter proofs", context do
+    body = "run() -> helper(fun() -> ok end).\nhelper(F) -> F()."
+    explicit = private_erlang(context, body, "run/0,helper/1")
+    attribute = private_erlang(context, body, "run/0", "-compile(export_all). ")
+    compiler_option = private_erlang(context, body, "run/0", "", [:export_all])
+
+    for result <- [explicit, attribute, compiler_option] do
+      assert Enum.any?(result.unresolved_dispatch, &(&1.line == 2))
+    end
+  end
+
+  test "literal wrappers preserve each original captured callback occurrence and line", context do
+    result =
+      private_erlang(
+        context,
+        "run(C) ->\n helper(fun() -> C() end),\n C().\nhelper(F) -> F().",
+        "run/1"
+      )
+
+    findings = Enum.filter(result.unresolved_dispatch, &(&1.kind == "unresolved_fun_invocation"))
+    assert Enum.map(findings, & &1.line) == [2, 3]
+    assert length(result.unresolved_dispatch) == 2
+
+    returned =
+      private_erlang(
+        context,
+        "run(C) ->\n helper(fun() -> C() end).\nhelper(F) -> fun() -> F() end.",
+        "run/1"
+      )
+
+    assert Enum.map(returned.unresolved_dispatch, & &1.line) == [2]
+  end
+
+  test "private parameter proof does not cross inner formal parameter shadowing", context do
+    result =
+      private_erlang(
+        context,
+        "run() -> helper(fun() -> ok end).\nhelper(F) -> (fun(F) -> F() end)(fun() -> ok end)."
+      )
+
+    assert Enum.any?(
+             result.unresolved_dispatch,
+             &(&1.line == 2 and &1.kind == "unresolved_fun_invocation")
+           )
+  end
+
+  test "private clause tuple and list patterns project finite domains conservatively", context do
+    for body <- [
+          "run(X) -> case X of a -> helper({lists,reverse}); _ -> helper({maps,to_list}) end. helper({M,F}) -> M:F([]).",
+          "run(X) -> case X of a -> helper([lists,reverse]); _ -> helper([maps,to_list]) end. helper([M,F]) -> M:F([]).",
+          "run(X) -> case X of a -> helper({first,lists}); _ -> helper({second,maps}) end. helper({first,M}) -> M:reverse([]); helper({second,M}) -> M:to_list([])."
+        ] do
+      assert private_erlang(context, body, "run/1").unresolved_dispatch == [], body
+    end
+
+    unsafe =
+      private_erlang(
+        context,
+        "run(X) -> case X of a -> helper({erlang,length}); _ -> helper({lists,apply}) end. helper({M,F}) -> M:F([]).",
+        "run/1"
+      )
+
+    assert Enum.any?(unsafe.unresolved_dispatch, &(&1.kind == "unresolved_apply"))
+  end
+
+  test "recursive callers unseeded cycles and their dependent helpers remain unknown", context do
+    for body <- [
+          "run() -> helper(fun() -> ok end). helper(F) -> F(), helper(F).",
+          "run() -> first(fun() -> ok end). first(F) -> second(F). second(F) -> F(), first(F).",
+          "run() -> ok. first(F) -> second(F). second(F) -> F(), first(F).",
+          "run() -> first(). first() -> first(), helper(fun() -> ok end). helper(F) -> F().",
+          "run() -> ok. helper(F) -> F()."
+        ] do
+      assert unsafe?(private_erlang(context, body)), body
+    end
+  end
+
+  test "private caller unions and first caller literal domains respect finite bounds", context do
+    body = fn count ->
+      branches = Enum.map_join(1..count, "; ", fn n -> "#{n} -> helper(m#{n})" end)
+      "run(X) -> case X of " <> branches <> " end. helper(M) -> M:f()."
+    end
+
+    assert private_erlang(context, body.(16), "run/1").unresolved_dispatch == []
+    assert unsafe?(private_erlang(context, body.(17), "run/1"))
+
+    huge = Enum.map_join(1..9_000, ",", &Integer.to_string/1)
+
+    assert unsafe?(
+             private_erlang(
+               context,
+               "run() -> helper({lists,{" <> huge <> "}}). helper({M,_}) -> M:reverse([])."
+             )
+           )
+  end
+
+  test "private parameter analysis budget exhaustion retains unknown obligations", context do
+    helpers = Enum.map_join(1..255, " ", fn n -> "unused#{n}() -> ok." end)
+
+    assert unsafe?(
+             private_erlang(
+               context,
+               "run() -> helper(lists). helper(M) -> M:reverse([]). " <> helpers
+             )
+           )
+
+    calls = Enum.map_join(1..4_097, ",", fn _ -> "helper(lists)" end)
+
+    assert unsafe?(
+             private_erlang(context, "run() -> " <> calls <> ". helper(M) -> M:reverse([]).")
+           )
+
+    literal = String.duplicate("x", 100_001)
+
+    assert unsafe?(
+             private_erlang(
+               context,
+               "run() -> \"" <> literal <> "\", helper(lists). helper(M) -> M:reverse([])."
+             )
+           )
+  end
+
+  test "unknown capture domains and computed returns do not close private callers", context do
+    unknown_capture =
+      private_erlang(
+        context,
+        "run(M,F,A) -> C=fun M:F/A, helper(lists), C.\nhelper(M) -> M:reverse([]).",
+        "run/3"
+      )
+
+    assert Enum.any?(unknown_capture.unresolved_dispatch, &(&1.line == 2))
+
+    returned =
+      private_erlang(
+        context,
+        "run() -> helper(factory()). factory() -> fun() -> ok end.\nhelper(F) -> F()."
+      )
+
+    assert Enum.any?(returned.unresolved_dispatch, &(&1.line == 2))
+  end
+
+  test "changed compiled private caller body changes hash and retains its unsafe occurrence",
+       context do
+    safe = private_erlang(context, "run() -> helper(fun() -> ok end). helper(F) -> F().")
+
+    changed =
+      private_erlang(
+        context,
+        "run() -> helper(fun() -> ssl:connect(localhost,443,[]) end). helper(F) -> F()."
+      )
+
+    assert safe.unresolved_dispatch == []
+    assert safe.sha256 != changed.sha256
+    findings = Enum.filter(changed.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+    assert Enum.map(findings, & &1.line) == [1]
+    assert unsafe?(changed)
+  end
+
   defp unsafe?(result),
     do: result.unresolved_dispatch != [] or result.otp_ssl_imports != []
 
   defp erlang(context, body, extra \\ "") do
     source = "-module(no_otp_audit_fixture). -compile(export_all). " <> extra <> body
+    compile_erlang(context, source, [])
+  end
+
+  defp private_erlang(context, body, exports \\ "run/0", extra \\ "", options \\ []) do
+    source = "-module(no_otp_audit_fixture). -export([" <> exports <> "]). " <> extra <> body
+    compile_erlang(context, source, options)
+  end
+
+  defp compile_erlang(context, source, options) do
     {:ok, tokens, _} = :erl_scan.string(String.to_charlist(source))
 
     forms =
@@ -419,7 +668,8 @@ defmodule NoOTP.ReleaseAuditTest do
     assert {:ok, module, bytes, _warnings} =
              :compile.forms(
                forms,
-               [:binary, :debug_info, :return_errors, :return_warnings, :nowarn_export_all]
+               [:binary, :debug_info, :return_errors, :return_warnings, :nowarn_export_all] ++
+                 options
              )
 
     audit(context, module, bytes)
