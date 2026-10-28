@@ -199,6 +199,7 @@ defmodule HTTP.HTTP1ReuseTest do
     opts =
       Keyword.merge(opts,
         http1_reuse: true,
+        tls_backend: :ssl,
         timeout: 6_000,
         socket_opts: [sndbuf: 1_024, high_watermark: 1_024, low_watermark: 512]
       )

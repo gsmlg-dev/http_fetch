@@ -245,6 +245,7 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
         body: upload,
         duplex: :half,
         http_version: :auto,
+        tls_backend: :ssl,
         ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
       )
 

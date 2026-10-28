@@ -509,6 +509,7 @@ defmodule HTTP.RequestCompletionTest do
 
     promise =
       HTTP.fetch(String.replace(url, "http:", "https:"),
+        tls_backend: :ssl,
         redirect: :manual,
         ssl: [verify: :verify_none],
         timeout: 2_000

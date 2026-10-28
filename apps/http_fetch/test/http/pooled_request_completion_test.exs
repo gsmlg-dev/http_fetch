@@ -95,48 +95,65 @@ defmodule HTTP.PooledRequestCompletionTest do
     send(peer, :close)
   end
 
-  @tag :integration
-  test "HTTP1 cancellation during checkout stays pending until the leased socket closes" do
-    parent = self()
-    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
-    {:ok, {_, port}} = :inet.sockname(listener)
+  for backend <- [:default, :ssl, :ex_ssl] do
+    @tag :integration
+    @tag backend: backend
+    test "#{backend} HTTP1 cancellation during checkout stays pending until the leased socket closes",
+         %{backend: backend} do
+      parent = self()
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+      {:ok, {_, port}} = :inet.sockname(listener)
 
-    peer =
-      Task.async(fn ->
-        {:ok, socket} = :gen_tcp.accept(listener, 2_000)
-        {:ok, _head} = :gen_tcp.recv(socket, 0, 2_000)
-        :ok = :gen_tcp.send(socket, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
-        send(parent, :checkout_peer_closed)
-        :gen_tcp.close(listener)
-      end)
+      peer =
+        Task.async(fn ->
+          {:ok, socket} = :gen_tcp.accept(listener, 2_000)
+          {:ok, _head} = :gen_tcp.recv(socket, 0, 2_000)
+          :ok = :gen_tcp.send(socket, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+          assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+          send(parent, :checkout_peer_closed)
+          :gen_tcp.close(listener)
+        end)
 
-    on_exit(fn -> :gen_tcp.close(listener) end)
-    url = "http://127.0.0.1:#{port}/"
-    opts = [http1_reuse: true, redirect: :manual, timeout: 2_000]
-    first = HTTP.fetch(url, opts)
-    Promise.await(first)
-    assert :ok = RequestCompletion.await(Promise.completion(first), 1_000)
-    pool = Process.whereis(HTTP.HTTP1.Pool)
-    :sys.suspend(pool)
-    second = HTTP.fetch(url, Keyword.merge(opts, method: :post, body: "must-not-send"))
+      on_exit(fn -> :gen_tcp.close(listener) end)
+      url = "http://127.0.0.1:#{port}/"
+      opts = [http1_reuse: true, redirect: :manual, timeout: 2_000]
+      opts = if backend == :default, do: opts, else: Keyword.put(opts, :tls_backend, backend)
+      first = HTTP.fetch(url, opts)
+      Promise.await(first)
+      assert :ok = RequestCompletion.await(Promise.completion(first), 1_000)
+      pool = Process.whereis(HTTP.HTTP1.Pool)
+      :sys.suspend(pool)
+      second = HTTP.fetch(url, Keyword.merge(opts, method: :post, body: "must-not-send"))
+      tracker = Promise.completion(second).tracker
 
-    try do
-      wait_until(fn ->
-        {:messages, messages} = Process.info(pool, :messages)
-        Enum.any?(messages, &match?({:"$gen_call", _, {:checkout, _}}, &1))
-      end)
+      try do
+        wait_until(fn ->
+          {:messages, messages} = Process.info(pool, :messages)
 
-      assert {:error, :cleanup_pending} =
-               RequestCompletion.abort_and_await(Promise.completion(second), 20)
-    after
-      :sys.resume(pool)
+          if backend == :ssl do
+            Enum.any?(messages, &match?({:"$gen_call", _, {:checkout, _}}, &1))
+          else
+            Enum.any?(messages, fn
+              {:"$gen_call", _, {:checkout, _, ^tracker, deadline}} when is_integer(deadline) ->
+                true
+
+              _ ->
+                false
+            end)
+          end
+        end)
+
+        assert {:error, :cleanup_pending} =
+                 RequestCompletion.abort_and_await(Promise.completion(second), 20)
+      after
+        :sys.resume(pool)
+      end
+
+      assert {:error, :aborted} = Promise.await(second)
+      assert :ok = RequestCompletion.await(Promise.completion(second), 1_000)
+      assert_receive :checkout_peer_closed
+      assert :ok = Task.await(peer)
     end
-
-    assert {:error, :aborted} = Promise.await(second)
-    assert :ok = RequestCompletion.await(Promise.completion(second), 1_000)
-    assert_receive :checkout_peer_closed
-    assert :ok = Task.await(peer)
   end
 
   @tag :integration
@@ -332,7 +349,7 @@ defmodule HTTP.PooledRequestCompletionTest do
   end
 
   @tag :integration
-  test "HTTP2 TLS cancellation closes TCP but leaves unreturned TLS cleanup unconfirmed" do
+  test "OTP HTTP2 TLS cancellation closes TCP but leaves unreturned TLS cleanup unconfirmed" do
     parent = self()
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
     {:ok, {_, port}} = :inet.sockname(listener)
@@ -351,6 +368,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     promise =
       HTTP.fetch("https://127.0.0.1:#{port}/",
         http_version: :http2,
+        tls_backend: :ssl,
         redirect: :manual,
         timeout: 2_000,
         ssl: [verify: :verify_none]
@@ -434,58 +452,72 @@ defmodule HTTP.PooledRequestCompletionTest do
     end
   end
 
-  @tag :integration
-  test "HTTP2 failed pool registration settles its provisional owner and TLS socket" do
-    parent = self()
-    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
-    {:ok, {_, port}} = :inet.sockname(listener)
-    on_exit(fn -> :gen_tcp.close(listener) end)
+  for backend <- [:default, :ssl] do
+    @tag :integration
+    @tag backend: backend
+    test "#{backend} HTTP2 failed pool registration settles its provisional owner and TLS socket",
+         %{backend: backend} do
+      parent = self()
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+      {:ok, {_, port}} = :inet.sockname(listener)
+      on_exit(fn -> :gen_tcp.close(listener) end)
 
-    peer =
-      Task.async(fn ->
-        {:ok, tcp} = :gen_tcp.accept(listener, 2_000)
-        send(parent, :registration_tcp_accepted)
+      peer =
+        Task.async(fn ->
+          {:ok, tcp} = :gen_tcp.accept(listener, 2_000)
+          send(parent, :registration_tcp_accepted)
 
-        receive do
-          :negotiate -> :ok
-        end
+          receive do
+            :negotiate -> :ok
+          end
 
-        {:ok, socket} =
-          :ssl.handshake(
-            tcp,
-            [
-              certfile: Path.join(@fixtures, "localhost.pem"),
-              keyfile: Path.join(@fixtures, "localhost.key"),
-              alpn_preferred_protocols: ["h2"]
-            ],
-            2_000
-          )
+          {:ok, socket} =
+            :ssl.handshake(
+              tcp,
+              [
+                certfile: Path.join(@fixtures, "localhost.pem"),
+                keyfile: Path.join(@fixtures, "localhost.key"),
+                alpn_preferred_protocols: ["h2"]
+              ],
+              2_000
+            )
 
-        assert {:ok, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"} = :ssl.recv(socket, 24, 2_000)
-        await_tls_close_without_request(socket)
-        :gen_tcp.close(listener)
-      end)
+          if backend == :ssl do
+            assert {:ok, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"} = :ssl.recv(socket, 24, 2_000)
+            await_tls_close_without_request(socket)
+          else
+            assert {:error, :closed} = :ssl.recv(socket, 0, 2_000)
+          end
 
-    promise =
-      HTTP.fetch("https://localhost:#{port}/",
+          :gen_tcp.close(listener)
+        end)
+
+      opts = [
         http_version: :http2,
         redirect: :manual,
         timeout: 2_000,
         ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
-      )
+      ]
 
-    assert_receive :registration_tcp_accepted
-    pool = Process.whereis(:http_fetch_http2_pool)
-    previous_limit = :sys.get_state(pool).max_connections
-    :sys.replace_state(pool, &%{&1 | max_connections: 0})
+      opts = if backend == :default, do: opts, else: Keyword.put(opts, :tls_backend, backend)
+      promise = HTTP.fetch("https://localhost:#{port}/", opts)
 
-    try do
-      send(peer.pid, :negotiate)
-      assert {:error, :connection_capacity} = Promise.await(promise)
-      assert :ok = RequestCompletion.await(Promise.completion(promise), 1_000)
-      assert :ok = Task.await(peer)
-    after
-      :sys.replace_state(pool, &%{&1 | max_connections: previous_limit})
+      assert_receive :registration_tcp_accepted
+      pool = Process.whereis(:http_fetch_http2_pool)
+      previous_limit = :sys.get_state(pool).max_connections
+      on_exit(fn -> :sys.replace_state(pool, &%{&1 | max_connections: previous_limit}) end)
+      :sys.replace_state(pool, &%{&1 | max_connections: 0})
+
+      try do
+        send(peer.pid, :negotiate)
+        assert {:error, :connection_capacity} = Promise.await(promise)
+        assert :ok = RequestCompletion.await(Promise.completion(promise), 1_000)
+        assert :ok = Task.await(peer)
+      after
+        :sys.replace_state(pool, &%{&1 | max_connections: previous_limit})
+      end
+
+      assert :sys.get_state(pool).max_connections == previous_limit
     end
   end
 
@@ -539,6 +571,7 @@ defmodule HTTP.PooledRequestCompletionTest do
 
     opts = [
       http_version: version,
+      tls_backend: :ssl,
       http1_reuse: version == :http1,
       redirect: :manual,
       timeout: 2_000,

@@ -41,8 +41,8 @@ defmodule HTTP.ManagedTransportTest do
     scope = open(origin, max_requests: 1)
     parent = self()
 
-    preparer =
-      spawn(fn ->
+    {preparer, monitor} =
+      spawn_monitor(fn ->
         request = %HTTP.Request{
           url: URI.parse(origin),
           transport_options: [
@@ -57,9 +57,8 @@ defmodule HTTP.ManagedTransportTest do
         send(parent, :claimed)
       end)
 
-    monitor = Process.monitor(preparer)
     assert_receive :claimed
-    assert_receive {:DOWN, ^monitor, _, _, :normal}
+    assert_receive {:DOWN, ^monitor, :process, ^preparer, :normal}
 
     wait_until(fn ->
       match?({:ok, %{preparing_requests: 0}}, ManagedTransport.snapshot(scope, 100))
@@ -253,12 +252,12 @@ defmodule HTTP.ManagedTransportTest do
 
   test "incompatible camelCase policy and oversized body reject before any accept" do
     {origin, listener} = listener()
-    scope = open(origin)
+    scope = open(origin, tls_backend: :ex_ssl)
 
     for override <- [
           %{"httpVersion" => :auto},
           %{"connectAddress" => {127, 0, 0, 2}},
-          %{"tlsBackend" => :ex_ssl},
+          %{"tlsBackend" => :ssl},
           %{"socketOpts" => [send_timeout: 10]}
         ] do
       options =

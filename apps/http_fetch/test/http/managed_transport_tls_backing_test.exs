@@ -5,6 +5,7 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
   alias HTTP.{ManagedTransport, Promise, RequestCompletion, Response}
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
+  @tls12_peer Path.expand("../support/ex_ssl_proxy_lifecycle_peer.py", __DIR__)
 
   test "borrowed CA preparation preserves verification, digest, overrides and redaction" do
     {origin, listener} = listener()
@@ -50,32 +51,135 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
     retire(compact)
   end
 
-  for {host, ca_file, alert} <- [
-        {"localhost", "pinned-ca.pem", :unknown_ca},
-        {"wrong.invalid", "localhost-ca.pem", :bad_certificate}
+  for backend <- [:default, :ssl],
+      version <- [:"tlsv1.2", :"tlsv1.3"],
+      {host, ca_file, rejection} <- [
+        {"localhost", "pinned-ca.pem", :wrong_ca},
+        {"wrong.invalid", "localhost-ca.pem", :wrong_identity}
       ] do
-    test "borrowed CA keeps #{alert} refusal without HTTP bytes or replay" do
-      {origin, listener} = listener(unquote(host))
-      peer = peer(listener)
-      {scope, input_bytes, backing_bytes} = borrowed_scope(origin, unquote(ca_file))
-      assert backing_bytes > input_bytes
-      :erlang.garbage_collect(self())
-      promise = fetch(origin, scope)
-      assert {:error, {:tls_alert, {unquote(alert), _}}} = Promise.await(promise)
+    alert =
+      case {backend, version, rejection} do
+        {:default, :"tlsv1.2", _} -> :bad_certificate
+        {:default, :"tlsv1.3", :wrong_identity} -> :certificate_unknown
+        {_, _, :wrong_ca} -> :unknown_ca
+        {:ssl, _, :wrong_identity} -> :bad_certificate
+      end
 
-      assert {:error, :cleanup_unconfirmed} =
-               RequestCompletion.await(Promise.completion(promise), 3_000)
+    cleanup = if backend == :ssl, do: {:error, :cleanup_unconfirmed}, else: :ok
 
-      assert {:handshake_error, _} = Task.await(peer, 3_000)
-      assert {:error, :timeout} = :ssl.transport_accept(listener, 100)
-      assert {:ok, receipt} = ManagedTransport.retire(scope, mode: :abort)
-      assert {:error, :cleanup_unconfirmed} = ManagedTransport.await_retired(receipt, 3_000)
-      assert {:error, :cleanup_unconfirmed} = ManagedTransport.await_retired(receipt, 0)
-      assert {:error, :transport_scope_retired} = Promise.await(fetch(origin, scope))
+    test "#{backend} #{version} borrowed CA keeps #{rejection} #{alert} refusal without HTTP bytes or replay" do
+      {origin, peer} = rejection_peer(unquote(host), unquote(backend), unquote(version))
+
+      try do
+        {scope, input_bytes, backing_bytes} =
+          borrowed_scope(origin, unquote(ca_file), unquote(backend), unquote(version))
+
+        assert backing_bytes > input_bytes
+        :erlang.garbage_collect(self())
+        promise = fetch(origin, scope)
+        assert {:error, {:tls_alert, {unquote(alert), _}}} = Promise.await(promise)
+
+        assert unquote(Macro.escape(cleanup)) ==
+                 RequestCompletion.await(Promise.completion(promise), 3_000)
+
+        assert_rejection_peer(peer, unquote(alert))
+        assert {:ok, receipt} = ManagedTransport.retire(scope, mode: :abort)
+        assert unquote(Macro.escape(cleanup)) == ManagedTransport.await_retired(receipt, 3_000)
+        assert unquote(Macro.escape(cleanup)) == ManagedTransport.await_retired(receipt, 0)
+        assert {:error, :transport_scope_retired} = Promise.await(fetch(origin, scope))
+      after
+        stop_rejection_peer(peer)
+      end
     end
   end
 
-  defp borrowed_scope(origin, name) do
+  # OTP's TLS 1.2 peer lacks required EMS, so it cannot reach ExSSL certificate checks.
+  defp rejection_peer(host, :default, :"tlsv1.2") do
+    port =
+      Port.open({:spawn_executable, System.find_executable("python3")}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        {:line, 65_536},
+        args: [
+          "-B",
+          @tls12_peer,
+          "--cert",
+          Path.join(@fixtures, "localhost.pem"),
+          "--key",
+          Path.join(@fixtures, "localhost.key"),
+          "--tls",
+          "TLSv1.2",
+          "--protocol",
+          "http/1.1",
+          "--route",
+          "forward"
+        ]
+      ])
+
+    on_exit(fn -> if Port.info(port), do: Port.close(port) end)
+    assert %{"event" => "ready", "port" => number, "tls" => "TLSv1.2"} = peer_event(port)
+    {"https://#{host}:#{number}", {:openssl, port}}
+  end
+
+  defp rejection_peer(host, _, _) do
+    {origin, listener} = listener(host)
+    {origin, {:otp, listener, peer(listener)}}
+  end
+
+  defp assert_rejection_peer({:otp, listener, task}, _alert) do
+    assert {:handshake_error, _} = Task.await(task, 3_000)
+    assert {:error, :timeout} = :ssl.transport_accept(listener, 100)
+  end
+
+  defp assert_rejection_peer({:openssl, port}, alert) do
+    state = peer_closed(port, System.monotonic_time(:millisecond) + 2_000)
+    assert state["active_connections"] == 0
+    assert state["handshakes"] == []
+    assert [%{"kind" => "tls", "reason" => reason}] = state["errors"]
+    assert reason =~ alert |> Atom.to_string() |> String.upcase()
+    # Keep the listener available for the same no-replay observation as the OTP peer.
+    Process.sleep(100)
+    assert Port.command(port, JSON.encode!(%{command: "stats"}) <> "\n")
+
+    assert %{"requests" => [], "accepted_connections" => 1, "closed_connections" => 1} =
+             peer_event(port)
+  end
+
+  defp peer_closed(port, deadline) do
+    assert Port.command(port, JSON.encode!(%{command: "stats"}) <> "\n")
+    remaining = deadline - System.monotonic_time(:millisecond)
+    assert remaining > 0
+    state = peer_event(port, remaining)
+    assert System.monotonic_time(:millisecond) < deadline
+
+    if state["closed_connections"] == 1 do
+      state
+    else
+      Process.sleep(2)
+      peer_closed(port, deadline)
+    end
+  end
+
+  defp peer_event(port, timeout \\ 5_000) do
+    receive do
+      {^port, {:data, {:eol, line}}} -> JSON.decode!(line)
+      {^port, {:exit_status, code}} -> flunk("borrowed CA peer exited with #{code}")
+    after
+      timeout -> flunk("borrowed CA peer event timeout")
+    end
+  end
+
+  defp stop_rejection_peer({:otp, _, _}), do: :ok
+
+  defp stop_rejection_peer({:openssl, port}) do
+    assert Port.command(port, JSON.encode!(%{command: "stop"}) <> "\n")
+    assert %{"event" => "stop"} = peer_event(port)
+    assert_receive {^port, {:exit_status, 0}}, 5_000
+    assert Port.info(port) == nil
+  end
+
+  defp borrowed_scope(origin, name, backend \\ :default, version \\ nil) do
     parent = self()
 
     {helper, monitor} =
@@ -97,7 +201,10 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
             do: ssl(der),
             else: [verify: :verify_peer, cacerts: [der]]
 
-        scope = open(origin, ssl_options)
+        ssl_options =
+          if version, do: Keyword.put(ssl_options, :versions, [version]), else: ssl_options
+
+        scope = open(origin, ssl_options, backend)
         {scope, byte_size(der), backing_bytes}
     after
       3_000 -> flunk("missing finite borrowed CA fixture")
@@ -121,25 +228,29 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
     ]
   end
 
-  defp open(origin, ssl) do
-    assert {:ok, scope} =
-             ManagedTransport.open(
-               origin: origin,
-               connect_address: {127, 0, 0, 1},
-               http_version: :http1,
-               max_connections: 2,
-               max_requests: 32,
-               max_pending: 0,
-               idle_timeout: 30_000,
-               socket_opts: [
-                 buffer: 8_192,
-                 recbuf: 8_192,
-                 sndbuf: 8_192,
-                 send_timeout: 1_000,
-                 send_timeout_close: true
-               ],
-               ssl: ssl
-             )
+  defp open(origin, ssl, backend \\ :default) do
+    options = [
+      origin: origin,
+      connect_address: {127, 0, 0, 1},
+      http_version: :http1,
+      max_connections: 2,
+      max_requests: 32,
+      max_pending: 0,
+      idle_timeout: 30_000,
+      socket_opts: [
+        buffer: 8_192,
+        recbuf: 8_192,
+        sndbuf: 8_192,
+        send_timeout: 1_000,
+        send_timeout_close: true
+      ],
+      ssl: ssl
+    ]
+
+    options =
+      if backend == :default, do: options, else: Keyword.put(options, :tls_backend, backend)
+
+    assert {:ok, scope} = ManagedTransport.open(options)
 
     on_exit(fn ->
       {:ok, receipt} = ManagedTransport.retire(scope, mode: :abort)
