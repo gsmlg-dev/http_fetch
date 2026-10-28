@@ -81,6 +81,40 @@ defmodule HTTP.ExSSLSetupPhaseIntegrationTest do
     end
   end
 
+  for route <- [:eligible, :without_token, :ineligible] do
+    test "native refusal #{route} preserves the original token and eligibility boundary" do
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+      {:ok, {_, port}} = :inet.sockname(listener)
+      :ok = :gen_tcp.close(listener)
+      token = make_ref()
+
+      {result, completion} =
+        tracked_result(fn tracker ->
+          options = [
+            request_lifecycle: tracker,
+            connect_failure_token: token,
+            tls_setup_evidence: true,
+            connect_address: {127, 0, 0, 1},
+            ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
+          ]
+
+          case unquote(route) do
+            :eligible -> ExSSL.connect("localhost", port, options, 2_000)
+            :without_token -> excluded_connect(:without_token, port, options)
+            :ineligible -> excluded_connect(:ineligible, port, options)
+          end
+        end)
+
+      if unquote(route) == :eligible do
+        assert {:error, {:connect_failure, ^token, :econnrefused}} = result
+      else
+        assert {:error, :econnrefused} = result
+      end
+
+      assert :ok = ClientCompletion.await(completion, 2_000)
+    end
+  end
+
   for version <- [:"tlsv1.2", :"tlsv1.3"], route <- [:without_token, :ineligible, :upgrade] do
     test "#{version} #{route} preserves the raw error despite actual fatal setup" do
       version = unquote(version)

@@ -86,6 +86,8 @@ defmodule SSL.Lifecycle.NativeSocketAllocatorTest do
     assert {:sealed, %{setup: :failed, setup_failure: :connect, observed_down: 17}} =
              Receipt.read(context.receipt)
 
+    assert {:ok, %{phase: :connect}} = Receipt.connect_failure(context.receipt)
+    assert :unknown = Receipt.setup_failure(context.receipt)
     refute Process.alive?(observer)
   end
 

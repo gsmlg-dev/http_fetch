@@ -133,23 +133,25 @@ defmodule HTTP.RequestErrorWireTest do
     end
   end
 
-  for scheme <- ["http", "https"] do
+  for {scheme, backend} <- [{"http", []}, {"https", []}, {"https", [tls_backend: :ex_ssl]}] do
     @tag :integration
-    test "#{scheme} refusal exposes pre-send evidence and caller can try a second validated pin" do
+    test "#{scheme} #{inspect(backend)} refusal exposes pre-send evidence and caller can try a second validated pin" do
       {refused, listener, port} = paired_listeners(10, 16)
       :ok = :gen_tcp.close(refused)
       on_exit(fn -> :gen_tcp.close(listener) end)
       url = "#{unquote(scheme)}://pinned.invalid:#{port}/mutation"
 
-      options = [
-        method: :post,
-        body: "once",
-        redirect: :manual,
-        telemetry: false,
-        error_mode: :structured,
-        tls_backend: :ssl,
-        ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")]
-      ]
+      options =
+        [
+          method: :post,
+          body: "once",
+          redirect: :manual,
+          telemetry: false,
+          error_mode: :structured,
+          ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")]
+        ] ++ unquote(backend)
+
+      refused_promise = HTTP.fetch(url, options ++ [connect_address: @ipv6])
 
       assert {:error,
               %{
@@ -158,8 +160,9 @@ defmodule HTTP.RequestErrorWireTest do
                 request_started: false,
                 reason: :econnrefused
               } = error} =
-               HTTP.fetch(url, options ++ [connect_address: @ipv6])
-               |> HTTP.Promise.await(2_000)
+               HTTP.Promise.await(refused_promise, 2_000)
+
+      assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(refused_promise), 2_000)
 
       assert HTTP.RequestError.pre_send?(error)
       assert {:error, :timeout} = :gen_tcp.accept(listener, 0)

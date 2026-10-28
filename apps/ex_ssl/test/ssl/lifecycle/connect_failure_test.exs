@@ -22,6 +22,8 @@ defmodule SSL.Lifecycle.ConnectFailureTest do
 
     assert {:unconfirmed, :observer_unsealed} = Reader.await(context.receipt, deadline(2_000))
     assert :unsealed = Receipt.read(context.receipt)
+    assert {:ok, %{phase: :connect}} = Receipt.connect_failure(context.receipt)
+    assert :unknown = Receipt.setup_failure(context.receipt)
   end
 
   test "actual Setup refusal records connect without claiming missing child identities" do
@@ -391,6 +393,8 @@ defmodule SSL.Lifecycle.ConnectFailureTest do
     do: GenServer.call(a.observer, {{:record_connect_failure, reason, existing}, request}, 500)
 
   defp assert_pending(a, allocations) do
+    assert :unknown = Receipt.connect_failure(a.receipt)
+
     assert {:ok,
             %{setup: :pending, setup_failure: :none, admission: :open, allocations: ^allocations}} =
              Observer.snapshot(a.receipt, deadline())

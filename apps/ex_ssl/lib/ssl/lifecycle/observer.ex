@@ -160,6 +160,25 @@ defmodule SSL.Lifecycle.Observer do
 
   def record_socket_connect_failure(_, _, _, _), do: {:error, :invalid_connect_failure}
 
+  # Public allocation must retain its original error notification. This shares
+  # the native identity/deadline proof but does not retire the pending attempt.
+  def record_socket_connect_phase(receipt, socket, reason, {:abs_ms, existing})
+      when is_integer(existing) and reason in [:econnrefused, :enetunreach, :ehostunreach] do
+    entered = now()
+    requested = min(existing, entered + 250)
+
+    if entered < requested,
+      do:
+        call(
+          receipt,
+          {:record_socket_connect_phase, socket, reason, {:abs_ms, existing}},
+          {:abs_ms, requested}
+        ),
+      else: {:error, :deadline_exceeded}
+  end
+
+  def record_socket_connect_phase(_, _, _, _), do: {:error, :invalid_connect_failure}
+
   @spec reserve_root(Receipt.t(), Authority.lease(), :allocator | :setup, {:abs_ms, integer()}) ::
           {:ok, reference()} | {:error, atom()}
   def reserve_root(receipt, lease, role, deadline),
@@ -342,16 +361,16 @@ defmodule SSL.Lifecycle.Observer do
     do: settle({:error, :invalid_deadline}, expire(state))
 
   def handle_call(
-        {{:record_socket_connect_failure, socket, reason, {:abs_ms, existing}},
-         {:abs_ms, deadline}},
+        {{operation, socket, reason, {:abs_ms, existing}}, {:abs_ms, deadline}},
         from,
         state
       )
-      when is_integer(deadline) do
+      when operation in [:record_socket_connect_failure, :record_socket_connect_phase] and
+             is_integer(deadline) do
     state = expire(state)
 
     if now() < deadline do
-      operation = {:record_socket_connect_failure, socket, reason, existing, deadline}
+      operation = {operation, socket, reason, existing, deadline}
       {reply, next} = operate(operation, elem(from, 0), state)
       settle(reply, next)
     else
@@ -359,11 +378,13 @@ defmodule SSL.Lifecycle.Observer do
     end
   end
 
-  def handle_call({{:record_socket_connect_failure, _, _, _}, _}, _from, state),
-    do: settle({:error, :invalid_connect_failure}, expire(state))
+  def handle_call({{operation, _, _, _}, _}, _from, state)
+      when operation in [:record_socket_connect_failure, :record_socket_connect_phase],
+      do: settle({:error, :invalid_connect_failure}, expire(state))
 
-  def handle_call({{:record_socket_connect_failure, _, _, _, _}, _}, _from, state),
-    do: settle({:error, :invalid_connect_failure}, expire(state))
+  def handle_call({{operation, _, _, _, _}, _}, _from, state)
+      when operation in [:record_socket_connect_failure, :record_socket_connect_phase],
+      do: settle({:error, :invalid_connect_failure}, expire(state))
 
   def handle_call(
         {operation, budget},
@@ -1193,7 +1214,8 @@ defmodule SSL.Lifecycle.Observer do
            entered < requested and entered < existing and
              (state.expires == :infinity or entered < state.expires),
          {:ok, authority} <-
-           Authority.cancel(state.authority, Authority.lease(state.authority), entered, requested) do
+           Authority.cancel(state.authority, Authority.lease(state.authority), entered, requested),
+         :ok <- Receipt.seal_connect_failure(state.receipt) do
       {:ok, record_connect_outcome(state, authority, min(existing, entered + 1_000))}
     else
       _ -> {{:error, :unauthorized_connect_failure}, state}
@@ -1217,7 +1239,8 @@ defmodule SSL.Lifecycle.Observer do
            entered < requested and entered < existing and
              (state.expires == :infinity or entered < state.expires),
          {:ok, authority} <-
-           Authority.cancel(state.authority, Authority.lease(state.authority), entered, requested) do
+           Authority.cancel(state.authority, Authority.lease(state.authority), entered, requested),
+         :ok <- Receipt.seal_connect_failure(state.receipt) do
       {:ok, record_connect_outcome(state, authority, min(existing, entered + 1_000))}
     else
       _ -> {{:error, :unauthorized_connect_failure}, state}
@@ -1225,6 +1248,29 @@ defmodule SSL.Lifecycle.Observer do
   end
 
   defp operate({:record_socket_connect_failure, _, _, _, _}, _caller, state),
+    do: {{:error, :invalid_connect_failure}, state}
+
+  defp operate(
+         {:record_socket_connect_phase, socket, reason, existing, requested},
+         caller,
+         state
+       )
+       when is_integer(existing) and is_integer(requested) and
+              reason in [:econnrefused, :enetunreach, :ehostunreach] do
+    with true <- connect_window?(existing, requested),
+         :ok <- socket_connect_caller(state, caller, socket, existing),
+         entered = now(),
+         true <-
+           entered < requested and entered < existing and
+             (state.expires == :infinity or entered < state.expires),
+         :ok <- Receipt.seal_connect_failure(state.receipt) do
+      {:ok, state}
+    else
+      _ -> {{:error, :unauthorized_connect_failure}, state}
+    end
+  end
+
+  defp operate({:record_socket_connect_phase, _, _, _, _}, _caller, state),
     do: {{:error, :invalid_connect_failure}, state}
 
   defp operate({:publish_setup, result}, caller, state) do

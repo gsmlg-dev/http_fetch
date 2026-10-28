@@ -77,6 +77,18 @@ defmodule SSL.Lifecycle do
   def setup_failure(%Handle{receipt: receipt}), do: Receipt.setup_failure(receipt)
   def setup_failure(_), do: :unknown
 
+  @doc """
+  Reads authenticated native connection failure evidence before establishment.
+
+  Only the original allocator's observed failure, committed with its original
+  resource ownership and deadline, establishes this phase. A generic setup error,
+  cancellation, timeout or missing publication returns `:unknown`. The evidence
+  survives provider exit and does not establish cleanup; use `await/2` separately.
+  """
+  @spec connect_failure(Handle.t()) :: {:ok, %{phase: :connect}} | :unknown
+  def connect_failure(%Handle{receipt: receipt}), do: Receipt.connect_failure(receipt)
+  def connect_failure(_), do: :unknown
+
   @spec status(Handle.t() | Pair.Handle.t()) ::
           {:pending, map()} | {:terminal, map()} | {:unconfirmed, term()}
   def status(%Pair.Handle{} = handle), do: Pair.status(handle)

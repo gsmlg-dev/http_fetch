@@ -253,6 +253,14 @@ defmodule SSL.Lifecycle.PublicTransportTest do
 
         assert {:ok, %{setup: :failed, setup_failure: :connect, cleanup: :confirmed}} =
                  Lifecycle.await(handle, deadline(2_000))
+
+        if expected == :econnrefused do
+          assert {:ok, %{phase: :connect}} = Lifecycle.connect_failure(handle)
+        else
+          assert :unknown = Lifecycle.connect_failure(handle)
+        end
+
+        assert :unknown = Lifecycle.setup_failure(handle)
       after
         Lifecycle.cancel(lease, deadline(500))
       end

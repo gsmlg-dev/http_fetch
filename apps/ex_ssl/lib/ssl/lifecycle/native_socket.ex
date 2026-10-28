@@ -99,9 +99,11 @@ defmodule SSL.Lifecycle.NativeSocket do
   end
 
   defp connect_candidates(receipt, [ip | rest], port, options, original, family, token) do
+    allocation_budget = public_budget(original)
+
     with true <- SSL.Options.remaining(original) > 0,
          {:ok, socket} <- :socket.open(family, :stream, :tcp) do
-      with :use <- Observer.enroll_socket(receipt, token, socket, public_budget(original)),
+      with :use <- Observer.enroll_socket(receipt, token, socket, allocation_budget),
            :ok <- prepare(socket, options),
            :ok <- bind(socket, family, options.tcp_options) do
         result =
@@ -116,6 +118,7 @@ defmodule SSL.Lifecycle.NativeSocket do
             public_connected(socket, receipt, original)
 
           {:error, reason} when reason in [:einval, :timeout] or rest == [] ->
+            _ = Observer.record_socket_connect_phase(receipt, socket, reason, allocation_budget)
             {:error, reason}
 
           {:error, _reason} ->

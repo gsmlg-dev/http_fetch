@@ -237,6 +237,74 @@ defmodule SSL.Lifecycle.SocketConnectFailureTest do
     cancel_and_await(attempt)
   end
 
+  test "public phase publication rejects forged, expired and wrong-owner evidence" do
+    attempt = attempt()
+
+    assert {:error, :unauthorized_connect_failure} =
+             Observer.record_socket_connect_phase(
+               attempt.receipt,
+               attempt.socket,
+               :econnrefused,
+               budget(attempt.native)
+             )
+
+    assert_pending(attempt)
+
+    for {reason, bound, expected} <- [
+          {:econnrefused, now() - 1, :deadline_exceeded},
+          {:econnrefused, attempt.native + 1_000, :unauthorized_connect_failure},
+          {:closed, attempt.native, :invalid_connect_failure},
+          {:timeout, attempt.native, :invalid_connect_failure}
+        ] do
+      assert {:error, ^expected} =
+               in_actor(
+                 attempt.allocator,
+                 fn ->
+                   Observer.record_socket_connect_phase(
+                     attempt.receipt,
+                     attempt.socket,
+                     reason,
+                     budget(bound)
+                   )
+                 end,
+                 attempt.native
+               )
+
+      assert_pending(attempt)
+    end
+
+    {holder, _monitor} = start_actor(attempt.parent)
+
+    assert :ok =
+             in_actor(
+               attempt.allocator,
+               fn ->
+                 :socket.setopt(attempt.socket, :otp, :controlling_process, holder)
+               end,
+               attempt.native
+             )
+
+    assert {:error, :unauthorized_connect_failure} =
+             in_actor(
+               attempt.allocator,
+               fn ->
+                 Observer.record_socket_connect_phase(
+                   attempt.receipt,
+                   attempt.socket,
+                   :econnrefused,
+                   budget(attempt.native)
+                 )
+               end,
+               attempt.native
+             )
+
+    assert_pending(attempt)
+    assert :ok = Observer.cancel(attempt.receipt, attempt.lease, budget(attempt.native))
+    assert :ok = in_actor(holder, fn -> :socket.close(attempt.socket) end, attempt.native)
+    await_cleanup(attempt)
+    assert :unknown = Receipt.connect_failure(attempt.receipt)
+  end
+
   defp attempt(kind \\ :socket, enrolled \\ true) do
     native = now() + 1_000
     parent = native + 2_000
@@ -337,6 +405,8 @@ defmodule SSL.Lifecycle.SocketConnectFailureTest do
   end
 
   defp assert_pending(attempt, roles \\ 17, allocations \\ 0) do
+    assert :unknown = Receipt.connect_failure(attempt.receipt)
+
     assert {:ok,
             %{
               setup: :pending,

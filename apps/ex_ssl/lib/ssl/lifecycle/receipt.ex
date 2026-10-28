@@ -96,6 +96,30 @@ defmodule SSL.Lifecycle.Receipt do
   def setup_failure(_), do: :unknown
 
   @doc false
+  def seal_connect_failure(%__MODULE__{observer: observer, setup_phase: cell})
+      when observer == self() do
+    case :atomics.compare_exchange(cell, 1, 0, 3) do
+      :ok ->
+        :atomics.put(cell, 1, 4)
+        :ok
+
+      _ ->
+        {:error, :already_sealed}
+    end
+  end
+
+  def seal_connect_failure(_), do: {:error, :not_observer}
+
+  @doc false
+  def connect_failure(%__MODULE__{setup_phase: cell}) do
+    if :atomics.get(cell, 1) == 4, do: {:ok, %{phase: :connect}}, else: :unknown
+  catch
+    :error, :badarg -> :unknown
+  end
+
+  def connect_failure(_), do: :unknown
+
+  @doc false
   def valid?(%__MODULE__{observer: observer, cell: cell}),
     do: is_pid(observer) and is_reference(cell)
 

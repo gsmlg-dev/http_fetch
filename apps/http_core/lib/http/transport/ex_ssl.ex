@@ -325,10 +325,20 @@ defmodule HTTP.Transport.ExSSL do
   defp setup_failure_result(error, reason, opts, {handle, _lease}) do
     if Keyword.get(opts, :tls_setup_evidence) === true and
          is_pid(Keyword.get(opts, :request_lifecycle)) and
-         is_reference(Keyword.get(opts, :connect_failure_token)) and
-         SSL.Lifecycle.setup_failure(handle) == {:ok, %{phase: :tls_setup}},
-       do: HTTP.Transport.tls_setup_error(opts, reason),
-       else: error
+         is_reference(Keyword.get(opts, :connect_failure_token)) do
+      cond do
+        SSL.Lifecycle.connect_failure(handle) == {:ok, %{phase: :connect}} ->
+          HTTP.Transport.connect_error(opts, reason)
+
+        SSL.Lifecycle.setup_failure(handle) == {:ok, %{phase: :tls_setup}} ->
+          HTTP.Transport.tls_setup_error(opts, reason)
+
+        true ->
+          error
+      end
+    else
+      error
+    end
   end
 
   defp setup_failure_result(error, _reason, _opts, _descriptor), do: error
