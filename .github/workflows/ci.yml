@@ -141,6 +141,69 @@ jobs:
           path: ${{ runner.temp }}/ex-ssl-candidate-results/*.txt
           if-no-files-found: error
 
+  no-otp-release:
+    name: Isolated production release without OTP SSL
+    needs: changes
+    if: needs.changes.outputs.candidate_tls == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 70 # Two bounded 30-minute release gates plus archive preparation.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare independent no-OTP SSL peers
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes expect
+          command -v unbuffer
+          uv venv "$RUNNER_TEMP/no-otp-peer-python" --python 3.12
+          uv pip install --python "$RUNNER_TEMP/no-otp-peer-python/bin/python" \
+            --requirement scripts/requirements-http2-stream-clients.txt aioquic==1.2.0
+          for tls in TLSv1.2 TLSv1.3; do
+            "$RUNNER_TEMP/no-otp-peer-python/bin/python" scripts/release/no_otp_peer.py plan \
+              --tls "$tls" \
+              --cert "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost.pem" \
+              --key "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost.key" \
+              --ca "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost-ca.pem" \
+              --output "$RUNNER_TEMP/no-otp-plan-$tls.json"
+          done
+      - name: Build and validate all candidate archives
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' mix.exs)
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
+          elixir scripts/release/archives.exs "$version" "$RUNNER_TEMP/archives"
+      - name: Require isolated candidate release without OTP SSL
+        run: |
+          set -euo pipefail
+          for tls in TLSv1.2 TLSv1.3; do
+            "$RUNNER_TEMP/no-otp-peer-python/bin/python" scripts/release/no_otp_consumer_gate.py \
+              "$RELEASE_VERSION" "$RUNNER_TEMP/archives" "$RUNNER_TEMP/stage" \
+              --source-root "$GITHUB_WORKSPACE" --source-sha "$(git rev-parse HEAD)" \
+              --peer-plan "$RUNNER_TEMP/no-otp-plan-$tls.json" \
+              --output "$RUNNER_TEMP/no-otp-release/candidate-$tls"
+          done
+      - name: Preserve no-OTP release diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: no-otp-candidate-release-diagnostics
+          path: |
+            ${{ runner.temp }}/no-otp-release/**/gate-report.json
+            ${{ runner.temp }}/no-otp-release/**/release-report.json
+            ${{ runner.temp }}/no-otp-release/**/commands.json
+            ${{ runner.temp }}/no-otp-release/**/command-*.log
+            ${{ runner.temp }}/no-otp-release/**/peer-*.log
+            ${{ runner.temp }}/no-otp-release/**/peer-*.json
+          if-no-files-found: error
+
   published-ex-ssl-feature-gate:
     name: Historical published ex_ssl 0.7.2 compatibility
     needs: changes

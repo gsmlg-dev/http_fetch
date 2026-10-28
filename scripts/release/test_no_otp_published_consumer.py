@@ -193,5 +193,75 @@ class NoOTPReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn(".erlang.cookie", step)
 
 
+class NoOTPCIWorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+        matches = re.findall(r"^  no-otp-release:\n(.*?)(?=^  [a-zA-Z0-9_-]+:|\Z)",
+                             workflow, re.M | re.S)
+        if len(matches) != 1:
+            raise AssertionError("exactly one automatic no-OTP candidate job is required")
+        cls.job = matches[0]
+
+    def step(self, name):
+        matches = re.findall(r"^      - name: " + re.escape(name) +
+                             r"\n(.*?)(?=^      - |\Z)", self.job, re.M | re.S)
+        self.assertEqual(len(matches), 1, "exactly one required CI step: " + name)
+        return matches[0]
+
+    def test_affected_candidates_require_an_independent_fail_closed_job(self):
+        self.assertIn("needs: changes", self.job)
+        self.assertIn("if: needs.changes.outputs.candidate_tls == 'true'", self.job)
+        self.assertNotIn("needs: checks", self.job)
+        self.assertNotIn("continue-on-error", self.job)
+        self.assertNotIn("|| true", self.job)
+        for forbidden in ("git push", "git tag", "hex_packages.py publish", "HEX_API_KEY"):
+            self.assertNotIn(forbidden, self.job)
+
+    def test_each_tls_version_uses_fresh_source_bound_production_archives(self):
+        build = self.step("Build and validate all candidate archives")
+        self.assertIn("scripts/release/stage.py build", build)
+        self.assertIn("scripts/release/archives.exs", build)
+        self.assertNotIn("--package", build)
+        run = self.step("Require isolated candidate release without OTP SSL")
+        self.assertIn("for tls in TLSv1.2 TLSv1.3; do", run)
+        self.assertIn("scripts/release/no_otp_consumer_gate.py", run)
+        self.assertIn('--source-root "$GITHUB_WORKSPACE"', run)
+        self.assertIn('--source-sha "$(git rev-parse HEAD)"', run)
+        self.assertIn('--peer-plan "$RUNNER_TEMP/no-otp-plan-$tls.json"', run)
+        self.assertIn('--output "$RUNNER_TEMP/no-otp-release/candidate-$tls"', run)
+        self.assertNotIn("--published", run)
+        self.assertNotRegex(run, r"(?m)^        if:")
+        self.assertIn("set -euo pipefail", run)
+        self.assertLess(self.job.index("name: Build and validate all candidate archives"),
+                        self.job.index("name: Require isolated candidate release without OTP SSL"))
+
+    def test_pinned_peers_and_required_tools_precede_the_release_gate(self):
+        prepare = self.step("Prepare independent no-OTP SSL peers")
+        self.assertIn("expect", prepare)
+        self.assertIn("command -v unbuffer", prepare)
+        self.assertIn("--requirement scripts/requirements-http2-stream-clients.txt", prepare)
+        self.assertIn("aioquic==1.2.0", prepare)
+        self.assertIn("for tls in TLSv1.2 TLSv1.3; do", prepare)
+        self.assertIn('--tls "$tls"', prepare)
+        for flag, fixture in (("--cert", "localhost.pem"), ("--key", "localhost.key"),
+                              ("--ca", "localhost-ca.pem")):
+            self.assertIn(f'{flag} "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/{fixture}"',
+                          prepare)
+        self.assertLess(self.job.index("name: Prepare independent no-OTP SSL peers"),
+                        self.job.index("name: Require isolated candidate release without OTP SSL"))
+
+    def test_failures_retain_reports_without_release_keys_or_cookies(self):
+        step = self.step("Preserve no-OTP release diagnostics")
+        self.assertIn("if: always()", step)
+        self.assertIn("if-no-files-found: error", step)
+        for name in ("gate-report.json", "release-report.json", "commands.json",
+                     "command-*.log", "peer-*.log", "peer-*.json"):
+            self.assertIn("no-otp-release/**/" + name, step)
+        self.assertNotRegex(step, r"(?m)no-otp-release/\*\*\s*$")
+        self.assertNotIn(".key", step)
+        self.assertNotIn(".erlang.cookie", step)
+
+
 if __name__ == "__main__":
     unittest.main()
