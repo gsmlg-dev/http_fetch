@@ -31,8 +31,33 @@ def read_exact(connection, count):
     return b"".join(parts)
 
 
-def exchange(connection, mode, delay_ms):
-    if mode == "echo":
+def exchange(connection, mode, delay_ms, upstream_port):
+    if mode == "tunnel":
+        with socket.create_connection(("127.0.0.1", upstream_port), timeout=2) as upstream:
+            upstream.settimeout(3)
+            deadline = time.monotonic() + 5
+            forwarded = 0
+            while time.monotonic() < deadline:
+                ready = [connection] if connection.pending() else select.select(
+                    [connection, upstream], [], [], max(0, deadline - time.monotonic())
+                )[0]
+                if not ready:
+                    raise TimeoutError("bounded tunnel deadline")
+                for source in ready:
+                    chunk = source.recv(64 * 1024)
+                    if not chunk:
+                        announce("exchange", bytes=forwarded)
+                        return
+                    forwarded += len(chunk)
+                    if forwarded > MAX_BODY:
+                        raise ValueError("tunnel byte bound exceeded")
+                    (upstream if source is connection else connection).sendall(chunk)
+            raise TimeoutError("bounded tunnel deadline")
+    elif mode == "raw3":
+        body = read_exact(connection, 3)
+        connection.sendall(body[::-1])
+        announce("exchange", bytes=3, request_sha256=hashlib.sha256(body).hexdigest())
+    elif mode == "echo":
         length = int.from_bytes(read_exact(connection, 4), "big")
         if length > MAX_BODY:
             raise ValueError("request too large")
@@ -100,7 +125,8 @@ def main():
     parser.add_argument("--alpn", default="")
     parser.add_argument("--alpn-after-first", default="")
     parser.add_argument("--verify", choices=["none", "optional", "required"], default="none")
-    parser.add_argument("--mode", choices=["echo", "http1"], default="echo")
+    parser.add_argument("--mode", choices=["echo", "http1", "tunnel", "raw3"], default="echo")
+    parser.add_argument("--upstream-port", type=int)
     parser.add_argument("--max-connections", type=int, default=1)
     parser.add_argument("--delay-ms", type=int, default=0)
     parser.add_argument("--group")
@@ -110,6 +136,8 @@ def main():
 
     if args.max_connections not in range(1, 33) or args.delay_ms not in range(0, 1001):
         parser.error("invalid bounded fixture setting")
+    if args.mode == "tunnel" and args.upstream_port not in range(1, 65536):
+        parser.error("tunnel requires a valid upstream port")
     versions = {"tls12": ssl.TLSVersion.TLSv1_2, "tls13": ssl.TLSVersion.TLSv1_3}
     if versions[args.min_version] > versions[args.max_version]:
         parser.error("invalid TLS version range")
@@ -149,7 +177,7 @@ def main():
                     alpn=connection.selected_alpn_protocol(),
                     client_der_b64=base64.b64encode(der).decode("ascii") if der else None,
                 )
-                exchange(connection, args.mode, args.delay_ms)
+                exchange(connection, args.mode, args.delay_ms, args.upstream_port)
                 if args.abrupt_close == "true":
                     # The test first acknowledges the plaintext, then releases
                     # this barrier to test TCP truncation independently of timing.
@@ -171,6 +199,8 @@ def main():
             announce("failure", error=type(error).__name__)
             raw.close()
     listener.close()
+    if args.mode in ("tunnel", "raw3"):
+        announce("closed", accepted_connections=accepted)
 
 
 if __name__ == "__main__":

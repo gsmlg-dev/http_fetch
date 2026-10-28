@@ -174,6 +174,19 @@ defmodule SSL.ConnectionWriter do
 
   defp loop(connection, connection_monitor) do
     receive do
+      {:carrier_send, token, %SSL.Socket{} = carrier, bytes, _shutdown?, deadline}
+      when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
+             (is_integer(deadline) or deadline == :infinity) ->
+        # The controller closes the carrier only after this record is acknowledged.
+        # Half-closing its underlying TCP would bypass the outer TLS close_notify.
+        result =
+          if deadline == :infinity,
+            do: SSL.send(carrier, bytes),
+            else: SSL.send(carrier, bytes, {:abs_ms, deadline})
+
+        send(connection, {:writer_result, self(), token, result})
+        loop(connection, connection_monitor)
+
       {:send, token, tcp, bytes, shutdown?}
       when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
              is_boolean(shutdown?) ->

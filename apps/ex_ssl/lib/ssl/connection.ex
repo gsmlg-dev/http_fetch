@@ -36,6 +36,7 @@ defmodule SSL.Connection do
     defstruct [
       :socket,
       :tcp,
+      :carrier_monitor,
       :owner,
       :owner_monitor,
       :options,
@@ -592,6 +593,28 @@ defmodule SSL.Connection do
     drain_or_continue(phase, state)
   end
 
+  def handle_event(:info, {:ssl, %Socket{} = carrier, bytes}, phase, %{tcp: carrier} = state),
+    do: handle_event(:info, {:tcp, carrier, bytes}, phase, state)
+
+  def handle_event(:info, {:ssl_closed, %Socket{} = carrier}, phase, %{tcp: carrier} = state),
+    do: handle_event(:info, {:tcp_closed, carrier}, phase, state)
+
+  def handle_event(
+        :info,
+        {:DOWN, monitor, :process, pid, _reason},
+        phase,
+        %{tcp: %Socket{pid: pid} = carrier, carrier_monitor: monitor} = state
+      ),
+      do: handle_event(:info, {:tcp_closed, carrier}, phase, %{state | carrier_monitor: nil})
+
+  def handle_event(
+        :info,
+        {:ssl_error, %Socket{} = carrier, reason},
+        phase,
+        %{tcp: carrier} = state
+      ),
+      do: handle_event(:info, {:tcp_error, carrier, reason}, phase, state)
+
   def handle_event(:internal, :drain_input, phase, state) do
     drain_input(phase, state)
   end
@@ -760,6 +783,35 @@ defmodule SSL.Connection do
   defp socket_call({:call, from}, {_ref, {:attach, tcp}}, :handoff, state),
     do: start_tls(from, tcp, state)
 
+  defp socket_call({:call, from}, {_ref, request}, :connected, state)
+       when request in [:carrier_owned, :carrier_boundary] do
+    result =
+      cond do
+        elem(from, 0) != state.owner ->
+          {:error, :not_owner}
+
+        state.closed ->
+          {:error, :closed}
+
+        request == :carrier_owned ->
+          :ok
+
+        state.active != false ->
+          {:error, {:options, :unsupported_tcp_state}}
+
+        state.size != 0 ->
+          {:error, :pending_plaintext}
+
+        Enum.any?([state.recv, state.write, state.output, state.pending_control], &(&1 != nil)) ->
+          {:error, :busy}
+
+        true ->
+          :ok
+      end
+
+    reply(from, result)
+  end
+
   defp socket_call({:call, from}, {_ref, :close}, _phase, state) do
     if match?(%{kind: :local}, state.closing) do
       closing = %{state.closing | waiters: [from | state.closing.waiters]}
@@ -858,14 +910,10 @@ defmodule SSL.Connection do
           Diagnostics.peercert(state.machine)
 
         :peername ->
-          diagnostic_result(
-            if(is_port(tcp), do: :inet.peername(tcp), else: NativeSocket.peername(tcp))
-          )
+          diagnostic_result(transport_peername(tcp))
 
         :sockname ->
-          diagnostic_result(
-            if(is_port(tcp), do: :inet.sockname(tcp), else: NativeSocket.sockname(tcp))
-          )
+          diagnostic_result(transport_sockname(tcp))
       end
 
     reply(from, result)
@@ -944,7 +992,13 @@ defmodule SSL.Connection do
         reply(from, {:error, :infinite_send_timeout})
 
       true ->
-        drain_or_continue(:connected, %{state | duplex_reads?: true}, [{:reply, from, :ok}])
+        case enable_carrier_duplex(state.tcp) do
+          :ok ->
+            drain_or_continue(:connected, %{state | duplex_reads?: true}, [{:reply, from, :ok}])
+
+          error ->
+            reply(from, error)
+        end
     end
   end
 
@@ -1180,6 +1234,7 @@ defmodule SSL.Connection do
     if state.writer, do: Process.exit(state.writer, :kill)
     if state.writer_monitor, do: Process.demonitor(state.writer_monitor, [:flush])
     if state.owner_monitor, do: Process.demonitor(state.owner_monitor, [:flush])
+    if state.carrier_monitor, do: Process.demonitor(state.carrier_monitor, [:flush])
     if state.lifecycle, do: Process.demonitor(state.lifecycle.observer_monitor, [:flush])
     _ = close_transport(state)
     :ok
@@ -1234,7 +1289,7 @@ defmodule SSL.Connection do
   end
 
   defp prepare_resumption(options, tcp) do
-    result = if is_port(tcp), do: :inet.peername(tcp), else: NativeSocket.peername(tcp)
+    result = transport_peername(tcp)
 
     with {:ok, endpoint} <- result,
          {:ok, options, ticket, ticket_key} <- SSL.ResumptionContext.prepare(options, endpoint),
@@ -1477,6 +1532,13 @@ defmodule SSL.Connection do
     end
   end
 
+  defp arm_input(phase, %{tcp: %Socket{} = carrier} = state, actions) do
+    case SSL.setopts(carrier, active: :once) do
+      :ok -> {:next_state, phase, %{state | armed: true}, actions}
+      {:error, reason} -> fail(state, reason)
+    end
+  end
+
   defp arm_input(phase, state, actions) do
     case NativeSocket.receive_nowait(state.tcp) do
       {:select, {:select_info, _operation, _handle} = info} ->
@@ -1628,8 +1690,12 @@ defmodule SSL.Connection do
     end
   end
 
+  defp enable_carrier_duplex(%Socket{} = carrier), do: SSL.enable_duplex_reads(carrier)
+  defp enable_carrier_duplex(_tcp), do: :ok
+
   defp apply_tcp_options(_tcp, []), do: :ok
   defp apply_tcp_options(nil, _options), do: {:error, :closed}
+  defp apply_tcp_options(%Socket{} = carrier, options), do: SSL.setopts(carrier, options)
   defp apply_tcp_options(tcp, options) when is_port(tcp), do: :inet.setopts(tcp, options)
   defp apply_tcp_options(tcp, options), do: NativeSocket.setopts(tcp, options)
 
@@ -1866,6 +1932,23 @@ defmodule SSL.Connection do
   # and owner loss still terminate the same enrolled controller and writer.
   defp close_transport(state), do: do_close_transport(forget_session(state))
 
+  defp do_close_transport(%{tcp: %Socket{} = carrier} = state) do
+    _ = if state.output, do: cancel_timer(state.output.timer)
+    _ = if state.pending_control, do: cancel_timer(state.pending_control.timer)
+    _ = SSL.close(carrier)
+    if state.carrier_monitor, do: Process.demonitor(state.carrier_monitor, [:flush])
+
+    %{
+      state
+      | tcp: nil,
+        carrier_monitor: nil,
+        machine: nil,
+        armed: false,
+        output: nil,
+        pending_control: nil
+    }
+  end
+
   defp do_close_transport(%{lifecycle: lifecycle, tcp: tcp} = state)
        when not is_nil(lifecycle) and not is_nil(tcp) and not is_port(tcp) do
     if lifecycle.public, do: Observer.logical_closed(lifecycle.receipt)
@@ -1919,8 +2002,17 @@ defmodule SSL.Connection do
     %{state | tcp: nil, machine: nil, armed: false, output: nil, pending_control: nil}
   end
 
+  defp native_abort_policy(%{tcp: %Socket{}}), do: :ok
   defp native_abort_policy(%{tcp: tcp}) when is_port(tcp), do: :ok
   defp native_abort_policy(%{tcp: tcp}), do: NativeSocket.abort_on_close(tcp)
+
+  defp transport_peername(%Socket{} = carrier), do: SSL.peername(carrier)
+  defp transport_peername(tcp) when is_port(tcp), do: :inet.peername(tcp)
+  defp transport_peername(tcp), do: NativeSocket.peername(tcp)
+
+  defp transport_sockname(%Socket{} = carrier), do: SSL.sockname(carrier)
+  defp transport_sockname(tcp) when is_port(tcp), do: :inet.sockname(tcp)
+  defp transport_sockname(tcp), do: NativeSocket.sockname(tcp)
 
   defp diagnostic_result({:error, _}), do: {:error, :closed}
   defp diagnostic_result(result), do: result
@@ -2025,6 +2117,18 @@ defmodule SSL.Connection do
     state
   catch
     _kind, _reason -> state
+  end
+
+  defp send_output(
+         %{lifecycle: nil, tcp: %Socket{} = carrier, writer: writer} = state,
+         token,
+         _tcp,
+         bytes,
+         shutdown?,
+         deadline
+       ) do
+    send(writer, {:carrier_send, token, carrier, bytes, shutdown?, deadline})
+    {:ok, state}
   end
 
   defp send_output(
@@ -2149,7 +2253,8 @@ defmodule SSL.Connection do
   end
 
   defp start_tls(from, tcp, state) do
-    state = %{state | tcp: tcp, connect_from: from}
+    carrier_monitor = if match?(%Socket{}, tcp), do: Process.monitor(tcp.pid)
+    state = %{state | tcp: tcp, carrier_monitor: carrier_monitor, connect_from: from}
 
     if Options.remaining(state.deadline) == 0 do
       fail(state, :timeout)
@@ -2217,6 +2322,9 @@ defmodule SSL.Connection do
         TCPOptions.mutable(state.options.tcp_options)
     )
   end
+
+  defp prepare_transport(%Socket{} = carrier, state),
+    do: SSL.setopts(carrier, [active: false] ++ TCPOptions.mutable(state.options.tcp_options))
 
   defp prepare_transport(tcp, state), do: NativeSocket.prepare(tcp, state.options)
 

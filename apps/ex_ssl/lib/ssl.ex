@@ -8,7 +8,7 @@ defmodule SSL do
   defaults differ from OTP. Unsupported options return explicit
   `{:error, {:options, reason}}` errors.
 
-  STARTTLS callers must own a passive binary/raw TCP socket, fully consume and
+  STARTTLS callers must own a passive binary/raw TCP or `SSL.Socket` carrier, fully consume and
   validate the application's upgrade response, and reject any buffered plaintext.
   Supply `server_name_indication` as the certificate reference DNS name, or use
   `ex_ssl: [reference_identity: {:ip, address} | {:dns_id, name}]` to verify a
@@ -28,7 +28,7 @@ defmodule SSL do
     Socket
   }
 
-  @spec connect(:gen_tcp.socket(), list()) :: {:ok, Socket.t()} | {:error, term()}
+  @spec connect(:gen_tcp.socket() | Socket.t(), list()) :: {:ok, Socket.t()} | {:error, term()}
   def connect(tcp_socket, options), do: connect(tcp_socket, options, :infinity)
 
   @spec connect(term(), term(), term()) :: {:ok, Socket.t()} | {:error, term()}
@@ -83,7 +83,7 @@ defmodule SSL do
   end
 
   @doc """
-  Resolves and validates TLS configuration for a later TCP upgrade.
+  Resolves and validates TLS configuration for a later TCP or TLS-carrier upgrade.
 
   Loads trust and client credentials and freezes the upgrade reference, SNI and
   concrete wire profile. No socket, connection process or ephemeral keys are
@@ -104,13 +104,13 @@ defmodule SSL do
   end
 
   @doc """
-  Upgrades an owned passive binary/raw TCP socket with a prepared snapshot.
+  Upgrades an owned passive binary/raw TCP or `SSL.Socket` carrier with a prepared snapshot.
 
   Uses the resolved policy without rereading files or resolving options/profiles.
   Ownership, pending-plaintext rejection, timeout and close-on-failure semantics
   are the same as `connect/3`. Future runtime or handshake failures remain possible.
   """
-  @spec connect_prepared(:gen_tcp.socket(), PreparedUpgrade.t(), timeout()) ::
+  @spec connect_prepared(:gen_tcp.socket() | Socket.t(), PreparedUpgrade.t(), timeout()) ::
           {:ok, Socket.t()} | {:error, term()}
   def connect_prepared(tcp_socket, prepared, timeout \\ :infinity),
     do: upgrade_socket(tcp_socket, {:prepared, prepared}, timeout)
@@ -332,7 +332,7 @@ defmodule SSL do
         {:ok, pid} ->
           socket = %Socket{pid: pid, ref: ref, status: status}
 
-          case :gen_tcp.controlling_process(tcp, pid) do
+          case transfer_carrier(tcp, pid) do
             :ok ->
               call(socket, {:attach, tcp})
 
@@ -350,6 +350,11 @@ defmodule SSL do
     end
   end
 
+  defp transfer_carrier(%Socket{} = socket, owner), do: controlling_process(socket, owner)
+  defp transfer_carrier(tcp, owner), do: :gen_tcp.controlling_process(tcp, owner)
+
+  defp owned_socket(%Socket{} = socket), do: call(socket, :carrier_owned)
+
   defp owned_socket(socket) when is_port(socket) do
     case :erlang.port_info(socket, :connected) do
       {:connected, owner} when owner == self() -> :ok
@@ -359,6 +364,12 @@ defmodule SSL do
   end
 
   defp owned_socket(_), do: {:error, :badarg}
+
+  defp upgrade_boundary(%Socket{} = socket) do
+    with :ok <- call(socket, :carrier_boundary) do
+      if delivered_carrier_message?(socket), do: {:error, :pending_plaintext}, else: :ok
+    end
+  end
 
   defp upgrade_boundary(tcp) do
     with {:ok, options} <- :inet.getopts(tcp, [:active, :packet, :mode]),
@@ -387,6 +398,22 @@ defmodule SSL do
       {:tcp_error, ^tcp, _} -> true
       _ -> false
     end)
+  end
+
+  defp delivered_carrier_message?(socket) do
+    {:messages, messages} = Process.info(self(), :messages)
+
+    Enum.any?(messages, fn
+      {:ssl, ^socket, _} -> true
+      {:ssl_closed, ^socket} -> true
+      {:ssl_error, ^socket, _} -> true
+      _ -> false
+    end)
+  end
+
+  defp close_on_error({:error, _} = error, %Socket{} = socket) do
+    close(socket)
+    error
   end
 
   defp close_on_error({:error, _} = error, tcp) do

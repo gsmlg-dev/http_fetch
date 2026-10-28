@@ -8,7 +8,7 @@ certification, and OTP `:ssl` remains the recommended default.
 
 | Surface | Supported behavior |
 | --- | --- |
-| `SSL.connect/2,3,4` | Authenticated TLS 1.3 and bounded TLS 1.2 client connections and passive binary/raw STARTTLS upgrades. Connect succeeds only after peer signature and Finished validation. |
+| `SSL.connect/2,3,4` | Authenticated TLS 1.3 and bounded TLS 1.2 client connections, passive binary/raw STARTTLS upgrades, and nested upgrades over an owned `SSL.Socket`. Connect succeeds only after peer signature and Finished validation. |
 | `SSL.send/2` | Valid iodata of any logical size supported by available caller memory. Data is traversed without flattening the entire write and protected in records of at most 16,384 plaintext bytes. One logical write is admitted at a time; another caller receives `{:error, :busy}`. There is no automatic replay. An unfinished admitted send is settled promptly as `{:error, :closed}` after an authenticated peer closure makes further writes impossible; a send already acknowledged in full remains `:ok`. |
 | `SSL.recv/2,3` | Passive raw binary receive. Length zero returns available plaintext; a positive length waits for exactly that many bytes. One passive receive is admitted, and the maximum requested/buffered plaintext is 1 MiB. |
 | `SSL.setopts/2` | Validates the whole request for `active: false` or `:once`, send timeouts and the mutable TCP allowlist below. Invalid options reject before changes. Driver failures can partially apply TCP options; TLS state changes only after driver success. |
@@ -326,6 +326,29 @@ identity verification. Record, handshake, certificate, trust-store, and passive
 plaintext bounds remain independently enforced. No traffic secrets, private
 keys, or application payloads are exposed through public metadata or ordinary
 inspection.
+
+### Existing TLS carriers
+
+`SSL.connect(outer_socket, inner_options, timeout)` and `SSL.connect_prepared/3`
+can establish independently authenticated inner TLS over an owned passive
+`SSL.Socket`. Each layer retains its own protocol, ALPN, trust, identity, record
+keys, bounded buffers and writer. The inner connection becomes the outer
+application owner; later transfers of the inner socket retain that relationship.
+Peer/local addresses continue to identify the underlying connection endpoint.
+
+Unread carrier plaintext, active delivery and occupied I/O reject the upgrade.
+A foreign caller receives `:not_owner` without changing or closing the carrier.
+After an owned upgrade attempt, failure closes the carrier. Inner close and owner
+loss retire both sessions; carrier death also terminates the inner session. Inner
+record writes carry their original absolute deadline through `SSL.send/3` on the
+outer layer. Enabling duplex reads on the inner socket enables them on its
+carrier, subject to the existing finite send-timeout requirement for each layer.
+
+Independent OpenSSL peers and OTP public `cb_info` reference cases cover all
+four TLS1.2/TLS1.3 combinations. This low-level carrier support uses ordinary
+connections. Lifecycle-backed nested upgrades and HTTP HTTPS-over-HTTPS routes
+still require separate provider accounting and route integration before default
+promotion or production OTP SSL removal.
 
 ## Prepared upgrade configuration
 

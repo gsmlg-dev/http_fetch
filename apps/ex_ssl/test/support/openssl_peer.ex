@@ -100,7 +100,8 @@ defmodule ExSSL.TestSupport.OpenSSLPeer do
       :delay_ms,
       :group,
       :restart_context,
-      :abrupt_close
+      :abrupt_close,
+      :upstream_port
     ]
 
     if Keyword.keyword?(options) and Enum.all?(Keyword.keys(options), &(&1 in allowed)) and
@@ -133,7 +134,8 @@ defmodule ExSSL.TestSupport.OpenSSLPeer do
          optional("--group", options[:group]) ++
          optional("--cafile", options[:cafile]) ++
          optional("--alpn", alpn(options[:alpn])) ++
-         optional("--alpn-after-first", alpn(options[:alpn_after_first]))}
+         optional("--alpn-after-first", alpn(options[:alpn_after_first])) ++
+         optional("--upstream-port", options[:upstream_port])}
     else
       {:error, :invalid_options}
     end
@@ -145,5 +147,6 @@ defmodule ExSSL.TestSupport.OpenSSLPeer do
   defp alpn(nil), do: nil
   defp alpn(protocols), do: Enum.join(protocols, ",")
   defp optional(_key, nil), do: []
+  defp optional(key, value) when is_integer(value), do: [key, Integer.to_string(value)]
   defp optional(key, value), do: [key, value]
 end
