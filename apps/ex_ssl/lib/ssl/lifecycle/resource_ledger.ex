@@ -15,7 +15,7 @@ defmodule SSL.Lifecycle.ResourceLedger do
           | {reference(), :port, port()}
           | {reference(), :socket, :socket.socket()}
   @type creator :: :observer | {role(), reference()}
-  @type scope :: :dial | :upgrade
+  @type scope :: :dial | :upgrade | :layer
   @type role_mask :: 0..31
   @type snapshot :: %{
           scope: scope(),
@@ -38,13 +38,15 @@ defmodule SSL.Lifecycle.ResourceLedger do
   @spec enrollment_view(t(), role()) :: {:ok, enrollment()} | :error
   def enrollment_view(%__MODULE__{} = ledger, role), do: Map.fetch(ledger.resources, role)
 
-  @spec new(:dial | :upgrade) :: t()
-  def new(scope \\ :dial) when scope in [:dial, :upgrade], do: %__MODULE__{scope: scope}
+  @spec new(scope()) :: t()
+  def new(scope \\ :dial) when scope in [:dial, :upgrade, :layer],
+    do: %__MODULE__{scope: scope}
 
   @spec reserve(t(), role(), creator(), reference()) :: {:ok, t()} | {:error, atom()}
   def reserve(%__MODULE__{} = ledger, role, creator, token) when is_reference(token) do
     cond do
       not Map.has_key?(@roles, role) -> {:error, :invalid_role}
+      ledger.scope == :layer and role in [:allocator, :tcp] -> {:error, :role_outside_scope}
       ledger.admission != :open -> {:error, :admission_closed}
       occupied?(ledger, role) -> {:error, :role_used}
       not creator_live?(ledger, creator) -> {:error, :creator_not_observed}

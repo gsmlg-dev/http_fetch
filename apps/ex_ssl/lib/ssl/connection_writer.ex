@@ -99,6 +99,28 @@ defmodule SSL.ConnectionWriter do
     nonce = context.nonce
 
     receive do
+      {:lifecycle_carrier_send, ^nonce, token, %SSL.Socket{} = carrier, bytes, _shutdown?,
+       deadline}
+      when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
+             (is_integer(deadline) or deadline == :infinity) ->
+        if live?(connection, observer) do
+          result =
+            if deadline == :infinity,
+              do: SSL.send(carrier, bytes),
+              else: SSL.send(carrier, bytes, {:abs_ms, deadline})
+
+          send(connection, {:writer_result, self(), token, result})
+
+          enrolled_loop(
+            connection,
+            connection_monitor,
+            observer,
+            observer_monitor,
+            context,
+            spent
+          )
+        end
+
       {:lifecycle_socket_send, ^nonce, token, tcp, bytes, shutdown?, deadline}
       when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
              is_boolean(shutdown?) and (is_integer(deadline) or deadline == :infinity) ->

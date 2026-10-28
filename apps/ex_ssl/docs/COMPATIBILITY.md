@@ -345,10 +345,17 @@ outer layer. Enabling duplex reads on the inner socket enables them on its
 carrier, subject to the existing finite send-timeout requirement for each layer.
 
 Independent OpenSSL peers and OTP public `cb_info` reference cases cover all
-four TLS1.2/TLS1.3 combinations. This low-level carrier support uses ordinary
-connections. Lifecycle-backed nested upgrades and HTTP HTTPS-over-HTTPS routes
-still require separate provider accounting and route integration before default
-promotion or production OTP SSL removal.
+four TLS1.2/TLS1.3 combinations. Lifecycle-backed upgrades also accept an owned
+`SSL.Socket`: the inner `:layer` receipt accounts Setup, Connection and Writer
+without allocating or adopting TCP. The outer handle retains its independent
+physical-socket obligation. Each handle needs its own confirmed `await/2` result;
+the inner receipt alone never establishes outer TCP cleanup. Authentication
+failure phase evidence remains separate from both cleanup receipts. Prepare,
+owner transfer, adoption and TLS attachment retain their original deadline.
+
+This layer support does not yet provide a combined transfer handle or enable
+HTTP HTTPS-over-HTTPS routing. Those integrations and their consumer acceptance
+remain required before default promotion or production OTP SSL removal.
 
 ## Prepared upgrade configuration
 

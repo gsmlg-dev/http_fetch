@@ -19,7 +19,7 @@ defmodule SSL.Lifecycle.Receipt do
     owner_down: 7,
     internal: 8
   }
-  @scopes %{dial: 1, upgrade: 2}
+  @scopes %{dial: 1, upgrade: 2, layer: 3}
   @enforce_keys [:cell, :observer]
   @derive {Inspect, only: []}
   defstruct [:cell, :observer, :setup_phase, :auxiliary_cell]
@@ -277,7 +277,8 @@ defmodule SSL.Lifecycle.Receipt do
          {:ok, scope} <- decode_enum(@scopes, scope),
          {:ok, failure} <- decode_enum(@failures, failure),
          true <- valid_outcome?(setup, failure),
-         true <- roles in 0..31 and down == roles and losses in 0..31 and epoch <= @max_epoch do
+         true <- roles in 0..31 and down == roles and losses in 0..31 and epoch <= @max_epoch,
+         true <- scope != :layer or :erlang.band(:erlang.bor(roles, losses), 17) == 0 do
       {:sealed,
        %{
          version: 1,

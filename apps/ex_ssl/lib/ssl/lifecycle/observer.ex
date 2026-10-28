@@ -275,6 +275,7 @@ defmodule SSL.Lifecycle.Observer do
        resources: %{},
        candidate_close: nil,
        setup_phase_grant: nil,
+       layer_carrier: nil,
        handoff: Handoff.new(self()),
        handoff_timer: nil,
        setup: :not_started,
@@ -753,7 +754,7 @@ defmodule SSL.Lifecycle.Observer do
   end
 
   defp operate({:bind_public, lease, scope, setup_deadline}, caller, state)
-       when scope in [:dial, :upgrade] and
+       when scope in [:dial, :upgrade, :layer] and
               (is_integer(setup_deadline) or setup_deadline == :infinity) do
     if not state.authority.bound? and map_size(state.resources) == 0 and
          map_size(state.permits) == 0 do
@@ -800,6 +801,19 @@ defmodule SSL.Lifecycle.Observer do
           Process.demonitor(ref, [:flush])
           {{:error, :adoption_not_permitted}, state}
       end
+    else
+      _ -> {{:error, :adoption_not_permitted}, state}
+    end
+  end
+
+  defp operate({:commit_upgrade, %SSL.Socket{} = carrier}, caller, %{scope: :layer} = state) do
+    # The exact enrolled Connection has authenticated carrier ownership before
+    # making this call. This attests adoption only, never physical TCP cleanup.
+    with true <- open?(state) and carrier.pid != caller and Process.alive?(carrier.pid),
+         {:ok, {_, :process, ^caller}} <- handoff_resource(state, :connection),
+         {:ok, _setup} <- handoff_resource(state, :setup),
+         {:ok, _writer} <- handoff_resource(state, :writer) do
+      {:ok, %{update_handoff(state, Handoff.invalidate(state.handoff)) | layer_carrier: carrier}}
     else
       _ -> {{:error, :adoption_not_permitted}, state}
     end
@@ -1334,6 +1348,13 @@ defmodule SSL.Lifecycle.Observer do
     end
   end
 
+  defp setup_failure_transport(%{scope: :layer, layer_carrier: %SSL.Socket{pid: pid}}, caller) do
+    if pid != caller and Process.alive?(pid), do: :ok, else: {:error, :foreign_tls_resource}
+  end
+
+  defp setup_failure_transport(%{scope: :layer}, _caller),
+    do: {:error, :foreign_tls_resource}
+
   defp failure_tcp(state, caller) do
     with %{
            live: true,
@@ -1527,6 +1548,10 @@ defmodule SSL.Lifecycle.Observer do
   defp reserve(%{scope: :upgrade} = state, :tcp, _creator, _caller),
     do: {{:error, :adoption_not_implemented}, state}
 
+  defp reserve(%{scope: :layer} = state, role, _creator, _caller)
+       when role in [:allocator, :tcp],
+       do: {{:error, :role_outside_scope}, state}
+
   defp reserve(state, role, creator, caller) do
     token = make_ref()
 
@@ -1715,6 +1740,18 @@ defmodule SSL.Lifecycle.Observer do
     end
   end
 
+  defp publish(%{scope: :layer} = state, :connected) do
+    case state.layer_carrier do
+      %SSL.Socket{pid: pid} ->
+        if Process.alive?(pid),
+          do: publish_connected(state),
+          else: {{:error, :resources_pending}, state}
+
+      _ ->
+        {{:error, :resources_pending}, state}
+    end
+  end
+
   defp publish(state, :connected), do: publish_connected(state)
 
   defp publish(state, {:failed, failure}) when failure in @failures,
@@ -1726,7 +1763,10 @@ defmodule SSL.Lifecycle.Observer do
     do: {{:error, :resources_pending}, state}
 
   defp publish_connected(state) do
-    if Enum.all?([:connection, :writer, :tcp], fn role ->
+    roles =
+      if state.scope == :layer, do: [:connection, :writer], else: [:connection, :writer, :tcp]
+
+    if Enum.all?(roles, fn role ->
          match?(%{live: true}, Map.get(state.resources, role))
        end) do
       _ = if state.timer, do: Process.cancel_timer(state.timer)
@@ -1993,7 +2033,7 @@ defmodule SSL.Lifecycle.Observer do
       node(controller) != node() ->
         {:error, :invalid_controller}
 
-      scope not in [:dial, :upgrade] ->
+      scope not in [:dial, :upgrade, :layer] ->
         {:error, :invalid_scope}
 
       deadline == :infinity ->

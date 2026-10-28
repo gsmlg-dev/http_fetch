@@ -1,7 +1,7 @@
 defmodule SSL.Lifecycle.Driver do
   @moduledoc false
-  alias SSL.Lifecycle.{Handle, Lease, Observer, Receipt, Setup}
-  alias SSL.{Options, PreparedUpgrade}
+  alias SSL.Lifecycle.{Carrier, Handle, Lease, Observer, Receipt, Setup}
+  alias SSL.{Options, PreparedUpgrade, Socket}
 
   def descriptor(options) do
     options = if is_list(options), do: descriptor_options(options), else: :invalid
@@ -48,6 +48,23 @@ defmodule SSL.Lifecycle.Driver do
     end
   end
 
+  def upgrade(%Socket{} = carrier, source, deadline, %Handle{receipt: receipt}, %Lease{
+        authority: lease
+      }) do
+    # A layer accounts only its own processes. The independent outer handle
+    # continues to attest the physical TCP and its original allocation lineage.
+    with :ok <- Carrier.owned(carrier, deadline) do
+      result =
+        with :ok <- Observer.bind(receipt, lease, :layer, deadline, budget(deadline)),
+             {:ok, options} <- options(source),
+             :ok <- Carrier.boundary(carrier, deadline),
+             do: setup(receipt, lease, {:layer, carrier}, %{options | lifecycle: nil}, deadline)
+
+      if match?({:error, _}, result), do: Carrier.request_close(carrier)
+      finish(result, receipt, lease, deadline)
+    end
+  end
+
   def upgrade(tcp, source, deadline, %Handle{receipt: receipt}, %Lease{authority: lease}) do
     # A foreign Port is never adopted, mutated, consumed or closed.
     with :ok <- owned(tcp),
@@ -86,7 +103,12 @@ defmodule SSL.Lifecycle.Driver do
         attempt: elem(lease, 0)
       }
 
-      start = if match?({:upgrade, _}, endpoint), do: &Setup.start/1, else: &Setup.start_socket/1
+      start =
+        case endpoint do
+          {:upgrade, _} -> &Setup.start/1
+          {:layer, _} -> &Setup.start_layer/1
+          _ -> &Setup.start_socket/1
+        end
 
       case start.(context) do
         {:ok, helper} -> wait(helper, nonce, receipt, endpoint, deadline)
@@ -96,6 +118,7 @@ defmodule SSL.Lifecycle.Driver do
   end
 
   defp allocation(_receipt, _lease, {:upgrade, _}, _deadline), do: {:ok, nil}
+  defp allocation(_receipt, _lease, {:layer, _}, _deadline), do: {:ok, nil}
 
   defp allocation(receipt, lease, _endpoint, deadline),
     do: Observer.reserve_root(receipt, lease, :allocator, budget(deadline))
@@ -134,9 +157,9 @@ defmodule SSL.Lifecycle.Driver do
         end
 
       {:lifecycle_adopt_ready, ^helper, ^nonce, ^observer, socket} ->
-        {:upgrade, tcp} = endpoint
+        {_kind, tcp} = endpoint
 
-        with :ok <- :gen_tcp.controlling_process(tcp, socket.pid),
+        with :ok <- transfer(tcp, socket.pid, deadline),
              :ok <- Setup.adopt(helper, nonce, tcp, budget(deadline)),
              :ok <- Setup.attach(helper, nonce, budget(deadline)) do
           await(helper, nonce, observer, cell, monitor, observer_monitor, endpoint, deadline)
@@ -160,6 +183,11 @@ defmodule SSL.Lifecycle.Driver do
       Options.remaining(deadline) -> {:error, :timeout}
     end
   end
+
+  defp transfer(%Socket{} = carrier, owner, deadline),
+    do: Carrier.transfer(carrier, owner, deadline)
+
+  defp transfer(tcp, owner, _deadline), do: :gen_tcp.controlling_process(tcp, owner)
 
   defp finish({:error, reason} = result, receipt, lease, deadline) do
     category =

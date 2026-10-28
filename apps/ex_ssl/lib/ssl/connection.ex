@@ -419,12 +419,18 @@ defmodule SSL.Connection do
         :inert_prepared,
         %{lifecycle: %{public: true, ready: {setup, nonce}, observer: observer}} = state
       ) do
-    if elem(from, 0) == setup and is_port(tcp) and
-         Port.info(tcp, :connected) == {:connected, self()} and
+    if elem(from, 0) == setup and
+         (is_port(tcp) or match?(%Socket{}, tcp)) and transport_owned?(tcp, deadline) and
          Options.remaining(deadline) > 0 do
       case Observer.commit_upgrade(state.lifecycle.receipt, tcp, {:abs_ms, deadline}) do
-        :ok -> {:next_state, :inert_owned, %{state | tcp: tcp}, [{:reply, from, :ok}]}
-        error -> reply(from, error)
+        :ok ->
+          monitor = if match?(%Socket{}, tcp), do: Process.monitor(tcp.pid)
+
+          {:next_state, :inert_owned, %{state | tcp: tcp, carrier_monitor: monitor},
+           [{:reply, from, :ok}]}
+
+        error ->
+          reply(from, error)
       end
     else
       reply(from, {:error, :unauthorized_attach})
@@ -782,6 +788,14 @@ defmodule SSL.Connection do
 
   defp socket_call({:call, from}, {_ref, {:attach, tcp}}, :handoff, state),
     do: start_tls(from, tcp, state)
+
+  defp socket_call({:call, from}, {_ref, {:carrier_owned_by, owner}}, :connected, state) do
+    cond do
+      state.closed -> reply(from, {:error, :closed})
+      owner == state.owner -> reply(from, :ok)
+      true -> reply(from, {:error, :not_owner})
+    end
+  end
 
   defp socket_call({:call, from}, {_ref, request}, :connected, state)
        when request in [:carrier_owned, :carrier_boundary] do
@@ -1935,6 +1949,10 @@ defmodule SSL.Connection do
   defp do_close_transport(%{tcp: %Socket{} = carrier} = state) do
     _ = if state.output, do: cancel_timer(state.output.timer)
     _ = if state.pending_control, do: cancel_timer(state.pending_control.timer)
+
+    if state.lifecycle && state.lifecycle.public,
+      do: Observer.logical_closed(state.lifecycle.receipt)
+
     _ = SSL.close(carrier)
     if state.carrier_monitor, do: Process.demonitor(state.carrier_monitor, [:flush])
 
@@ -2170,14 +2188,23 @@ defmodule SSL.Connection do
   defp enqueue_lifecycle(state, token, bytes, shutdown?, deadline) do
     # Later control output retains the original capability, not admission E or Setup life.
     message =
-      if is_port(state.tcp) do
-        {:lifecycle_send, state.lifecycle.writer_nonce, token, state.tcp, bytes, shutdown?}
-      else
-        {:ok, send_deadline} = Options.deadline(state.send_timeout)
-        bound = if deadline == :infinity, do: send_deadline, else: min(deadline, send_deadline)
+      case state.tcp do
+        %Socket{} = carrier ->
+          {:ok, send_deadline} = Options.deadline(state.send_timeout)
+          bound = if deadline == :infinity, do: send_deadline, else: min(deadline, send_deadline)
 
-        {:lifecycle_socket_send, state.lifecycle.writer_nonce, token, state.tcp, bytes, shutdown?,
-         bound}
+          {:lifecycle_carrier_send, state.lifecycle.writer_nonce, token, carrier, bytes,
+           shutdown?, bound}
+
+        tcp when is_port(tcp) ->
+          {:lifecycle_send, state.lifecycle.writer_nonce, token, tcp, bytes, shutdown?}
+
+        tcp ->
+          {:ok, send_deadline} = Options.deadline(state.send_timeout)
+          bound = if deadline == :infinity, do: send_deadline, else: min(deadline, send_deadline)
+
+          {:lifecycle_socket_send, state.lifecycle.writer_nonce, token, tcp, bytes, shutdown?,
+           bound}
       end
 
     send(state.writer, message)
@@ -2226,8 +2253,13 @@ defmodule SSL.Connection do
 
     birth_live?(state) and Process.alive?(tls.recipient) and Process.alive?(state.writer) and
       Options.remaining(tls.deadline) > 0 and
-      transport_owned?(state.tcp)
+      transport_owned?(state.tcp, tls.deadline)
   end
+
+  defp transport_owned?(%Socket{} = carrier, deadline),
+    do: SSL.Lifecycle.Carrier.owned_by?(carrier, self(), deadline)
+
+  defp transport_owned?(tcp, _deadline), do: transport_owned?(tcp)
 
   defp transport_owned?(tcp) when is_port(tcp),
     do: Port.info(tcp, :connected) == {:connected, self()}
@@ -2253,7 +2285,9 @@ defmodule SSL.Connection do
   end
 
   defp start_tls(from, tcp, state) do
-    carrier_monitor = if match?(%Socket{}, tcp), do: Process.monitor(tcp.pid)
+    carrier_monitor =
+      state.carrier_monitor || if(match?(%Socket{}, tcp), do: Process.monitor(tcp.pid))
+
     state = %{state | tcp: tcp, carrier_monitor: carrier_monitor, connect_from: from}
 
     if Options.remaining(state.deadline) == 0 do

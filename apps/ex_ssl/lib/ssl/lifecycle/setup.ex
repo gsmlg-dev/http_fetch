@@ -2,7 +2,7 @@ defmodule SSL.Lifecycle.Setup do
   @moduledoc false
   use GenServer, restart: :temporary
   alias SSL.{Connection, Options, Socket}
-  alias SSL.Lifecycle.{Allocator, Observer, Receipt}
+  alias SSL.Lifecycle.{Allocator, Carrier, Observer, Receipt}
 
   # Serializes actual births and control replies while the original authority owns cleanup.
   defmodule State do
@@ -38,7 +38,9 @@ defmodule SSL.Lifecycle.Setup do
           required(:permit) => reference(),
           required(:allocator_permit) => reference() | nil,
           required(:endpoint) =>
-            {:inet.ip_address() | String.t() | charlist(), 1..65_535} | {:upgrade, port()},
+            {:inet.ip_address() | String.t() | charlist(), 1..65_535}
+            | {:upgrade, port()}
+            | {:layer, Socket.t()},
           required(:classic) =>
             {pid(), reference(), :atomics.atomics_ref(), Options.t(), integer() | :infinity},
           required(:control_deadline) => {:abs_ms, integer()},
@@ -51,6 +53,9 @@ defmodule SSL.Lifecycle.Setup do
 
   @spec start_socket(context()) :: GenServer.on_start()
   def start_socket(context), do: start_mode(context, :socket)
+
+  @spec start_layer(context()) :: GenServer.on_start()
+  def start_layer(context), do: start_mode(context, :layer)
 
   defp start_mode(
          %{
@@ -168,7 +173,7 @@ defmodule SSL.Lifecycle.Setup do
   @impl true
   def init({context, owner, observer}), do: init({context, owner, observer, :port})
 
-  def init({context, owner, observer, mode}) when mode in [:port, :socket] do
+  def init({context, owner, observer, mode}) when mode in [:port, :socket, :layer] do
     Process.flag(:sensitive, true)
 
     monitors = %{
@@ -231,7 +236,7 @@ defmodule SSL.Lifecycle.Setup do
     {_root, expected} = state.context.ready
 
     if elem(from, 0) == state.owner and nonce == expected and
-         state.context.endpoint == {:upgrade, tcp} do
+         state.context.endpoint in [{:upgrade, tcp}, {:layer, tcp}] do
       request =
         :gen_statem.send_request(
           state.connection,
@@ -444,10 +449,11 @@ defmodule SSL.Lifecycle.Setup do
          %State{
            phase: :births,
            connection_ready: true,
-           context: %{endpoint: {:upgrade, _}},
+           context: %{endpoint: {kind, _}},
            socket: %Socket{ref: ref}
          } = state
-       ) do
+       )
+       when kind in [:upgrade, :layer] do
     request =
       :gen_statem.send_request(
         state.connection,
@@ -657,6 +663,9 @@ defmodule SSL.Lifecycle.Setup do
         Process.alive?(state.owner) and Process.alive?(state.observer) and
         Process.alive?(state.connection)
 
+  defp phase_owned?(%State{mode: :layer} = state),
+    do: Carrier.owned_by?(state.tcp, state.connection, elem(budget(state), 1))
+
   defp phase_owned?(%State{mode: :port} = state),
     do: Port.info(state.tcp, :connected) == {:connected, state.connection}
 
@@ -766,7 +775,9 @@ defmodule SSL.Lifecycle.Setup do
   end
 
   defp public?(state), do: Map.get(state.context, :public, false)
-  defp upgrade?(state), do: match?({:upgrade, _}, state.context.endpoint)
+
+  defp upgrade?(state),
+    do: match?({kind, _} when kind in [:upgrade, :layer], state.context.endpoint)
 
   defp budget(%State{context: %{public: true}} = state) do
     original = elem(state.context.classic, 4)
