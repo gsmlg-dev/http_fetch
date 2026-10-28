@@ -1,5 +1,6 @@
 defmodule HTTP.NestedHTTPSProxyTest do
   use ExUnit.Case, async: true
+  alias ExSSL.TestSupport.ManagedLifecycleProbe, as: Probe
   @moduletag :integration
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
@@ -43,10 +44,7 @@ defmodule HTTP.NestedHTTPSProxyTest do
       promise = HTTP.fetch(url, options)
       assert {:error, _} = HTTP.Promise.await(promise, 4_000)
 
-      assert HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 2_000) in [
-               :ok,
-               {:error, :cleanup_unconfirmed}
-             ]
+      assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 2_000)
 
       if layer == :proxy do
         assert_receive {:proxy_handshake_failed, ^peer, _}, 2_000
@@ -74,6 +72,7 @@ defmodule HTTP.NestedHTTPSProxyTest do
       {url, proxy, peer} = nested_peer(stage)
       promise = HTTP.fetch(url, stop_options(options(proxy), stage, unquote(stop)))
       assert_receive {:stage, ^stage}, 2_000
+      provider = provider_snapshot(HTTP.Promise.completion(promise))
 
       result =
         if unquote(stop) == :abort do
@@ -88,7 +87,8 @@ defmodule HTTP.NestedHTTPSProxyTest do
           HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 2_000)
         end
 
-      assert_cleanup(stage, result, HTTP.Promise.completion(promise))
+      assert :ok = result
+      assert_provider_cleanup(provider, 2_000)
       assert_receive {:proxy_closed, ^peer}, 2_000
       assert_origin_closed(stage)
     end
@@ -144,7 +144,7 @@ defmodule HTTP.NestedHTTPSProxyTest do
   end
 
   for stop <- [:abort, :deadline] do
-    test "#{stop} before proxy TLS completes retains missing setup evidence" do
+    test "#{stop} before proxy TLS completes confirms provider cleanup" do
       parent = self()
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
       {:ok, {_, port}} = :inet.sockname(listener)
@@ -174,17 +174,18 @@ defmodule HTTP.NestedHTTPSProxyTest do
 
       assert_receive :proxy_tls_pending, 2_000
       handle = HTTP.Promise.completion(promise)
+      provider = provider_snapshot(handle)
 
       if unquote(stop) == :abort do
-        assert {:error, :cleanup_unconfirmed} =
-                 HTTP.RequestCompletion.abort_and_await(handle, 3_000)
+        assert :ok = HTTP.RequestCompletion.abort_and_await(handle, 3_000)
 
         assert {:error, :aborted} = HTTP.Promise.await(promise, 1_000)
       else
         assert {:error, :connect_timeout} = HTTP.Promise.await(promise, 2_000)
-        assert {:error, :cleanup_unconfirmed} = HTTP.RequestCompletion.await(handle, 3_000)
+        assert :ok = HTTP.RequestCompletion.await(handle, 3_000)
       end
 
+      assert_provider_cleanup(provider, 1_000)
       assert_receive {:proxy_tcp_closed, {:error, :closed}}, 1_000
     end
   end
@@ -193,7 +194,7 @@ defmodule HTTP.NestedHTTPSProxyTest do
         {:deadline, :await_closed, {:error, :closed}, :connect_timeout},
         {:peer_close, :close, :closed_by_peer, :closed}
       ] do
-    test "queued outer TLS #{outcome} retains its HTTP phase and missing setup evidence" do
+    test "queued outer TLS #{outcome} retains its HTTP phase and confirms provider cleanup" do
       parent = self()
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
       {:ok, {_, port}} = :inet.sockname(listener)
@@ -229,6 +230,7 @@ defmodule HTTP.NestedHTTPSProxyTest do
 
       assert_receive :proxy_tls_pending, 2_000
       handle = HTTP.Promise.completion(promise)
+      provider = provider_snapshot(handle)
       resources = :sys.get_state(handle.tracker).resources |> Map.values()
       [{owner, :owner}] = Enum.filter(resources, fn {_, kind} -> kind == :owner end)
       [{dial, :dial}] = Enum.filter(resources, fn {_, kind} -> kind == :dial end)
@@ -250,7 +252,8 @@ defmodule HTTP.NestedHTTPSProxyTest do
       end
 
       result = HTTP.Promise.await(promise, 2_000)
-      assert {:error, :cleanup_unconfirmed} = HTTP.RequestCompletion.await(handle, 3_000)
+      assert :ok = HTTP.RequestCompletion.await(handle, 3_000)
+      assert_provider_cleanup(provider, 1_000)
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 1_000
       assert_receive {:DOWN, ^tracker_monitor, :process, _, :normal}, 1_000
       expected_close = unquote(Macro.escape(close_result))
@@ -291,12 +294,24 @@ defmodule HTTP.NestedHTTPSProxyTest do
   defp deadline_reason(:origin_gate), do: :request_timeout
   defp deadline_reason(_stage), do: :connect_timeout
 
-  defp assert_cleanup(:inner_gate, result, handle) do
-    assert result in [{:error, :cleanup_pending}, {:error, :cleanup_unconfirmed}]
-    assert {:error, :cleanup_unconfirmed} = HTTP.RequestCompletion.await(handle, 3_000)
+  defp provider_snapshot(%{tracker: tracker}) do
+    [handle] = Map.keys(:sys.get_state(tracker, 1_000).providers)
+    provider = Probe.pair_snapshot(handle)
+    on_exit(fn -> Probe.release_pair_monitors(provider) end)
+    provider
   end
 
-  defp assert_cleanup(_stage, result, _handle), do: assert(result == :ok)
+  defp assert_provider_cleanup(provider, timeout) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+
+    assert {:ok,
+            %{
+              cleanup: :confirmed,
+              layers: %{outer: %{cleanup: :confirmed}, inner: %{cleanup: :confirmed}}
+            }} = SSL.Lifecycle.await(provider.handle, {:abs_ms, deadline})
+
+    Probe.await_pair_down(provider, max(deadline - System.monotonic_time(:millisecond), 0))
+  end
 
   defp assert_origin_closed(:origin_gate),
     do: assert_receive({:origin_closed, {:error, :closed}}, 2_000)
@@ -306,7 +321,7 @@ defmodule HTTP.NestedHTTPSProxyTest do
   defp options(proxy) do
     [
       proxy: proxy,
-      tls_backend: :ssl,
+      tls_backend: :ex_ssl,
       ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
       redirect: :manual,
       telemetry: false,
@@ -345,7 +360,7 @@ defmodule HTTP.NestedHTTPSProxyTest do
       end)
 
     {:ok, proxy_listener} =
-      :ssl.listen(0, Keyword.put(server_opts("pinned-ip"), :ip, {127, 0, 0, 2}))
+      :ssl.listen(0, Keyword.put(server_opts("nested-proxy-loopback"), :ip, {127, 0, 0, 1}))
 
     {:ok, {_, proxy_port}} = :ssl.sockname(proxy_listener)
 
@@ -400,9 +415,9 @@ defmodule HTTP.NestedHTTPSProxyTest do
     end)
 
     proxy =
-      {:https, "127.0.0.2", proxy_port,
+      {:https, "127.0.0.1", proxy_port,
        [
-         ssl: [cacertfile: Path.join(@fixtures, "pinned-ip-ca.pem")],
+         ssl: [cacertfile: Path.join(@fixtures, "nested-proxy-loopback-ca.pem")],
          headers: [{"Proxy-Authorization", "Basic proxy-only"}]
        ]}
 

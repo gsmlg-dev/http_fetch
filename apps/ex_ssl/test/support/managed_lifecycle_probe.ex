@@ -83,6 +83,59 @@ defmodule ExSSL.TestSupport.ManagedLifecycleProbe do
     end)
   end
 
+  # Test-only pair evidence captures original native identities before a
+  # controlled stop. Consumers keep opaque handles and bounded monitor controls.
+  def pair_snapshot(%SSL.Lifecycle.Pair.Handle{} = handle) do
+    layers =
+      Enum.map([handle.outer, handle.inner], fn layer ->
+        observer = layer.receipt.observer
+        %{resources: resources} = :sys.get_state(observer, 1_000)
+        {observer, resources}
+      end)
+
+    [{_, %{connection: %{live: true}, writer: %{live: true}, tcp: %{live: true}}}, _] = layers
+
+    identities =
+      Enum.flat_map(layers, fn {observer, resources} ->
+        [
+          {:process, observer}
+          | for(
+              {_role, %{identity: {_, type, object}, live: true}} <- resources,
+              do: {type, object}
+            )
+        ]
+      end)
+      |> Enum.uniq()
+
+    monitors =
+      Enum.map(identities, fn
+        {:socket, socket} -> {:socket, socket, :socket.monitor(socket)}
+        {type, object} -> {type, object, :erlang.monitor(type, object)}
+      end)
+
+    %{handle: handle, monitors: monitors}
+  end
+
+  def await_pair_down(provider, timeout) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+
+    Enum.each(provider.monitors, fn {type, object, ref} ->
+      receive do
+        {:DOWN, ^ref, ^type, ^object, _} -> :ok
+      after
+        max(deadline - System.monotonic_time(:millisecond), 0) ->
+          raise "nested provider #{type} did not terminate within original deadline"
+      end
+    end)
+  end
+
+  def release_pair_monitors(provider) do
+    Enum.each(provider.monitors, fn
+      {:socket, _socket, ref} -> :socket.cancel_monitor(ref)
+      {_type, _object, ref} -> Process.demonitor(ref, [:flush])
+    end)
+  end
+
   # Match the public provider boundary's native blocked-output predicate. The
   # original absolute deadline covers both samples and every retry.
   def await_native_blocked(graph, deadline) do
