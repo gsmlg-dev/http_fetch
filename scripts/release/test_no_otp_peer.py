@@ -101,8 +101,9 @@ class QuicBase:
 
 
 class ConnectionTerminated:
-    def __init__(self, error_code=0, reason_phrase=""):
+    def __init__(self, error_code=0, reason_phrase="", frame_type=0):
         self.error_code, self.reason_phrase = error_code, reason_phrase
+        self.frame_type = frame_type
 
 
 H2_EVENTS = SimpleNamespace(RequestReceived=RequestReceived, StreamReset=StreamReset,
@@ -661,6 +662,43 @@ class QuicAdapterTests(unittest.TestCase):
         self.assertEqual(gates, [])
         protocol.quic_event_received(ConnectionTerminated())
         self.assertEqual(value.finish()["result"], "PASS")
+
+    def test_h3_no_error_application_close_preserves_success_and_cancellation(self):
+        for action in ("success", "cancellation"):
+            with self.subTest(action=action):
+                value, _, _, _, protocol = self.setup_protocol(action)
+                protocol.quic_event_received(ProtocolNegotiated())
+                protocol.quic_event_received(HeadersReceived(value.case))
+                protocol.quic_event_received(ConnectionTerminated(0x100, frame_type=None))
+                record = value.finish()
+                self.assertEqual(record["result"], "PASS")
+                self.assertEqual(record["active_connections"], 0)
+                self.assertIn(dict(kind="quic_termination", connection=1,
+                                   error_code=0x100, frame_type=None, reason=""), record["events"])
+
+    def test_transport_crypto_zero_and_unknown_application_close_still_fail(self):
+        for code, frame_type in ((0x100, 0), (0x100, 0x1C), (0x101, None)):
+            with self.subTest(code=code, frame_type=frame_type):
+                value, _, _, _, protocol = self.setup_protocol("success")
+                protocol.quic_event_received(ProtocolNegotiated())
+                protocol.quic_event_received(HeadersReceived(value.case))
+                protocol.quic_event_received(ConnectionTerminated(code, frame_type=frame_type))
+                record = value.finish()
+                self.assertEqual(record["result"], "FAIL")
+                self.assertEqual(record["active_connections"], 0)
+                self.assertTrue(any("unexpected handshake failure" in error
+                                    for error in record["errors"]))
+
+    def test_normal_or_application_close_cannot_supply_identity_alert(self):
+        for code, frame_type in ((0, 0), (0x100, None), (0x12A, None)):
+            with self.subTest(code=code, frame_type=frame_type):
+                value, _, _, _, protocol = self.setup_protocol("invalid_identity")
+                protocol.quic_event_received(ProtocolNegotiated())
+                protocol.quic_event_received(ConnectionTerminated(code, frame_type=frame_type))
+                record = value.finish()
+                self.assertEqual(record["result"], "FAIL")
+                self.assertEqual(record["requests"], 0)
+                self.assertEqual(record["expected_identity_handshake_errors"], [])
 
     def test_all_three_quic_held_actions_publish_only_after_wire_headers(self):
         for action in ("timeout", "cancellation", "shutdown"):

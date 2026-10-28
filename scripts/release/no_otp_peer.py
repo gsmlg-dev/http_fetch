@@ -739,9 +739,15 @@ def quic_protocol(api, oracle):
                     oracle.reset(self.cid, event.stream_id, event.error_code)
                 elif isinstance(event, api.ConnectionTerminated):
                     oracle.event("quic_termination", connection=self.cid,
-                                 error_code=event.error_code, reason=str(event.reason_phrase)[:1024])
-                    if event.error_code != 0:
-                        identity_alert = event.error_code in (0x12A, 0x12B, 0x12C, 0x12D, 0x12E, 0x130)
+                                 error_code=event.error_code, frame_type=event.frame_type,
+                                 reason=str(event.reason_phrase)[:1024])
+                    # H3_NO_ERROR is an application close. The same transport
+                    # error value denotes CRYPTO_ERROR(0), not successful H3.
+                    normal_close = event.error_code == 0 or (
+                        event.error_code == 0x100 and event.frame_type is None)
+                    if not normal_close or oracle.case["action"] == "invalid_identity":
+                        identity_alert = event.frame_type is not None and event.error_code in (
+                            0x12A, 0x12B, 0x12C, 0x12D, 0x12E, 0x130)
                         oracle.handshake_failed(self.cid, event.reason_phrase,
                                                 identity_alert=identity_alert)
                     oracle.closed(self.cid, "local_stop" if oracle.stopping or self.locally_closed or
