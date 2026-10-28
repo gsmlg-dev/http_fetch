@@ -5,6 +5,8 @@ defmodule HTTP.ClientCompletionTest do
   alias HTTP.RequestLifecycle
 
   test "receipt survives owner and tracker; repeated and concurrent waits agree" do
+    Code.ensure_loaded!(ClientCompletion)
+    Code.ensure_loaded!(RequestLifecycle)
     parent = self()
 
     owner =
