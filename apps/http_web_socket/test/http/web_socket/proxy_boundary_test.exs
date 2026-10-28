@@ -2,6 +2,7 @@ defmodule HTTP.WebSocket.ProxyBoundaryTest do
   use ExUnit.Case, async: true
   @moduletag :integration
   import Bitwise
+  alias ExSSL.TestSupport.ManagedLifecycleProbe, as: Probe
   alias HTTP.WebSocket
   alias HTTP.WebSocket.Event.{Open, Message, Error, Close}
 
@@ -197,7 +198,7 @@ defmodule HTTP.WebSocket.ProxyBoundaryTest do
     assert_receive {:shutdown_peer_closed, ^peer}, @timeout
   end
 
-  for backend <- [:ssl, :ex_ssl] do
+  for backend <- [nil, :ex_ssl] do
     test "verified WSS slow-peer cancellation is bounded with #{backend}" do
       fixtures = Path.expand("../../support/fixtures", __DIR__)
 
@@ -260,7 +261,7 @@ defmodule HTTP.WebSocket.ProxyBoundaryTest do
     end
   end
 
-  for backend <- [:ssl, :ex_ssl] do
+  for backend <- [nil, :ex_ssl] do
     test "WSS owner loss aborts a blocked transport with #{backend}" do
       fixtures = Path.expand("../../support/fixtures", __DIR__)
 
@@ -317,23 +318,16 @@ defmodule HTTP.WebSocket.ProxyBoundaryTest do
       assert %{worker: writer} = state.write
       writer_monitor = Process.monitor(writer)
 
-      {tcp, tcp_monitor} =
-        if unquote(backend) == :ssl do
-          {:cancellable_ssl, _socket, tcp} = state.socket
-          on_exit(fn -> HTTP.Transport.SSL.abort(state.socket) end)
-          {tcp, Port.monitor(tcp)}
-        else
-          {nil, nil}
-        end
+      [handle] = Map.keys(:sys.get_state(state.attempt_tracker).providers)
+      graph = Probe.graph_handle(handle)
+      on_exit(fn -> Probe.release_monitors(graph) end)
 
       monitor = Process.monitor(ws.pid)
       send(owner, :stop)
       assert_receive {:DOWN, ^monitor, :process, _, _}, 1_000
       assert_receive {:DOWN, ^writer_monitor, :process, ^writer, _}, 1_000
 
-      if tcp_monitor do
-        assert_receive {:DOWN, ^tcp_monitor, :port, ^tcp, _}, 1_000
-      end
+      Probe.await_down(graph, [:connection, :writer, :tcp], 1_000)
 
       send(peer, :drain)
       assert_receive {:lost_owner_closed, ^peer}, 1_000
