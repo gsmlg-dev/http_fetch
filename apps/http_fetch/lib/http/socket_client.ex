@@ -2378,7 +2378,8 @@ defmodule HTTP.SocketClient do
         # Native active-once then reports a closed handle instead of the abort.
         # Restrict this classification to closure errors at this boundary;
         # parser errors and already-delivered send failures keep their reason.
-        if reason in [:closed, :einval] do
+        if reason in [:closed, :einval] or
+             (state.transport == HTTP.Transport.ExSSL and reason == :econnreset) do
           receive do
             :abort -> {:error, :aborted}
           after

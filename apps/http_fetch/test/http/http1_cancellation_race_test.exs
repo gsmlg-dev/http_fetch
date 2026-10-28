@@ -2,6 +2,7 @@ defmodule HTTP.HTTP1CancellationRaceTest do
   use ExUnit.Case, async: false
   @moduletag :integration
 
+  alias ExSSL.TestSupport.ManagedLifecycleProbe, as: Probe
   alias HTTP.{Promise, RequestCompletion}
 
   # Interpose only the transport boundary, retaining the original transport
@@ -26,8 +27,6 @@ defmodule HTTP.HTTP1CancellationRaceTest do
           fun.()
       end
     end
-
-    defp selected?(:setopts, [{:cancellable_ssl, _, _}, _], :response_rearm), do: false
 
     defp selected?(:setopts, args, :response_rearm) do
       if List.last(args) == [active: :once] do
@@ -83,7 +82,7 @@ defmodule HTTP.HTTP1CancellationRaceTest do
     previous = Code.compiler_options(ignore_module_conflict: true)
 
     try do
-      for module <- [HTTP.Transport.TCP, HTTP.Transport.SSL] do
+      for module <- [HTTP.Transport.TCP, HTTP.Transport.ExSSL] do
         {^module, binary, filename} = :code.get_object_code(module)
         source = module.module_info(:compile)[:source] |> List.to_string()
         quoted = source |> File.read!() |> Code.string_to_quoted!()
@@ -131,7 +130,7 @@ defmodule HTTP.HTTP1CancellationRaceTest do
     :ok
   end
 
-  for backend <- [:tcp, :ssl] do
+  for backend <- [:tcp, :ex_ssl] do
     test "#{backend}: cancellation during partial-head rearm preserves abort and joins actual closure" do
       backend = unquote(backend)
       :persistent_term.put(Gate, {self(), transport(backend), :response_rearm})
@@ -150,14 +149,14 @@ defmodule HTTP.HTTP1CancellationRaceTest do
       end
 
       assert_receive {:native_activation_result, {:error, reason}}, 3_000
-      assert reason in [:closed, :einval]
+      assert_native_failure(backend, reason)
       assert :ok = RequestCompletion.await(completion, 3_000)
       assert {:error, :aborted} = Promise.await(promise, 3_000)
       join_peer(peer)
     end
   end
 
-  for backend <- [:tcp, :ssl] do
+  for backend <- [:tcp, :ex_ssl] do
     test "#{backend}: public cancellation before post-send activation remains aborted" do
       backend = unquote(backend)
       transport = transport(backend)
@@ -168,7 +167,7 @@ defmodule HTTP.HTTP1CancellationRaceTest do
         HTTP.fetch(url,
           http_version: :http1,
           http1_reuse: false,
-          tls_backend: :ssl,
+          tls_backend: :ex_ssl,
           ssl: [verify: :verify_none],
           redirect: :manual,
           decode_body: false,
@@ -189,7 +188,7 @@ defmodule HTTP.HTTP1CancellationRaceTest do
       end
 
       assert_receive {:native_activation_result, {:error, native_reason}}, 3_000
-      assert native_reason in [:closed, :einval]
+      assert_native_failure(backend, native_reason)
       assert :ok = RequestCompletion.await(completion, 3_000)
       assert {:error, :aborted} = Promise.await(promise, 3_000)
       join_peer(peer)
@@ -197,7 +196,7 @@ defmodule HTTP.HTTP1CancellationRaceTest do
     end
   end
 
-  for backend <- [:tcp, :ssl] do
+  for backend <- [:tcp, :ex_ssl] do
     test "#{backend}: activation failure without cancellation preserves the native error" do
       backend = unquote(backend)
       :persistent_term.put(Gate, {self(), transport(backend), :activation})
@@ -210,19 +209,14 @@ defmodule HTTP.HTTP1CancellationRaceTest do
       try do
         state = :sys.get_state(completion.tracker)
 
-        tcp =
-          Enum.find_value(state.resources, fn {_, {resource, kind}} ->
-            if kind == :socket, do: resource
-          end)
-
-        :ok = :gen_tcp.close(tcp)
+        close_native_transport(backend, state)
         assert_receive :peer_closed, 3_000
       after
         send(owner, {:release_transport, gate})
       end
 
       assert_receive {:native_activation_result, {:error, native_reason}}, 3_000
-      assert native_reason in [:closed, :einval]
+      assert_native_failure(backend, native_reason)
       assert {:error, ^native_reason} = Promise.await(promise, 3_000)
       assert :ok = RequestCompletion.await(completion, 3_000)
       join_peer(peer)
@@ -253,15 +247,10 @@ defmodule HTTP.HTTP1CancellationRaceTest do
       assert_receive {:transport_gate, sender, before_send, :before_send}, 3_000
       state = :sys.get_state(completion.tracker)
 
-      tcp =
-        Enum.find_value(state.resources, fn {_, {resource, kind}} ->
-          if kind == :socket, do: resource
-        end)
-
-      :ok = :gen_tcp.close(tcp)
+      close_native_transport(backend, state)
       send(sender, {:release_transport, before_send})
       assert_receive {:transport_gate, ^sender, gate, {:error, native_reason}}, 3_000
-      assert native_reason in [:closed, :einval]
+      assert_native_failure(backend, native_reason)
 
       owner =
         Enum.find_value(state.resources, fn {_, {resource, kind}} ->
@@ -339,7 +328,7 @@ defmodule HTTP.HTTP1CancellationRaceTest do
         [
           http_version: :http1,
           http1_reuse: false,
-          tls_backend: :ssl,
+          tls_backend: :ex_ssl,
           ssl: [verify: :verify_none],
           redirect: :manual,
           decode_body: false,
@@ -352,7 +341,34 @@ defmodule HTTP.HTTP1CancellationRaceTest do
   end
 
   defp transport(:tcp), do: HTTP.Transport.TCP
-  defp transport(:ssl), do: HTTP.Transport.SSL
+  defp transport(:ex_ssl), do: HTTP.Transport.ExSSL
+
+  defp assert_native_failure(:tcp, reason), do: assert(reason in [:closed, :einval])
+
+  # SSL.call reports the opaque socket's abrupt terminal status after provider
+  # cancellation or native closure; it does not use inet's closed-port errors.
+  defp assert_native_failure(:ex_ssl, reason), do: assert(reason == :econnreset)
+
+  defp close_native_transport(:tcp, state) do
+    tcp =
+      Enum.find_value(state.resources, fn {_, {resource, kind}} ->
+        if kind == :socket, do: resource
+      end)
+
+    assert :ok = :gen_tcp.close(tcp)
+  end
+
+  defp close_native_transport(:ex_ssl, state) do
+    [handle] = Map.keys(state.providers)
+    graph = Probe.graph_handle(handle)
+
+    try do
+      assert :ok = Probe.close_tcp(graph)
+      Probe.await_down(graph, [:connection, :writer, :tcp, :observer], 3_000)
+    after
+      Probe.release_monitors(graph)
+    end
+  end
 
   defp peer(backend, mode \\ :headers) do
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
@@ -392,7 +408,7 @@ defmodule HTTP.HTTP1CancellationRaceTest do
 
   defp handshake(:tcp, tcp), do: {:gen_tcp, tcp}
 
-  defp handshake(:ssl, tcp) do
+  defp handshake(:ex_ssl, tcp) do
     fixtures = Path.expand("../support/fixtures", __DIR__)
 
     {:ok, socket} =
