@@ -329,10 +329,14 @@ defmodule NoOTP.ReleaseAudit do
     {dynamic, missing} =
       case Keyword.fetch!(chunks, :abstract_code) do
         {:raw_abstract_v1, forms} ->
-          prepared = prove_return_calls(forms, context)
+          prepared =
+            forms
+            |> prove_return_calls(context)
+            |> qualify_named_dispatches(imports)
+            |> prove_selector_returns()
 
           {walk_calls(
-             resolve_lexical(qualify_named_dispatches(prepared, imports), exports),
+             resolve_lexical(prepared, exports),
              path
            ), false}
 
@@ -1013,6 +1017,196 @@ defmodule NoOTP.ReleaseAudit do
 
   defp qualify_named_calls(term, _targets), do: term
 
+  # These same-module summaries hold for every input, not only known callers.
+  # Join every clause/branch; a possibly returning unknown alternative prevents
+  # a proof. Only atom results are admitted, never returned callbacks or state.
+  defp prove_selector_returns(forms) do
+    definitions =
+      Map.new(for {:function, _, name, arity, _} = form <- forms, do: {{name, arity}, form})
+
+    analysis = %{
+      definitions: definitions,
+      edges: MapSet.new(),
+      captures: MapSet.new(),
+      complete: true,
+      nodes: 0,
+      calls: 0
+    }
+
+    summaries =
+      if map_size(definitions) <= @max_parameter_functions do
+        analysis =
+          Enum.reduce(definitions, analysis, fn {owner, {:function, _, _, _, clauses}}, state ->
+            caller_syntax(clauses, owner, state)
+          end)
+
+        if analysis.complete do
+          edges =
+            Enum.reduce(definitions, analysis.edges, fn {owner, form}, edges ->
+              selector_capture_edges(form, owner, definitions, edges)
+            end)
+
+          if MapSet.size(edges) <= @max_parameter_calls,
+            do: selector_returns(definitions, edges, %{}),
+            else: %{}
+        else
+          %{}
+        end
+      else
+        %{}
+      end
+
+    selector_targets(forms, summaries)
+  end
+
+  # Captures also form possible local dependencies. Conservatively include a
+  # same-named remote capture instead of assuming it cannot call a local body.
+  defp selector_capture_edges({:fun, _, {:function, name, arity}}, owner, definitions, edges)
+       when is_atom(name) and is_integer(arity) do
+    if Map.has_key?(definitions, {name, arity}),
+      do: MapSet.put(edges, {owner, {name, arity}}),
+      else: edges
+  end
+
+  defp selector_capture_edges(
+         {:fun, _, {:function, _module, {:atom, _, name}, {:integer, _, arity}}},
+         owner,
+         definitions,
+         edges
+       ),
+       do: selector_capture_edges({:fun, 0, {:function, name, arity}}, owner, definitions, edges)
+
+  defp selector_capture_edges(term, owner, definitions, edges) when is_tuple(term),
+    do: term |> Tuple.to_list() |> selector_capture_edges(owner, definitions, edges)
+
+  defp selector_capture_edges(terms, owner, definitions, edges) when is_list(terms),
+    do: Enum.reduce(terms, edges, &selector_capture_edges(&1, owner, definitions, &2))
+
+  defp selector_capture_edges(_term, _owner, _definitions, edges), do: edges
+
+  # Each pass removes vertices. Any local-call cycle and its dependents stay
+  # unknown; an iteration/depth cutoff can never stand in for an invariant.
+  defp selector_returns(remaining, edges, summaries) do
+    ready =
+      Enum.reject(remaining, fn {key, _form} ->
+        Enum.any?(edges, fn {caller, callee} ->
+          caller == key and Map.has_key?(remaining, callee)
+        end)
+      end)
+
+    if ready == [] do
+      summaries
+    else
+      summaries =
+        Enum.reduce(ready, summaries, fn {key, form}, known ->
+          case selector_value(form, summaries) do
+            :unknown -> known
+            value -> Map.put(known, key, value)
+          end
+        end)
+
+      selector_returns(Map.drop(remaining, Enum.map(ready, &elem(&1, 0))), edges, summaries)
+    end
+  end
+
+  defp selector_value({:function, _, _, _, clauses} = form, summaries) do
+    if clauses != [] and :erlang.external_size(form) <= @max_finite_bytes do
+      value =
+        clauses
+        |> Enum.map(fn clause ->
+          clause = selector_calls(clause, summaries)
+          elem(resolve_clause(clause, %{}, false), 2)
+        end)
+        |> common_value()
+
+      if Enum.all?(finite_choices(value), &match?({:atom, _, atom} when is_atom(atom), &1)),
+        do: value,
+        else: :unknown
+    else
+      :unknown
+    end
+  end
+
+  # Preserve each original call and its arguments for the ordinary traversal.
+  # The attached summary is atom-only, so it cannot duplicate executable bodies.
+  defp selector_calls({:call, line, {:atom, _, name} = callee, arguments}, summaries) do
+    call = {:call, line, callee, selector_calls(arguments, summaries)}
+
+    case Map.fetch(summaries, {name, length(arguments)}) do
+      {:ok, value} -> {:audit_selector, line, call, value}
+      :error -> call
+    end
+  end
+
+  defp selector_calls(term, summaries) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.map(&selector_calls(&1, summaries)) |> List.to_tuple()
+
+  defp selector_calls(terms, summaries) when is_list(terms),
+    do: Enum.map(terms, &selector_calls(&1, summaries))
+
+  defp selector_calls(term, _summaries), do: term
+
+  # The first consumer boundary is a direct local producer in module position.
+  # Do not introduce assignment, argument, remote-return or state propagation.
+  # A compiler may wrap that expression in an immediate case. Refine only a
+  # single-variable clause whose entire body dispatches on that exact receiver;
+  # keep every original branch and the producer syntax for the ordinary scan.
+  defp selector_targets(
+         {:case, annotation, {:call, _, {:atom, _, name}, arguments} = source, clauses},
+         summaries
+       ) do
+    source = selector_targets(source, summaries)
+    clauses = selector_targets(clauses, summaries)
+
+    clauses =
+      case Map.fetch(summaries, {name, length(arguments)}) do
+        {:ok, value} -> Enum.map(clauses, &selector_case_clause(&1, value))
+        :error -> clauses
+      end
+
+    {:case, annotation, source, clauses}
+  end
+
+  defp selector_targets(
+         {:remote, annotation, {:call, line, {:atom, _, name} = callee, arguments}, function},
+         summaries
+       ) do
+    call = {:call, line, callee, selector_targets(arguments, summaries)}
+
+    target =
+      case Map.fetch(summaries, {name, length(arguments)}) do
+        {:ok, value} -> {:audit_selector, line, call, value}
+        :error -> call
+      end
+
+    {:remote, annotation, target, selector_targets(function, summaries)}
+  end
+
+  defp selector_targets(term, summaries) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.map(&selector_targets(&1, summaries)) |> List.to_tuple()
+
+  defp selector_targets(terms, summaries) when is_list(terms),
+    do: Enum.map(terms, &selector_targets(&1, summaries))
+
+  defp selector_targets(term, _summaries), do: term
+
+  defp selector_case_clause(
+         {:clause, annotation, [{:var, _, name}] = patterns, [],
+          [
+            {:call, line,
+             {:remote, remote_line, {:var, receiver_line, receiver_name} = receiver, function},
+             arguments}
+          ]},
+         value
+       )
+       when name == receiver_name and name != :_ do
+    target = {:audit_selector, receiver_line, receiver, value}
+    call = {:call, line, {:remote, remote_line, target, function}, arguments}
+    {:clause, annotation, patterns, [], [call]}
+  end
+
+  defp selector_case_clause(clause, _value), do: clause
+
   # Complete compiled caller domains can seed private parameters. General finite
   # targets require acyclic callers; literal closure parameters also admit a
   # separately checked acyclic argument-dependency proof. Exports and captures
@@ -1260,6 +1454,9 @@ defmodule NoOTP.ReleaseAudit do
 
   # Count and recognize executable AST constructors before claiming completeness.
   # Unsupported nodes make the entire added parameter proof unavailable.
+  defp caller_syntax({:audit_selector, _, call, _value}, owner, state),
+    do: caller_syntax(call, owner, state)
+
   defp caller_syntax(_term, _owner, %{complete: false} = state), do: state
 
   defp caller_syntax(term, owner, state) do
@@ -1446,6 +1643,11 @@ defmodule NoOTP.ReleaseAudit do
     {{:audit_return, line, call}, environment, value}
   end
 
+  defp resolve_expression({:audit_selector, line, call, value}, environment) do
+    {call, environment, _} = resolve_expression(call, environment)
+    {{:audit_selector, line, call, value}, environment, value}
+  end
+
   defp resolve_expression({:var, _, name} = expression, environment) do
     value = Map.get(environment, name, :unknown)
     {if(value == :unknown, do: expression, else: value), environment, value}
@@ -1549,7 +1751,9 @@ defmodule NoOTP.ReleaseAudit do
   end
 
   defp resolve_expression({:call, line, callee, args}, environment) do
-    variable_callee? = match?({:var, _, _}, callee)
+    variable_callee? =
+      match?({:var, _, _}, callee) or match?({:audit_selector, _, _, _}, callee)
+
     {callee, environment, _} = resolve_expression(callee, environment)
     # Data atoms obtained from variables are not source-level local calls.
     callee = if variable_callee?, do: {:audit_fun_value, line, callee}, else: callee
@@ -1777,6 +1981,8 @@ defmodule NoOTP.ReleaseAudit do
       end
     end)
   end
+
+  defp expand_finite({:audit_selector, _, _call, value}), do: expand_finite(value)
 
   defp expand_finite({:fun, _, {:clauses, _}} = value), do: {:ok, [value]}
   defp expand_finite({:named_fun, _, _, _} = value), do: {:ok, [value]}

@@ -1612,4 +1612,342 @@ defmodule NoOTP.ReleaseAuditTest do
     [result] = NoOTP.ReleaseAudit.artifacts().beam_inspections
     result
   end
+
+  # R: finite same-module atom returns, with all original controls retained.
+  test "R01 compiled SSE-shaped selector covers both literal module returns", context do
+    source = """
+    defmodule NoOTPAuditReturnSelectorFixture do
+      def close(state), do: stream_module(state).close(:socket)
+      def ack(state), do: stream_module(state).acknowledge(:stream, :ref)
+      defp stream_module(%{options: %{http_version: :http3}}), do: SafeH3
+      defp stream_module(_state), do: SafeH2
+    end
+    """
+
+    [{module, bytes}] = Code.compile_string(source)
+
+    on_exit(fn ->
+      :code.purge(module)
+      :code.delete(module)
+    end)
+
+    assert audit(context, module, bytes).unresolved_dispatch == []
+  end
+
+  test "R02 one unknown normal return poisons all-input selector summaries", context do
+    for body <- [
+          "run(X) -> (pick(X)):f(). pick(a) -> lists; pick(M) -> M.",
+          "run(X) -> (pick(X)):f(). pick(X) -> case X of a -> lists; M -> M end.",
+          "run(X) -> (pick(a)):f(), X. pick(a) -> lists; pick(M) -> M."
+        ] do
+      assert unsafe?(private_erlang(context, body, "run/1")), body
+    end
+  end
+
+  test "R03 unsafe atom returns remain unsafe at every selector consumer", context do
+    body = "run(X) -> (pick(X)):f(). pick(a) -> lists; pick(_) -> ssl."
+    result = private_erlang(context, body, "run/1")
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["literal_module_ssl"]
+  end
+
+  test "R04 nested unsafe producer bodies are scanned exactly once", context do
+    body = """
+    run(X) -> (pick(X)):f().
+    pick(_) -> _F=fun() -> ssl:connect(localhost,443,[]) end, lists.
+    """
+
+    result = private_erlang(context, body, "run/1")
+
+    assert Enum.map(result.unresolved_dispatch, &{&1.line, &1.kind}) ==
+             [{2, "literal_module_ssl"}]
+  end
+
+  test "R05 producer arguments retain their nested unsafe occurrence once", context do
+    body = """
+    run() -> (pick(fun() -> ssl:connect(localhost,443,[]) end)):f().
+    pick(_) -> lists.
+    """
+
+    result = private_erlang(context, body)
+
+    assert Enum.map(result.unresolved_dispatch, &{&1.line, &1.kind}) ==
+             [{1, "literal_module_ssl"}]
+  end
+
+  test "R06 unsafe captures and shadowed callbacks in producers remain obligations", context do
+    capture = """
+    run(X) -> (pick(X)):f().
+    pick(_) -> _F=fun ssl:connect/3, lists.
+    """
+
+    shadow = """
+    run(X) -> (pick(X)):f().
+    pick(F) -> _G=fun(F) -> F() end, lists.
+    """
+
+    assert Enum.map(
+             private_erlang(context, capture, "run/1").unresolved_dispatch,
+             &{&1.line, &1.kind}
+           ) ==
+             [{2, "literal_fun_ssl"}]
+
+    assert Enum.map(
+             private_erlang(context, shadow, "run/1").unresolved_dispatch,
+             &{&1.line, &1.kind}
+           ) ==
+             [{2, "unresolved_fun_invocation"}]
+  end
+
+  test "R07 a literal base clause cannot certify a self-recursive selector", context do
+    for body <- [
+          "run(X) -> (pick(X)):f(). pick(0) -> lists; pick(N) -> pick(N-1).",
+          "run(X) -> (pick(X)):f(). pick(X) -> pick(X), lists."
+        ] do
+      assert unsafe?(private_erlang(context, body, "run/1")), body
+    end
+  end
+
+  test "R08 mutual return cycles and dependent wrappers remain unknown", context do
+    body = """
+    run(X) -> (wrapper(X)):f().
+    wrapper(X) -> first(X).
+    first(0) -> lists; first(X) -> second(X).
+    second(X) -> first(X).
+    """
+
+    assert unsafe?(private_erlang(context, body, "run/1"))
+
+    captured = """
+    run(X) -> (first(X)):f().
+    first(X) -> F=fun second/1, F(X), lists.
+    second(X) -> first(X).
+    """
+
+    assert unsafe?(private_erlang(context, captured, "run/1"))
+  end
+
+  test "R09 a compiled default wrapper inherits only the all-input return summary", context do
+    source = """
+    defmodule NoOTPAuditReturnDefaultFixture do
+      def run(value), do: select(value).f()
+      defp select(value, mode \\\\ :default)
+      defp select(:first, _mode), do: SafeFirst
+      defp select(_value, _mode), do: SafeSecond
+    end
+    """
+
+    [{module, bytes}] = Code.compile_string(source)
+
+    on_exit(fn ->
+      :code.purge(module)
+      :code.delete(module)
+    end)
+
+    assert audit(context, module, bytes).unresolved_dispatch == []
+  end
+
+  test "R10 a returned atom binding never leaks through shadowed formals", context do
+    body = "run(F) -> M=pick(F), (fun(M) -> M:f() end)(F). pick(_) -> lists."
+    result = private_erlang(context, body, "run/1")
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["unresolved_module_dispatch"]
+  end
+
+  test "R11 local aliases and every case branch contribute their atom result", context do
+    body = """
+    run(X) -> (pick(X)):f().
+    pick(X) -> M=case X of a -> lists; _ -> maps end, M.
+    """
+
+    assert private_erlang(context, body, "run/1").unresolved_dispatch == []
+  end
+
+  test "R12 unproved error try and external return branches stay unknown", context do
+    for producer <- [
+          "pick(X) -> case X of a -> lists; _ -> erlang:error(no_return_claim) end.",
+          "pick(X) -> try X() of _ -> lists catch _:_ -> maps end.",
+          "pick(X) -> case X of a -> lists; _ -> external:pick(X) end.",
+          "pick(_) -> <<\"lists\">>."
+        ] do
+      body = "run(X) -> (pick(X)):f(). " <> producer
+      assert unsafe?(private_erlang(context, body, "run/1")), producer
+    end
+  end
+
+  test "R13 atom union and function byte bounds fail closed without truncation", context do
+    for count <- [16, 17] do
+      clauses = Enum.map_join(1..count, "; ", &"pick(#{&1}) -> m#{&1}")
+      body = "run(X) -> (pick(X)):f(). " <> clauses <> "."
+      result = private_erlang(context, body, "run/1")
+      assert result.unresolved_dispatch == [] == (count == 16)
+    end
+
+    huge = Enum.map_join(1..9_000, ",", &Integer.to_string/1)
+    body = "run(X) -> (pick(X)):f(). pick(_) -> {" <> huge <> "}, lists."
+    assert unsafe?(private_erlang(context, body, "run/1"))
+  end
+
+  test "R14 module function call and node budgets retain selector findings", context do
+    helpers = Enum.map_join(1..255, " ", &"unused#{&1}() -> ok.")
+    body = "run(X) -> (pick(X)):f(). pick(_) -> lists. " <> helpers
+    assert unsafe?(private_erlang(context, body, "run/1"))
+
+    calls = Enum.map_join(1..4_097, ",", fn _ -> "pick(X)" end)
+    body = "run(X) -> " <> calls <> ", (pick(X)):f(). pick(_) -> lists."
+    assert unsafe?(private_erlang(context, body, "run/1"))
+
+    literal = String.duplicate("x", 100_001)
+    body = "run(X) -> \"" <> literal <> "\", (pick(X)):f(). pick(_) -> lists."
+    assert unsafe?(private_erlang(context, body, "run/1"))
+  end
+
+  test "R15 a returned atom invoked as a fun is not a source-level local call", context do
+    for body <- [
+          "run(X) -> F=pick(X), F(). pick(_) -> lists.",
+          "run(X) -> (pick(X))(). pick(_) -> lists."
+        ] do
+      result = private_erlang(context, body, "run/1")
+      assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["unresolved_fun_invocation"]
+    end
+  end
+
+  test "R16 return assignments and private argument propagation remain outside this slice",
+       context do
+    safe = """
+    run(X) -> helper(pick(X)).
+    pick(a) -> lists; pick(_) -> maps.
+    helper(M) -> M:f().
+    """
+
+    assert unsafe?(private_erlang(context, safe, "run/1"))
+    assigned = "run(X) -> M=pick(X), M:f(). pick(_) -> lists."
+    assert unsafe?(private_erlang(context, assigned, "run/1"))
+
+    changed =
+      String.replace(safe, "run(X) -> helper(pick(X))", "run(X,M) -> helper(pick(X)), helper(M)")
+
+    assert unsafe?(private_erlang(context, changed, "run/2"))
+  end
+
+  test "R17 returned metadispatch names and module captures retain unsafe checks", context do
+    for body <- [
+          "run(X) -> (pick(X)):apply(ssl,connect,[]). pick(_) -> erlang.",
+          "run(X) -> M=pick(X), F=fun M:connect/3, F(localhost,443,[]). pick(_) -> ssl.",
+          "run(X) -> M=pick(X), erlang:spawn(M,connect,[]). pick(_) -> ssl."
+        ] do
+      assert unsafe?(private_erlang(context, body, "run/1")), body
+    end
+  end
+
+  test "R18 return summaries never execute producer side effects", context do
+    Process.delete(:audit_return_producer_executed)
+
+    body = """
+    run(X) -> (pick(X)):f().
+    pick(_) -> erlang:put(audit_return_producer_executed,true), lists.
+    """
+
+    assert private_erlang(context, body, "run/1").unresolved_dispatch == []
+    assert Process.get(:audit_return_producer_executed) == nil
+  end
+
+  # R19-R24: immediate case wrappers retain the narrow receiver proof boundary.
+  test "R19 immediate case receivers use every normal-return atom", context do
+    body = """
+    run(X) -> case wrapper(X) of M -> M:f() end.
+    wrapper(X) -> pick(X).
+    pick(first) -> lists; pick(_) -> maps.
+    """
+
+    assert private_erlang(context, body, "run/1").unresolved_dispatch == []
+  end
+
+  test "R20 immediate case summaries retain unknown cycle and union bounds", context do
+    for producer <- [
+          "pick(first) -> lists; pick(M) -> M.",
+          "pick(0) -> lists; pick(N) -> pick(N-1).",
+          "pick(X) -> other(X). other(X) -> pick(X).",
+          "pick(X) -> external:pick(X)."
+        ] do
+      body = "run(X) -> case pick(X) of M -> M:f() end. " <> producer
+      assert unsafe?(private_erlang(context, body, "run/1")), producer
+    end
+
+    for count <- [16, 17] do
+      clauses = Enum.map_join(1..count, "; ", &"pick(#{&1}) -> m#{&1}")
+      body = "run(X) -> case pick(X) of M -> M:f() end. " <> clauses <> "."
+      result = private_erlang(context, body, "run/1")
+      assert result.unresolved_dispatch == [] == (count == 16)
+    end
+  end
+
+  test "R21 immediate case proof does not become general binding propagation", context do
+    for body <- [
+          "run(X) -> case pick(X) of M when is_atom(M) -> M:f() end. pick(_) -> lists.",
+          "run(X) -> case pick(X) of M -> external:effect(), M:f() end. pick(_) -> lists.",
+          "run(X,N) -> case pick(X) of _M -> N:f() end. pick(_) -> lists.",
+          "run(X) -> M=case pick(X) of N -> N end, M:f(). pick(_) -> lists.",
+          "run(X) -> case pick(X) of M -> helper(M) end. pick(_) -> lists. helper(M) -> M:f().",
+          "run(X) -> case external:pick(X) of M -> M:f() end."
+        ] do
+      exports = if String.starts_with?(body, "run(X,N)"), do: "run/2", else: "run/1"
+      assert unsafe?(private_erlang(context, body, exports)), body
+    end
+  end
+
+  test "R22 case producer other branches and nested arguments are scanned once", context do
+    body = """
+    run(X) -> case pick(fun() -> ssl:connect(localhost,443,[]) end) of
+      \#{f := _F} -> ssl:connect(localhost,443,[]);
+      M -> M:f(fun() -> ssl:connect(localhost,443,[]) end)
+    end.
+    pick(_) -> _F=fun() -> ssl:connect(localhost,443,[]) end, lists.
+    """
+
+    result = private_erlang(context, body, "run/1")
+
+    assert Enum.map(result.unresolved_dispatch, &{&1.line, &1.kind}) ==
+             [
+               {1, "literal_module_ssl"},
+               {2, "literal_module_ssl"},
+               {3, "literal_module_ssl"},
+               {5, "literal_module_ssl"}
+             ]
+  end
+
+  test "R23 immediate case receivers retain unsafe and dynamic function checks", context do
+    body = "run(X) -> case pick(X) of M -> M:f() end. pick(_) -> ssl."
+    result = private_erlang(context, body, "run/1")
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["literal_module_ssl"]
+
+    metadispatch = """
+    run(X) -> case pick(X) of M -> M:apply(ssl,connect,[]) end.
+    pick(_) -> erlang.
+    """
+
+    assert unsafe?(private_erlang(context, metadispatch, "run/1"))
+
+    dynamic = "run(X,F) -> case pick(X) of M -> M:F() end. pick(_) -> lists."
+    result = private_erlang(context, dynamic, "run/2")
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["unresolved_function_dispatch"]
+  end
+
+  test "R24 case refinement respects nested shadowing and never executes producers", context do
+    shadow = """
+    run(X) -> case pick(X) of M -> M:f(fun(M) -> M:f() end) end.
+    pick(_) -> lists.
+    """
+
+    result = private_erlang(context, shadow, "run/1")
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["unresolved_module_dispatch"]
+
+    Process.delete(:audit_case_producer_executed)
+
+    body = """
+    run(X) -> case pick(X) of M -> M:f() end.
+    pick(_) -> erlang:put(audit_case_producer_executed,true), lists.
+    """
+
+    assert private_erlang(context, body, "run/1").unresolved_dispatch == []
+    assert Process.get(:audit_case_producer_executed) == nil
+  end
 end

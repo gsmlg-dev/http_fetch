@@ -29,7 +29,7 @@ class CompiledLexicalAuditTests(unittest.TestCase):
             self.fail("compiled audit controls timed out:\n" + output)
         self.assertEqual(child.returncode, 0, output)
         output = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output)
-        self.assertRegex(output, r"\b103 tests, 0 failures\b")
+        self.assertRegex(output, r"\b127 tests, 0 failures\b")
         self.assertNotRegex(output, r"\b[1-9]\d* (?:excluded|skipped)\b")
 
 
