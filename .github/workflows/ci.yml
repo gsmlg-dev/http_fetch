@@ -168,9 +168,9 @@ jobs:
           for tls in TLSv1.2 TLSv1.3; do
             "$RUNNER_TEMP/no-otp-peer-python/bin/python" scripts/release/no_otp_peer.py plan \
               --tls "$tls" \
-              --cert "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost.pem" \
-              --key "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost.key" \
-              --ca "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost-ca.pem" \
+              --cert "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/no-otp-localhost-ecdsa.pem" \
+              --key "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/no-otp-localhost-ecdsa.key" \
+              --ca "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/no-otp-localhost-ecdsa-ca.pem" \
               --output "$RUNNER_TEMP/no-otp-plan-$tls.json"
           done
       - name: Build and validate all candidate archives

@@ -179,9 +179,9 @@ class NoOTPReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('"$RUNNER_TEMP/no-otp-peer-python/bin/python" scripts/release/no_otp_peer.py plan', step)
         self.assertIn("for tls in TLSv1.2 TLSv1.3; do", step)
         self.assertIn('--tls "$tls"', step)
-        self.assertIn('--cert "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost.pem"', step)
-        self.assertIn('--key "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost.key"', step)
-        self.assertIn('--ca "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/localhost-ca.pem"', step)
+        self.assertIn('--cert "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/no-otp-localhost-ecdsa.pem"', step)
+        self.assertIn('--key "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/no-otp-localhost-ecdsa.key"', step)
+        self.assertIn('--ca "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/no-otp-localhost-ecdsa-ca.pem"', step)
 
     def test_failed_release_retains_diagnostics_without_archiving_release_or_keys(self):
         step = self.step("Preserve no-OTP release diagnostics")
@@ -246,8 +246,8 @@ class NoOTPCIWorkflowTests(unittest.TestCase):
         self.assertIn("aioquic==1.2.0", prepare)
         self.assertIn("for tls in TLSv1.2 TLSv1.3; do", prepare)
         self.assertIn('--tls "$tls"', prepare)
-        for flag, fixture in (("--cert", "localhost.pem"), ("--key", "localhost.key"),
-                              ("--ca", "localhost-ca.pem")):
+        for flag, fixture in (("--cert", "no-otp-localhost-ecdsa.pem"), ("--key", "no-otp-localhost-ecdsa.key"),
+                              ("--ca", "no-otp-localhost-ecdsa-ca.pem")):
             self.assertIn(f'{flag} "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/{fixture}"',
                           prepare)
         self.assertLess(self.job.index("name: Prepare independent no-OTP SSL peers"),
