@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.19] - 2026-10-29
+
+### Fixed
+- Retain HTTP/1 WebSocket transport references while draining buffered control
+  frames after EOF, preventing nil-transport Close writes. Preserve delivery ACK
+  backpressure without repeated reads, and finish failed protocol Close writes
+  abnormally with their original error instead of leaving cleanup pending (#150).
+
 ## [0.21.18] - 2026-10-27
 
 ### Added

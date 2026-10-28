@@ -4,11 +4,129 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
 
   import Bitwise
 
+  alias HTTP.Runtime.Delivery
   alias HTTP.Transport.TCP
   alias HTTP.WebSocket
+  alias HTTP.WebSocket.{Connection, Frame, Options}
   alias HTTP.WebSocket.Event.{Close, Error, Message, Open}
 
   @fixtures Path.expand("../../support/fixtures", __DIR__)
+
+  for backend <- [:inet, :socket], blocked? <- [false, true], valid? <- [false, true] do
+    test "TCP #{backend} handles a #{if valid?, do: "valid", else: "malformed"} #{if blocked?, do: "backpressured", else: "buffered"} peer Close after deferred EOF" do
+      set_tcp_backend(unquote(backend))
+      {tcp, port} = closed_tcp()
+
+      {:ok, options} =
+        Options.new("ws://127.0.0.1:#{port}/socket", [],
+          delivery: :ack,
+          max_queue_events: 1,
+          close_timeout: 1_000,
+          write_timeout: 1_000
+        )
+
+      target = %WebSocket{}
+      delivery = Delivery.new(options)
+
+      {delivery, ack} =
+        if unquote(blocked?) do
+          message = %Message{target: target, data: "tail"}
+          {:ok, delivery, [{^message, ref}]} = Delivery.push(delivery, message, 11, self())
+          {delivery, ref}
+        else
+          {delivery, nil}
+        end
+
+      frame = if unquote(valid?), do: <<0x88, 2, 1000::16>>, else: <<0x88, 2, 1005::16>>
+      generation = make_ref()
+
+      state = %Connection{
+        options: options,
+        owner: self(),
+        target: target,
+        uri: options.uri,
+        transport: TCP,
+        socket: tcp,
+        http_version: :http1,
+        ready_state: WebSocket.open(),
+        generation: generation,
+        read_close_pending?: true,
+        parser: Frame.new_parser(),
+        delivery: delivery,
+        raw_queue: :queue.from_list([{frame, nil}]),
+        raw_bytes: byte_size(frame)
+      }
+
+      assert {:noreply, state} =
+               Connection.handle_info({:http1_read_closed, generation, tcp}, state)
+
+      state =
+        if ack do
+          assert state.raw_bytes == byte_size(frame)
+          assert is_nil(state.write)
+          assert {:reply, :ok, state} = Connection.handle_call({:acknowledge, ack}, nil, state)
+          state
+        else
+          state
+        end
+
+      %{worker: worker, monitor: monitor, timer: timer} = state.write
+
+      on_exit(fn ->
+        Process.exit(worker, :kill)
+        Process.cancel_timer(timer)
+        if state.close_timer, do: Process.cancel_timer(elem(state.close_timer, 0))
+      end)
+
+      assert_receive {:http1_write, ^worker, {:error, :closed}} = result, 1_000
+      # The send can finish before submit/2 installs its monitor.
+      assert_receive {:DOWN, ^monitor, :process, ^worker, reason}, 1_000
+      assert reason in [:normal, :noproc]
+      assert {:stop, :normal, finished} = Connection.handle_info(result, state)
+      assert finished.transport == nil
+      assert finished.socket == nil
+      assert finished.write == nil
+
+      if unquote(valid?) do
+        assert_receive {WebSocket, ^target, %Close{code: 1000, was_clean: true}}
+        refute_receive {WebSocket, ^target, %Error{}}, 0
+      else
+        assert_receive {WebSocket, ^target, %Error{reason: :invalid_close_code}}
+        assert_receive {WebSocket, ^target, %Close{code: 1006, was_clean: false}}
+      end
+    end
+  end
+
+  test "deferred EOF waits for delivery ACK without scheduling another read" do
+    {tcp, port} = closed_tcp()
+
+    {:ok, options} = Options.new("ws://127.0.0.1:#{port}/socket", [], delivery: :ack)
+    target = %WebSocket{}
+    message = %Message{target: target, data: "tail"}
+    {:ok, delivery, [{^message, ref}]} = Delivery.push(Delivery.new(options), message, 11, self())
+    generation = make_ref()
+
+    state = %Connection{
+      options: options,
+      owner: self(),
+      target: target,
+      transport: TCP,
+      socket: tcp,
+      http_version: :http1,
+      ready_state: WebSocket.open(),
+      generation: generation,
+      read_close_pending?: true,
+      parser: Frame.new_parser(),
+      delivery: delivery
+    }
+
+    assert {:noreply, state} =
+             Connection.handle_info({:http1_read_closed, generation, tcp}, state)
+
+    refute_receive {:http1_read_closed, _, _}, 0
+    assert {:stop, :normal, :ok, _} = Connection.handle_call({:acknowledge, ref}, nil, state)
+    assert_receive {WebSocket, ^target, %Close{code: 1006, was_clean: false}}
+  end
 
   for backend <- [:ssl, :ex_ssl], terminal <- [:close, :eof, :truncated, :invalid] do
     test "#{backend} processes queued #{terminal} frames before peer EOF finalizes closure" do
@@ -288,6 +406,17 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
         do: :persistent_term.erase(key),
         else: :persistent_term.put(key, previous)
     end)
+  end
+
+  defp closed_tcp do
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false])
+    {:ok, {_, port}} = :inet.sockname(listener)
+    {:ok, tcp} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
+    {:ok, peer} = :gen_tcp.accept(listener)
+    :ok = :gen_tcp.close(peer)
+    :ok = :gen_tcp.close(tcp)
+    :ok = :gen_tcp.close(listener)
+    {tcp, port}
   end
 
   defp tcp_actor(socket) when is_port(socket), do: {socket, :port}

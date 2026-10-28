@@ -323,13 +323,9 @@ defmodule HTTP.WebSocket.Connection do
           read_close_pending?: true
         } = state
       ) do
-    advance(%{
-      state
-      | remote_end?: true,
-        transport: nil,
-        socket: nil,
-        read_close_pending?: false
-    })
+    # Buffered control frames can still submit a bounded reply. Retain its
+    # transport until normal detachment, even when that reply returns :closed.
+    advance(%{state | remote_end?: true, read_close_pending?: false})
   end
 
   def handle_info({:http1_read_closed, _generation, _socket}, state), do: {:noreply, state}
@@ -1165,7 +1161,9 @@ defmodule HTTP.WebSocket.Connection do
 
   defp transport_terminal(state, reason) do
     state = state |> park_terminal(reason, 1006, "", false) |> detach()
-    advance(state)
+    # Detachment cancels the writer and close timer. An unsent protocol Close
+    # cannot remain required after that; retain its error and finish abnormally.
+    advance(%{state | terminal: timeout_terminal(state)})
   end
 
   defp park_terminal(state, reason, code, text, require_write?) do
@@ -1222,6 +1220,7 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   defp rearm(%{transport: nil} = state), do: {:noreply, state}
+  defp rearm(%{http_version: :http1, remote_end?: true} = state), do: {:noreply, state}
   # A peer Close ends HTTP/1 frame reads. Let the bounded close reply settle
   # without granting read credit to a TCP socket the peer may already have closed.
   defp rearm(%{http_version: :http1, close_received?: true} = state), do: {:noreply, state}
