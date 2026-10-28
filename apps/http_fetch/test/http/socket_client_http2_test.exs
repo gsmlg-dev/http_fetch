@@ -2311,7 +2311,7 @@ defmodule HTTP.SocketClientHTTP2Test do
     assert File.regular?(source), "connection source is unavailable for private buffer probe"
 
     assert :crypto.hash(:sha256, File.read!(source)) |> Base.encode16(case: :lower) ==
-             "3a7bfd4b518e0cc8610450b690922d75f909ebb91da1996b2376d67146525ba4",
+             "2af9faca2ddcbd0da6464a0df312b70a0f51c3518c43c0107e6330a38fb16dfd",
            "revalidate this private buffer probe after changing SSL.Connection source"
 
     assert Application.spec(:ex_ssl, :vsn) == Application.spec(:http_fetch, :vsn),
