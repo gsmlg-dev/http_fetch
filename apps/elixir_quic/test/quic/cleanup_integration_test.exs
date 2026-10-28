@@ -162,10 +162,16 @@ defmodule Quic.CleanupIntegrationTest do
     endpoint_down = Process.monitor(endpoint)
     io_down = Process.monitor(io)
     port_down = :erlang.monitor(:port, port)
+    observe_cleanup_down(handle, tag, [io, port])
     gate_udp(endpoint, tag)
+    observation_deadline = System.monotonic_time(:millisecond) + 1_000
     assert {:pending, %{enrolled: 3}} = Cleanup.retire(lease, bound(0))
     assert_receive {:DOWN, ^io_down, :process, ^io, :normal}, 1_000
     assert_receive {:DOWN, ^port_down, :port, ^port, :normal}, 1_000
+
+    assert_receive {:cleanup_observed_down, ^tag},
+                   max(observation_deadline - System.monotonic_time(:millisecond), 0)
+
     assert {:pending, %{enrolled: 3, down: 2}} = Cleanup.status(handle)
     send(endpoint, {:release_receive, tag})
     assert_receive {:DOWN, ^endpoint_down, :process, ^endpoint, :normal}, 1_000
@@ -191,6 +197,7 @@ defmodule Quic.CleanupIntegrationTest do
     assert {:ok, %{scid: scid}} = Quic.Codec.parse_initial(initial)
     parent = self()
     tag = make_ref()
+    observe_cleanup_down(handle, tag, [io, port])
 
     pause = fn
       state, {:in, {{:call, _}, {:datagram, _, _, _}}, _}, _ ->
@@ -211,9 +218,14 @@ defmodule Quic.CleanupIntegrationTest do
     {ip, number} = Quic.local(endpoint)
     assert :ok = :gen_udp.send(peer, ip, number, <<0x40, scid::binary>>)
     assert_receive {:route_paused, ^tag}, 1_000
+    observation_deadline = System.monotonic_time(:millisecond) + 1_000
     assert {:pending, %{enrolled: 4}} = Cleanup.retire(lease, bound(0))
     assert_receive {:DOWN, ^io_down, :process, ^io, :normal}, 1_000
     assert_receive {:DOWN, ^port_down, :port, ^port, :normal}, 1_000
+
+    assert_receive {:cleanup_observed_down, ^tag},
+                   max(observation_deadline - System.monotonic_time(:millisecond), 0)
+
     assert {:pending, %{enrolled: 4, down: 2}} = Cleanup.status(handle)
     send(connection.id, {:release_route, tag})
     assert_receive {:DOWN, ^endpoint_down, :process, ^endpoint, :normal}, 1_000
@@ -244,6 +256,33 @@ defmodule Quic.CleanupIntegrationTest do
       assert_receive {:DOWN, ^caller_down, :process, ^caller, ^reason}, 1_000
       assert {:ok, %{cleanup: :confirmed}} = Cleanup.retire(lease, bound())
     end
+  end
+
+  # Independent monitors can deliver DOWN before the observer publishes it.
+  # The sys noreply event follows handle_info and its receipt update.
+  defp observe_cleanup_down(handle, tag, resources) do
+    parent = self()
+
+    observe = fn
+      state, {:in, {:DOWN, _, _, resource, _}}, _ ->
+        %{state | current: resource}
+
+      %{pending: pending, current: resource} = state, {:noreply, _}, _
+      when resource != nil ->
+        case List.delete(pending, resource) do
+          [] ->
+            send(parent, {:cleanup_observed_down, tag})
+            :done
+
+          pending ->
+            %{state | pending: pending, current: nil}
+        end
+
+      state, _, _ ->
+        state
+    end
+
+    assert :ok = :sys.install(handle.observer, {observe, %{pending: resources, current: nil}})
   end
 
   defp receive_client(options) do
