@@ -59,7 +59,7 @@ for app <- packages do
     do: raise("non-isolated or wrong-version candidate #{app}")
 end
 for dep <- Mix.Dep.cached() do
-  unless dep.scm == Hex.SCM and not dep.opts[:override] and
+  unless dep.scm == Hex.SCM and dep.opts[:override] in [nil, false] and
            Path.expand(dep.opts[:dest]) == Path.join(project, "deps/#{dep.app}"),
     do: raise("transitive dependency escaped isolated Hex resolution")
 end
