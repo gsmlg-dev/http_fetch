@@ -179,6 +179,78 @@ defmodule SSL.AbandonedCloseTest do
     assert actual_terminal == :reset
   end
 
+  test "inet sender death between records aborts an unfinished logical upload" do
+    install_between_records_gate()
+    parent = self()
+    ref = make_ref()
+    peer = start_peer(parent, ref)
+    bridge = start_bridge(peer.port, parent, ref)
+
+    on_exit(fn ->
+      for pid <- [bridge.task.pid, peer.task.pid], do: Process.exit(pid, :kill)
+      :gen_tcp.close(bridge.listener)
+      :ssl.close(peer.listener)
+    end)
+
+    options = Peer.client_options() ++ [send_timeout: 5_000]
+    assert {:ok, socket} = SSL.connect({127, 0, 0, 1}, bridge.port, options, 5_000)
+    assert_receive {^ref, :peer_ready}, 5_000
+    initial = snapshot(socket.pid)
+    writer = initial.writer
+    assert is_port(initial.tcp)
+    assert Port.info(initial.tcp, :connected) == {:connected, socket.pid}
+    connection_monitor = Process.monitor(socket.pid)
+    writer_monitor = Process.monitor(writer)
+    tcp_monitor = Port.monitor(initial.tcp)
+
+    on_exit(fn ->
+      if Process.alive?(socket.pid), do: Process.exit(socket.pid, :kill)
+
+      for monitor <- [connection_monitor, writer_monitor, tcp_monitor],
+          do: Process.demonitor(monitor, [:flush])
+    end)
+
+    send(peer.task.pid, {ref, :respond})
+    assert {:ok, @response} = SSL.recv(socket, byte_size(@response), 1_000)
+    assert :ok = bridge_command(bridge, :observe)
+    :persistent_term.put({__MODULE__, :between_records}, {socket.pid, self(), ref})
+    payload = @prefix <> :binary.copy("d", @logical_size - byte_size(@prefix))
+
+    {sender, sender_monitor} =
+      spawn_monitor(fn -> send(parent, {ref, :send_result, SSL.send(socket, payload)}) end)
+
+    assert_receive {^ref, :between_records, connection, ^sender, tcp}, 1_000
+    assert connection == socket.pid
+    assert tcp == initial.tcp
+    assert Port.info(tcp, :connected) == {:connected, connection}
+    assert {:ok, [send_pend: 0]} = :inet.getstat(tcp, [:send_pend])
+    assert_receive {^ref, :record_forwarded, wire_size}, 1_000
+    assert wire_size > byte_size(@prefix)
+    assert :ok = bridge_command(bridge, :seal)
+    deadline = now() + 1_000
+    Process.exit(sender, :kill)
+    assert_receive {:DOWN, ^sender_monitor, :process, ^sender, :killed}, remaining(deadline)
+    send(connection, {ref, :resume_boundary})
+
+    assert_receive {:DOWN, ^connection_monitor, :process, ^connection, :normal},
+                   remaining(deadline)
+
+    assert_receive {:DOWN, ^writer_monitor, :process, ^writer, _}, remaining(deadline)
+    assert_receive {:DOWN, ^tcp_monitor, :port, ^tcp, _}, remaining(deadline)
+    assert Port.info(tcp) == nil
+    assert_receive {^ref, :client_terminal, actual_terminal}, remaining(deadline)
+    drain_deadline = now() + 2_000
+    send(peer.task.pid, {ref, :drain, drain_deadline})
+    assert_receive {^ref, :prefix_received, prefix_size}, remaining(drain_deadline)
+    assert prefix_size == byte_size(@prefix)
+    assert :ok = bridge_command(bridge, :release_final)
+    assert_receive {^ref, :peer_closed, ^prefix_size}, remaining(drain_deadline)
+    assert :ok = Peer.stop(peer)
+    assert :ok = bridge_command(bridge, :stop)
+    assert :ok = Task.await(bridge.task, 1_000)
+    assert actual_terminal == :reset
+  end
+
   # Suspend one real Connection only after its first encrypted record was
   # acknowledged locally. Keep its unfinished logical write and original actors;
   # no fabricated DOWN or state replacement is used to select this interleaving.

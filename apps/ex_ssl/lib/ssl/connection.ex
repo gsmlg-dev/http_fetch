@@ -2003,14 +2003,14 @@ defmodule SSL.Connection do
     _ = if state.pending_control, do: cancel_timer(state.pending_control.timer)
 
     # Port.close does not block the callback, but inet can retain the port
-    # while flushing. Driver completion does not acknowledge an abandoned
-    # logical upload. Preserve that abort intent at this terminal boundary;
+    # while flushing. Driver completion does not acknowledge an unfinished or
+    # abandoned logical upload. Preserve that abort intent at this boundary;
     # leave ordinary, acknowledged empty-queue closes graceful.
     if is_port(state.tcp) do
       pending = :inet.getstat(state.tcp, [:send_pend])
 
       _ =
-        if state.write_abandoned? or state.output != nil or
+        if state.write_abandoned? or state.write != nil or state.output != nil or
              match?({:ok, [{:send_pend, size}]} when size > 0, pending) do
           _ = :inet.setopts(state.tcp, linger: {true, 0})
         end
