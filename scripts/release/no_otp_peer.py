@@ -346,7 +346,9 @@ class H2Adapter:
             elif isinstance(event, self.types.DataReceived):
                 require((self.cid, event.stream_id) in self.oracle.streams, "DATA for unknown stream")
                 if self.oracle.case["client"] == "wss":
-                    self.websocket(event.stream_id, event.data)
+                    # An empty H2 DATA frame adds no WebSocket bytes after Close.
+                    if event.data:
+                        self.websocket(event.stream_id, event.data)
                 else:
                     require(not event.data, "unexpected GET request body")
                 self.conn.acknowledge_received_data(event.flow_controlled_length, event.stream_id)

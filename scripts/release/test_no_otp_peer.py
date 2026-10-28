@@ -604,6 +604,13 @@ class AdapterTests(unittest.TestCase):
         websocket.events.return_value = [CloseConnection()]
         transport.events = [DataReceived(masked(8, b"\x03\xe8"))]
         adapter.receive(b"close")
+        # Empty H2 DATA can carry END_STREAM after the WebSocket Close exchange.
+        # The closed wsproto parser rejects even an empty receive_data call.
+        websocket.receive_data.reset_mock()
+        websocket.receive_data.side_effect = RuntimeError("Connection already closed.")
+        transport.events = [DataReceived(b""), StreamEnded()]
+        adapter.receive(b"end stream")
+        websocket.receive_data.assert_not_called()
         value.closed(1, "received_eof")
         record = value.finish()
         self.assertEqual(record["result"], "PASS")
