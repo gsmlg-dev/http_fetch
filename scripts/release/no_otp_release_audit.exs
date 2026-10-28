@@ -1013,8 +1013,10 @@ defmodule NoOTP.ReleaseAudit do
 
   defp qualify_named_calls(term, _targets), do: term
 
-  # Only an acyclic, complete compiled caller domain can seed private parameters.
-  # Exports and captures remain open; no function return or global-state inference.
+  # Complete compiled caller domains can seed private parameters. General finite
+  # targets require acyclic callers; literal closure parameters also admit a
+  # separately checked acyclic argument-dependency proof. Exports and captures
+  # remain open; neither rule infers function returns or global state.
   defp resolve_lexical(forms, beam_exports) do
     definitions =
       Map.new(for {:function, _, name, arity, _} = form <- forms, do: {{name, arity}, form})
@@ -1050,7 +1052,9 @@ defmodule NoOTP.ReleaseAudit do
               Map.update(acc, callee, MapSet.new([caller]), &MapSet.put(&1, caller))
             end)
 
-          closed_parameters(definitions, callers, exported, analysis.captures, %{}, %{})
+          closures = independent_closure_parameters(definitions, exported, analysis)
+
+          closed_parameters(definitions, callers, exported, analysis.captures, %{}, %{}, closures)
         else
           %{}
         end
@@ -1068,15 +1072,18 @@ defmodule NoOTP.ReleaseAudit do
   end
 
   # Remove ready vertices, never iterate a recursive proof to an arbitrary cap.
-  # Cycles and vertices depending on them fall back to unknown parameters.
-  defp closed_parameters(remaining, callers, exported, captures, incoming, resolved) do
+  # Cycles retain unknown general targets; checked closure seeds are independent.
+  defp closed_parameters(remaining, callers, exported, captures, incoming, resolved, closures) do
     ready =
       Enum.reject(remaining, fn {key, _form} ->
         Enum.any?(Map.get(callers, key, MapSet.new()), &Map.has_key?(remaining, &1))
       end)
 
     if ready == [] do
-      resolved
+      Enum.reduce(remaining, resolved, fn {{_, arity} = key, form}, output ->
+        values = closure_parameter_values(key, List.duplicate(:unknown, arity), closures)
+        Map.put(output, key, resolve_function(form, values))
+      end)
     else
       {incoming, resolved} =
         Enum.reduce(ready, {incoming, resolved}, fn {{_, arity} = key, form}, {args, output} ->
@@ -1085,13 +1092,156 @@ defmodule NoOTP.ReleaseAudit do
               do: Map.get(args, key, List.duplicate(:unknown, arity)),
               else: List.duplicate(:unknown, arity)
 
+          values = closure_parameter_values(key, values, closures)
           form = resolve_function(form, values)
           {collect_local_arguments(form, remaining, args), Map.put(output, key, form)}
         end)
 
       remaining = Map.drop(remaining, Enum.map(ready, &elem(&1, 0)))
-      closed_parameters(remaining, callers, exported, captures, incoming, resolved)
+      closed_parameters(remaining, callers, exported, captures, incoming, resolved, closures)
     end
+  end
+
+  # Each proof edge is an argument origin, not a function call edge. A caller's
+  # unrelated recursion cannot invent a parameter value. Direct self-recursive
+  # callers remain deliberately unsupported by this bounded extension, as do
+  # unknown origins and all recursive parameter dependencies.
+  defp independent_closure_parameters(definitions, exported, analysis) do
+    blocked =
+      Enum.reduce(analysis.edges, MapSet.union(exported, analysis.captures), fn
+        {key, key}, blocked -> MapSet.put(blocked, key)
+        _, blocked -> blocked
+      end)
+
+    dependencies =
+      Enum.reduce(definitions, %{}, fn {{_, arity} = owner, form}, dependencies ->
+        {:function, _, _, _, clauses} =
+          resolve_function(form, List.duplicate(:unknown, arity))
+
+        Enum.reduce(clauses, dependencies, fn {:clause, _, patterns, guards, body}, acc ->
+          parameters =
+            patterns
+            |> Enum.with_index()
+            |> Enum.flat_map(fn
+              {{:var, _, name}, index} -> [{name, {owner, index}}]
+              _ -> []
+            end)
+            |> Map.new()
+
+          parameters = if MapSet.member?(blocked, owner), do: %{}, else: parameters
+          self_recursive? = MapSet.member?(analysis.edges, {owner, owner})
+
+          closure_dependencies(
+            [guards, body],
+            definitions,
+            parameters,
+            self_recursive?,
+            acc
+          )
+        end)
+      end)
+      |> Map.reject(fn {{key, _index}, _origins} -> MapSet.member?(blocked, key) end)
+
+    if map_size(dependencies) <= @max_parameter_calls,
+      do: prove_closure_parameters(dependencies, MapSet.new()),
+      else: MapSet.new()
+  end
+
+  defp closure_dependencies(
+         {:call, _, {:atom, _, name}, args} = term,
+         definitions,
+         parameters,
+         self_recursive?,
+         dependencies
+       ) do
+    key = {name, length(args)}
+
+    dependencies =
+      if Map.has_key?(definitions, key) do
+        args
+        |> Enum.with_index()
+        |> Enum.reduce(dependencies, fn {argument, index}, acc ->
+          origin =
+            if self_recursive?,
+              do: :unknown,
+              else: closure_argument_origin(argument, parameters)
+
+          Map.update(acc, {key, index}, [origin], &[origin | &1])
+        end)
+      else
+        dependencies
+      end
+
+    term
+    |> Tuple.to_list()
+    |> closure_dependencies(definitions, parameters, self_recursive?, dependencies)
+  end
+
+  # Nested clauses/comprehensions may shadow outer formals. Literal closures
+  # still prove their own identity, but forwarding across these scopes is open.
+  defp closure_dependencies(term, definitions, _parameters, self_recursive?, dependencies)
+       when is_tuple(term) and tuple_size(term) >= 1 and
+              elem(term, 0) in [:clause, :lc, :bc, :mc] do
+    term
+    |> Tuple.to_list()
+    |> closure_dependencies(definitions, %{}, self_recursive?, dependencies)
+  end
+
+  defp closure_dependencies(term, definitions, parameters, self_recursive?, dependencies)
+       when is_tuple(term) do
+    term
+    |> Tuple.to_list()
+    |> closure_dependencies(definitions, parameters, self_recursive?, dependencies)
+  end
+
+  defp closure_dependencies(terms, definitions, parameters, self_recursive?, dependencies)
+       when is_list(terms) do
+    Enum.reduce(terms, dependencies, fn term, acc ->
+      closure_dependencies(term, definitions, parameters, self_recursive?, acc)
+    end)
+  end
+
+  defp closure_dependencies(_term, _definitions, _parameters, _self_recursive?, dependencies),
+    do: dependencies
+
+  defp closure_argument_origin({:var, _, name}, parameters),
+    do: Map.get(parameters, name, :unknown)
+
+  defp closure_argument_origin(argument, _parameters) do
+    case caller_argument_value(argument) do
+      {:fun, _, {:clauses, []}} -> :literal_closure
+      _ -> :unknown
+    end
+  end
+
+  # Remove proven vertices. Each successful pass strictly shrinks the finite
+  # dependency graph; a cycle has no ready vertex and remains unknown. There is
+  # no assumed seed, widening or iteration cutoff that turns an unknown safe.
+  defp prove_closure_parameters(dependencies, proven) do
+    ready =
+      for {parameter, origins} <- dependencies,
+          origins != [],
+          Enum.all?(origins, &(&1 == :literal_closure or MapSet.member?(proven, &1))),
+          do: parameter
+
+    if ready == [] do
+      proven
+    else
+      prove_closure_parameters(
+        Map.drop(dependencies, ready),
+        Enum.reduce(ready, proven, &MapSet.put(&2, &1))
+      )
+    end
+  end
+
+  defp closure_parameter_values(key, values, closures) do
+    values
+    |> Enum.with_index()
+    |> Enum.map(fn {value, index} ->
+      if value == :unknown and MapSet.member?(closures, {key, index}),
+        do: {:fun, 0, {:clauses, []}},
+        else: value
+    end)
   end
 
   defp resolve_function({:function, line, name, arity, clauses}, values) do

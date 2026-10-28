@@ -861,6 +861,229 @@ defmodule NoOTP.ReleaseAuditTest do
     assert unsafe?(changed)
   end
 
+  test "C01 literal helper arguments survive an unrelated mutual caller cycle", context do
+    body = """
+    run() -> first(a).
+    first(a) -> helper(fun() -> ok end), second(b);
+    first(_) -> ok.
+    second(X) -> first(X).
+    helper(F) -> F().
+    """
+
+    assert private_erlang(context, body).unresolved_dispatch == []
+  end
+
+  test "C02 every independent caller must supply a literal closure", context do
+    body = """
+    run(X) -> first(X).
+    first(a) -> helper(fun() -> one end), second(b);
+    first(b) -> helper(fun() -> two end);
+    first(_) -> ok.
+    second(X) -> first(X).
+    helper(F) -> F().
+    """
+
+    assert private_erlang(context, body, "run/1").unresolved_dispatch == []
+    changed = String.replace(body, "helper(fun() -> two end)", "helper(X)")
+    # Keep the changed branch variable bound, without relying on unreachable code.
+    changed = String.replace(changed, "first(b) ->", "first(X) when X =:= b ->")
+    assert unsafe?(private_erlang(context, changed, "run/1"))
+  end
+
+  test "C03 private forwarding uses argument dependencies rather than caller SCCs", context do
+    body = """
+    run() -> first(a).
+    first(a) -> wrapper(unknown, fun() -> ok end), second(b);
+    first(_) -> ok.
+    second(X) -> first(X).
+    wrapper(State,F) -> helper(State,F,nil).
+    helper(_State,F,_Context) -> F().
+    """
+
+    assert private_erlang(context, body).unresolved_dispatch == []
+  end
+
+  test "C04 actual Elixir default wrapper forwards only its proven callback parameter", context do
+    source = """
+    defmodule NoOTPAuditIndependentClosureFixture do
+      def run(value), do: first(value)
+      defp first(:a) do
+        guarded(%{}, 1, fn -> :ok end)
+        second(:b)
+      end
+      defp first(_), do: :ok
+      defp second(value), do: first(value)
+      defp guarded(state, timeout, fun, context \\\\ nil) do
+        {state, timeout, context, fun.()}
+      end
+    end
+    """
+
+    [{module, bytes}] = Code.compile_string(source)
+
+    on_exit(fn ->
+      :code.purge(module)
+      :code.delete(module)
+    end)
+
+    assert audit(context, module, bytes).unresolved_dispatch == []
+  end
+
+  test "C05 an additional unknown direct caller poisons the callback parameter", context do
+    body = """
+    run(X) -> first(a), extra(X).
+    first(a) -> wrapper(fun() -> ok end), second(b);
+    first(_) -> ok.
+    second(X) -> first(X).
+    extra(F) -> helper(F).
+    wrapper(F) -> helper(F).
+    helper(F) -> F().
+    """
+
+    assert unsafe?(private_erlang(context, body, "run/1"))
+  end
+
+  test "C06 nested unsafe closure bodies retain their original occurrence", context do
+    body = """
+    run() -> first(a).
+    first(a) -> M=ssl, helper(fun() -> M:connect(localhost,443,[]) end), second(b);
+    first(_) -> ok.
+    second(X) -> first(X).
+    helper(F) -> F().
+    """
+
+    result = private_erlang(context, body)
+    assert unsafe?(result)
+    assert Enum.any?(result.unresolved_dispatch, &(&1.line == 2))
+    refute Enum.any?(result.unresolved_dispatch, &(&1.line == 5))
+  end
+
+  test "C07 nested unknown captured callbacks remain unresolved", context do
+    body = """
+    run(F) -> first(a,F).
+    first(a,F) -> helper(fun() -> F() end), second(b,F);
+    first(_,_) -> ok.
+    second(X,F) -> first(X,F).
+    helper(F) -> F().
+    """
+
+    result = private_erlang(context, body, "run/1")
+    assert Enum.any?(result.unresolved_dispatch, &(&1.line == 2))
+    refute Enum.any?(result.unresolved_dispatch, &(&1.line == 5))
+  end
+
+  test "C08 returned or passed captures keep helper parameters open", context do
+    for escape <- ["fun helper/1", "lists:map(fun helper/1,[])"] do
+      body = """
+      run() -> first(a), #{escape}.
+      first(a) -> helper(fun() -> ok end), second(b);
+      first(_) -> ok.
+      second(X) -> first(X).
+      helper(F) -> F().
+      """
+
+      assert unsafe?(private_erlang(context, body)), escape
+    end
+  end
+
+  test "C09 explicit exports and export_all keep independent closure domains open", context do
+    body = """
+    run() -> first(a).
+    first(a) -> helper(fun() -> ok end), second(b);
+    first(_) -> ok.
+    second(X) -> first(X).
+    helper(F) -> F().
+    """
+
+    assert unsafe?(private_erlang(context, body, "run/0,helper/1"))
+    assert unsafe?(private_erlang(context, body, "run/0", "-compile(export_all). "))
+    assert unsafe?(private_erlang(context, body, "run/0", "", [:export_all]))
+  end
+
+  test "C10 direct self recursive callers stay outside the new proof", context do
+    for body <- [
+          "run() -> first(). first() -> first(), helper(fun() -> ok end). helper(F) -> F().",
+          "run() -> first(a). first(a) -> helper(fun() -> ok end), first(b); first(_) -> ok. helper(F) -> F()."
+        ] do
+      assert unsafe?(private_erlang(context, body)), body
+    end
+  end
+
+  test "C11 recursive parameter cycles cannot assume their own closure seed", context do
+    for entry <- ["first(fun() -> ok end)", "ok"] do
+      body = """
+      run() -> #{entry}.
+      first(F) -> second(F).
+      second(F) -> helper(F), first(F).
+      helper(F) -> F().
+      """
+
+      assert unsafe?(private_erlang(context, body)), entry
+    end
+  end
+
+  test "C12 forwarding inside a shadowing anonymous clause remains unknown", context do
+    body = """
+    run() -> first(a).
+    first(a) -> wrapper(fun() -> ok end), second(b);
+    first(_) -> ok.
+    second(X) -> first(X).
+    wrapper(F) -> fun(F) -> helper(F) end.
+    helper(F) -> F().
+    """
+
+    assert unsafe?(private_erlang(context, body))
+  end
+
+  test "C13 generic exported callbacks gain no external origin exception", context do
+    for body <- [
+          "run(F) -> F().",
+          "run(F) -> first(a,F). first(a,F) -> helper(F), second(b,F); first(_,_) -> ok. second(X,F) -> first(X,F). helper(F) -> F()."
+        ] do
+      assert unsafe?(private_erlang(context, body, "run/1")), body
+    end
+  end
+
+  test "C14 unknown callers remain obligations even without a known entry path", context do
+    body = """
+    run() -> first(a).
+    first(a) -> helper(fun() -> ok end), second(b);
+    first(_) -> ok.
+    second(X) -> first(X).
+    unused(F) -> helper(F).
+    helper(F) -> F().
+    """
+
+    assert unsafe?(private_erlang(context, body))
+  end
+
+  test "C15 named captures do not become anonymous closure identities", context do
+    for target <- ["lists:reverse/1", "ssl:connect/3"] do
+      body = """
+      run() -> first(a).
+      first(a) -> helper(fun #{target}), second(b);
+      first(_) -> ok.
+      second(X) -> first(X).
+      helper(F) -> erlang:apply(F,[]).
+      """
+
+      assert unsafe?(private_erlang(context, body)), target
+    end
+  end
+
+  test "C16 unknown wrapper default does not join a proven callback alternative", context do
+    body = """
+    run(X) -> first(a), helper(X).
+    first(a) -> helper(fun() -> ok end), second(b);
+    first(_) -> ok.
+    second(X) -> first(X).
+    helper(F) -> guarded(F,nil).
+    guarded(F,_Context) -> F().
+    """
+
+    assert unsafe?(private_erlang(context, body, "run/1"))
+  end
+
   defp unsafe?(result),
     do: result.unresolved_dispatch != [] or result.otp_ssl_imports != []
 
