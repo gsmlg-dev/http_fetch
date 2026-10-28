@@ -31,12 +31,20 @@ defmodule HTTPWebSocketGate do
     count = System.fetch_env!("HTTP_WS_GATE_COUNT") |> String.to_integer()
     tls? = String.starts_with?(url, "https:")
 
+    tls_opts =
+      if tls? do
+        [
+          tls_backend: String.to_existing_atom(System.get_env("HTTP_WS_GATE_BACKEND", "ex_ssl")),
+          ssl: [cacertfile: System.fetch_env!("HTTP_WS_GATE_CA")]
+        ]
+      else
+        []
+      end
+
     opts = [
       http_version: if(tls?, do: :http2, else: :h2c),
       http2_profile: :native_v1,
       http2_scope: "ws-gate",
-      tls_backend: String.to_existing_atom(System.fetch_env!("HTTP_WS_GATE_BACKEND")),
-      ssl: if(tls?, do: [cacertfile: System.fetch_env!("HTTP_WS_GATE_CA")], else: []),
       timeout: 30_000,
       connect_timeout: 30_000,
       opening_timeout: 30_000,
@@ -50,6 +58,8 @@ defmodule HTTPWebSocketGate do
       max_control_frames: @budgets.control_frames,
       max_frame_parts: 1024
     ]
+
+    opts = opts ++ tls_opts
 
     Process.put(:samples, [])
     Process.put(:sessions, [])

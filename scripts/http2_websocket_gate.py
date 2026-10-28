@@ -174,8 +174,6 @@ def main():
         parser.error('count and timeout must be positive')
     if not args.peer_check and args.mode in ('echo', 'churn') and args.count < (1000 if args.mode == 'churn' else 10000):
         parser.error('public acceptance requires echo >=10000 messages or churn >=1000 cycles')
-    if not args.tls and args.backend != 'ssl':
-        parser.error('ex_ssl requires actual TLS')
     if args.mode == 'soak' and args.seconds < (12 if args.soak_check else 1800):
         parser.error('soak requires >=1800 seconds; explicit --soak-check requires >=12')
     if args.peer == 'node' and args.mode != 'mixed':
@@ -228,17 +226,24 @@ def main():
         versions = dict(h2=h2.__version__, hpack=hpack.__version__, hyperframe=hyperframe.__version__, wsproto=wsproto.__version__)
         if node_versions:
             versions.update(node=node_versions['node'], nghttp2=node_versions['nghttp2'])
-        print(json.dumps(dict(kind='fixture_provenance', peer=args.peer, source_sha256={str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in [peer_source, root / 'scripts/http2_websocket_gate.py', root / 'scripts/http2_websocket_gate.exs']}, versions=versions)), flush=True)
+        print(json.dumps(dict(kind='fixture_provenance', peer=args.peer, tls=args.tls, backend=args.backend if args.tls else None, source_sha256={str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in [peer_source, root / 'scripts/http2_websocket_gate.py', root / 'scripts/http2_websocket_gate.exs']}, versions=versions)), flush=True)
         if args.peer_check:
             peer_check(main_peer['port'], args.tls, fixtures / 'localhost-ca.pem', args.count)
             completed = dict(result='PASS', completed=True, mode='fixture-check', count=args.count, public_client=False)
         else:
             scheme = 'https' if args.tls else 'http'
             env = os.environ.copy()
-            env.update(MIX_ENV='test', HTTP_WS_GATE_URL=f"{scheme}://localhost:{main_peer['port']}", HTTP_WS_GATE_BACKEND=args.backend,
-                       HTTP_WS_GATE_CA=str(fixtures / 'localhost-ca.pem'), HTTP_WS_GATE_MODE=args.mode,
+            env.update(MIX_ENV='test', HTTP_WS_GATE_URL=f"{scheme}://localhost:{main_peer['port']}",
+                       HTTP_WS_GATE_MODE=args.mode,
                        HTTP_WS_GATE_COUNT=str(args.count), HTTP_WS_GATE_SECONDS=str(args.seconds),
                        HTTP_WS_GATE_ACCEPTANCE='false' if args.soak_check else 'true')
+            # h2c neither selects nor claims a TLS backend, including inherited
+            # environment values from an earlier TLS gate invocation.
+            env.pop('HTTP_WS_GATE_BACKEND', None)
+            env.pop('HTTP_WS_GATE_CA', None)
+            if args.tls:
+                env.update(HTTP_WS_GATE_BACKEND=args.backend,
+                           HTTP_WS_GATE_CA=str(fixtures / 'localhost-ca.pem'))
             if disabled:
                 env['HTTP_WS_GATE_DISABLED_URL'] = f"{scheme}://localhost:{disabled['port']}"
             result = subprocess.Popen(['mix', 'run', str(root / 'scripts/http2_websocket_gate.exs')], cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)

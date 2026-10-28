@@ -27,26 +27,32 @@ defmodule HTTPStreamClientsGate do
   def run do
     metrics = HTTP2GateMetrics.start()
     url = System.fetch_env!("HTTP_STREAM_GATE_URL")
-    backend = String.to_existing_atom(System.get_env("HTTP_STREAM_GATE_BACKEND", "ex_ssl"))
     mode = System.get_env("HTTP_STREAM_GATE_MODE", "sse")
     count = String.to_integer(System.get_env("HTTP_STREAM_GATE_COUNT", "10000"))
     protocol = if String.starts_with?(url, "https"), do: :http2, else: :h2c
+
+    tls_opts =
+      if protocol == :http2 do
+        [
+          tls_backend:
+            String.to_existing_atom(System.get_env("HTTP_STREAM_GATE_BACKEND", "ex_ssl")),
+          ssl: [cacertfile: System.fetch_env!("HTTP_STREAM_GATE_CA")]
+        ]
+      else
+        []
+      end
 
     opts = [
       http_version: protocol,
       http2_profile: :native_v1,
       connect_timeout: 30_000,
-      tls_backend: backend,
-      ssl:
-        if(protocol == :http2,
-          do: [cacertfile: System.fetch_env!("HTTP_STREAM_GATE_CA")],
-          else: []
-        ),
       reconnect_time: 1,
       max_reconnect_time: 10,
       max_queue_events: @budgets.queue_events,
       max_queue_bytes: @budgets.queue_bytes
     ]
+
+    opts = opts ++ tls_opts
 
     Process.put(:samples, [])
 

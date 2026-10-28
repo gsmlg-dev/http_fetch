@@ -25,8 +25,6 @@ parser.add_argument('--peer-check', action='store_true', help='Validate independ
 args = parser.parse_args()
 if args.count < (1001 if args.mode == 'churn' else 10000):
     parser.error('acceptance requires >=10000 events, or >=1001 churn opens for 1000 reconnects')
-if not args.tls and args.backend != 'ssl':
-    parser.error('ex_ssl matrix requires --tls')
 import h2
 import hpack
 import hyperframe
@@ -178,11 +176,18 @@ def peer_check(port):
 try:
     metadata = ready.get(timeout=15)
     files = ['http2_stream_peer.py', 'http2_stream_peer.mjs', 'http2_stream_clients_gate.py', 'http2_stream_clients_gate.exs', 'requirements-http2-stream-clients.txt']
-    print(json.dumps({'kind': 'provenance', 'candidate_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(), 'dirty_files': subprocess.check_output(['git', 'status', '--porcelain'], cwd=root, text=True).splitlines(), 'sources': {name: hashlib.sha256((root / 'scripts' / name).read_bytes()).hexdigest() for name in files}, 'peer': args.peer, 'tls': args.tls, 'backend': args.backend}), flush=True)
+    print(json.dumps({'kind': 'provenance', 'candidate_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(), 'dirty_files': subprocess.check_output(['git', 'status', '--porcelain'], cwd=root, text=True).splitlines(), 'sources': {name: hashlib.sha256((root / 'scripts' / name).read_bytes()).hexdigest() for name in files}, 'peer': args.peer, 'tls': args.tls, 'backend': args.backend if args.tls else None}), flush=True)
     if args.peer_check:
         peer_check(metadata['port'])
     else:
-        env.update(HTTP_STREAM_GATE_URL=f"{'https' if args.tls else 'http'}://localhost:{metadata['port']}", HTTP_STREAM_GATE_BACKEND=args.backend, HTTP_STREAM_GATE_CA=str(fixtures / 'localhost-ca.pem'), HTTP_STREAM_GATE_MODE=args.mode, HTTP_STREAM_GATE_COUNT=str(args.count), MIX_ENV='test')
+        env.update(HTTP_STREAM_GATE_URL=f"{'https' if args.tls else 'http'}://localhost:{metadata['port']}", HTTP_STREAM_GATE_MODE=args.mode, HTTP_STREAM_GATE_COUNT=str(args.count), MIX_ENV='test')
+        # Plaintext has no TLS provider. Do not inherit TLS-only configuration
+        # into the companion or label h2c as execution of either TLS backend.
+        env.pop('HTTP_STREAM_GATE_BACKEND', None)
+        env.pop('HTTP_STREAM_GATE_CA', None)
+        if args.tls:
+            env.update(HTTP_STREAM_GATE_BACKEND=args.backend,
+                       HTTP_STREAM_GATE_CA=str(fixtures / 'localhost-ca.pem'))
         result = subprocess.Popen(['mix', 'run', str(root / 'scripts/http2_stream_clients_gate.exs')], cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         gate_lines = queue.Queue(maxsize=2048)
 
