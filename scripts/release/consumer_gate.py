@@ -105,6 +105,9 @@ MIGRATION_SUPPORT = (
     "apps/http_fetch/test/support", "apps/http_event_source/test/support",
     "apps/http_web_socket/test/support",
 )
+MIGRATION_ASSETS = (
+    "apps/elixir_quic/test/fixtures/tls/root.pem",
+)
 MIGRATION_PEERS = (
     "scripts/tls_migration_performance_peer.py",
     "scripts/http2_websocket_peer.py", "scripts/ex_ssl_tls12_peer.py",
@@ -352,13 +355,13 @@ IO.puts("loaded_ssl_connection=" <> to_string(:code.which(SSL.Connection)))
 def stage_migration_tests(project):
     """Keep source tests and peer assets separate from the packaged implementation."""
     files = [name for group in MIGRATION_GROUPS.values() for name in group]
-    for name in (*files, *MIGRATION_SUPPORT, *MIGRATION_PEERS):
+    for name in (*files, *MIGRATION_SUPPORT, *MIGRATION_ASSETS, *MIGRATION_PEERS):
         if not (ROOT / name).exists():
             raise RuntimeError(f"missing migration test or support: {name}")
     for name in MIGRATION_SUPPORT:
         shutil.copytree(ROOT / name, project / name,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    for name in (*files, *MIGRATION_PEERS):
+    for name in (*files, *MIGRATION_ASSETS, *MIGRATION_PEERS):
         target = project / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / name, target)

@@ -25,6 +25,9 @@ class MigrationConsumerTests(unittest.TestCase):
                                      (consumer_gate.ROOT / name).read_bytes())
             self.assertTrue((project / "apps/ex_ssl/test/support/local_tls_peer.ex").is_file())
             self.assertTrue((project / "scripts/tls_migration_performance_peer.py").is_file())
+            ca = "apps/elixir_quic/test/fixtures/tls/root.pem"
+            self.assertEqual((project / ca).read_bytes(),
+                             (consumer_gate.ROOT / ca).read_bytes())
             self.assertEqual(list(project.glob("apps/*/lib")), [])
             self.assertEqual(list(project.glob("apps/*/mix.exs")), [])
 
@@ -35,6 +38,23 @@ class MigrationConsumerTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "missing migration"):
                         consumer_gate.migration_project(Path(directory), "1.2.3", {})
                     command.assert_not_called()
+
+    def test_missing_h3_ca_fails_before_mix_or_staging_side_effects(self):
+        name = "apps/elixir_quic/test/fixtures/tls/root.pem"
+        missing = consumer_gate.ROOT / name
+        with patch.object(Path, "exists", new=lambda path: path != missing), \
+                patch.object(Path, "mkdir") as mkdir, \
+                patch.object(Path, "write_text") as write_text, \
+                patch.object(consumer_gate.shutil, "copytree") as copytree, \
+                patch.object(consumer_gate.shutil, "copyfile") as copyfile, \
+                patch.object(consumer_gate, "command", side_effect=RuntimeError("unexpected Mix")) as command:
+            with self.assertRaisesRegex(RuntimeError, "missing migration.*" + name):
+                consumer_gate.migration_project(Path("unused"), "1.2.3", {})
+            mkdir.assert_not_called()
+            write_text.assert_not_called()
+            copytree.assert_not_called()
+            copyfile.assert_not_called()
+            command.assert_not_called()
 
     def test_missing_ticket_scenarios_fail_before_staging(self):
         required = (

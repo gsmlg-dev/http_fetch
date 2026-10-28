@@ -35,6 +35,7 @@ defmodule HTTP.EventSource.OptionsTest do
 
   @h3_ca Path.expand("../../../../elixir_quic/test/fixtures/tls/root.pem", __DIR__)
 
+  @tag :integration
   test "HTTP3 is explicit, HTTPS-only and preserves QUIC profile and trust options" do
     ssl = [cacertfile: @h3_ca, reference_identity: {:dns_id, "example.test"}]
 
@@ -62,6 +63,7 @@ defmodule HTTP.EventSource.OptionsTest do
              )
   end
 
+  @tag :integration
   test "HTTP3 rejects contradictory routes, TLS options and connection headers before networking" do
     for {url, init, reason} <- [
           {"http://example.test/events", [], :http3_requires_https},
