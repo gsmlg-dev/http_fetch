@@ -3,12 +3,11 @@ defmodule HTTP.RequestCompletion do
   A request-scoped cleanup barrier obtained from `HTTP.Promise.completion/1`.
 
   Supported for HTTP/1 (including reuse) and HTTP/2 requests, manual/error
-  redirects, and direct TCP or OTP TLS transport, including explicit HTTP and
+  redirects, and direct TCP or TLS transport, including explicit HTTP and
   HTTPS proxies. HTTP proxies support HTTP/1 forwarding and HTTP/1 or HTTP/2
   CONNECT tunnels to HTTPS origins. HTTPS proxies support HTTP/1 forwarding to
-  HTTP origins, and OTP TLS CONNECT tunnels to HTTPS origins with independently
-  verified proxy and origin TLS. Nested TLS with ExSSL and proxy h2c routes
-  remain unsupported.
+  HTTP origins, and OTP or ExSSL CONNECT tunnels to HTTPS origins with independently
+  verified proxy and origin TLS. Proxy h2c routes remain unsupported.
   Explicit ExSSL supports direct or pinned HTTPS HTTP/1 and HTTP/2, including reuse,
   and the proxy routes described above.
   Awaiting the Promise or monitoring its response stream alone does not
@@ -67,6 +66,12 @@ defmodule HTTP.RequestCompletion do
   @doc false
   @spec tracker(t()) :: pid() | nil
   def tracker(%__MODULE__{tracker: tracker}), do: tracker
+
+  defp supported_ex_ssl?(%{proxy: nil} = options, %HTTP.Request{url: %URI{scheme: "http"}}) do
+    options.http_version in [:http1, :http2, :h2c] and
+      (options.transport_scope == nil or
+         match?(%HTTP.ManagedTransport{}, options.transport_scope))
+  end
 
   defp supported_ex_ssl?(options, %HTTP.Request{} = request) do
     options.http_version in [:http1, :http2] and
