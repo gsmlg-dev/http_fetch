@@ -6,6 +6,7 @@ defmodule NoOTP.ReleaseAudit do
   @max_parameter_calls 4_096
   @max_parameter_nodes 100_000
   @parameter_ast_nodes [
+    :audit_return,
     :clause,
     :atom,
     :integer,
@@ -89,7 +90,8 @@ defmodule NoOTP.ReleaseAudit do
     # implementation callbacks are not classified as candidate backend dispatch.
     roots = applications |> Enum.map(& &1.name) |> Enum.uniq() |> Enum.reject(&(&1 in @otp_apps))
     beams = Enum.flat_map(roots, &Path.wildcard("#{release}/lib/#{&1}-*/ebin/*.beam"))
-    inspections = Enum.map(beams, &inspect_beam/1)
+    context = return_context(release)
+    inspections = Enum.map(beams, &inspect_beam(&1, context))
 
     versions =
       applications
@@ -313,7 +315,7 @@ defmodule NoOTP.ReleaseAudit do
 
   defp walk_boot(_term, _path), do: []
 
-  defp inspect_beam(path) do
+  defp inspect_beam(path, context) do
     {:ok, {module, chunks}} =
       :beam_lib.chunks(String.to_charlist(path), [:imports, :exports, :abstract_code])
 
@@ -327,8 +329,12 @@ defmodule NoOTP.ReleaseAudit do
     {dynamic, missing} =
       case Keyword.fetch!(chunks, :abstract_code) do
         {:raw_abstract_v1, forms} ->
-          {walk_calls(resolve_lexical(qualify_named_dispatches(forms, imports), exports), path),
-           false}
+          prepared = prove_return_calls(forms, context)
+
+          {walk_calls(
+             resolve_lexical(qualify_named_dispatches(prepared, imports), exports),
+             path
+           ), false}
 
         :no_abstract_code ->
           {[], true}
@@ -347,6 +353,606 @@ defmodule NoOTP.ReleaseAudit do
       missing_abstract_code: missing
     }
   end
+
+  # A return proof is available only for the actual current in-release selection.
+  # Standalone/offline audits never borrow the auditor host's implementation.
+  defp return_context(release) do
+    %{release: canonical_path(release), paths: Enum.map(:code.get_path(), &to_string/1)}
+  end
+
+  defp selected_producer(module, context) do
+    with %{resolved: release, error: nil} when is_binary(release) <- context.release,
+         path when is_list(path) <- :code.which(module),
+         raw = to_string(path),
+         %{resolved: selected, error: nil} <- canonical_path(raw),
+         true <- String.starts_with?(selected, release <> "/"),
+         first when is_binary(first) <-
+           Enum.find_value(context.paths, fn directory ->
+             candidate = Path.join(directory, Atom.to_string(module) <> ".beam")
+             if File.regular?(candidate), do: candidate
+           end),
+         %{resolved: ^selected, error: nil} <- canonical_path(first),
+         loaded <- :code.is_loaded(module),
+         true <- loaded_selection?(loaded, selected),
+         status when status in [:loaded, :not_loaded] <- :code.module_status(module),
+         {:ok, bytes} <- File.read(selected),
+         {:ok, {^module, chunks}} <-
+           :beam_lib.chunks(bytes, [:imports, :exports, :abstract_code]),
+         {:raw_abstract_v1, forms} <- Keyword.get(chunks, :abstract_code),
+         false <- Enum.any?(forms, &match?({:attribute, _, :on_load, _}, &1)),
+         false <- Enum.any?(Keyword.fetch!(chunks, :imports), &match?({:ssl, _, _}, &1)),
+         true <- Enum.map(:code.get_path(), &to_string/1) == context.paths,
+         ^path <- :code.which(module),
+         ^loaded <- :code.is_loaded(module),
+         ^status <- :code.module_status(module),
+         {:ok, ^bytes} <- File.read(selected) do
+      {:ok,
+       %{
+         module: module,
+         path: selected,
+         raw: raw,
+         loaded: loaded,
+         status: status,
+         sha256: :crypto.hash(:sha256, bytes),
+         exports: Keyword.fetch!(chunks, :exports),
+         definitions:
+           Map.new(for {:function, _, name, arity, _} = form <- forms, do: {{name, arity}, form})
+       }}
+    else
+      _ -> :unknown
+    end
+  rescue
+    _ -> :unknown
+  catch
+    _, _ -> :unknown
+  end
+
+  defp loaded_selection?(false, _selected), do: true
+
+  defp loaded_selection?({:file, path}, selected) when is_list(path),
+    do: match?(%{resolved: ^selected, error: nil}, canonical_path(to_string(path)))
+
+  defp loaded_selection?(_loaded, _selected), do: false
+
+  # Only a fully literal map argument starts this bounded return slice. Names,
+  # source lines, module identities and stored body hashes never grant a proof.
+  defp prove_return_calls(
+         {:call, line, {:remote, _, {:atom, _, module}, {:atom, _, function}},
+          [{:map, _, _} = argument]} = call,
+         context
+       ) do
+    state = %{context: context, selections: %{}, stack: [], calls: 0}
+
+    result =
+      with {:ok, value} <- return_literal(argument),
+           {:ok, result, state} <- return_call(module, function, [value], state, true),
+           {:tuple, _, [_accumulator, {:fun, _, {:clauses, []}}]} <- result,
+           true <- selections_current?(state) do
+        {:audit_return, line, call, result}
+      else
+        _ -> call
+      end
+
+    result
+  end
+
+  defp prove_return_calls(term, context) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.map(&prove_return_calls(&1, context)) |> List.to_tuple()
+
+  defp prove_return_calls(terms, context) when is_list(terms),
+    do: Enum.map(terms, &prove_return_calls(&1, context))
+
+  defp prove_return_calls(term, _context), do: term
+
+  defp selections_current?(state) do
+    Enum.map(:code.get_path(), &to_string/1) == state.context.paths and
+      Enum.all?(state.selections, fn {module, selected} ->
+        case selected_producer(module, state.context) do
+          {:ok, current} -> current == selected
+          _ -> false
+        end
+      end)
+  end
+
+  defp return_call(module, function, arguments, state, remote?) do
+    key = {module, function, length(arguments)}
+
+    with true <- state.calls < 32 and length(state.stack) < 16 and key not in state.stack,
+         {:ok, selected} <- return_selection(module, state),
+         true <- not remote? or {function, length(arguments)} in selected.exports,
+         {:function, _, _, _, clauses} = form <-
+           Map.get(selected.definitions, {function, length(arguments)}),
+         true <- :erlang.external_size(form) <= @max_finite_bytes do
+      stack = state.stack
+
+      state = %{
+        state
+        | stack: [key | stack],
+          calls: state.calls + 1,
+          selections: Map.put(state.selections, module, selected)
+      }
+
+      case return_clauses(clauses, arguments, %{}, module, state) do
+        {:ok, value, state} -> {:ok, value, %{state | stack: stack}}
+        _ -> :unknown
+      end
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp return_selection(module, state) do
+    case Map.fetch(state.selections, module) do
+      {:ok, selected} -> {:ok, selected}
+      :error -> selected_producer(module, state.context)
+    end
+  end
+
+  # Ordered matching: an unknown earlier pattern/guard prevents selecting a
+  # later clause. Even definitely unselected clauses retain the ordinary scan.
+  defp return_clauses([], _arguments, _environment, _module, _state), do: :unknown
+
+  defp return_clauses(
+         [{:clause, _, patterns, guards, body} = clause | rest],
+         arguments,
+         environment,
+         module,
+         state
+       ) do
+    with {:ok, scope} <- return_patterns(patterns, arguments, environment) do
+      case return_guards(guards, scope) do
+        true ->
+          if Enum.all?(rest, &return_unselected_safe?/1) do
+            return_sequence(body, scope, module, state)
+          else
+            :unknown
+          end
+
+        false ->
+          if return_unselected_safe?(clause),
+            do: return_clauses(rest, arguments, environment, module, state),
+            else: :unknown
+
+        :unknown ->
+          :unknown
+      end
+    else
+      :no_match ->
+        if return_unselected_safe?(clause),
+          do: return_clauses(rest, arguments, environment, module, state),
+          else: :unknown
+
+      _ ->
+        :unknown
+    end
+  end
+
+  defp return_unselected_safe?(clause),
+    do:
+      return_closure_syntax?(clause) and
+        walk_calls(elem(resolve_clause(clause, %{}, false), 0), "return-proof") == []
+
+  defp return_sequence([], _environment, _module, _state), do: :unknown
+
+  defp return_sequence(expressions, environment, module, state) do
+    Enum.reduce_while(expressions, {:ok, :unknown, environment, state}, fn expression,
+                                                                           {:ok, _value, scope,
+                                                                            state} ->
+      case return_expression(expression, scope, module, state) do
+        {:ok, value, scope, state} -> {:cont, {:ok, value, scope, state}}
+        _ -> {:halt, :unknown}
+      end
+    end)
+    |> case do
+      {:ok, value, _scope, state} -> {:ok, value, state}
+      _ -> :unknown
+    end
+  end
+
+  defp return_expression({:var, _, name}, environment, _module, state) do
+    case Map.fetch(environment, name) do
+      {:ok, value} -> {:ok, value, environment, state}
+      :error -> :unknown
+    end
+  end
+
+  defp return_expression({:match, _, pattern, expression}, environment, module, state) do
+    with {:ok, value, scope, state} <- return_expression(expression, environment, module, state),
+         {:ok, scope} <- return_pattern(pattern, value, scope) do
+      {:ok, value, scope, state}
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp return_expression({:tuple, line, expressions}, environment, module, state) do
+    with {:ok, values, environment, state} <-
+           return_arguments(expressions, environment, module, state),
+         true <- :erlang.external_size(values) <= @max_finite_bytes do
+      {:ok, {:tuple, line, values}, environment, state}
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp return_expression(
+         {:fun, line, {:clauses, clauses}} = expression,
+         environment,
+         _module,
+         state
+       ) do
+    resolved = elem(resolve_expression(expression, environment), 0)
+
+    # Auxiliary local helper/capture bodies are not independently scanned by
+    # the candidate-module pass. Reject them instead of assuming their effects.
+    if clauses != [] and return_closure_syntax?(resolved) and
+         return_no_auxiliary_helpers?(resolved, state.selections) and
+         walk_calls(resolved, "return-proof") == [] do
+      {:ok, {:fun, line, {:clauses, []}}, environment, state}
+    else
+      :unknown
+    end
+  end
+
+  defp return_expression({:case, _, expression, clauses}, environment, module, state) do
+    with {:ok, value, scope, state} <- return_expression(expression, environment, module, state),
+         {:ok, result, state} <- return_clauses(clauses, [value], scope, module, state) do
+      {:ok, result, environment, state}
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp return_expression(
+         {:call, _, {:atom, _, function}, expressions},
+         environment,
+         module,
+         state
+       ) do
+    with {:ok, arguments, environment, state} <-
+           return_arguments(expressions, environment, module, state),
+         {:ok, value, state} <- return_call(module, function, arguments, state, false) do
+      {:ok, value, environment, state}
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp return_expression(
+         {:call, line, {:remote, annotation, target, name}, expressions},
+         environment,
+         module,
+         state
+       ) do
+    with {:ok, {:atom, _, target_module}, environment, state} <-
+           return_expression(target, environment, module, state),
+         {:ok, {:atom, _, function}, environment, state} <-
+           return_expression(name, environment, module, state),
+         {:ok, arguments, environment, state} <-
+           return_arguments(expressions, environment, module, state),
+         [] <-
+           walk_calls(
+             {:call, line,
+              {:remote, annotation, {:atom, annotation, target_module},
+               {:atom, annotation, function}}, arguments},
+             "return-proof"
+           ),
+         {:ok, value, state} <- return_call(target_module, function, arguments, state, true) do
+      {:ok, value, environment, state}
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp return_expression(expression, environment, _module, state) do
+    case return_literal(expression) do
+      {:ok, value} -> {:ok, value, environment, state}
+      _ -> :unknown
+    end
+  end
+
+  defp return_arguments(expressions, environment, module, state) do
+    Enum.reduce_while(expressions, {:ok, [], environment, state}, fn expression,
+                                                                     {:ok, values, scope, state} ->
+      case return_expression(expression, scope, module, state) do
+        {:ok, value, scope, state} -> {:cont, {:ok, values ++ [value], scope, state}}
+        _ -> {:halt, :unknown}
+      end
+    end)
+  end
+
+  defp return_closure_syntax?({:call, _, {:atom, _, _}, _}), do: false
+  defp return_closure_syntax?({:fun, _, {:function, _, _}}), do: false
+  defp return_closure_syntax?({:fun, _, {:function, _, _, _}}), do: false
+  defp return_closure_syntax?({:named_fun, _, _, _}), do: false
+
+  defp return_closure_syntax?(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.all?(&return_closure_syntax?/1)
+
+  defp return_closure_syntax?(terms) when is_list(terms),
+    do: Enum.all?(terms, &return_closure_syntax?/1)
+
+  defp return_closure_syntax?(_term), do: true
+
+  defp return_literal(expression) do
+    if :erlang.external_size(expression) <= @max_finite_bytes,
+      do: return_literal_node(expression),
+      else: :unknown
+  end
+
+  defp return_literal_node({:map, line, fields}) do
+    Enum.reduce_while(fields, {:ok, []}, fn
+      {:map_field_assoc, annotation, key, value}, {:ok, fields} ->
+        with {:ok, key} <- return_literal(key),
+             {:ok, value} <- return_literal(value),
+             {:ok, data_key} <- return_data(key),
+             :missing <- return_map_value(fields, data_key) do
+          {:cont, {:ok, fields ++ [{:map_field_assoc, annotation, key, value}]}}
+        else
+          _ -> {:halt, :unknown}
+        end
+
+      _, _ ->
+        {:halt, :unknown}
+    end)
+    |> case do
+      {:ok, fields} -> {:ok, {:map, line, fields}}
+      _ -> :unknown
+    end
+  end
+
+  defp return_literal_node(expression) do
+    case literal_value(expression) do
+      :unknown -> :unknown
+      value -> {:ok, value}
+    end
+  end
+
+  defp return_patterns(patterns, values, environment) when length(patterns) == length(values) do
+    Enum.zip(patterns, values)
+    |> Enum.reduce_while({:ok, environment}, fn {pattern, value}, {:ok, scope} ->
+      case return_pattern(pattern, value, scope) do
+        {:ok, scope} -> {:cont, {:ok, scope}}
+        other -> {:halt, other}
+      end
+    end)
+  end
+
+  defp return_patterns(_patterns, _values, _environment), do: :unknown
+
+  defp return_pattern({:var, _, :_}, _value, environment), do: {:ok, environment}
+
+  defp return_pattern({:var, _, name}, value, environment) do
+    case Map.fetch(environment, name) do
+      :error ->
+        {:ok, Map.put(environment, name, value)}
+
+      {:ok, old} ->
+        return_equal_pattern(old, value, environment)
+    end
+  end
+
+  defp return_pattern({:match, _, left, right}, value, environment) do
+    with {:ok, environment} <- return_pattern(left, value, environment),
+         {:ok, environment} <- return_pattern(right, value, environment),
+         do: {:ok, environment}
+  end
+
+  defp return_pattern({:tuple, _, patterns}, {:tuple, _, values}, environment),
+    do: return_patterns(patterns, values, environment)
+
+  defp return_pattern({:map, _, patterns}, {:map, _, fields}, environment) do
+    Enum.reduce_while(patterns, {:ok, environment}, fn
+      {:map_field_exact, _, key, pattern}, {:ok, scope} ->
+        with {:ok, data_key} <- return_pattern_key(key, scope),
+             {:ok, value} <- return_map_value(fields, data_key) do
+          case return_pattern(pattern, value, scope) do
+            {:ok, scope} -> {:cont, {:ok, scope}}
+            other -> {:halt, other}
+          end
+        else
+          :missing -> {:halt, :no_match}
+          _ -> {:halt, :unknown}
+        end
+
+      _, _ ->
+        {:halt, :unknown}
+    end)
+  end
+
+  defp return_pattern(pattern, value, environment) do
+    with {:ok, literal} <- return_literal(pattern) do
+      return_equal_pattern(literal, value, environment)
+    else
+      _ -> :unknown
+    end
+  end
+
+  # A bound key variable is an expression, not a literal AST key. Unsupported
+  # key expressions cannot establish that an earlier map clause fails.
+  defp return_pattern_key({:var, _, name}, environment) do
+    with {:ok, value} <- Map.fetch(environment, name), do: return_data(value)
+  end
+
+  defp return_pattern_key(expression, _environment), do: return_data(expression)
+
+  defp return_map_value([], _data_key), do: :missing
+
+  defp return_map_value([{:map_field_assoc, _, key, value} | rest], data_key) do
+    case return_data(key) do
+      {:ok, existing} ->
+        if existing === data_key, do: {:ok, value}, else: return_map_value(rest, data_key)
+
+      _ ->
+        :unknown
+    end
+  end
+
+  defp return_map_value(_fields, _data_key), do: :unknown
+
+  defp return_equal_pattern(left, right, environment) do
+    with {:ok, left} <- return_data(left),
+         {:ok, right} <- return_data(right) do
+      if left === right, do: {:ok, environment}, else: :no_match
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp return_guards([], _environment), do: true
+
+  defp return_guards(alternatives, environment) do
+    alternatives
+    |> Enum.map(fn sequence ->
+      values = Enum.map(sequence, &return_guard(&1, environment))
+
+      cond do
+        false in values -> false
+        :unknown in values -> :unknown
+        true -> true
+      end
+    end)
+    |> then(fn values ->
+      cond do
+        true in values -> true
+        :unknown in values -> :unknown
+        true -> false
+      end
+    end)
+  end
+
+  defp return_guard({:op, _, operator, left, right}, environment)
+       when operator in [:"=:=", :==] do
+    with {:ok, {kind_a, _, a}} when kind_a in [:atom, :integer] <-
+           return_guard_value(left, environment),
+         {:ok, {kind_b, _, b}} when kind_b in [:atom, :integer] <-
+           return_guard_value(right, environment) do
+      kind_a == kind_b and a == b
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp return_guard({:op, _, operator, left, right}, environment)
+       when operator in [:orelse, :andalso] do
+    case {operator, return_guard(left, environment), return_guard(right, environment)} do
+      {:orelse, true, _} -> true
+      {:orelse, false, right} when is_boolean(right) -> right
+      {:andalso, false, _} -> false
+      {:andalso, true, right} when is_boolean(right) -> right
+      _ -> :unknown
+    end
+  end
+
+  defp return_guard(
+         {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :is_atom}}, [value]},
+         environment
+       ) do
+    case return_guard_value(value, environment) do
+      {:ok, {:atom, _, _}} -> true
+      {:ok, _} -> false
+      _ -> :unknown
+    end
+  end
+
+  defp return_guard({:atom, _, value}, _environment) when is_boolean(value), do: value
+  defp return_guard(_guard, _environment), do: :unknown
+
+  defp return_guard_value({:var, _, name}, environment), do: Map.fetch(environment, name)
+  defp return_guard_value(expression, _environment), do: return_literal(expression)
+
+  # Decode only bounded, inert literal data. Native exact equality supplies
+  # Erlang map-key semantics and ignores AST annotations and field ordering.
+  # Functions, variables, floats and unsupported constructors stay unknown.
+  defp return_data(expression) do
+    if :erlang.external_size(expression) <= @max_finite_bytes,
+      do: return_data_node(expression),
+      else: :unknown
+  end
+
+  defp return_data_node({:atom, _, value}) when is_atom(value), do: {:ok, value}
+  defp return_data_node({:integer, _, value}) when is_integer(value), do: {:ok, value}
+  defp return_data_node({nil, _}), do: {:ok, []}
+
+  defp return_data_node({:tuple, _, elements}) do
+    case return_data_elements(elements) do
+      {:ok, values} -> {:ok, List.to_tuple(values)}
+      _ -> :unknown
+    end
+  end
+
+  defp return_data_node({:cons, _, head, tail}) do
+    with {:ok, head} <- return_data(head),
+         {:ok, tail} <- return_data(tail),
+         do: {:ok, [head | tail]}
+  end
+
+  defp return_data_node({:map, _, fields}) do
+    Enum.reduce_while(fields, {:ok, %{}}, fn
+      {:map_field_assoc, _, key, value}, {:ok, data} ->
+        with {:ok, key} <- return_data(key),
+             {:ok, value} <- return_data(value) do
+          {:cont, {:ok, Map.put(data, key, value)}}
+        else
+          _ -> {:halt, :unknown}
+        end
+
+      _, _ ->
+        {:halt, :unknown}
+    end)
+  end
+
+  defp return_data_node(_expression), do: :unknown
+
+  defp return_data_elements(elements) do
+    Enum.reduce_while(elements, {:ok, []}, fn expression, {:ok, values} ->
+      case return_data(expression) do
+        {:ok, value} -> {:cont, {:ok, [value | values]}}
+        _ -> {:halt, :unknown}
+      end
+    end)
+    |> case do
+      {:ok, values} -> {:ok, Enum.reverse(values)}
+      _ -> :unknown
+    end
+  end
+
+  # A remote self/helper call in the auxiliary producer directory would hide
+  # a body outside the returned closure. This bounded slice does not prove it.
+  defp return_no_auxiliary_helpers?(
+         {:call, _, {:remote, _, {:atom, _, module}, _}, arguments},
+         selections
+       ) do
+    helper? =
+      case :code.which(module) do
+        path when is_list(path) ->
+          case canonical_path(to_string(path)) do
+            %{resolved: resolved, error: nil} ->
+              Enum.any?(selections, fn {_module, selected} ->
+                Path.dirname(selected.path) == Path.dirname(resolved)
+              end)
+
+            _ ->
+              true
+          end
+
+        :preloaded ->
+          false
+
+        _ ->
+          true
+      end
+
+    not helper? and return_no_auxiliary_helpers?(arguments, selections)
+  end
+
+  defp return_no_auxiliary_helpers?(term, selections) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.all?(&return_no_auxiliary_helpers?(&1, selections))
+
+  defp return_no_auxiliary_helpers?(terms, selections) when is_list(terms),
+    do: Enum.all?(terms, &return_no_auxiliary_helpers?(&1, selections))
+
+  defp return_no_auxiliary_helpers?(_term, _selections), do: true
 
   # Resolve only compiled local/imported equivalents of the named erlang MFAs.
   # A same-named local function or explicit other-module import is not that BIF.
@@ -681,6 +1287,13 @@ defmodule NoOTP.ReleaseAudit do
       end)
 
     {resolved, environment, value}
+  end
+
+  # Keep the complete original producer call in the ordinary scan. Only its
+  # separately checked return value may seed the following lexical binding.
+  defp resolve_expression({:audit_return, line, call, value}, environment) do
+    {call, environment, _} = resolve_expression(call, environment)
+    {{:audit_return, line, call}, environment, value}
   end
 
   defp resolve_expression({:var, _, name} = expression, environment) do

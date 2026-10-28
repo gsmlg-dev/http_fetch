@@ -869,6 +869,494 @@ defmodule NoOTP.ReleaseAuditTest do
     compile_erlang(context, source, [])
   end
 
+  test "B01 selected compiled producer bodies prove nine collector calls without invocation",
+       context do
+    fixture = b_fixture(context)
+    result = b_run(context, fixture)
+    assert result.unresolved_dispatch == []
+    assert result.otp_ssl_imports == []
+  end
+
+  test "B02 current in-release unloaded producers remain usable without loading", context do
+    fixture = b_fixture(context, load: false)
+    assert b_run(context, fixture).unresolved_dispatch == []
+    assert :code.is_loaded(fixture.protocol) == false
+    assert :code.is_loaded(fixture.collector) == false
+  end
+
+  test "B03 producer module names carry no exemption", context do
+    fixture = b_fixture(context, collector_body: "into(_) -> {[], external:callback()}.")
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B04 every collector branch retains direct unsafe calls", context do
+    for stage <- [:cont, :done, :halt] do
+      fixture = b_fixture(context, unsafe_stage: stage)
+      assert b_open_count(b_run(context, fixture)) == 9
+      b_remove(fixture)
+    end
+  end
+
+  test "B05 nested anonymous collector bodies retain unsafe calls", context do
+    fixture = b_fixture(context, cont_body: "fun() -> ssl:connect(localhost,443,[]) end, [X|L]")
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B06 callable collector input remains unknown", context do
+    fixture = b_fixture(context, cont_body: "X()")
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B07 an earlier matching protocol clause overrides the ordinary producer", context do
+    fixture = b_fixture(context, prefix_clause: "impl(_) -> external; ")
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B08 unknown earlier protocol guard cannot be ignored", context do
+    fixture =
+      b_fixture(context, prefix_clause: "impl(M) when erlang:map_size(M) > 0 -> external; ")
+
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B09 changed implementation selection is rechecked on every audit", context do
+    fixture = b_fixture(context, target: "unknown_b_producer")
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B10 missing producer debug information is unproved", context do
+    fixture = b_fixture(context, debug: false)
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B11 a missing selected file is unproved", context do
+    fixture = b_fixture(context)
+    File.rm!(fixture.collector_path)
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B12 changed loaded bytes cannot use stale debug forms", context do
+    fixture = b_fixture(context)
+
+    changed =
+      b_compile(
+        fixture.collector,
+        "-export([into/1]). into(_) -> {[], fun(_,_) -> ssl:connect(localhost,443,[]) end}.",
+        true
+      )
+
+    File.write!(fixture.collector_path, changed)
+    assert :code.module_status(fixture.collector) == :modified
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B13 code path shadowing cannot substitute for the loaded path", context do
+    fixture = b_fixture(context)
+    shadow = Path.join(Path.dirname(fixture.directory), "shadow-ebin")
+    File.mkdir_p!(shadow)
+
+    File.cp!(
+      fixture.collector_path,
+      Path.join(shadow, Atom.to_string(fixture.collector) <> ".beam")
+    )
+
+    true = :code.add_patha(String.to_charlist(shadow))
+    on_exit(fn -> :code.del_path(String.to_charlist(shadow)) end)
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B14 runtime selection reordering is rechecked after a successful audit", context do
+    fixture = b_fixture(context)
+    assert b_run(context, fixture).unresolved_dispatch == []
+    shadow = Path.join(Path.dirname(fixture.directory), "reordered-ebin")
+    File.mkdir_p!(shadow)
+
+    File.cp!(
+      fixture.protocol_path,
+      Path.join(shadow, Atom.to_string(fixture.protocol) <> ".beam")
+    )
+
+    true = :code.add_patha(String.to_charlist(shadow))
+    on_exit(fn -> :code.del_path(String.to_charlist(shadow)) end)
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B15 external loaded producer paths cannot borrow owned release bytes", context do
+    fixture = b_fixture(context, external: true)
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B16 a symlinked producer path is noncanonical", context do
+    fixture = b_fixture(context, load: false)
+    link = fixture.directory <> "-link"
+    File.ln_s!(fixture.directory, link)
+    true = :code.add_patha(String.to_charlist(link))
+    on_exit(fn -> :code.del_path(String.to_charlist(link)) end)
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B17 unknown collector seed is not a literal-map proof", context do
+    fixture = b_fixture(context)
+    assert b_open_count(b_run(context, fixture, "Input")) == 9
+  end
+
+  test "B18 recursive producer return never receives a proof", context do
+    fixture = b_fixture(context, collector_body: "into(M) -> into(M).")
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B19 collector local helpers cannot hide unscanned dispatch", context do
+    for call <- ["hidden(), [X|L]", :remote_hidden] do
+      fixture =
+        b_fixture(context,
+          cont_body: call,
+          extra: "hidden() -> M=ssl, M:connect(localhost,443,[])."
+        )
+
+      assert b_open_count(b_run(context, fixture)) == 9
+      b_remove(fixture)
+    end
+  end
+
+  test "B20 a safe returned tuple does not erase unsafe producer statements", context do
+    fixture = b_fixture(context, producer_prefix: "ssl:connect(localhost,443,[]), ")
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B21 an unsafe unselected producer body remains an obligation", context do
+    fixture = b_fixture(context, fallback: "ssl:connect(localhost,443,[])")
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B22 skipped protocol alternatives may not supply a collector", context do
+    fixture =
+      b_fixture(context,
+        prefix_clause: "impl(\#{'__struct__' := missing_b_struct}) -> external; "
+      )
+
+    assert b_run(context, fixture).unresolved_dispatch == []
+  end
+
+  test "B23 unknown struct implementation and missing map fields fail closed", context do
+    fixture = b_fixture(context)
+
+    for input <- [
+          "\#{'__struct__' => other_b_struct, map => \#{}}",
+          "\#{'__struct__' => b_struct}"
+        ] do
+      assert b_open_count(b_run(context, fixture, input)) == 9
+    end
+  end
+
+  test "B24 collector construction never executes the returned function", context do
+    fixture = b_fixture(context, cont_body: "erlang:error(audit_must_not_execute)")
+    assert b_run(context, fixture).unresolved_dispatch == []
+  end
+
+  # Only generated trusted fixture modules may be loaded. No production module
+  # is loaded, replaced, invoked or evaluated by these helpers or by the auditor.
+  defp b_fixture(context, options \\ []) do
+    suffix = Integer.to_string(System.unique_integer([:positive]))
+    protocol = String.to_atom("no_otp_b_protocol_" <> suffix)
+    collector = String.to_atom("no_otp_b_collector_" <> suffix)
+    release = context.ebin |> Path.dirname() |> Path.dirname() |> Path.dirname() |> b_physical()
+    System.put_env("NO_OTP_RELEASE", release)
+    System.put_env("NO_OTP_PROJECT", release)
+    directory = Path.join(release, "lib/elixir-b-" <> suffix <> "/ebin")
+    File.mkdir_p!(directory)
+
+    File.write!(
+      Path.join(directory, "elixir.app"),
+      "{application,elixir,[{vsn,\"b\"},{applications,[]}]}."
+    )
+
+    selected =
+      if options[:external],
+        do: Path.join(System.tmp_dir!(), "no-otp-b-external-" <> suffix),
+        else: directory
+
+    File.mkdir_p!(selected)
+    fallback = Keyword.get(options, :fallback, "nil")
+    target = Keyword.get(options, :target, Atom.to_string(collector))
+
+    protocol_source = """
+    -export([into/1]).
+    into(M) -> (selected(M)):into(M).
+    selected(M) -> case impl(M) of I when I =:= false orelse I =:= nil -> erlang:error(no_impl); I -> I end.
+    #{Keyword.get(options, :prefix_clause, "")}
+    impl(\#{'__struct__' := S}) when erlang:is_atom(S) -> struct_impl(S);
+    impl(_) -> #{fallback}.
+    struct_impl(b_struct) -> #{target};
+    struct_impl(_) -> nil.
+    """
+
+    cont = Keyword.get(options, :cont_body, "[X|L]")
+    remote_hidden? = cont == :remote_hidden
+    cont = if remote_hidden?, do: Atom.to_string(collector) <> ":hidden(), [X|L]", else: cont
+    done = "M\#{map := sets:union(S,sets:from_list(L,[{version,2}]))}"
+    halt = "ok"
+    unsafe = "ssl:connect(localhost,443,[])"
+    cont = if options[:unsafe_stage] == :cont, do: unsafe, else: cont
+    done = if options[:unsafe_stage] == :done, do: unsafe, else: done
+    halt = if options[:unsafe_stage] == :halt, do: unsafe, else: halt
+
+    default_body = """
+    into(\#{'__struct__' := b_struct, map := S}=M) ->
+      #{Keyword.get(options, :producer_prefix, "")}
+      F=fun(L,{cont,X}) -> #{cont}; (L,done) -> #{done}; (_,halt) -> #{halt} end,
+      {[],F}.
+    #{Keyword.get(options, :extra, "")}
+    """
+
+    exports = if remote_hidden?, do: "-export([into/1,hidden/0]). ", else: "-export([into/1]). "
+    collector_source = exports <> Keyword.get(options, :collector_body, default_body)
+    debug = Keyword.get(options, :debug, true)
+    entries = [{protocol, protocol_source}, {collector, collector_source}]
+
+    fixture = %{
+      protocol: protocol,
+      collector: collector,
+      directory: selected,
+      protocol_path: Path.join(selected, Atom.to_string(protocol) <> ".beam"),
+      collector_path: Path.join(selected, Atom.to_string(collector) <> ".beam")
+    }
+
+    on_exit(fn ->
+      b_remove(fixture)
+      if selected != directory, do: File.rm_rf!(selected)
+    end)
+
+    true = :code.add_patha(String.to_charlist(selected))
+
+    for {module, source} <- entries do
+      assert :code.is_loaded(module) == false
+      bytes = b_compile(module, source, debug)
+      path = Path.join(selected, Atom.to_string(module) <> ".beam")
+      File.write!(path, bytes)
+
+      if selected != directory,
+        do: File.write!(Path.join(directory, Atom.to_string(module) <> ".beam"), bytes)
+
+      if Keyword.get(options, :load, true),
+        do:
+          assert({:module, ^module} = :code.load_binary(module, String.to_charlist(path), bytes))
+    end
+
+    fixture
+  end
+
+  defp b_remove(fixture) do
+    for module <- [fixture.protocol, fixture.collector] do
+      :code.purge(module)
+      :code.delete(module)
+      :code.purge(module)
+    end
+
+    :code.del_path(String.to_charlist(fixture.directory))
+  end
+
+  defp b_compile(module, body, debug) do
+    source = "-module(" <> Atom.to_string(module) <> "). " <> body
+    {:ok, tokens, _} = :erl_scan.string(String.to_charlist(source))
+
+    forms =
+      tokens
+      |> Enum.chunk_by(&match?({:dot, _}, &1))
+      |> Enum.chunk_every(2)
+      |> Enum.map(fn [form, dot] ->
+        {:ok, parsed} = :erl_parse.parse_form(form ++ dot)
+        parsed
+      end)
+
+    refute Enum.any?(forms, &match?({:attribute, _, :on_load, _}, &1))
+
+    options =
+      [:binary, :return_errors, :return_warnings] ++ if(debug, do: [:debug_info], else: [])
+
+    assert {:ok, ^module, bytes, _warnings} = :compile.forms(forms, options)
+    bytes
+  end
+
+  defp b_run(context, fixture, input \\ "\#{'__struct__' => b_struct, map => \#{}}") do
+    body =
+      for name <- ["ledger", "scope_processes", "scope_sockets"] do
+        "#{name}(Input) -> {A,F}=" <>
+          Atom.to_string(fixture.protocol) <>
+          ":into(" <>
+          input <>
+          "), F(A,{cont,x}), F(A,done), F(A,halt)."
+      end
+
+    private_erlang(context, Enum.join(body, "\n"), "ledger/1,scope_processes/1,scope_sockets/1")
+  end
+
+  defp b_open_count(result),
+    do: Enum.count(result.unresolved_dispatch, &(&1.kind == "unresolved_fun_invocation"))
+
+  # Resolve the trusted test-created directory so macOS /var and /tmp aliases
+  # do not accidentally turn positive fixtures into noncanonical negatives.
+  defp b_physical(path, remaining \\ 16)
+  defp b_physical(_path, 0), do: raise("fixture symlink depth exceeded")
+
+  defp b_physical(path, remaining) do
+    Path.expand(path)
+    |> Path.split()
+    |> Enum.reduce("", fn part, parent ->
+      candidate = if parent == "", do: part, else: Path.join(parent, part)
+
+      case File.read_link(candidate) do
+        {:ok, target} -> b_physical(Path.expand(target, Path.dirname(candidate)), remaining - 1)
+        {:error, :einval} -> candidate
+        other -> raise("fixture path cannot be resolved: #{inspect(other)}")
+      end
+    end)
+  end
+
+  test "B25 a proven bound map key cannot skip an actually matching unsafe branch", context do
+    fixture =
+      b_map_fixture(context, """
+      into(M) -> K=map, case M of
+        \#{K := _} -> __UNPROVED_HELPER__:into(M);
+        _ -> {[], fun(_,_) -> ok end}
+      end.
+      """)
+
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B26 repeated map bindings compare map contents independent of field order", context do
+    for bound <- ["\#{a => 1, b => 2}", "{\#{a => 1, b => 2}, ok}"] do
+      matched = String.replace(bound, "a => 1, b => 2", "b => 2, a => 1")
+
+      body =
+        "into(M) -> Bound=" <>
+          bound <>
+          ", case " <>
+          matched <>
+          " of Bound -> __UNPROVED_HELPER__:into(M); _ -> {[], fun(_,_) -> ok end} end."
+
+      fixture = b_map_fixture(context, body)
+      assert b_open_count(b_run(context, fixture)) == 9
+      b_remove(fixture)
+    end
+  end
+
+  test "B27 repeated map bindings ignore different debug source annotations", context do
+    fixture =
+      b_map_fixture(context, """
+      into(M) ->
+        Bound=\#{a => 1, b => 2},
+        case \#{a => 1, b => 2} of
+          Bound -> __UNPROVED_HELPER__:into(M);
+          _ -> {[], fun(_,_) -> ok end}
+        end.
+      """)
+
+    assert b_open_count(b_run(context, fixture)) == 9
+  end
+
+  test "B28 unsupported compound map key expressions remain unknown", context do
+    fixture =
+      b_map_fixture(context, """
+      into(M) -> K=map, case M of
+        \#{{K, tag} := _} -> __UNPROVED_HELPER__:into(M);
+        _ -> {[], fun(_,_) -> ok end}
+      end.
+      """)
+
+    input = "\#{'__struct__' => b_struct, map => \#{}, {map,tag} => present}"
+    assert b_open_count(b_run(context, fixture, input)) == 9
+  end
+
+  test "B29 semantic duplicate map keys cannot select an overwritten first value", context do
+    fixture =
+      b_map_fixture(
+        context,
+        "into(M) -> case M of \#{\#{a => 1, b => 2} := unsafe} -> __UNPROVED_HELPER__:into(M); _ -> {[], fun(_,_) -> ok end} end."
+      )
+
+    input =
+      "\#{'__struct__' => b_struct, map => \#{}, \#{a => 1, b => 2} => safe, \#{b => 2, a => 1} => unsafe}"
+
+    assert b_open_count(b_run(context, fixture, input)) == 9
+  end
+
+  test "B30 map keys compare contents independent of key map field order", context do
+    fixture =
+      b_map_fixture(
+        context,
+        "into(M) -> case M of \#{\#{b => 2, a => 1} := unsafe} -> __UNPROVED_HELPER__:into(M); _ -> {[], fun(_,_) -> ok end} end."
+      )
+
+    input = "\#{'__struct__' => b_struct, map => \#{}, \#{a => 1, b => 2} => unsafe}"
+    assert b_open_count(b_run(context, fixture, input)) == 9
+  end
+
+  test "B31 supported atom and integer map keys retain exact Erlang identity", context do
+    fixture =
+      b_map_fixture(
+        context,
+        "into(M) -> case M of \#{true := unsafe} -> __UNPROVED_HELPER__:into(M); _ -> {[], fun(_,_) -> ok end} end."
+      )
+
+    unsafe = "\#{'__struct__' => b_struct, map => \#{}, 1 => safe, true => unsafe}"
+    safe = "\#{'__struct__' => b_struct, map => \#{}, 1 => unsafe, true => safe}"
+    assert b_open_count(b_run(context, fixture, unsafe)) == 9
+    assert b_run(context, fixture, safe).unresolved_dispatch == []
+  end
+
+  test "B32 unsupported float keys never collapse into numerically equal integer keys", context do
+    fixture =
+      b_map_fixture(
+        context,
+        "into(M) -> case M of \#{1.0 := unsafe} -> __UNPROVED_HELPER__:into(M); _ -> {[], fun(_,_) -> ok end} end."
+      )
+
+    input = "\#{'__struct__' => b_struct, map => \#{}, 1 => safe, 1.0 => unsafe}"
+    assert b_open_count(b_run(context, fixture, input)) == 9
+  end
+
+  # Earlier matching branches call this actual generated auxiliary module. Its
+  # returned closure is unsafe, but neither helper nor closure is ever invoked.
+  # A buggy proof that skips that branch sees only the later safe literal fun.
+  defp b_map_fixture(context, body) do
+    fixture = b_fixture(context)
+    helper = String.to_atom(Atom.to_string(fixture.collector) <> "_unproved")
+    helper_path = Path.join(fixture.directory, Atom.to_string(helper) <> ".beam")
+    assert :code.is_loaded(helper) == false
+
+    on_exit(fn ->
+      :code.purge(helper)
+      :code.delete(helper)
+      :code.purge(helper)
+    end)
+
+    helper_source =
+      "-export([into/1]). into(_) -> {[], fun(_,_) -> ssl:connect(localhost,443,[]) end}."
+
+    helper_bytes = b_compile(helper, helper_source, true)
+    File.write!(helper_path, helper_bytes)
+
+    assert {:module, ^helper} =
+             :code.load_binary(helper, String.to_charlist(helper_path), helper_bytes)
+
+    source =
+      "-export([into/1]). " <>
+        String.replace(body, "__UNPROVED_HELPER__", Atom.to_string(helper))
+
+    bytes = b_compile(fixture.collector, source, true)
+    :code.purge(fixture.collector)
+    :code.delete(fixture.collector)
+    :code.purge(fixture.collector)
+    File.write!(fixture.collector_path, bytes)
+    module = fixture.collector
+
+    assert {:module, ^module} =
+             :code.load_binary(module, String.to_charlist(fixture.collector_path), bytes)
+
+    fixture
+  end
+
   defp private_erlang(context, body, exports \\ "run/0", extra \\ "", options \\ []) do
     source = "-module(no_otp_audit_fixture). -export([" <> exports <> "]). " <> extra <> body
     compile_erlang(context, source, options)
