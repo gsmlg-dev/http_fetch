@@ -10,27 +10,15 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
   setup do
-    pool = Process.whereis(:http_fetch_http2_pool)
-    original = :sys.get_state(pool)
-    :sys.replace_state(pool, &%{&1 | max_connections: 1, max_total_connections: 1})
+    :ok = Supervisor.terminate_child(HTTPRuntime.Application, Pool)
+
+    {:ok, pool} =
+      start_supervised(
+        {Pool, name: :http_fetch_http2_pool, max_connections: 1, max_total_connections: 1}
+      )
 
     on_exit(fn ->
-      state = :sys.get_state(pool)
-      for {_, {pid, _}} <- state.connectors, do: Process.exit(pid, :kill)
-      for {_, {pid, _}} <- state.callers, do: Process.exit(pid, :kill)
-
-      for {_, entry} <- state.entries, {owner, _} <- entry.connections do
-        if Process.alive?(owner), do: GenServer.stop(owner, :normal)
-      end
-
-      :sys.replace_state(pool, fn state ->
-        %{
-          state
-          | max_connections: original.max_connections,
-            max_total_connections: original.max_total_connections,
-            max_pending: original.max_pending
-        }
-      end)
+      {:ok, _pool} = Supervisor.restart_child(HTTPRuntime.Application, Pool)
     end)
 
     {:ok, pool: pool}
