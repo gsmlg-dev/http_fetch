@@ -145,6 +145,10 @@ defmodule HTTP.Proxy do
       else
         {:ok, outer}
       end
+    else
+      # The outer TLS result can arrive before the dialer's connect timer.
+      {:error, :timeout} -> {:error, :connect_timeout}
+      error -> error
     end
   end
 

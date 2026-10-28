@@ -189,6 +189,76 @@ defmodule HTTP.NestedHTTPSProxyTest do
     end
   end
 
+  for {outcome, instruction, close_result, reason} <- [
+        {:deadline, :await_closed, {:error, :closed}, :connect_timeout},
+        {:peer_close, :close, :closed_by_peer, :closed}
+      ] do
+    test "queued outer TLS #{outcome} retains its HTTP phase and missing setup evidence" do
+      parent = self()
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+      {:ok, {_, port}} = :inet.sockname(listener)
+
+      peer =
+        Task.async(fn ->
+          {:ok, socket} = :gen_tcp.accept(listener, 2_000)
+          {:ok, _client_hello} = :gen_tcp.recv(socket, 0, 2_000)
+          send(parent, :proxy_tls_pending)
+
+          result =
+            receive do
+              :await_closed -> :gen_tcp.recv(socket, 0, 3_000)
+              :close -> :closed_by_peer
+            after
+              2_000 -> flunk("missing proxy peer instruction")
+            end
+
+          :gen_tcp.close(socket)
+          result
+        end)
+
+      on_exit(fn ->
+        :gen_tcp.close(listener)
+        if Process.alive?(peer.pid), do: Task.shutdown(peer, :brutal_kill)
+      end)
+
+      promise =
+        HTTP.fetch(
+          "https://origin.invalid/",
+          stop_options(options({:https, "127.0.0.1", port, []}), :proxy_tls, :deadline)
+        )
+
+      assert_receive :proxy_tls_pending, 2_000
+      handle = HTTP.Promise.completion(promise)
+      resources = :sys.get_state(handle.tracker).resources |> Map.values()
+      [{owner, :owner}] = Enum.filter(resources, fn {_, kind} -> kind == :owner end)
+      [{dial, :dial}] = Enum.filter(resources, fn {_, kind} -> kind == :dial end)
+      monitor = Process.monitor(dial)
+      owner_monitor = Process.monitor(owner)
+      tracker_monitor = Process.monitor(handle.tracker)
+      true = :erlang.suspend_process(owner)
+
+      try do
+        send(peer.pid, unquote(instruction))
+        assert_receive {:DOWN, ^monitor, :process, ^dial, :normal}, 2_000
+
+        # Deliver the actual native result before the owner's receive timer can
+        # settle this request. No error or timeout is injected into the client.
+        assert {:messages, [{:connect_result, _, {:error, _}} | _]} =
+                 Process.info(owner, :messages)
+      after
+        :erlang.resume_process(owner)
+      end
+
+      result = HTTP.Promise.await(promise, 2_000)
+      assert {:error, :cleanup_unconfirmed} = HTTP.RequestCompletion.await(handle, 3_000)
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 1_000
+      assert_receive {:DOWN, ^tracker_monitor, :process, _, :normal}, 1_000
+      expected_close = unquote(Macro.escape(close_result))
+      assert ^expected_close = Task.await(peer, 1_000)
+      assert {:error, unquote(reason)} = result
+    end
+  end
+
   test "invalid native ExSSL origin policy fails before proxy authentication or dialing" do
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     on_exit(fn -> :gen_tcp.close(listener) end)
