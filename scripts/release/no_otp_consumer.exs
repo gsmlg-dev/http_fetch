@@ -382,12 +382,13 @@ defmodule NoOTP.Consumer do
       :ok = Session.close(cancelled)
     else
       # This caller-driven API has no Fetch RequestCompletion. Timeout is a
-      # bounded response wait through public poll followed by public abort;
-      # it is not fabricated as a native :deadline_exceeded result.
+      # bounded response wait through public poll followed by public close.
+      # Close submits CONNECTION_CLOSE before retiring the owned endpoint;
+      # this is not a fabricated native :deadline_exceeded result.
       if action == "timeout" do
         h3_timeout(session, ref, deadline)
       else
-        {:ok, _} = Session.abort(session)
+        :ok = Session.close(session)
       end
     end
   end
@@ -401,8 +402,7 @@ defmodule NoOTP.Consumer do
 
   defp h3_timeout(session, ref, deadline) do
     if now() >= deadline do
-      {:ok, _} = Session.abort(session)
-      :ok
+      :ok = Session.close(session)
     else
       {:ok, advanced, events} = Session.poll(session, 128, timeout: remaining(deadline))
 
