@@ -353,9 +353,19 @@ the inner receipt alone never establishes outer TCP cleanup. Authentication
 failure phase evidence remains separate from both cleanup receipts. Prepare,
 owner transfer, adoption and TLS attachment retain their original deadline.
 
-This layer support does not yet provide a combined transfer handle or enable
-HTTP HTTPS-over-HTTPS routing. Those integrations and their consumer acceptance
-remain required before default promotion or production OTP SSL removal.
+`SSL.Lifecycle.new_pair/1` reserves both obligations before I/O; `layers/1`
+returns their separate scalar descriptors. Pair status sums actual resource
+counts, while `await/2` confirms cleanup only after both receipts and observers
+finish. Evidence loss in either layer remains unconfirmed. Pair controls share
+one absolute deadline. Pair transfer changes the outer cancellation controller
+while retaining its inner-Connection socket owner, then transfers the inner
+controller and application owner. Both epochs and nonces must be accepted before
+the source can discharge its obligation. After partial acceptance, the retained
+source inner lease can still retire the inner owner and consequently the outer
+session. Accepted tickets can recover the same leases without advancing epochs.
+
+HTTP HTTPS-over-HTTPS routing and its consumer acceptance remain required before
+default promotion or production OTP SSL removal.
 
 ## Prepared upgrade configuration
 

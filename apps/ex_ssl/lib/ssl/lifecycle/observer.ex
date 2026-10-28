@@ -86,6 +86,10 @@ defmodule SSL.Lifecycle.Observer do
     do: call(receipt, {:offer, lease, target}, deadline)
 
   @doc false
+  def offer_controller(receipt, lease, controller, deadline),
+    do: call(receipt, {:offer_controller, lease, controller}, deadline)
+
+  @doc false
   def accept(receipt, ticket, deadline), do: call(receipt, {:accept, ticket}, deadline)
 
   @spec cancel(Receipt.t(), Authority.lease(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
@@ -397,6 +401,9 @@ defmodule SSL.Lifecycle.Observer do
         case setup_phase_operation(operation, deadline) do
           {:offer, lease, target} ->
             {:offer, lease, target, deadline}
+
+          {:offer_controller, lease, controller} ->
+            {:offer_controller, lease, controller, deadline}
 
           {:cancel, lease} ->
             {:cancel, lease, deadline}
@@ -893,6 +900,17 @@ defmodule SSL.Lifecycle.Observer do
     else
       _ -> {{:error, :owner_change_not_permitted}, state}
     end
+  end
+
+  defp operate({:offer_controller, lease, controller, deadline}, caller, state) do
+    if is_pid(controller) and node(controller) == node(),
+      do:
+        operate(
+          {:offer, lease, %{controller: controller, owner: state.owner}, deadline},
+          caller,
+          state
+        ),
+      else: {{:error, :invalid_target}, state}
   end
 
   defp operate({:offer, lease, target, deadline}, _caller, state) do

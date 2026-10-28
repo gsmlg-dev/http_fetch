@@ -235,6 +235,191 @@ defmodule SSL.Lifecycle.NestedTLSTest do
     Task.await(origin, 1_000)
   end
 
+  test "the pair counts one physical socket and awaits both independent receipts" do
+    {_outer, inner, handle, _lease, _layers} = pair_connected()
+
+    assert {:pending,
+            %{
+              scope: :pair,
+              setup: :connected,
+              bound?: true,
+              provider_resources: %{
+                processes: 6,
+                observers: 2,
+                tcp_sockets: 1,
+                data_resources: 5
+              }
+            }} = Lifecycle.status(handle, deadline(1_000))
+
+    assert :ok = SSL.close(inner)
+
+    assert {:ok,
+            %{
+              cleanup: :confirmed,
+              layers: %{
+                outer: %{scope: :dial, roles: 31, observed_down: 31},
+                inner: %{scope: :layer, roles: 14, observed_down: 14}
+              }
+            }} = Lifecycle.await(handle, deadline(2_000))
+  end
+
+  test "pair acceptance preserves the outer carrier owner and recovers both accepted leases" do
+    {_outer, inner, handle, lease, _layers} = pair_connected()
+    recipient = recipient()
+
+    assert {:ok, transfer} =
+             Lifecycle.offer(lease, %{controller: recipient, owner: recipient}, deadline(1_000))
+
+    assert {:error, {:outer, :not_recipient}} = Lifecycle.accept(transfer, deadline(1_000))
+    send(recipient, {:accept, transfer, deadline(1_000)})
+    assert_receive {^recipient, :accept, {:ok, accepted}}, 1_000
+    send(recipient, {:accept, transfer, deadline(1_000)})
+    assert_receive {^recipient, :accept, {:ok, ^accepted}}, 1_000
+
+    assert {:pending,
+            %{
+              epoch: {1, 1},
+              transfer: :accepted,
+              layers: %{outer: %{epoch: 1}, inner: %{epoch: 1}}
+            }} = Lifecycle.status(handle)
+
+    assert {:error, {:outer, :stale_lease}} = Lifecycle.cancel(lease, deadline(1_000))
+    send(recipient, {:exchange, inner})
+    assert_receive {^recipient, :exchange, {:ok, <<42, 255, 0>>}}, 2_000
+    assert :ok = Lifecycle.cancel(accepted, deadline(1_000))
+    assert {:ok, %{cleanup: :confirmed}} = Lifecycle.await(handle, deadline(2_000))
+  end
+
+  test "partial pair acceptance keeps the source inner lease able to retire both layers" do
+    {_outer, _inner, handle, lease, layers} = pair_connected()
+    recipient = recipient()
+
+    assert {:ok, transfer} =
+             Lifecycle.offer(lease, %{controller: recipient, owner: recipient}, deadline(1_000))
+
+    {inner_handle, _} = layers.inner
+    observer = inner_handle.receipt.observer
+    :erlang.suspend_process(observer)
+
+    try do
+      send(recipient, {:accept, transfer, deadline(150)})
+      assert_receive {^recipient, :accept, {:error, {:inner, :acceptance_unconfirmed}}}, 500
+    after
+      :erlang.resume_process(observer)
+    end
+
+    assert {:pending, %{epoch: {1, 0}, transfer: :pending}} = Lifecycle.status(handle)
+    assert {:error, {:outer, :stale_lease}} = Lifecycle.cancel(lease, deadline(1_000))
+    assert {:ok, %{cleanup: :confirmed}} = Lifecycle.await(handle, deadline(2_000))
+  end
+
+  test "pair transfer supports a separate pool controller and application owner" do
+    {_outer, inner, handle, lease, _layers} = pair_connected()
+    controller = recipient()
+    owner = recipient()
+
+    assert {:ok, transfer} =
+             Lifecycle.offer(lease, %{controller: controller, owner: owner}, deadline(1_000))
+
+    send(controller, {:accept, transfer, deadline(1_000)})
+    assert_receive {^controller, :accept, {:ok, accepted}}, 1_000
+    send(owner, {:exchange, inner})
+    assert_receive {^owner, :exchange, {:ok, <<42, 255, 0>>}}, 2_000
+    assert :ok = Lifecycle.cancel(accepted, deadline(1_000))
+    assert {:ok, %{cleanup: :confirmed}} = Lifecycle.await(handle, deadline(2_000))
+  end
+
+  test "a replacement pair offer fences both earlier transfer nonces" do
+    {_outer, _inner, handle, lease, _layers} = pair_connected()
+    recipient = recipient()
+    target = %{controller: recipient, owner: recipient}
+    assert {:ok, replaced} = Lifecycle.offer(lease, target, deadline(1_000))
+    assert {:ok, current} = Lifecycle.offer(lease, target, deadline(1_000))
+    send(recipient, {:accept, replaced, deadline(1_000)})
+    assert_receive {^recipient, :accept, {:error, {:outer, :stale_transfer}}}, 1_000
+    send(recipient, {:accept, current, deadline(1_000)})
+    assert_receive {^recipient, :accept, {:ok, accepted}}, 1_000
+    assert :ok = Lifecycle.cancel(accepted, deadline(1_000))
+    assert {:ok, %{cleanup: :confirmed}} = Lifecycle.await(handle, deadline(2_000))
+  end
+
+  test "an expired pair offer never releases either source obligation" do
+    {_outer, _inner, handle, lease, _layers} = pair_connected()
+    recipient = recipient()
+
+    assert {:ok, transfer} =
+             Lifecycle.offer(lease, %{controller: recipient, owner: recipient}, deadline(50))
+
+    Process.sleep(60)
+    send(recipient, {:accept, transfer, deadline(1_000)})
+    assert_receive {^recipient, :accept, {:error, {:outer, :offer_expired}}}, 1_000
+    assert {:pending, %{epoch: {0, 0}, transfer: :expired}} = Lifecycle.status(handle)
+    assert :ok = Lifecycle.cancel(lease, deadline(1_000))
+    assert {:ok, %{cleanup: :confirmed}} = Lifecycle.await(handle, deadline(2_000))
+  end
+
+  test "pair recipient death retires the inner owner, both controllers and the physical TCP" do
+    {_outer, _inner, handle, lease, _layers} = pair_connected()
+    recipient = recipient()
+
+    assert {:ok, transfer} =
+             Lifecycle.offer(lease, %{controller: recipient, owner: recipient}, deadline(1_000))
+
+    send(recipient, {:accept, transfer, deadline(1_000)})
+    assert_receive {^recipient, :accept, {:ok, _}}, 1_000
+    monitor = Process.monitor(recipient)
+    Process.exit(recipient, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^recipient, :killed}, 1_000
+    assert {:ok, %{cleanup: :confirmed}} = Lifecycle.await(handle, deadline(2_000))
+  end
+
+  defp pair_connected do
+    {proxy, origin} = peers(:"tlsv1.3", :"tlsv1.3")
+    assert {:ok, handle, lease} = Lifecycle.new_pair(controller: self(), deadline: :infinity)
+    assert {:ok, layers} = Lifecycle.layers({handle, lease})
+
+    on_exit(fn ->
+      Lifecycle.cancel(lease, deadline(1_000))
+      Lifecycle.await(handle, deadline(2_000))
+    end)
+
+    assert {:ok, outer} =
+             SSL.connect(
+               {127, 0, 0, 1},
+               proxy.port,
+               options(:"tlsv1.3", "proxy", layers.outer),
+               3_000
+             )
+
+    assert {:ok, _} = OpenSSLPeer.event(proxy, "handshake", 2_000)
+    assert {:ok, inner} = connect(:prepared, outer, :"tlsv1.3", layers.inner)
+    assert {:ok, _} = OpenSSLPeer.event(origin, "handshake", 2_000)
+    {outer, inner, handle, lease, layers}
+  end
+
+  defp recipient do
+    parent = self()
+    pid = spawn(fn -> recipient_loop(parent) end)
+    on_exit(fn -> Process.exit(pid, :kill) end)
+    pid
+  end
+
+  defp recipient_loop(parent) do
+    receive do
+      {:accept, transfer, deadline} ->
+        send(parent, {self(), :accept, Lifecycle.accept(transfer, deadline)})
+        recipient_loop(parent)
+
+      {:exchange, socket} ->
+        result =
+          with :ok <- SSL.send(socket, <<0, 255, 42>>, deadline(1_000)),
+               do: SSL.recv(socket, 3, 1_000)
+
+        send(parent, {self(), :exchange, result})
+        recipient_loop(parent)
+    end
+  end
+
   defp connected do
     {proxy, origin} = peers(:"tlsv1.3", :"tlsv1.3")
     {outer_handle, outer_lease} = attempt()

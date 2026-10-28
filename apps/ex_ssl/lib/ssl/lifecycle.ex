@@ -8,7 +8,7 @@ defmodule SSL.Lifecycle do
   are finite absolute monotonic milliseconds. Handles contain no cancellation
   authority and remain readable after the provider exits.
   """
-  alias SSL.Lifecycle.{Observer, Reader, Receipt}
+  alias SSL.Lifecycle.{Observer, Pair, Reader, Receipt}
 
   defmodule Handle do
     @moduledoc false
@@ -51,6 +51,20 @@ defmodule SSL.Lifecycle do
   end
 
   @doc """
+  Reserves both independent lifecycle obligations before nested TLS performs I/O.
+
+  Use `layers/1` to give each scalar descriptor to its own TLS connection. Pair
+  status and await require both receipts; a layer receipt never proves outer TCP
+  cleanup. No extra data process or physical socket is allocated by the pair.
+  """
+  @spec new_pair(keyword()) :: {:ok, Pair.Handle.t(), Pair.Lease.t()} | {:error, term()}
+  def new_pair(options), do: Pair.new(options)
+
+  @doc "Returns the fixed outer and inner scalar descriptors of one pair reservation."
+  @spec layers({Pair.Handle.t(), Pair.Lease.t()}) :: {:ok, map()} | {:error, atom()}
+  def layers(descriptor), do: Pair.layers(descriptor)
+
+  @doc """
   Reads authenticated fatal setup-phase evidence separately from resource cleanup.
 
   A proven result means the original Connection accepted ServerHello and committed
@@ -63,7 +77,10 @@ defmodule SSL.Lifecycle do
   def setup_failure(%Handle{receipt: receipt}), do: Receipt.setup_failure(receipt)
   def setup_failure(_), do: :unknown
 
-  @spec status(Handle.t()) :: {:pending, map()} | {:terminal, map()} | {:unconfirmed, atom()}
+  @spec status(Handle.t() | Pair.Handle.t()) ::
+          {:pending, map()} | {:terminal, map()} | {:unconfirmed, term()}
+  def status(%Pair.Handle{} = handle), do: Pair.status(handle)
+
   def status(%Handle{receipt: receipt}) do
     case Reader.status(receipt) do
       {:pending, evidence} ->
@@ -80,7 +97,9 @@ defmodule SSL.Lifecycle do
   def status(_), do: {:unconfirmed, :invalid_evidence}
 
   @doc "Observes exact live resource counts within one finite absolute deadline."
-  @spec status(Handle.t(), {:abs_ms, integer()}) :: term()
+  @spec status(Handle.t() | Pair.Handle.t(), {:abs_ms, integer()}) :: term()
+  def status(%Pair.Handle{} = handle, deadline), do: Pair.status(handle, deadline)
+
   def status(%Handle{receipt: receipt}, {:abs_ms, expiry} = deadline) when is_integer(expiry) do
     case Reader.status(receipt) do
       {:pending, evidence} ->
@@ -97,7 +116,9 @@ defmodule SSL.Lifecycle do
   def status(%Handle{}, _), do: {:error, :invalid_deadline}
   def status(_, _), do: {:unconfirmed, :invalid_evidence}
 
-  @spec await(Handle.t(), {:abs_ms, integer()}) :: term()
+  @spec await(Handle.t() | Pair.Handle.t(), {:abs_ms, integer()}) :: term()
+  def await(%Pair.Handle{} = handle, deadline), do: Pair.await(handle, deadline)
+
   def await(%Handle{receipt: receipt}, deadline) do
     case Reader.await(receipt, deadline) do
       {:pending, evidence} ->
@@ -113,13 +134,22 @@ defmodule SSL.Lifecycle do
 
   def await(_, _), do: {:unconfirmed, :invalid_evidence}
 
-  @spec cancel(Lease.t(), {:abs_ms, integer()}) :: :ok | {:error, atom()}
+  @spec cancel(Lease.t() | Pair.Lease.t(), {:abs_ms, integer()}) :: :ok | {:error, term()}
+  def cancel(%Pair.Lease{} = lease, deadline), do: Pair.cancel(lease, deadline)
+
   def cancel(%Lease{handle: %Handle{receipt: receipt}, authority: authority}, deadline),
     do: Observer.cancel(receipt, authority, deadline)
 
   def cancel(_, _), do: {:error, :invalid_lease}
 
-  @spec offer(Lease.t(), %{controller: pid(), owner: pid()}, {:abs_ms, integer()}) :: term()
+  @spec offer(
+          Lease.t() | Pair.Lease.t(),
+          %{controller: pid(), owner: pid()},
+          {:abs_ms, integer()}
+        ) ::
+          term()
+  def offer(%Pair.Lease{} = lease, target, deadline), do: Pair.offer(lease, target, deadline)
+
   def offer(
         %Lease{handle: %Handle{receipt: receipt} = handle, authority: authority},
         target,
@@ -133,7 +163,24 @@ defmodule SSL.Lifecycle do
 
   def offer(_, _, _), do: {:error, :invalid_lease}
 
-  @spec accept(Transfer.t(), {:abs_ms, integer()}) :: term()
+  @doc "Offers a new cancellation controller while preserving the provider's current socket owner."
+  @spec offer_controller(Lease.t(), pid(), {:abs_ms, integer()}) :: term()
+  def offer_controller(
+        %Lease{handle: %Handle{receipt: receipt} = handle, authority: authority},
+        controller,
+        deadline
+      ) do
+    case Observer.offer_controller(receipt, authority, controller, deadline) do
+      {:ok, ticket} -> {:ok, %Transfer{handle: handle, ticket: ticket}}
+      error -> error
+    end
+  end
+
+  def offer_controller(_, _, _), do: {:error, :invalid_lease}
+
+  @spec accept(Transfer.t() | Pair.Transfer.t(), {:abs_ms, integer()}) :: term()
+  def accept(%Pair.Transfer{} = transfer, deadline), do: Pair.accept(transfer, deadline)
+
   def accept(%Transfer{handle: %Handle{receipt: receipt} = handle, ticket: ticket}, deadline) do
     case Observer.accept(receipt, ticket, deadline) do
       {:ok, authority} -> {:ok, %Lease{handle: handle, authority: authority}}
