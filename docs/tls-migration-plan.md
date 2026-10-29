@@ -426,6 +426,14 @@ The [source-removal checkpoint](tls-migration-validation.md#p6-source-removal-ch
 passes the configured Linux source suites. The remaining release checks below
 must pass before P6 is accepted.
 
+Caller-supplied implementations at `QuicHttp3.Session.new/1` (`:transport`),
+`HTTP.WebTransport.new/2` (`:backend`) and `Quic.TLSDriver.new/2` (`:adapter`,
+including its retained test hook) use the approved checked callback-origin
+boundary. Their input origins and allowed operations still require proof. Every
+default and library-supplied implementation remains fully audited; this boundary
+does not certify user implementation bodies as OTP-free or establish native
+WebTransport support. Other injection seams receive no blanket exemption.
+
 - [x] Delete OTP transport implementation, backend branches, private socket types/layouts.
 - [x] Remove five unconditional ssl extra_applications and audit transitive/generated apps.
 - [x] Legacy tls_backend=:ssl returns an explicit configuration error.

@@ -1,5 +1,32 @@
 # TLS migration execution ledger
 
+## P7 release-candidate preparation — 2026-10-29
+
+Release tooling at `9840e8e2966885a3af5d4c1f33d7eb7245e4d4f7` accepts canonical
+`major.minor.patch-rc.N` versions alongside stable versions. The next coordinated
+release targets `1.0.0-rc.1`, subject to a fresh availability check. GitHub RCs use
+the prerelease flag and `--latest=false`; formal `1.0.0` follows later validation
+and a release decision.
+
+An isolated preparation builds all nine `1.0.0-rc.1` archives, verifies their exact
+internal requirements and staged source bytes, and reproduces identical archive
+hashes. Nine fresh candidate Hex consumers each resolve the exact RC through
+Hex.SCM, compile with warnings-as-errors and start with the matching application
+version on local Elixir 1.18.5 / OTP 29 (ERTS 17.0.2). No path or umbrella
+overrides are used. These are candidate checks, not a fresh supported-runtime
+matrix, published-consumer results or the final OTP-free release traffic gate.
+
+The release automation suite passes 195 tests, CI automation passes 38 tests,
+and the version helper passes strict compilation and formatting. The unchanged
+published-consumer tests have five macOS `/tmp` versus `/private/tmp` assertion
+failures at the prior source baseline; the full suite passes with an isolated
+canonical temporary directory, without changing those tests or their assertions.
+Source, build-cache and lockfile guards remain intact. Receipts and archive hashes
+are retained at `/private/tmp/http-fetch-root-resume-20261029T0530Z`.
+
+No RC has been published. P6 release acceptance and P7 publication remain open;
+Credo/Dialyzer and performance retain their existing deferrals.
+
 ## P6 source-removal checkpoint — 2026-10-29
 
 Production removal is committed at `55d719467f691d857df18323e162afcae338ecd3`.
