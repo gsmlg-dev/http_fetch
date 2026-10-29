@@ -681,7 +681,7 @@ defmodule SSL.Lifecycle.NativeSocketTLSTest do
     ref = proxy.ref
 
     try do
-      a = attempt(proxy.port, send_timeout: 10_000, sndbuf: 4_096)
+      a = attempt(proxy.port, send_timeout: 10_000, sndbuf: 4_096, nodelay: true)
       assert :ok = Setup.attach(a.setup, a.nonce, deadline(1_000))
       success(a)
       assert :ok = private_io(a, :enable_duplex_reads)
