@@ -3909,4 +3909,366 @@ defmodule NoOTP.ReleaseAuditTest do
 
     t_install(context, entries) |> t_inspection(NoOTPActualUnionSlice)
   end
+
+  # W: checked selector unions seed explicit private identity invariants.
+  test "W01 a checked finite union seeds a recursive private parameter", context do
+    assert private_erlang(context, w_body(), "run/1").unresolved_dispatch != []
+    result = i_run(context, w_body(), w_domains(), "run/1")
+    assert result.unresolved_dispatch == []
+
+    assert result.parameter_invariant_derivation == %{
+             status: "checked",
+             checked_slots: [
+               %{function: "first", arity: 1, parameter_index: 0, targets: ["lists", "maps"]}
+             ]
+           }
+  end
+
+  test "W02 renamed identity cycles join all finite entry alternatives", context do
+    body = """
+    run(X) -> case select(X) of {ok,T,_,_} -> alpha(T) end.
+    select(a) -> {ok,lists,a,0}; select(X) -> {ok,maps,X,1}.
+    alpha(T) -> T:reverse([]), beta(T).
+    beta(T) -> alpha(T).
+    """
+
+    domains = for name <- [:alpha, :beta], do: {{name, 1}, 0, [:lists, :maps]}
+    result = i_run(context, body, domains, "run/1")
+    assert result.unresolved_dispatch == []
+    assert length(result.parameter_invariant_derivation.checked_slots) == 2
+  end
+
+  test "W03 an unsafe union alternative remains visible when admitted to the domain", context do
+    body = String.replace(w_body(), "{ok,maps,x,0}", "{ok,ssl,x,0}")
+    result = i_run(context, body, w_domains([:lists, :ssl]), "run/1")
+    assert result.parameter_invariant_derivation.status == "checked"
+    assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+  end
+
+  test "W04 a missing or unknown selector alternative prevents induction", context do
+    for {body, domains} <- [
+          {w_body(), w_domains([:lists])},
+          {String.replace(w_body(), "choose(_) -> {ok,maps,x,0}", "choose(X) -> {ok,X,x,0}"),
+           w_domains()}
+        ] do
+      result = i_run(context, body, domains, "run/1")
+      assert result.unresolved_dispatch != []
+      assert result.parameter_invariant_derivation.status == "rejected"
+    end
+  end
+
+  test "W05 every additional caller must supply a checked origin", context do
+    for prefix <- ["first(X),", "first(external:value()),"] do
+      body = String.replace(w_body(), "run(X) ->", "run(X) -> " <> prefix)
+      result = i_run(context, body, w_domains(), "run/1")
+      assert result.unresolved_dispatch != []
+      assert result.parameter_invariant_derivation.status == "rejected"
+    end
+  end
+
+  test "W06 recursive replacements remain unknown even when their union fits the domain",
+       context do
+    for edge <- [
+          "first(lists)",
+          "first(external:value(M))",
+          "case choose(M) of {ok,N,_,_} -> first(N) end"
+        ] do
+      body =
+        String.replace(
+          w_body(),
+          "first(M) -> M:reverse([]), first(M).",
+          "first(M) -> M:reverse([]), " <> edge <> "."
+        )
+
+      result = i_run(context, body, w_domains(), "run/1")
+      assert result.unresolved_dispatch != []
+      assert result.parameter_invariant_derivation.status == "rejected"
+    end
+  end
+
+  test "W07 captures exports and export_all cannot be closed by union seeds", context do
+    for capture <- ["fun first/1", "fun no_otp_audit_fixture:first/1"] do
+      body = String.replace(w_body(), "run(X) ->", "run(X) -> " <> capture <> ",")
+      assert i_run(context, body, w_domains(), "run/1").unresolved_dispatch != []
+    end
+
+    assert i_run(context, w_body(), w_domains(), "run/1,first/1").unresolved_dispatch != []
+
+    assert i_run(context, w_body(), w_domains(), "run/1", "-compile(export_all). ").unresolved_dispatch !=
+             []
+  end
+
+  test "W08 shadowing and comprehension callers cannot borrow a finite seed", context do
+    for prefix <- [
+          "F=fun(M) -> first(M) end, F(X),",
+          "F=fun Again(M) -> first(M), Again(M) end, F(X),",
+          "[first(M) || M <- external:values()],"
+        ] do
+      body = String.replace(w_body(), "run(X) ->", "run(X) -> " <> prefix)
+      assert i_run(context, body, w_domains(), "run/1").unresolved_dispatch != []
+    end
+  end
+
+  test "W09 malformed nonatom nested and metadata union seeds fail closed", context do
+    for union <- [
+          {:audit_union, 0, []},
+          {:audit_union, 0, :unknown},
+          {:audit_union, 0, [{:var, 0, :Unknown}]},
+          {:audit_union, 0, [{:integer, 0, 1}]},
+          {:audit_union, 0, [{:fun, 0, {:clauses, []}}]},
+          {:audit_union, 0, [{:audit_union, 0, [{:atom, 0, :lists}]}]},
+          {:audit_union, {:invalid, 0}, [{:atom, 0, :lists}]},
+          {:audit_union, 0, [{:atom, [location: 0, unexpected: true], :lists}]}
+        ] do
+      result = w_union(context, union, [:lists])
+      assert result.unresolved_dispatch != []
+      assert result.parameter_invariant_derivation.status == "rejected"
+    end
+  end
+
+  test "W10 finite target and byte bounds still bound union-seeded induction", context do
+    atoms = for n <- 1..17, do: String.to_atom("w_atom_#{n}")
+    values = Enum.map(atoms, &{:atom, 0, &1})
+
+    assert w_union(context, {:audit_union, 0, Enum.take(values, 16)}, Enum.take(atoms, 16)).unresolved_dispatch ==
+             []
+
+    assert w_union(context, {:audit_union, 0, values}, atoms).unresolved_dispatch != []
+
+    annotated =
+      for {:atom, _, value} <- Enum.take(values, 16),
+          do: {:atom, [location: 0, text: List.duplicate(?x, 4_096)], value}
+
+    union = {:audit_union, 0, annotated}
+    assert :erlang.external_size(union) > 65_536
+    assert w_union(context, union, Enum.take(atoms, 16)).unresolved_dispatch != []
+  end
+
+  test "W11 union proofs preserve nested unsafe multiplicity without executing code", context do
+    Process.delete(:audit_union_seed_executed)
+
+    body =
+      w_body()
+      |> String.replace("run(X) ->", "run(X) -> erlang:put(audit_union_seed_executed,true),")
+      |> String.replace(
+        "first(M) ->",
+        "first(M) -> fun() -> N=ssl,N:connect(a,1,[]) end, fun() -> N=ssl,N:connect(a,1,[]) end,"
+      )
+
+    result = i_run(context, body, w_domains(), "run/1")
+    assert result.parameter_invariant_derivation.status == "checked"
+
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == [
+             "literal_module_ssl",
+             "literal_module_ssl"
+           ]
+
+    assert Process.get(:audit_union_seed_executed) == nil
+  end
+
+  test "W12 actual selector and recursive receive source slices compose", context do
+    # Exact producer, recv_handshake and remaining definitions; only the caller
+    # is synthetic. Root separately checks the original full release path.
+    result = w_actual_slice(context, :original)
+
+    assert Enum.map(result.unconfigured.unresolved_dispatch, &{&1.line, &1.kind}) ==
+             [{616, "unresolved_module_dispatch"}]
+
+    assert result.configured.unresolved_dispatch == []
+    assert result.configured.parameter_invariant_derivation.status == "checked"
+  end
+
+  test "W13 unknown unsafe and changed-backedge actual slice mutations remain open", context do
+    for mutation <- [:unknown_caller, :unsafe_caller, :changed_backedge] do
+      result = w_actual_slice(context, mutation).configured
+      assert result.unresolved_dispatch != []
+      assert result.parameter_invariant_derivation.status == "rejected"
+    end
+  end
+
+  test "W14 changed selected union artifacts and missing debug cannot reuse a proof", context do
+    safe =
+      w_union(context, {:audit_union, 0, [{:atom, 0, :lists}, {:atom, 0, :maps}]}, [:lists, :maps])
+
+    assert safe.unresolved_dispatch == []
+
+    changed =
+      w_union(context, {:audit_union, 0, [{:atom, 0, :lists}, {:atom, 0, :ssl}]}, [:lists, :maps])
+
+    assert safe.sha256 != changed.sha256
+    assert changed.unresolved_dispatch != []
+
+    path = Path.join(b_physical(context.ebin), "w_input.beam")
+    {:ok, {_, stripped}} = :beam_lib.strip(File.read!(path))
+    File.write!(path, stripped)
+
+    result =
+      NoOTP.ReleaseAudit.artifacts(parameter_invariants: %{w_input: w_domains()})
+      |> t_inspection(:w_input)
+
+    assert result.missing_abstract_code
+    assert result.parameter_invariant_derivation.status == "missing_debug"
+  end
+
+  defp w_body do
+    """
+    run(X) -> case choose(X) of {ok,M,_,_} -> first(M) end.
+    choose(a) -> {ok,lists,x,0}; choose(_) -> {ok,maps,x,0}.
+    first(M) -> M:reverse([]), first(M).
+    """
+  end
+
+  defp w_domains(atoms \\ [:lists, :maps]), do: [{{:first, 1}, 0, atoms}]
+
+  defp w_union(context, union, atoms) do
+    bytes =
+      b_compile(
+        :w_input,
+        "-export([run/0]). run() -> first(lists). first(M) -> M:reverse([]), first(M).",
+        true
+      )
+
+    t_install(context, [{:w_input, bytes}])
+    path = Path.join(b_physical(context.ebin), "w_input.beam")
+
+    s_rewrite(path, fn forms ->
+      Enum.map(forms, fn
+        {:function, line, :run, 0, clauses} ->
+          {:function, line, :run, 0, w_union_argument(clauses, union)}
+
+        form ->
+          form
+      end)
+    end)
+
+    NoOTP.ReleaseAudit.artifacts(parameter_invariants: %{w_input: w_domains(atoms)})
+    |> t_inspection(:w_input)
+  end
+
+  defp w_union_argument({:call, annotation, {:atom, _, :first} = callee, [_argument]}, union),
+    do: {:call, annotation, callee, [union]}
+
+  defp w_union_argument(term, union) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.map(&w_union_argument(&1, union)) |> List.to_tuple()
+
+  defp w_union_argument(terms, union) when is_list(terms),
+    do: Enum.map(terms, &w_union_argument(&1, union))
+
+  defp w_union_argument(term, _union), do: term
+
+  defp w_actual_slice(context, mutation) do
+    root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
+
+    backend =
+      File.read!(Path.join(root, "apps/http_core/lib/http/tls_backend.ex"))
+      |> String.replace("HTTP.TLSBackend", "NoOTPActualSeedBackend")
+
+    {:defmodule, _, [_module, [do: {:__block__, _, definitions}]]} =
+      root
+      |> Path.join("apps/http_web_socket/lib/http/web_socket/connection.ex")
+      |> File.read!()
+      |> Code.string_to_quoted!()
+
+    definitions =
+      Enum.filter(definitions, fn
+        {:defp, _, [{:select_transport, _, [_]}, _]} -> true
+        {:defp, _, [{:when, _, [{:select_transport, _, [_]}, _]}, _]} -> true
+        {:defp, _, [{:recv_handshake, _, [_, _, _, _]}, _]} -> true
+        {:defp, _, [{:remaining, _, [_]}, _]} -> true
+        _ -> false
+      end)
+
+    assert length(definitions) == 6
+
+    definitions =
+      Macro.prewalk(definitions, fn
+        {:__aliases__, metadata, [:HTTP, :TLSBackend]} ->
+          {:__aliases__, metadata, [:NoOTPActualSeedBackend]}
+
+        node ->
+          node
+      end)
+
+    definitions =
+      if mutation == :changed_backedge do
+        Enum.map(definitions, fn
+          {:defp, metadata, [{:recv_handshake, _, _} = head, [do: body]]} ->
+            body =
+              Macro.prewalk(body, fn
+                {:recv_handshake, call_metadata, [_transport, socket, buffer, deadline]} ->
+                  {:recv_handshake, call_metadata, [:lists, socket, buffer, deadline]}
+
+                node ->
+                  node
+              end)
+
+            {:defp, metadata, [head, [do: body]]}
+
+          node ->
+            node
+        end)
+      else
+        definitions
+      end
+
+    extra =
+      case mutation do
+        :unknown_caller ->
+          quote do
+            def alternate(value), do: recv_handshake(value, nil, <<>>, 0)
+          end
+
+        :unsafe_caller ->
+          quote do
+            def alternate, do: recv_handshake(:ssl, nil, <<>>, 0)
+          end
+
+        _ ->
+          quote do
+          end
+      end
+
+    fixture =
+      quote do
+        defmodule NoOTPActualSeedSlice do
+          alias HTTP.WebSocket.Handshake
+          unquote_splicing(definitions)
+
+          def run(state) do
+            case select_transport(state) do
+              {:ok, transport, _host, _port} -> recv_handshake(transport, nil, <<>>, 0)
+            end
+          end
+
+          unquote(extra)
+        end
+      end
+
+    entries = Code.compile_string(backend) ++ Code.compile_quoted(fixture)
+
+    for {module, _} <- entries do
+      :code.purge(module)
+      :code.delete(module)
+
+      on_exit(fn ->
+        :code.purge(module)
+        :code.delete(module)
+      end)
+    end
+
+    unconfigured = t_install(context, entries) |> t_inspection(NoOTPActualSeedSlice)
+
+    configured =
+      NoOTP.ReleaseAudit.artifacts(
+        parameter_invariants: %{
+          NoOTPActualSeedSlice => [
+            {{:recv_handshake, 4}, 0,
+             [HTTP.Transport.TCP, HTTP.Transport.ExSSL, HTTP.Transport.Unix]}
+          ]
+        }
+      )
+      |> t_inspection(NoOTPActualSeedSlice)
+
+    %{unconfigured: unconfigured, configured: configured}
+  end
 end

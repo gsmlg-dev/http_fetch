@@ -26,6 +26,9 @@ defmodule NoOTP.Consumer do
         {{:establish_tunnel, 7}, 6, transport_targets},
         {{:read_head, 7}, 6, transport_targets},
         {{:next_proxy_head, 8}, 7, transport_targets}
+      ],
+      HTTP.WebSocket.Connection => [
+        {{:recv_handshake, 4}, 0, transport_targets ++ [HTTP.Transport.Unix]}
       ]
     }
 

@@ -2468,6 +2468,9 @@ defmodule NoOTP.ReleaseAudit do
             {:atom, _, atom} ->
               if Map.has_key?(slots, owner), do: :unknown, else: {:seed, atom}
 
+            {:audit_union, _, _} = union ->
+              if Map.has_key?(slots, owner), do: :unknown, else: invariant_union_seed(union)
+
             _ ->
               :unknown
           end
@@ -2505,6 +2508,27 @@ defmodule NoOTP.ReleaseAudit do
     end)
   end
 
+  # A previously checked selector may supply multiple finite entry targets.
+  # Admit only bounded atom proof data; recursive edges still require the
+  # original parameter identity, never a replacement union or computed value.
+  defp invariant_union_seed({:audit_union, annotation, values} = term) when is_list(values) do
+    valid? =
+      callable_annotation?(annotation) and values != [] and
+        length(values) <= @max_finite_targets and
+        :erlang.external_size(term) <= @max_finite_bytes and
+        Enum.all?(values, fn
+          {:atom, atom_annotation, value} ->
+            is_atom(value) and callable_annotation?(atom_annotation)
+
+          _ ->
+            false
+        end)
+
+    if valid?, do: {:seeds, Enum.map(values, &elem(&1, 2))}, else: :unknown
+  end
+
+  defp invariant_union_seed(_term), do: :unknown
+
   defp invariant_origins_valid?(origins, domains) do
     Enum.all?(origins, fn {slot, inputs} ->
       target = Map.fetch!(domains, slot)
@@ -2512,6 +2536,7 @@ defmodule NoOTP.ReleaseAudit do
       inputs != [] and
         Enum.all?(inputs, fn
           {:seed, atom} -> atom in target
+          {:seeds, atoms} -> Enum.all?(atoms, &(&1 in target))
           {:identity, source} -> Enum.all?(Map.fetch!(domains, source), &(&1 in target))
           _ -> false
         end)
@@ -2528,6 +2553,7 @@ defmodule NoOTP.ReleaseAudit do
       for {slot, inputs} <- origins,
           Enum.any?(inputs, fn
             {:seed, _} -> true
+            {:seeds, _} -> true
             {:identity, source} -> MapSet.member?(reached, source)
           end),
           do: slot
