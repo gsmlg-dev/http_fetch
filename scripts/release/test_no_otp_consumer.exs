@@ -36,7 +36,7 @@ Code.compile_quoted(
 )
 
 defmodule NoOTP.ConsumerReadinessTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   defp session(results) do
     Process.put(:no_otp_readiness_results, results)
