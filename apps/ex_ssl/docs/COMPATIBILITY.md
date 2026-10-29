@@ -2,7 +2,10 @@
 
 `ex_ssl` provides an experimental OTP `:ssl`-compatible client API for the
 implemented subset below. Passing the repository tests is not a security
-certification, and OTP `:ssl` remains the recommended default.
+certification. Current umbrella HTTP clients default to ExSSL and reject legacy
+OTP backend selection. The [migration checklist](../../../docs/tls-migration-plan.md)
+records accepted P1–P5 source/candidate stages; P6 production-release isolation
+and P7 coordinated publication remain open.
 
 ## Public API
 
@@ -66,9 +69,10 @@ Supported connection options are:
 - `active: false | :once` (default `false`);
 - `verify: :verify_peer | :verify_none` (default `:verify_peer`);
 - `cacerts` or `cacertfile`;
-- one initial-handshake client identity through `cert`/`certfile` and `key`/`keyfile` (forms and bounds below);
+- initial-handshake client identities through `certs_keys`, or legacy `cert`/`certfile` and `key`/`keyfile`, with per-identity `password` support (forms and bounds below);
 - DNS `server_name_indication`;
 - `customize_hostname_check: [match_fun: fun]`;
+- ordinary TCP `verify_fun`, `partial_chain`, `crl_check`, `crl_cache` and OCSP `stapling` (policy boundaries below);
 - `versions: [:"tlsv1.3"]` (default), `[:"tlsv1.2"]`, or either ordered, non-duplicate mixed list;
 - ordered `ciphers`, `signature_algs`, `signature_algs_cert` and `supported_groups` (forms below);
 - validated TCP options from the allowlist below;
@@ -96,8 +100,8 @@ existing trust and identity checks.
 With explicit `verify_none`, omitted CA options do not load system trust. Empty
 `cacerts`, unused malformed CA entries and readable non-PEM CA files are admitted,
 as in the executed OTP 29 references. An explicit unreadable CA file still fails;
-`cacerts` retains precedence over `cacertfile`. Unsupported verification callbacks
-remain explicit option errors. Supplied reference/SNI values retain their shape
+`cacerts` retains precedence over `cacertfile`. Supported ordinary TCP verification
+callbacks follow the policy boundary below. Supplied reference/SNI values retain their shape
 validation even when hostname verification is disabled.
 
 Packet modes, list mode, active true/active-N, arbitrary TCP
@@ -260,8 +264,10 @@ The owner may explicitly opt in to `SSL.enable_duplex_reads/1` on an established
 open connection with a finite send timeout. This idempotent operation permits
 bounded inbound processing while one application output job is pending. The
 handshake, control and shutdown barriers stay intact; mandatory inbound protocol
-responses on an occupied writer fail closed with `:busy`. Infinite-timeout write
-admission is rejected in this mode. The pending job is immutable and retains its
+responses can occupy one bounded pending-control slot behind the admitted
+application record. Control output retains its protected bytes and original
+deadline; a second occupied slot still fails closed with `:busy`. Infinite-timeout
+write admission is rejected in this mode. The pending job is immutable and retains its
 original deadline, including any automatic KeyUpdate bundled with its application
 record; no epoch rollback, re-encryption or retransmission occurs.
 
@@ -424,7 +430,7 @@ integration and its executed evidence and validation limitations.
 
 ## Initial-handshake client authentication
 
-`SSL.connect` accepts one client identity and sends it only in response to an
+`SSL.connect` selects one client identity per handshake and sends it only in response to an
 authenticated initial CertificateRequest. The request must offer a compatible
 CertificateVerify scheme and certificate-chain signature policy. Requested CA
 names constrain selection. Unknown OID filters are ignored as specified by TLS.
@@ -454,15 +460,17 @@ independent TLS12/TLS13 host/prepared mTLS exchanges for those ten formats,
 including exact client identity, authenticated HTTP and TLS12 EMS. This local
 version-specific configuration does not establish default-provider or platform
 compatibility.
-Full encrypted-key compatibility remains unaccepted. Hardware signers remain
-unsupported. Ordinary `certs_keys` selection has independent TLS1.2/TLS1.3
+The migration's bounded encrypted-key and multiple-identity compatibility stage
+is accepted; available crypto-provider capabilities still constrain decoding.
+Hardware signers remain unsupported. Ordinary `certs_keys` selection has independent TLS1.2/TLS1.3
 evidence: explicit modern sources override legacy sources, each map owns its
 password, and all candidates are validated before dialing. Selection respects
 local/peer signature policy, certificate types and CA hints, including later
 matching candidates and bounded local chain completion. Prepared identities
 retain their snapshot across file changes. Fetch, EventSource and WebSocket
-have independent authenticated exchanges; public lifecycle/cleanup and complete
-P3 acceptance remain pending. See `docs/tls-migration-design.md` in the umbrella
+have independent authenticated exchanges, with provider lifecycle, completion and
+managed H1/H2 acceptance recorded in the migration checklist. See the umbrella's
+[migration design](../../../docs/tls-migration-design.md)
 for the explicit candidate, credential-byte and issuer-search limits.
 Chain order and a scheme-specific signing/verification proof bind the key to the
 leaf; the peer remains responsible for client certificate trust and validity.
@@ -496,11 +504,11 @@ verification remains required; certificate-signature policy applies to the
 selected path. This does not reorder arbitrary peer chains or discover new
 trust anchors. Bounds and certificate decoding cover the full presented chain.
 
-This table describes the current optional-backend subset. The complete http_fetch
-migration must preserve ordinary `verify_fun` and fully implement `partial_chain`,
-CRL/OCSP, encrypted private keys and multiple client identities before OTP SSL
-removal (user decision, 2026-10-23). Migration acceptance remains open; partial
-support or current rejection does not satisfy the migration contract.
+This table describes current ordinary TCP policy support. The required
+`verify_fun`, partial-chain, CRL/OCSP and client-identity compatibility stages have
+source/candidate acceptance in the migration checklist. Their finite policy and
+provider limits remain part of the contract. Final isolated-release and published
+consumer acceptance remain separate open gates.
 
 | Policy | Candidate support |
 | --- | --- |
@@ -508,16 +516,17 @@ support or current rejection does not satisfy the migration contract.
 | `depth` | Intermediate-CA bound, independent of parser/resource limits |
 | SNI / reference identity | DNS identity or IP SAN verification; explicit `ex_ssl.reference_identity` is independent of SNI and destination, including socket upgrades |
 | `customize_hostname_check: [match_fun: fun]` | Supported hostname matching customization; path validation remains required |
-| `verify_fun` | Ordinary TCP supports tuple fun3/native-DER fun4, legacy fun1 and `:undefined`; prepared two-attach state-reset acceptance and final regression gates remain open |
-| `partial_chain` | Rejected; no user callback can introduce an intermediate trust anchor |
-| `crl_check` / `crl_cache` | Rejected; no revocation freshness or retrieval guarantee is claimed |
-| `stapling` | Rejected; OCSP response validation and availability policy are not implemented |
+| `verify_fun` | Ordinary TCP supports tuple fun3/native-DER fun4, legacy fun1 and `:undefined`; state resets for each candidate path and prepared attachment |
+| `partial_chain` | A callback may select a presented intermediate as trust anchor; the selected path still receives PKIX, identity and protocol validation |
+| `crl_check` / `crl_cache` | Bounded CRL validation, ExSSL-owned default/hash-directory caches, HTTP retrieval and custom cache callbacks; `SSL.CRLCache` replaces OTP cache-population calls |
+| `stapling` | Validates requested OCSP staples, including optional nonce policy; missing required leaf staples and invalid/revoked responses fail verification |
 | `cert_policy_opts` / `allow_any_ca_purpose` | Rejected; no implicit acceptance of policy overrides |
 
 These names follow the [OTP 29 public option documentation](https://www.erlang.org/docs/29/apps/ssl/ssl.html).
-Each supplied unsupported policy fails before network I/O, with its value
-redacted. Implementing one requires a separate trust-semantics design and
-negative/availability tests.
+Unsupported policies fail before network I/O, with their values redacted.
+Verification callbacks, partial-chain trust, enabled CRL checks and requested
+stapling force a full certificate handshake and bypass ticket lookup/insertion;
+they do not add periodic verification to healthy pooled connections.
 
 Ordinary verification callbacks receive a fresh initial state for each candidate
 path and prepared attachment. Callback overrides apply to X.509 validation;
@@ -526,7 +535,8 @@ CertificateVerify/ServerKeyExchange, Finished and AEAD checks remain mandatory.
 Callback failures expose fixed diagnostic classes. Configured callbacks force a
 full certificate handshake, including with explicit automatic tickets, and bypass
 ticket partition/cache access and insertion. Managed and QUIC callback support
-remains excluded. Public cancellation and cleanup acceptance remains blocked by P2.
+remains excluded. Public provider cancellation and cleanup are covered by the
+accepted lifecycle stage; a logical TLS failure alone is not a cleanup receipt.
 
 ## Explicit TLS1.2 subset (since 0.4)
 

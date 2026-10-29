@@ -11,25 +11,26 @@ versions. The original `0.16.1` package inventory is a historical snapshot;
 current candidate and publication evidence is recorded in the
 [implementation audit](http3-implementation-audit.md).
 
-OTP `:ssl` remains the default for TCP. ex_ssl is explicitly selected for the
-existing TCP clients; QUIC consumes public `SSL.QUIC` APIs independently of
-that backend setting. The historical phase records below retain their original
+Current source selects ExSSL for TCP TLS by default and rejects legacy
+`tls_backend: :ssl` explicitly. QUIC consumes public `SSL.QUIC` APIs independently
+of that backend setting. The historical phase records below retain their original
 versions and counts. Current migration checks are tracked in
 [migration validation](migration-validation.md). This inventory does not claim
 full OTP compatibility or completed independent human security review.
 
 ## Complete provider migration (2026-10-21)
 
-The current migration baseline is umbrella `main@6b69bde` (`0.21.14`).
+The original migration review baseline was umbrella `main@6b69bde` (`0.21.14`).
 The [migration design and compatibility table](tls-migration-design.md) and
 [staged checklist](tls-migration-plan.md) track the remaining work to make
 ExSSL the sole production TLS provider. [Execution evidence](tls-migration-validation.md)
-records checks performed against this baseline, separately from the historical
-standalone release evidence below. Current source implements public provider
-lifecycle evidence, explicit ExSSL completion and managed H1/H2; the staged
-checklist distinguishes accepted source/candidate results from remaining integrated
-gates. OTP remains the production default and dependency. Default promotion,
-production OTP SSL removal and next-major published-consumer acceptance remain open.
+records checks separately from the historical standalone release evidence below.
+P1–P5 compatibility, public lifecycle, completion, managed H1/H2 and default
+promotion have accepted source/candidate results. The P6 source slice removes
+the OTP transport and five unconditional application dependencies. Its isolated
+production-release dynamic-dispatch/traffic gate remains open, as does P7
+next-major publication and cold published-consumer acceptance. These source
+changes do not establish that the coordinated migration has been released.
 
 [`SSL.Lifecycle`](../apps/ex_ssl/lib/ssl/lifecycle.ex) exposes the v1 attempt Handle,
 revocable Lease and acknowledged Transfer. Create the handle before I/O; cancellation
@@ -38,7 +39,7 @@ evidence without extracting private TLS fields. Backend pinning through redirect
 or reconnects does not freeze raw CA/identity files or system roots for an ordinary
 fresh dial; managed policy snapshots have that stronger contract.
 
-The unreleased R42 source slice adds version-specific TLS1.2 RSA-PKCS1
+Earlier R42 source evidence added version-specific TLS1.2 RSA-PKCS1
 SHA256/384/512 for server and initial client authentication. Independent fixed
 vectors and six forced OpenSSL server/mTLS scenarios verify exact scheme IDs;
 the full ExSSL suite passes922 checks and shared QUIC checks pass14. TLS1.3
@@ -50,27 +51,28 @@ The route audit retains explicit migration boundaries. Secure HTTPS/WSS schemes
 with Unix sockets now reject before local-socket I/O; plain HTTP/WS remain supported.
 SSE/WS reject explicit HTTP proxy endpoints before an origin dial; WebSocket frame
 proxy mode is separate. Fetch supports forwarding through HTTP/HTTPS proxies and
-CONNECT from an HTTP proxy to an HTTPS origin. OTP also implements HTTPS origins
-through HTTPS proxies; ExSSL currently rejects that nested TLS route, whose
-next-major compatibility boundary remains unresolved.
+CONNECT from an HTTP proxy to an HTTPS origin, plus nested ExSSL TLS for HTTPS
+origins through HTTPS proxies. Both nested layers retain independent policy and
+provider cleanup evidence.
 
 ExSSL CONNECT prepares TLS policy before dialing the proxy; independent listeners
 cover rejected configuration with zero proxy and origin accepts. Fetch's
 cross-origin client-identity behavior remains a named migration boundary in the
 [route audit](tls-migration-design.md#public-routes-and-effective-policy-source-reviewed):
-OTP currently permits identity forwarding where ExSSL/H3 isolate the origin.
+ExSSL/H3 isolate the origin; historical OTP forwarding behavior does not authorize
+cross-origin credential forwarding.
 No encrypted Unix or functioning default WebTransport session is claimed.
 
 The P1 HTTP ExSSL adapter now offers TLS1.3 plus bounded TLS1.2 for ordinary
 calls. Explicit versions and concrete profile order remain authoritative;
 auto tickets and explicit cipher policies retain the prior TLS1.3 context when
 versions are omitted. Independent policy scenarios are recorded in the execution
-ledger. Remaining option compatibility and integrated acceptance gates prevent a
-sole-provider completion claim.
+ledger. The remaining isolated-release and publication gates prevent a completed
+sole-provider migration claim.
 
 | Requirement | Status | Production boundary | Executable coverage |
 | --- | --- | --- | --- |
-| Connect, ownership, send, passive recv, active-once, ALPN, close | implemented | `http_core` transport behaviour and SSL/ExSSL adapters | `apps/http_core/test/http/tls_transport_test.exs` |
+| Connect, ownership, send, passive recv, active-once, ALPN, close | implemented | `http_core` transport behaviour and ExSSL adapter | `apps/http_core/test/http/tls_transport_test.exs` |
 | Shared default and explicit per-call backend | implemented | `HTTP.TLSBackend`, fetch/WSS/EventSource option normalization | `apps/http_core/test/http/tls_backend_test.exs` and each client's option tests |
 | Verified HTTP/1.1 fixed/chunked/close-delimited responses, large uploads, cancellation/deadline | implemented | `HTTP.SocketClient` | `apps/http_fetch/test/http/ssl_transport_test.exs` |
 | Verified ALPN HTTP/2, streaming/flow control, early response with pending upload | implemented | shared HTTP/2 parser and socket owner | `apps/http_core/test/http/http2_test.exs`, `apps/http_fetch/test/http/socket_client_http2_test.exs` |
@@ -84,21 +86,23 @@ sole-provider completion claim.
 | `socket_opts: [send_timeout: ..., send_timeout_close: true]` | implemented | ExSSL translates these two options; socket values override matching `ssl` values | `tls_transport_test.exs` |
 | Safe TCP options, client certificates, TLS 1.2/mixed versions, ordered TLS policy | implemented in ex_ssl 0.4.0 | allowlisted adapter options and independent ex_ssl engine | full published feature gate, cold dependency smoke, and scoped transport tests |
 | Explicit TCP `verify_none` | implemented in current source | `verify_peer` stays default; handshake signature, Finished and record authentication remain required; QUIC still rejects none | `apps/ex_ssl/test/ssl/verify_none_interop_test.exs` and authentication-negative suites |
-| Public provider lifecycle, request completion and managed ExSSL H1/H2 | implemented; integrated stage acceptance remains open | provider termination and request handoff are distinct; healthy pooled connections survive request completion | provider, Fetch and stream-client groups in `scripts/release/consumer_gate.py` |
-| TLS1.2 `reuse_sessions`, TLS1.3 manual tickets / `use_ticket` | unresolved compatibility boundary | ExSSL currently rejects these controls; implementation or an explicit next-major compatibility decision is required before promotion | compatibility inventory and resumption option/reference tests |
+| Public provider lifecycle, request completion and managed ExSSL H1/H2 | accepted source/candidate stage | provider termination and request handoff are distinct; healthy pooled connections survive request completion | provider, Fetch and stream-client groups in `scripts/release/consumer_gate.py` |
+| Ordinary verification, CRL/OCSP, partial-chain trust and encrypted/multiple client identities | accepted source/candidate stage | bounded ordinary TCP policy; existing managed exclusions remain | current ex_ssl policy/identity integration suites and candidate feature groups |
+| TLS1.2 `reuse_sessions`, TLS1.3 manual tickets / `use_ticket` | implemented with bounded protocol-specific policy | opt-in EMS session-ID reuse and opaque manual tickets; explicit unsupported combinations still fail | ex_ssl TLS1.2 session, manual-ticket and resumption integration suites |
 | Unlisted TCP options and early data | unsupported | explicit option/protocol errors | negative option and authentication tests |
 | Introspection beyond negotiated ALPN, active-N, packet modes | not required by audited consumer | no production callsites | library roadmap; not a Phase 0 blocker |
 | HTTP/3 and WebTransport | separate QUIC implementation | explicit TCP backend rejected; shared default ignored | fetch SSL transport tests and WebTransport option/TLS config tests |
 
-Only `HTTP.Transport.SSL` calls OTP `:ssl` in production. TLS listen, accept,
-handshake, and peer traffic in test support are reference-server operations.
+The production `HTTP.Transport.SSL` adapter has been removed from this source
+slice. TLS listen, accept, handshake, and peer traffic using OTP `:ssl` in test
+support are reference-server operations. The final P6 gate must still prove
+dynamic dispatch and supported traffic in a release with OTP SSL unavailable.
 QUIC calls in HTTP/3/WebTransport are outside this TCP adapter contract. The
 imported QUIC stack uses ex_ssl's separate TLS API. Fetch and EventSource support
 explicit HTTPS HTTP/3 beta; WebTransport remains unsupported. See the
 [QUIC consumer contract](ex-quic-consumer-contract.md).
 
-Public `ssl:` and `socket_opts:` containers remain backend-specific. The OTP
-adapter preserves its existing option behavior. The ex_ssl adapter validates
+Public `ssl:` and `socket_opts:` containers remain supported. The ExSSL adapter validates
 keyword shape and duplicates and rejects unsupported socket options. No option
 is dropped to make a connection succeed.
 
@@ -269,8 +273,10 @@ request-body producers. HTTP/3 consumes the independent `SSL.QUIC` path.
 TLS 1.2 interoperability evidence remains bounded to the tested OpenSSL ECDHE-RSA
 AES-GCM and OTP scenarios. It is not general server/platform compatibility.
 
-Peer verification remains mandatory. Resumption is disabled unless requested;
-TLS 1.2/mixed-version and mTLS resumption combinations fail explicitly. There is
+Peer verification is the default. Explicit ordinary TCP `verify_none` preserves
+handshake-signature, Finished and AEAD checks; QUIC keeps mandatory verification.
+Resumption is disabled unless requested, with distinct bounded TLS1.2 session-ID
+and TLS1.3 ticket policies; unsupported combinations fail explicitly. There is
 no 0-RTT, persistent-ticket storage, TLS-engine connection pool, backend fallback,
 uncertain byte replay or automatic WebSocket reconnect. HTTP runtime pooling is
 owned separately by `http_runtime`. HTTP/3 and WebTransport retain

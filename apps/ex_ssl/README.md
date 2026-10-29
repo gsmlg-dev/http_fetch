@@ -7,14 +7,16 @@
 
 The OTP application is `:ex_ssl`. The public compatibility module is `SSL` (`Elixir.SSL`), which does not conflict with Erlang's built-in `:ssl` module.
 
-This app was imported from `gsmlg-dev/ex_quic@14974913390e12d03a78a2903d18e55a04fa89d6` into the `http_fetch` umbrella. Its original TLS source provenance is recorded in [the QUIC TLS contract](../../docs/quic/ex-ssl-quic-contract.md). The shared candidate version is `0.16.1`; all sibling dependencies use that exact version.
+This app was imported from `gsmlg-dev/ex_quic@14974913390e12d03a78a2903d18e55a04fa89d6` into the `http_fetch` umbrella. Its original TLS source provenance is recorded in [the QUIC TLS contract](../../docs/quic/ex-ssl-quic-contract.md). The original import inventory used `0.16.1`; current coordinated versions and exact sibling requirements are declared in [mix.exs](mix.exs).
 
 > **Status:** experimental TLS 1.3 client runtime with authenticated connections,
 > passive and active-once binary/raw traffic, application ownership transfer,
 > ALPN lookup, bounded streaming writes, initial-handshake client authentication,
 > and TCP-to-TLS upgrades. See the
-> [compatibility matrix](docs/COMPATIBILITY.md) for exact restrictions. OTP
-> `:ssl` remains the default recommendation.
+> [compatibility matrix](docs/COMPATIBILITY.md) for exact restrictions. Current
+> umbrella HTTP clients default to ExSSL and reject legacy OTP backend selection.
+> The [migration checklist](../../docs/tls-migration-plan.md) separates accepted
+> compatibility/default stages from pending production-release and publication gates.
 
 Version 0.4 also supports ordered TLS 1.3 algorithm options, explicit
 certificate-chain signature restrictions, one client identity, and a validated

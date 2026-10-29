@@ -26,7 +26,7 @@ Current HTTP/3 beta acceptance and publication evidence are tracked in the
 
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
 - **Full HTTP support**: GET, POST, PUT, DELETE, PATCH, HEAD methods
-- **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, selectable TLS for HTTPS, and Unix domain sockets
+- **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, ExSSL for HTTPS, and Unix domain sockets
 - **Explicit HTTP/3 beta**: HTTPS Fetch and EventSource with bounded streams and static/literal QPACK
 - **Unix Domain Sockets**: HTTP over Unix sockets for Docker daemon, systemd, and other local services
 - **Form data support**: HTTP.FormData for multipart/form-data and file uploads
