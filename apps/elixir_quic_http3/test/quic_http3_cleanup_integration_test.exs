@@ -101,12 +101,18 @@ defmodule QuicHttp3.CleanupIntegrationTest do
     {:abs_ms, deadline} = absolute = bound()
 
     debug = fn
+      state, {:in, {:"$gen_call", _, {_, {:operation, _, ref, :connect, _}}}}, _ ->
+        send(parent, {:connect_intent, tag, ref})
+        state
+
       state, {:in, {:"$gen_call", _, {_, {:reserve, :connection, _}}}}, _ ->
         Map.put(state, :connection_birth?, true)
 
       %{connection_birth?: true} = state,
       {:in, {:"$gen_call", _, {_, {:enroll, _, connection}}}},
       _ ->
+        send(parent, {:connect_gate, tag, connection})
+        wait_gate({tag, :connect})
         %{state | connection_birth?: false} |> Map.put(:connection, connection)
 
       %{connection: connection} = state,
@@ -127,18 +133,37 @@ defmodule QuicHttp3.CleanupIntegrationTest do
         {:ok, session} = Session.new(cleanup: %{handle: handle, lease: lease})
         options = context.options ++ [deadline: absolute, timeout: 20, consumer: parent]
         started = System.monotonic_time(:millisecond)
-        result = Session.connect(session, ip, port, options)
+
+        {:unknown, %{connection: %{handle: nil}} = pending, connect_ref} =
+          Session.connect(session, ip, port, options)
+
+        assert pending.pending.ref == connect_ref
+        assert pending.pending.deadline == deadline
+        send(parent, {:connect_unknown, tag, connect_ref})
+
+        assert %{status: :admitted} =
+                 await_status(pending.connection.endpoint, connect_ref, absolute)
+
+        result = Session.resume(pending)
         elapsed = System.monotonic_time(:millisecond) - started
         send(parent, {:attach_result, tag, result, elapsed})
         receive do: ({:release_caller, ^tag} -> :ok)
       end)
 
     on_exit(fn ->
+      send(handle.observer, {:release, {tag, :connect}})
       send(handle.observer, {:release, tag})
       send(caller, {:release_caller, tag})
     end)
 
+    assert_receive {:connect_intent, ^tag, connect_ref}, 1_000
+    assert_receive {:connect_gate, ^tag, connection}, 1_000
+    await_connect_timeout(handle.observer, connect_ref, absolute)
+    send(handle.observer, {:release, {tag, :connect}})
+    assert_receive {:connect_unknown, ^tag, ^connect_ref}, 1_000
+
     assert_receive {:attach_gate, ^tag, actor, generation, attach_ref, ^deadline}, 1_000
+    assert actor == connection
     assert is_reference(attach_ref)
     assert :erlang.suspend_process(actor)
     send(handle.observer, {:release, tag})
@@ -473,6 +498,23 @@ defmodule QuicHttp3.CleanupIntegrationTest do
 
       result ->
         result
+    end
+  end
+
+  defp await_connect_timeout(observer, ref, {:abs_ms, deadline} = absolute) do
+    assert System.monotonic_time(:millisecond) < deadline
+    {:messages, messages} = Process.info(observer, :messages)
+
+    if Enum.any?(messages, fn
+         {:"$gen_call", _, {_, {:operation_result, ^ref, :indeterminate}}} -> true
+         _ -> false
+       end) do
+      :ok
+    else
+      receive do
+      after
+        1 -> await_connect_timeout(observer, ref, absolute)
+      end
     end
   end
 
