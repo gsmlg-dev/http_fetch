@@ -219,8 +219,128 @@ def validate_runtime(state, release):
                 'OTP ssl or test support on production code path')
 
 
+def validate_callable_preflight(report):
+    """Incoming-only diagnostics cannot authorize any external classification."""
+    require(report.get('external_callable_records', []) == [],
+            'external callable classification is not implemented')
+    preflight = report.get('callable_provenance_preflight')
+    inspections = report.get('beam_inspections', [])
+    require(isinstance(inspections, list), 'BEAM inspection inventory malformed')
+    for inspection in inspections:
+        require(isinstance(inspection, dict) and
+                inspection.get('external_callable_records', []) == [],
+                'per-BEAM external callable classification is not implemented')
+    if preflight is None:
+        return
+    require(isinstance(preflight, dict) and preflight.get('schema') == 1 and
+            type(preflight.get('schema')) is int and preflight.get('stage') == 'incoming_only',
+            'unsupported callable provenance stage')
+    require(preflight.get('external_callable_records') == [],
+            'incoming diagnostics cannot classify callable origins')
+    for key in ('requests_valid', 'scan_complete'):
+        require(type(preflight.get(key)) is bool, 'callable completeness flag malformed')
+    for key, limit in (('scanned_nodes', 2_000_001), ('scanned_sites', 100_000)):
+        require(type(preflight.get(key)) is int and 0 <= preflight[key] <= limit,
+                'callable scan bound malformed')
+    require(not preflight['scan_complete'] or
+            (preflight['scanned_nodes'] <= 2_000_000 and preflight['scanned_sites'] < 100_000),
+            'exhausted callable scan claimed complete')
+    snapshots = preflight.get('snapshots')
+    require(isinstance(snapshots, list) and
+            len(snapshots) == len(inspections) == report.get('checked_beams'),
+            'callable snapshot coverage mismatch')
+    by_beam = {}
+    by_module = {}
+    inspected = {item.get('beam'): item for item in inspections}
+    require(len(inspected) == len(inspections), 'duplicate inspected BEAM identity')
+    for snapshot in snapshots:
+        require(isinstance(snapshot, dict), 'callable snapshot malformed')
+        beam, module, sha = (snapshot.get(key) for key in ('beam', 'module', 'sha256'))
+        require(isinstance(beam, str) and beam and isinstance(module, str) and module and
+                isinstance(sha, str) and re.fullmatch(r'[0-9a-f]{64}', sha) is not None,
+                'callable snapshot identity malformed')
+        require(beam not in by_beam and module not in by_module and beam in inspected,
+                'duplicate or uninspected callable snapshot')
+        require(all(snapshot.get(key) == inspected[beam].get(key)
+                    for key in ('beam', 'module', 'sha256')),
+                'stale callable snapshot')
+        require(type(snapshot.get('selected')) is bool and type(snapshot.get('debug')) is bool,
+                'callable artifact selection evidence malformed')
+        require(type(inspected[beam].get('missing_abstract_code')) is bool and
+                snapshot['debug'] != inspected[beam]['missing_abstract_code'],
+                'callable debug evidence mismatch')
+        exports = snapshot.get('exports')
+        require(isinstance(exports, list), 'callable export inventory missing')
+        exported = set()
+        for export in exports:
+            require(isinstance(export, dict) and isinstance(export.get('function'), str) and
+                    export['function'] and type(export.get('arity')) is int and
+                    0 <= export['arity'] <= 255, 'callable export malformed')
+            identity = (export['function'], export['arity'])
+            require(identity not in exported, 'duplicate callable export')
+            exported.add(identity)
+        by_beam[beam] = snapshot
+        by_module[module] = exported
+    roots = preflight.get('roots')
+    require(isinstance(roots, list) and len(roots) <= 64 and
+            (preflight['requests_valid'] or roots == []), 'callable request inventory malformed')
+    roots_seen = set()
+    node_identities = {}
+    for entry in roots:
+        require(isinstance(entry, dict) and isinstance(entry.get('root'), dict),
+                'callable root malformed')
+        root = entry['root']
+        require(isinstance(root.get('module'), str) and root['module'] and
+                isinstance(root.get('function'), str) and root['function'] and
+                type(root.get('arity')) is int and 0 <= root['arity'] <= 255,
+                'callable root identity malformed')
+        identity = (root['module'], root['function'], root['arity'])
+        require(identity not in roots_seen, 'duplicate callable root')
+        roots_seen.add(identity)
+        exported = (root['function'], root['arity']) in by_module.get(root['module'], set())
+        require(type(entry.get('exported')) is bool and entry['exported'] == exported,
+                'callable root export mismatch')
+        incoming = entry.get('incoming')
+        require(isinstance(incoming, list) and len(incoming) <= preflight['scanned_sites'],
+                'callable incoming coverage malformed')
+        nodes_seen = set()
+        for edge in incoming:
+            require(isinstance(edge, dict), 'callable edge malformed')
+            beam, path, ordinal = (edge.get(key) for key in ('beam', 'path', 'ordinal'))
+            require(isinstance(beam, str) and beam in by_beam and
+                    edge.get('module') == by_beam[beam]['module'], 'unbound callable edge BEAM')
+            require(isinstance(path, list) and path and
+                    all(type(index) is int and index >= 0 for index in path),
+                    'callable original-node path malformed')
+            require(type(ordinal) is int and 0 <= ordinal < preflight['scanned_sites'] and
+                    type(edge.get('line')) is int and edge['line'] >= 0,
+                    'callable original-node ordinal malformed')
+            owner = edge.get('owner')
+            require(isinstance(owner, dict) and isinstance(owner.get('function'), str) and
+                    owner['function'] and type(owner.get('arity')) is int and
+                    0 <= owner['arity'] <= 255, 'callable owner malformed')
+            require(edge.get('kind') in {
+                'capture', 'capture_invocation', 'apply', 'direct_arguments_require_proof',
+                'dynamic_target_requires_proof', 'metadispatch_requires_proof',
+                'metadispatch_capture_requires_proof', 'unknown_callable_arity',
+                'callable_or_metadispatch_requires_proof', 'callable_target_requires_proof'},
+                'unknown callable edge derivation')
+            node = (beam, tuple(path))
+            require(node not in nodes_seen, 'duplicate callable incoming node')
+            nodes_seen.add(node)
+            bound = (beam, tuple(path), edge['module'], owner['function'], owner['arity'], edge['line'])
+            require(ordinal not in node_identities or node_identities[ordinal] == bound,
+                    'callable node ordinal rebound')
+            node_identities[ordinal] = bound
+        closed = (preflight['scan_complete'] and exported and not incoming and
+                  all(item['selected'] and item['debug'] for item in snapshots))
+        require(entry.get('status') == ('no_syntactic_incoming_edges' if closed else 'unconfirmed'),
+                'callable incoming status disagrees with evidence')
+
+
 def validate_artifacts(report, version):
     require(isinstance(report, dict), 'artifact audit missing')
+    validate_callable_preflight(report)
     for field in ('checked_app_files', 'checked_rel_files', 'checked_boot_files', 'checked_beams'):
         require(type(report.get(field)) is int and report[field] > 0, f'{field}: no artifacts inspected')
     for field in ('ssl_app_dependencies', 'ssl_bundle_paths', 'ssl_boot_entries',

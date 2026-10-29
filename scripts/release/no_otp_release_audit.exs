@@ -5,6 +5,47 @@ defmodule NoOTP.ReleaseAudit do
   @max_parameter_functions 256
   @max_parameter_calls 4_096
   @max_parameter_nodes 100_000
+  @callable_header_sizes %{
+    clause: [5],
+    atom: [3],
+    integer: [3],
+    float: [3],
+    char: [3],
+    string: [3],
+    nil: [2],
+    var: [3],
+    cons: [4],
+    tuple: [3],
+    map: [3, 4],
+    map_field_assoc: [4],
+    map_field_exact: [4],
+    bin: [3],
+    bin_element: [5],
+    match: [4],
+    block: [3],
+    case: [4],
+    if: [3],
+    receive: [3, 5],
+    try: [6],
+    catch: [3],
+    op: [4, 5],
+    remote: [4],
+    named_fun: [4],
+    lc: [4],
+    bc: [4],
+    mc: [4],
+    generate: [4],
+    b_generate: [4],
+    m_generate: [4],
+    generate_strict: [4],
+    b_generate_strict: [4],
+    m_generate_strict: [4],
+    call: [4],
+    fun: [3],
+    record: [4, 5],
+    record_field: [3, 4, 5],
+    record_index: [4]
+  }
   @parameter_ast_nodes [
     :audit_return,
     :clause,
@@ -108,7 +149,7 @@ defmodule NoOTP.ReleaseAudit do
         %{application: name, paths: Enum.map(entries, & &1.path)}
       end)
 
-    %{
+    report = %{
       checked_app_files: length(applications),
       checked_rel_files: length(rel_files),
       checked_boot_files: length(boot_files),
@@ -128,7 +169,380 @@ defmodule NoOTP.ReleaseAudit do
       unresolved_dispatch: Enum.flat_map(inspections, & &1.unresolved_dispatch),
       missing_abstract_code: Enum.filter(inspections, & &1.missing_abstract_code)
     }
+
+    callable_preflight(report, beams, context, Keyword.fetch(options, :public_callable_roots))
   end
+
+  # This prerequisite inventories actual compiled incoming edges. It does not
+  # certify argument origin or move any dispatch out of unresolved_dispatch.
+  # In particular an empty direct-caller list is not an external-origin proof.
+  defp callable_preflight(report, _beams, _context, :error), do: report
+
+  defp callable_preflight(report, beams, context, {:ok, requests}) do
+    valid? =
+      is_list(requests) and length(requests) <= 64 and
+        Enum.all?(requests, fn
+          {module, function, arity} ->
+            is_atom(module) and is_atom(function) and is_integer(arity) and arity in 0..255
+
+          _ ->
+            false
+        end) and length(Enum.uniq(requests)) == length(requests)
+
+    {snapshots, state} =
+      Enum.map_reduce(beams, %{nodes: 0, ordinal: 0, complete: true, sites: []}, fn beam, state ->
+        {:ok, {module, chunks}} =
+          :beam_lib.chunks(String.to_charlist(beam), [:imports, :exports, :abstract_code])
+
+        hash = digest(beam)
+        inspection = Enum.find(report.beam_inspections, &(&1.beam == beam))
+        original? = inspection.sha256 == hash
+
+        selected? =
+          case selected_producer(module, context) do
+            {:ok, producer} ->
+              producer.path == beam and
+                Base.encode16(producer.sha256, case: :lower) == hash
+
+            _ ->
+              false
+          end
+
+        exports = Keyword.fetch!(chunks, :exports)
+        imports = Keyword.fetch!(chunks, :imports)
+
+        {debug?, state} =
+          case Keyword.fetch!(chunks, :abstract_code) do
+            {:raw_abstract_v1, forms} ->
+              definitions =
+                for {:function, _, name, arity, _} <- forms, into: MapSet.new(), do: {name, arity}
+
+              scope = %{beam: beam, module: module, imports: imports, definitions: definitions}
+
+              state =
+                forms
+                |> Enum.with_index()
+                |> Enum.reduce(state, fn
+                  {{:function, _, name, arity, clauses}, index}, acc ->
+                    callable_sites(clauses, [index, 4], {name, arity}, scope, acc)
+
+                  _, acc ->
+                    acc
+                end)
+
+              {true, state}
+
+            _ ->
+              {false, state}
+          end
+
+        snapshot = %{
+          beam: beam,
+          module: inspect(module),
+          sha256: hash,
+          selected: selected? and original?,
+          debug: debug?,
+          exports:
+            Enum.map(exports, fn {name, arity} -> %{function: to_string(name), arity: arity} end)
+        }
+
+        {snapshot, %{state | complete: state.complete and original?}}
+      end)
+
+    snapshots_current? = Enum.all?(snapshots, &(digest(&1.beam) == &1.sha256))
+    complete? = state.complete and snapshots_current?
+    selected? = Enum.all?(snapshots, &(&1.selected and &1.debug))
+    sites = Enum.reverse(state.sites)
+
+    roots =
+      if valid? do
+        Enum.map(requests, fn {module, function, arity} = root ->
+          target = %{module: inspect(module), function: to_string(function), arity: arity}
+          snapshot = Enum.find(snapshots, &(&1.module == target.module))
+
+          exported? =
+            snapshot != nil and %{function: target.function, arity: arity} in snapshot.exports
+
+          incoming =
+            Enum.flat_map(sites, fn {site, scope, term} ->
+              case callable_edge(term, scope, root) do
+                nil -> []
+                kind -> [Map.put(site, :kind, kind)]
+              end
+            end)
+
+          %{
+            root: target,
+            exported: exported?,
+            status:
+              if(complete? and selected? and exported? and incoming == [],
+                do: "no_syntactic_incoming_edges",
+                else: "unconfirmed"
+              ),
+            incoming: incoming
+          }
+        end)
+      else
+        []
+      end
+
+    analysis = %{
+      schema: 1,
+      stage: "incoming_only",
+      requests_valid: valid?,
+      scan_complete: complete?,
+      scanned_nodes: state.nodes,
+      scanned_sites: state.ordinal,
+      snapshots: snapshots,
+      roots: roots,
+      external_callable_records: []
+    }
+
+    Map.put(report, :callable_provenance_preflight, analysis)
+  end
+
+  defp callable_sites(_term, _path, _owner, _scope, %{complete: false} = state), do: state
+
+  defp callable_sites(term, path, owner, scope, state) do
+    state = %{state | nodes: state.nodes + 1}
+
+    if state.nodes > 2_000_000 or state.ordinal >= 100_000 do
+      %{state | complete: false}
+    else
+      state =
+        if match?({:call, _, _, _}, term) or match?({:fun, _, {:function, _, _}}, term) or
+             match?({:fun, _, {:function, _, _, _}}, term) do
+          {name, arity} = owner
+
+          site = %{
+            beam: scope.beam,
+            module: inspect(scope.module),
+            owner: %{function: to_string(name), arity: arity},
+            path: path,
+            ordinal: state.ordinal,
+            line: :erl_anno.line(elem(term, 1))
+          }
+
+          %{state | ordinal: state.ordinal + 1, sites: [{site, scope, term} | state.sites]}
+        else
+          state
+        end
+
+      term
+      |> callable_children()
+      |> Enum.reduce(state, fn {child, index}, acc ->
+        callable_sites(child, path ++ [index], owner, scope, acc)
+      end)
+    end
+  end
+
+  # Skip only AST headers whose exact tag/arity and data-only annotation are
+  # recognized. Retain raw tuple/list indices, including gaps, so every call
+  # and capture keeps its original path and preorder ordinal. Unknown shapes
+  # and malformed annotations take the complete raw traversal instead.
+  defp callable_children(term) when is_tuple(term) do
+    children = term |> Tuple.to_list() |> Enum.with_index()
+
+    header? =
+      tuple_size(term) >= 2 and
+        tuple_size(term) in Map.get(@callable_header_sizes, elem(term, 0), []) and
+        callable_annotation?(elem(term, 1))
+
+    if header?, do: Enum.drop(children, 2), else: children
+  end
+
+  defp callable_children(term) when is_list(term), do: Enum.with_index(term)
+  defp callable_children(_term), do: []
+
+  defp callable_annotation?(line) when is_integer(line) and line >= 0, do: true
+
+  defp callable_annotation?({line, column})
+       when is_integer(line) and line >= 0 and is_integer(column) and column >= 1,
+       do: true
+
+  defp callable_annotation?(properties) when is_list(properties),
+    do: callable_annotation_properties?(properties, 16, false)
+
+  defp callable_annotation?(_unknown), do: false
+
+  defp callable_annotation_properties?([], _remaining, location?), do: location?
+
+  defp callable_annotation_properties?([{key, value} | rest], remaining, location?)
+       when remaining > 0 do
+    callable_annotation_property?(key, value) and
+      callable_annotation_properties?(rest, remaining - 1, location? or key == :location)
+  end
+
+  defp callable_annotation_properties?(_unknown, _remaining, _location?), do: false
+
+  defp callable_annotation_property?(key, value) when key in [:location, :end_location] do
+    case value do
+      line when is_integer(line) and line >= 0 ->
+        true
+
+      {line, column}
+      when is_integer(line) and line >= 0 and is_integer(column) and column >= 1 ->
+        true
+
+      _ ->
+        false
+    end
+  end
+
+  defp callable_annotation_property?(key, true) when key in [:generated, :record], do: true
+
+  defp callable_annotation_property?(:file, value) when is_binary(value),
+    do: byte_size(value) <= 4_096
+
+  defp callable_annotation_property?(key, value) when key in [:file, :text],
+    do: callable_annotation_characters?(value, 4_096)
+
+  defp callable_annotation_property?(_key, _value), do: false
+
+  # erl_anno:is_anno/1 accepts arbitrary lists for file/text. Validate each
+  # character ourselves so executable-shaped terms in those lists cannot be
+  # hidden as metadata. Bounds limit validation work; excess falls back raw.
+  defp callable_annotation_characters?([], _remaining), do: true
+
+  defp callable_annotation_characters?([character | rest], remaining)
+       when remaining > 0 and is_integer(character) and character in 0..0x10FFFF,
+       do: callable_annotation_characters?(rest, remaining - 1)
+
+  defp callable_annotation_characters?(_unknown, _remaining), do: false
+
+  defp callable_edge({:call, _, {:atom, _, name}, args}, scope, root) do
+    key = {name, length(args)}
+
+    module =
+      if MapSet.member?(scope.definitions, key) do
+        scope.module
+      else
+        Enum.find_value(scope.imports, :erlang, fn
+          {module, ^name, arity} when arity == length(args) -> module
+          _ -> nil
+        end)
+      end
+
+    callable_remote_edge({:atom, 0, module}, {:atom, 0, name}, args, scope, root)
+  end
+
+  defp callable_edge({:call, _, {:remote, _, module, function}, args}, scope, root),
+    do: callable_remote_edge(module, function, args, scope, root)
+
+  defp callable_edge({:call, _, callee, args}, scope, root),
+    do: callable_fun_edge(callee, length(args), scope, root)
+
+  defp callable_edge({:fun, _, {:function, name, arity}}, scope, root)
+       when is_atom(name) and is_integer(arity),
+       do: callable_named_edge(scope.module, name, arity, root, "capture")
+
+  defp callable_edge({:fun, _, {:function, module, function, arity}}, _scope, root),
+    do: callable_capture_edge(module, function, arity, root)
+
+  defp callable_remote_edge({:atom, _, :erlang}, {:atom, _, :apply}, [fun, args], scope, root) do
+    arity =
+      case literal_arguments(args) do
+        {:ok, values} -> length(values)
+        :unknown -> :unknown
+      end
+
+    callable_fun_edge(fun, arity, scope, root)
+  end
+
+  defp callable_remote_edge(
+         {:atom, _, :erlang},
+         {:atom, _, :apply},
+         [module, function, args],
+         _scope,
+         root
+       ) do
+    callable_mfa_edge(module, function, args, root, "apply")
+  end
+
+  defp callable_remote_edge(module, function, args, _scope, {target, name, arity}) do
+    cond do
+      callable_possible_atom?(module, :erlang) and callable_metadispatch?(function) ->
+        "metadispatch_requires_proof"
+
+      callable_possible_atom?(module, target) and callable_possible_atom?(function, name) and
+          length(args) == arity ->
+        if match?({:atom, _, _}, module) and match?({:atom, _, _}, function),
+          do: "direct_arguments_require_proof",
+          else: "dynamic_target_requires_proof"
+
+      # An unknown function may select erlang:apply/spawn regardless of the
+      # eventual target's arity. Never exclude that edge using outer arity alone.
+      callable_possible_atom?(module, :erlang) and not match?({:atom, _, _}, function) ->
+        "metadispatch_requires_proof"
+
+      true ->
+        nil
+    end
+  end
+
+  defp callable_fun_edge({:fun, _, {:clauses, _}}, _arity, _scope, _root), do: nil
+  defp callable_fun_edge({:named_fun, _, _, _}, _arity, _scope, _root), do: nil
+
+  defp callable_fun_edge({:fun, _, {:function, name, arity}}, _invoked, scope, root)
+       when is_atom(name) and is_integer(arity),
+       do: callable_named_edge(scope.module, name, arity, root, "capture_invocation")
+
+  defp callable_fun_edge({:fun, _, {:function, module, function, arity}}, _invoked, _scope, root),
+    do: callable_capture_edge(module, function, arity, root)
+
+  defp callable_fun_edge(_fun, arity, _scope, {_module, _function, target_arity}) do
+    cond do
+      arity == :unknown -> "unknown_callable_arity"
+      arity in [1, 2, 3, 4, 5] -> "callable_or_metadispatch_requires_proof"
+      arity == target_arity -> "callable_target_requires_proof"
+      true -> nil
+    end
+  end
+
+  defp callable_capture_edge(module, function, arity, {target, name, count}) do
+    cond do
+      callable_possible_atom?(module, :erlang) and callable_metadispatch?(function) ->
+        "metadispatch_capture_requires_proof"
+
+      callable_possible_atom?(module, target) and callable_possible_atom?(function, name) and
+          (not match?({:integer, _, _}, arity) or elem(arity, 2) == count) ->
+        "capture"
+
+      true ->
+        nil
+    end
+  end
+
+  defp callable_named_edge(module, function, arity, {module, function, arity}, kind), do: kind
+  defp callable_named_edge(_module, _function, _arity, _root, _kind), do: nil
+
+  defp callable_mfa_edge(module, function, arguments, {target, name, arity}, kind) do
+    count =
+      case literal_arguments(arguments) do
+        {:ok, args} -> length(args)
+        :unknown -> :unknown
+      end
+
+    cond do
+      callable_possible_atom?(module, :erlang) and callable_metadispatch?(function) ->
+        "metadispatch_requires_proof"
+
+      callable_possible_atom?(module, target) and callable_possible_atom?(function, name) and
+          count in [:unknown, arity] ->
+        kind
+
+      true ->
+        nil
+    end
+  end
+
+  defp callable_possible_atom?({:atom, _, actual}, expected), do: actual == expected
+  defp callable_possible_atom?(_unknown, _expected), do: true
+
+  defp callable_metadispatch?({:atom, _, name}),
+    do: name == :apply or Keyword.has_key?(@dispatches, name)
+
+  defp callable_metadispatch?(_unknown), do: true
 
   def runtime do
     modules =

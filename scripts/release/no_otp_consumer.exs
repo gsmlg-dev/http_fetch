@@ -29,9 +29,24 @@ defmodule NoOTP.Consumer do
       ]
     }
 
+    # These supported entry points request incoming-edge diagnostics only.
+    # No external callback is classified until its complete provenance is proved.
+    public_callable_roots = [
+      {HTTP.Promise, :then, 2},
+      {HTTP.Promise, :then, 3},
+      {SSL, :connect, 2},
+      {SSL, :connect, 3},
+      {SSL, :connect, 4},
+      {:telemetry, :span, 3}
+    ]
+
     report = %{
       nonce: config["nonce"],
-      artifacts: NoOTP.ReleaseAudit.artifacts(parameter_invariants: parameter_invariants),
+      artifacts:
+        NoOTP.ReleaseAudit.artifacts(
+          parameter_invariants: parameter_invariants,
+          public_callable_roots: public_callable_roots
+        ),
       before: NoOTP.ReleaseAudit.runtime(),
       initial_code_paths: initial_paths,
       scenarios: [],

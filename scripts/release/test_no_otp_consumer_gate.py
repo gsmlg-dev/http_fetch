@@ -521,5 +521,118 @@ class SourceArchiveIdentityTests(unittest.TestCase):
             self.assertEqual(gate.verify_source(stage, source, archives, "1.2.3"), pinned)
 
 
+
+class CallablePreflightTests(unittest.TestCase):
+    @staticmethod
+    def report():
+        beam = '/release/lib/fixture-1/ebin/fixture.beam'
+        inspection = dict(beam=beam, module=':fixture', sha256='a' * 64,
+                          missing_abstract_code=False, unresolved_dispatch=[])
+        snapshot = {key: inspection[key] for key in ('beam', 'module', 'sha256')}
+        snapshot.update(selected=True, debug=True, exports=[dict(function='entry', arity=1)])
+        return dict(checked_app_files=1, checked_rel_files=1, checked_boot_files=1,
+                    checked_beams=1, ssl_app_dependencies=[], ssl_bundle_paths=[],
+                    ssl_boot_entries=[], direct_otp_ssl_imports=[], unresolved_dispatch=[],
+                    missing_abstract_code=[], duplicate_package_apps=[],
+                    package_versions={p: '1.2.3' for p in gate.PACKAGES},
+                    beam_inspections=[inspection],
+                    callable_provenance_preflight=dict(
+                        schema=1, stage='incoming_only', requests_valid=True, scan_complete=True,
+                        scanned_nodes=20, scanned_sites=1, snapshots=[snapshot],
+                        external_callable_records=[], roots=[dict(
+                            root=dict(module=':fixture', function='entry', arity=1), exported=True,
+                            status='no_syntactic_incoming_edges', incoming=[])]))
+
+    @staticmethod
+    def edge(report):
+        return dict(beam=report['beam_inspections'][0]['beam'], module=':fixture',
+                    owner=dict(function='caller', arity=1), path=[2, 4, 0, 4, 0],
+                    ordinal=0, line=3, kind='direct_arguments_require_proof')
+
+    def test_diagnostics_do_not_replace_zero_unresolved_requirement(self):
+        report = self.report()
+        gate.validate_artifacts(report, '1.2.3')
+        report['unresolved_dispatch'] = [dict(kind='unresolved_fun_invocation')]
+        with self.assertRaises(gate.GateError):
+            gate.validate_artifacts(report, '1.2.3')
+
+    def test_external_classification_cannot_be_forged_at_any_level(self):
+        for level in ('top', 'preflight', 'beam'):
+            report = self.report()
+            target = (report if level == 'top' else report['beam_inspections'][0]
+                      if level == 'beam' else report['callable_provenance_preflight'])
+            target['external_callable_records'] = [dict(status='proven')]
+            with self.subTest(level=level), self.assertRaises(gate.GateError):
+                gate.validate_artifacts(report, '1.2.3')
+
+    def test_snapshot_coverage_hash_and_debug_are_bound_to_inspection(self):
+        mutations = [lambda p: p['snapshots'].clear(),
+                     lambda p: p['snapshots'].append(p['snapshots'][0]),
+                     lambda p: p['snapshots'][0].update(sha256='b' * 64),
+                     lambda p: p['snapshots'][0].update(module=':other'),
+                     lambda p: p['snapshots'][0].update(debug=False)]
+        for mutate in mutations:
+            report = self.report()
+            mutate(report['callable_provenance_preflight'])
+            with self.assertRaises(gate.GateError):
+                gate.validate_artifacts(report, '1.2.3')
+
+    def test_unknown_selected_path_never_reports_closed_input_universe(self):
+        report = self.report()
+        preflight = report['callable_provenance_preflight']
+        preflight['snapshots'][0]['selected'] = False
+        with self.assertRaises(gate.GateError):
+            gate.validate_artifacts(report, '1.2.3')
+        preflight['roots'][0]['status'] = 'unconfirmed'
+        gate.validate_artifacts(report, '1.2.3')
+
+    def test_duplicate_and_rebound_original_node_identities_are_rejected(self):
+        for mutate in ('duplicate', 'rebound', 'bad_path', 'unbound_beam'):
+            report = self.report()
+            preflight = report['callable_provenance_preflight']
+            edge = self.edge(report)
+            preflight['roots'][0].update(status='unconfirmed', incoming=[edge])
+            if mutate == 'duplicate':
+                preflight['scanned_sites'] = 2
+                preflight['roots'][0]['incoming'].append(dict(edge))
+            elif mutate == 'rebound':
+                preflight['scanned_sites'] = 2
+                preflight['roots'][0]['incoming'].append({**edge, 'path': [9]})
+            elif mutate == 'bad_path':
+                edge['path'] = [True]
+            else:
+                edge['beam'] = '/foreign/fixture.beam'
+            with self.subTest(mutation=mutate), self.assertRaises(gate.GateError):
+                gate.validate_artifacts(report, '1.2.3')
+
+    def test_incoming_edges_remain_unconfirmed_even_when_root_exported(self):
+        report = self.report()
+        root = report['callable_provenance_preflight']['roots'][0]
+        root['incoming'] = [self.edge(report)]
+        with self.assertRaises(gate.GateError):
+            gate.validate_artifacts(report, '1.2.3')
+        root['status'] = 'unconfirmed'
+        gate.validate_artifacts(report, '1.2.3')
+
+    def test_invalid_or_exhausted_proof_flags_cannot_claim_success(self):
+        for change in (dict(schema=True), dict(stage='external_proven'),
+                       dict(scan_complete='true'), dict(scanned_nodes=2_000_001),
+                       dict(scanned_sites=100_000), dict(requests_valid=False)):
+            report = self.report()
+            report['callable_provenance_preflight'].update(change)
+            with self.subTest(change=change), self.assertRaises(gate.GateError):
+                gate.validate_artifacts(report, '1.2.3')
+
+    def test_absent_export_and_duplicate_root_cannot_become_contracts(self):
+        for mutate in ('absent', 'duplicate'):
+            report = self.report()
+            preflight = report['callable_provenance_preflight']
+            if mutate == 'absent':
+                preflight['roots'][0]['root']['function'] = 'missing'
+            else:
+                preflight['roots'].append(preflight['roots'][0])
+            with self.subTest(mutation=mutate), self.assertRaises(gate.GateError):
+                gate.validate_artifacts(report, '1.2.3')
+
 if __name__ == "__main__":
     unittest.main()

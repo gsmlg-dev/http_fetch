@@ -2168,4 +2168,471 @@ defmodule NoOTP.ReleaseAuditTest do
 
     result
   end
+
+  test "P01 incoming-only requests preserve every unresolved occurrence", context do
+    {before, after_report} = p_run(context, "entry(F) -> F().", [{:p_input, :entry, 1}])
+    refute Map.has_key?(before, :callable_provenance_preflight)
+    assert before.unresolved_dispatch != []
+    assert after_report.unresolved_dispatch == before.unresolved_dispatch
+    assert after_report.beam_inspections == before.beam_inspections
+    proof = after_report.callable_provenance_preflight
+    assert proof.stage == "incoming_only"
+    assert proof.external_callable_records == []
+    assert proof.scan_complete
+    assert Enum.all?(proof.snapshots, & &1.selected)
+    assert [%{status: "no_syntactic_incoming_edges", incoming: []}] = proof.roots
+  end
+
+  test "P02 direct local callers and captures remain explicit obligations", context do
+    for body <- [
+          "entry(F) -> F(). caller() -> entry(fun() -> ok end).",
+          "entry(F) -> F(). caller() -> fun entry/1.",
+          "entry(F) -> F(). caller() -> fun p_input:entry/1."
+        ] do
+      {before, report} =
+        p_run(context, body, [{:p_input, :entry, 1}], exports: "entry/1,caller/0")
+
+      assert report.unresolved_dispatch == before.unresolved_dispatch
+
+      assert [%{status: "unconfirmed", incoming: [_ | _]}] =
+               report.callable_provenance_preflight.roots
+    end
+  end
+
+  test "P03 renamed public roots do not gain origin from their names", context do
+    {before, report} =
+      p_run(context, "renamed(F) -> F().", [{:p_other, :renamed, 1}],
+        module: :p_other,
+        exports: "renamed/1"
+      )
+
+    assert before.unresolved_dispatch == report.unresolved_dispatch
+
+    assert [%{root: %{module: ":p_other", function: "renamed", arity: 1}}] =
+             report.callable_provenance_preflight.roots
+
+    assert report.callable_provenance_preflight.external_callable_records == []
+  end
+
+  test "P04 dynamic callable and aliases cannot disappear from incoming evidence", context do
+    for body <- [
+          "entry(F) -> F(). caller(F) -> F(fun() -> ok end).",
+          "entry(F) -> F(). caller(M) -> M:entry(fun() -> ok end).",
+          "entry(F) -> F(). caller(_) -> M=p_input, F=entry, M:F(fun() -> ok end).",
+          "entry(F) -> F(). caller(F) -> G=F, G(fun() -> ok end)."
+        ] do
+      {_, report} =
+        p_run(context, body, [{:p_input, :entry, 1}], exports: "entry/1,caller/1")
+
+      assert [%{status: "unconfirmed", incoming: [_ | _]}] =
+               report.callable_provenance_preflight.roots
+    end
+  end
+
+  test "P05 apply and metadispatch retain unknown argument spines and selectors", context do
+    for call <- [
+          "erlang:apply(p_input,entry,[F])",
+          "erlang:apply(p_input,entry,F)",
+          "erlang:apply(F,[fun() -> ok end])",
+          "erlang:spawn(p_input,entry,[F])",
+          "erlang:make_fun(p_input,entry,1)",
+          "erlang:F(p_input,entry,[F])",
+          "F(p_input,entry,[fun() -> ok end])"
+        ] do
+      {_, report} =
+        p_run(context, "entry(F) -> F(). caller(F) -> " <> call <> ".", [{:p_input, :entry, 1}],
+          exports: "entry/1,caller/1"
+        )
+
+      assert [%{status: "unconfirmed", incoming: [_ | _]}] =
+               report.callable_provenance_preflight.roots
+    end
+  end
+
+  test "P06 original paths distinguish repeated annotations and nested closures", context do
+    body =
+      "entry(F) -> F(). caller() -> entry(fun() -> ok end), fun() -> entry(fun() -> ok end) end."
+
+    {_, report} = p_run(context, body, [{:p_input, :entry, 1}], exports: "entry/1,caller/0")
+    [root] = report.callable_provenance_preflight.roots
+    edges = Enum.filter(root.incoming, &(&1.kind == "direct_arguments_require_proof"))
+    assert length(edges) == 2
+    assert length(Enum.uniq(Enum.map(edges, & &1.line))) == 1
+    assert length(Enum.uniq(Enum.map(edges, & &1.path))) == 2
+    assert length(Enum.uniq(Enum.map(edges, & &1.ordinal))) == 2
+    assert Enum.all?(edges, &(&1.owner == %{function: "caller", arity: 0}))
+  end
+
+  test "P07 malformed duplicate and oversized requests never classify a callback", context do
+    for roots <- [
+          :invalid,
+          [{:p_input, :entry, -1}],
+          [{"p_input", :entry, 1}],
+          [{:p_input, :entry, 1}, {:p_input, :entry, 1}],
+          List.duplicate({:p_input, :entry, 1}, 65)
+        ] do
+      {before, report} = p_run(context, "entry(F) -> F().", roots)
+      assert report.unresolved_dispatch == before.unresolved_dispatch
+      refute report.callable_provenance_preflight.requests_valid
+      assert report.callable_provenance_preflight.roots == []
+      assert report.callable_provenance_preflight.external_callable_records == []
+    end
+  end
+
+  test "P08 a new selected module adds its real incoming edge", context do
+    extra = {:p_caller, "-export([run/1]). run(F) -> p_input:entry(F).", true}
+    {before, report} = p_run(context, "entry(F) -> F().", [{:p_input, :entry, 1}], extra: [extra])
+    assert before.unresolved_dispatch == report.unresolved_dispatch
+    assert length(report.callable_provenance_preflight.snapshots) == 2
+    [root] = report.callable_provenance_preflight.roots
+
+    assert Enum.any?(
+             root.incoming,
+             &(&1.module == ":p_caller" and &1.kind == "direct_arguments_require_proof")
+           )
+
+    assert root.status == "unconfirmed"
+  end
+
+  test "P09 missing debug in any audited module invalidates closed incoming evidence", context do
+    extra = {:p_hidden, "-export([run/1]). run(F) -> p_input:entry(F).", false}
+    {_, report} = p_run(context, "entry(F) -> F().", [{:p_input, :entry, 1}], extra: [extra])
+    assert report.missing_abstract_code != []
+    assert [%{status: "unconfirmed"}] = report.callable_provenance_preflight.roots
+    assert Enum.any?(report.callable_provenance_preflight.snapshots, &(not &1.debug))
+  end
+
+  test "P10 absent or private roots are not exported contracts", context do
+    {_, report} =
+      p_run(context, "entry(F) -> F(), hidden(F). hidden(F) -> F().", [
+        {:p_absent, :entry, 1},
+        {:p_input, :hidden, 1}
+      ])
+
+    assert Enum.all?(
+             report.callable_provenance_preflight.roots,
+             &(not &1.exported and &1.status == "unconfirmed")
+           )
+  end
+
+  test "P11 scans neither execute producers nor hide unsafe nested bodies", context do
+    Process.delete(:p_audit_executed)
+
+    body =
+      "entry(F) -> erlang:put(p_audit_executed,true), F(), fun() -> M=ssl, M:connect(a,1,[]) end."
+
+    {before, report} = p_run(context, body, [{:p_input, :entry, 1}])
+    assert report.unresolved_dispatch == before.unresolved_dispatch
+    assert Enum.any?(report.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+    assert Process.get(:p_audit_executed) == nil
+  end
+
+  test "P12 incompatible literal MFA calls are distinguished from unknown targets", context do
+    body = "entry(F) -> F(). caller() -> lists:reverse([])."
+    {_, report} = p_run(context, body, [{:p_input, :entry, 1}], exports: "entry/1,caller/0")
+    assert [%{incoming: []}] = report.callable_provenance_preflight.roots
+  end
+
+  test "P13 compiled nested expressions retain raw call and capture preorder", context do
+    body = """
+    entry(F) -> F().
+    caller(X) ->
+      A = \#{value => entry(X)},
+      B = [entry(Y) || Y <- [X]],
+      C = <<(entry(X)):8>>,
+      D = fun Again(Y) -> case Y of stop -> entry(X); _ -> Again(stop) end end,
+      E = fun() -> entry(X) end,
+      F = fun entry/1,
+      G = fun p_input:entry/1,
+      try entry(X) of V -> {A,B,C,D,E,F,G,V}
+      catch _:_ -> entry(X)
+      after receive done -> entry(X) after 0 -> entry(X) end end.
+    """
+
+    {before, report} =
+      p_run(context, body, [{:p_input, :entry, 1}], exports: "entry/1,caller/1")
+
+    [snapshot] = report.callable_provenance_preflight.snapshots
+
+    {:ok, {:p_input, [abstract_code: {:raw_abstract_v1, forms}]}} =
+      :beam_lib.chunks(String.to_charlist(snapshot.beam), [:abstract_code])
+
+    p_assert_raw_sites(before, report, forms)
+    assert report.callable_provenance_preflight.scanned_nodes < p_raw_node_count(forms)
+  end
+
+  test "P14 valid scalar annotation forms leave identical raw site identities", context do
+    for annotation <- [
+          0,
+          {7, 3},
+          [
+            location: {7, 3},
+            generated: true,
+            record: true,
+            end_location: {9, 4},
+            file: ~c"fixture.erl",
+            text: ~c"entry(F)"
+          ],
+          [location: 7, file: "fixture.erl"]
+        ] do
+      {before, report, forms} =
+        p_mutated(context, fn body -> [{:block, annotation, [p_entry_call() | body]}] end)
+
+      p_assert_raw_sites(before, report, forms)
+      assert [%{incoming: [_]}] = report.callable_provenance_preflight.roots
+    end
+  end
+
+  test "P15 executable terms in file annotations are not erased as strings", context do
+    for nested <- [p_entry_call(), p_entry_capture()] do
+      annotation = [location: 1, file: [102, nested, 111]]
+      assert :erl_anno.is_anno(annotation)
+
+      {before, report, forms} =
+        p_mutated(context, fn body -> [{:block, annotation, body}] end)
+
+      p_assert_raw_sites(before, report, forms)
+      assert [%{incoming: [edge]}] = report.callable_provenance_preflight.roots
+      assert Enum.slice(edge.path, 5, 3) == [1, 1, 1]
+    end
+  end
+
+  test "P16 executable terms in text annotations are not erased as strings", context do
+    for nested <- [p_entry_call(), p_entry_capture()] do
+      annotation = [location: 1, text: [nested]]
+      assert :erl_anno.is_anno(annotation)
+
+      {before, report, forms} =
+        p_mutated(context, fn body -> [{:block, annotation, body}] end)
+
+      p_assert_raw_sites(before, report, forms)
+      assert [%{incoming: [_]}] = report.callable_provenance_preflight.roots
+    end
+  end
+
+  test "P17 unknown tags and malformed arities retain every raw child", context do
+    for wrap <- [
+          fn body -> {:unknown_ast_tag, p_entry_call(), body} end,
+          fn body -> {:tuple, p_entry_capture(), body, :unexpected_fourth_field} end,
+          fn body -> {:block, 0, body, p_entry_call()} end,
+          fn body -> {:atom, 0, {p_entry_call(), body}} end,
+          fn body -> {p_entry_capture(), 0, body} end
+        ] do
+      {before, report, forms} = p_mutated(context, fn body -> [wrap.(body)] end)
+      p_assert_raw_sites(before, report, forms)
+      assert [%{incoming: [_]}] = report.callable_provenance_preflight.roots
+    end
+  end
+
+  test "P18 malformed and unknown annotation properties fall back without partial erasure",
+       context do
+    for annotation <- [
+          [location: 1, unknown: p_entry_call()],
+          [location: 1, generated: p_entry_capture()],
+          [location: 1, file: ~c"valid-prefix", text: [p_entry_call()]],
+          [location: 1, file: [p_entry_capture()], text: ~c"valid-suffix"],
+          [location: p_entry_call()],
+          [file: [p_entry_capture()]]
+        ] do
+      {before, report, forms} =
+        p_mutated(context, fn body -> [{:tuple, annotation, body}] end)
+
+      p_assert_raw_sites(before, report, forms)
+      assert [%{incoming: [_]}] = report.callable_provenance_preflight.roots
+    end
+  end
+
+  test "P19 annotation validation bounds cannot truncate hidden obligations", context do
+    for annotation <- [
+          [location: 1] ++ List.duplicate({:generated, true}, 16) ++ [text: [p_entry_call()]],
+          [location: 1, file: List.duplicate(?x, 4_096) ++ [p_entry_capture()]],
+          [location: 1, text: [0x110000, p_entry_call()]],
+          [location: 1, text: [-1, p_entry_capture()]]
+        ] do
+      {before, report, forms} =
+        p_mutated(context, fn body -> [{:block, annotation, body}] end)
+
+      p_assert_raw_sites(before, report, forms)
+      assert [%{incoming: [_]}] = report.callable_provenance_preflight.roots
+    end
+  end
+
+  test "P20 counted nodes exclude only proven headers and retain body data", context do
+    for annotation <- [0, [location: 1, file: List.duplicate(?x, 4_096)]] do
+      literal = {:tuple, annotation, [{:atom, 0, :ok}, {:integer, 0, 1}]}
+      {before, report, forms} = p_mutated(context, fn _body -> [literal] end)
+      p_assert_raw_sites(before, report, forms)
+      # One clause list, one clause, one pattern list, one var and its name,
+      # one guard list, one body list, one tuple, one element list, and each
+      # of the two literal nodes with its value: thirteen retained nodes.
+      assert report.callable_provenance_preflight.scanned_nodes == 13
+      assert report.callable_provenance_preflight.scanned_sites == 0
+
+      for {malformed, expected} <- [
+            {put_elem(literal, 0, :unknown_ast_tag), 14 + p_raw_count(annotation)},
+            {Tuple.append(literal, :extra), 15 + p_raw_count(annotation)}
+          ] do
+        {before, report, forms} = p_mutated(context, fn _body -> [malformed] end)
+        p_assert_raw_sites(before, report, forms)
+        assert report.callable_provenance_preflight.scanned_nodes == expected
+      end
+    end
+  end
+
+  defp p_entry_call,
+    do: {:call, 1, {:remote, 1, {:atom, 1, :p_input}, {:atom, 1, :entry}}, [{:atom, 1, :input}]}
+
+  defp p_entry_capture,
+    do: {:fun, 1, {:function, {:atom, 1, :p_input}, {:atom, 1, :entry}, {:integer, 1, 1}}}
+
+  # Change only the debug chunk of a real compiled fixture. The auditor must
+  # conservatively retain obligations even when debug annotations are malformed;
+  # no producer or rewritten code is loaded or executed by these controls.
+  defp p_mutated(context, rewrite_body) do
+    ebin = b_physical(context.ebin)
+    directory = ebin |> Path.dirname() |> Path.dirname() |> Path.dirname()
+    System.put_env("NO_OTP_RELEASE", directory)
+    System.put_env("NO_OTP_PROJECT", directory)
+    bytes = b_compile(:p_input, "-export([entry/1]). entry(F) -> F().", true)
+    {:ok, :p_input, chunks} = :beam_lib.all_chunks(bytes)
+    {~c"Dbgi", debug} = List.keyfind(chunks, ~c"Dbgi", 0)
+    {:debug_info_v1, :erl_abstract_code, {forms, options}} = :erlang.binary_to_term(debug)
+
+    forms =
+      Enum.map(forms, fn
+        {:function, annotation, :entry, 1, clauses} ->
+          clauses =
+            Enum.map(clauses, fn {:clause, anno, args, guards, body} ->
+              {:clause, anno, args, guards, rewrite_body.(body)}
+            end)
+
+          {:function, annotation, :entry, 1, clauses}
+
+        other ->
+          other
+      end)
+
+    debug =
+      :erlang.term_to_binary({:debug_info_v1, :erl_abstract_code, {forms, options}}, [:compressed])
+
+    {:ok, bytes} = :beam_lib.build_module(List.keyreplace(chunks, ~c"Dbgi", 0, {~c"Dbgi", debug}))
+    File.write!(Path.join(ebin, "p_input.beam"), bytes)
+    true = :code.add_patha(String.to_charlist(ebin))
+    on_exit(fn -> :code.del_path(String.to_charlist(ebin)) end)
+    before = NoOTP.ReleaseAudit.artifacts()
+    report = NoOTP.ReleaseAudit.artifacts(public_callable_roots: [{:p_input, :entry, 1}])
+    {before, report, forms}
+  end
+
+  defp p_assert_raw_sites(before, report, forms) do
+    assert Map.delete(report, :callable_provenance_preflight) == before
+    proof = report.callable_provenance_preflight
+    assert proof.scan_complete
+    assert proof.external_callable_records == []
+    sites = p_raw_sites(forms)
+    assert proof.scanned_sites == length(sites)
+    [root] = proof.roots
+
+    expected =
+      sites
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {{path, term}, ordinal} ->
+        if p_root_site?(term), do: [{path, ordinal}], else: []
+      end)
+
+    for edge <- root.incoming do
+      {path, _term} = Enum.fetch!(sites, edge.ordinal)
+      assert edge.path == path
+    end
+
+    actual =
+      root.incoming
+      |> Enum.filter(
+        &(&1.kind in ["direct_arguments_require_proof", "capture", "capture_invocation"])
+      )
+      |> Enum.map(&{&1.path, &1.ordinal})
+
+    assert actual == expected
+  end
+
+  # Independent full raw preorder, with no annotation/header filtering. This
+  # checks both original tuple/list paths and ordinals across all call/capture
+  # nodes, including nodes that do not contribute an incoming root edge.
+  defp p_raw_sites(forms) do
+    forms
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {{:function, _, _, _, clauses}, index} -> p_raw_sites(clauses, [index, 4])
+      _ -> []
+    end)
+  end
+
+  defp p_raw_sites(term, path) do
+    site =
+      if match?({:call, _, _, _}, term) or
+           match?({:fun, _, {:function, _, _}}, term) or
+           match?({:fun, _, {:function, _, _, _}}, term),
+         do: [{path, term}],
+         else: []
+
+    children =
+      cond do
+        is_tuple(term) -> Tuple.to_list(term)
+        is_list(term) -> term
+        true -> []
+      end
+
+    site ++
+      (children
+       |> Enum.with_index()
+       |> Enum.flat_map(fn {child, index} ->
+         p_raw_sites(child, path ++ [index])
+       end))
+  end
+
+  defp p_root_site?({:call, _, {:atom, _, :entry}, [_]}), do: true
+
+  defp p_root_site?({:call, _, {:remote, _, {:atom, _, :p_input}, {:atom, _, :entry}}, [_]}),
+    do: true
+
+  defp p_root_site?({:fun, _, {:function, :entry, 1}}), do: true
+
+  defp p_root_site?(
+         {:fun, _, {:function, {:atom, _, :p_input}, {:atom, _, :entry}, {:integer, _, 1}}}
+       ),
+       do: true
+
+  defp p_root_site?(_other), do: false
+
+  defp p_raw_node_count(forms) do
+    forms
+    |> Enum.reduce(0, fn
+      {:function, _, _, _, clauses}, total -> total + p_raw_count(clauses)
+      _, total -> total
+    end)
+  end
+
+  defp p_raw_count(term) when is_tuple(term), do: 1 + p_raw_count_children(Tuple.to_list(term))
+  defp p_raw_count(term) when is_list(term), do: 1 + p_raw_count_children(term)
+  defp p_raw_count(_term), do: 1
+  defp p_raw_count_children(children), do: Enum.reduce(children, 0, &(&2 + p_raw_count(&1)))
+
+  defp p_run(context, body, roots, options \\ []) do
+    ebin = b_physical(context.ebin)
+    directory = ebin |> Path.dirname() |> Path.dirname() |> Path.dirname()
+    System.put_env("NO_OTP_RELEASE", directory)
+    System.put_env("NO_OTP_PROJECT", directory)
+    module = Keyword.get(options, :module, :p_input)
+    source = "-export([" <> Keyword.get(options, :exports, "entry/1") <> "]). " <> body
+    entries = [{module, source, true} | Keyword.get(options, :extra, [])]
+
+    for {module, source, debug?} <- entries do
+      bytes = b_compile(module, source, debug?)
+      File.write!(Path.join(ebin, Atom.to_string(module) <> ".beam"), bytes)
+    end
+
+    true = :code.add_patha(String.to_charlist(ebin))
+    on_exit(fn -> :code.del_path(String.to_charlist(ebin)) end)
+    {NoOTP.ReleaseAudit.artifacts(), NoOTP.ReleaseAudit.artifacts(public_callable_roots: roots)}
+  end
 end
