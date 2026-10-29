@@ -19,6 +19,9 @@ defmodule NoOTP.Consumer do
     transport_targets = [HTTP.Transport.TCP, HTTP.Transport.ExSSL]
 
     parameter_invariants = %{
+      HTTP.EventSource.Connection => [
+        {{:connect_stream, 2}, 1, [HTTP.HTTP3.Stream, HTTP.Runtime.Stream]}
+      ],
       HTTP.Proxy => [
         {{:establish_tunnel, 7}, 6, transport_targets},
         {{:read_head, 7}, 6, transport_targets},
