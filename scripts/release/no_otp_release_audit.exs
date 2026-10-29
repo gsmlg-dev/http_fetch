@@ -1091,6 +1091,7 @@ defmodule NoOTP.ReleaseAudit do
         {:raw_abstract_v1, forms} ->
           prepared =
             forms
+            |> prove_remote_tuple_cases(context)
             |> prove_local_tuple_cases(context)
             |> prove_internal_pair_calls(context)
             |> prove_return_calls(context)
@@ -1181,6 +1182,395 @@ defmodule NoOTP.ReleaseAudit do
     do: match?(%{resolved: ^selected, error: nil}, canonical_path(to_string(path)))
 
   defp loaded_selection?(_loaded, _selected), do: false
+
+  # Conditional return projection for a selected candidate's remote call.
+  # Every normal return is overapproximated: unknown passthrough can still be a
+  # matching four-tuple, while known other arities/tags cannot. Original calls,
+  # helpers, guards and nested bodies remain in the ordinary artifact scan.
+  defp prove_remote_tuple_cases(forms, context) do
+    state = %{
+      context: context,
+      requests: MapSet.new(),
+      selections: %{},
+      summaries: %{},
+      visiting: MapSet.new(),
+      nodes: 0,
+      calls: 0,
+      complete: true
+    }
+
+    state = tagged_case_requests(forms, state)
+
+    {projections, state} =
+      Enum.map_reduce(state.requests, state, fn {module, function, arity, tag} = key, acc ->
+        {value, acc} = tagged_return_call(module, function, arity, true, acc)
+        {{key, tagged_projection(value, tag)}, acc}
+      end)
+
+    current? =
+      Enum.all?(state.selections, fn {module, selected} ->
+        selected_producer(module, context) == {:ok, selected}
+      end)
+
+    if state.complete and current?,
+      do: remote_tuple_cases(forms, Map.new(projections)),
+      else: forms
+  end
+
+  defp tagged_case_requests(_term, %{complete: false} = state), do: state
+
+  defp tagged_case_requests(term, state) do
+    state = %{state | nodes: state.nodes + 1}
+
+    if state.nodes > @max_parameter_nodes do
+      %{state | complete: false}
+    else
+      requests =
+        case term do
+          {:case, _, {:call, _, {:remote, _, {:atom, _, module}, {:atom, _, function}}, args},
+           clauses}
+          when is_list(args) and is_list(clauses) ->
+            Enum.reduce(clauses, state.requests, fn
+              {:clause, _, [{:tuple, _, [{:atom, _, tag}, {:var, _, name}, _, _]}], _, _}, acc
+              when is_atom(module) and is_atom(function) and is_atom(tag) and name != :_ ->
+                MapSet.put(acc, {module, function, length(args), tag})
+
+              _, acc ->
+                acc
+            end)
+
+          _ ->
+            state.requests
+        end
+
+      state = %{state | requests: requests, complete: MapSet.size(requests) <= 64}
+      Enum.reduce(tagged_children(term), state, &tagged_case_requests/2)
+    end
+  end
+
+  defp tagged_children(term) when is_tuple(term), do: Tuple.to_list(term)
+  defp tagged_children(term) when is_list(term), do: term
+  defp tagged_children(_term), do: []
+
+  defp tagged_selection(module, state) do
+    case Map.fetch(state.selections, module) do
+      {:ok, selected} ->
+        {:ok, selected, state}
+
+      :error ->
+        with true <- map_size(state.selections) < 32,
+             {:ok, selected} <- selected_producer(module, state.context),
+             true <- MapSet.member?(state.context.audited_beams, selected.path),
+             true <- map_size(selected.definitions) <= @max_parameter_functions do
+          {:ok, selected, %{state | selections: Map.put(state.selections, module, selected)}}
+        else
+          _ -> :unknown
+        end
+    end
+  end
+
+  defp tagged_return_call(_module, _function, _arity, _remote?, %{complete: false} = state),
+    do: {:unknown, state}
+
+  defp tagged_return_call(module, function, arity, remote?, state) do
+    key = {module, function, arity}
+    state = %{state | calls: state.calls + 1}
+
+    cond do
+      state.calls > @max_parameter_calls or MapSet.size(state.visiting) >= 32 ->
+        {:unknown, %{state | complete: false}}
+
+      MapSet.member?(state.visiting, key) ->
+        {:unknown, state}
+
+      true ->
+        with {:ok, selected, state} <- tagged_selection(module, state),
+             true <- not remote? or {function, arity} in selected.exports,
+             form when not is_nil(form) <- Map.get(selected.definitions, {function, arity}),
+             true <- tuple_projection_form?(form) do
+          case Map.fetch(state.summaries, key) do
+            {:ok, value} ->
+              {value, state}
+
+            :error ->
+              if map_size(state.summaries) >= @max_parameter_functions do
+                {:unknown, %{state | complete: false}}
+              else
+                {:function, _, _, _, clauses} = form
+                state = %{state | visiting: MapSet.put(state.visiting, key)}
+
+                {values, state} =
+                  Enum.map_reduce(clauses, state, fn
+                    {:clause, _, patterns, _guards, body}, acc ->
+                      scope = Enum.reduce(patterns, %{}, &tagged_unknown_pattern/2)
+                      {value, _scope, acc} = tagged_sequence(body, scope, module, acc)
+                      {value, acc}
+                  end)
+
+                value = tagged_join(values)
+
+                state = %{
+                  state
+                  | visiting: MapSet.delete(state.visiting, key),
+                    summaries: Map.put(state.summaries, key, value)
+                }
+
+                {value, state}
+              end
+          end
+        else
+          _ -> {:unknown, state}
+        end
+    end
+  end
+
+  defp tagged_sequence(expressions, environment, module, state) do
+    Enum.reduce(expressions, {:unknown, environment, state}, fn expression,
+                                                                {_value, scope, acc} ->
+      tagged_expression(expression, scope, module, acc)
+    end)
+  end
+
+  defp tagged_expression(_expression, environment, _module, %{complete: false} = state),
+    do: {:unknown, environment, state}
+
+  defp tagged_expression(expression, environment, module, state) do
+    state = %{state | nodes: state.nodes + 1}
+
+    if state.nodes > @max_parameter_nodes,
+      do: {:unknown, environment, %{state | complete: false}},
+      else: tagged_value(expression, environment, module, state)
+  end
+
+  defp tagged_value({:var, _, name}, environment, _module, state) when is_atom(name),
+    do: {Map.get(environment, name, :unknown), environment, state}
+
+  defp tagged_value({:atom, _, value} = expression, environment, _module, state)
+       when is_atom(value),
+       do: {expression, environment, state}
+
+  defp tagged_value({:integer, _, value} = expression, environment, _module, state)
+       when is_integer(value),
+       do: {expression, environment, state}
+
+  defp tagged_value({nil, _} = value, environment, _module, state),
+    do: {value, environment, state}
+
+  defp tagged_value({:tuple, annotation, expressions}, environment, module, state)
+       when is_list(expressions) do
+    {values, {environment, state}} =
+      Enum.map_reduce(expressions, {environment, state}, fn expression, {scope, acc} ->
+        {value, scope, acc} = tagged_expression(expression, scope, module, acc)
+        {value, {scope, acc}}
+      end)
+
+    value = {:tuple, annotation, values}
+    value = if :erlang.external_size(value) <= @max_finite_bytes, do: value, else: :unknown
+    {value, environment, state}
+  end
+
+  defp tagged_value({:match, _, pattern, expression}, environment, module, state) do
+    {value, environment, state} = tagged_expression(expression, environment, module, state)
+
+    scope =
+      case tagged_bind(pattern, value, environment) do
+        {:ok, scope} -> scope
+        :no_match -> environment
+      end
+
+    {value, scope, state}
+  end
+
+  defp tagged_value({:block, _, body}, environment, module, state) when is_list(body),
+    do: tagged_sequence(body, environment, module, state)
+
+  defp tagged_value({:case, _, source, clauses}, environment, module, state)
+       when is_list(clauses) do
+    {value, environment, state} = tagged_expression(source, environment, module, state)
+
+    {values, state} =
+      Enum.map_reduce(clauses, state, fn
+        {:clause, _, [pattern], _guards, body}, acc when is_list(body) ->
+          {results, acc} =
+            Enum.map_reduce(finite_choices(value), acc, fn alternative, acc ->
+              case tagged_bind(pattern, alternative, environment) do
+                {:ok, scope} ->
+                  {result, _scope, acc} = tagged_sequence(body, scope, module, acc)
+                  {[result], acc}
+
+                :no_match ->
+                  {[], acc}
+              end
+            end)
+
+          {List.flatten(results), acc}
+
+        _, acc ->
+          {[:unknown], acc}
+      end)
+
+    {tagged_join(List.flatten(values)), environment, state}
+  end
+
+  defp tagged_value({:call, _, {:atom, _, function}, args}, environment, module, state)
+       when is_atom(function) and is_list(args) do
+    {value, state} = tagged_return_call(module, function, length(args), false, state)
+    {value, environment, state}
+  end
+
+  defp tagged_value(
+         {:call, _, {:remote, _, {:atom, _, module}, {:atom, _, function}}, args},
+         environment,
+         _owner,
+         state
+       )
+       when is_atom(module) and is_atom(function) and is_list(args) do
+    {value, state} = tagged_return_call(module, function, length(args), true, state)
+    {value, environment, state}
+  end
+
+  defp tagged_value(_expression, environment, _module, state),
+    do: {:unknown, environment, state}
+
+  defp tagged_unknown_pattern(pattern, environment),
+    do: Enum.reduce(pattern_variables(pattern), environment, &Map.put_new(&2, &1, :unknown))
+
+  defp tagged_bind({:var, _, :_}, _value, environment), do: {:ok, environment}
+
+  defp tagged_bind({:var, _, name}, value, environment),
+    do: {:ok, Map.put_new(environment, name, value)}
+
+  defp tagged_bind({:match, _, first, second}, value, environment) do
+    with {:ok, environment} <- tagged_bind(first, value, environment),
+         do: tagged_bind(second, value, environment)
+  end
+
+  defp tagged_bind({:tuple, _, patterns}, {:tuple, _, values}, environment)
+       when is_list(patterns) and is_list(values) and length(patterns) == length(values) do
+    Enum.zip(patterns, values)
+    |> Enum.reduce_while({:ok, environment}, fn {pattern, value}, {:ok, scope} ->
+      case tagged_bind(pattern, value, scope) do
+        {:ok, scope} -> {:cont, {:ok, scope}}
+        :no_match -> {:halt, :no_match}
+      end
+    end)
+  end
+
+  defp tagged_bind({:atom, _, expected}, {:atom, _, actual}, environment),
+    do: if(expected == actual, do: {:ok, environment}, else: :no_match)
+
+  defp tagged_bind({:integer, _, expected}, {:integer, _, actual}, environment),
+    do: if(expected == actual, do: {:ok, environment}, else: :no_match)
+
+  defp tagged_bind(pattern, value, environment) do
+    expected = tagged_kind(pattern)
+    actual = tagged_kind(value)
+
+    if expected != :unknown and actual != :unknown and expected != actual,
+      do: :no_match,
+      else: {:ok, tagged_unknown_pattern(pattern, environment)}
+  end
+
+  defp tagged_kind({:tuple, _, fields}) when is_list(fields), do: {:tuple, length(fields)}
+  defp tagged_kind({:map, _, _}), do: :map
+  defp tagged_kind({:atom, _, _}), do: :atom
+  defp tagged_kind({:integer, _, _}), do: :integer
+  defp tagged_kind({nil, _}), do: :list
+  defp tagged_kind(_), do: :unknown
+
+  # Coalesce equal tuple tags/arities componentwise. Unrelated payload fields
+  # may become unknown; a single unknown matching module field cannot vanish.
+  defp tagged_join(values) do
+    values = Enum.flat_map(values, &finite_choices/1)
+
+    if :unknown in values or values == [] do
+      :unknown
+    else
+      values
+      |> Enum.group_by(fn
+        {:tuple, _, [{:atom, _, tag} | fields]} -> {:tagged, tag, length(fields)}
+        value -> {:value, canonical_value(value)}
+      end)
+      |> Enum.map(fn
+        {{:tagged, _, _}, [{:tuple, annotation, fields} | _] = group} ->
+          fields =
+            fields
+            |> Enum.with_index()
+            |> Enum.map(fn {_field, index} ->
+              group |> Enum.map(&(elem(&1, 2) |> Enum.at(index))) |> common_value()
+            end)
+
+          {:tuple, annotation, fields}
+
+        {_key, [value | _]} ->
+          value
+      end)
+      |> common_value()
+    end
+  end
+
+  defp tagged_projection(value, tag) do
+    values =
+      Enum.map(finite_choices(value), fn
+        {:tuple, _, [{:atom, _, ^tag}, target, _, _]} ->
+          if Enum.all?(finite_choices(target), &match?({:atom, _, atom} when is_atom(atom), &1)),
+            do: [target],
+            else: [:unknown]
+
+        {:tuple, _, [{:atom, _, _}, _, _, _]} ->
+          []
+
+        {:tuple, _, fields} when length(fields) != 4 ->
+          []
+
+        {kind, _, _} when kind in [:atom, :integer] ->
+          []
+
+        {nil, _} ->
+          []
+
+        _ ->
+          [:unknown]
+      end)
+
+    values |> List.flatten() |> common_value()
+  end
+
+  defp remote_tuple_cases(
+         {:case, annotation,
+          {:call, _, {:remote, _, {:atom, _, module}, {:atom, _, function}}, args} = source,
+          clauses},
+         projections
+       ) do
+    clauses = remote_tuple_cases(clauses, projections)
+
+    clauses =
+      if callable_annotation?(annotation) and tuple_projection_headers?(source) do
+        Enum.map(clauses, fn
+          {:clause, _, [{:tuple, _, [{:atom, _, tag}, {:var, _, _}, _, _]}], _, _} = clause ->
+            case Map.get(projections, {module, function, length(args), tag}, :unknown) do
+              :unknown -> clause
+              targets -> local_tuple_case_clause(clause, tag, targets)
+            end
+
+          clause ->
+            clause
+        end)
+      else
+        clauses
+      end
+
+    {:case, annotation, remote_tuple_cases(source, projections), clauses}
+  end
+
+  defp remote_tuple_cases(term, projections) when is_tuple(term),
+    do:
+      term |> Tuple.to_list() |> Enum.map(&remote_tuple_cases(&1, projections)) |> List.to_tuple()
+
+  defp remote_tuple_cases(terms, projections) when is_list(terms),
+    do: Enum.map(terms, &remote_tuple_cases(&1, projections))
+
+  defp remote_tuple_cases(term, _projections), do: term
 
   # Prove only an immediate local case over uniform tagged four-tuples. Every
   # producer clause must construct the same tag and a finite atom in slot two;
@@ -2800,6 +3190,16 @@ defmodule NoOTP.ReleaseAudit do
     if state.nodes > @max_parameter_nodes,
       do: %{state | complete: false},
       else: caller_node(term, owner, state)
+  end
+
+  # Early lexical preparation marks variable callees so a data atom cannot
+  # become a source-level local call. Traverse that marker's complete payload
+  # for caller edges and captures; it supplies no callable or parameter fact.
+  defp caller_node({:audit_fun_value, annotation, callee} = term, owner, state) do
+    if callable_annotation?(annotation) and
+         :erlang.external_size(term) <= @max_finite_bytes,
+       do: caller_syntax(callee, owner, state),
+       else: %{state | complete: false}
   end
 
   # Earlier checked return preparation can place a finite atom domain directly

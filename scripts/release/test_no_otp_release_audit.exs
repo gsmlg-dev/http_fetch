@@ -4555,4 +4555,456 @@ defmodule NoOTP.ReleaseAuditTest do
 
     t_install(context, [{module, bytes}]) |> t_inspection(module)
   end
+
+  # Y: selected remote normal-return shapes, never default/module-name assumptions.
+  test "Y01 selected remote success tuples exclude known error arities", context do
+    producer =
+      "pick(a) -> {ok,lists,x,0}; pick(_) -> {error,unknown_payload()}. unknown_payload() -> external:value()."
+
+    assert y_consumer_result(context, producer).unresolved_dispatch == []
+  end
+
+  test "Y02 local and selected remote helper returns preserve a finite module slot", context do
+    producer =
+      "pick(X) -> case helper(X) of {ok,M,H,P} -> {ok,M,H,P}; Other -> Other end. helper(X) -> {ok,y_leaf:pick(X),X,0}."
+
+    assert y_consumer_result(context, producer, y_consumer(),
+             leaf: "pick(a) -> lists; pick(_) -> maps."
+           ).unresolved_dispatch == []
+  end
+
+  test "Y03 every matching success alternative contributes including unknown modules", context do
+    for producer <- [
+          "pick(a) -> {ok,lists,x,0}; pick(X) -> {ok,X,x,0}.",
+          "pick(X) -> {ok,external:module(X),x,0}.",
+          "pick(X) when is_atom(X) -> {ok,X,x,0}; pick(_) -> {ok,lists,x,0}."
+        ] do
+      assert y_consumer_result(context, producer).unresolved_dispatch != []
+    end
+  end
+
+  test "Y04 unknown passthrough is not treated as an error", context do
+    for producer <- [
+          "pick(a) -> {ok,lists,x,0}; pick(X) -> X.",
+          "pick(X) -> case external:value(X) of {ok,M,H,P} -> {ok,M,H,P}; Other -> Other end.",
+          "pick(X) -> case external:validate(X) of ok -> {ok,lists,x,0}; Other -> Other end."
+        ] do
+      assert y_consumer_result(context, producer).unresolved_dispatch != []
+    end
+  end
+
+  test "Y05 unsafe matching modules remain unsafe while nonmatching data stays data", context do
+    result = y_consumer_result(context, "pick(a) -> {ok,lists,x,0}; pick(_) -> {ok,ssl,x,0}.")
+    assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+
+    assert y_consumer_result(context, "pick(a) -> {ok,lists,x,0}; pick(_) -> {error,ssl}.").unresolved_dispatch ==
+             []
+  end
+
+  test "Y06 original argument closures and fallback calls keep their occurrences", context do
+    consumer =
+      "run(X) -> case y_producer:pick(fun() -> ssl:connect(a,1,[]) end) of {ok,M,_,_} -> M:reverse([]); _ -> X(value) end."
+
+    result = y_consumer_result(context, "pick(X) -> {ok,lists,X,0}.", consumer)
+
+    assert Enum.sort(Enum.map(result.unresolved_dispatch, & &1.kind)) ==
+             ["literal_module_ssl", "unresolved_fun_invocation"]
+  end
+
+  test "Y07 producer helper obligations remain audited independently of the projection",
+       context do
+    report = y_fixture(context, "pick(X) -> side(X), {ok,lists,X,0}. side(F) -> F().")
+    assert t_inspection(report, :y_consumer).unresolved_dispatch == []
+
+    assert Enum.any?(
+             t_inspection(report, :y_producer).unresolved_dispatch,
+             &(&1.kind == "unresolved_fun_invocation")
+           )
+
+    report = y_fixture(context, "pick(X) -> ssl:connect(a,1,[]), {ok,lists,X,0}.")
+    assert t_inspection(report, :y_consumer).unresolved_dispatch != []
+    assert t_inspection(report, :y_producer).otp_ssl_imports != []
+  end
+
+  test "Y08 coalescing tagged alternatives cannot erase an unknown module component", context do
+    producer = "pick(a) -> {ok,lists,x,0}; pick(b) -> {ok,maps,y,1}; pick(X) -> {ok,X,z,2}."
+    assert y_consumer_result(context, producer).unresolved_dispatch != []
+
+    consumer = "run(X) -> case y_producer:pick(X) of {ok,M,F,G} -> M:reverse([]),F(),G:run() end."
+    result = y_consumer_result(context, "pick(X) -> {ok,lists,X,X}.", consumer)
+
+    assert Enum.sort(Enum.map(result.unresolved_dispatch, & &1.kind)) ==
+             ["unresolved_fun_invocation", "unresolved_module_dispatch"]
+  end
+
+  test "Y09 only definitely disjoint returned shapes are excluded", context do
+    assert y_consumer_result(context, "pick(a) -> {ok,lists,x,0}; pick(X) -> {error,X,x,0}.").unresolved_dispatch ==
+             []
+
+    assert y_consumer_result(context, "pick(a) -> {ok,lists,x,0}; pick(X) -> {X,ssl,x,0}.").unresolved_dispatch !=
+             []
+  end
+
+  test "Y10 all guarded clauses and fallthrough values remain possible", context do
+    producer = "pick(X) when is_atom(X) -> X; pick(_) -> {ok,lists,x,0}."
+    assert y_consumer_result(context, producer).unresolved_dispatch != []
+
+    producer =
+      "pick(X) -> case validate(X) of ok -> {ok,lists,x,0}; Other -> Other end. validate(a) -> ok; validate(X) -> X."
+
+    assert y_consumer_result(context, producer).unresolved_dispatch != []
+  end
+
+  test "Y11 selected producer debug exports and on_load metadata are checked", context do
+    for options <- [[debug: false], [exports: "other/0", extra: " other() -> ok."]] do
+      assert y_consumer_result(context, "pick(X) -> {ok,lists,X,0}.", y_consumer(), options).unresolved_dispatch !=
+               []
+    end
+
+    y_fixture(context, "pick(X) -> {ok,lists,X,0}.")
+    path = Path.join(b_physical(context.ebin), "y_producer.beam")
+    s_rewrite(path, fn forms -> [{:attribute, 1, :on_load, {:pick, 1}} | forms] end)
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :y_consumer).unresolved_dispatch != []
+  end
+
+  test "Y12 stale loaded producers cannot supply a candidate proof", context do
+    y_fixture(context, "pick(X) -> X.")
+    path = Path.join(b_physical(context.ebin), "y_producer.beam")
+
+    assert {:module, :y_producer} =
+             :code.load_binary(:y_producer, String.to_charlist(path), File.read!(path))
+
+    on_exit(fn ->
+      :code.purge(:y_producer)
+      :code.delete(:y_producer)
+      :code.purge(:y_producer)
+    end)
+
+    File.write!(
+      path,
+      b_compile(:y_producer, "-export([pick/1]). pick(X) -> {ok,lists,X,0}.", true)
+    )
+
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :y_consumer).unresolved_dispatch != []
+  end
+
+  test "Y13 removed and changed selected producer artifacts require a new derivation", context do
+    safe = y_consumer_result(context, "pick(X) -> {ok,lists,X,0}.")
+    assert safe.unresolved_dispatch == []
+    File.rm!(Path.join(b_physical(context.ebin), "y_producer.beam"))
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :y_consumer).unresolved_dispatch != []
+    assert y_consumer_result(context, "pick(X) -> {ok,X,X,0}.").unresolved_dispatch != []
+  end
+
+  test "Y14 aliases captures repeated receivers and variable tags remain outside the rule",
+       context do
+    for consumer <- [
+          "run(X) -> Pair=y_producer:pick(X),case Pair of {ok,M,_,_} -> M:reverse([]) end.",
+          "run(X) -> F=fun y_producer:pick/1,case F(X) of {ok,M,_,_} -> M:reverse([]) end.",
+          "run(X) -> case y_producer:pick(X) of {ok,M,M,_} -> M:reverse([]) end.",
+          "run(X) -> case y_producer:pick(X) of {Tag,M,_,_} -> {Tag,M:reverse([])} end."
+        ] do
+      assert y_consumer_result(context, "pick(X) -> {ok,lists,X,0}.", consumer).unresolved_dispatch !=
+               []
+    end
+  end
+
+  test "Y15 malformed producer metadata and unsupported bodies fail closed", context do
+    for mutation <- [:metadata, :unsupported, :bytes] do
+      y_fixture(context, "pick(X) -> {ok,lists,X,0}.")
+      path = Path.join(b_physical(context.ebin), "y_producer.beam")
+
+      s_rewrite(path, fn forms ->
+        Enum.map(forms, fn
+          {:function, anno, :pick, 1, [{:clause, line, args, guards, body}]} ->
+            case mutation do
+              :metadata ->
+                {:function, {:invalid, 1}, :pick, 1, [{:clause, line, args, guards, body}]}
+
+              :unsupported ->
+                {:function, anno, :pick, 1,
+                 [{:clause, line, args, guards, [{:unrecognized_return_node, 1, []} | body]}]}
+
+              :bytes ->
+                {:function, anno, :pick, 1,
+                 [
+                   {:clause, line, args, guards,
+                    [{:string, 1, List.duplicate(?x, 70_000)} | body]}
+                 ]}
+            end
+
+          form ->
+            form
+        end)
+      end)
+
+      assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :y_consumer).unresolved_dispatch != []
+    end
+  end
+
+  test "Y16 target clause and module definition limits remain enforced", context do
+    clauses = fn count -> Enum.map_join(1..count, ";", fn n -> "#{n} -> {ok,m#{n},x,0}" end) end
+
+    assert y_consumer_result(context, "pick(X) -> case X of " <> clauses.(16) <> " end.").unresolved_dispatch ==
+             []
+
+    assert y_consumer_result(context, "pick(X) -> case X of " <> clauses.(17) <> " end.").unresolved_dispatch !=
+             []
+
+    producer = Enum.map_join(1..17, ";", fn n -> "pick(#{n}) -> {ok,lists,x,0}" end) <> "."
+    assert y_consumer_result(context, producer).unresolved_dispatch != []
+    extras = Enum.map_join(1..257, "\n", fn n -> "unused_#{n}() -> ok." end)
+
+    assert y_consumer_result(context, "pick(X) -> {ok,lists,X,0}.\n" <> extras).unresolved_dispatch !=
+             []
+  end
+
+  test "Y17 recursive return cycles and exhausted helper depth cannot invent a result", context do
+    for producer <- [
+          "pick(X) -> pick(X).",
+          "pick(X) -> helper(X). helper(X) -> pick(X).",
+          "pick(a) -> {ok,lists,x,0}; pick(X) -> pick(X)."
+        ] do
+      assert y_consumer_result(context, producer).unresolved_dispatch != []
+    end
+
+    helpers = Enum.map_join(1..33, "\n", fn n -> "step#{n}(X) -> step#{n + 1}(X)." end)
+    producer = "pick(X) -> step1(X).\n" <> helpers <> "\nstep34(X) -> {ok,lists,X,0}."
+    assert y_consumer_result(context, producer).unresolved_dispatch != []
+  end
+
+  test "Y18 proof never executes producers predicates or argument closures", context do
+    Process.delete(:audit_tagged_return_executed)
+
+    producer =
+      "pick(X) -> erlang:put(audit_tagged_return_executed,true), case predicate(X) of true -> {ok,lists,X,0}; false -> {error,X} end. predicate(_) -> erlang:put(audit_tagged_return_executed,true),true."
+
+    assert y_consumer_result(context, producer).unresolved_dispatch == []
+    assert Process.get(:audit_tagged_return_executed) == nil
+  end
+
+  test "Y19 current Dialer Proxy Backend and Stream source compose across all five sinks",
+       context do
+    report = y_actual_sources(context, :original)
+    assert t_inspection(report, NoOTPActualTaggedStream).unresolved_dispatch == []
+    # This fixture certifies no unrelated Dialer or Proxy transport inputs.
+    assert t_inspection(report, NoOTPActualTaggedDialer).unresolved_dispatch != []
+    assert t_inspection(report, NoOTPActualTaggedProxy).unresolved_dispatch != []
+  end
+
+  test "Y20 actual unknown route unsafe origin and added Stream caller stay visible", context do
+    for mutation <- [:unknown_route, :unsafe_transport, :unknown_caller] do
+      report = y_actual_sources(context, mutation)
+      result = t_inspection(report, NoOTPActualTaggedStream)
+      assert result.unresolved_dispatch != []
+
+      if mutation == :unsafe_transport,
+        do: assert(Enum.any?(result.unresolved_dispatch, &(&1.kind == "literal_module_ssl")))
+    end
+  end
+
+  test "Y21 early variable-callee markers preserve acyclic transport propagation", context do
+    consumer =
+      "run(X) -> case y_producer:pick(X) of {ok,M,_,_} -> X(), relay(M); _ -> ok end. relay(M) -> finish(M). finish(M) -> M:reverse([])."
+
+    result = y_consumer_result(context, "pick(X) -> {ok,lists,X,0}.", consumer)
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["unresolved_fun_invocation"]
+  end
+
+  test "Y22 callable marker payloads retain private captures and unsafe caller edges", context do
+    for consumer <- [
+          "run(X) -> case y_producer:pick(X) of {ok,M,_,_} -> F=fun relay/1,F(M),relay(M); _ -> ok end. relay(M) -> M:reverse([]).",
+          "run(X) -> case y_producer:pick(X) of {ok,M,_,_} -> F=fun() -> relay(X) end,F(),relay(M); _ -> ok end. relay(M) -> M:reverse([])."
+        ] do
+      result = y_consumer_result(context, "pick(X) -> {ok,lists,X,0}.", consumer)
+      assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "unresolved_module_dispatch"))
+    end
+  end
+
+  test "Y23 marker payloads never turn data atoms into callable local targets", context do
+    consumer =
+      "run(X) -> case y_producer:pick(X) of {ok,M,_,_} -> F=lists,F(),relay(M); _ -> ok end. relay(M) -> M:reverse([])."
+
+    result = y_consumer_result(context, "pick(X) -> {ok,lists,X,0}.", consumer)
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["unresolved_fun_invocation"]
+  end
+
+  test "Y24 selected helper shadows outside the release cannot seed remote projection", context do
+    y_fixture(context, "pick(X) -> {ok,y_leaf:pick(X),X,0}.")
+
+    outside =
+      Path.join(System.tmp_dir!(), "no-otp-tagged-shadow-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(outside)
+
+    File.write!(
+      Path.join(outside, "y_leaf.beam"),
+      b_compile(:y_leaf, "-export([pick/1]). pick(_) -> lists.", true)
+    )
+
+    true = :code.add_patha(String.to_charlist(outside))
+
+    on_exit(fn ->
+      :code.del_path(String.to_charlist(outside))
+      File.rm_rf!(outside)
+    end)
+
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :y_consumer).unresolved_dispatch != []
+  end
+
+  test "Y25 malformed callable-marker metadata or payload prevents parameter proof", context do
+    consumer = "run(X) -> X(),relay(lists). relay(M) -> M:reverse([])."
+
+    for mutation <- [:metadata, :executable_metadata, :payload, :arity] do
+      y_fixture(context, "pick(X) -> {ok,lists,X,0}.", consumer)
+      path = Path.join(b_physical(context.ebin), "y_consumer.beam")
+      s_rewrite(path, &y_marker_mutation(&1, mutation))
+      result = t_inspection(NoOTP.ReleaseAudit.artifacts(), :y_consumer)
+      assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "unresolved_module_dispatch"))
+      assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "unresolved_fun_invocation"))
+    end
+  end
+
+  defp y_marker_mutation({:call, line, {:var, _, _} = callee, args}, mutation) do
+    marker =
+      case mutation do
+        :metadata -> {:audit_fun_value, {:invalid, 1}, callee}
+        :executable_metadata -> {:audit_fun_value, {:call, 1, {:var, 1, :Injected}, []}, callee}
+        :payload -> {:audit_fun_value, line, {:unrecognized_callable_node, 1, callee}}
+        :arity -> {:audit_fun_value, line, callee, []}
+      end
+
+    {:call, line, marker, args}
+  end
+
+  defp y_marker_mutation(term, mutation) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.map(&y_marker_mutation(&1, mutation)) |> List.to_tuple()
+
+  defp y_marker_mutation(terms, mutation) when is_list(terms),
+    do: Enum.map(terms, &y_marker_mutation(&1, mutation))
+
+  defp y_marker_mutation(term, _mutation), do: term
+
+  defp y_consumer,
+    do: "run(X) -> case y_producer:pick(X) of {ok,M,_,_} -> M:reverse([]); _ -> ok end."
+
+  defp y_consumer_result(context, producer, consumer \\ y_consumer(), options \\ []),
+    do: y_fixture(context, producer, consumer, options) |> t_inspection(:y_consumer)
+
+  defp y_fixture(context, producer, consumer \\ y_consumer(), options \\ []) do
+    exports = Keyword.get(options, :exports, "pick/1")
+    extra = Keyword.get(options, :extra, "")
+
+    bytes =
+      b_compile(
+        :y_producer,
+        "-export([" <> exports <> "]). " <> producer <> extra,
+        Keyword.get(options, :debug, true)
+      )
+
+    leaf =
+      b_compile(
+        :y_leaf,
+        "-export([pick/1]). " <> Keyword.get(options, :leaf, "pick(_) -> lists."),
+        true
+      )
+
+    input = b_compile(:y_consumer, "-export([run/1]). " <> consumer, true)
+    t_install(context, [{:y_producer, bytes}, {:y_leaf, leaf}, {:y_consumer, input}])
+  end
+
+  defp y_actual_sources(context, mutation) do
+    root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
+    # Complete current sources are compiled under isolated names. Their
+    # compile-time struct dependencies are also complete source copies.
+    headers =
+      File.read!(Path.join(root, "apps/http_core/lib/http/headers.ex"))
+      |> String.replace("HTTP.Headers", "NoOTPActualTaggedHeaders")
+
+    form_data =
+      File.read!(Path.join(root, "apps/http_core/lib/http/form_data.ex"))
+      |> String.replace("HTTP.FormData", "NoOTPActualTaggedFormData")
+
+    request =
+      File.read!(Path.join(root, "apps/http_core/lib/http/request.ex"))
+      |> String.replace("HTTP.Request", "NoOTPActualTaggedRequest")
+      |> String.replace("alias HTTP.Headers", "alias NoOTPActualTaggedHeaders, as: Headers")
+      |> String.replace("HTTP.Headers", "NoOTPActualTaggedHeaders")
+      |> String.replace("HTTP.FormData", "NoOTPActualTaggedFormData")
+
+    backend =
+      File.read!(Path.join(root, "apps/http_core/lib/http/tls_backend.ex"))
+      |> String.replace("HTTP.TLSBackend", "NoOTPActualTaggedBackend")
+
+    proxy =
+      File.read!(Path.join(root, "apps/http_core/lib/http/proxy.ex"))
+      |> String.replace("HTTP.Proxy", "NoOTPActualTaggedProxy")
+      |> String.replace(
+        "alias HTTP.{Headers, Request}",
+        "alias HTTP.Headers; alias NoOTPActualTaggedRequest, as: Request"
+      )
+
+    dialer =
+      File.read!(Path.join(root, "apps/http_runtime/lib/http/runtime/dialer.ex"))
+      |> String.replace("HTTP.Runtime.Dialer", "NoOTPActualTaggedDialer")
+      |> String.replace("alias HTTP.Request", "alias NoOTPActualTaggedRequest, as: Request")
+      |> String.replace("HTTP.Proxy", "NoOTPActualTaggedProxy")
+      |> String.replace("HTTP.TLSBackend", "NoOTPActualTaggedBackend")
+
+    stream =
+      File.read!(Path.join(root, "apps/http_runtime/lib/http/runtime/stream.ex"))
+      |> String.replace("HTTP.Runtime.Stream", "NoOTPActualTaggedStream")
+      |> String.replace(
+        "alias HTTP.{Request, RequestLifecycle}",
+        "alias HTTP.RequestLifecycle; alias NoOTPActualTaggedRequest, as: Request"
+      )
+      |> String.replace("alias HTTP.Runtime.Dialer", "alias NoOTPActualTaggedDialer, as: Dialer")
+
+    {proxy, dialer, stream} =
+      case mutation do
+        :unknown_route ->
+          {String.replace(
+             proxy,
+             "{:ok, if(proxy, do: Map.put(proxy, :origin_scheme, request.url.scheme))}",
+             ":external_unproved.route(request)"
+           ), dialer, stream}
+
+        :unsafe_transport ->
+          {proxy,
+           String.replace(
+             dialer,
+             "{:ok, HTTP.Transport.TCP, host, uri.port || 80}",
+             "{:ok, :ssl, host, uri.port || 80}"
+           ), stream}
+
+        :unknown_caller ->
+          {proxy, dialer,
+           String.replace_suffix(
+             stream,
+             "\nend\n",
+             "\n  def extra(r,t,s,d,m,p,k,v), do: initialize(r,t,s,d,m,p,k,v)\nend\n"
+           )}
+
+        :original ->
+          {proxy, dialer, stream}
+      end
+
+    entries =
+      Enum.flat_map(
+        [headers, form_data, request, backend, proxy, dialer, stream],
+        &Code.compile_string/1
+      )
+
+    for {module, _} <- entries do
+      :code.purge(module)
+      :code.delete(module)
+
+      on_exit(fn ->
+        :code.purge(module)
+        :code.delete(module)
+      end)
+    end
+
+    t_install(context, entries)
+  end
 end
