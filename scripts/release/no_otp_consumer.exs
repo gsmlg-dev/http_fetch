@@ -40,12 +40,21 @@ defmodule NoOTP.Consumer do
       {:telemetry, :span, 3}
     ]
 
+    # A private tagged-event theorem only: this does not classify external code
+    # or establish the later queue, deferred-header or receive-message invariant.
+    private_shape_invariants = [
+      {HTTP.HTTP3.ConnectionOwner,
+       [{{:deliver, 3}, 2, [{:tuple, :informational, 3}, {:tuple, :trailers, 2}]}],
+       [{{:deliver, 3}, 2, {:notify, 3}, 2, :discover}]}
+    ]
+
     report = %{
       nonce: config["nonce"],
       artifacts:
         NoOTP.ReleaseAudit.artifacts(
           parameter_invariants: parameter_invariants,
-          public_callable_roots: public_callable_roots
+          public_callable_roots: public_callable_roots,
+          private_shape_invariants: private_shape_invariants
         ),
       before: NoOTP.ReleaseAudit.runtime(),
       initial_code_paths: initial_paths,

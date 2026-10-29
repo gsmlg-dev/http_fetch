@@ -337,6 +337,162 @@ def validate_callable_preflight(report):
         require(entry.get('status') == ('no_syntactic_incoming_edges' if closed else 'unconfirmed'),
                 'callable incoming status disagrees with evidence')
 
+    validate_private_shapes(preflight, by_beam, by_module, node_identities)
+
+
+def validate_private_shapes(preflight, by_beam, by_module, node_identities):
+    proof = preflight.get('private_shape_derivations')
+    if proof is None:
+        return
+    require(isinstance(proof, dict) and type(proof.get('schema')) is int and
+            proof['schema'] == 1 and type(proof.get('requests_valid')) is bool,
+            'private shape schema malformed')
+    modules = proof.get('modules')
+    require(isinstance(modules, list) and len(modules) <= 64 and
+            (proof['requests_valid'] or not modules), 'private shape requests malformed')
+    seen_modules = set()
+    paths = {(bound[0], bound[1]): ordinal for ordinal, bound in node_identities.items()}
+
+    def slot(value):
+        require(isinstance(value, dict) and isinstance(value.get('function'), str) and
+                value['function'] and type(value.get('arity')) is int and
+                1 <= value['arity'] <= 255 and type(value.get('parameter_index')) is int and
+                0 <= value['parameter_index'] < value['arity'], 'private shape slot malformed')
+        return (value['function'], value['arity'], value['parameter_index'])
+
+    def shapes(values):
+        require(isinstance(values, list) and 0 < len(values) <= 16,
+                'private shape domain malformed')
+        result = set()
+        for value in values:
+            require(isinstance(value, dict), 'private shape value malformed')
+            if value.get('kind') == 'atom':
+                require(set(value) == {'kind', 'value'} and isinstance(value['value'], str),
+                        'private atom shape malformed')
+                key = ('atom', value['value'])
+            else:
+                require(set(value) == {'kind', 'tag', 'arity'} and value['kind'] == 'tuple' and
+                        isinstance(value['tag'], str) and type(value['arity']) is int and
+                        1 <= value['arity'] <= 255, 'private tuple shape malformed')
+                key = ('tuple', value['tag'], value['arity'])
+            require(key not in result, 'duplicate private shape')
+            result.add(key)
+        return result
+
+    def site(value, record):
+        require(isinstance(value, dict) and value.get('beam') == record['beam'] and
+                value.get('module') == record['module'], 'unbound private shape occurrence')
+        path, ordinal, owner = (value.get(key) for key in ('path', 'ordinal', 'owner'))
+        require(isinstance(path, list) and path and len(path) <= 100_000 and
+                all(type(index) is int and index >= 0 for index in path) and
+                type(ordinal) is int and 0 <= ordinal < preflight['scanned_sites'] and
+                type(value.get('line')) is int and value['line'] >= 0,
+                'private shape original occurrence malformed')
+        require(isinstance(owner, dict) and isinstance(owner.get('function'), str) and
+                owner['function'] and type(owner.get('arity')) is int and
+                0 <= owner['arity'] <= 255, 'private shape owner malformed')
+        bound = (record['beam'], tuple(path), record['module'], owner['function'],
+                 owner['arity'], value['line'])
+        require(ordinal not in node_identities or node_identities[ordinal] == bound,
+                'private shape ordinal rebound')
+        position = (record['beam'], tuple(path))
+        require(position not in paths or paths[position] == ordinal,
+                'private shape path rebound')
+        node_identities[ordinal] = bound
+        paths[position] = ordinal
+        return (owner['function'], owner['arity']), ordinal
+
+    for record in modules:
+        require(isinstance(record, dict) and isinstance(record.get('module'), str) and
+                record['module'] and record['module'] not in seen_modules,
+                'duplicate or malformed private shape module')
+        seen_modules.add(record['module'])
+        require(record.get('beam') is None or isinstance(record.get('beam'), str),
+                'private shape BEAM path malformed')
+        snapshot = by_beam.get(record.get('beam'))
+        require((snapshot is None and record.get('beam') is None and
+                 record.get('sha256') is None and record['module'] not in by_module) or
+                (snapshot is not None and snapshot['module'] == record['module'] and
+                 snapshot['sha256'] == record.get('sha256')), 'stale private shape artifact')
+        require(record.get('status') in ('checked', 'unconfirmed'), 'private shape status malformed')
+        if record['status'] == 'unconfirmed':
+            require(record.get('inventory') is None and record.get('slots') == [] and
+                    record.get('callers') == [] and record.get('observations') == [],
+                    'unconfirmed shape contains a certificate')
+            continue
+        require(snapshot is not None and proof['requests_valid'] and preflight['scan_complete'] and
+                all(item['selected'] and item['debug'] for item in by_beam.values()),
+                'private shape lacks complete selected artifacts')
+        inventory = record.get('inventory')
+        require(isinstance(inventory, dict) and inventory.get('complete') is True and
+                type(inventory.get('nodes')) is int and 0 < inventory['nodes'] <= 100_000 and
+                type(inventory.get('calls')) is int and 0 < inventory['calls'] <= 4_096,
+                'private shape caller inventory incomplete')
+        entries = record.get('slots')
+        require(isinstance(entries, list) and 0 < len(entries) <= 256, 'private shape slots missing')
+        domains = {}
+        for entry in entries:
+            key = slot(entry)
+            require(key not in domains and key[:2] not in by_module[record['module']],
+                    'duplicate or exported private shape slot')
+            domains[key] = shapes(entry.get('shapes'))
+        callers = record.get('callers')
+        require(isinstance(callers, list) and callers and
+                len(callers) <= inventory['calls'] * len(domains), 'private shape callers missing')
+        origins = {key: [] for key in domains}
+        seen_calls = set()
+        for call in callers:
+            require(isinstance(call, dict), 'private shape caller malformed')
+            target = slot(call.get('target'))
+            require(target in domains, 'private shape caller target absent')
+            owner, ordinal = site(call.get('site'), record)
+            require((ordinal, target) not in seen_calls, 'duplicate private shape caller')
+            seen_calls.add((ordinal, target))
+            origin = call.get('origin')
+            require(isinstance(origin, dict), 'private shape origin malformed')
+            if origin.get('kind') == 'seed':
+                require(shapes([origin.get('shape')]) <= domains[target] and
+                        owner not in {key[:2] for key in domains}, 'private shape seed unproved')
+                origins[target].append(None)
+            else:
+                require(origin.get('kind') == 'parameter', 'unknown private shape origin')
+                source = slot(origin.get('source'))
+                require(source in domains and source[:2] == owner and
+                        domains[source] <= domains[target], 'private shape forwarding unproved')
+                origins[target].append(source)
+        require(all(origins.values()), 'private shape caller coverage missing')
+        reached = set()
+        while len(reached) < len(domains):
+            ready = {key for key, values in origins.items() if key not in reached and
+                     any(value is None or value in reached for value in values)}
+            require(ready, 'private shape cycle lacks an external seed')
+            reached.update(ready)
+        observations = record.get('observations')
+        require(isinstance(observations, list) and 0 < len(observations) <= 64,
+                'private shape observations missing')
+        seen_observations = set()
+        for observation in observations:
+            require(isinstance(observation, dict), 'private shape observation malformed')
+            source = slot(observation.get('source'))
+            require(source in domains, 'private shape observation source absent')
+            owner, ordinal = site(observation.get('site'), record)
+            callee = observation.get('callee')
+            require(isinstance(callee, dict) and isinstance(callee.get('function'), str) and
+                    callee['function'] and type(callee.get('arity')) is int and
+                    1 <= callee['arity'] <= 255 and type(callee.get('argument_index')) is int and
+                    0 <= callee['argument_index'] < callee['arity'],
+                    'private shape observation callee malformed')
+            key = (ordinal, callee['argument_index'])
+            require(key not in seen_observations and owner == source[:2] and
+                    shapes(observation.get('shapes')) == domains[source],
+                    'private shape observation domain or occurrence mismatch')
+            seen_observations.add(key)
+            expected = observation.get('expected_path')
+            require(expected is None or
+                    (isinstance(expected, list) and expected and
+                     all(type(index) is int and index >= 0 for index in expected) and
+                     expected == observation['site']['path']), 'stale private shape observation path')
+
 
 def validate_artifacts(report, version):
     require(isinstance(report, dict), 'artifact audit missing')

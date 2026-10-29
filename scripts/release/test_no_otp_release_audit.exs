@@ -2635,4 +2635,433 @@ defmodule NoOTP.ReleaseAuditTest do
     on_exit(fn -> :code.del_path(String.to_charlist(ebin)) end)
     {NoOTP.ReleaseAudit.artifacts(), NoOTP.ReleaseAudit.artifacts(public_callable_roots: roots)}
   end
+
+  test "S01 tuple seeds preserve unknown payloads and exact forwarding occurrence", context do
+    result = s_run(context, s_body())
+    assert result.record.status == "checked"
+    assert length(result.record.callers) == 2
+    assert [observation] = result.record.observations
+    assert observation.source == %{function: "deliver", arity: 2, parameter_index: 1}
+    assert observation.callee == %{function: "notify", arity: 2, argument_index: 1}
+    assert Enum.sort(observation.shapes) == Enum.sort(hd(result.record.slots).shapes)
+
+    {:ok, {_, [{:abstract_code, {:raw_abstract_v1, forms}}]}} =
+      :beam_lib.chunks(String.to_charlist(result.path), [:abstract_code])
+
+    assert {:call, _, {:atom, _, :notify}, [_, {:var, _, :E}]} =
+             s_at(forms, observation.site.path)
+
+    assert Enum.at(p_raw_sites(forms), observation.site.ordinal) ==
+             {observation.site.path, s_at(forms, observation.site.path)}
+  end
+
+  test "S02 renamed module functions variables and tags need no name exemption", context do
+    body =
+      "run(X) -> pass(X,{alpha,X}), pass(X,{beta,0,X}). pass(A,B) -> out(A,B). out(_,E) -> E."
+
+    requests = [
+      {:s_renamed, [{{:pass, 2}, 1, [{:tuple, :alpha, 2}, {:tuple, :beta, 3}]}],
+       [{{:pass, 2}, 1, {:out, 2}, 1, :discover}]}
+    ]
+
+    assert s_run(context, body, requests, module: :s_renamed).record.status == "checked"
+  end
+
+  test "S03 private identity forwarding composes checked parameter dependencies", context do
+    body =
+      "run(X) -> wrap(X,{informational,200,X}), wrap(X,{trailers,X}). wrap(S,E) -> deliver(S,E). deliver(S,E) -> notify(S,E). notify(_,E) -> E."
+
+    [{module, entries, observations}] = s_requests()
+    entries = [{{:wrap, 2}, 1, s_shapes()} | entries]
+    result = s_run(context, body, [{module, entries, observations}])
+    assert result.record.status == "checked"
+    assert Enum.any?(result.record.callers, &(&1.origin.kind == "parameter"))
+  end
+
+  test "S04 unrelated recursive callers do not poison independently seeded shapes", context do
+    body =
+      "run(X) -> first(X). first(X) -> deliver(X,{informational,200,X}), second(X). second(X) -> deliver(X,{trailers,X}), first(X). deliver(S,E) -> notify(S,E). notify(_,E) -> E."
+
+    assert s_run(context, body).record.status == "checked"
+  end
+
+  test "S05 all branch callers contribute to the finite union", context do
+    body =
+      "run(X) -> case X of a -> deliver(X,{informational,200,X}); _ -> deliver(X,{trailers,X}) end. deliver(S,E) -> notify(S,E). notify(_,E) -> E."
+
+    assert s_run(context, body).record.status == "checked"
+    changed = String.replace(body, "deliver(X,{trailers,X})", "deliver(X,X)")
+    assert s_run(context, changed).record.status == "unconfirmed"
+  end
+
+  test "S06 an added unknown or callable caller invalidates the entire theorem", context do
+    for argument <- ["X", "fun() -> ok end", "external:produce(X)"] do
+      body = String.replace(s_body(), "run(X) ->", "run(X) -> deliver(X,#{argument}),")
+      result = s_run(context, body)
+      assert result.record.status == "unconfirmed"
+      assert result.record.slots == []
+    end
+  end
+
+  test "S07 private function exports and export_all cannot establish a closed domain", context do
+    for opts <- [[exports: "run/1,deliver/2"], [extra: "-compile(export_all). "]] do
+      assert s_run(context, s_body(), s_requests(), opts).record.status == "unconfirmed"
+    end
+  end
+
+  test "S08 returned passed and remote captures block private caller completeness", context do
+    for capture <- ["fun deliver/2", "lists:map(fun deliver/2,[])", "fun s_input:deliver/2"] do
+      body = String.replace(s_body(), "run(X) ->", "run(X) -> #{capture},")
+      assert s_run(context, body).record.status == "unconfirmed"
+    end
+  end
+
+  test "S09 closure and comprehension shadowing cannot borrow an outer parameter", context do
+    for expression <- [
+          "fun(E) -> deliver(S,E) end",
+          "fun Again(E) -> deliver(S,E), Again(E) end",
+          "[deliver(S,E) || E <- external:values()]"
+        ] do
+      body = String.replace(s_body(), "notify(S,E).", "notify(S,E), #{expression}.")
+      assert s_run(context, body).record.status == "unconfirmed"
+    end
+  end
+
+  test "S10 captured nonshadowed parameter forwarding retains its source slot", context do
+    body = String.replace(s_body(), "notify(S,E).", "fun() -> notify(S,E) end.")
+    assert s_run(context, body).record.status == "checked"
+  end
+
+  test "S11 unseeded cycles and omitted forwarding slots remain unknown", context do
+    body =
+      "run(_) -> ok. wrap(S,E) -> deliver(S,E). deliver(S,E) -> notify(S,E), wrap(S,E). notify(_,E) -> E."
+
+    [{module, entries, observations}] = s_requests()
+    requests = [{module, [{{:wrap, 2}, 1, s_shapes()} | entries], observations}]
+    assert s_run(context, body, requests).record.status == "unconfirmed"
+    seeded = String.replace(body, "run(_) -> ok.", "run(X) -> wrap(X,{trailers,X}).")
+    assert s_run(context, seeded, requests).record.status == "checked"
+    assert s_run(context, seeded).record.status == "unconfirmed"
+  end
+
+  test "S12 incorrect tag arity slot and observation operand cannot be asserted", context do
+    [{module, entries, observations}] = s_requests()
+
+    for requests <- [
+          [{module, [{{:deliver, 2}, 1, [{:tuple, :wrong, 3}]}], observations}],
+          [
+            {module, [{{:deliver, 2}, 1, [{:tuple, :informational, 2}, {:tuple, :trailers, 2}]}],
+             observations}
+          ],
+          [
+            {module, [{{:deliver, 2}, 0, s_shapes()}],
+             [{{:deliver, 2}, 0, {:notify, 2}, 0, :discover}]}
+          ],
+          [{module, entries, [{{:deliver, 2}, 1, {:notify, 2}, 0, :discover}]}]
+        ] do
+      assert s_run(context, s_body(), requests).record.status == "unconfirmed"
+    end
+  end
+
+  test "S13 explicit original paths are checked against the actual compiled occurrence",
+       context do
+    result = s_run(context, s_body())
+    [observation] = result.record.observations
+    [{module, entries, _}] = s_requests()
+    requests = [{module, entries, [{{:deliver, 2}, 1, {:notify, 2}, 1, observation.site.path}]}]
+    assert s_report(context, :s_input, requests).record.status == "checked"
+
+    wrong = [
+      {module, entries, [{{:deliver, 2}, 1, {:notify, 2}, 1, observation.site.path ++ [0]}]}
+    ]
+
+    assert s_report(context, :s_input, wrong).record.status == "unconfirmed"
+
+    moved =
+      s_run(
+        context,
+        String.replace(s_body(), "notify(S,E).", "erlang:self(), notify(S,E)."),
+        requests
+      )
+
+    assert moved.record.status == "unconfirmed"
+  end
+
+  test "S14 missing debug cannot be replaced by a requested shape", context do
+    result = s_run(context, s_body())
+    {:ok, {_, stripped}} = :beam_lib.strip(File.read!(result.path))
+    File.write!(result.path, stripped)
+    assert s_report(context, :s_input, s_requests()).record.status == "unconfirmed"
+  end
+
+  test "S15 different first selected artifact prevents a local certificate", context do
+    result = s_run(context, s_body())
+    shadow = Path.join(Path.dirname(context.ebin), "shape-shadow")
+    File.mkdir_p!(shadow)
+    shadow = b_physical(shadow)
+    File.write!(Path.join(shadow, "s_input.beam"), File.read!(result.path))
+    true = :code.add_patha(String.to_charlist(shadow))
+    on_exit(fn -> :code.del_path(String.to_charlist(shadow)) end)
+    assert s_report(context, :s_input, s_requests()).record.status == "unconfirmed"
+  end
+
+  test "S16 changed artifacts must rederive all shape seeds", context do
+    before = s_run(context, s_body())
+    after_result = s_run(context, String.replace(s_body(), "{trailers,X}", "X"))
+    assert before.record.sha256 != after_result.record.sha256
+    assert after_result.record.status == "unconfirmed"
+  end
+
+  test "S17 malformed duplicate oversized requests and absent modules fail closed", context do
+    [{module, entries, observations}] = s_requests()
+
+    for requests <- [
+          :invalid,
+          s_requests() ++ s_requests(),
+          [{module, entries ++ entries, observations}],
+          [{module, entries, observations ++ observations}],
+          [{module, [{{:deliver, 2}, 2, s_shapes()}], observations}],
+          [{module, [{{:deliver, 2}, 1, List.duplicate({:atom, :ok}, 17)}], observations}],
+          List.duplicate(hd(s_requests()), 65)
+        ] do
+      result = s_run(context, s_body(), requests)
+      refute Enum.any?(result.proof.modules, &(&1.status == "checked"))
+    end
+
+    result = s_run(context, s_body(), [{:absent_shape_module, entries, observations}])
+    assert result.record.status == "unconfirmed"
+    assert result.record.beam == nil
+  end
+
+  test "S18 node call and definition bounds cannot be overridden by shape requests", context do
+    for kind <- [:nodes, :calls, :definitions] do
+      result = s_run(context, s_body())
+
+      s_rewrite(result.path, fn forms ->
+        case kind do
+          :definitions ->
+            forms ++
+              for n <- 1..257,
+                  do:
+                    {:function, 1, String.to_atom("shape_extra_#{n}"), 0,
+                     [{:clause, 1, [], [], [{:atom, 1, :ok}]}]}
+
+          _ ->
+            Enum.map(forms, fn
+              {:function, anno, :run, 1, [{:clause, line, args, guards, body}]} ->
+                additions =
+                  if kind == :nodes,
+                    do: List.duplicate({:atom, 1, :ok}, 100_001),
+                    else: List.duplicate(hd(body), 4_097)
+
+                {:function, anno, :run, 1, [{:clause, line, args, guards, additions ++ body}]}
+
+              other ->
+                other
+            end)
+        end
+      end)
+
+      assert s_report(context, :s_input, s_requests()).record.status == "unconfirmed"
+    end
+  end
+
+  test "S19 unsupported AST and ambiguous forwarding occurrences remain unknown", context do
+    duplicate = String.replace(s_body(), "notify(S,E).", "notify(S,E), notify(S,E).")
+    assert s_run(context, duplicate).record.status == "unconfirmed"
+    result = s_run(context, s_body())
+
+    s_rewrite(result.path, fn forms ->
+      Enum.map(forms, fn
+        {:function, anno, :run, arity, [{:clause, line, args, guards, body}]} ->
+          {:function, anno, :run, arity,
+           [{:clause, line, args, guards, [{:unrecognized_shape_expression, 1, []} | body]}]}
+
+        other ->
+          other
+      end)
+    end)
+
+    assert s_report(context, :s_input, s_requests()).record.status == "unconfirmed"
+  end
+
+  test "S20 outer-shape proof neither executes nor hides nested unsafe code", context do
+    Process.delete(:shape_producer_executed)
+
+    body =
+      String.replace(s_body(), "run(X) ->", "run(X) -> erlang:put(shape_producer_executed,true),")
+
+    body =
+      String.replace(
+        body,
+        "{informational,200,X}",
+        "{informational,200,fun(M) -> M:connect(a,1,[]) end}"
+      )
+
+    result = s_run(context, body)
+    assert result.record.status == "checked"
+    assert result.report.unresolved_dispatch != []
+    assert Process.get(:shape_producer_executed) == nil
+    assert :code.is_loaded(:s_input) == false
+    assert result.report.callable_provenance_preflight.external_callable_records == []
+  end
+
+  test "S21 full actual H3 source proves only the deliver event forwarding slice", context do
+    root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
+    source = File.read!(Path.join(root, "apps/http_runtime/lib/http/http3/connection_owner.ex"))
+
+    source =
+      String.replace(
+        source,
+        "defmodule HTTP.HTTP3.ConnectionOwner do",
+        "defmodule NoOTPActualShapeOwner do",
+        global: false
+      )
+
+    [{module, bytes}] = Code.compile_string(source)
+    :code.purge(module)
+    :code.delete(module)
+
+    on_exit(fn ->
+      :code.purge(module)
+      :code.delete(module)
+    end)
+
+    requests = [
+      {module, [{{:deliver, 3}, 2, [{:tuple, :informational, 3}, {:tuple, :trailers, 2}]}],
+       [{{:deliver, 3}, 2, {:notify, 3}, 2, :discover}]}
+    ]
+
+    result = s_install(context, module, bytes, requests)
+    assert result.record.status == "checked"
+    assert length(result.record.callers) == 2
+    assert [observation] = result.record.observations
+    assert observation.site.owner == %{function: "deliver", arity: 3}
+    assert Enum.all?(result.record.callers, &(&1.site.owner.function == "dispatch_event"))
+    # This standalone owner already has no ordinary unresolved dispatches.
+    # Bind that baseline to this exact compiled artifact, then compare all
+    # ordinary fields so adding shape evidence cannot erase any finding.
+    assert result.baseline.checked_beams == 1
+    assert [baseline_beam] = result.baseline.beam_inspections
+    assert baseline_beam.module == inspect(module)
+
+    assert {baseline_beam.beam, baseline_beam.sha256} ==
+             {result.record.beam, result.record.sha256}
+
+    assert result.baseline.unresolved_dispatch == []
+
+    assert Map.delete(result.report, :callable_provenance_preflight) ==
+             Map.delete(result.baseline, :callable_provenance_preflight)
+
+    refute NoOTP.ReleaseAudit.clean?(result.report, %{})
+  end
+
+  test "S22 requested shape facts cannot close unrelated exported callable inputs", context do
+    body = s_body() <> " generic(F) -> F()."
+    result = s_run(context, body, s_requests(), exports: "run/1,generic/1")
+    assert result.record.status == "checked"
+    assert Enum.any?(result.report.unresolved_dispatch, &(&1.kind == "unresolved_fun_invocation"))
+    assert result.report.callable_provenance_preflight.external_callable_records == []
+  end
+
+  test "S23 literal atom seeds are distinct from tagged tuple seeds", context do
+    body = "run(X) -> deliver(X,done). deliver(S,E) -> notify(S,E). notify(_,E) -> E."
+
+    requests = [
+      {:s_input, [{{:deliver, 2}, 1, [{:atom, :done}]}],
+       [{{:deliver, 2}, 1, {:notify, 2}, 1, :discover}]}
+    ]
+
+    assert s_run(context, body, requests).record.status == "checked"
+
+    assert s_run(context, String.replace(body, "deliver(X,done)", "deliver(X,{done})"), requests).record.status ==
+             "unconfirmed"
+  end
+
+  test "S24 computed or aliased seed expressions require a separate derivation", context do
+    for expression <- ["case X of a -> {trailers,X}; _ -> X end", "Y"] do
+      body =
+        "run(X) -> Y={trailers,X}, deliver(X,#{expression}). deliver(S,E) -> notify(S,E). notify(_,E) -> E."
+
+      assert s_run(context, body).record.status == "unconfirmed"
+    end
+  end
+
+  defp s_shapes, do: [{:tuple, :informational, 3}, {:tuple, :trailers, 2}]
+
+  defp s_requests,
+    do: [
+      {:s_input, [{{:deliver, 2}, 1, s_shapes()}],
+       [{{:deliver, 2}, 1, {:notify, 2}, 1, :discover}]}
+    ]
+
+  defp s_body,
+    do:
+      "run(X) -> deliver(X,{informational,200,X}), deliver(X,{trailers,X}). deliver(S,E) -> notify(S,E). notify(_,E) -> E."
+
+  defp s_run(context, body, requests \\ s_requests(), options \\ []) do
+    module = Keyword.get(options, :module, :s_input)
+
+    source =
+      "-export([" <>
+        Keyword.get(options, :exports, "run/1") <>
+        "]). " <>
+        Keyword.get(options, :extra, "") <> body
+
+    s_install(context, module, b_compile(module, source, true), requests)
+  end
+
+  defp s_install(context, module, bytes, requests) do
+    ebin = b_physical(context.ebin)
+    directory = ebin |> Path.dirname() |> Path.dirname() |> Path.dirname()
+    System.put_env("NO_OTP_RELEASE", directory)
+    System.put_env("NO_OTP_PROJECT", directory)
+    File.write!(Path.join(ebin, Atom.to_string(module) <> ".beam"), bytes)
+    true = :code.add_patha(String.to_charlist(ebin))
+    on_exit(fn -> :code.del_path(String.to_charlist(ebin)) end)
+    s_report(context, module, requests)
+  end
+
+  defp s_report(context, module, requests) do
+    before = NoOTP.ReleaseAudit.artifacts(public_callable_roots: [])
+
+    report =
+      NoOTP.ReleaseAudit.artifacts(public_callable_roots: [], private_shape_invariants: requests)
+
+    assert Map.delete(report, :callable_provenance_preflight) ==
+             Map.delete(before, :callable_provenance_preflight)
+
+    assert Map.delete(report.callable_provenance_preflight, :private_shape_derivations) ==
+             before.callable_provenance_preflight
+
+    proof = report.callable_provenance_preflight.private_shape_derivations
+
+    %{
+      baseline: before,
+      report: report,
+      proof: proof,
+      record: List.first(proof.modules),
+      path: Path.join(b_physical(context.ebin), Atom.to_string(module) <> ".beam")
+    }
+  end
+
+  defp s_at(term, []), do: term
+  defp s_at(term, [index | rest]) when is_tuple(term), do: s_at(elem(term, index), rest)
+  defp s_at(term, [index | rest]) when is_list(term), do: s_at(Enum.fetch!(term, index), rest)
+
+  defp s_rewrite(path, rewrite) do
+    {:ok, module, chunks} = :beam_lib.all_chunks(File.read!(path))
+    {~c"Dbgi", debug} = List.keyfind(chunks, ~c"Dbgi", 0)
+    {:debug_info_v1, :erl_abstract_code, {forms, options}} = :erlang.binary_to_term(debug)
+
+    debug =
+      :erlang.term_to_binary(
+        {:debug_info_v1, :erl_abstract_code, {rewrite.(forms), options}},
+        [:compressed]
+      )
+
+    {:ok, bytes} = :beam_lib.build_module(List.keyreplace(chunks, ~c"Dbgi", 0, {~c"Dbgi", debug}))
+    File.write!(path, bytes)
+    assert :code.is_loaded(module) == false
+  end
 end

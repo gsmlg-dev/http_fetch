@@ -170,15 +170,21 @@ defmodule NoOTP.ReleaseAudit do
       missing_abstract_code: Enum.filter(inspections, & &1.missing_abstract_code)
     }
 
-    callable_preflight(report, beams, context, Keyword.fetch(options, :public_callable_roots))
+    callable_preflight(
+      report,
+      beams,
+      context,
+      Keyword.fetch(options, :public_callable_roots),
+      Keyword.fetch(options, :private_shape_invariants)
+    )
   end
 
   # This prerequisite inventories actual compiled incoming edges. It does not
   # certify argument origin or move any dispatch out of unresolved_dispatch.
   # In particular an empty direct-caller list is not an external-origin proof.
-  defp callable_preflight(report, _beams, _context, :error), do: report
+  defp callable_preflight(report, _beams, _context, :error, _shape_requests), do: report
 
-  defp callable_preflight(report, beams, context, {:ok, requests}) do
+  defp callable_preflight(report, beams, context, {:ok, requests}, shape_requests) do
     valid? =
       is_list(requests) and length(requests) <= 64 and
         Enum.all?(requests, fn
@@ -298,8 +304,347 @@ defmodule NoOTP.ReleaseAudit do
       external_callable_records: []
     }
 
+    analysis =
+      case shape_requests do
+        {:ok, requests} ->
+          Map.put(
+            analysis,
+            :private_shape_derivations,
+            private_shape_derivations(analysis, sites, requests)
+          )
+
+        :error ->
+          analysis
+      end
+
     Map.put(report, :callable_provenance_preflight, analysis)
   end
+
+  # Conditional outer-shape facts about private parameters, never callable
+  # classifications. All callers are checked on raw forms; ordinary resolution
+  # and every original finding remain untouched. Unknown payload fields are not
+  # interpreted. These facts alone prove neither message nor state provenance.
+  defp private_shape_derivations(preflight, sites, requests) do
+    valid? =
+      is_list(requests) and length(requests) <= 64 and
+        :erlang.external_size(requests) <= @max_finite_bytes and
+        Enum.all?(requests, &shape_request?/1) and
+        length(Enum.uniq_by(requests, &elem(&1, 0))) == length(requests)
+
+    records =
+      if valid? do
+        Enum.map(requests, fn {module, entries, observations} ->
+          snapshot = Enum.find(preflight.snapshots, &(&1.module == inspect(module)))
+          shape_module(preflight, sites, snapshot, module, entries, observations)
+        end)
+      else
+        []
+      end
+
+    %{schema: 1, requests_valid: valid?, modules: records}
+  end
+
+  defp shape_request?({module, entries, observations}) do
+    is_atom(module) and is_list(entries) and entries != [] and
+      length(entries) <= @max_parameter_functions and
+      Enum.all?(entries, fn
+        {{name, arity}, index, shapes} ->
+          is_atom(name) and is_integer(arity) and arity in 1..255 and
+            is_integer(index) and index in 0..(arity - 1) and is_list(shapes) and
+            shapes != [] and length(shapes) <= @max_finite_targets and
+            Enum.all?(shapes, &outer_shape?/1) and length(Enum.uniq(shapes)) == length(shapes)
+
+        _ ->
+          false
+      end) and is_list(observations) and observations != [] and length(observations) <= 64 and
+      Enum.all?(observations, fn
+        {{owner, arity}, index, {callee, count}, argument, path} ->
+          is_atom(owner) and is_integer(arity) and arity in 1..255 and
+            is_integer(index) and index in 0..(arity - 1) and is_atom(callee) and
+            is_integer(count) and count in 1..255 and is_integer(argument) and
+            argument in 0..(count - 1) and
+            (path == :discover or
+               (is_list(path) and path != [] and length(path) <= @max_parameter_nodes and
+                  Enum.all?(path, &(is_integer(&1) and &1 >= 0))))
+
+        _ ->
+          false
+      end) and length(Enum.uniq(observations)) == length(observations)
+  end
+
+  defp shape_request?(_), do: false
+  defp outer_shape?({:atom, value}), do: is_atom(value)
+
+  defp outer_shape?({:tuple, tag, arity}),
+    do: is_atom(tag) and is_integer(arity) and arity in 1..255
+
+  defp outer_shape?(_), do: false
+
+  defp shape_module(preflight, sites, snapshot, module, entries, observations) do
+    base = %{
+      module: inspect(module),
+      beam: if(snapshot, do: snapshot.beam, else: nil),
+      sha256: if(snapshot, do: snapshot.sha256, else: nil),
+      status: "unconfirmed",
+      inventory: nil,
+      slots: [],
+      callers: [],
+      observations: []
+    }
+
+    with true <- preflight.scan_complete,
+         true <- Enum.all?(preflight.snapshots, &(&1.selected and &1.debug)),
+         %{selected: true, debug: true} <- snapshot,
+         {:ok, {^module, chunks}} <-
+           :beam_lib.chunks(String.to_charlist(snapshot.beam), [:exports, :abstract_code]),
+         {:raw_abstract_v1, forms} <- Keyword.get(chunks, :abstract_code),
+         {:ok, proof} <-
+           shape_proof(
+             forms,
+             Keyword.fetch!(chunks, :exports),
+             entries,
+             observations,
+             Enum.filter(sites, fn {site, _, _} -> site.beam == snapshot.beam end)
+           ),
+         true <- digest(snapshot.beam) == snapshot.sha256 do
+      Map.merge(base, Map.put(proof, :status, "checked"))
+    else
+      _ -> base
+    end
+  end
+
+  defp shape_proof(forms, beam_exports, entries, observations, sites) do
+    definitions = Map.new(for {:function, _, name, arity, _} = f <- forms, do: {{name, arity}, f})
+    exports = for {:attribute, _, :export, values} <- forms, value <- values, do: value
+
+    options =
+      for {:attribute, _, :compile, values} <- forms, value <- List.wrap(values), do: value
+
+    exported = MapSet.new(beam_exports ++ exports)
+
+    initial = %{
+      definitions: definitions,
+      edges: MapSet.new(),
+      captures: MapSet.new(),
+      complete: true,
+      nodes: 0,
+      calls: 0
+    }
+
+    analysis =
+      Enum.reduce(definitions, initial, fn {owner, {:function, _, _, _, clauses}}, acc ->
+        caller_syntax(clauses, owner, acc)
+      end)
+
+    domains = Map.new(entries, fn {key, index, shapes} -> {{key, index}, shapes} end)
+
+    eligible? =
+      analysis.complete and :export_all not in options and
+        map_size(definitions) <= @max_parameter_functions and map_size(domains) == length(entries) and
+        Enum.all?(domains, fn {{key, index}, _} ->
+          not MapSet.member?(exported, key) and not MapSet.member?(analysis.captures, key) and
+            invariant_formals?(Map.get(definitions, key), index)
+        end) and
+        Enum.all?(observations, fn {owner, index, callee, _, _} ->
+          Map.has_key?(domains, {owner, index}) and Map.has_key?(definitions, callee)
+        end)
+
+    if eligible? do
+      context = %{
+        domains: domains,
+        observations: observations,
+        sites: Map.new(sites, fn {site, _, _} -> {site.path, site} end)
+      }
+
+      result =
+        forms
+        |> Enum.with_index()
+        |> Enum.reduce(%{callers: [], observations: []}, fn
+          {{:function, _, name, arity, clauses}, index}, acc ->
+            owner = {name, arity}
+
+            clauses
+            |> Enum.with_index()
+            |> Enum.reduce(acc, fn {{:clause, _, patterns, _, _} = clause, clause_index}, state ->
+              scope =
+                for {{^owner, slot}, _} <- domains, into: %{} do
+                  {:var, _, variable} = Enum.at(patterns, slot)
+                  {variable, {owner, slot}}
+                end
+
+              shape_walk(clause, [index, 4, clause_index], owner, scope, context, state)
+            end)
+
+          _, acc ->
+            acc
+        end)
+
+      origins =
+        Enum.reduce(result.callers, Map.new(domains, fn {slot, _} -> {slot, []} end), fn {slot,
+                                                                                          origin,
+                                                                                          _site},
+                                                                                         acc ->
+          Map.update!(acc, slot, &[origin | &1])
+        end)
+
+      all_origins? =
+        Enum.all?(origins, fn {slot, values} ->
+          values != [] and
+            Enum.all?(values, fn
+              {:seed, shape} ->
+                shape in Map.fetch!(domains, slot)
+
+              {:identity, source} ->
+                Map.has_key?(domains, source) and
+                  Enum.all?(Map.fetch!(domains, source), &(&1 in Map.fetch!(domains, slot)))
+
+              _ ->
+                false
+            end)
+        end)
+
+      observed =
+        Enum.map(observations, fn request ->
+          matches = Enum.filter(result.observations, fn {actual, _, _} -> actual == request end)
+          {request, matches}
+        end)
+
+      observations_valid? =
+        Enum.all?(observed, fn
+          {{owner, index, _, _, expected}, [{_, {:identity, source}, site}]} ->
+            source == {owner, index} and (expected == :discover or expected == site.path)
+
+          _ ->
+            false
+        end)
+
+      if all_origins? and invariant_seeded?(origins, MapSet.new()) and observations_valid? do
+        {:ok,
+         %{
+           inventory: %{complete: true, nodes: analysis.nodes, calls: analysis.calls},
+           slots:
+             Enum.map(entries, fn {key, index, shapes} ->
+               Map.put(shape_slot({key, index}), :shapes, Enum.map(shapes, &shape_json/1))
+             end),
+           callers:
+             Enum.reverse(result.callers)
+             |> Enum.map(fn {slot, origin, site} ->
+               %{target: shape_slot(slot), origin: shape_origin_json(origin), site: site}
+             end),
+           observations:
+             Enum.map(observed, fn
+               {{owner, index, {callee, count}, argument, expected}, [{_, _, site}]} ->
+                 %{
+                   source: shape_slot({owner, index}),
+                   callee: %{function: to_string(callee), arity: count, argument_index: argument},
+                   expected_path: if(expected == :discover, do: nil, else: expected),
+                   site: site,
+                   shapes: Enum.map(Map.fetch!(domains, {owner, index}), &shape_json/1)
+                 }
+             end)
+         }}
+      else
+        :unknown
+      end
+    else
+      :unknown
+    end
+  end
+
+  defp shape_walk({:fun, _, {:clauses, clauses}}, path, owner, scope, context, result),
+    do: shape_fun(clauses, path ++ [2, 1], owner, scope, context, result)
+
+  defp shape_walk({:named_fun, _, name, clauses}, path, owner, scope, context, result),
+    do: shape_fun(clauses, path ++ [3], owner, Map.delete(scope, name), context, result)
+
+  defp shape_walk(term, path, owner, scope, context, result) do
+    scope =
+      if is_tuple(term) and tuple_size(term) > 0 and elem(term, 0) in [:lc, :bc, :mc],
+        do: %{},
+        else: scope
+
+    result =
+      case term do
+        {:call, _, {:atom, _, name}, args} ->
+          callee = {name, length(args)}
+          site = Map.fetch!(context.sites, path)
+
+          result =
+            Enum.reduce(context.domains, result, fn
+              {{^callee, index} = slot, _}, acc ->
+                origin = shape_origin(Enum.at(args, index), owner, scope, context.domains)
+                %{acc | callers: [{slot, origin, site} | acc.callers]}
+
+              _, acc ->
+                acc
+            end)
+
+          Enum.reduce(context.observations, result, fn
+            {^owner, _source, ^callee, index, _path} = request, acc ->
+              origin = shape_origin(Enum.at(args, index), owner, scope, context.domains)
+              %{acc | observations: [{request, origin, site} | acc.observations]}
+
+            _, acc ->
+              acc
+          end)
+
+        _ ->
+          result
+      end
+
+    Enum.reduce(callable_children(term), result, fn {child, index}, acc ->
+      shape_walk(child, path ++ [index], owner, scope, context, acc)
+    end)
+  end
+
+  defp shape_fun(clauses, path, owner, scope, context, result) do
+    clauses
+    |> Enum.with_index()
+    |> Enum.reduce(result, fn
+      {{:clause, _, patterns, _, _} = clause, index}, acc ->
+        shape_walk(
+          clause,
+          path ++ [index],
+          owner,
+          Map.drop(scope, pattern_variables(patterns)),
+          context,
+          acc
+        )
+    end)
+  end
+
+  defp shape_origin({:var, _, variable}, _owner, scope, _domains) do
+    case Map.fetch(scope, variable) do
+      {:ok, slot} -> {:identity, slot}
+      :error -> :unknown
+    end
+  end
+
+  defp shape_origin(expression, owner, _scope, domains) do
+    # Literal seeds must enter from outside the proposed recursive invariant.
+    if Enum.any?(domains, fn {{key, _}, _} -> key == owner end) do
+      :unknown
+    else
+      case expression do
+        {:atom, _, value} ->
+          {:seed, {:atom, value}}
+
+        {:tuple, _, [{:atom, _, tag} | _] = fields} when length(fields) <= 255 ->
+          {:seed, {:tuple, tag, length(fields)}}
+
+        _ ->
+          :unknown
+      end
+    end
+  end
+
+  defp shape_slot({{name, arity}, index}),
+    do: %{function: to_string(name), arity: arity, parameter_index: index}
+
+  defp shape_json({:atom, value}), do: %{kind: "atom", value: to_string(value)}
+  defp shape_json({:tuple, tag, arity}), do: %{kind: "tuple", tag: to_string(tag), arity: arity}
+  defp shape_origin_json({:seed, shape}), do: %{kind: "seed", shape: shape_json(shape)}
+  defp shape_origin_json({:identity, slot}), do: %{kind: "parameter", source: shape_slot(slot)}
 
   defp callable_sites(_term, _path, _owner, _scope, %{complete: false} = state), do: state
 

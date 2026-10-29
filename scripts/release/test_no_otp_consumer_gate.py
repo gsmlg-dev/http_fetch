@@ -634,5 +634,180 @@ class CallablePreflightTests(unittest.TestCase):
             with self.subTest(mutation=mutate), self.assertRaises(gate.GateError):
                 gate.validate_artifacts(report, '1.2.3')
 
+
+class PrivateShapeTests(unittest.TestCase):
+    @staticmethod
+    def report():
+        report = CallablePreflightTests.report()
+        preflight = report['callable_provenance_preflight']
+        preflight['scanned_sites'] = 3
+        preflight['scanned_nodes'] = 80
+        beam = report['beam_inspections'][0]['beam']
+        target = dict(function='deliver', arity=2, parameter_index=1)
+        shapes = [dict(kind='tuple', tag='informational', arity=3),
+                  dict(kind='tuple', tag='trailers', arity=2)]
+        def site(ordinal, owner):
+            return dict(beam=beam, module=':fixture', owner=dict(function=owner, arity=2),
+                        ordinal=ordinal, line=10 + ordinal, path=[ordinal + 2, 4, 0, 4, 0])
+        record = dict(module=':fixture', beam=beam, sha256='a' * 64, status='checked',
+                      inventory=dict(complete=True, nodes=70, calls=3),
+                      slots=[{**target, 'shapes': shapes}],
+                      callers=[dict(target=target.copy(), origin=dict(kind='seed', shape=shape.copy()),
+                                    site=site(n, 'dispatch')) for n, shape in enumerate(shapes)],
+                      observations=[dict(source=target.copy(),
+                                         callee=dict(function='notify', arity=2, argument_index=1),
+                                         expected_path=None, site=site(2, 'deliver'), shapes=shapes)])
+        preflight['private_shape_derivations'] = dict(schema=1, requests_valid=True, modules=[record])
+        return report
+
+    @staticmethod
+    def record(report):
+        return report['callable_provenance_preflight']['private_shape_derivations']['modules'][0]
+
+    def test_complete_private_shape_theorem_is_separate_from_zero_unresolved(self):
+        report = self.report()
+        gate.validate_artifacts(report, '1.2.3')
+        report['unresolved_dispatch'] = [dict(kind='unresolved_fun_invocation')]
+        with self.assertRaises(gate.GateError):
+            gate.validate_artifacts(report, '1.2.3')
+
+    def test_stale_artifact_and_incomplete_selection_reject_checked_shapes(self):
+        for mutation in ('hash', 'path', 'selected', 'debug', 'scan'):
+            report = self.report()
+            record = self.record(report)
+            preflight = report['callable_provenance_preflight']
+            preflight['roots'][0]['status'] = 'unconfirmed'
+            if mutation == 'hash':
+                record['sha256'] = 'b' * 64
+            elif mutation == 'path':
+                record['beam'] = '/foreign/fixture.beam'
+            elif mutation == 'selected':
+                preflight['snapshots'][0]['selected'] = False
+            elif mutation == 'debug':
+                preflight['snapshots'][0]['debug'] = False
+                report['beam_inspections'][0]['missing_abstract_code'] = True
+            else:
+                preflight['scan_complete'] = False
+            with self.subTest(mutation=mutation), self.assertRaises(gate.GateError):
+                gate.validate_callable_preflight(report)
+
+    def test_exported_duplicate_or_missing_slots_cannot_claim_private_proof(self):
+        for mutation in ('export', 'duplicate', 'absent', 'wrong_index'):
+            report = self.report()
+            record = self.record(report)
+            if mutation == 'export':
+                report['callable_provenance_preflight']['snapshots'][0]['exports'].append(
+                    dict(function='deliver', arity=2))
+            elif mutation == 'duplicate':
+                record['slots'].append(record['slots'][0].copy())
+            elif mutation == 'absent':
+                record['slots'] = []
+            else:
+                record['slots'][0]['parameter_index'] = 2
+            with self.subTest(mutation=mutation), self.assertRaises(gate.GateError):
+                gate.validate_callable_preflight(report)
+
+    def test_unknown_or_wrong_seed_and_omitted_callers_reject_theorem(self):
+        for mutation in ('unknown', 'tag', 'arity', 'no_callers', 'duplicate', 'internal_seed'):
+            report = self.report()
+            record = self.record(report)
+            if mutation == 'unknown':
+                record['callers'][0]['origin']['kind'] = 'external'
+            elif mutation in ('tag', 'arity'):
+                record['callers'][0]['origin']['shape'][mutation] = 'wrong' if mutation == 'tag' else 2
+            elif mutation == 'no_callers':
+                record['callers'] = []
+            elif mutation == 'duplicate':
+                record['callers'].append(record['callers'][0])
+            else:
+                record['callers'][0]['site']['owner']['function'] = 'deliver'
+            with self.subTest(mutation=mutation), self.assertRaises(gate.GateError):
+                gate.validate_callable_preflight(report)
+
+    def test_forwarded_domains_need_a_checked_source_and_external_seed(self):
+        report = self.report()
+        record = self.record(report)
+        source = dict(function='wrap', arity=2, parameter_index=1)
+        record['slots'].append({**source, 'shapes': record['slots'][0]['shapes']})
+        record['callers'][0]['target'] = source.copy()
+        record['callers'][1]['origin'] = dict(kind='parameter', source=source.copy())
+        record['callers'][1]['site']['owner']['function'] = 'wrap'
+        gate.validate_callable_preflight(report)
+        record['callers'][0]['origin'] = dict(kind='parameter', source=record['callers'][1]['target'])
+        record['callers'][0]['site']['owner']['function'] = 'deliver'
+        with self.assertRaises(gate.GateError):
+            gate.validate_callable_preflight(report)
+
+    def test_original_path_ordinal_owner_and_observation_must_agree(self):
+        for mutation in ('path', 'ordinal', 'owner', 'shape', 'argument', 'duplicate'):
+            report = self.report()
+            record = self.record(report)
+            observation = record['observations'][0]
+            if mutation == 'path':
+                observation['expected_path'] = [99]
+            elif mutation == 'ordinal':
+                observation['site']['ordinal'] = record['callers'][0]['site']['ordinal']
+            elif mutation == 'owner':
+                observation['site']['owner']['function'] = 'dispatch'
+            elif mutation == 'shape':
+                observation['shapes'] = [dict(kind='atom', value='done')]
+            elif mutation == 'argument':
+                observation['callee']['argument_index'] = 2
+            else:
+                record['observations'].append(observation)
+            with self.subTest(mutation=mutation), self.assertRaises(gate.GateError):
+                gate.validate_callable_preflight(report)
+
+    def test_inventory_bounds_schema_and_status_are_strict(self):
+        for mutation in ('nodes', 'calls', 'complete', 'schema', 'valid', 'status'):
+            report = self.report()
+            record = self.record(report)
+            proof = report['callable_provenance_preflight']['private_shape_derivations']
+            if mutation == 'nodes':
+                record['inventory']['nodes'] = 100_001
+            elif mutation == 'calls':
+                record['inventory']['calls'] = 4_097
+            elif mutation == 'complete':
+                record['inventory']['complete'] = False
+            elif mutation == 'schema':
+                proof['schema'] = True
+            elif mutation == 'valid':
+                proof['requests_valid'] = False
+            else:
+                record['status'] = 'external'
+            with self.subTest(mutation=mutation), self.assertRaises(gate.GateError):
+                gate.validate_callable_preflight(report)
+
+    def test_unconfirmed_records_carry_no_success_evidence(self):
+        report = self.report()
+        record = self.record(report)
+        record.update(status='unconfirmed', inventory=None, slots=[], callers=[], observations=[])
+        gate.validate_callable_preflight(report)
+        record['slots'] = [dict(function='deliver', arity=2, parameter_index=1)]
+        with self.assertRaises(gate.GateError):
+            gate.validate_callable_preflight(report)
+
+    def test_duplicate_modules_and_external_records_are_still_rejected(self):
+        report = self.report()
+        proof = report['callable_provenance_preflight']['private_shape_derivations']
+        proof['modules'].append(proof['modules'][0])
+        with self.assertRaises(gate.GateError):
+            gate.validate_callable_preflight(report)
+        report = self.report()
+        report['callable_provenance_preflight']['external_callable_records'] = [dict(status='checked')]
+        with self.assertRaises(gate.GateError):
+            gate.validate_callable_preflight(report)
+
+    def test_unbound_null_artifact_cannot_impersonate_a_present_module(self):
+        report = self.report()
+        record = self.record(report)
+        record.update(status='unconfirmed', beam=None, sha256=None, inventory=None,
+                      slots=[], callers=[], observations=[])
+        with self.assertRaises(gate.GateError):
+            gate.validate_callable_preflight(report)
+        record['module'] = ':missing'
+        gate.validate_callable_preflight(report)
+
+
 if __name__ == "__main__":
     unittest.main()
