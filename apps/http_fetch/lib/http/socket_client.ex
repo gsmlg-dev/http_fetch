@@ -1025,7 +1025,7 @@ defmodule HTTP.SocketClient do
         fail_http2(state, :aborted)
 
       {:DOWN, ^monitor, :process, _owner, reason} ->
-        if reason in [:normal, :closed] do
+        if reason in [:normal, :noproc, :closed] do
           await_http2_response(
             Map.put_new(state, :pending_close, {:request_process_down, reason})
           )
