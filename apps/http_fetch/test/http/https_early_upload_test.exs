@@ -338,6 +338,9 @@ defmodule HTTP.HTTPSEarlyUploadTest do
         {:ok, tcp} = :ssl.transport_accept(listener, @timeout)
         {:ok, socket} = :ssl.handshake(tcp, @timeout)
         headers(socket, "")
+        # Prepare the bounded probe while the client is held at peer readiness.
+        # Setting native options after client cleanup can race the TCP close.
+        :ok = :ssl.setopts(socket, send_timeout: 100, send_timeout_close: false)
         send(parent, {:peer_ready, self()})
         serve(socket, parent)
       end)
@@ -400,11 +403,7 @@ defmodule HTTP.HTTPSEarlyUploadTest do
           if remaining == 0 do
             {:error, :timeout}
           else
-            case :ssl.setopts(socket, send_timeout: remaining, send_timeout_close: false) do
-              :ok -> :ssl.send(socket, <<0>>)
-              {:error, :closed} = closed -> closed
-              other -> {:probe_option_error, other}
-            end
+            :ssl.send(socket, <<0>>)
           end
 
         send(parent, {token, result})
