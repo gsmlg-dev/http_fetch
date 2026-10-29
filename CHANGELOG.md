@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The TLS migration is being prepared for the `1.0.0-rc.N` series. The changes
-below describe the current source; production release isolation and published
-consumer acceptance remain pending. See the [migration checklist](docs/tls-migration-plan.md)
+## [1.0.0-rc.0] - Unreleased
+
+The initial TLS migration release candidate is `1.0.0-rc.0`; it has not been
+published. The changes below describe the current source; production release
+isolation and published consumer acceptance remain pending. See the
+[migration checklist](docs/tls-migration-plan.md)
 and [validation ledger](docs/tls-migration-validation.md) for executed gates.
 
 ### Changed
