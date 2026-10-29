@@ -2,7 +2,7 @@
 
 Execution checklist derived from the accepted 2026-10-21 HTTP Fetch migration plan.
 Baseline: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, nine packages at `0.21.14`.
-Status (2026-10-28): P0–P4 acceptance is complete at `3c561646b7f1bc9042c5cadbc37ed7c6b48fae15`,
+Status (2026-10-29): P0–P4 acceptance is complete at `3c561646b7f1bc9042c5cadbc37ed7c6b48fae15`,
 including resumption, nested HTTPS proxies, public lifecycle, completion and
 managed H1/H2. P5 default promotion is accepted at
 `0f4b3dd0f37caadc71b6db7bdc9fff74e9170825` after source, candidate and configured
@@ -422,9 +422,13 @@ actual versions with repository tooling; no guessed reserved versions.
 
 ## P6 — Remove production OTP SSL (after P5)
 
-- [ ] Delete OTP transport implementation, backend branches, private socket types/layouts.
-- [ ] Remove five unconditional ssl extra_applications and audit transitive/generated apps.
-- [ ] Legacy tls_backend=:ssl returns an explicit configuration error.
+The [source-removal checkpoint](tls-migration-validation.md#p6-source-removal-checkpoint--2026-10-29)
+passes the configured Linux source suites. The remaining release checks below
+must pass before P6 is accepted.
+
+- [x] Delete OTP transport implementation, backend branches, private socket types/layouts.
+- [x] Remove five unconditional ssl extra_applications and audit transitive/generated apps.
+- [x] Legacy tls_backend=:ssl returns an explicit configuration error.
 - [ ] Test peers start OTP SSL only in isolated test/external environments.
 - [ ] Build an actual fresh candidate production consumer release with no umbrella
       overrides/test support; ssl absent from app closure, rel/boot and bundled dirs.

@@ -1,5 +1,39 @@
 # TLS migration execution ledger
 
+## P6 source-removal checkpoint — 2026-10-29
+
+Production removal is committed at `55d719467f691d857df18323e162afcae338ecd3`.
+It deletes the retired OTP transport and nested adapter, removes production OTP
+selectors and the five unconditional application dependencies, and explicitly
+rejects `tls_backend: :ssl`. The current production sources, app manifests,
+configuration and lockfile remain identical through `60c1c4a`.
+
+All-nine [units](https://github.com/gsmlg-dev/http_fetch/actions/runs/40809490861)
+and the configured [E2E workflow](https://github.com/gsmlg-dev/http_fetch/actions/runs/40809490824)
+pass at `55d7194`; apps without standalone E2E suites retain the P4 scope below.
+All-nine [integration](https://github.com/gsmlg-dev/http_fetch/actions/runs/40814044245)
+passes at `a29248a`, including the corrected H3 attach-timeout precondition. These
+are configured Linux results. The earlier macOS blocked-writer observation race
+remains open; no unrestricted macOS integration pass is claimed.
+
+The isolated production [release audit](https://github.com/gsmlg-dev/http_fetch/actions/runs/40817866344)
+at `71162cb` scans 348 BEAM files. It finds zero direct OTP SSL imports,
+application dependencies, boot entries or bundled SSL paths. OTP SSL is
+unavailable, unloaded and unstarted before and after the scan. Its 192 unresolved
+dynamic calls still reject the release gate, so no traffic scenario executes.
+
+The subsequent auditor change `60c1c4a` passes strict helper compilation with
+zero warnings, all 231 compiled controls, source tooling regression and format
+checks. A separate immutable 350-BEAM comparison proves exactly three existing
+WebSocket selector calls, reducing that frozen release's configured unresolved
+count from 192 to 189. Every other ordinary field, occurrence multiplicity and
+incoming provenance record remains exact; all source, cache and release guards
+pass. Fixture compilation retains its existing warnings. This frozen comparison
+does not establish a fresh candidate release or traffic result.
+
+P6 release/traffic acceptance and P7 coordinated publication remain open.
+Credo/Dialyzer remain user-deferred; performance is TODO outside this goal.
+
 ## P5 default promotion acceptance — 2026-10-28
 
 The shared resolver, Fetch, EventSource, WebSocket and managed H1/H2 now default
