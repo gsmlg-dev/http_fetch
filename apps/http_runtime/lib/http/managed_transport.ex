@@ -42,8 +42,8 @@ defmodule HTTP.ManagedTransport do
   (HTTP). Optional capacity is `max_requests: 1..2048` (default 100),
   `max_connections: 1..256` (default 2), `max_pending: 0`, and
   `idle_timeout: 1..60000` milliseconds (default 30000). `ssl` and `socket_opts`
-  freeze supported TLS/socket settings. Default `tls_backend: :ex_ssl` and the
-  transitional explicit `:ssl` selection support HTTPS H1/H2; only `http2_profile: :native_v1`
+  freeze supported TLS/socket settings. ExSSL supports HTTPS H1/H2; legacy
+  `tls_backend: :ssl` selections fail before dialing. Only `http2_profile: :native_v1`
   is accepted. TLS files and system CAs are captured
   once at open; rotated policy requires a new scope. For explicit HTTPS `:http1`,
   `ssl: [alpn_advertised_protocols: ["http/1.1"]]` optionally advertises the single
@@ -56,7 +56,7 @@ defmodule HTTP.ManagedTransport do
   connecting, checked-out and idle transports. Exhaustion returns
   `{:error, {:transport_scope_capacity, :requests | :connections}}`, with no
   waiting queue. Frozen TLS/socket policy owns compact binary backing within its
-  1 MiB serialized limit. Freeze/preparation copy overlap and OTP's parsed TLS
+  1 MiB serialized limit. Freeze/preparation copy overlap and parsed TLS
   state are outside that retained-policy payload bound. Request metadata is
   bounded to 64 KiB/256 fields,
   buffered upload bodies to 1 MiB, and upload chunks/bridges to 64 KiB. The native
@@ -93,10 +93,10 @@ defmodule HTTP.ManagedTransport do
   `{:error, :cleanup_unconfirmed}`. Normal coordinator termination preserves the
   durable receipt; unexpected coordinator death cannot report success.
 
-  OTP TLS connections retain independent receiver and sender termination
-  evidence after pool handoff. If TLS setup fails without returning a socket,
-  or its resource representation is unsupported, the generation retires with
-  unconfirmed cleanup; open a new scope for subsequent requests.
+  TLS connections enroll public ExSSL lifecycle evidence before setup and retain
+  provider cleanup obligations after pool handoff. Missing or lost lifecycle
+  evidence leaves generation cleanup unconfirmed; open a new scope for subsequent
+  requests.
   """
   alias HTTP.ManagedTransport.{Policy, Scope}
 

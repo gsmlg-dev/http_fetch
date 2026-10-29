@@ -23,7 +23,7 @@ defmodule HTTP.WebSocket.OpeningTest do
     refute_receive {WebSocket, ^ws, %Open{}}, 0
   end
 
-  for backend <- [:ssl, :ex_ssl] do
+  for backend <- [nil, :ex_ssl] do
     test "close interrupts stalled HTTP/1 TLS dialing with #{backend}" do
       parent = self()
       {url, peer} = stalled_peer(:tls, parent)

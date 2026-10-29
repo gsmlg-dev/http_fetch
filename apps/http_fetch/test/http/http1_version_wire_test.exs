@@ -5,7 +5,7 @@ defmodule HTTP.HTTP1VersionWireTest do
   alias HTTP.{Promise, RequestCompletion, RequestError, Response}
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
-  for backend <- [:ssl, :ex_ssl],
+  for backend <- [nil, :ex_ssl],
       mode <- [:raw, :structured],
       version <- ["HTTP/2.0", "HTTP/0.9"] do
     test "#{backend} #{mode} rejects #{version} before response acceptance and closes without replay" do
@@ -22,7 +22,7 @@ defmodule HTTP.HTTP1VersionWireTest do
     end
   end
 
-  for backend <- [:ssl, :ex_ssl], version <- ["HTTP/1.0", "HTTP/1.1", "HTTP/1.9"] do
+  for backend <- [nil, :ex_ssl], version <- ["HTTP/1.0", "HTTP/1.1", "HTTP/1.9"] do
     test "#{backend} accepts compatible #{version} responses" do
       connection = if unquote(version) == "HTTP/1.1", do: "Connection: close\r\n", else: ""
       bytes = unquote(version) <> " 200 OK\r\nContent-Length: 2\r\n" <> connection <> "\r\nok"

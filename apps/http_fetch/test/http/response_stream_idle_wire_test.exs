@@ -23,7 +23,7 @@ defmodule HTTP.ResponseStreamIdleWireTest do
     :ok
   end
 
-  for backend <- [:tcp, :ssl, :ex_ssl] do
+  for backend <- [:tcp, nil, :ex_ssl] do
     test "#{backend} infinite response idle permits an acknowledged network gap beyond the global limit" do
       backend = unquote(backend)
       {peer, promise, response} = response(backend, <<0, 255>>, 4)
@@ -264,7 +264,7 @@ defmodule HTTP.ResponseStreamIdleWireTest do
           connect_timeout: 3_000,
           read_idle_timeout: 2_500,
           response_stream_idle_timeout: response_idle,
-          tls_backend: if(backend == :ex_ssl, do: :ex_ssl, else: :ssl),
+          tls_backend: if(backend == :tcp, do: nil, else: backend),
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
           telemetry: false
         ],

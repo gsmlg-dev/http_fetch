@@ -55,10 +55,10 @@ defmodule HTTP.EventSource do
   Custom server-sent event names are delivered through the message event's
   `type` field.
 
-  For HTTP/1 and HTTP/2 `https` connections, pass `tls_backend: :ssl | :ex_ssl` (or the equivalent
-  string in a map). When omitted, the shared `:http_core` TLS backend setting is
-  defaults to `:ex_ssl`, is captured when the source is created and is retained
-  across reconnects.
+  For HTTP/1 and HTTP/2 `https` connections, `tls_backend: :ex_ssl` (or the equivalent
+  string in a map) selects the TLS provider. When omitted, the shared `:http_core`
+  TLS backend setting defaults to `:ex_ssl`, is captured when the source is created
+  and is retained across reconnects. Legacy OTP `:ssl` selections are rejected.
   """
 
   alias HTTP.EventSource.Connection

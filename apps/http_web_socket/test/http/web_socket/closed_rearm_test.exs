@@ -128,7 +128,7 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
     assert_receive {WebSocket, ^target, %Close{code: 1006, was_clean: false}}
   end
 
-  for backend <- [:ssl, :ex_ssl], terminal <- [:close, :eof, :truncated, :invalid] do
+  for backend <- [nil, :ex_ssl], terminal <- [:close, :eof, :truncated, :invalid] do
     test "#{backend} processes queued #{terminal} frames before peer EOF finalizes closure" do
       backend = unquote(backend)
       terminal = unquote(terminal)
@@ -441,17 +441,9 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
   end
 
   defp tls_pid(%SSL.Socket{pid: pid}), do: pid
-  defp tls_pid({:cancellable_ssl, socket, _tcp}), do: tls_pid(socket)
-  defp tls_pid({:sslsocket, _, [pid | _]}), do: pid
-  defp tls_pid({:sslsocket, _, pid, _, _, _, _, _}), do: pid
 
-  defp wait_for_tls_data(:ex_ssl, pid, monitor, _consumer) do
+  defp wait_for_tls_data(backend, pid, monitor, _consumer) when backend in [nil, :ex_ssl] do
     assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 5_000
-  end
-
-  defp wait_for_tls_data(:ssl, pid, _monitor, consumer) do
-    # OTP can retain its TLS process until the next active-once request.
-    assert_receive {:trace, ^pid, :send, {:ssl, _, _}, ^consumer}, 5_000
   end
 
   defp receive_upgrade(transport, socket, buffer \\ "") do

@@ -95,7 +95,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     send(peer, :close)
   end
 
-  for backend <- [:default, :ssl, :ex_ssl] do
+  for backend <- [:default, :ex_ssl] do
     @tag :integration
     @tag backend: backend
     test "#{backend} HTTP1 cancellation during checkout stays pending until the leased socket closes",
@@ -349,7 +349,7 @@ defmodule HTTP.PooledRequestCompletionTest do
   end
 
   @tag :integration
-  test "OTP HTTP2 TLS cancellation closes TCP but leaves unreturned TLS cleanup unconfirmed" do
+  test "ExSSL HTTP2 cancellation joins TCP and provider cleanup" do
     parent = self()
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
     {:ok, {_, port}} = :inet.sockname(listener)
@@ -368,7 +368,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     promise =
       HTTP.fetch("https://127.0.0.1:#{port}/",
         http_version: :http2,
-        tls_backend: :ssl,
+        tls_backend: :ex_ssl,
         redirect: :manual,
         timeout: 2_000,
         ssl: [verify: :verify_none]
@@ -376,7 +376,7 @@ defmodule HTTP.PooledRequestCompletionTest do
 
     assert_receive :tls_dial_started, 1_000
 
-    assert {:error, :cleanup_unconfirmed} =
+    assert :ok =
              RequestCompletion.abort_and_await(Promise.completion(promise), 1_000)
 
     assert {:error, _} = Promise.await(promise)
@@ -385,7 +385,7 @@ defmodule HTTP.PooledRequestCompletionTest do
 
   for version <- [:http1, :http2] do
     @tag :integration
-    test "verified OTP TLS #{version} cleanup preserves its pooled connection for reuse" do
+    test "verified ExSSL TLS #{version} cleanup preserves its pooled connection for reuse" do
       assert_tls_reuse(unquote(version))
     end
   end
@@ -452,7 +452,7 @@ defmodule HTTP.PooledRequestCompletionTest do
     end
   end
 
-  for backend <- [:default, :ssl] do
+  for backend <- [:default, :ex_ssl] do
     @tag :integration
     @tag backend: backend
     test "#{backend} HTTP2 failed pool registration settles its provisional owner and TLS socket",
@@ -571,7 +571,7 @@ defmodule HTTP.PooledRequestCompletionTest do
 
     opts = [
       http_version: version,
-      tls_backend: :ssl,
+      tls_backend: :ex_ssl,
       http1_reuse: version == :http1,
       redirect: :manual,
       timeout: 2_000,

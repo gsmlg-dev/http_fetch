@@ -5,7 +5,6 @@ defmodule HTTP.SocketClient do
   alias HTTP.Runtime.Dialer
   alias HTTP.Stream.Writer
   alias HTTP.Transport.ExSSL
-  alias HTTP.Transport.SSL, as: OTPTLS
 
   alias HTTP.Headers
   alias HTTP.HTTP2.{BodyBridge, ConnectionOwner, ConnectionSupervisor, Frame, Pool, PoolKey}
@@ -2192,14 +2191,6 @@ defmodule HTTP.SocketClient do
     # instead of waiting indefinitely for a peer that has stopped reading.
     abandonment =
       case {state.transport, state.socket} do
-        {OTPTLS, socket} ->
-          if OTPTLS.cancellable?(socket) do
-            :ok
-          else
-            _ = state.transport.setopts(socket, linger: {true, 0})
-            :ok
-          end
-
         {ExSSL, socket} ->
           ExSSL.abandon_send(socket)
 
@@ -2208,9 +2199,8 @@ defmodule HTTP.SocketClient do
           :ok
       end
 
-    # OTP's TLS sender can still hold a bounded write after its caller dies.
-    # Keep the read side for the entire response, then abort the retained TCP
-    # transport at final cleanup rather than waiting in the sender's queue.
+    # Keep response reads after abandoning the writer. The provider owns the
+    # pending write and its final cleanup even after the upload caller exits.
     case abandonment do
       :ok ->
         upload = state.upload
@@ -2224,12 +2214,6 @@ defmodule HTTP.SocketClient do
       {:error, reason} ->
         {:error, {:upload_abandon, reason}, state}
     end
-  end
-
-  defp close_http1_socket(%{transport: OTPTLS, upload_cancelled?: true} = state) do
-    if OTPTLS.cancellable?(state.socket),
-      do: OTPTLS.abort(state.socket),
-      else: OTPTLS.close(state.socket)
   end
 
   defp close_http1_socket(state), do: state.transport.close(state.socket)

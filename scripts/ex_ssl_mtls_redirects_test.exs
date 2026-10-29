@@ -75,16 +75,30 @@ defmodule CandidateMTLSRedirectsTest do
     assert :ok = Task.await(target_peer, 5_000)
   end
 
-  test "OTP backend keeps its existing cross-origin client-identity behavior", %{fixtures: f} do
+  test "legacy OTP selection preserves historical behavior or rejects before current I/O", %{
+    fixtures: f
+  } do
     {source, port} = listener(f)
     {target, target_port} = listener(f)
-    source_peer = serve(source, f.rsa.der, [redirect("https://127.0.0.1:#{target_port}/next")])
-    target_peer = serve(target, f.rsa.der, [ok()])
-    response = fetch(port, f, tls_backend: :ssl)
-    assert response.status == 200
-    assert HTTP.Response.read_all(response) == "mtls"
-    assert :ok = Task.await(source_peer, 5_000)
-    assert :ok = Task.await(target_peer, 5_000)
+
+    if System.get_env("EX_SSL_EXPECTED_DEFAULT_BACKEND") == "ssl" do
+      source_peer = serve(source, f.rsa.der, [redirect("https://127.0.0.1:#{target_port}/next")])
+      target_peer = serve(target, f.rsa.der, [ok()])
+      response = fetch(port, f, tls_backend: :ssl)
+      assert response.status == 200
+      assert HTTP.Response.read_all(response) == "mtls"
+      assert :ok = Task.await(source_peer, 5_000)
+      assert :ok = Task.await(target_peer, 5_000)
+    else
+      for backend <- [:ssl, "ssl"] do
+        assert_raise ArgumentError, ~r/unsupported tls_backend/, fn ->
+          fetch(port, f, tls_backend: backend)
+        end
+      end
+
+      assert {:error, :timeout} = :ssl.transport_accept(source, 0)
+      assert {:error, :timeout} = :ssl.transport_accept(target, 0)
+    end
   end
 
   defp listener(f) do

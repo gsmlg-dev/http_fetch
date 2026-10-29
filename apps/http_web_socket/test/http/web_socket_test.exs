@@ -90,7 +90,7 @@ defmodule HTTP.WebSocketTest do
 
   @tag :integration
   test "upgrades, exchanges frames, and closes over verified TLS 1.3" do
-    for backend <- [:ssl, :ex_ssl] do
+    for backend <- [nil, :ex_ssl] do
       {:ok, _server, port} =
         HTTPWebSocket.TestServer.start_link(
           tls: true,

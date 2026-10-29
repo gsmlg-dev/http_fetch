@@ -27,7 +27,7 @@ defmodule HTTP.ProxyRequestCompletionTest do
   end
 
   for stage <- [:connect, :origin_tls, :proxy_tls] do
-    completion = if stage == :connect, do: "confirmed", else: "unconfirmed without a TLS handle"
+    completion = "confirmed"
 
     @tag :integration
     test "#{stage} cancellation waits for the dial helper with cleanup #{completion}" do
@@ -173,7 +173,7 @@ defmodule HTTP.ProxyRequestCompletionTest do
       :erlang.resume_process(dial)
     end
 
-    expected = if stage == :connect, do: :ok, else: {:error, :cleanup_unconfirmed}
+    expected = :ok
     assert ^expected = RequestCompletion.await(handle, 1_000)
     assert_receive {:DOWN, ^monitor, :process, ^dial, :normal}
     assert {:error, _} = Promise.await(promise)
@@ -188,7 +188,7 @@ defmodule HTTP.ProxyRequestCompletionTest do
     assert {:error, :cleanup_pending} = RequestCompletion.await(handle, 0)
     assert {:error, reason} = Promise.await(promise, 2_000)
     assert reason in [:request_timeout, :connect_timeout, :timeout, :proxy_tunnel_timeout]
-    expected = if stage == :connect, do: :ok, else: {:error, :cleanup_unconfirmed}
+    expected = :ok
     assert ^expected = RequestCompletion.await(handle, 1_000)
     assert_receive {:pending_closed, {:error, :closed}}, 1_000
     assert ^expected = RequestCompletion.await(handle, 0)
@@ -229,7 +229,7 @@ defmodule HTTP.ProxyRequestCompletionTest do
           http_version: :http1,
           redirect: :manual,
           decode_body: false,
-          tls_backend: :ssl,
+          tls_backend: :ex_ssl,
           timeout: 3_000
         ],
         opts

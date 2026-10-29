@@ -6,8 +6,9 @@ Status (2026-10-28): P0–P4 acceptance is complete at `3c561646b7f1bc9042c5cadb
 including resumption, nested HTTPS proxies, public lifecycle, completion and
 managed H1/H2. P5 default promotion is accepted at
 `0f4b3dd0f37caadc71b6db7bdc9fff74e9170825` after source, candidate and configured
-runtime gates pass. Explicit OTP remains transitional until P6. P6/P7 remain open;
-the default promotion has not been published.
+runtime gates pass. P6 removes the production OTP adapter and selectors; its
+isolated release, dynamic-dispatch and traffic acceptance remain open. P7 remains
+open; the migration has not been published.
 
 See [design and compatibility table](tls-migration-design.md) and
 [execution evidence](tls-migration-validation.md). A checkbox means executed and

@@ -257,7 +257,6 @@ defmodule HTTP.ManagedTransportTest do
     for override <- [
           %{"httpVersion" => :auto},
           %{"connectAddress" => {127, 0, 0, 2}},
-          %{"tlsBackend" => :ssl},
           %{"socketOpts" => [send_timeout: 10]}
         ] do
       options =
@@ -278,6 +277,29 @@ defmodule HTTP.ManagedTransportTest do
     assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
     assert {:ok, receipt} = ManagedTransport.retire(scope)
     assert :ok = ManagedTransport.await_retired(receipt, 1_000)
+  end
+
+  test "removed camelCase OTP backend rejects before scope admission or dialing" do
+    {origin, listener} = listener()
+    scope = open(origin, tls_backend: :ex_ssl)
+
+    assert_raise ArgumentError, "unsupported tls_backend: :ssl; expected :ex_ssl", fn ->
+      HTTP.fetch(origin, %{
+        "tlsBackend" => :ssl,
+        transport_scope: scope,
+        redirect: :manual,
+        stream_response: true,
+        decode_body: false
+      })
+    end
+
+    assert {:ok, %{preparing_requests: 0, active_requests: 0, connections: 0}} =
+             ManagedTransport.snapshot(scope, 100)
+
+    assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
+    assert {:ok, receipt} = ManagedTransport.retire(scope)
+    assert :ok = ManagedTransport.await_retired(receipt, 1_000)
+    assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
   end
 
   test "invalid socket and TLS policy rejects at open" do

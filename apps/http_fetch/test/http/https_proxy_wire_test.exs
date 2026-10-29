@@ -4,7 +4,7 @@ defmodule HTTP.HTTPSProxyWireTest do
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
-  for backend <- [:ssl, :ex_ssl] do
+  for backend <- [nil, :ex_ssl] do
     test "#{backend} TLS proxy forwards exact entities in absolute form and reuses by proxy credentials" do
       {port, peer} = proxy_peer()
       route = {:https, "localhost", port, [headers: [{"Proxy-Authorization", "Basic first"}]]}
@@ -70,7 +70,7 @@ defmodule HTTP.HTTPSProxyWireTest do
     end
   end
 
-  for backend <- [:ssl, :ex_ssl] do
+  for backend <- [nil, :ex_ssl] do
     test "#{backend} TLS proxy rejects a trusted certificate for the wrong hostname" do
       {port, _peer} = proxy_peer("pinned")
 
@@ -165,7 +165,7 @@ defmodule HTTP.HTTPSProxyWireTest do
     refute String.downcase(head) =~ "transfer-encoding"
   end
 
-  for backend <- [:ssl, :ex_ssl], stop <- [:abort, :deadline] do
+  for backend <- [nil, :ex_ssl], stop <- [:abort, :deadline] do
     test "#{backend} TLS proxy handshake is bounded by #{stop}" do
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
       {:ok, {_, port}} = :inet.sockname(listener)
@@ -230,17 +230,11 @@ defmodule HTTP.HTTPSProxyWireTest do
     {port, peer}
   end
 
-  defp assert_hostname_failure(:ssl, reason) do
-    assert {:tls_alert, {:bad_certificate, _}} = reason
-    assert inspect(reason) =~ "hostname_check_failed"
-  end
-
-  defp assert_hostname_failure(:ex_ssl, reason) do
+  defp assert_hostname_failure(backend, reason) when backend in [nil, :ex_ssl] do
     assert {:tls_alert, {:certificate_unknown, _}} = reason
   end
 
-  defp hostname_alert(:ssl), do: :bad_certificate
-  defp hostname_alert(:ex_ssl), do: :certificate_unknown
+  defp hostname_alert(backend) when backend in [nil, :ex_ssl], do: :certificate_unknown
 
   defp accept(listener, parent) do
     case :ssl.transport_accept(listener) do

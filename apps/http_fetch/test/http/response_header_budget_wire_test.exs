@@ -58,7 +58,7 @@ defmodule HTTP.ResponseHeaderBudgetWireTest do
              |> HTTP.Promise.await(3_000)
   end
 
-  for backend <- [:ssl, :ex_ssl] do
+  for backend <- [nil, :ex_ssl] do
     test "CONNECT larger than 16 KiB reaches independently verified #{backend} origin TLS" do
       {url, peer_pid} =
         peer(fn socket ->
@@ -106,7 +106,7 @@ defmodule HTTP.ResponseHeaderBudgetWireTest do
       HTTP.fetch("https://localhost/budget",
         proxy: {:http, "127.0.0.1", URI.parse(url).port, []},
         response_header_limits: [max_connect_head_bytes: 20_000],
-        tls_backend: :ssl,
+        tls_backend: :ex_ssl,
         redirect: :manual,
         telemetry: false,
         timeout: 3_000
@@ -177,7 +177,7 @@ defmodule HTTP.ResponseHeaderBudgetWireTest do
       HTTP.fetch("https://localhost/budget",
         proxy: {:http, "127.0.0.1", URI.parse(url).port, []},
         response_header_limits: [max_informational_responses: 1],
-        tls_backend: :ssl,
+        tls_backend: :ex_ssl,
         redirect: :manual,
         telemetry: false,
         timeout: 3_000

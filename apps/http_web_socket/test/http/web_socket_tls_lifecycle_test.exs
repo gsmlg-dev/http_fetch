@@ -10,7 +10,7 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
-  for backend <- [:ssl, :ex_ssl], terminal <- [:eof, :close] do
+  for backend <- [nil, :ex_ssl], terminal <- [:eof, :close] do
     test "delivers validated Upgrade bytes when #{backend} closes before ownership transfer with #{terminal}" do
       parent = self()
 
@@ -44,7 +44,7 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
 
         assert pid == socket.pid
 
-        if unquote(backend) == :ex_ssl do
+        if unquote(backend) in [nil, :ex_ssl] do
           tls_monitor = Process.monitor(tls_pid(tls))
           assert_receive {:DOWN, ^tls_monitor, :process, _, reason}, 5_000
           assert reason in [:normal, :noproc]
@@ -299,8 +299,6 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
   end
 
   defp tls_pid(%SSL.Socket{pid: pid}), do: pid
-  defp tls_pid({:sslsocket, _, [pid | _]}), do: pid
-  defp tls_pid({:sslsocket, _, pid, _, _, _, _, _}), do: pid
 
   defp upgrade_request(socket, buffer \\ "") do
     if String.contains?(buffer, "\r\n\r\n") do

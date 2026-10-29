@@ -499,7 +499,7 @@ defmodule HTTP.RequestCompletionTest do
   end
 
   @tag :integration
-  test "OTP TLS cancellation closes TCP but leaves unreturned TLS cleanup unconfirmed" do
+  test "ExSSL cancellation joins TCP and provider cleanup" do
     {server, url} =
       server(fn socket, parent ->
         {:ok, _client_hello} = :gen_tcp.recv(socket, 0, 2_000)
@@ -509,7 +509,7 @@ defmodule HTTP.RequestCompletionTest do
 
     promise =
       HTTP.fetch(String.replace(url, "http:", "https:"),
-        tls_backend: :ssl,
+        tls_backend: :ex_ssl,
         redirect: :manual,
         ssl: [verify: :verify_none],
         timeout: 2_000
@@ -517,7 +517,7 @@ defmodule HTTP.RequestCompletionTest do
 
     handle = Promise.completion(promise)
     assert_receive :handshake_started, 1_000
-    assert {:error, :cleanup_unconfirmed} = RequestCompletion.abort_and_await(handle, 1_000)
+    assert :ok = RequestCompletion.abort_and_await(handle, 1_000)
     assert {:error, _} = Promise.await(promise)
     assert_receive {:handshake_closed, {:error, :closed}}
     assert :ok = Task.await(server)
@@ -711,7 +711,8 @@ defmodule HTTP.RequestCompletionBackendTest do
     assert {:error, {:unsupported_completion, :tls_backend}} =
              HTTP.RequestCompletion.await(handle, 0)
 
-    explicit = HTTP.FetchOptions.new(redirect: :manual, tls_backend: "ssl")
-    assert explicit.tls_backend == :ssl
+    assert_raise ArgumentError, ~r/unsupported tls_backend/, fn ->
+      HTTP.FetchOptions.new(redirect: :manual, tls_backend: "ssl")
+    end
   end
 end

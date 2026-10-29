@@ -4,7 +4,7 @@ defmodule HTTP.ProxyCompositionTest do
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
-  for {scheme, backend} <- [{:http, nil}, {:https, :ssl}, {:https, :ex_ssl}] do
+  for {scheme, backend} <- [{:http, nil}, {:https, nil}, {:https, :ex_ssl}] do
     test "#{scheme}/#{backend} reuse isolates proxy credentials and endpoints" do
       scheme = unquote(scheme)
       {first_port, first_proxy} = peer(scheme)

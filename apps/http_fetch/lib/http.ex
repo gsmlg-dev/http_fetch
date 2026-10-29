@@ -1,7 +1,7 @@
 defmodule HTTP do
   @moduledoc """
-  A browser-like HTTP fetch API for Elixir, built on Erlang's `:gen_tcp`, `:ssl`,
-  and the shared QUIC HTTP/3 transport.
+  A browser-like HTTP fetch API for Elixir, built on Erlang's `:gen_tcp`, the
+  independent `ex_ssl` TLS engine, and the shared QUIC HTTP/3 transport.
 
   This module provides a modern, Promise-based HTTP client interface similar to the
   browser's `fetch()` API. It supports asynchronous requests, streaming, request
@@ -119,7 +119,7 @@ defmodule HTTP do
                 - `:signal`: An `HTTP.AbortController` PID. If provided, the request can be aborted
                              via this controller.
                 - `:http_version`: `:http1`, `:http2`, `:http3`, `:h2c`, or `:auto`.
-                - `:tls_backend`: `:ex_ssl` (default) or transitional `:ssl` for HTTPS requests. It may also be
+                - `:tls_backend`: `:ex_ssl` (default) for HTTPS requests. Legacy `:ssl` is rejected. It may also be
                   configured globally with `config :http_core, :tls_backend, :ex_ssl`; an explicit
                   request value takes precedence. HTTP/3 does not support this option.
                 - `:timeout`, `:connect_timeout`, `:ssl`, and `:socket_opts`: Elixir-specific transport
@@ -150,7 +150,7 @@ defmodule HTTP do
   require finite, positive request and connection timeouts.
 
   `read_idle_timeout` and `write_idle_timeout` are independent positive millisecond
-  limits for HTTP/1 requests (TCP, OTP TLS and ExSSL). They default to
+  limits for HTTP/1 requests (TCP and ExSSL). They default to
   `nil`; automatic protocol selection, HTTP/2, HTTP/3 and managed transport scopes
   are unsupported. Read idle measures armed response reads and resets on nonempty
   transport data, pausing during consumer acknowledgement backpressure. Write
@@ -162,7 +162,7 @@ defmodule HTTP do
   connection deadlines, socket send limits and cancellation remain independent.
 
   `response_stream_idle_timeout` sets a per-request response-body inactivity
-  policy for ordinary HTTP/1 (TCP, OTP TLS and ExSSL). It accepts positive
+  policy for ordinary HTTP/1 (TCP and ExSSL). It accepts positive
   milliseconds up to 4_294_967_295 or `:infinity`; `nil` keeps the existing global
   stream timeout. Set it to `:infinity` to leave network stalls to
   `read_idle_timeout` or to allow uncapped response reads. Response convenience

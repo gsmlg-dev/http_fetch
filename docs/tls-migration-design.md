@@ -2,8 +2,10 @@
 
 Status (2026-10-28): integrated P0–P4 acceptance is complete at `3c561646`,
 including advanced policies, resumption, nested proxies, lifecycle and managed
-H1/H2. P5 now defaults to ExSSL and passes local source validation; current
-candidate/runtime and full CI acceptance remain pending before P6 removal.
+H1/H2. P5 default promotion is accepted at `0f4b3dd` after source, candidate and
+configured runtime gates. P6 removes the production OTP adapter, selectors and
+five unconditional dependencies; isolated release and dynamic-dispatch
+acceptance remain pending before publication.
 See the [current execution checklist](tls-migration-plan.md#current-accepted-evidence-and-remaining-gates)
 for exact source/package boundaries, executed results and pending runtime checks.
 Historical foundation sections retain their original implementation boundaries.
@@ -852,11 +854,14 @@ Its dynamic dispatch matches are review candidates, not resolved targets. It exc
 test/support/e2e/docs/scripts deliberately; audit generated `.app` files, BEAM imports,
 dynamic dispatch and release boot/closure separately in P6.
 
-Current executable OTP calls/types live in the temporary OTP adapter and shared
-transport type. Private tuple assumptions live in RequestLifecycle. Backend literals
-also occur in client options and managed policy. Five HTTP manifests list `:ssl`;
-ex_ssl lists it only in the test environment. Reference test peers and historical
-documentation are classified separately and are not evidence of runtime dependency.
+At the P0 baseline, executable OTP calls/types lived in the temporary OTP adapter
+and shared transport type, with private tuple assumptions in RequestLifecycle and
+five unconditional HTTP app dependencies. P6 removes those implementations and
+dependencies and rejects legacy backend selectors before connecting. ExSSL lists
+`:ssl` only in the test environment for independent reference peers. Source
+removal does not establish production-release isolation: current BEAM imports,
+dynamic dispatch, generated closure, boot data and runtime traffic remain separate
+acceptance gates. Historical documentation and reference peers retain their scope.
 
 See [execution ledger](tls-migration-validation.md) for actual commands, failures and
 limits. Existing historical consumer counts remain scoped to their original versions.

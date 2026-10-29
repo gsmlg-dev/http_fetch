@@ -115,7 +115,7 @@ defmodule HTTP.EventSourceTest do
 
   @tag :integration
   test "delivers events over verified TLS 1.3 for each backend" do
-    for backend <- [:ssl, :ex_ssl] do
+    for backend <- [nil, :ex_ssl] do
       {:ok, _server, port} =
         HTTPEventSource.TestServer.start_link(
           tls: true,

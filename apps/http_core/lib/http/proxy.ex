@@ -3,7 +3,6 @@ defmodule HTTP.Proxy do
 
   alias HTTP.{Headers, Request}
   alias HTTP.Transport.{ExSSL, TCP}
-  alias HTTP.Transport.SSL, as: OTPTLS
 
   @max_auth_bytes 8_192
 
@@ -129,7 +128,7 @@ defmodule HTTP.Proxy do
     end
   end
 
-  def connect(transport, host, port, opts, timeout, %{scheme: :https} = proxy) do
+  def connect(ExSSL, _host, _port, opts, timeout, %{scheme: :https} = proxy) do
     deadline = System.monotonic_time(:millisecond) + min(timeout, proxy.timeout)
 
     ssl =
@@ -139,18 +138,17 @@ defmodule HTTP.Proxy do
     proxy_opts = opts |> Keyword.put(:ssl, ssl) |> Keyword.put(:cancellable, true)
 
     with {:ok, outer} <-
-           transport.connect(proxy.host, proxy.port, proxy_opts, remaining(deadline)) do
-      if Map.get(proxy, :origin_scheme) == "https" do
-        nested_connect(transport, outer, host, port, opts, proxy, deadline)
-      else
-        {:ok, outer}
-      end
+           ExSSL.connect(proxy.host, proxy.port, proxy_opts, remaining(deadline)) do
+      {:ok, outer}
     else
       # The outer TLS result can arrive before the dialer's connect timer.
       {:error, :timeout} -> {:error, :connect_timeout}
       error -> error
     end
   end
+
+  def connect(_transport, _host, _port, _opts, _timeout, %{scheme: :https}),
+    do: {:error, :invalid_tls_backend}
 
   def connect(transport, host, port, opts, timeout, proxy) do
     deadline = System.monotonic_time(:millisecond) + min(timeout, proxy.timeout)
@@ -183,29 +181,6 @@ defmodule HTTP.Proxy do
           result
       end
     end
-  end
-
-  defp nested_connect(OTPTLS, outer, host, port, opts, proxy, deadline) do
-    result =
-      with :ok <-
-             establish_tunnel(
-               outer,
-               host,
-               port,
-               proxy,
-               deadline,
-               Keyword.get(opts, :response_header_limits),
-               OTPTLS
-             ),
-           do: HTTP.Transport.NestedTLS.upgrade(outer, host, opts, remaining(deadline))
-
-    if match?({:error, _}, result), do: OTPTLS.abort(outer)
-    result
-  end
-
-  defp nested_connect(transport, outer, _host, _port, _opts, _proxy, _deadline) do
-    transport.close(outer)
-    {:error, :nested_tls_requires_otp_ssl}
   end
 
   defp nested_ex_ssl_connect(outer, attempt, host, port, opts, proxy, deadline) do

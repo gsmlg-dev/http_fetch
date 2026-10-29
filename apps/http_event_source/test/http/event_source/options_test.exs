@@ -163,13 +163,13 @@ defmodule HTTP.EventSource.OptionsTest do
   test "selects TLS backends from atom and string map options" do
     assert {:ok, %{tls_backend: :ex_ssl}} = Options.new("https://example.com/events")
 
-    assert {:ok, %{tls_backend: :ssl}} =
+    assert {:error, :invalid_tls_backend} =
              Options.new("https://example.com/events", tls_backend: :ssl)
 
     assert {:ok, %{tls_backend: :ex_ssl}} =
              Options.new("https://example.com/events", %{"tlsBackend" => "ex_ssl"})
 
-    assert {:ok, %{tls_backend: :ssl}} =
+    assert {:error, :invalid_tls_backend} =
              Options.new("https://example.com/events", %{"tls_backend" => "ssl"})
   end
 
@@ -181,12 +181,12 @@ defmodule HTTP.EventSource.OptionsTest do
     assert {:ok, options} = Options.new("https://example.com/events")
     assert options.tls_backend == :ex_ssl
 
-    assert {:ok, %{tls_backend: :ssl}} =
+    assert {:error, :invalid_tls_backend} =
              Options.new("https://example.com/events", tls_backend: :ssl)
 
     Application.put_env(:http_core, :tls_backend, :ssl)
     assert options.tls_backend == :ex_ssl
-    assert {:ok, %{tls_backend: :ssl}} = Options.new("https://example.com/events")
+    assert {:error, :invalid_tls_backend} = Options.new("https://example.com/events")
   end
 
   test "rejects invalid init options" do

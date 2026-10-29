@@ -8,8 +8,8 @@ defmodule HTTP.ManagedTransportExSSLPolicyTest do
     assert policy.transport[:tls_backend] == :ex_ssl
     assert {:ok, same} = freeze("ex_ssl")
     assert same == policy
-    assert {:ok, otp} = freeze(:ssl)
-    refute policy.identity == otp.identity
+    assert {:error, :invalid_tls_backend} = freeze(:ssl)
+    assert {:error, :invalid_tls_backend} = freeze("ssl")
     assert {:ok, default} = Policy.freeze(options() ++ [ssl: [cacerts: []]])
     assert default.transport[:tls_backend] == :ex_ssl
   end

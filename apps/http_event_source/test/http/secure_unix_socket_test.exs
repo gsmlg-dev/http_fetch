@@ -23,7 +23,7 @@ defmodule HTTP.EventSource.SecureUnixSocketTest do
     path: path,
     listener: listener
   } do
-    for backend <- [:ssl, :ex_ssl], version <- [:http1, :auto] do
+    for backend <- [nil, :ex_ssl], version <- [:http1, :auto] do
       assert {:error, :tls_over_unix_socket_not_supported} =
                EventSource.new("https://localhost/events",
                  unix_socket: path,

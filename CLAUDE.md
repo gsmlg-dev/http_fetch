@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is an Elixir umbrella providing a browser-like HTTP fetch API, shared HTTP
 protocol clients, and experimental TLS/QUIC packages. TCP sockets use Erlang's
-`:gen_tcp`; OTP `:ssl` remains the default TCP TLS backend. The imported QUIC
-stack uses the independent `ex_ssl` TLS engine.
+`:gen_tcp`; TCP TLS and the imported QUIC stack use the independent `ex_ssl`
+TLS engine. Legacy OTP `:ssl` backend selections are rejected.
 
 ## Core Architecture
 
@@ -164,4 +164,5 @@ Current known issues to address:
 
 ## Requirements
 - Elixir 1.18+ (for built-in `JSON` module support)
-- Erlang OTP with `:ssl` and `:public_key` applications
+- Erlang OTP with `:crypto` and `:public_key` applications; OTP `:ssl` is required
+  only by test/reference peers

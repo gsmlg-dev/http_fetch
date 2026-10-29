@@ -23,7 +23,7 @@ defmodule HTTP.HTTP1IdleTimeoutWireTest do
       HTTP.fetch("http://127.0.0.1:#{port}/empty-policy",
         http_version: :http1,
         redirect: :manual,
-        tls_backend: :ssl,
+        tls_backend: :ex_ssl,
         read_idle_timeout: 1_000,
         timeout: 3_000,
         telemetry: false
@@ -72,7 +72,7 @@ defmodule HTTP.HTTP1IdleTimeoutWireTest do
         HTTP.fetch("http://127.0.0.1:#{port}/idle",
           http_version: :http1,
           redirect: :manual,
-          tls_backend: :ssl,
+          tls_backend: :ex_ssl,
           error_mode: unquote(mode),
           read_idle_timeout: 100,
           timeout: 1_000

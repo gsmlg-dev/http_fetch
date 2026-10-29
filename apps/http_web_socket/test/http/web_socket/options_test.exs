@@ -98,13 +98,13 @@ defmodule HTTP.WebSocket.OptionsTest do
   test "selects TLS backends from atom and string map options" do
     assert {:ok, %{tls_backend: :ex_ssl}} = Options.new("wss://example.com/socket")
 
-    assert {:ok, %{tls_backend: :ssl}} =
+    assert {:error, :invalid_tls_backend} =
              Options.new("wss://example.com/socket", [], tls_backend: :ssl)
 
     assert {:ok, %{tls_backend: :ex_ssl}} =
              Options.new("wss://example.com/socket", [], %{"tlsBackend" => "ex_ssl"})
 
-    assert {:ok, %{tls_backend: :ssl}} =
+    assert {:error, :invalid_tls_backend} =
              Options.new("wss://example.com/socket", [], %{"tls_backend" => "ssl"})
   end
 
@@ -116,12 +116,12 @@ defmodule HTTP.WebSocket.OptionsTest do
     assert {:ok, options} = Options.new("wss://example.com/socket")
     assert options.tls_backend == :ex_ssl
 
-    assert {:ok, %{tls_backend: :ssl}} =
+    assert {:error, :invalid_tls_backend} =
              Options.new("wss://example.com/socket", [], tls_backend: :ssl)
 
     Application.put_env(:http_core, :tls_backend, :ssl)
     assert options.tls_backend == :ex_ssl
-    assert {:ok, %{tls_backend: :ssl}} = Options.new("wss://example.com/socket")
+    assert {:error, :invalid_tls_backend} = Options.new("wss://example.com/socket")
   end
 
   test "rejects invalid TLS backend selections" do

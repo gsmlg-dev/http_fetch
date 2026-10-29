@@ -30,7 +30,7 @@ defmodule HTTP.HTTP2PoolKeyConfigurationTest do
     assert {:ok, %{tls: %{backend: :ex_ssl}}} = key(tls_backend: :ex_ssl)
   end
 
-  test "constructed request policy survives reconfiguration and isolates transitional OTP pools" do
+  test "constructed request policy survives rejected legacy reconfiguration" do
     options = FetchOptions.new(http_version: :http2)
     assert options.tls_backend == :ex_ssl
     transport = FetchOptions.to_transport_options(options)
@@ -38,8 +38,8 @@ defmodule HTTP.HTTP2PoolKeyConfigurationTest do
 
     Application.put_env(:http_core, :tls_backend, :ssl)
     assert {:ok, ^before} = key(transport)
-    assert {:ok, %{tls: %{backend: :ssl}} = otp} = key([])
-    refute before == otp
+    assert {:error, :invalid_tls_backend} = key([])
+    assert {:error, :invalid_tls_backend} = key(tls_backend: :ssl)
   end
 
   defp key(options) do

@@ -211,7 +211,7 @@ defmodule HTTP.ExSSLVersionPolicyTest do
   end
 
   defp assert_otp_exchange(version, options, route) do
-    transport = if route == :otp, do: HTTP.Transport.SSL, else: ExSSL
+    transport = if route == :otp, do: :ssl, else: ExSSL
 
     {:ok, listener} =
       :ssl.listen(0,
@@ -259,7 +259,13 @@ defmodule HTTP.ExSSLVersionPolicyTest do
     do: ExSSL.connect("localhost", port, [ssl: [cacertfile: @ca] ++ options], 5_000)
 
   defp connect(port, options, :otp),
-    do: HTTP.Transport.SSL.connect("localhost", port, [ssl: [cacertfile: @ca] ++ options], 5_000)
+    do:
+      :ssl.connect(
+        ~c"localhost",
+        port,
+        [mode: :binary, active: false, verify: :verify_peer, cacertfile: @ca] ++ options,
+        5_000
+      )
 
   defp connect(port, options, :upgrade) do
     {:ok, tcp} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 5_000)

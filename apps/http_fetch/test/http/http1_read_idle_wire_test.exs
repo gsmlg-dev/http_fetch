@@ -9,7 +9,7 @@ defmodule HTTP.HTTP1ReadIdleWireTest do
   @idle 600
   @head "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\n"
 
-  for backend <- [:tcp, :ssl, :ex_ssl] do
+  for backend <- [:tcp, nil, :ex_ssl] do
     test "#{backend} fragmented headers and raw body progress outlast the read idle budget" do
       backend = unquote(backend)
       {peer, url} = peer(backend)
@@ -159,7 +159,7 @@ defmodule HTTP.HTTP1ReadIdleWireTest do
         [
           http_version: :http1,
           redirect: :manual,
-          tls_backend: if(backend == :ex_ssl, do: :ex_ssl, else: :ssl),
+          tls_backend: if(backend == :tcp, do: nil, else: backend),
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
           decode_body: false,
           read_idle_timeout: @idle,

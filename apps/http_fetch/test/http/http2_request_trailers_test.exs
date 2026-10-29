@@ -17,7 +17,7 @@ defmodule HTTP.HTTP2RequestTrailersTest do
     assert event(peer, "end")["trailers"] == result["trailers"]
   end
 
-  for backend <- [:ssl, :ex_ssl] do
+  for backend <- [nil, :ex_ssl] do
     test "empty TLS upload and successive trailers preserve HPACK state with #{backend}" do
       {peer, url} = peer()
 
@@ -368,7 +368,7 @@ defmodule HTTP.HTTP2RequestTrailersTest do
           http_version: :http2,
           http2_profile: :native_v1,
           redirect: :manual,
-          tls_backend: :ssl,
+          tls_backend: :ex_ssl,
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
           telemetry: false,
           timeout: 5_000

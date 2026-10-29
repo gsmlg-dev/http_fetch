@@ -35,7 +35,7 @@ Current HTTP/3 beta acceptance and publication evidence are tracked in the
 - **Promise-based**: Async operations with chaining support
 - **Request cancellation**: AbortController support for cancelling requests
 - **Automatic JSON parsing**: Built-in JSON response handling
-- **Selectable TLS**: ExSSL by default, with verified TLS 1.3 and supported TLS 1.2
+- **Verified TLS**: ExSSL, with verified TLS 1.3 and supported TLS 1.2
 - **HTTP/2 wire profiles**: Versioned native and synthetic profiles can control
   ordered SETTINGS and header serialization; use `http2_profile` only with an
   explicit HTTP/2 or h2c request.
@@ -198,7 +198,7 @@ is supplied; an explicit infinite write timeout remains unsupported.
 `read_idle_timeout` and `write_idle_timeout` accept positive integer milliseconds
 up to 4,294,967,295. Both default to `nil` (disabled); zero and `:infinity` are
 invalid. They require `http_version: :http1` (the default) and support HTTP over TCP and HTTPS
-with either `:ssl` or `:ex_ssl`. Automatic protocol selection, HTTP/2, HTTP/3 and
+through ExSSL. Automatic protocol selection, HTTP/2, HTTP/3 and
 managed transport scopes reject these options explicitly.
 
 ```elixir
@@ -250,7 +250,7 @@ still reports `:read_idle_timeout`. A finite response stream idle expiry reports
 
 The policy also applies to `HTTP.Response.read_all/1`, `text/1`, `json/1`,
 `clone/1`, and `write_to/2`, and requires no application-wide configuration
-changes. It supports ordinary HTTP/1 over TCP, OTP TLS and ExSSL. Automatic
+changes. It supports ordinary HTTP/1 over TCP and ExSSL TLS. Automatic
 protocol selection, HTTP/2, HTTP/3 and managed transport scopes reject an explicit
 policy. Upload-source streams retain their existing policy.
 
@@ -283,8 +283,8 @@ Keep at most one acknowledged chunk and acknowledge it after delivery. This
 setting covers both the response Stream and the socket producer's ACK wait;
 it does not buffer the whole response. Network inactivity retains its separate
 `response_stream_idle_timeout` policy. Overall deadlines, cancellation and reader
-loss still terminate the owned request. The option supports TCP, OTP TLS and
-ExSSL; automatic/H2/H3 protocols and managed transport scopes reject explicit
+loss still terminate the owned request. The option supports TCP and ExSSL TLS;
+automatic/H2/H3 protocols and managed transport scopes reject explicit
 values. Upload-source streams retain their existing policy.
 
 ## HTTP/1 Response Framing
@@ -322,12 +322,9 @@ is optional:
 config :http_core, tls_backend: :ex_ssl
 ```
 
-A flat per-call option overrides that default. Explicit OTP `:ssl` remains
-available during the transition and is removed at migration boundary C:
+A flat per-call option overrides the shared setting:
 
 ```elixir
-HTTP.fetch("https://example.com", tls_backend: :ssl)
-
 HTTP.fetch("https://example.com",
   tls_backend: :ex_ssl,
   ssl: [cacertfile: "/path/to/ca.pem"]
@@ -337,7 +334,8 @@ HTTP.WebSocket.new("wss://example.com/socket", [], tls_backend: :ex_ssl)
 HTTP.EventSource.new("https://example.com/events", tls_backend: :ex_ssl)
 ```
 
-`tls_backend` accepts `:ssl`, `:ex_ssl`, `"ssl"`, or `"ex_ssl"`. Maps also accept
+`tls_backend` accepts `:ex_ssl` or `"ex_ssl"`. Legacy `:ssl` and `"ssl"`
+selections return an explicit configuration error before connecting. Maps also accept
 `"tls_backend"` and `"tlsBackend"` keys. Omitted or `nil` values inherit the shared
 configuration. The backend is captured when the request/client is created and
 retained through redirects and EventSource reconnects; runtime configuration
@@ -409,14 +407,11 @@ during automatic redirects. A scheme,
 hostname or effective-port change returns
 `{:error, :client_identity_cross_origin_redirect}`. To authorize another origin,
 use `redirect: :manual` and explicitly make a new request with that identity.
-The OTP backend retains its existing redirect behavior.
-
-ex_ssl 0.5.0 supports verified TLS 1.2 for
+ExSSL supports verified TLS 1.2 for
 HTTP/1.1, HTTP/2, WSS and EventSource. Select it with `ssl: [versions:
 [:"tlsv1.2"]]`; a mixed TLS 1.3/TLS 1.2 offer selects the peer's supported
 version. The independent OpenSSL package gate includes 262,144-byte HTTP/2
-responses with observed connection and stream WINDOW_UPDATE frames. The OTP
-default is unchanged.
+responses with observed connection and stream WINDOW_UPDATE frames.
 
 TLS 1.3 session resumption is explicit:
 `ssl: [versions: [:"tlsv1.3"], session_tickets: :auto]`. Tickets are disabled
@@ -432,7 +427,7 @@ bodies over HTTP/1.1, HTTP/2 and explicit HTTP/3; the multiplexed runtimes use
 bounded upload bridges and preserve early-response upload cleanup.
 This is a bounded subset, not full OTP `:ssl` parity.
 
-See the [ex_ssl compatibility contract](https://github.com/gsmlg-dev/ex_ssl/blob/v0.5.0/docs/COMPATIBILITY.md).
+See the [ex_ssl compatibility contract](apps/ex_ssl/docs/COMPATIBILITY.md).
 The [consumer contract inventory](docs/ex-ssl-consumer-contract.md) maps the
 implemented subset and intentional restrictions to its tests.
 
@@ -619,7 +614,7 @@ from tunneled origin requests. The same route remains selected across redirects.
 An HTTPS proxy supports HTTP origins using TLS to the proxy and absolute-form
 HTTP/1 forwarding. HTTPS origins use authenticated CONNECT followed by a second,
 independently verified TLS session, with HTTP/1 or HTTP/2 inside the tunnel.
-Nested TLS supports `tls_backend: :ssl` and `:ex_ssl`. ExSSL prepares both policies
+Nested TLS uses ExSSL, which prepares both policies
 and reserves both cleanup obligations before dialing. Proxy `opts[:ssl]` configures
 proxy trust and SNI;
 top-level `ssl` configures origin TLS (and proxy TLS when no separate policy is
@@ -1335,7 +1330,7 @@ package consumers and TLS feature validation.
 Unrelated root documentation does not trigger these jobs.
 
 The CI H2 compatibility job checks consumer suites, both independent peers over
-h2c and verified TLS with `:ssl` and `:ex_ssl`, and mixed candidate-package
+h2c and verified ExSSL TLS, and mixed candidate-package
 traffic. Its artifact records candidate SHA, archive checksums, commands,
 backend/peer, test summaries, and exclusions. Long soaks run separately.
 Each app job prepares its dependency closure; WebSocket and EventSource test
@@ -1415,7 +1410,8 @@ mix format --check-formatted
 ## Requirements
 
 - Elixir 1.18+ (for built-in `JSON` module support)
-- Erlang OTP with `:ssl` and `:public_key` applications
+- Erlang OTP with `:crypto` and `:public_key` applications; OTP `:ssl` is used only
+  by test/reference peers
 
 ## License
 
@@ -1534,7 +1530,7 @@ owned by the caller and must respond to their stream's termination themselves.
 
 The barrier supports direct TCP and the default ExSSL TLS backend, including TLS
 handshake cancellation, explicit `:http1`, `:http2`, and direct `:h2c` selection.
-Explicit proxies with the OTP or ExSSL TLS backend support the following routes,
+Explicit proxies with ExSSL TLS support the following routes,
 including pending TCP connection, CONNECT and TLS negotiation, uploads, response streams,
 and safe pooled return:
 
@@ -1549,8 +1545,8 @@ Proxy endpoint, authentication and TLS policy isolate pooled connections.
 Proxy authorization is excluded from origin requests inside CONNECT tunnels.
 For example, adding `proxy: {:http, "proxy.example", 3128, []}` to the example
 above retains the same completion contract. Both TLS sessions and the raw socket
-participate in nested cleanup. A setup failure before OTP exposes a TLS handle
-retains `:cleanup_unconfirmed`; a finite wait may first return `:cleanup_pending`.
+participate in nested cleanup. Missing or lost lifecycle evidence retains
+`:cleanup_unconfirmed`; a finite wait may first return `:cleanup_pending`.
 ExSSL joins independent inner and outer lifecycle receipts; request completion
 does not retire a healthy pooled connection. Managed scopes retain their proxy
 exclusion. Proxy `:h2c`, Unix routes, redirects followed internally,

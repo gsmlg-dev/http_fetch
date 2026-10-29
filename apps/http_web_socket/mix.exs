@@ -42,7 +42,7 @@ defmodule HttpWebSocket.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :crypto, :public_key, :ssl],
+      extra_applications: [:logger, :crypto, :public_key],
       mod: {HTTPWebSocket.Application, []}
     ]
   end

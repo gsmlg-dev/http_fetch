@@ -171,7 +171,7 @@ defmodule HTTP.HTTP1StrictFramingWireTest do
       if scheme == :http,
         do: [],
         else: [
-          tls_backend: :ssl,
+          tls_backend: :ex_ssl,
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem"), versions: [:"tlsv1.3"]]
         ]
 

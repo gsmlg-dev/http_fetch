@@ -2,8 +2,6 @@ defmodule HTTP.RequestLifecycle do
   @moduledoc false
   use GenServer
 
-  alias HTTP.Transport.SSL, as: OTPTLS
-
   # The latch outlives the coordinator. No request process owns the evidence.
   @spec start(:request | :client) :: {pid(), :atomics.atomics_ref()}
   def start(mode \\ :request) when mode in [:request, :client] do
@@ -270,22 +268,14 @@ defmodule HTTP.RequestLifecycle do
     end
   end
 
-  def track_tls(opts, socket) do
+  def track_tls(opts, _socket) do
     case Keyword.get(opts, :request_lifecycle) do
       nil ->
         :ok
 
       tracker ->
-        case OTPTLS.lifecycle_resources(socket) do
-          {:ok, tcp, processes} ->
-            register(tracker, tcp, :socket)
-            Enum.each(processes, &register(tracker, &1, :tls))
-            :ok
-
-          :error ->
-            unconfirmed_tls(tracker)
-            {:error, :unsupported_tls_socket_representation}
-        end
+        unconfirmed_tls(tracker)
+        {:error, :unsupported_tls_socket_representation}
     end
   end
 
@@ -373,13 +363,6 @@ defmodule HTTP.RequestLifecycle do
   def unconfirmed_tls(nil), do: :ok
   def unconfirmed_tls(tracker), do: GenServer.cast(tracker, :unconfirmed_tls)
 
-  # TLS setup rejects unsupported sockets before pooling. Recheckout preserves
-  # the socket-return API; track_tls records any missing evidence conservatively.
-  def track_socket(opts, {:cancellable_ssl, ssl, _tcp} = socket) do
-    _ = track_tls(opts, ssl)
-    socket
-  end
-
   def track_socket(opts, socket) when is_port(socket) or is_pid(socket) do
     register(Keyword.get(opts, :request_lifecycle), socket, :socket)
     socket
@@ -431,17 +414,10 @@ defmodule HTTP.RequestLifecycle do
     end
   end
 
-  defp connection_resources({:cancellable_ssl, ssl, _tcp}), do: connection_resources(ssl)
-
   defp connection_resources(socket) when is_port(socket) or is_pid(socket),
     do: {:ok, [socket]}
 
-  defp connection_resources(socket) do
-    case OTPTLS.lifecycle_resources(socket) do
-      {:ok, tcp, processes} -> {:ok, [tcp | processes]}
-      :error -> :error
-    end
-  end
+  defp connection_resources(_socket), do: :error
 
   defp handoff(tracker, resources) do
     GenServer.call(tracker, {:handoff, resources}, :infinity)

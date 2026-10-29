@@ -6,7 +6,7 @@ defmodule HTTP.PreferIPv6WireTest do
   @fixtures Path.expand("../support/fixtures", __DIR__)
   @wait 4_000
 
-  for backend <- [:tcp, :ssl, :ex_ssl] do
+  for backend <- [:tcp, nil, :ex_ssl] do
     test "#{backend} public preference preserves authority and confirmed request cleanup" do
       backend = unquote(backend)
       parent = self()
@@ -28,7 +28,7 @@ defmodule HTTP.PreferIPv6WireTest do
     end
   end
 
-  for backend <- [:tcp, :ssl, :ex_ssl], interruption <- [:cancel, :deadline] do
+  for backend <- [:tcp, nil, :ex_ssl], interruption <- [:cancel, :deadline] do
     test "#{backend} #{interruption} closes the connection after IPv4 fallback" do
       backend = unquote(backend)
       parent = self()
@@ -54,7 +54,7 @@ defmodule HTTP.PreferIPv6WireTest do
     end
   end
 
-  for backend <- [:ssl, :ex_ssl] do
+  for backend <- [nil, :ex_ssl] do
     test "#{backend} retains structured TLS rejection evidence after IPv4 fallback" do
       parent = self()
 
@@ -197,7 +197,7 @@ defmodule HTTP.PreferIPv6WireTest do
       Keyword.merge(
         [
           prefer_ipv6: true,
-          tls_backend: if(backend == :tcp, do: :ssl, else: backend),
+          tls_backend: if(backend == :tcp, do: nil, else: backend),
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
           http_version: :http1,
           redirect: :manual,

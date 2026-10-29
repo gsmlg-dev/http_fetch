@@ -15,7 +15,7 @@ defmodule HTTP.InfiniteTimeoutWireTest do
     :ok
   end
 
-  for backend <- [:tcp, :ssl, :ex_ssl], connect_timeout <- [1_000, :infinity] do
+  for backend <- [:tcp, nil, :ex_ssl], connect_timeout <- [1_000, :infinity] do
     test "#{backend} infinite request retains a separate #{connect_timeout} connection timeout" do
       {url, peer} = peer(unquote(backend))
 
@@ -36,7 +36,7 @@ defmodule HTTP.InfiniteTimeoutWireTest do
     end
   end
 
-  for backend <- [:tcp, :ssl, :ex_ssl] do
+  for backend <- [:tcp, nil, :ex_ssl] do
     test "#{backend} infinite request supports acknowledged raw streaming downloads" do
       {url, peer} = peer(unquote(backend))
 
@@ -216,7 +216,7 @@ defmodule HTTP.InfiniteTimeoutWireTest do
     end
   end
 
-  for backend <- [:ssl, :ex_ssl],
+  for backend <- [nil, :ex_ssl],
       {timeout, connect_timeout, result} <- [
         {:infinity, 100, :connect_timeout},
         {100, :infinity, :request_timeout},
@@ -280,7 +280,7 @@ defmodule HTTP.InfiniteTimeoutWireTest do
              |> HTTP.Promise.await(@wait)
   end
 
-  for backend <- [:ssl, :ex_ssl] do
+  for backend <- [nil, :ex_ssl] do
     test "#{backend} automatic TLS selection supports infinite HTTP1 fallback" do
       {url, peer} = peer(unquote(backend))
       opts = Keyword.put(options(unquote(backend), timeout: :infinity), :http_version, :auto)

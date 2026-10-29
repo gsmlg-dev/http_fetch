@@ -14,7 +14,7 @@ defmodule HTTP.Runtime.Dialer do
   def connected_protocol(_transport, _socket, %{mode: :h2c}), do: {:ok, :http2}
 
   def connected_protocol(transport, socket, %{mode: :force_h2})
-      when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
+      when transport == HTTP.Transport.ExSSL do
     with {:ok, protocol} <- transport.negotiated_protocol(socket) do
       case normalize_alpn_protocol(protocol) do
         "h2" -> {:ok, :http2}
@@ -24,7 +24,7 @@ defmodule HTTP.Runtime.Dialer do
   end
 
   def connected_protocol(transport, socket, %{mode: :auto_https})
-      when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
+      when transport == HTTP.Transport.ExSSL do
     with {:ok, protocol} <- transport.negotiated_protocol(socket) do
       case normalize_alpn_protocol(protocol) do
         "h2" -> {:ok, :http2}
@@ -79,17 +79,17 @@ defmodule HTTP.Runtime.Dialer do
   end
 
   defp validate_pinned_identity(transport, host, _address, request)
-       when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
+       when transport == HTTP.Transport.ExSSL do
     sni =
       request.transport_options |> Keyword.get(:ssl, []) |> Keyword.get(:server_name_indication)
 
     original_ip = :inet.parse_address(String.to_charlist(host))
 
     cond do
-      transport == HTTP.Transport.ExSSL and conflicting_reference_identity?(host, request) ->
+      conflicting_reference_identity?(host, request) ->
         {:error, :connect_address_identity_conflict}
 
-      transport == HTTP.Transport.ExSSL and match?({:ok, _}, original_ip) and sni == :disable ->
+      match?({:ok, _}, original_ip) and sni == :disable ->
         :ok
 
       not is_nil(sni) and sni not in [host, String.to_charlist(host)] ->
@@ -175,7 +175,7 @@ defmodule HTTP.Runtime.Dialer do
     deadline_at =
       if is_reference(Keyword.get(opts, :connect_failure_token)) and
            Keyword.get(opts, :proxy_route) == nil and
-           transport in [HTTP.Transport.TCP, HTTP.Transport.SSL],
+           transport == HTTP.Transport.TCP,
          do: request_deadline,
          else: dial_deadline
 
@@ -496,7 +496,7 @@ defmodule HTTP.Runtime.Dialer do
   end
 
   def protocol_selection(%Request{url: %URI{scheme: "http"}} = request, transport)
-      when transport in [HTTP.Transport.TCP, HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
+      when transport in [HTTP.Transport.TCP, HTTP.Transport.ExSSL] do
     case http_version(request) do
       version when version in [:http1, :auto] ->
         if http2_options?(request),
@@ -512,7 +512,7 @@ defmodule HTTP.Runtime.Dialer do
   end
 
   def protocol_selection(%Request{url: %URI{scheme: "https"}} = request, transport)
-      when transport in [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
+      when transport == HTTP.Transport.ExSSL do
     case http_version(request) do
       :http1 ->
         if http2_options?(request),

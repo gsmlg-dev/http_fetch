@@ -24,7 +24,7 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
     {:ok, pool: pool}
   end
 
-  for backend <- [:ssl, :ex_ssl] do
+  for backend <- [nil, :ex_ssl] do
     @tag backend: backend, admission_cold: true
     test "cold auto HTTPS bounds actual TCP accepts for #{backend}", %{
       pool: pool,
@@ -218,7 +218,7 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
     end
   end
 
-  test "auto HTTPS streamed upload negotiates H2 through the cancellable OTP TLS adapter", %{
+  test "auto HTTPS streamed upload negotiates H2 through the ExSSL adapter", %{
     pool: pool
   } do
     {peer, url} = peer!()
@@ -233,7 +233,7 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
         body: upload,
         duplex: :half,
         http_version: :auto,
-        tls_backend: :ssl,
+        tls_backend: :ex_ssl,
         ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
       )
 
@@ -245,9 +245,9 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
           do: owner
 
     connection = :sys.get_state(owner)
-    assert connection.transport == HTTP.Transport.SSL
-    assert HTTP.Transport.SSL.cancellable?(connection.socket)
-    assert {:ok, "h2"} = HTTP.Transport.SSL.negotiated_protocol(connection.socket)
+    assert connection.transport == HTTP.Transport.ExSSL
+    assert %SSL.Socket{} = connection.socket
+    assert {:ok, "h2"} = HTTP.Transport.ExSSL.negotiated_protocol(connection.socket)
     assert_receive {:DOWN, ^source_monitor, :process, ^upload, :normal}, 1_000
 
     command(peer, "respond")

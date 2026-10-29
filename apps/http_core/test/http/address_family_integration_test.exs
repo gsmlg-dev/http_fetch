@@ -14,7 +14,7 @@ defmodule HTTP.Transport.AddressFamilyIntegrationTest do
     :ok = HTTP.Transport.TCP.close(socket)
   end
 
-  for transport <- [HTTP.Transport.TCP, HTTP.Transport.SSL, HTTP.Transport.ExSSL],
+  for transport <- [HTTP.Transport.TCP, HTTP.Transport.ExSSL],
       host <- ["localhost", "127.0.0.1"] do
     test "#{inspect(transport)} falls back to IPv4 for #{host} before sending payload" do
       transport = unquote(transport)
@@ -35,7 +35,7 @@ defmodule HTTP.Transport.AddressFamilyIntegrationTest do
     end
   end
 
-  for transport <- [HTTP.Transport.SSL, HTTP.Transport.ExSSL] do
+  for transport <- [HTTP.Transport.ExSSL] do
     test "#{inspect(transport)} verifies localhost over the preferred IPv6 connection" do
       transport = unquote(transport)
       port = tls_peer({0, 0, 0, 0, 0, 0, 0, 1}, [:inet6, {:ipv6_v6only, true}])

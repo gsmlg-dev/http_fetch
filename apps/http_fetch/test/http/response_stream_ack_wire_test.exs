@@ -23,7 +23,7 @@ defmodule HTTP.ResponseStreamAckWireTest do
     :ok
   end
 
-  for backend <- [:tcp, :ssl, :ex_ssl] do
+  for backend <- [:tcp, nil, :ex_ssl] do
     for policy <- [:infinity, 2_500] do
       test "#{backend} #{policy} ACK policy permits bounded delayed delivery beyond global timeout" do
         backend = unquote(backend)
@@ -160,7 +160,7 @@ defmodule HTTP.ResponseStreamAckWireTest do
           read_idle_timeout: 2_500,
           response_stream_idle_timeout: :infinity,
           response_stream_ack_timeout: ack_policy,
-          tls_backend: if(backend == :ex_ssl, do: :ex_ssl, else: :ssl),
+          tls_backend: if(backend == :tcp, do: nil, else: backend),
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
           telemetry: false
         ],

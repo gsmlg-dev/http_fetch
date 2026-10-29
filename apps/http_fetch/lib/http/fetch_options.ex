@@ -44,7 +44,7 @@ defmodule HTTP.FetchOptions do
     not peer acknowledgement or a partial-syscall progress guarantee. Waiting
     for an upload source does not consume a write budget. Shorter existing
     `socket_opts[:send_timeout]` and overall request limits still apply.
-    Both idle options support ordinary HTTP/1 TCP, OTP TLS and ExSSL, including
+    Both idle options support ordinary HTTP/1 TCP and ExSSL TLS, including
     HTTP/1 reuse. They require `http_version: :http1` (the default); automatic/H2/H3
     protocols and managed `transport_scope` are rejected. Timeouts report
     `:read_idle_timeout` / `:write_idle_timeout` (or `HTTP.RequestError` in
@@ -84,8 +84,9 @@ defmodule HTTP.FetchOptions do
     For a proxy route this policy selects the proxy endpoint address family.
   - `response_header_limits` - Request-local HTTP/1 and CONNECT budgets; see
     `HTTP.ResponseHeaderLimits`. Also applies to informational and redirect heads.
-  - `tls_backend` - TLS implementation, `:ssl` or `:ex_ssl`; defaults to the
-    shared `:http_core, :tls_backend` configuration, falling back to `:ex_ssl`
+  - `tls_backend` - TLS implementation, `:ex_ssl`; defaults to the shared
+    `:http_core, :tls_backend` configuration, falling back to `:ex_ssl`.
+    Legacy `:ssl` selections return an explicit configuration error
   - `ssl` - TLS options passed to the selected TLS backend
   - `socket_opts` - socket options passed to the underlying transport
   - `unix_socket` - Unix Domain Socket path
@@ -804,7 +805,7 @@ defmodule HTTP.FetchOptions do
   end
 
   defp tls_backend_error_message(tls_backend) do
-    "unsupported tls_backend: #{inspect(tls_backend)}; expected :ssl or :ex_ssl"
+    "unsupported tls_backend: #{inspect(tls_backend)}; expected :ex_ssl"
   end
 
   defp maybe_add(list, _key, nil), do: list

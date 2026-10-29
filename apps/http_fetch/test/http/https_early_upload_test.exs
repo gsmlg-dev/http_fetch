@@ -7,12 +7,11 @@ defmodule HTTP.HTTPSEarlyUploadTest do
   @fixtures Path.expand("../../../http_web_socket/test/support/fixtures", __DIR__)
   @timeout 5_000
 
-  for backend <- [:ssl, :ex_ssl],
+  for backend <- [nil, :ex_ssl],
       version <- [:http1, :auto],
       outcome <- [:buffered, :streamed, :cancel, :deadline, :send_timeout, :owner_down],
       timeout <- [4_000, :infinity],
       not (outcome == :deadline and timeout == :infinity) do
-    if backend == :ssl and outcome == :buffered, do: @tag(:tls_repro)
     @tag tls_outcome: outcome
 
     test "#{backend} #{version} #{outcome} #{timeout} cleans up a verified HTTPS upload blocked in TLS send" do
@@ -51,10 +50,7 @@ defmodule HTTP.HTTPSEarlyUploadTest do
       owner_monitor = Process.monitor(owner)
       writer = blocked_writer(owner, System.monotonic_time(:millisecond) + 1_000)
 
-      provider =
-        if unquote(backend) == :ex_ssl do
-          pending_tls_output(promise, owner, System.monotonic_time(:millisecond) + 1_000)
-        end
+      provider = pending_tls_output(promise, owner, System.monotonic_time(:millisecond) + 1_000)
 
       writer_monitor = Process.monitor(writer)
       started = System.monotonic_time(:millisecond)
@@ -93,13 +89,10 @@ defmodule HTTP.HTTPSEarlyUploadTest do
           assert {:error, :request_timeout} = HTTP.Promise.await(promise, 2_000)
 
         :send_timeout ->
-          # OTP's send timeout and send_timeout_close notifications can race;
-          # either native result must settle before the request deadline.
+          # The native send timeout must settle before the request deadline.
           assert {:error, reason} = HTTP.Promise.await(promise, 2_000)
 
-          if unquote(backend) == :ssl,
-            do: assert(reason in [:timeout, :closed]),
-            else: assert(reason == :timeout)
+          assert reason == :timeout
 
         :owner_down ->
           Process.exit(owner, :kill)
@@ -371,7 +364,9 @@ defmodule HTTP.HTTPSEarlyUploadTest do
         serve(socket, parent)
 
       :drain ->
-        drain(socket)
+        deadline = System.monotonic_time(:millisecond) + 2_000
+        probe_peer(socket, deadline)
+        drain(socket, deadline)
         send(parent, {:peer_closed, self()})
     after
       @timeout -> :ssl.close(socket)
@@ -390,10 +385,60 @@ defmodule HTTP.HTTPSEarlyUploadTest do
 
   defp peer_state(_), do: :unsupported_reference_layout
 
-  defp drain(socket) do
-    case :ssl.recv(socket, 0, 2_000) do
+  # The test joins every original local resource before permitting this peer
+  # observation. A successful probe send does not establish terminal receive.
+  defp probe_peer(socket, drain_deadline) do
+    parent = self()
+    token = make_ref()
+    probe_deadline = min(drain_deadline, System.monotonic_time(:millisecond) + 100)
+
+    {worker, monitor} =
+      spawn_monitor(fn ->
+        remaining = max(probe_deadline - System.monotonic_time(:millisecond), 0)
+
+        result =
+          if remaining == 0 do
+            {:error, :timeout}
+          else
+            case :ssl.setopts(socket, send_timeout: remaining, send_timeout_close: false) do
+              :ok -> :ssl.send(socket, <<0>>)
+              {:error, :closed} = closed -> closed
+              other -> {:probe_option_error, other}
+            end
+          end
+
+        send(parent, {token, result})
+      end)
+
+    result =
+      receive do
+        {^token, result} ->
+          result
+
+        {:DOWN, ^monitor, :process, ^worker, reason} ->
+          flunk("HTTPS peer probe died: #{inspect(reason)}")
+      after
+        max(probe_deadline - System.monotonic_time(:millisecond), 0) ->
+          # The observation has failed; only now stop and join this owned helper.
+          Process.exit(worker, :kill)
+          assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 1_000
+          flunk("HTTPS peer probe exceeded its original drain budget")
+      end
+
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal},
+                   max(probe_deadline - System.monotonic_time(:millisecond), 0)
+
+    assert result in [:ok, {:error, :closed}, {:error, :econnreset}],
+           "HTTPS peer probe failed: #{inspect(result)}"
+  end
+
+  defp drain(socket, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+    assert remaining > 0, "HTTPS peer exhausted original drain budget"
+
+    case :ssl.recv(socket, 0, remaining) do
       {:ok, _} ->
-        drain(socket)
+        drain(socket, deadline)
 
       {:error, :timeout} ->
         flunk("HTTPS peer still open after local cleanup: #{inspect(peer_state(socket))}")

@@ -4,7 +4,8 @@ This file provides guidance to Pi Agent when working with code in this repositor
 
 ## Requirements
 - Elixir 1.18+ (uses built-in `JSON` module)
-- Erlang OTP with `:ssl` and `:public_key` applications
+- Erlang OTP with `:crypto` and `:public_key` applications; OTP `:ssl` is required
+  only by test/reference peers
 
 ## Build, test, and lint
 

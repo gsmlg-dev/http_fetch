@@ -247,7 +247,7 @@ defmodule HTTP.Runtime.TunnelCapabilityTest do
         ]),
       transport_options: [
         http_version: :h2c,
-        tls_backend: :ssl,
+        tls_backend: :ex_ssl,
         http2_reuse: Keyword.get(opts, :reuse, true),
         http2_profile: Keyword.get(opts, :profile, :native_v1),
         http2_scope: Keyword.get(opts, :scope, "capability-#{System.unique_integer([:positive])}")

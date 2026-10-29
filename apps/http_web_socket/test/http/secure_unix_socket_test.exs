@@ -23,7 +23,7 @@ defmodule HTTP.WebSocket.SecureUnixSocketTest do
     path: path,
     listener: listener
   } do
-    for scheme <- ["wss", "https"], backend <- [:ssl, :ex_ssl] do
+    for scheme <- ["wss", "https"], backend <- [nil, :ex_ssl] do
       assert {:error, :tls_over_unix_socket_not_supported} =
                WebSocket.new("#{scheme}://localhost/socket", [],
                  unix_socket: path,

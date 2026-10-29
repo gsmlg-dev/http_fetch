@@ -206,7 +206,12 @@ defmodule HTTP.FetchOptionsTest do
 
     test "normalizes TLS backend selection" do
       assert %HTTP.FetchOptions{tls_backend: :ex_ssl} = HTTP.FetchOptions.new([])
-      assert %HTTP.FetchOptions{tls_backend: :ssl} = HTTP.FetchOptions.new(tls_backend: "ssl")
+
+      for backend <- [:ssl, "ssl"] do
+        assert_raise ArgumentError, ~r/unsupported tls_backend.*expected :ex_ssl/, fn ->
+          HTTP.FetchOptions.new(tls_backend: backend)
+        end
+      end
 
       assert %HTTP.FetchOptions{tls_backend: :ex_ssl} =
                HTTP.FetchOptions.new(%{"tlsBackend" => "ex_ssl"})

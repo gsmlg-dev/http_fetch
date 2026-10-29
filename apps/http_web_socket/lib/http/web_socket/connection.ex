@@ -6,7 +6,6 @@ defmodule HTTP.WebSocket.Connection do
   alias HTTP.ClientCompletion
   alias HTTP.HTTP2.WireProfile
   alias HTTP.RequestLifecycle
-  alias HTTP.Transport.SSL, as: OTPTLS
   alias HTTP.WebSocket
   alias HTTP.WebSocket.ArrayBuffer
   alias HTTP.WebSocket.Event.Close
@@ -590,9 +589,6 @@ defmodule HTTP.WebSocket.Connection do
       result
     end
   end
-
-  defp connect_http1(OTPTLS, host, port, opts, timeout),
-    do: OTPTLS.connect_cancellable(host, port, opts, timeout)
 
   defp connect_http1(transport, host, port, opts, timeout),
     do: transport.connect(host, port, opts, timeout)
@@ -1359,8 +1355,6 @@ defmodule HTTP.WebSocket.Connection do
         pending_send_frames: 0
     }
   end
-
-  defp abort_transport(OTPTLS, socket), do: OTPTLS.abort(socket)
 
   defp abort_transport(transport, socket) do
     transport.setopts(socket, linger: {true, 0})

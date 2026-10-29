@@ -7,7 +7,7 @@ defmodule HTTP.TLSTransportTest do
   @ca Path.join(@fixtures, "localhost-ca.pem")
   @cert Path.join(@fixtures, "localhost.pem")
 
-  for transport <- [HTTP.Transport.SSL, ExSSL] do
+  for transport <- [ExSSL] do
     @transport transport
 
     describe "#{inspect(transport)}" do

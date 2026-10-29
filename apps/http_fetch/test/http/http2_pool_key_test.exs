@@ -32,22 +32,21 @@ defmodule HTTP.HTTP2PoolKeyTest do
     refute left == right
   end
 
-  test "scope, backend, verification, SNI, and ALPN isolate identities" do
-    base = [http2_scope: "tenant-a", tls_backend: :ssl, ssl: [verify: :verify_peer]]
+  test "scope, verification, SNI, and ALPN isolate identities" do
+    base = [http2_scope: "tenant-a", tls_backend: :ex_ssl, ssl: [verify: :verify_peer]]
     assert {:ok, first} = PoolKey.build(request(base), WireProfile.native_v1(), :h2)
 
     for change <- [
-          [http2_scope: "tenant-b", tls_backend: :ssl, ssl: [verify: :verify_peer]],
-          [http2_scope: "tenant-a", tls_backend: :ex_ssl, ssl: [verify: :verify_peer]],
-          [http2_scope: "tenant-a", tls_backend: :ssl, ssl: [verify: :verify_none]],
+          [http2_scope: "tenant-b", tls_backend: :ex_ssl, ssl: [verify: :verify_peer]],
+          [http2_scope: "tenant-a", tls_backend: :ex_ssl, ssl: [verify: :verify_none]],
           [
             http2_scope: "tenant-a",
-            tls_backend: :ssl,
+            tls_backend: :ex_ssl,
             ssl: [verify: :verify_peer, server_name_indication: ~c"other.example"]
           ],
           [
             http2_scope: "tenant-a",
-            tls_backend: :ssl,
+            tls_backend: :ex_ssl,
             ssl: [verify: :verify_peer, alpn_advertised_protocols: ["h2"]]
           ]
         ] do

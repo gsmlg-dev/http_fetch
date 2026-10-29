@@ -20,7 +20,7 @@ defmodule HTTP.UploadFinalizationWireTest do
     :ok
   end
 
-  for backend <- [:tcp, :ssl, :ex_ssl], streamed <- [false, true], chunks <- [[], ["ab", "cd"]] do
+  for backend <- [:tcp, nil, :ex_ssl], streamed <- [false, true], chunks <- [[], ["ab", "cd"]] do
     test "#{backend} streamed=#{streamed} #{inspect(chunks)} confirms finalization before exposing response" do
       backend = unquote(backend)
       chunks = unquote(chunks)
@@ -52,7 +52,7 @@ defmodule HTTP.UploadFinalizationWireTest do
     end
   end
 
-  for backend <- [:tcp, :ssl, :ex_ssl], outcome <- [:raise, :throw, :exit] do
+  for backend <- [:tcp, nil, :ex_ssl], outcome <- [:raise, :throw, :exit] do
     test "#{backend} finalizer #{outcome} fails despite an immediate HTTP 200" do
       backend = unquote(backend)
       {peer, url} = peer(backend, "abcd")
@@ -70,7 +70,7 @@ defmodule HTTP.UploadFinalizationWireTest do
     end
   end
 
-  for backend <- [:tcp, :ssl, :ex_ssl],
+  for backend <- [:tcp, nil, :ex_ssl],
       outcome <- [:timeout, :cancel, :deadline, :owner_down, :reader_down] do
     test "#{backend} blocked finalizer #{outcome} remains bounded and never succeeds" do
       backend = unquote(backend)
@@ -103,7 +103,7 @@ defmodule HTTP.UploadFinalizationWireTest do
     end
   end
 
-  for backend <- [:tcp, :ssl, :ex_ssl] do
+  for backend <- [:tcp, nil, :ex_ssl] do
     test "#{backend} completed writes leave a longer source finalizer independent of write idle" do
       backend = unquote(backend)
       Application.put_env(:http_fetch, :streaming_timeout, 2_000)
@@ -136,7 +136,7 @@ defmodule HTTP.UploadFinalizationWireTest do
     end
   end
 
-  for backend <- [:tcp, :ssl, :ex_ssl], mismatch <- [:underflow, :overflow] do
+  for backend <- [:tcp, nil, :ex_ssl], mismatch <- [:underflow, :overflow] do
     test "#{backend} #{mismatch} retains length validation and emits no extra payload" do
       backend = unquote(backend)
       mismatch = unquote(mismatch)
@@ -151,7 +151,7 @@ defmodule HTTP.UploadFinalizationWireTest do
     end
   end
 
-  for backend <- [:tcp, :ssl, :ex_ssl], interruption <- [:abort, :deadline] do
+  for backend <- [:tcp, nil, :ex_ssl], interruption <- [:abort, :deadline] do
     test "#{backend} queued #{interruption} wins over confirmed finalization before response publication" do
       backend = unquote(backend)
       {peer, url} = peer(backend, "abcd")
@@ -354,7 +354,7 @@ defmodule HTTP.UploadFinalizationWireTest do
           timeout: :infinity,
           connect_timeout: 3_000,
           telemetry: false,
-          tls_backend: if(backend == :ex_ssl, do: :ex_ssl, else: :ssl),
+          tls_backend: if(backend == :tcp, do: nil, else: backend),
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
         ],
         extra

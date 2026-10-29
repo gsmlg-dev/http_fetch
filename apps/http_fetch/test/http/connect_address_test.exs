@@ -69,7 +69,7 @@ defmodule HTTP.ConnectAddressTest do
     on_exit(fn -> :gen_tcp.close(listener) end)
     {:ok, {_, port}} = :inet.sockname(listener)
 
-    for backend <- [:ssl, :ex_ssl] do
+    for backend <- [nil, :ex_ssl] do
       assert {:error, :connect_address_sni_conflict} =
                HTTP.fetch("https://pinned.invalid:#{port}/",
                  connect_address: @ipv4,
@@ -150,7 +150,7 @@ defmodule HTTP.ConnectAddressTest do
     end
   end
 
-  for backend <- [:ssl, :ex_ssl], address <- [@ipv4, @ipv6] do
+  for backend <- [nil, :ex_ssl], address <- [@ipv4, @ipv6] do
     @tag :integration
     test "#{backend} pin #{inspect(address)} retains SNI and hostname verification" do
       address = unquote(Macro.escape(address))
@@ -180,7 +180,7 @@ defmodule HTTP.ConnectAddressTest do
     end
   end
 
-  for backend <- [:ssl, :ex_ssl] do
+  for backend <- [nil, :ex_ssl] do
     @tag :integration
     test "#{backend} pin keeps default trust and rejects wrong URL certificate identity" do
       for {host, ssl} <- [
@@ -370,7 +370,7 @@ defmodule HTTP.ConnectAddressTest do
     assert HTTP.Headers.get(result.headers, "location") == "http://other.invalid/path"
   end
 
-  for backend <- [:ssl, :ex_ssl], stop <- [:abort, :deadline] do
+  for backend <- [nil, :ex_ssl], stop <- [:abort, :deadline] do
     @tag :integration
     test "#{backend} pinned TLS establishment cleanup on #{stop}" do
       parent = self()
@@ -503,7 +503,7 @@ defmodule HTTP.ConnectAddressTest do
   end
 
   @tag :integration
-  test "pinned OTP streaming connection retains cancellable TCP ownership" do
+  test "pinned ExSSL streaming connection retains cancellable provider ownership" do
     {port, _} =
       tls_peer(@ipv4, fn socket ->
         assert {:error, :closed} = :ssl.recv(socket, 0, @timeout)
@@ -513,16 +513,17 @@ defmodule HTTP.ConnectAddressTest do
       url: URI.parse("https://pinned.invalid:#{port}/"),
       body: self(),
       transport_options: [
-        tls_backend: :ssl,
+        tls_backend: :ex_ssl,
         connect_address: @ipv4,
         redirect: :manual,
         ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")]
       ]
     }
 
-    assert {:ok, HTTP.Transport.SSL, socket, _} = HTTP.Runtime.Dialer.open(request, nil, @timeout)
-    assert HTTP.Transport.SSL.cancellable?(socket)
-    assert :ok = HTTP.Transport.SSL.close(socket)
+    assert {:ok, HTTP.Transport.ExSSL, %SSL.Socket{} = socket, _} =
+             HTTP.Runtime.Dialer.open(request, nil, @timeout)
+
+    assert :ok = HTTP.Transport.ExSSL.close(socket)
   end
 
   defp await_tls_transport_close(socket, alerts \\ <<>>) do

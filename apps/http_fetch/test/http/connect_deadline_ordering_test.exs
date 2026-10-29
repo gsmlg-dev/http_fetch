@@ -6,7 +6,7 @@ defmodule HTTP.ConnectDeadlineOrderingTest do
   @moduletag :integration
   @peer_timeout 3_000
 
-  for backend <- [:ssl, :ex_ssl],
+  for backend <- [nil, :ex_ssl],
       {control, request_timeout, expected} <- [
         {:abort, 5_000, :aborted},
         {:deadline, 5_000, :request_timeout},
@@ -15,7 +15,6 @@ defmodule HTTP.ConnectDeadlineOrderingTest do
       ] do
     test "#{backend} pinned native timeout respects #{control} ordering" do
       backend = unquote(backend)
-      control = unquote(control)
       observer = self()
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
       on_exit(fn -> :gen_tcp.close(listener) end)
@@ -45,7 +44,8 @@ defmodule HTTP.ConnectDeadlineOrderingTest do
         ]
       }
 
-      transport = HTTP.TLSBackend.transport(backend)
+      assert {:ok, effective_backend} = HTTP.TLSBackend.resolve(backend)
+      transport = HTTP.TLSBackend.transport(effective_backend)
 
       dial =
         Task.Supervisor.async_nolink(:http_runtime_task_supervisor, fn ->
@@ -73,7 +73,7 @@ defmodule HTTP.ConnectDeadlineOrderingTest do
 
       try do
         await_native_error(dial.pid, System.monotonic_time(:millisecond) + @peer_timeout)
-        if control in [:abort, :deadline], do: send(dial.pid, control)
+        if unquote(control in [:abort, :deadline]), do: send(dial.pid, unquote(control))
 
         assert {:messages, [{:connect_result, _, {:error, :timeout}} | _]} =
                  Process.info(dial.pid, :messages)
