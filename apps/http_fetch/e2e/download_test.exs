@@ -7,8 +7,6 @@ defmodule E2E.DownloadTest do
   @moduletag :e2e
   @moduletag timeout: 30_000
 
-  alias E2E.ResponseView
-
   describe "full download" do
     test "returns the requested number of bytes" do
       n = 4096

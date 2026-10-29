@@ -8,8 +8,6 @@ defmodule E2E.MethodsTest do
   @moduletag :e2e
   @moduletag timeout: 30_000
 
-  alias E2E.ResponseView
-
   defp get(path, opts \\ []) do
     path |> E2E.Server.url() |> HTTP.fetch([method: "GET"] ++ opts) |> HTTP.Promise.await()
   end

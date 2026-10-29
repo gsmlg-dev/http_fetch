@@ -7,8 +7,6 @@ defmodule E2E.JSONTest do
   @moduletag :e2e
   @moduletag timeout: 30_000
 
-  alias E2E.ResponseView
-
   describe "JSON responses" do
     test "decodes application/json response body" do
       resp = E2E.Server.url("/json") |> HTTP.fetch() |> HTTP.Promise.await()

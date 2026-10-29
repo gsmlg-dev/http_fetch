@@ -18,8 +18,6 @@ defmodule E2E.StreamingTest do
   @streaming_threshold HTTP.Config.streaming_threshold()
   @expected_size 6 * 1024 * 1024
 
-  alias E2E.ResponseView
-
   setup do
     # Capture telemetry events from the streaming subsystem.
     test_pid = self()

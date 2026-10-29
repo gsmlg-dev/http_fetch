@@ -9,8 +9,6 @@ defmodule E2E.MultipartTest do
   @moduletag :e2e
   @moduletag timeout: 60_000
 
-  alias E2E.ResponseView
-
   setup do
     # Create three temp files of different shapes that we'll upload.
     small_text = Briefly.create!(directory: true, prefix: "small_")

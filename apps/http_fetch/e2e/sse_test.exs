@@ -11,8 +11,6 @@ defmodule E2E.SSETest do
   @moduletag :e2e
   @moduletag timeout: 30_000
 
-  alias E2E.ResponseView
-
   test "returns text/event-stream content type" do
     resp = E2E.Server.url("/sse?n=1") |> HTTP.fetch() |> HTTP.Promise.await()
     view = E2E.ResponseView.from(resp)

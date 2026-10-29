@@ -8,8 +8,6 @@ defmodule E2E.URLEncodedTest do
   @moduletag :e2e
   @moduletag timeout: 30_000
 
-  alias E2E.ResponseView
-
   describe "raw urlencoded body" do
     test "posts a simple key/value pair" do
       resp =
