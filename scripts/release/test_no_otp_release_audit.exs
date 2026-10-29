@@ -3368,4 +3368,334 @@ defmodule NoOTP.ReleaseAuditTest do
 
   defp t_inspection(report, module),
     do: Enum.find(report.beam_inspections, &(&1.module == inspect(module)))
+
+  test "U01 uniform local tuple clauses project only their finite atom target", context do
+    producer = "select(a) -> {ok,lists,a,0}; select(X) -> {ok,maps,X,1}."
+    assert u_fixture(context, producer).unresolved_dispatch == []
+  end
+
+  test "U02 every selected remote atom leaf clause contributes", context do
+    leaf = "pick(a) -> lists; pick(_) -> maps."
+    assert u_fixture(context, u_producer(), u_consumer(), leaf).unresolved_dispatch == []
+  end
+
+  test "U03 unknown mixed tag or mixed shape local returns reject projection", context do
+    for producer <- [
+          "select(a) -> {ok,lists,a,0}; select(X) -> X.",
+          "select(a) -> {ok,lists,a,0}; select(X) -> {error,X}.",
+          "select(a) -> {ok,lists,a,0}; select(X) -> {other,maps,X,1}.",
+          "select(X) -> {ok,X,a,0}.",
+          "select(X) -> case X of a -> {ok,lists,a,0}; _ -> X end."
+        ] do
+      assert u_fixture(context, producer).unresolved_dispatch != [], producer
+    end
+  end
+
+  test "U04 unknown and guarded remote return alternatives remain open", context do
+    for leaf <- [
+          "pick(a) -> lists; pick(X) -> X.",
+          "pick(X) when is_atom(X) -> X; pick(_) -> lists.",
+          "pick(X) -> case X of a -> lists; _ -> X end.",
+          "pick(X) -> helper(X).\nhelper(X) -> X."
+        ] do
+      assert u_fixture(context, u_producer(), u_consumer(), leaf).unresolved_dispatch != []
+    end
+  end
+
+  test "U05 literal and returned SSL targets remain unsafe findings", context do
+    local = u_fixture(context, "select(X) -> {ok,ssl,X,0}.")
+    remote = u_fixture(context, u_producer(), u_consumer(), "pick(_) -> ssl.")
+
+    for result <- [local, remote] do
+      assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+    end
+  end
+
+  test "U06 producer and original argument effects are retained", context do
+    producer = "select(X) -> ssl:connect(localhost,443,[]), {ok,lists,X,0}."
+    result = u_fixture(context, producer)
+    assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+    assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "unresolved_module_dispatch"))
+
+    consumer =
+      "run(X) -> case select(fun() -> ssl:connect(localhost,443,[]) end) of {ok,M,_,_} -> M:reverse([]); Other -> {X,Other} end."
+
+    result = u_fixture(context, "select(X) -> {ok,lists,X,0}.", consumer)
+    assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+  end
+
+  test "U07 unknown fallback case branches are still scanned", context do
+    consumer = "run(X) -> case select(X) of {ok,M,_,_} -> M:reverse([]); _ -> X(value) end."
+    result = u_fixture(context, "select(X) -> {ok,lists,X,0}.", consumer)
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["unresolved_fun_invocation"]
+  end
+
+  test "U08 companion fields never become finite modules or functions", context do
+    consumer = "run(X) -> case select(X) of {ok,M,F,G} -> M:reverse([]), F(), G:run() end."
+    result = u_fixture(context, "select(X) -> {ok,lists,X,0}.", consumer)
+
+    assert Enum.sort(Enum.map(result.unresolved_dispatch, & &1.kind)) ==
+             ["unresolved_fun_invocation", "unresolved_module_dispatch"]
+  end
+
+  test "U09 aliases captures and remote local calls are outside the tuple case rule", context do
+    for consumer <- [
+          "run(X) -> Pair=select(X), case Pair of {ok,M,_,_} -> M:reverse([]) end.",
+          "run(X) -> F=fun select/1, case F(X) of {ok,M,_,_} -> M:reverse([]) end.",
+          "run(X) -> case u_input:select(X) of {ok,M,_,_} -> M:reverse([]) end."
+        ] do
+      assert u_fixture(context, "select(X) -> {ok,lists,X,0}.", consumer).unresolved_dispatch !=
+               []
+    end
+  end
+
+  test "U10 nested fun shadows cannot borrow the enclosing tuple receiver", context do
+    consumer =
+      "run(X) -> case select(X) of {ok,M,_,_} -> A=fun() -> M:reverse([]) end, B=fun(M) -> M:reverse([]) end, {A,B} end."
+
+    result = u_fixture(context, "select(X) -> {ok,lists,X,0}.", consumer)
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["unresolved_module_dispatch"]
+  end
+
+  test "U11 repeated receiver patterns and different tags receive no projection", context do
+    for consumer <- [
+          "run(X) -> case select(X) of {ok,M,M,_} -> M:reverse([]) end.",
+          "run(X) -> case select(X) of {different,M,_,_} -> M:reverse([]) end.",
+          "run(X) -> case select(X) of {Tag,M,_,_} -> {Tag,M:reverse([])} end."
+        ] do
+      assert u_fixture(context, "select(X) -> {ok,lists,X,0}.", consumer).unresolved_dispatch !=
+               []
+    end
+  end
+
+  test "U12 selected leaf requires debug and matching export", context do
+    for options <- [[debug: false], [exports: "other/0", extra: "\nother() -> ok."]] do
+      assert u_fixture(context, u_producer(), u_consumer(), "pick(_) -> lists.", options).unresolved_dispatch !=
+               []
+    end
+  end
+
+  test "U13 missing selected leaf cannot borrow a previous proof", context do
+    assert u_fixture(context).unresolved_dispatch == []
+    File.rm!(Path.join(b_physical(context.ebin), "u_leaf.beam"))
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :u_input).unresolved_dispatch != []
+  end
+
+  test "U14 a first selected external leaf cannot certify candidate bytes", context do
+    assert u_fixture(context).unresolved_dispatch == []
+    shadow = Path.join(context.ebin, "shadow")
+    File.mkdir_p!(shadow)
+
+    File.write!(
+      Path.join(shadow, "u_leaf.beam"),
+      b_compile(:u_leaf, "-export([pick/1]). pick(X) -> X.", true)
+    )
+
+    true = :code.add_patha(String.to_charlist(shadow))
+    on_exit(fn -> :code.del_path(String.to_charlist(shadow)) end)
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :u_input).unresolved_dispatch != []
+  end
+
+  test "U15 stale loaded leaf bytes cannot supply current disk proof", context do
+    u_fixture(context, u_producer(), u_consumer(), "pick(X) -> X.")
+    path = Path.join(b_physical(context.ebin), "u_leaf.beam")
+
+    assert {:module, :u_leaf} =
+             :code.load_binary(:u_leaf, String.to_charlist(path), File.read!(path))
+
+    on_exit(fn ->
+      :code.purge(:u_leaf)
+      :code.delete(:u_leaf)
+      :code.purge(:u_leaf)
+    end)
+
+    File.write!(path, b_compile(:u_leaf, "-export([pick/1]). pick(_) -> lists.", true))
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :u_input).unresolved_dispatch != []
+  end
+
+  test "U16 on_load and unsafe selected leaf bodies remain rejected", context do
+    assert u_fixture(context).unresolved_dispatch == []
+    path = Path.join(b_physical(context.ebin), "u_leaf.beam")
+    s_rewrite(path, fn forms -> [{:attribute, 1, :on_load, {:pick, 1}} | forms] end)
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :u_input).unresolved_dispatch != []
+
+    result =
+      u_fixture(
+        context,
+        u_producer(),
+        u_consumer(),
+        "pick(_) -> ssl:connect(localhost,443,[]), lists."
+      )
+
+    assert result.unresolved_dispatch != []
+    leaf = t_inspection(NoOTP.ReleaseAudit.artifacts(), :u_leaf)
+    assert Enum.any?(leaf.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+  end
+
+  test "U17 malformed producer headers cannot grant a tuple proof", context do
+    u_fixture(context, "select(X) -> {ok,lists,X,0}.")
+    path = Path.join(b_physical(context.ebin), "u_input.beam")
+
+    s_rewrite(path, fn forms ->
+      Enum.map(forms, fn
+        {:function, _, :select, 1, clauses} -> {:function, {:invalid, 1}, :select, 1, clauses}
+        form -> form
+      end)
+    end)
+
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :u_input).unresolved_dispatch != []
+  end
+
+  test "U18 clause definition byte and unsupported syntax bounds remain closed", context do
+    producer = Enum.map_join(1..17, ";", fn n -> "select(#{n}) -> {ok,lists,x,0}" end) <> "."
+    assert u_fixture(context, producer).unresolved_dispatch != []
+    extras = "\n" <> Enum.map_join(1..257, "\n", fn n -> "unused_#{n}() -> ok." end)
+    assert u_fixture(context, "select(X) -> {ok,lists,X,0}." <> extras).unresolved_dispatch != []
+
+    for kind <- [:bytes, :unsupported] do
+      u_fixture(context, "select(X) -> {ok,lists,X,0}.")
+      path = Path.join(b_physical(context.ebin), "u_input.beam")
+
+      s_rewrite(path, fn forms ->
+        Enum.map(forms, fn
+          {:function, annotation, :select, 1, [{:clause, line, args, guards, body}]} ->
+            extra =
+              if kind == :bytes,
+                do: {:string, 1, List.duplicate(?x, 70_000)},
+                else: {:unsupported_tuple_expression, 1, []}
+
+            {:function, annotation, :select, 1, [{:clause, line, args, guards, [extra | body]}]}
+
+          form ->
+            form
+        end)
+      end)
+
+      assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :u_input).unresolved_dispatch != []
+    end
+  end
+
+  test "U19 actual WebSocket selector source slice proves a synthetic immediate consumer",
+       context do
+    # This preserves all actual selector clauses, not the full connection module.
+    # The whole-module acceptance check is the separate frozen release A/B.
+    assert u_actual_slice(context, false).unresolved_dispatch == []
+  end
+
+  test "U20 actual selector source slice rejects an unknown remote leaf", context do
+    result = u_actual_slice(context, true)
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["unresolved_module_dispatch"]
+  end
+
+  test "U21 neither producer nor selected leaf is executed", context do
+    Process.delete(:tuple_producer_executed)
+    Process.delete(:tuple_leaf_executed)
+    producer = "select(X) -> erlang:put(tuple_producer_executed,true), {ok,u_leaf:pick(X),X,0}."
+    leaf = "pick(_) -> erlang:put(tuple_leaf_executed,true), lists."
+    assert u_fixture(context, producer, u_consumer(), leaf).unresolved_dispatch == []
+    assert Process.get(:tuple_producer_executed) == nil
+    assert Process.get(:tuple_leaf_executed) == nil
+    assert :code.is_loaded(:u_leaf) == false
+  end
+
+  test "U22 selected leaf changes are rederived without a trusted hash", context do
+    assert u_fixture(context).unresolved_dispatch == []
+    path = Path.join(b_physical(context.ebin), "u_leaf.beam")
+    File.write!(path, b_compile(:u_leaf, "-export([pick/1]). pick(X) -> X.", true))
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :u_input).unresolved_dispatch != []
+  end
+
+  defp u_producer, do: "select(X) -> {ok,u_leaf:pick(X),X,0}."
+
+  defp u_consumer,
+    do: "run(X) -> case select(X) of {ok,M,_,_} -> M:reverse([]); Other -> Other end."
+
+  defp u_fixture(
+         context,
+         producer \\ u_producer(),
+         consumer \\ u_consumer(),
+         leaf \\ "pick(_) -> lists.",
+         options \\ []
+       ) do
+    leaf_bytes =
+      b_compile(
+        :u_leaf,
+        "-export([" <>
+          Keyword.get(options, :exports, "pick/1") <>
+          "]). " <> leaf <> Keyword.get(options, :extra, ""),
+        Keyword.get(options, :debug, true)
+      )
+
+    input = b_compile(:u_input, "-export([run/1]). " <> consumer <> "\n" <> producer, true)
+    t_install(context, [{:u_leaf, leaf_bytes}, {:u_input, input}]) |> t_inspection(:u_input)
+  end
+
+  defp u_actual_slice(context, unknown_leaf?) do
+    root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
+
+    backend =
+      File.read!(Path.join(root, "apps/http_core/lib/http/tls_backend.ex"))
+      |> String.replace("HTTP.TLSBackend", "NoOTPActualTupleBackend")
+
+    backend =
+      if unknown_leaf?,
+        do:
+          String.replace(
+            backend,
+            "def transport(:ex_ssl), do: HTTP.Transport.ExSSL",
+            "def transport(value), do: value"
+          ),
+        else: backend
+
+    {:defmodule, _, [_module, [do: {:__block__, _, definitions}]]} =
+      root
+      |> Path.join("apps/http_web_socket/lib/http/web_socket/connection.ex")
+      |> File.read!()
+      |> Code.string_to_quoted!()
+
+    clauses =
+      Enum.filter(definitions, fn
+        {:defp, _, [{:select_transport, _, [_argument]}, _body]} -> true
+        {:defp, _, [{:when, _, [{:select_transport, _, [_argument]}, _guard]}, _body]} -> true
+        _ -> false
+      end)
+
+    assert length(clauses) == 3
+
+    clauses =
+      Macro.prewalk(clauses, fn
+        {:__aliases__, metadata, [:HTTP, :TLSBackend]} ->
+          {:__aliases__, metadata, [:NoOTPActualTupleBackend]}
+
+        node ->
+          node
+      end)
+
+    fixture =
+      quote do
+        defmodule NoOTPActualTupleSlice do
+          unquote_splicing(clauses)
+
+          def run(state) do
+            case select_transport(state) do
+              {:ok, target, _, _} -> target.close(nil)
+            end
+          end
+        end
+      end
+
+    entries = Code.compile_string(backend) ++ Code.compile_quoted(fixture)
+
+    for {module, _} <- entries do
+      :code.purge(module)
+      :code.delete(module)
+
+      on_exit(fn ->
+        :code.purge(module)
+        :code.delete(module)
+      end)
+    end
+
+    t_install(context, entries) |> t_inspection(NoOTPActualTupleSlice)
+  end
 end

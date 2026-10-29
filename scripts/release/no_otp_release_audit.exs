@@ -1091,6 +1091,7 @@ defmodule NoOTP.ReleaseAudit do
         {:raw_abstract_v1, forms} ->
           prepared =
             forms
+            |> prove_local_tuple_cases(context)
             |> prove_internal_pair_calls(context)
             |> prove_return_calls(context)
             |> qualify_named_dispatches(imports)
@@ -1180,6 +1181,220 @@ defmodule NoOTP.ReleaseAudit do
     do: match?(%{resolved: ^selected, error: nil}, canonical_path(to_string(path)))
 
   defp loaded_selection?(_loaded, _selected), do: false
+
+  # Prove only an immediate local case over uniform tagged four-tuples. Every
+  # producer clause must construct the same tag and a finite atom in slot two;
+  # the remaining fields are opaque. This all-input return fact needs no caller
+  # assumption, and never follows aliases, state, messages or callback inputs.
+  defp prove_local_tuple_cases(forms, context) do
+    definitions =
+      Map.new(for {:function, _, name, arity, _} = form <- forms, do: {{name, arity}, form})
+
+    initial = %{
+      definitions: definitions,
+      edges: MapSet.new(),
+      captures: MapSet.new(),
+      complete: true,
+      nodes: 0,
+      calls: 0
+    }
+
+    summaries =
+      if map_size(definitions) <= @max_parameter_functions do
+        syntax =
+          Enum.reduce(definitions, initial, fn {owner, {:function, _, _, _, clauses}}, acc ->
+            caller_syntax(clauses, owner, acc)
+          end)
+
+        if syntax.complete do
+          Map.new(definitions, fn {key, form} ->
+            {key, local_tuple_projection(form, context)}
+          end)
+        else
+          %{}
+        end
+      else
+        %{}
+      end
+
+    local_tuple_cases(forms, summaries)
+  end
+
+  defp local_tuple_projection({:function, _, _, _, clauses} = form, context) do
+    if tuple_projection_form?(form) do
+      projections =
+        Enum.map(clauses, fn {:clause, _, _, _, body} = clause ->
+          case List.last(body) do
+            {:tuple, _, [{:atom, _, tag}, target, _, _]} ->
+              {resolved, _, _} = resolve_clause(clause, %{}, false)
+              value = tuple_projection_atom(target, context)
+
+              if is_atom(tag) and value != :unknown and
+                   walk_calls(resolved, "tuple-projection") == [],
+                 do: {tag, value},
+                 else: :unknown
+
+            _ ->
+              :unknown
+          end
+        end)
+
+      case Enum.uniq(
+             Enum.map(projections, fn
+               {tag, _} -> tag
+               :unknown -> :unknown
+             end)
+           ) do
+        [tag] when tag != :unknown ->
+          targets = common_value(Enum.map(projections, &elem(&1, 1)))
+          if targets == :unknown, do: :unknown, else: {tag, targets}
+
+        _ ->
+          :unknown
+      end
+    else
+      :unknown
+    end
+  end
+
+  defp tuple_projection_atom({:atom, _, target} = value, _context) when is_atom(target),
+    do: value
+
+  defp tuple_projection_atom(
+         {:call, _, {:remote, _, {:atom, _, module}, {:atom, _, function}}, arguments},
+         context
+       )
+       when is_list(arguments) do
+    arity = length(arguments)
+
+    with {:ok, selected} <- selected_producer(module, context),
+         true <- MapSet.member?(context.audited_beams, selected.path),
+         true <- {function, arity} in selected.exports,
+         true <- map_size(selected.definitions) <= @max_parameter_functions,
+         {:function, _, ^function, ^arity, clauses} = form <-
+           Map.get(selected.definitions, {function, arity}),
+         true <- tuple_projection_form?(form) do
+      values =
+        Enum.map(clauses, fn {:clause, _, _, _, body} = clause ->
+          {resolved, _, _} = resolve_clause(clause, %{}, false)
+
+          case List.last(body) do
+            {:atom, _, target} = value when is_atom(target) ->
+              if walk_calls(resolved, "tuple-atom-leaf") == [], do: value, else: :unknown
+
+            _ ->
+              :unknown
+          end
+        end)
+
+      value = common_value(values)
+      if selected_producer(module, context) == {:ok, selected}, do: value, else: :unknown
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp tuple_projection_atom(_expression, _context), do: :unknown
+
+  defp tuple_projection_form?({:function, annotation, name, arity, clauses} = form) do
+    callable_annotation?(annotation) and is_atom(name) and is_integer(arity) and
+      arity >= 0 and arity <= 255 and is_list(clauses) and clauses != [] and
+      length(clauses) <= @max_finite_targets and
+      :erlang.external_size(form) <= @max_finite_bytes and
+      Enum.all?(clauses, fn
+        {:clause, _, patterns, guards, body} = clause ->
+          is_list(patterns) and length(patterns) == arity and is_list(guards) and
+            is_list(body) and body != [] and tuple_projection_headers?(clause)
+
+        _ ->
+          false
+      end)
+  end
+
+  # Metadata cannot hide executable syntax in this added proof. Fun descriptors
+  # and binary type descriptors are data only in these exact recognized shapes.
+  defp tuple_projection_headers?({:fun, annotation, {:clauses, clauses}}),
+    do: callable_annotation?(annotation) and tuple_projection_headers?(clauses)
+
+  defp tuple_projection_headers?({:fun, annotation, {:function, name, arity}}),
+    do: callable_annotation?(annotation) and is_atom(name) and is_integer(arity) and arity >= 0
+
+  defp tuple_projection_headers?({:fun, annotation, {:function, module, name, arity}}),
+    do:
+      callable_annotation?(annotation) and
+        tuple_projection_headers?([module, name, arity])
+
+  defp tuple_projection_headers?({:bin_element, annotation, value, size, types}),
+    do:
+      callable_annotation?(annotation) and tuple_projection_headers?([value, size]) and
+        (types == :default or
+           (is_list(types) and
+              Enum.all?(types, fn
+                type when is_atom(type) -> true
+                {:unit, unit} when is_integer(unit) and unit >= 1 and unit <= 256 -> true
+                _ -> false
+              end)))
+
+  defp tuple_projection_headers?(term) when is_tuple(term) do
+    tuple_size(term) >= 2 and
+      tuple_size(term) in Map.get(@callable_header_sizes, elem(term, 0), []) and
+      callable_annotation?(elem(term, 1)) and
+      term |> Tuple.to_list() |> Enum.drop(2) |> Enum.all?(&tuple_projection_headers?/1)
+  end
+
+  defp tuple_projection_headers?(terms) when is_list(terms),
+    do: Enum.all?(terms, &tuple_projection_headers?/1)
+
+  defp tuple_projection_headers?(term)
+       when is_atom(term) or is_integer(term) or is_float(term) or is_binary(term),
+       do: true
+
+  defp tuple_projection_headers?(_term), do: false
+
+  defp local_tuple_cases(
+         {:case, annotation, {:call, _, {:atom, _, name}, arguments} = source, clauses},
+         summaries
+       )
+       when is_list(arguments) and is_list(clauses) do
+    clauses = local_tuple_cases(clauses, summaries)
+
+    clauses =
+      case {callable_annotation?(annotation) and tuple_projection_headers?(source),
+            Map.get(summaries, {name, length(arguments)}, :unknown)} do
+        {true, {tag, targets}} ->
+          Enum.map(clauses, &local_tuple_case_clause(&1, tag, targets))
+
+        _ ->
+          clauses
+      end
+
+    {:case, annotation, local_tuple_cases(source, summaries), clauses}
+  end
+
+  defp local_tuple_cases(term, summaries) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.map(&local_tuple_cases(&1, summaries)) |> List.to_tuple()
+
+  defp local_tuple_cases(terms, summaries) when is_list(terms),
+    do: Enum.map(terms, &local_tuple_cases(&1, summaries))
+
+  defp local_tuple_cases(term, _summaries), do: term
+
+  defp local_tuple_case_clause(
+         {:clause, _, [{:tuple, _, [{:atom, _, tag}, {:var, _, name}, _, _]}] = patterns, _, _} =
+           clause,
+         tag,
+         targets
+       ) do
+    if name != :_ and Enum.count(pattern_variables(patterns), &(&1 == name)) == 1 and
+         :erlang.external_size(clause) <= @max_finite_bytes and
+         tuple_projection_headers?(clause) do
+      elem(resolve_clause(clause, %{name => targets}, false), 0)
+    else
+      clause
+    end
+  end
+
+  defp local_tuple_case_clause(clause, _tag, _targets), do: clause
 
   # A selected candidate producer can return a literal closure paired with
   # arbitrary state. Unlike auxiliary collector implementations, its complete
