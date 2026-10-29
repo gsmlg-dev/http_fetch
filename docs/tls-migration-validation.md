@@ -55,14 +55,21 @@ application dependencies, boot entries or bundled SSL paths. OTP SSL is
 unavailable, unloaded and unstarted before and after the scan. Its 192 unresolved
 dynamic calls still reject the release gate, so no traffic scenario executes.
 
-The subsequent auditor change `60c1c4a` passes strict helper compilation with
-zero warnings, all 231 compiled controls, source tooling regression and format
-checks. A separate immutable 350-BEAM comparison proves exactly three existing
-WebSocket selector calls, reducing that frozen release's configured unresolved
-count from 192 to 189. Every other ordinary field, occurrence multiplicity and
+The latest auditor extension proves complete single-hop local wrappers around
+selected remote returns and checks nine private SocketClient transport parameter
+slots. All 310 compiled controls pass within the unchanged 60-second limit,
+alongside 108 tooling checks, strict compilation and formatting. Independent
+whole-source compilation verifies the executable equivalence of all three
+composed mutation fixtures; compilation jobs finish before any audit begins.
+
+A separate immutable 350-BEAM comparison removes exactly six SocketClient
+findings, reducing its configured unresolved count from 181 to 175. The default
+count remains 184. Every other ordinary field, occurrence multiplicity and
 incoming provenance record remains exact; all source, cache and release guards
-pass. Fixture compilation retains its existing warnings. This frozen comparison
-does not establish a fresh candidate release or traffic result.
+pass. The actual artifact gate still rejects the remaining findings. This frozen
+comparison does not establish a fresh candidate release or traffic result.
+Receipts are retained under
+`/private/tmp/http-fetch-root-resume-20261029T0820Z/audit30-acceptance`.
 
 P6 release/traffic acceptance and P7 coordinated publication remain open.
 Credo/Dialyzer remain user-deferred; performance is TODO outside this goal.

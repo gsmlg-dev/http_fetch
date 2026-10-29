@@ -4990,9 +4990,10 @@ defmodule NoOTP.ReleaseAuditTest do
       end
 
     entries =
-      Enum.flat_map(
+      z_compile_sources(
         [headers, form_data, request, backend, proxy, dialer, stream],
-        &Code.compile_string/1
+        context.z_source_bytes,
+        [headers, form_data, request]
       )
 
     for {module, _} <- entries do
@@ -5006,5 +5007,659 @@ defmodule NoOTP.ReleaseAuditTest do
     end
 
     t_install(context, entries)
+  end
+
+  # Z: selected remote returns through complete local forwarders and checked slots.
+  test "Z01 a complete one-hop local wrapper preserves all selected remote returns", context do
+    result = z_result(context, "pick(a) -> {ok,lists,x,0}; pick(_) -> {error,opaque}.")
+    assert result.unresolved_dispatch == []
+  end
+
+  test "Z02 unknown and unsafe selected wrapper returns retain their obligations", context do
+    for producer <- ["pick(X) -> X.", "pick(X) -> {ok,X,x,0}."] do
+      assert z_result(context, producer).unresolved_dispatch != []
+    end
+
+    assert Enum.any?(
+             z_result(context, "pick(X) -> {ok,ssl,X,0}.").unresolved_dispatch,
+             &(&1.kind == "literal_module_ssl")
+           )
+  end
+
+  test "Z03 local mixed producers chains guards and multi-clause wrappers stay outside the rule",
+       context do
+    for wrapper <- [
+          "forward(X) -> case X of a -> {ok,lists,X,0}; _ -> {error,X} end.",
+          "forward(X) -> nested(X). nested(X) -> y_producer:pick(X).",
+          "forward(X) when is_atom(X) -> y_producer:pick(X).",
+          "forward(a) -> y_producer:pick(a); forward(X) -> y_producer:pick(X).",
+          "forward(X) -> external:effect(), y_producer:pick(X)."
+        ] do
+      assert z_result(context, "pick(X) -> {ok,lists,X,0}.", z_consumer(wrapper)).unresolved_dispatch !=
+               []
+    end
+  end
+
+  test "Z04 original wrapper arguments keep unsafe nested calls", context do
+    consumer = z_consumer("forward(_) -> y_producer:pick(fun() -> ssl:connect(a,1,[]) end).")
+    result = z_result(context, "pick(X) -> {ok,lists,X,0}.", consumer)
+    assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+  end
+
+  test "Z05 case fallback and unknown callback calls survive wrapper propagation", context do
+    consumer =
+      "run(X) -> case forward(X) of {ok,M,_,_} -> X(),M:reverse([]); _ -> X(other) end. forward(X) -> y_producer:pick(X)."
+
+    result = z_result(context, "pick(X) -> {ok,lists,X,0}.", consumer)
+
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) ==
+             ["unresolved_fun_invocation", "unresolved_fun_invocation"]
+  end
+
+  test "Z06 forwarding cannot borrow unavailable or unexported selected code", context do
+    for options <- [[debug: false], [exports: "other/0", extra: " other() -> ok."]] do
+      report = y_fixture(context, "pick(X) -> {ok,lists,X,0}.", z_consumer(), options)
+      assert t_inspection(report, :y_consumer).unresolved_dispatch != []
+    end
+  end
+
+  test "Z07 explicit transport invariants are derived through a recursive caller", context do
+    y_fixture(context, "pick(a) -> {ok,lists,x,0}; pick(_) -> {ok,maps,x,0}.", z_recursive())
+
+    result =
+      NoOTP.ReleaseAudit.artifacts(
+        parameter_invariants: %{
+          y_consumer: [{{:entry, 1}, 0, [:lists, :maps]}, {{:finish, 1}, 0, [:lists, :maps]}]
+        }
+      )
+      |> t_inspection(:y_consumer)
+
+    assert result.unresolved_dispatch == []
+    assert result.parameter_invariant_derivation.status == "checked"
+    assert length(result.parameter_invariant_derivation.checked_slots) == 2
+  end
+
+  test "Z08 an extra unknown caller or capture invalidates the entire requested domain",
+       context do
+    for extra <- [" extra(X) -> entry(X).", " extra(_) -> fun entry/1."] do
+      y_fixture(
+        context,
+        "pick(X) -> {ok,lists,X,0}.",
+        "-export([extra/1]). " <> z_recursive() <> extra
+      )
+
+      result =
+        NoOTP.ReleaseAudit.artifacts(
+          parameter_invariants: %{
+            y_consumer: [{{:entry, 1}, 0, [:lists]}, {{:finish, 1}, 0, [:lists]}]
+          }
+        )
+        |> t_inspection(:y_consumer)
+
+      assert result.unresolved_dispatch != []
+      assert result.parameter_invariant_derivation.status == "rejected"
+    end
+  end
+
+  test "Z09 complete current SocketClient source proves exactly six transport sites", context do
+    {before, after_result} = z_actual_source(context, :original)
+    assert length(before.unresolved_dispatch) == 18
+    assert length(after_result.unresolved_dispatch) == 12
+    removed = before.unresolved_dispatch -- after_result.unresolved_dispatch
+    assert Enum.sort(Enum.map(removed, & &1.line)) == [423, 444, 452, 612, 706, 882]
+    assert Enum.all?(removed, &(&1.kind == "unresolved_module_dispatch"))
+    assert after_result.parameter_invariant_derivation.status == "checked"
+    assert length(after_result.parameter_invariant_derivation.checked_slots) == 9
+  end
+
+  test "Z10 actual selected unsafe and unknown producers cannot satisfy the transport domain",
+       context do
+    for mutation <- [:unknown_route, :unsafe_transport] do
+      {before, after_result} = z_actual_source(context, mutation)
+      assert after_result.unresolved_dispatch == before.unresolved_dispatch
+      assert length(after_result.unresolved_dispatch) == 18
+      assert after_result.parameter_invariant_derivation.status == "rejected"
+    end
+  end
+
+  test "Z11 actual added caller capture or changed local wrapper blocks all nine slots",
+       context do
+    for mutation <- [:unknown_caller, :capture, :wrapper] do
+      {before, after_result} = z_actual_source(context, mutation)
+      assert after_result.unresolved_dispatch == before.unresolved_dispatch
+      assert after_result.parameter_invariant_derivation.status == "rejected"
+    end
+  end
+
+  test "Z12 malformed forwarding metadata cannot hide unsafe executable syntax", context do
+    for mutation <- [:function_metadata, :call_metadata, :body] do
+      y_fixture(context, "pick(X) -> {ok,lists,X,0}.", z_consumer())
+      path = Path.join(b_physical(context.ebin), "y_consumer.beam")
+      unsafe = {:call, 1, {:remote, 1, {:atom, 1, :ssl}, {:atom, 1, :connect}}, []}
+
+      s_rewrite(path, fn forms ->
+        Enum.map(forms, fn
+          {:function, anno, :forward, 1, [{:clause, line, args, guards, [call]}]} ->
+            case mutation do
+              :function_metadata ->
+                {:function, unsafe, :forward, 1, [{:clause, line, args, guards, [call]}]}
+
+              :call_metadata ->
+                {:function, anno, :forward, 1,
+                 [{:clause, line, args, guards, [put_elem(call, 1, unsafe)]}]}
+
+              :body ->
+                {:function, anno, :forward, 1,
+                 [{:clause, line, args, guards, [{:unknown_node, 1, unsafe}, call]}]}
+            end
+
+          form ->
+            form
+        end)
+      end)
+
+      result = t_inspection(NoOTP.ReleaseAudit.artifacts(), :y_consumer)
+      assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+      assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "unresolved_module_dispatch"))
+    end
+  end
+
+  test "Z13 executable request scanning still fails closed when its node bound is exhausted",
+       context do
+    y_fixture(context, "pick(X) -> {ok,lists,X,0}.", z_consumer())
+    path = Path.join(b_physical(context.ebin), "y_consumer.beam")
+
+    s_rewrite(path, fn forms ->
+      forms ++
+        [
+          {:function, 1, :padding, 0,
+           [{:clause, 1, [], [], List.duplicate({:integer, 1, 0}, 100_001)}]}
+        ]
+    end)
+
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :y_consumer).unresolved_dispatch != []
+  end
+
+  test "Z14 duplicate local wrapper definitions cannot hide an unknown alternative", context do
+    y_fixture(context, "pick(X) -> {ok,lists,X,0}.", z_consumer())
+    path = Path.join(b_physical(context.ebin), "y_consumer.beam")
+
+    s_rewrite(path, fn forms ->
+      forms ++ [{:function, 1, :forward, 1, [{:clause, 1, [{:var, 1, :X}], [], [{:var, 1, :X}]}]}]
+    end)
+
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :y_consumer).unresolved_dispatch != []
+  end
+
+  defp z_consumer(wrapper \\ "forward(X) -> y_producer:pick(X)."),
+    do: "run(X) -> case forward(X) of {ok,M,_,_} -> M:reverse([]); _ -> ok end. " <> wrapper
+
+  defp z_result(context, producer, consumer \\ z_consumer()),
+    do: y_fixture(context, producer, consumer) |> t_inspection(:y_consumer)
+
+  defp z_recursive,
+    do:
+      "run(X) -> case forward(X) of {ok,M,_,_} -> entry(M); _ -> ok end. forward(X) -> y_producer:pick(X). entry(M) -> finish(M). finish(M) -> M:reverse([]),run(again)."
+
+  defp z_transport_invariants do
+    targets = [HTTP.Transport.TCP, HTTP.Transport.ExSSL, HTTP.Transport.Unix]
+
+    [
+      {{:handle_new_connection, 7}, 1, targets},
+      {{:connect_http1_or_new, 7}, 0, targets},
+      {{:refresh_http1_socket, 4}, 0, targets},
+      {{:initialize_legacy_owner, 4}, 1, targets},
+      {{:maybe_http2_owner, 5}, 2, targets},
+      {{:run_http2_owner, 4}, 1, targets},
+      {{:initialize_http2_owner, 8}, 0, targets},
+      {{:maybe_activate_http2_owner, 5}, 1, targets},
+      {{:transfer_http2_socket, 3}, 0, targets}
+    ]
+  end
+
+  defp z_actual_source(context, mutation) do
+    root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
+    dependencies = z_dependency_sources(root, mutation)
+
+    source =
+      File.read!(Path.join(root, "apps/http_fetch/lib/http/socket_client.ex"))
+      |> String.replace("HTTP.SocketClient", "NoOTPActualForwardedSocketClient")
+      |> String.replace("alias HTTP.Runtime.Dialer", "alias NoOTPActualTaggedDialer, as: Dialer")
+      |> String.replace("alias HTTP.Request", "alias NoOTPActualTaggedRequest, as: Request")
+
+    original_source = source
+    source = z_mutation_source(source, mutation)
+
+    struct_sources = Enum.take(dependencies, 3)
+    entries = z_compile_sources(dependencies, context.z_source_bytes, struct_sources)
+
+    [{module, original_bytes}] =
+      z_compile_sources([original_source], context.z_source_bytes, struct_sources)
+
+    bytes =
+      if source == original_source,
+        do: original_bytes,
+        else:
+          z_compile_mutation(
+            module,
+            original_bytes,
+            original_source,
+            source,
+            mutation,
+            context.z_source_bytes,
+            struct_sources
+          )
+
+    entries = entries ++ [{module, bytes}]
+    z_install_sources(context, entries)
+    before = NoOTP.ReleaseAudit.artifacts() |> t_inspection(module)
+
+    after_result =
+      NoOTP.ReleaseAudit.artifacts(
+        parameter_invariants: %{
+          module => z_transport_invariants()
+        }
+      )
+      |> t_inspection(module)
+
+    {before, after_result}
+  end
+
+  # Compile the full original Elixir module once. Prepare each declared tiny
+  # source mutation serially, then compile all complete composed modules in
+  # at most three independent byte-producing jobs. No job loads code or audits.
+  defp z_mutation_source(source, mutation) do
+    case mutation do
+      :unknown_caller ->
+        String.replace_suffix(
+          source,
+          "\nend\n",
+          "\n  def added(c,t,h,p,s,x,q), do: handle_new_connection(c,t,h,p,s,x,q)\nend\n"
+        )
+
+      :capture ->
+        String.replace_suffix(
+          source,
+          "\nend\n",
+          "\n  def added(), do: &handle_new_connection/7\nend\n"
+        )
+
+      :wrapper ->
+        String.replace(
+          source,
+          "defp select_transport(request, path), do: Dialer.select_transport(request, path)",
+          "defp select_transport(request, _path), do: :external_unproved.select(request)"
+        )
+
+      _ ->
+        source
+    end
+  end
+
+  defp z_compile_mutation(
+         module,
+         original_bytes,
+         original_source,
+         changed_source,
+         mutation,
+         cache,
+         struct_sources
+       ) do
+    assert mutation in [:unknown_caller, :capture, :wrapper]
+    assert changed_source == z_mutation_source(original_source, mutation)
+    settings = Code.compiler_options()
+    key = {changed_source, struct_sources, settings}
+
+    case :ets.lookup(cache, key) do
+      [{^key, [{^module, bytes}]}] ->
+        bytes
+
+      [] ->
+        plans =
+          for candidate <- [:unknown_caller, :capture, :wrapper],
+              source = z_mutation_source(original_source, candidate),
+              candidate_key = {source, struct_sources, settings},
+              :ets.lookup(cache, candidate_key) == [] do
+            z_prepare_mutation(module, original_bytes, original_source, source, candidate)
+            |> Map.put(:cache_key, candidate_key)
+          end
+
+        # Mini source compilation loads its module. Remove that temporary code
+        # before starting any independent complete-module compiler jobs.
+        :code.purge(module)
+        :code.delete(module)
+        assert length(plans) in 1..3
+
+        tasks =
+          Enum.map(plans, fn %{forms: forms} ->
+            Task.async(fn ->
+              try do
+                :compile.forms(forms, [:binary, :debug_info, :return_errors, :return_warnings])
+              catch
+                kind, reason -> {:fixture_compile_exception, kind, reason, __STACKTRACE__}
+              end
+            end)
+          end)
+
+        # Await every compiler before asserting, caching, installing or auditing.
+        # The original outer 60-second wrapper still bounds this entire suite.
+        monitors = Enum.map(tasks, fn task -> {task.pid, Process.monitor(task.pid)} end)
+        results = Task.await_many(tasks, :infinity)
+
+        Enum.each(monitors, fn {pid, monitor} ->
+          receive do
+            {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+          end
+        end)
+
+        entries =
+          Enum.zip(plans, results)
+          |> Enum.map(fn {plan, result} ->
+            bytes = z_validate_mutation(module, plan, result)
+            {plan.cache_key, [{module, bytes}]}
+          end)
+
+        true = :ets.insert(cache, entries)
+        [{^key, [{^module, bytes}]}] = :ets.lookup(cache, key)
+        bytes
+    end
+  end
+
+  defp z_prepare_mutation(module, original_bytes, original_source, changed_source, mutation) do
+    declaration = z_declared_source_mutation(original_source, changed_source, mutation)
+
+    {:ok, {^module, original_chunks}} =
+      :beam_lib.chunks(original_bytes, [:exports, :abstract_code])
+
+    {:raw_abstract_v1, original_forms} = original_chunks[:abstract_code]
+
+    target =
+      case mutation do
+        :unknown_caller -> {:added, 7}
+        :capture -> {:added, 0}
+        :wrapper -> {:select_transport, 2}
+      end
+
+    stubs =
+      if mutation == :wrapper do
+        [
+          quote do
+            def __fixture_force__(a, b), do: select_transport(a, b)
+          end
+        ]
+      else
+        exports =
+          Enum.reject(original_chunks[:exports], fn {name, _} ->
+            name in [:__info__, :module_info]
+          end)
+
+        Enum.map(exports, fn {name, arity} -> z_compile_stub(name, arity, :def) end) ++
+          [z_compile_stub(:handle_new_connection, 7, :defp)]
+      end
+
+    quoted = {:defmodule, [], [module, [do: {:__block__, [], stubs ++ [declaration]}]]}
+    :code.purge(module)
+    :code.delete(module)
+    [{^module, mutation_bytes}] = Code.compile_quoted(quoted)
+    {:ok, {^module, mutation_chunks}} = :beam_lib.chunks(mutation_bytes, [:abstract_code])
+    {:raw_abstract_v1, mutation_forms} = mutation_chunks[:abstract_code]
+    changed_function = Map.fetch!(z_function_forms(mutation_forms), target)
+    composed = z_compose_forms(original_forms, mutation_forms, changed_function, target, mutation)
+
+    expected_keys =
+      Map.keys(z_function_forms(original_forms)) |> MapSet.new() |> MapSet.put(target)
+
+    assert MapSet.new(Map.keys(z_function_forms(composed))) == expected_keys
+
+    allowed = fn
+      {:attribute, _, :export, _} ->
+        mutation != :wrapper
+
+      {:function, _, name, arity, _} ->
+        {name, arity} == target or (mutation != :wrapper and {name, arity} == {:__info__, 1})
+
+      _ ->
+        false
+    end
+
+    assert Enum.reject(composed, allowed) == Enum.reject(original_forms, allowed)
+    refute z_contains_stub?(composed)
+
+    expected_exports =
+      if mutation == :wrapper,
+        do: original_chunks[:exports],
+        else: Enum.uniq([target | original_chunks[:exports]])
+
+    %{forms: composed, expected_exports: expected_exports}
+  end
+
+  defp z_validate_mutation(module, plan, result) do
+    assert {:ok, ^module, bytes, _warnings} = result
+    {:ok, {^module, chunks}} = :beam_lib.chunks(bytes, [:exports, :imports, :abstract_code])
+    {:raw_abstract_v1, emitted_forms} = chunks[:abstract_code]
+    assert z_function_forms(emitted_forms) == z_function_forms(plan.forms)
+    assert Enum.sort(chunks[:exports]) == Enum.sort(plan.expected_exports)
+    bytes
+  end
+
+  defp z_compile_stub(name, arity, visibility) do
+    args = Macro.generate_arguments(arity, __MODULE__)
+    {visibility, [], [{name, [], args}, [do: :no_otp_fixture_stub_only]]}
+  end
+
+  defp z_declared_source_mutation(original_source, changed_source, mutation) do
+    {:defmodule, _, [module, [do: {:__block__, _, original}]]} =
+      Code.string_to_quoted!(original_source, columns: true)
+
+    {:defmodule, _, [^module, [do: {:__block__, _, changed}]]} =
+      Code.string_to_quoted!(changed_source, columns: true)
+
+    {declaration, expected} =
+      case mutation do
+        :unknown_caller ->
+          assert Enum.take(changed, length(original)) == original
+          assert length(changed) == length(original) + 1
+
+          {List.last(changed),
+           "def added(c,t,h,p,s,x,q), do: handle_new_connection(c,t,h,p,s,x,q)"}
+
+        :capture ->
+          assert Enum.take(changed, length(original)) == original
+          assert length(changed) == length(original) + 1
+          {List.last(changed), "def added(), do: &handle_new_connection/7"}
+
+        :wrapper ->
+          indices =
+            for {form, index} <- Enum.with_index(original),
+                match?({:defp, _, [{:select_transport, _, [_, _]}, _]}, form),
+                do: index
+
+          assert [index] = indices
+          assert List.replace_at(changed, index, Enum.at(original, index)) == original
+
+          {Enum.at(changed, index),
+           "defp select_transport(request, _path), do: :external_unproved.select(request)"}
+      end
+
+    assert Macro.to_string(declaration) == Macro.to_string(Code.string_to_quoted!(expected))
+    declaration
+  end
+
+  defp z_compose_forms(original, mutation_forms, changed_function, target, mutation) do
+    if mutation == :wrapper do
+      assert Map.has_key?(z_function_forms(original), target)
+
+      Enum.map(original, fn
+        {:function, _, name, arity, _} = form ->
+          if {name, arity} == target, do: changed_function, else: form
+
+        form ->
+          form
+      end)
+    else
+      refute Map.has_key?(z_function_forms(original), target)
+
+      {:function, _, :__info__, 1, replacement_clauses} =
+        Map.fetch!(z_function_forms(mutation_forms), {:__info__, 1})
+
+      replacements =
+        Map.new(
+          for {:clause, _, [{:atom, _, key}], _, _} = clause <- replacement_clauses,
+              key in [:functions, :exports_md5],
+              do: {key, clause}
+        )
+
+      assert map_size(replacements) == 2
+
+      {forms, exported?} =
+        Enum.map_reduce(original, false, fn
+          {:attribute, line, :export, values}, false ->
+            {{:attribute, line, :export, Enum.uniq(values ++ [target])}, true}
+
+          {:function, line, :__info__, 1, clauses}, exported? ->
+            clauses =
+              Enum.map(clauses, fn
+                {:clause, _, [{:atom, _, key}], _, _} = clause ->
+                  Map.get(replacements, key, clause)
+
+                clause ->
+                  clause
+              end)
+
+            {{:function, line, :__info__, 1, clauses}, exported?}
+
+          form, exported? ->
+            {form, exported?}
+        end)
+
+      assert exported?
+      forms ++ [changed_function]
+    end
+  end
+
+  defp z_function_forms(forms),
+    do: Map.new(for {:function, _, name, arity, _} = form <- forms, do: {{name, arity}, form})
+
+  defp z_contains_stub?(:no_otp_fixture_stub_only), do: true
+
+  defp z_contains_stub?(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.any?(&z_contains_stub?/1)
+
+  defp z_contains_stub?(terms) when is_list(terms), do: Enum.any?(terms, &z_contains_stub?/1)
+  defp z_contains_stub?(_term), do: false
+
+  # ExUnit keeps the setup_all owner alive for this module's suite. The
+  # unnamed table expires with that owner and stores compiled bytes only.
+  setup_all do
+    {:ok, z_source_bytes: :ets.new(__MODULE__, [:set, :public])}
+  end
+
+  # Exact source, struct dependency source and compiler settings key the bytes.
+  # Cached modules are loaded only to serve compilation of later fixture
+  # sources; z_install_sources purges them before every independent audit.
+  defp z_compile_sources(sources, cache, struct_sources) do
+    Enum.flat_map(sources, fn source ->
+      key = {source, struct_sources, Code.compiler_options()}
+
+      case :ets.lookup(cache, key) do
+        [] ->
+          entries = Code.compile_string(source)
+          true = :ets.insert(cache, {key, entries})
+          entries
+
+        [{^key, entries}] ->
+          for {module, bytes} <- entries do
+            :code.purge(module)
+            :code.delete(module)
+
+            assert {:module, ^module} =
+                     :code.load_binary(module, ~c"no-otp-fixture-compile-cache", bytes)
+          end
+
+          entries
+      end
+    end)
+  end
+
+  defp z_install_sources(context, entries) do
+    ebin = b_physical(context.ebin)
+    directory = ebin |> Path.dirname() |> Path.dirname() |> Path.dirname()
+    System.put_env("NO_OTP_RELEASE", directory)
+    System.put_env("NO_OTP_PROJECT", directory)
+
+    for {module, bytes} <- entries do
+      :code.purge(module)
+      :code.delete(module)
+      File.write!(Path.join(ebin, Atom.to_string(module) <> ".beam"), bytes)
+    end
+
+    true = :code.add_patha(String.to_charlist(ebin))
+
+    on_exit(fn ->
+      for {module, _} <- entries do
+        :code.purge(module)
+        :code.delete(module)
+      end
+
+      :code.del_path(String.to_charlist(ebin))
+    end)
+  end
+
+  defp z_dependency_sources(root, mutation) do
+    headers =
+      File.read!(Path.join(root, "apps/http_core/lib/http/headers.ex"))
+      |> String.replace("HTTP.Headers", "NoOTPActualTaggedHeaders")
+
+    form_data =
+      File.read!(Path.join(root, "apps/http_core/lib/http/form_data.ex"))
+      |> String.replace("HTTP.FormData", "NoOTPActualTaggedFormData")
+
+    request =
+      File.read!(Path.join(root, "apps/http_core/lib/http/request.ex"))
+      |> String.replace("HTTP.Request", "NoOTPActualTaggedRequest")
+      |> String.replace("alias HTTP.Headers", "alias NoOTPActualTaggedHeaders, as: Headers")
+      |> String.replace("HTTP.Headers", "NoOTPActualTaggedHeaders")
+      |> String.replace("HTTP.FormData", "NoOTPActualTaggedFormData")
+
+    backend =
+      File.read!(Path.join(root, "apps/http_core/lib/http/tls_backend.ex"))
+      |> String.replace("HTTP.TLSBackend", "NoOTPActualTaggedBackend")
+
+    proxy =
+      File.read!(Path.join(root, "apps/http_core/lib/http/proxy.ex"))
+      |> String.replace("HTTP.Proxy", "NoOTPActualTaggedProxy")
+      |> String.replace(
+        "alias HTTP.{Headers, Request}",
+        "alias HTTP.Headers; alias NoOTPActualTaggedRequest, as: Request"
+      )
+
+    dialer =
+      File.read!(Path.join(root, "apps/http_runtime/lib/http/runtime/dialer.ex"))
+      |> String.replace("HTTP.Runtime.Dialer", "NoOTPActualTaggedDialer")
+      |> String.replace("alias HTTP.Request", "alias NoOTPActualTaggedRequest, as: Request")
+      |> String.replace("HTTP.Proxy", "NoOTPActualTaggedProxy")
+      |> String.replace("HTTP.TLSBackend", "NoOTPActualTaggedBackend")
+
+    proxy =
+      if mutation == :unknown_route,
+        do:
+          String.replace(
+            proxy,
+            "{:ok, if(proxy, do: Map.put(proxy, :origin_scheme, request.url.scheme))}",
+            ":external_unproved.route(request)"
+          ),
+        else: proxy
+
+    dialer =
+      if mutation == :unsafe_transport,
+        do:
+          String.replace(
+            dialer,
+            "{:ok, HTTP.Transport.TCP, host, uri.port || 80}",
+            "{:ok, :ssl, host, uri.port || 80}"
+          ),
+        else: dialer
+
+    [headers, form_data, request, backend, proxy, dialer]
   end
 end

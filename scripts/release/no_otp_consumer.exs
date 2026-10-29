@@ -19,6 +19,17 @@ defmodule NoOTP.Consumer do
     transport_targets = [HTTP.Transport.TCP, HTTP.Transport.ExSSL]
 
     parameter_invariants = %{
+      HTTP.SocketClient => [
+        {{:handle_new_connection, 7}, 1, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:connect_http1_or_new, 7}, 0, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:refresh_http1_socket, 4}, 0, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:initialize_legacy_owner, 4}, 1, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:maybe_http2_owner, 5}, 2, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:run_http2_owner, 4}, 1, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:initialize_http2_owner, 8}, 0, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:maybe_activate_http2_owner, 5}, 1, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:transfer_http2_socket, 3}, 0, transport_targets ++ [HTTP.Transport.Unix]}
+      ],
       HTTP.EventSource.Connection => [
         {{:connect_stream, 2}, 1, [HTTP.HTTP3.Stream, HTTP.Runtime.Stream]}
       ],

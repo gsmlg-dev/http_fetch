@@ -1190,6 +1190,7 @@ defmodule NoOTP.ReleaseAudit do
   defp prove_remote_tuple_cases(forms, context) do
     state = %{
       context: context,
+      forwarders: tagged_remote_forwarders(forms),
       requests: MapSet.new(),
       selections: %{},
       summaries: %{},
@@ -1213,9 +1214,49 @@ defmodule NoOTP.ReleaseAudit do
       end)
 
     if state.complete and current?,
-      do: remote_tuple_cases(forms, Map.new(projections)),
+      do: remote_tuple_cases(forms, Map.new(projections), state.forwarders),
       else: forms
   end
+
+  # A single complete local wrapper may forward to a selected remote producer.
+  # Its return domain is all-input, so argument expressions cannot narrow it;
+  # the original wrapper and all argument effects remain in the artifact scan.
+  # Local mixed-return producers retain the separate uniform-tuple rule.
+  defp tagged_remote_forwarders(forms) do
+    definitions = for {:function, _, _, _, _} = form <- forms, do: form
+
+    keys = Enum.map(definitions, fn {:function, _, name, arity, _} -> {name, arity} end)
+
+    if length(definitions) <= @max_parameter_functions and
+         length(Enum.uniq(keys)) == length(keys) do
+      Map.new(
+        for {:function, _, name, arity,
+             [
+               {:clause, _, _, [],
+                [{:call, _, {:remote, _, {:atom, _, module}, {:atom, _, function}}, args}]}
+             ]} = form <-
+              definitions,
+            is_atom(module) and is_atom(function) and is_list(args),
+            tuple_projection_form?(form),
+            do: {{name, arity}, {module, function, length(args)}}
+      )
+    else
+      %{}
+    end
+  end
+
+  defp tagged_case_call(
+         {:call, _, {:remote, _, {:atom, _, module}, {:atom, _, function}}, args},
+         _forwarders
+       )
+       when is_atom(module) and is_atom(function) and is_list(args),
+       do: {module, function, length(args)}
+
+  defp tagged_case_call({:call, _, {:atom, _, name}, args}, forwarders)
+       when is_atom(name) and is_list(args),
+       do: Map.get(forwarders, {name, length(args)}, :unknown)
+
+  defp tagged_case_call(_source, _forwarders), do: :unknown
 
   defp tagged_case_requests(_term, %{complete: false} = state), do: state
 
@@ -1227,17 +1268,21 @@ defmodule NoOTP.ReleaseAudit do
     else
       requests =
         case term do
-          {:case, _, {:call, _, {:remote, _, {:atom, _, module}, {:atom, _, function}}, args},
-           clauses}
-          when is_list(args) and is_list(clauses) ->
-            Enum.reduce(clauses, state.requests, fn
-              {:clause, _, [{:tuple, _, [{:atom, _, tag}, {:var, _, name}, _, _]}], _, _}, acc
-              when is_atom(module) and is_atom(function) and is_atom(tag) and name != :_ ->
-                MapSet.put(acc, {module, function, length(args), tag})
+          {:case, _, source, clauses} when is_list(clauses) ->
+            case tagged_case_call(source, state.forwarders) do
+              {module, function, arity} ->
+                Enum.reduce(clauses, state.requests, fn
+                  {:clause, _, [{:tuple, _, [{:atom, _, tag}, {:var, _, name}, _, _]}], _, _}, acc
+                  when is_atom(tag) and name != :_ ->
+                    MapSet.put(acc, {module, function, arity, tag})
 
-              _, acc ->
-                acc
-            end)
+                  _, acc ->
+                    acc
+                end)
+
+              :unknown ->
+                state.requests
+            end
 
           _ ->
             state.requests
@@ -1248,9 +1293,9 @@ defmodule NoOTP.ReleaseAudit do
     end
   end
 
-  defp tagged_children(term) when is_tuple(term), do: Tuple.to_list(term)
-  defp tagged_children(term) when is_list(term), do: term
-  defp tagged_children(_term), do: []
+  # Reuse the raw inventory's exact header/annotation recognition. Only proven
+  # data-only headers are skipped; malformed metadata keeps its raw traversal.
+  defp tagged_children(term), do: Enum.map(callable_children(term), &elem(&1, 0))
 
   defp tagged_selection(module, state) do
     case Map.fetch(state.selections, module) do
@@ -1536,41 +1581,46 @@ defmodule NoOTP.ReleaseAudit do
     values |> List.flatten() |> common_value()
   end
 
-  defp remote_tuple_cases(
-         {:case, annotation,
-          {:call, _, {:remote, _, {:atom, _, module}, {:atom, _, function}}, args} = source,
-          clauses},
-         projections
-       ) do
-    clauses = remote_tuple_cases(clauses, projections)
+  defp remote_tuple_cases({:case, annotation, source, clauses}, projections, forwarders)
+       when is_list(clauses) do
+    clauses = remote_tuple_cases(clauses, projections, forwarders)
 
     clauses =
-      if callable_annotation?(annotation) and tuple_projection_headers?(source) do
-        Enum.map(clauses, fn
-          {:clause, _, [{:tuple, _, [{:atom, _, tag}, {:var, _, _}, _, _]}], _, _} = clause ->
-            case Map.get(projections, {module, function, length(args), tag}, :unknown) do
-              :unknown -> clause
-              targets -> local_tuple_case_clause(clause, tag, targets)
-            end
+      case tagged_case_call(source, forwarders) do
+        {module, function, arity} ->
+          if callable_annotation?(annotation) and tuple_projection_headers?(source) do
+            Enum.map(clauses, fn
+              {:clause, _, [{:tuple, _, [{:atom, _, tag}, {:var, _, _}, _, _]}], _, _} = clause ->
+                case Map.get(projections, {module, function, arity, tag}, :unknown) do
+                  :unknown -> clause
+                  targets -> local_tuple_case_clause(clause, tag, targets)
+                end
 
-          clause ->
-            clause
-        end)
-      else
-        clauses
+              clause ->
+                clause
+            end)
+          else
+            clauses
+          end
+
+        :unknown ->
+          clauses
       end
 
-    {:case, annotation, remote_tuple_cases(source, projections), clauses}
+    {:case, annotation, remote_tuple_cases(source, projections, forwarders), clauses}
   end
 
-  defp remote_tuple_cases(term, projections) when is_tuple(term),
+  defp remote_tuple_cases(term, projections, forwarders) when is_tuple(term),
     do:
-      term |> Tuple.to_list() |> Enum.map(&remote_tuple_cases(&1, projections)) |> List.to_tuple()
+      term
+      |> Tuple.to_list()
+      |> Enum.map(&remote_tuple_cases(&1, projections, forwarders))
+      |> List.to_tuple()
 
-  defp remote_tuple_cases(terms, projections) when is_list(terms),
-    do: Enum.map(terms, &remote_tuple_cases(&1, projections))
+  defp remote_tuple_cases(terms, projections, forwarders) when is_list(terms),
+    do: Enum.map(terms, &remote_tuple_cases(&1, projections, forwarders))
 
-  defp remote_tuple_cases(term, _projections), do: term
+  defp remote_tuple_cases(term, _projections, _forwarders), do: term
 
   # Prove only an immediate local case over uniform tagged four-tuples. Every
   # producer clause must construct the same tag and a finite atom in slot two;
