@@ -3698,4 +3698,215 @@ defmodule NoOTP.ReleaseAuditTest do
 
     t_install(context, entries) |> t_inspection(NoOTPActualTupleSlice)
   end
+
+  test "V01 checked atom-union arguments reach an ordinary private helper", context do
+    assert private_erlang(context, v_body(), "run/1").unresolved_dispatch == []
+  end
+
+  test "V02 a private atom-union argument preserves its SSL alternative", context do
+    body = String.replace(v_body(), "{ok,maps,x,0}", "{ok,ssl,x,0}")
+    result = private_erlang(context, body, "run/1")
+    assert Enum.any?(result.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+  end
+
+  test "V03 every unknown or shadowed caller still poisons the private slot", context do
+    for prefix <- [
+          "helper(X),",
+          "F=fun(M) -> helper(M) end, F(X),",
+          "F=fun Again(M) -> helper(M), Again(M) end, F(X),",
+          "[helper(M) || M <- external:values()],"
+        ] do
+      body = String.replace(v_body(), "run(X) ->", "run(X) -> " <> prefix)
+      assert private_erlang(context, body, "run/1").unresolved_dispatch != []
+    end
+  end
+
+  test "V04 captures exports and export_all remain open despite finite arguments", context do
+    for capture <- [
+          "fun helper/1",
+          "fun no_otp_audit_fixture:helper/1",
+          "lists:map(fun helper/1,[])"
+        ] do
+      body = String.replace(v_body(), "run(X) ->", "run(X) -> " <> capture <> ",")
+      assert private_erlang(context, body, "run/1").unresolved_dispatch != []
+    end
+
+    assert private_erlang(context, v_body(), "run/1,helper/1").unresolved_dispatch != []
+
+    assert private_erlang(context, v_body(), "run/1", "-compile(export_all). ").unresolved_dispatch !=
+             []
+
+    assert private_erlang(context, v_body(), "run/1", "", [:export_all]).unresolved_dispatch != []
+  end
+
+  test "V05 recursive parameter arguments and absent caller domains stay unknown", context do
+    recursive =
+      String.replace(
+        v_body(),
+        "helper(M) -> M:reverse([]).",
+        "helper(M) -> M:reverse([]), helper(M)."
+      )
+
+    assert private_erlang(context, recursive, "run/1").unresolved_dispatch != []
+
+    assert private_erlang(context, "run() -> ok. helper(M) -> M:reverse([]).").unresolved_dispatch !=
+             []
+  end
+
+  test "V06 only direct atom elements are recognized in an internal union node", context do
+    for values <- [
+          :unknown,
+          [],
+          [{:integer, 0, 1}],
+          [{:var, 0, :Unproved}],
+          [{:tuple, 0, [{:atom, 0, :lists}]}],
+          [{:fun, 0, {:clauses, []}}],
+          [{:audit_union, 0, [{:atom, 0, :lists}]}]
+        ] do
+      assert v_union(context, {:audit_union, 0, values}).unresolved_dispatch != []
+    end
+  end
+
+  test "V07 invalid union and element metadata cannot establish completeness", context do
+    for union <- [
+          {:audit_union, {:invalid, 0}, [{:atom, 0, :lists}]},
+          {:audit_union, [location: 0, unexpected: true], [{:atom, 0, :lists}]},
+          {:audit_union, 0, [{:atom, {:invalid, 0}, :lists}]},
+          {:audit_union, 0, [{:atom, [location: 0, unexpected: true], :lists}]}
+        ] do
+      assert v_union(context, union).unresolved_dispatch != []
+    end
+  end
+
+  test "V08 the existing target and byte limits bound atom proof nodes", context do
+    atoms = for n <- 1..17, do: {:atom, 0, String.to_atom("v_atom_#{n}")}
+    assert v_union(context, {:audit_union, 0, Enum.take(atoms, 16)}).unresolved_dispatch == []
+    assert v_union(context, {:audit_union, 0, atoms}).unresolved_dispatch != []
+
+    annotated =
+      for {:atom, _, value} <- Enum.take(atoms, 16),
+          do: {:atom, [location: 0, text: List.duplicate(?x, 4_096)], value}
+
+    oversized = {:audit_union, 0, annotated}
+    assert :erlang.external_size(oversized) > 65_536
+    assert v_union(context, oversized).unresolved_dispatch != []
+  end
+
+  test "V09 actual selector and connect helper source slices compose", context do
+    # Original producer and sink definitions, but a synthetic immediate caller.
+    # The separate immutable release comparison proves the full original path.
+    assert v_actual_slice(context, false).unresolved_dispatch == []
+  end
+
+  test "V10 an added unknown caller invalidates the actual helper source slice", context do
+    result = v_actual_slice(context, true)
+
+    assert Enum.map(result.unresolved_dispatch, &{&1.line, &1.kind}) ==
+             [{594, "unresolved_module_dispatch"}]
+  end
+
+  defp v_body do
+    """
+    run(X) -> case choose(X) of {ok,M,_,_} -> helper(M) end.
+    choose(a) -> {ok,lists,x,0}; choose(_) -> {ok,maps,x,0}.
+    helper(M) -> M:reverse([]).
+    """
+  end
+
+  defp v_union(context, union) do
+    bytes =
+      b_compile(
+        :v_input,
+        "-export([run/0]). run() -> helper(lists).\nhelper(M) -> M:reverse([]).",
+        true
+      )
+
+    t_install(context, [{:v_input, bytes}])
+    path = Path.join(b_physical(context.ebin), "v_input.beam")
+    s_rewrite(path, &v_union_argument(&1, union))
+    t_inspection(NoOTP.ReleaseAudit.artifacts(), :v_input)
+  end
+
+  defp v_union_argument({:call, annotation, {:atom, _, :helper} = callee, [_argument]}, union),
+    do: {:call, annotation, callee, [union]}
+
+  defp v_union_argument(term, union) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.map(&v_union_argument(&1, union)) |> List.to_tuple()
+
+  defp v_union_argument(terms, union) when is_list(terms),
+    do: Enum.map(terms, &v_union_argument(&1, union))
+
+  defp v_union_argument(term, _union), do: term
+
+  defp v_actual_slice(context, unknown_caller?) do
+    root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
+
+    backend =
+      File.read!(Path.join(root, "apps/http_core/lib/http/tls_backend.ex"))
+      |> String.replace("HTTP.TLSBackend", "NoOTPActualUnionBackend")
+
+    {:defmodule, _, [_module, [do: {:__block__, _, definitions}]]} =
+      root
+      |> Path.join("apps/http_web_socket/lib/http/web_socket/connection.ex")
+      |> File.read!()
+      |> Code.string_to_quoted!()
+
+    definitions =
+      Enum.filter(definitions, fn
+        {:defp, _, [{:select_transport, _, [_argument]}, _body]} -> true
+        {:defp, _, [{:when, _, [{:select_transport, _, [_argument]}, _guard]}, _body]} -> true
+        {:defp, _, [{:connect_http1, _, [_, _, _, _, _]}, _body]} -> true
+        _ -> false
+      end)
+
+    assert length(definitions) == 4
+
+    definitions =
+      Macro.prewalk(definitions, fn
+        {:__aliases__, metadata, [:HTTP, :TLSBackend]} ->
+          {:__aliases__, metadata, [:NoOTPActualUnionBackend]}
+
+        node ->
+          node
+      end)
+
+    extra =
+      if unknown_caller? do
+        quote do
+          def alternate(value), do: connect_http1(value, nil, 0, [], 0)
+        end
+      else
+        quote do
+        end
+      end
+
+    fixture =
+      quote do
+        defmodule NoOTPActualUnionSlice do
+          unquote_splicing(definitions)
+
+          def run(state) do
+            case select_transport(state) do
+              {:ok, transport, host, port} -> connect_http1(transport, host, port, [], 0)
+            end
+          end
+
+          unquote(extra)
+        end
+      end
+
+    entries = Code.compile_string(backend) ++ Code.compile_quoted(fixture)
+
+    for {module, _} <- entries do
+      :code.purge(module)
+      :code.delete(module)
+
+      on_exit(fn ->
+        :code.purge(module)
+        :code.delete(module)
+      end)
+    end
+
+    t_install(context, entries) |> t_inspection(NoOTPActualUnionSlice)
+  end
 end

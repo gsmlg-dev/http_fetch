@@ -2776,6 +2776,26 @@ defmodule NoOTP.ReleaseAudit do
       else: caller_node(term, owner, state)
   end
 
+  # Earlier checked return preparation can place a finite atom domain directly
+  # in a caller argument. Accept only that data-only proof node; otherwise the
+  # entire existing private-parameter analysis must remain unavailable.
+  defp caller_node({:audit_union, annotation, values} = term, owner, state)
+       when is_list(values) do
+    valid? =
+      callable_annotation?(annotation) and values != [] and
+        length(values) <= @max_finite_targets and
+        :erlang.external_size(term) <= @max_finite_bytes and
+        Enum.all?(values, fn
+          {:atom, atom_annotation, value} ->
+            is_atom(value) and callable_annotation?(atom_annotation)
+
+          _ ->
+            false
+        end)
+
+    if valid?, do: caller_syntax(values, owner, state), else: %{state | complete: false}
+  end
+
   defp caller_node({:call, _, callee, args}, owner, state) do
     state = %{state | calls: state.calls + 1}
 
