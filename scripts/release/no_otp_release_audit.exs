@@ -2981,6 +2981,57 @@ defmodule NoOTP.ReleaseAudit do
       else: environment
   end
 
+  # Only a literal-true case arm establishes that its scrutinee succeeded.
+  # Elixir compiles strict `and` to false/true cases; their false arm must
+  # return literal false before truth can imply both operands. No falsy,
+  # wildcard, negated or arbitrary predicate establishes an atom identity.
+  defp successful_case_environment(
+         source,
+         {:clause, annotation, [{:atom, pattern_annotation, true}], _guards, _body},
+         environment
+       ) do
+    with true <- callable_annotation?(annotation),
+         true <- callable_annotation?(pattern_annotation),
+         true <- :erlang.external_size(source) <= @max_finite_bytes,
+         true <- tuple_projection_headers?(source),
+         {:ok, scope} <- positive_case_facts(source, environment, 32) do
+      scope
+    else
+      _ -> environment
+    end
+  end
+
+  defp successful_case_environment(_source, _clause, environment), do: environment
+
+  defp positive_case_facts(_expression, _environment, 0), do: :unknown
+
+  defp positive_case_facts({:op, _, :andalso, left, right}, environment, remaining) do
+    with {:ok, scope} <- positive_case_facts(left, environment, remaining - 1),
+         do: positive_case_facts(right, scope, remaining - 1)
+  end
+
+  defp positive_case_facts({:op, _, :orelse, left, right}, environment, remaining) do
+    with {:ok, first} <- positive_case_facts(left, environment, remaining - 1),
+         {:ok, second} <- positive_case_facts(right, environment, remaining - 1),
+         do: {:ok, join_environments([first, second])}
+  end
+
+  defp positive_case_facts(
+         {:case, _, left,
+          [
+            {:clause, _, [{:atom, _, false}], [], [{:atom, _, false}]},
+            {:clause, _, [{:atom, _, true}], [], [right]}
+          ]},
+         environment,
+         remaining
+       ) do
+    with {:ok, scope} <- positive_case_facts(left, environment, remaining - 1),
+         do: positive_case_facts(right, scope, remaining - 1)
+  end
+
+  defp positive_case_facts(expression, environment, _remaining),
+    do: {:ok, guard_atom_fact(expression, environment)}
+
   defp resolve_sequence(expressions, environment) do
     {resolved, {environment, value}} =
       Enum.map_reduce(expressions, {environment, :unknown}, fn expression, {scope, _value} ->
@@ -3034,8 +3085,9 @@ defmodule NoOTP.ReleaseAudit do
   end
 
   defp resolve_expression({:case, line, expression, clauses}, environment) do
+    source = expression
     {expression, environment, _value} = resolve_expression(expression, environment)
-    {clauses, environment, value} = resolve_branches(clauses, environment)
+    {clauses, environment, value} = resolve_branches(clauses, environment, source)
     {{:case, line, expression, clauses}, environment, value}
   end
 
@@ -3151,8 +3203,12 @@ defmodule NoOTP.ReleaseAudit do
 
   defp resolve_expression(expression, environment), do: {expression, environment, :unknown}
 
-  defp resolve_branches(clauses, environment) do
-    branches = Enum.map(clauses, &resolve_clause(&1, environment, false))
+  defp resolve_branches(clauses, environment, source \\ nil) do
+    branches =
+      Enum.map(clauses, fn clause ->
+        scope = successful_case_environment(source, clause, environment)
+        resolve_clause(clause, scope, false)
+      end)
 
     {Enum.map(branches, &elem(&1, 0)), join_environments(Enum.map(branches, &elem(&1, 1))),
      common_value(Enum.map(branches, &elem(&1, 2)))}

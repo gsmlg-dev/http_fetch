@@ -4271,4 +4271,288 @@ defmodule NoOTP.ReleaseAuditTest do
 
     %{unconfigured: unconfigured, configured: configured}
   end
+
+  # X: positive atom facts from literal-true branches, including compiled strict and.
+  test "X01 literal true branches refine positive atom equalities in either order", context do
+    for predicate <- ["M == lists", "M =:= lists", "lists == M", "lists =:= M"] do
+      body = "run(M) -> case " <> predicate <> " of true -> M:reverse([]); false -> ok end."
+      assert private_erlang(context, body, "run/1").unresolved_dispatch == []
+    end
+  end
+
+  test "X02 actual compiled Elixir strict and refines a complete private caller", context do
+    [{module, bytes}] =
+      Code.compile_string("""
+      defmodule NoOTPStrictAndFixture do
+        def run(module, tracker) do
+          if module == :lists and is_pid(tracker), do: invoke(module), else: :ok
+        end
+        defp invoke(module), do: module.reverse([])
+      end
+      """)
+
+    on_exit(fn ->
+      :code.purge(module)
+      :code.delete(module)
+    end)
+
+    assert audit(context, module, bytes).unresolved_dispatch == []
+  end
+
+  test "X03 conjunctions and fully finite disjunctions retain all true alternatives", context do
+    for predicate <- [
+          "M == lists andalso is_pid(X)",
+          "is_pid(X) andalso M == lists",
+          "M == lists orelse M == maps",
+          "(M == lists orelse M == maps) andalso is_pid(X)"
+        ] do
+      body = "run(M,X) -> case " <> predicate <> " of true -> M:reverse([]); false -> ok end."
+      assert private_erlang(context, body, "run/2").unresolved_dispatch == []
+    end
+  end
+
+  test "X04 facts do not enter false branches or escape a case", context do
+    body = """
+    run(M) -> case M == lists of true -> M:reverse([]); false -> M:reverse([]) end,
+              M:reverse([]).
+    """
+
+    result = private_erlang(context, body, "run/1")
+
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) ==
+             ["unresolved_module_dispatch", "unresolved_module_dispatch"]
+  end
+
+  test "X05 unknown and unsafe disjuncts remain obligations", context do
+    for predicate <- ["M == lists orelse is_atom(M)", "M == lists orelse M == ssl"] do
+      body = "run(M) -> case " <> predicate <> " of true -> M:connect(a,1,[]); false -> ok end."
+      assert unsafe?(private_erlang(context, body, "run/1"))
+    end
+
+    result =
+      private_erlang(
+        context,
+        "run(M) -> case M == ssl of true -> M:connect(a,1,[]); false -> ok end.",
+        "run/1"
+      )
+
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["literal_module_ssl"]
+  end
+
+  test "X06 lookalike nested cases cannot claim strict conjunction semantics", context do
+    for predicate <- [
+          "case M == lists of false -> true; true -> true end",
+          "case M == lists of _ -> true end",
+          "case M == lists of true -> true; false -> true end",
+          "case M == lists of false -> false; true when is_atom(M) -> true; _ -> true end"
+        ] do
+      body = "run(M) -> case (" <> predicate <> ") of true -> M:reverse([]); false -> ok end."
+      assert private_erlang(context, body, "run/1").unresolved_dispatch != []
+    end
+  end
+
+  test "X07 nested fun parameters shadow case facts", context do
+    for closure <- [
+          "fun(M) -> M:reverse([]) end",
+          "fun Loop(M) -> M:reverse([]), Loop(M) end"
+        ] do
+      body = "run(M,X) -> case M == lists of true -> F=" <> closure <> ",F(X); false -> ok end."
+      assert private_erlang(context, body, "run/2").unresolved_dispatch != []
+    end
+  end
+
+  test "X08 nested unsafe occurrences retain their original multiplicity", context do
+    body = """
+    run(M) -> case M == lists of
+      true -> M:reverse([]), fun() -> N=ssl,N:connect(a,1,[]) end;
+      false -> fun() -> N=ssl,N:connect(a,1,[]) end
+    end.
+    """
+
+    result = private_erlang(context, body, "run/1")
+
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == [
+             "literal_module_ssl",
+             "literal_module_ssl"
+           ]
+  end
+
+  test "X09 unknown private callers captures and exports still prevent parameter closure",
+       context do
+    base =
+      "run(M) -> case M == lists of true -> helper(M); false -> ok end. helper(M) -> M:reverse([])."
+
+    for prefix <- ["helper(M),", "fun helper/1,", "fun no_otp_audit_fixture:helper/1,"] do
+      body = String.replace(base, "run(M) ->", "run(M) -> " <> prefix)
+      assert private_erlang(context, body, "run/1").unresolved_dispatch != []
+    end
+
+    assert private_erlang(context, base, "run/1,helper/1").unresolved_dispatch != []
+  end
+
+  test "X10 malformed predicate and true-branch metadata cannot introduce facts", context do
+    predicate = x_equality()
+
+    for replacement <- [
+          put_elem(predicate, 1, {:invalid, 0}),
+          put_elem(predicate, 1, location: 0, unexpected: true),
+          put_elem(predicate, 3, {:var, {:invalid, 0}, :M})
+        ] do
+      assert x_source(context, replacement).unresolved_dispatch != []
+    end
+
+    assert x_source(context, predicate, {:invalid, 0}).unresolved_dispatch != []
+  end
+
+  test "X11 predicate depth and byte exhaustion discard new case facts", context do
+    nested = fn count ->
+      Enum.reduce(1..count, x_equality(), fn _, expression ->
+        {:op, 0, :andalso, expression, {:atom, 0, true}}
+      end)
+    end
+
+    assert x_source(context, nested.(8)).unresolved_dispatch == []
+    assert x_source(context, nested.(33)).unresolved_dispatch != []
+
+    huge = {:op, 0, :andalso, x_equality(), {:tuple, 0, List.duplicate({:integer, 0, 1}, 20_000)}}
+    assert :erlang.external_size(huge) > 65_536
+    assert x_source(context, huge).unresolved_dispatch != []
+  end
+
+  test "X12 predicates and scanned bodies are never executed", context do
+    Process.delete(:audit_case_fact_executed)
+
+    body = """
+    run(M) -> case M == lists andalso predicate() of true -> M:reverse([]); false -> ok end.
+    predicate() -> erlang:put(audit_case_fact_executed,true),true.
+    """
+
+    assert private_erlang(context, body, "run/1").unresolved_dispatch == []
+    assert Process.get(:audit_case_fact_executed) == nil
+  end
+
+  test "X13 the complete current HTTP1 Pool source closes only its guarded helper", context do
+    result = x_actual_pool(context, :original)
+
+    assert Enum.sort(Enum.map(result.unresolved_dispatch, &{&1.line, &1.kind})) ==
+             Enum.map(
+               [55, 57, 59, 62, 152, 293, 300, 301, 350, 358, 409, 514],
+               &{&1, "unresolved_module_dispatch"}
+             )
+  end
+
+  test "X14 an unsafe atom in the actual Pool predicate remains unsafe", context do
+    result = x_actual_pool(context, :unsafe_equality)
+
+    assert Enum.any?(
+             result.unresolved_dispatch,
+             &(&1.line == 73 and &1.kind == "literal_module_ssl")
+           )
+  end
+
+  test "X15 weakening the actual predicate or adding a caller restores the obligation", context do
+    for mutation <- [:unknown_predicate, :unknown_caller] do
+      result = x_actual_pool(context, mutation)
+
+      assert Enum.any?(
+               result.unresolved_dispatch,
+               &(&1.line == 73 and &1.kind == "unresolved_module_dispatch")
+             )
+    end
+  end
+
+  test "X16 negation numeric predicates and truthy wildcard arms remain conservative", context do
+    for body <- [
+          "run(M) -> case not (M == ssl) of true -> M:reverse([]); false -> ok end.",
+          "run(M) -> case M == 1 of true -> M:reverse([]); false -> ok end.",
+          "run(M) -> case erlang:function_exported(M,reverse,1) of true -> M:reverse([]); false -> ok end.",
+          "run(M) -> case M == lists of false -> ok; _ -> M:reverse([]) end."
+        ] do
+      assert private_erlang(context, body, "run/1").unresolved_dispatch != []
+    end
+  end
+
+  defp x_equality, do: {:op, 0, :==, {:var, 0, :M}, {:atom, 0, :lists}}
+
+  defp x_source(context, source, true_annotation \\ 0) do
+    bytes =
+      b_compile(
+        :x_input,
+        "-export([run/1]). run(M) -> case M == lists of true -> M:reverse([]); false -> ok end.",
+        true
+      )
+
+    t_install(context, [{:x_input, bytes}])
+    path = Path.join(b_physical(context.ebin), "x_input.beam")
+
+    s_rewrite(path, fn forms ->
+      Enum.map(forms, fn
+        {:function, line, :run, 1, [{:clause, clause_line, arguments, guards, [expression]}]} ->
+          {:case, case_line, _predicate, branches} = expression
+
+          branches =
+            Enum.map(branches, fn
+              {:clause, _, [{:atom, pattern_line, true}], branch_guards, body} ->
+                {:clause, true_annotation, [{:atom, pattern_line, true}], branch_guards, body}
+
+              branch ->
+                branch
+            end)
+
+          {:function, line, :run, 1,
+           [{:clause, clause_line, arguments, guards, [{:case, case_line, source, branches}]}]}
+
+        form ->
+          form
+      end)
+    end)
+
+    NoOTP.ReleaseAudit.artifacts() |> t_inspection(:x_input)
+  end
+
+  defp x_actual_pool(context, mutation) do
+    root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
+
+    source =
+      File.read!(Path.join(root, "apps/http_runtime/lib/http/http1/pool.ex"))
+      |> String.replace("HTTP.HTTP1.Pool", "NoOTPActualCasePool")
+
+    source =
+      case mutation do
+        :unsafe_equality ->
+          String.replace(
+            source,
+            "transport == HTTP.Transport.ExSSL and is_pid(tracker)",
+            "transport == :ssl and is_pid(tracker)"
+          )
+
+        :unknown_predicate ->
+          String.replace(
+            source,
+            "transport == HTTP.Transport.ExSSL and is_pid(tracker)",
+            "is_atom(transport) and is_pid(tracker)"
+          )
+
+        :unknown_caller ->
+          String.replace_suffix(
+            source,
+            "\nend\n",
+            "\n  def extra(r,t,s,p,d), do: checkin_provider(r,t,s,p,d)\nend\n"
+          )
+
+        :original ->
+          source
+      end
+
+    [{module, bytes}] = Code.compile_string(source)
+    :code.purge(module)
+    :code.delete(module)
+
+    on_exit(fn ->
+      :code.purge(module)
+      :code.delete(module)
+    end)
+
+    t_install(context, [{module, bytes}]) |> t_inspection(module)
+  end
 end
