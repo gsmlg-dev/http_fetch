@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The TLS migration is being prepared for the `1.0.0-rc.N` series. The changes
+below describe the current source; production release isolation and published
+consumer acceptance remain pending. See the [migration checklist](docs/tls-migration-plan.md)
+and [validation ledger](docs/tls-migration-validation.md) for executed gates.
+
+### Changed
+- Use ExSSL by default for Fetch, EventSource, WebSocket and managed HTTP/1 and
+  HTTP/2. HTTPS supports TLS 1.3 and the documented TLS 1.2 profile through one
+  negotiation, with certificate verification enabled by default.
+- Use ExSSL for HTTPS origins inside HTTPS proxy CONNECT tunnels, retaining
+  separate origin/proxy verification and cleanup evidence for both TLS layers.
+- Preserve ordinary verification callbacks, partial-chain trust, CRL/OCSP,
+  encrypted private keys and multiple client identities within the documented
+  [TLS compatibility bounds](apps/ex_ssl/docs/COMPATIBILITY.md).
+- Keep request completion and managed connection retirement tied to public
+  `SSL.Lifecycle` evidence, including setup failure, cancellation and ownership
+  transfer. Existing HTTP/3 completion remains `unsupported_completion`.
+
+### Removed
+- Remove the production OTP SSL transport and unconditional OTP SSL application
+  dependencies. Explicit `tls_backend: :ssl` and `"ssl"` return a configuration
+  error. The public `SSL` facade, `ssl:` options and compatibility message names
+  remain supported.
+
 ## [0.21.19] - 2026-10-29
 
 ### Fixed
