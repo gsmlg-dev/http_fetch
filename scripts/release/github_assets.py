@@ -27,11 +27,16 @@ def existing_release(repository, tag):
         raise RuntimeError(f"GitHub release lookup failed: HTTP {error.code}") from error
 
 
+def verify_release_type(release, version):
+    if release.get("prerelease") is not ("-rc." in version):
+        raise RuntimeError("GitHub release prerelease flag differs from release version")
+
+
 def run(mode, version, archive_dir):
     if mode not in ("preflight", "complete"):
         raise ValueError("expected preflight or complete")
-    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version):
-        raise ValueError("stable release version required")
+    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?", version):
+        raise ValueError("stable or rc.N release version required")
     repository = os.environ["GITHUB_REPOSITORY"]
     tag = f"v{version}"
     archives = [archive_dir / f"{package}-{version}.tar" for package in PACKAGES]
@@ -41,16 +46,17 @@ def run(mode, version, archive_dir):
     if release is None:
         if mode == "preflight":
             return
-        subprocess.run(
-            ["gh", "release", "create", tag, *(str(path) for path in archives),
-             "--verify-tag", "--title", tag, "--generate-notes",
-             "--notes", "Published to Hex.pm: " + ", ".join(
-                 f"https://hex.pm/packages/{package}/{version}" for package in PACKAGES)],
-            check=True,
-        )
+        command = ["gh", "release", "create", tag, *(str(path) for path in archives),
+                   "--verify-tag", "--title", tag, "--generate-notes",
+                   "--notes", "Published to Hex.pm: " + ", ".join(
+                       f"https://hex.pm/packages/{package}/{version}" for package in PACKAGES)]
+        if "-rc." in version:
+            command.extend(["--prerelease", "--latest=false"])
+        subprocess.run(command, check=True)
         verify_assets(repository, tag, archives)
         return
 
+    verify_release_type(release, version)
     assets = {asset["name"]: asset for asset in release["assets"]}
     missing = []
     # Check every existing asset before uploading any missing one.
@@ -77,6 +83,7 @@ def verify_assets(repository, tag, archives):
     release = existing_release(repository, tag)
     if release is None:
         raise RuntimeError("GitHub release missing after completion")
+    verify_release_type(release, tag.removeprefix("v"))
     assets = {asset["name"]: asset for asset in release["assets"]}
     with tempfile.TemporaryDirectory() as directory:
         for archive in archives:

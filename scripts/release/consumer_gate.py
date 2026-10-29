@@ -488,8 +488,8 @@ def verify_canary_source(version, source_sha):
 
 
 def run(version, archive_dir=None, *, mode="all", keep=False, published=False, source_sha=None):
-    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version):
-        raise ValueError("stable release version required")
+    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?", version):
+        raise ValueError("stable or rc.N release version required")
     if mode == "http3-canary":
         if not published or archive_dir is None:
             raise ValueError("canary requires published Hex packages and release archives")

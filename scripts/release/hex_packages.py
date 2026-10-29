@@ -33,7 +33,7 @@ def release_status(package, version, archive):
 def run(mode, version, archive_dir, stage_dir=None):
     if mode not in ("preflight", "publish"):
         raise ValueError("expected preflight or publish")
-    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version):
+    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?", version):
         raise ValueError("invalid release version")
 
     archives = {package: archive_dir / f"{package}-{version}.tar" for package in PACKAGES}

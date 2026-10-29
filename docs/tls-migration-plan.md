@@ -441,6 +441,12 @@ must pass before P6 is accepted.
 
 ## P7 — Coordinated release and published verification (after P6)
 
+The next coordinated release uses `1.0.0-rc.N`, starting with `1.0.0-rc.1` if
+still available when publication begins. GitHub marks it as a prerelease and
+keeps the existing stable release as latest. All source, candidate and cold
+published-consumer gates remain required. Formal `1.0.0` follows a later
+validation period and release decision.
+
 - [ ] Full umbrella regression, formatting and required functional CI pass.
       Report user-deferred Credo/Dialyzer separately; retain their actual failures.
 - [ ] Commit the completed migration and push the reviewed source to GitHub before

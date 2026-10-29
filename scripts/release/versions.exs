@@ -14,8 +14,11 @@ defmodule ReleaseVersions do
   }
 
   def run([mode, version]) when mode in ["prepare", "validate"] do
-    unless Regex.match?(~r/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, version),
-      do: raise("release version must be stable major.minor.patch")
+    unless Regex.match?(
+             ~r/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-rc\.(0|[1-9]\d*))?\z/,
+             version
+           ),
+           do: raise("release version must be major.minor.patch or major.minor.patch-rc.N")
 
     paths = ["mix.exs" | Enum.map(@apps, &"apps/#{&1}/mix.exs")]
 

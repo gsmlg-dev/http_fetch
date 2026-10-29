@@ -83,10 +83,10 @@ def require(condition, message):
         raise GateError(message)
 
 
-def stable_version(version):
+def validate_version(version):
     require(isinstance(version, str) and re.fullmatch(
-        r'(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)', version),
-        'stable coordinated version required')
+        r'(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?', version),
+        'stable or rc.N coordinated version required')
 
 
 def validate_plan(plan):
@@ -151,7 +151,7 @@ def validate_plan(plan):
 
 
 def project_source(version):
-    stable_version(version)
+    validate_version(version)
     dependencies = ', '.join('{:' + package + ', "== ' + version + '"}' for package in PACKAGES)
     return f'''defmodule NoOTP.ConsumerProject do
   use Mix.Project
@@ -724,7 +724,7 @@ def bounded_registry_commands(runner, source=None):
 
 
 def run(version, archives, stage, source, source_sha, plan, output, max_seconds=1800, *, published=False):
-    stable_version(version)
+    validate_version(version)
     validate_plan(plan)
     require(re.fullmatch(r'[a-f0-9]{40}', source_sha), 'full source SHA required')
     output, source = output.resolve(), source.resolve()

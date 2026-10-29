@@ -34,8 +34,8 @@ def prepare_docs_source(source, target, version):
 
 
 def run(version, stage_dir, publish=False):
-    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version):
-        raise ValueError("stable release version required")
+    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?", version):
+        raise ValueError("stable or rc.N release version required")
     with tempfile.TemporaryDirectory(prefix="http-fetch-docs-") as directory:
         for package in PACKAGES:
             target = Path(directory) / package

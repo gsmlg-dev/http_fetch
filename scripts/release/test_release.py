@@ -216,7 +216,7 @@ class RemotePreflightTests(unittest.TestCase):
         self.assertEqual(events, ["verify", "deps", "verify"])
 
     def test_github_post_write_requires_all_matching_assets(self):
-        with patch.object(github_assets, "existing_release", side_effect=[None, {"assets": []}]), patch.object(
+        with patch.object(github_assets, "existing_release", side_effect=[None, {"assets": [], "prerelease": False}]), patch.object(
             github_assets.subprocess, "run") as commands, patch.dict("os.environ", {"GITHUB_REPOSITORY": "example/repo"}):
             with self.assertRaisesRegex(RuntimeError, "asset missing after completion"):
                 github_assets.run("complete", "1.0.0", self.archives)

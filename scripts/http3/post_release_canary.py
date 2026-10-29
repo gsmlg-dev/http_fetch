@@ -137,8 +137,8 @@ def main():
     parser.add_argument("--detach", action="store_true")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", args.version) or args.issue < 1:
-        parser.error("stable release version and positive tracking issue required")
+    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?", args.version) or args.issue < 1:
+        parser.error("stable or rc.N release version and positive tracking issue required")
     args.output_dir = args.output_dir.resolve()
     def interrupted(*_args):
         raise InterruptedError()

@@ -76,8 +76,8 @@ def main():
     parser.add_argument("archive_dir", type=Path)
     parser.add_argument("--package", choices=PACKAGES)
     args = parser.parse_args()
-    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", args.version):
-        parser.error("stable release version required")
+    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?", args.version):
+        parser.error("stable or rc.N release version required")
     if args.mode == "build":
         build(stage_sources(args.stage_dir), args.version, args.archive_dir,
               (args.package,) if args.package else PACKAGES)
