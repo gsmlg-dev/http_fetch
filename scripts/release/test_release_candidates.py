@@ -22,7 +22,7 @@ import stage
 
 
 ROOT = Path(__file__).resolve().parents[2]
-VERSION = "1.0.0-rc.1"
+VERSION = "1.0.0-rc.0"
 
 
 class ReleaseCandidateTests(unittest.TestCase):
@@ -110,7 +110,7 @@ class ReleaseCandidateTests(unittest.TestCase):
     def test_workflow_accepts_rc_and_rejects_noncanonical_or_injected_versions(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         [validation] = re.findall(r'^\s*(\[\[ "\$RELEASE_VERSION" =~ .* \]\])$', workflow, re.M)
-        for version in ("0.0.0", "1.0.0", VERSION, "1.0.0-rc.12"):
+        for version in ("0.0.0", "1.0.0", VERSION, "1.0.0-rc.1", "1.0.0-rc.12"):
             with self.subTest(version=version):
                 result = subprocess.run(["bash", "-c", validation],
                                         env={**os.environ, "RELEASE_VERSION": version}, timeout=5)

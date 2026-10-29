@@ -449,10 +449,10 @@ WebTransport support. Other injection seams receive no blanket exemption.
 
 ## P7 — Coordinated release and published verification (after P6)
 
-The next coordinated release uses `1.0.0-rc.N`, starting with `1.0.0-rc.1` if
-still available when publication begins. GitHub marks it as a prerelease and
-keeps the existing stable release as latest. All source, candidate and cold
-published-consumer gates remain required. Formal `1.0.0` follows a later
+The next coordinated release is `1.0.0-rc.0`, as selected by the user. Verify
+that exact version is available before publication. GitHub marks it as a
+prerelease and keeps the existing stable release as latest. All source, candidate
+and cold published-consumer gates remain required. Formal `1.0.0` follows a later
 validation period and release decision.
 
 - [ ] Full umbrella regression, formatting and required functional CI pass.

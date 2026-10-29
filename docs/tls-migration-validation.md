@@ -4,25 +4,31 @@
 
 Release tooling at `9840e8e2966885a3af5d4c1f33d7eb7245e4d4f7` accepts canonical
 `major.minor.patch-rc.N` versions alongside stable versions. The next coordinated
-release targets `1.0.0-rc.1`, subject to a fresh availability check. GitHub RCs use
-the prerelease flag and `--latest=false`; formal `1.0.0` follows later validation
-and a release decision.
+release targets the user-selected `1.0.0-rc.0`, subject to a fresh availability
+check. GitHub RCs use the prerelease flag and `--latest=false`; formal `1.0.0`
+follows later validation and a release decision.
 
-An isolated preparation builds all nine `1.0.0-rc.1` archives, verifies their exact
-internal requirements and staged source bytes, and reproduces identical archive
+A fresh isolated preparation builds all nine `1.0.0-rc.0` archives, verifies their
+exact internal requirements and staged source bytes, and reproduces identical archive
 hashes. Nine fresh candidate Hex consumers each resolve the exact RC through
 Hex.SCM, compile with warnings-as-errors and start with the matching application
 version on local Elixir 1.18.5 / OTP 29 (ERTS 17.0.2). No path or umbrella
 overrides are used. These are candidate checks, not a fresh supported-runtime
 matrix, published-consumer results or the final OTP-free release traffic gate.
 
-The release automation suite passes 195 tests, CI automation passes 38 tests,
-and the version helper passes strict compilation and formatting. The unchanged
-published-consumer tests have five macOS `/tmp` versus `/private/tmp` assertion
-failures at the prior source baseline; the full suite passes with an isolated
-canonical temporary directory, without changing those tests or their assertions.
+The RC-specific automation suite passes all 11 tests with `1.0.0-rc.0`, including
+exact dependencies, publication preflight, GitHub prerelease flags and version
+validation. The earlier full release automation suite passed 195 tests, CI
+automation passed 38 tests, and the unchanged version helper passed strict
+compilation and formatting. At that prior source baseline, five unchanged
+published-consumer tests failed macOS `/tmp` versus `/private/tmp` assertions;
+the full suite passed with an isolated canonical temporary directory, without
+changing those tests or their assertions.
 Source, build-cache and lockfile guards remain intact. Receipts and archive hashes
-are retained at `/private/tmp/http-fetch-root-resume-20261029T0530Z`.
+for the new `rc.0` checks are retained at
+`/private/tmp/http-fetch-root-resume-20261029T0820Z`; earlier `rc.1` preparation
+and full automation results remain at
+`/private/tmp/http-fetch-root-resume-20261029T0530Z` as historical evidence.
 
 No RC has been published. P6 release acceptance and P7 publication remain open;
 Credo/Dialyzer and performance retain their existing deferrals.
