@@ -131,7 +131,7 @@ defmodule NoOTP.ReleaseAudit do
     # implementation callbacks are not classified as candidate backend dispatch.
     roots = applications |> Enum.map(& &1.name) |> Enum.uniq() |> Enum.reject(&(&1 in @otp_apps))
     beams = Enum.flat_map(roots, &Path.wildcard("#{release}/lib/#{&1}-*/ebin/*.beam"))
-    context = return_context(release)
+    context = Map.put(return_context(release), :audited_beams, MapSet.new(beams))
     invariants = Keyword.get(options, :parameter_invariants, %{})
     inspections = Enum.map(beams, &inspect_beam(&1, context, invariants))
 
@@ -1091,6 +1091,7 @@ defmodule NoOTP.ReleaseAudit do
         {:raw_abstract_v1, forms} ->
           prepared =
             forms
+            |> prove_internal_pair_calls(context)
             |> prove_return_calls(context)
             |> qualify_named_dispatches(imports)
             |> prove_selector_returns()
@@ -1179,6 +1180,84 @@ defmodule NoOTP.ReleaseAudit do
     do: match?(%{resolved: ^selected, error: nil}, canonical_path(to_string(path)))
 
   defp loaded_selection?(_loaded, _selected), do: false
+
+  # A selected candidate producer can return a literal closure paired with
+  # arbitrary state. Unlike auxiliary collector implementations, its complete
+  # original body and local helpers remain in this same artifact audit. Prove
+  # every normal-return clause; exports/defaults never establish a domain.
+  # This deliberately covers only direct two-component destructuring of a
+  # static remote arity-two producer, not general return/state propagation.
+  defp prove_internal_pair_calls(
+         {:match, line, {:tuple, _, [_, _]} = pattern,
+          {:call, _, {:remote, _, {:atom, _, module}, {:atom, _, function}}, [_, _]} = call},
+         context
+       ) do
+    call = internal_pair_children(call, context)
+
+    expression =
+      case internal_pair_return(module, function, context) do
+        {:ok, value} -> {:audit_return, elem(call, 1), call, value}
+        :unknown -> call
+      end
+
+    {:match, line, prove_internal_pair_calls(pattern, context), expression}
+  end
+
+  defp prove_internal_pair_calls(term, context), do: internal_pair_children(term, context)
+
+  defp internal_pair_children(term, context) when is_tuple(term),
+    do:
+      term
+      |> Tuple.to_list()
+      |> Enum.map(&prove_internal_pair_calls(&1, context))
+      |> List.to_tuple()
+
+  defp internal_pair_children(terms, context) when is_list(terms),
+    do: Enum.map(terms, &prove_internal_pair_calls(&1, context))
+
+  defp internal_pair_children(term, _context), do: term
+
+  defp internal_pair_return(module, function, context) do
+    with {:ok, selected} <- selected_producer(module, context),
+         true <- MapSet.member?(context.audited_beams, selected.path),
+         true <- {function, 2} in selected.exports,
+         true <- map_size(selected.definitions) <= @max_parameter_functions,
+         {:function, _, ^function, 2, clauses} = form <-
+           Map.get(selected.definitions, {function, 2}),
+         true <- clauses != [] and length(clauses) <= @max_finite_targets,
+         true <- :erlang.external_size(form) <= @max_finite_bytes do
+      initial = %{
+        definitions: selected.definitions,
+        edges: MapSet.new(),
+        captures: MapSet.new(),
+        complete: true,
+        nodes: 0,
+        calls: 0
+      }
+
+      syntax = caller_syntax(clauses, {function, 2}, initial)
+
+      proven? =
+        syntax.complete and
+          Enum.all?(clauses, fn clause ->
+            {resolved, _scope, value} = resolve_clause(clause, %{}, false)
+
+            # The second component is deliberately not propagated. Nested
+            # unsafe/unknown calls in the wrapper itself prevent this rule;
+            # local helper bodies still retain their original module scan.
+            match?({:tuple, _, [{:fun, _, {:clauses, []}}, _]}, value) and
+              walk_calls(resolved, "internal-pair-proof") == []
+          end)
+
+      if proven? and selected_producer(module, context) == {:ok, selected} do
+        {:ok, {:tuple, 0, [{:fun, 0, {:clauses, []}}, :unknown]}}
+      else
+        :unknown
+      end
+    else
+      _ -> :unknown
+    end
+  end
 
   # Only a fully literal map argument starts this bounded return slice. Names,
   # source lines, module identities and stored body hashes never grant a proof.

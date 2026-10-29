@@ -3064,4 +3064,308 @@ defmodule NoOTP.ReleaseAuditTest do
     File.write!(path, bytes)
     assert :code.is_loaded(module) == false
   end
+
+  test "T01 selected internal closure pair closes the caller and private forwarding", context do
+    producer = "wrap(_,S) -> F=fun(X) -> {ok,X} end, {F,S}."
+    consumer = "run(P,S) -> {F,_}=t_producer:wrap(P,S), F(a), helper(F). helper(F) -> F(b)."
+    report = t_fixture(context, producer, consumer)
+    assert t_inspection(report, :t_consumer).unresolved_dispatch == []
+    assert t_inspection(report, :t_producer).unresolved_dispatch == []
+  end
+
+  test "T02 every normal-return clause must construct a closure irrespective of input", context do
+    producer = "wrap(a,S) -> {fun(X) -> {one,X} end,S}; wrap(_,S) -> {fun(X) -> {two,X} end,S}."
+    assert t_inspection(t_fixture(context, producer), :t_consumer).unresolved_dispatch == []
+
+    for alternate <- ["{S,S}", "external:produce(S)", "{fun lists:reverse/1,S}", "unknown"] do
+      changed = "wrap(a,S) -> {fun(X) -> X end,S}; wrap(_,S) -> #{alternate}."
+      assert t_inspection(t_fixture(context, changed), :t_consumer).unresolved_dispatch != []
+    end
+  end
+
+  test "T03 returning the caller function is not an internal closure constructor", context do
+    for producer <- [
+          "wrap(F,S) -> {F,S}.",
+          "wrap(F,S) when is_function(F,1) -> {F,S}.",
+          "wrap(F,S) -> G=F, {G,S}."
+        ] do
+      assert t_inspection(t_fixture(context, producer), :t_consumer).unresolved_dispatch != []
+    end
+  end
+
+  test "T04 unknown branch returns cannot be erased by a literal closure alternative", context do
+    producer = "wrap(F,S) -> G=case S of a -> fun(X) -> X end; _ -> F end, {G,S}."
+    assert t_inspection(t_fixture(context, producer), :t_consumer).unresolved_dispatch != []
+  end
+
+  test "T05 unknown companion state never becomes a callable identity", context do
+    producer = "wrap(_,S) -> {fun(X) -> X end,S}."
+    consumer = "run(P,S) -> {F,State}=t_producer:wrap(P,S), F(a), State(a)."
+    result = t_inspection(t_fixture(context, producer, consumer), :t_consumer)
+    assert Enum.map(result.unresolved_dispatch, & &1.kind) == ["unresolved_fun_invocation"]
+  end
+
+  test "T06 literal wrapper local helper keeps its unknown user invocation audited", context do
+    producer = "wrap(F,S) -> {fun(X) -> invoke(F,X) end,S}.\ninvoke(F,X) -> F(X)."
+    report = t_fixture(context, producer)
+    assert t_inspection(report, :t_consumer).unresolved_dispatch == []
+    findings = t_inspection(report, :t_producer).unresolved_dispatch
+    assert Enum.map(findings, &{&1.line, &1.kind}) == [{2, "unresolved_fun_invocation"}]
+    refute NoOTP.ReleaseAudit.clean?(report, %{})
+  end
+
+  test "T07 unsafe nested wrapper bodies cannot acquire the pair proof", context do
+    for body <- ["M=ssl, M:connect(a,1,[])", "F(X)", "fun() -> M=ssl, M:connect(a,1,[]) end"] do
+      producer = "wrap(F,S) -> {fun(X) -> #{body} end,S}."
+      report = t_fixture(context, producer)
+      assert t_inspection(report, :t_consumer).unresolved_dispatch != []
+      assert t_inspection(report, :t_producer).unresolved_dispatch != []
+    end
+  end
+
+  test "T08 producer statements and all argument syntax retain unsafe obligations", context do
+    producer = "wrap(_,S) -> M=ssl, M:connect(a,1,[]), {fun(X) -> X end,S}."
+    report = t_fixture(context, producer)
+    assert t_inspection(report, :t_consumer).unresolved_dispatch != []
+    assert report.unresolved_dispatch != []
+
+    consumer = "run(M,S) -> {F,_}=t_producer:wrap(fun() -> M:unsafe() end,S), F(a)."
+    report = t_fixture(context, "wrap(_,S) -> {fun(X) -> X end,S}.", consumer)
+
+    assert Enum.map(t_inspection(report, :t_consumer).unresolved_dispatch, & &1.kind) ==
+             ["unresolved_module_dispatch"]
+  end
+
+  test "T09 excluded auxiliary producer cannot borrow candidate body coverage", context do
+    report =
+      t_fixture(context, "wrap(_,S) -> {fun(X) -> X end,S}.", t_consumer(), auxiliary: true)
+
+    assert length(report.beam_inspections) == 1
+    assert t_inspection(report, :t_consumer).unresolved_dispatch != []
+  end
+
+  test "T10 missing debug or missing export retains the original caller finding", context do
+    for options <- [[debug: false], [exports: "other/0", extra: " other() -> ok."]] do
+      report = t_fixture(context, "wrap(_,S) -> {fun(X) -> X end,S}.", t_consumer(), options)
+      assert t_inspection(report, :t_consumer).unresolved_dispatch != []
+    end
+  end
+
+  test "T11 a different first selected artifact cannot certify the inspected producer", context do
+    t_fixture(context, "wrap(_,S) -> {fun(X) -> X end,S}.")
+    directory = Path.join(Path.dirname(context.ebin), "pair-shadow")
+    File.mkdir_p!(directory)
+    directory = b_physical(directory)
+
+    File.write!(
+      Path.join(directory, "t_producer.beam"),
+      b_compile(:t_producer, "-export([wrap/2]). wrap(F,S) -> {F,S}.", true)
+    )
+
+    true = :code.add_patha(String.to_charlist(directory))
+    on_exit(fn -> :code.del_path(String.to_charlist(directory)) end)
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :t_consumer).unresolved_dispatch != []
+  end
+
+  test "T12 changed selected producer is rederived rather than accepted by prior hash", context do
+    before = t_fixture(context, "wrap(_,S) -> {fun(X) -> X end,S}.")
+    after_report = t_fixture(context, "wrap(F,S) -> {F,S}.")
+
+    assert t_inspection(before, :t_producer).sha256 !=
+             t_inspection(after_report, :t_producer).sha256
+
+    assert t_inspection(before, :t_consumer).unresolved_dispatch == []
+    assert t_inspection(after_report, :t_consumer).unresolved_dispatch != []
+  end
+
+  test "T13 stale loaded bytes do not establish current selected producer identity", context do
+    t_fixture(context, "wrap(_,S) -> {fun(X) -> X end,S}.")
+    path = Path.join(b_physical(context.ebin), "t_producer.beam")
+
+    assert {:module, :t_producer} =
+             :code.load_binary(:t_producer, String.to_charlist(path), File.read!(path))
+
+    on_exit(fn ->
+      :code.purge(:t_producer)
+      :code.delete(:t_producer)
+      :code.purge(:t_producer)
+    end)
+
+    File.write!(path, b_compile(:t_producer, "-export([wrap/2]). wrap(F,S) -> {F,S}.", true))
+    assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :t_consumer).unresolved_dispatch != []
+  end
+
+  test "T14 function clause byte and unsupported syntax bounds fail closed", context do
+    clauses = Enum.map_join(1..17, ";", fn n -> "wrap(#{n},S) -> {fun(X) -> X end,S}" end) <> "."
+    assert t_inspection(t_fixture(context, clauses), :t_consumer).unresolved_dispatch != []
+    extra = "\n" <> Enum.map_join(1..257, "\n", fn n -> "unused_#{n}() -> ok." end)
+
+    assert t_inspection(
+             t_fixture(context, "wrap(_,S) -> {fun(X) -> X end,S}.", t_consumer(), extra: extra),
+             :t_consumer
+           ).unresolved_dispatch != []
+
+    for kind <- [:bytes, :unsupported] do
+      t_fixture(context, "wrap(_,S) -> {fun(X) -> X end,S}.")
+      path = Path.join(b_physical(context.ebin), "t_producer.beam")
+
+      s_rewrite(path, fn forms ->
+        Enum.map(forms, fn
+          {:function, anno, :wrap, 2, [{:clause, line, args, guards, body}]} ->
+            additions =
+              if kind == :bytes,
+                do: [{:string, 1, List.duplicate(?x, 70_000)}],
+                else: [{:unrecognized_pair_expression, 1, []}]
+
+            {:function, anno, :wrap, 2, [{:clause, line, args, guards, additions ++ body}]}
+
+          other ->
+            other
+        end)
+      end)
+
+      assert t_inspection(NoOTP.ReleaseAudit.artifacts(), :t_consumer).unresolved_dispatch != []
+    end
+  end
+
+  test "T15 no runtime producer or returned callback is executed", context do
+    Process.delete(:pair_producer_executed)
+
+    producer =
+      "wrap(_,S) -> erlang:put(pair_producer_executed,true), {fun(X) -> erlang:put(pair_producer_executed,true),X end,S}."
+
+    assert t_inspection(t_fixture(context, producer), :t_consumer).unresolved_dispatch == []
+    assert Process.get(:pair_producer_executed) == nil
+    assert :code.is_loaded(:t_producer) == false
+  end
+
+  test "T16 full actual VerifyFun and PolicyIO sources resolve only finite wrappers", context do
+    root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
+
+    verify =
+      File.read!(Path.join(root, "apps/ex_ssl/lib/ssl/pkix/verify_fun.ex"))
+      |> String.replace("defmodule SSL.PKIX.VerifyFun do", "defmodule NoOTPActualPairVerify do",
+        global: false
+      )
+
+    policy =
+      File.read!(Path.join(root, "apps/ex_ssl/lib/ssl/policy_io.ex"))
+      |> String.replace("SSL.PolicyIO", "NoOTPActualPairPolicy")
+      |> String.replace("alias SSL.PKIX.VerifyFun", "alias NoOTPActualPairVerify, as: VerifyFun")
+
+    entries = Code.compile_string(verify) ++ Code.compile_string(policy)
+
+    for {module, _} <- entries do
+      :code.purge(module)
+      :code.delete(module)
+
+      on_exit(fn ->
+        :code.purge(module)
+        :code.delete(module)
+      end)
+    end
+
+    report = t_install(context, entries)
+    producer = t_inspection(report, NoOTPActualPairVerify)
+
+    assert Enum.sort(Enum.map(producer.unresolved_dispatch, &{&1.line, &1.kind})) ==
+             [
+               {62, "unresolved_fun_invocation"},
+               {70, "unresolved_fun_invocation"},
+               {71, "unresolved_fun_invocation"},
+               {85, "unresolved_fun_invocation"}
+             ]
+
+    consumer = t_inspection(report, NoOTPActualPairPolicy)
+
+    assert Enum.map(consumer.unresolved_dispatch, &{&1.line, &1.kind}) ==
+             [{434, "unresolved_fun_invocation"}]
+
+    refute NoOTP.ReleaseAudit.clean?(report, %{})
+  end
+
+  test "T17 renamed modules functions and callback aliases carry no exemption", context do
+    producer =
+      b_compile(:t_other, "-export([build/2]). build(_,S) -> A=fun(X) -> X end,B=A,{B,S}.", true)
+
+    consumer =
+      b_compile(
+        :t_consumer,
+        "-export([run/2]). run(P,S) -> {F,_}=t_other:build(P,S), F(a).",
+        true
+      )
+
+    report = t_install(context, [{:t_other, producer}, {:t_consumer, consumer}])
+    assert t_inspection(report, :t_consumer).unresolved_dispatch == []
+  end
+
+  test "T18 unsupported returned shapes and local-return scope remain conservative", context do
+    for producer <- [
+          "wrap(_,S) -> fun(X) -> {X,S} end.",
+          "wrap(_,S) -> {ok,fun(X) -> X end,S}.",
+          "wrap(_,S) -> {factory(),S}. factory() -> fun(X) -> X end."
+        ] do
+      assert t_inspection(t_fixture(context, producer), :t_consumer).unresolved_dispatch != []
+    end
+
+    consumer = "run(P,S) -> Pair=t_producer:wrap(P,S), {F,_}=Pair, F(a)."
+
+    assert t_inspection(
+             t_fixture(context, "wrap(_,S) -> {fun(X) -> X end,S}.", consumer),
+             :t_consumer
+           ).unresolved_dispatch != []
+  end
+
+  defp t_consumer, do: "run(P,S) -> {F,_}=t_producer:wrap(P,S), F(a)."
+
+  defp t_fixture(context, producer, consumer \\ t_consumer(), options \\ []) do
+    producer =
+      b_compile(
+        :t_producer,
+        "-export([" <>
+          Keyword.get(options, :exports, "wrap/2") <>
+          "]). " <>
+          producer <>
+          Keyword.get(options, :extra, ""),
+        Keyword.get(options, :debug, true)
+      )
+
+    consumer = b_compile(:t_consumer, "-export([run/2]). " <> consumer, true)
+
+    if Keyword.get(options, :auxiliary, false) do
+      release = context.ebin |> Path.dirname() |> Path.dirname() |> Path.dirname() |> b_physical()
+      directory = Path.join(release, "lib/elixir-pair/ebin")
+      File.mkdir_p!(directory)
+
+      File.write!(
+        Path.join(directory, "elixir.app"),
+        "{application,elixir,[{vsn,\"pair\"},{applications,[]}]}."
+      )
+
+      File.write!(Path.join(directory, "t_producer.beam"), producer)
+      true = :code.add_patha(String.to_charlist(directory))
+      on_exit(fn -> :code.del_path(String.to_charlist(directory)) end)
+      t_install(context, [{:t_consumer, consumer}])
+    else
+      t_install(context, [{:t_producer, producer}, {:t_consumer, consumer}])
+    end
+  end
+
+  defp t_install(context, entries) do
+    ebin = b_physical(context.ebin)
+    directory = ebin |> Path.dirname() |> Path.dirname() |> Path.dirname()
+    System.put_env("NO_OTP_RELEASE", directory)
+    System.put_env("NO_OTP_PROJECT", directory)
+
+    for {module, bytes} <- entries do
+      File.write!(Path.join(ebin, Atom.to_string(module) <> ".beam"), bytes)
+    end
+
+    true = :code.add_patha(String.to_charlist(ebin))
+    on_exit(fn -> :code.del_path(String.to_charlist(ebin)) end)
+    NoOTP.ReleaseAudit.artifacts()
+  end
+
+  defp t_inspection(report, module),
+    do: Enum.find(report.beam_inspections, &(&1.module == inspect(module)))
 end
