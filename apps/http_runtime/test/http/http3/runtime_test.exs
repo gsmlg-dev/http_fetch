@@ -354,8 +354,15 @@ defmodule HTTP.HTTP3.RuntimeTest do
 
   @tag :integration
   test "raw native Session GOAWAY is returned without transfer or producer demand", ctx do
-    {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    server =
+      start_supervised!(%{
+        id: :goaway_peer,
+        start:
+          {Quic, :listen,
+           [[acceptor: self(), tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]]]]},
+        restart: :temporary
+      })
+
     {_, port} = Quic.local(server)
 
     request = %HTTP.Request{
@@ -364,11 +371,9 @@ defmodule HTTP.HTTP3.RuntimeTest do
     }
 
     {:ok, key, connect} = PoolKey.build(request)
-    {:ok, owner} = ConnectionOwner.start_link(connect)
-    on_exit(fn -> if Process.alive?(owner), do: GenServer.stop(owner) end)
+    owner = start_supervised!({ConnectionOwner, connect}, restart: :temporary)
     assert :ok = ConnectionOwner.await_ready(owner, 2_000)
-    {:ok, pool} = Pool.start_link(max_connections: 1)
-    on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+    pool = start_supervised!({Pool, max_connections: 1}, restart: :temporary)
     assert :ok = Pool.register(pool, key, owner)
     :sys.replace_state(owner, &put_in(&1.session.control.goaway_id, 0))
     request = %{request | method: :post, body: self(), duplex: :half}
