@@ -39,7 +39,7 @@ Production removal is committed at `55d719467f691d857df18323e162afcae338ecd3`.
 It deletes the retired OTP transport and nested adapter, removes production OTP
 selectors and the five unconditional application dependencies, and explicitly
 rejects `tls_backend: :ssl`. The current production sources, app manifests,
-configuration and lockfile remain identical through `90ccdf1`.
+configuration and lockfile remain identical through `7b1688c`.
 
 All-nine [units](https://github.com/gsmlg-dev/http_fetch/actions/runs/40809490861)
 and the configured [E2E workflow](https://github.com/gsmlg-dev/http_fetch/actions/runs/40809490824)
@@ -49,8 +49,8 @@ passes at `a29248a`, including the corrected H3 attach-timeout precondition. The
 are configured Linux results. The earlier macOS blocked-writer observation race
 remains open; no unrestricted macOS integration pass is claimed.
 
-The full manual [CI run](https://github.com/gsmlg-dev/http_fetch/actions/runs/40995936254)
-at `90ccdf1` passes all nine apps' strict compilation, formatting and packaging,
+The full manual [CI run](https://github.com/gsmlg-dev/http_fetch/actions/runs/41017714428)
+at `7b1688c` passes all nine apps' strict compilation, formatting and packaging,
 candidate Hex consumers/TLS smoke, shared H2 consumers and historical TLS
 compatibility, with Credo/Dialyzer explicitly deferred.
 
@@ -59,7 +59,7 @@ OTP SSL imports, application dependencies, boot entries or bundled SSL paths. OT
 unavailable, unloaded and unstarted before and after the scan. Its 175 unresolved
 dynamic calls still reject the release gate, so no traffic scenario executes.
 
-The latest auditor extension proves complete single-hop local wrappers around
+The private-parameter auditor extension proves complete single-hop local wrappers around
 selected remote returns and checks nine private SocketClient transport parameter
 slots. All 310 compiled controls pass within the unchanged 60-second limit,
 alongside 108 tooling checks, strict compilation and formatting. Independent
@@ -84,6 +84,16 @@ Each compiled child now receives a fresh temporary directory. Strict compilation
 formatting and whole/composed fixture equivalence retain their passing evidence
 for unchanged inputs. Receipts are under
 `/private/tmp/http-fetch-root-resume-20261030T0115Z`.
+
+Optional incoming-target diagnostics at `7b1688c` now record a finite immediate
+callee only when its exact original occurrence, complete module inventory,
+selected artifact and annotation-equivalent resolution are checked. The 19
+compiled controls and eight resource controls pass; the unchanged 328-control
+suite also passes within its original 60-second wrapper on Elixir 1.18.5 / OTP 28.
+The held RC0 comparison preserves the complete ordinary report and all raw
+incoming records in default, configured, diagnostic and malformed-request cases.
+This capability classifies no external callbacks and removes no dispatch findings.
+Receipts are under `/private/tmp/http-fetch-root-resume-20261030T0635Z`.
 
 P6 release/traffic acceptance and P7 coordinated publication remain open.
 Credo/Dialyzer remain user-deferred; performance is TODO outside this goal.
