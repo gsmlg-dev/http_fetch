@@ -494,9 +494,213 @@ def validate_private_shapes(preflight, by_beam, by_module, node_identities):
                      expected == observation['site']['path']), 'stale private shape observation path')
 
 
+def validate_private_fields(report):
+    """Auxiliary map facts do not discharge dispatch or classify external code."""
+    proof = report.get('private_field_derivations')
+    if proof is None:
+        return
+    require(isinstance(proof, dict) and type(proof.get('schema')) is int and
+            proof['schema'] == 1 and proof.get('stage') == 'diagnostic_only' and
+            type(proof.get('requests_valid')) is bool and
+            proof.get('external_callable_records', []) == [], 'private field schema malformed')
+    modules = proof.get('modules')
+    require(isinstance(modules, list) and len(modules) <= 64 and
+            (proof['requests_valid'] or not modules), 'private field requests malformed')
+    inspections = report.get('beam_inspections', [])
+    by_module = {item['module']: item for item in inspections}
+    seen = set()
+
+    def owner(value):
+        require(isinstance(value, dict) and isinstance(value.get('function'), str) and
+                value['function'] and type(value.get('arity')) is int and
+                0 <= value['arity'] <= 255, 'private field owner malformed')
+        return value['function'], value['arity']
+
+    def slot(value):
+        name, arity = owner(value)
+        require(type(value.get('parameter_index')) is int and
+                0 <= value['parameter_index'] < arity and
+                isinstance(value.get('field'), str), 'private field slot malformed')
+        return name, arity, value['parameter_index'], value['field']
+
+    def targets(value):
+        require(isinstance(value, list) and 0 < len(value) <= 16 and
+                all(isinstance(item, str) for item in value) and
+                value == sorted(set(value)), 'private field finite targets malformed')
+        return set(value)
+
+    def path(value):
+        require(isinstance(value, list) and 0 < len(value) <= 100_000 and
+                all(type(item) is int and item >= 0 for item in value),
+                'private field occurrence path malformed')
+        return tuple(value)
+
+    def site(value):
+        require(isinstance(value, dict) and type(value.get('line')) is int and
+                value['line'] >= 0, 'private field occurrence malformed')
+        return owner(value.get('owner')), path(value.get('path'))
+
+    for record in modules:
+        require(isinstance(record, dict) and isinstance(record.get('module'), str) and
+                record['module'] not in seen and type(record.get('selected')) is bool and
+                record.get('status') in ('checked', 'unconfirmed') and
+                record.get('external_callable_records', []) == [], 'private field module malformed')
+        seen.add(record['module'])
+        inspection = by_module.get(record['module'])
+        require((inspection is None and record.get('beam') is None and
+                 record.get('sha256') is None) or
+                (inspection is not None and record.get('beam') == inspection.get('beam') and
+                 record.get('sha256') == inspection.get('sha256')),
+                'stale private field artifact')
+        inventory = record.get('inventory')
+        if inventory is None:
+            require(record['status'] == 'unconfirmed' and record['selected'] is False and
+                    all(record.get(key) == [] for key in
+                        ('slots', 'callers', 'constructions', 'conditional_returns')),
+                    'unconfirmed field inventory contains a certificate')
+            continue
+        require(record['selected'] is True and inspection is not None and
+                inspection.get('missing_abstract_code') is False and isinstance(inventory, dict) and
+                type(inventory.get('complete')) is bool, 'private field selection unconfirmed')
+        for key, bound in (('nodes', 100_000), ('calls', 4_096), ('evaluated_nodes', 200_002)):
+            require(type(inventory.get(key)) is int and 0 <= inventory[key] <= bound,
+                    'private field inventory bound malformed')
+        require(not inventory['complete'] or inventory['evaluated_nodes'] <= 200_000,
+                'exhausted field evaluator claimed complete')
+        requested = record.get('slots')
+        require(isinstance(requested, list) and 0 < len(requested) <= 256,
+                'private field slot inventory malformed')
+        domains = {}
+        for item in requested:
+            identity = slot(item)
+            require(identity not in domains, 'duplicate private field slot')
+            domains[identity] = targets(item.get('targets'))
+        candidates = {item[:2] for item in domains}
+        scalars = {}
+        scalar_proof = inspection.get('parameter_invariant_derivation', {})
+        for item in scalar_proof.get('checked_slots', []) if scalar_proof.get('status') == 'checked' else []:
+            scalars[(item['function'], item['arity'], item['parameter_index'])] = set(item['targets'])
+
+        def value(fact, depth=0):
+            require(isinstance(fact, dict) and depth <= 256, 'private field value malformed')
+            kind = fact.get('kind')
+            if kind == 'unknown':
+                require(set(fact) == {'kind'}, 'unknown field value has asserted facts')
+            elif kind == 'atoms':
+                atoms = targets(fact.get('targets'))
+                origins = fact.get('origins')
+                require(isinstance(origins, list) and 0 < len(origins) <= 16,
+                        'private field value lacks origins')
+                unique = set()
+                for origin in origins:
+                    require(isinstance(origin, dict), 'private field origin malformed')
+                    source_kind = origin.get('kind')
+                    if source_kind == 'field_identity':
+                        source = slot(origin.get('source'))
+                        require(source in domains and domains[source] <= atoms,
+                                'unbound private field identity')
+                        identity = source_kind, source
+                    elif source_kind == 'checked_parameter':
+                        source = origin.get('source')
+                        source_owner = owner(source)
+                        require(type(source.get('parameter_index')) is int,
+                                'checked scalar parameter malformed')
+                        source_slot = source_owner + (source['parameter_index'],)
+                        require(source_slot in scalars and scalars[source_slot] <= atoms,
+                                'private field borrowed an unchecked scalar request')
+                        identity = source_kind, source_slot
+                    else:
+                        require(source_kind == 'literal', 'unsupported private field origin')
+                        identity = source_kind, owner(origin.get('owner')), path(origin.get('path'))
+                    require(identity not in unique, 'duplicate private field value origin')
+                    unique.add(identity)
+            elif kind == 'partial_map':
+                fields = fact.get('fields')
+                require(isinstance(fields, list), 'partial map field inventory malformed')
+                names = set()
+                for item in fields:
+                    require(isinstance(item, dict) and isinstance(item.get('field'), str) and
+                            item['field'] not in names and isinstance(item.get('value'), dict) and
+                            item['value'].get('kind') == 'atoms', 'partial map contains non-flat facts')
+                    names.add(item['field'])
+                    value(item['value'], depth + 1)
+            else:
+                require(kind == 'tuple' and isinstance(fact.get('elements'), list),
+                        'unsupported private field abstract value')
+                for item in fact['elements']:
+                    value(item, depth + 1)
+
+        incoming = {identity: [] for identity in domains}
+        callers = record.get('callers')
+        require(isinstance(callers, list) and len(callers) <= 4_096 * 256,
+                'private field incoming inventory malformed')
+        occurrences = set()
+        for call in callers:
+            require(isinstance(call, dict), 'private field caller malformed')
+            target = slot(call.get('target'))
+            require(target in domains, 'unrequested private field target')
+            source_owner, position = site(call.get('site'))
+            occurrence = position, target
+            require(occurrence not in occurrences, 'duplicate private field incoming occurrence')
+            occurrences.add(occurrence)
+            fact = call.get('fact')
+            value(fact)
+            origin = call.get('origin')
+            require(isinstance(origin, dict), 'private field transfer origin malformed')
+            kind = origin.get('kind')
+            if kind == 'unknown':
+                incoming[target].append(None)
+                continue
+            require(fact['kind'] == 'atoms' and targets(fact['targets']) <= domains[target],
+                    'private field transfer violates domain')
+            if kind == 'seed':
+                require(source_owner not in candidates and
+                        targets(origin.get('targets')) == targets(fact['targets']) and
+                        all(item['kind'] in ('literal', 'checked_parameter') for item in fact['origins']),
+                        'recursive replacement or unchecked field seed')
+                incoming[target].append('seed')
+            else:
+                require(kind == 'field_identity', 'unsupported private field transfer')
+                source = slot(origin.get('source'))
+                require(source in domains and source[3] == target[3] and
+                        domains[source] <= domains[target] and
+                        fact['origins'] == [origin] and targets(fact['targets']) == domains[source],
+                        'private field identity transfer mismatch')
+                incoming[target].append(source)
+        constructions = record.get('constructions')
+        require(isinstance(constructions, list) and len(constructions) <= 100_000,
+                'private field construction inventory malformed')
+        for item in constructions:
+            require(isinstance(item, dict), 'private field construction malformed')
+            site(item.get('site'))
+            value(item.get('value'))
+        summaries = record.get('conditional_returns')
+        require(isinstance(summaries, list) and len(summaries) == len(candidates),
+                'private field conditional summaries incomplete')
+        summarized = set()
+        for summary in summaries:
+            key = owner(summary)
+            require(key in candidates and key not in summarized,
+                    'duplicate or unrequested conditional field summary')
+            summarized.add(key)
+            value(summary.get('value'))
+        reached = set()
+        while True:
+            ready = {identity for identity, origins in incoming.items()
+                     if any(source == 'seed' or source in reached for source in origins)} - reached
+            if not ready:
+                break
+            reached.update(ready)
+        checked = (inventory['complete'] and reached == set(domains) and
+                   all(origins and None not in origins for origins in incoming.values()))
+        require(record['status'] == ('checked' if checked else 'unconfirmed'),
+                'private field graph status disagrees with complete seeded origins')
+
+
 def validate_artifacts(report, version):
     require(isinstance(report, dict), 'artifact audit missing')
     validate_callable_preflight(report)
+    validate_private_fields(report)
     for field in ('checked_app_files', 'checked_rel_files', 'checked_boot_files', 'checked_beams'):
         require(type(report.get(field)) is int and report[field] > 0, f'{field}: no artifacts inspected')
     for field in ('ssl_app_dependencies', 'ssl_bundle_paths', 'ssl_boot_entries',

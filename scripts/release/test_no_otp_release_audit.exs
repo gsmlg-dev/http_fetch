@@ -5662,4 +5662,377 @@ defmodule NoOTP.ReleaseAuditTest do
 
     [headers, form_data, request, backend, proxy, dialer]
   end
+
+  test "F01 partial map seeds and recursive field identity never discharge ordinary findings",
+       context do
+    body =
+      "run() -> loop(\#{transport => lists, payload => external:value()}). loop(S) -> M=erlang:map_get(transport,S), M:reverse([]), loop(S)."
+
+    {before, report, record} = f_fixture(context, body)
+    assert record.status == "checked"
+    assert record.inventory.complete
+    assert Map.delete(report, :private_field_derivations) == before
+    assert report.unresolved_dispatch != []
+  end
+
+  test "F02 recursive replacement rejects even an allowed literal while unrelated updates preserve",
+       context do
+    for {update, expected} <- [
+          {"S\#{payload => external:value()}", "checked"},
+          {"S\#{transport => lists}", "unconfirmed"}
+        ] do
+      body = "run() -> loop(\#{transport => lists}). loop(S) -> loop(" <> update <> ")."
+      {_, _, record} = f_fixture(context, body)
+      assert record.status == expected
+    end
+  end
+
+  test "F03 unknown tracked overwrites and dynamic keys drop the field fact", context do
+    for update <- ["S\#{transport => external:value()}", "S\#{external:key() => lists}"] do
+      body = "run() -> S=\#{transport => lists}, loop(" <> update <> "). loop(S) -> loop(S)."
+      {_, _, record} = f_fixture(context, body)
+      assert record.status == "unconfirmed"
+      assert Enum.any?(record.callers, &(&1.origin.kind == "unknown"))
+    end
+  end
+
+  test "F04 unknown bases contribute no inherited facts but explicit literal fields remain known",
+       context do
+    body = "run(X) -> loop(X\#{transport => lists}). loop(S) -> loop(S)."
+    {_, _, record} = f_fixture(context, body, f_entries(), "run/1")
+    assert record.status == "checked"
+    both = f_entries() ++ [{{:loop, 1}, 0, :protocol_module, [:http1]}]
+    {_, _, record} = f_fixture(context, body, both, "run/1")
+    assert record.status == "unconfirmed"
+  end
+
+  test "F05 branch joins retain bounded atom unions guaranteed in every map alternative",
+       context do
+    body =
+      "run(X) -> S=case X of a -> \#{transport => lists}; _ -> \#{transport => maps} end, loop(S). loop(S) -> loop(S)."
+
+    {_, _, record} = f_fixture(context, body, f_entries([:lists, :maps]), "run/1")
+    assert record.status == "checked"
+    seed = Enum.find(record.callers, &(&1.origin.kind == "seed"))
+    assert seed.fact.targets == ["lists", "maps"]
+  end
+
+  test "F06 a missing field or unknown matching branch cannot disappear at a join", context do
+    for alternative <- ["\#{}", "X", "external:value()"] do
+      body =
+        "run(X) -> S=case X of a -> \#{transport => lists}; _ -> " <>
+          alternative <> " end, loop(S). loop(S) -> loop(S)."
+
+      {_, _, record} = f_fixture(context, body, f_entries(), "run/1")
+      assert record.status == "unconfirmed"
+    end
+  end
+
+  test "F07 tuple components and whole map aliases preserve fields despite unknown payloads",
+       context do
+    body =
+      "run(X) -> T={ok,\#{transport => lists},X}, {ok,S,_}=T, Alias=S, loop(Alias). loop(S) -> loop(S)."
+
+    {_, _, record} = f_fixture(context, body, f_entries(), "run/1")
+    assert record.status == "checked"
+  end
+
+  test "F08 a map pattern over an unknown input never supplies a finite field origin", context do
+    body = "run(X) -> \#{transport := M}=X, loop(\#{transport => M}). loop(S) -> loop(S)."
+    {_, _, record} = f_fixture(context, body, f_entries(), "run/1")
+    assert record.status == "unconfirmed"
+
+    body =
+      "run(X) -> case X of \#{transport := lists}=S -> loop(S); _ -> ok end. loop(S) -> loop(S)."
+
+    {_, _, record} = f_fixture(context, body, f_entries(), "run/1")
+    assert record.status == "unconfirmed"
+  end
+
+  test "F09 callback captures preserve known fields but callback parameters shadow them",
+       context do
+    for {callback, expected} <- [
+          {"fun(_) -> loop(S) end", "checked"},
+          {"fun(S) -> loop(S) end", "unconfirmed"}
+        ] do
+      body =
+        "run() -> S=\#{transport => lists}, external:callback(" <>
+          callback <> "). loop(S) -> loop(S)."
+
+      {_, _, record} = f_fixture(context, body)
+      assert record.status == expected
+    end
+  end
+
+  test "F10 messages and reducer accumulators have unknown origins even beside a literal seed",
+       context do
+    for source <- [
+          "receive S -> loop(S) end",
+          "lists:foldl(fun(_,Acc) -> loop(Acc) end, \#{transport => lists}, external:events())",
+          "'Elixir.Enum':reduce_while(external:events(), {continue,\#{transport => lists}}, fun(_, {continue,Acc}) -> loop(Acc) end)"
+        ] do
+      body = "run() -> " <> source <> ". loop(S) -> loop(S)."
+      {_, _, record} = f_fixture(context, body)
+      assert record.status == "unconfirmed"
+    end
+  end
+
+  test "F11 exports captures and extra callers cannot enter a private field certificate",
+       context do
+    for {extra, exports} <- [
+          {"", "run/0,loop/1"},
+          {" other() -> fun loop/1.", "run/0,other/0"},
+          {" other(X) -> loop(X).", "run/0,other/1"}
+        ] do
+      body = "run() -> loop(\#{transport => lists}). loop(S) -> loop(S)." <> extra
+      {_, _, record} = f_fixture(context, body, f_entries(), exports)
+      assert record.status == "unconfirmed"
+    end
+  end
+
+  test "F12 an identity-only cycle has no seed", context do
+    body = "run() -> ok. loop(S) -> next(S). next(S) -> loop(S)."
+    entries = f_entries() ++ [{{:next, 1}, 0, :transport, [:lists]}]
+    {_, _, record} = f_fixture(context, body, entries)
+    assert record.status == "unconfirmed"
+    refute Enum.any?(record.callers, &(&1.origin.kind == "seed"))
+  end
+
+  test "F13 conditional local map return preservation requires the actual input facts", context do
+    body =
+      "run() -> loop(\#{transport => lists}). loop(S) -> loop(disarm(arm(S))). arm(S) -> case external:timeout() of nil -> S; T -> S\#{timer => T} end. disarm(S) -> S\#{timer => nil}."
+
+    entries = f_entries() ++ for name <- [:arm, :disarm], do: {{name, 1}, 0, :transport, [:lists]}
+    {_, _, record} = f_fixture(context, body, entries)
+    assert record.status == "checked"
+
+    for name <- ["arm", "disarm"] do
+      summary = Enum.find(record.conditional_returns, &(&1.function == name))
+      fact = f_json_field(summary.value, "transport")
+
+      assert fact.origins == [
+               %{
+                 kind: "field_identity",
+                 source: %{function: name, arity: 1, parameter_index: 0, field: "transport"}
+               }
+             ]
+    end
+
+    body = String.replace(body, "loop(disarm(arm(S)))", "loop(disarm(arm(external:value())))")
+    {_, _, record} = f_fixture(context, body, entries)
+    assert record.status == "unconfirmed"
+  end
+
+  test "F14 matching two and four tuple passthroughs cannot borrow map or protocol facts",
+       context do
+    for {producer, consumer} <- [
+          {"prepare(S) -> case external:call() of ok -> {ok,S}; Other -> Other end.",
+           "case prepare(\#{transport => lists}) of {ok,S} -> loop(S); _ -> ok end"},
+          {"prepare(_) -> case external:call() of ok -> {ok,lists,x,y}; Other -> Other end.",
+           "case prepare(x) of {ok,M,_,_} -> loop(\#{transport => M}); _ -> ok end"}
+        ] do
+      body = "run() -> " <> consumer <> ". loop(S) -> loop(S). " <> producer
+      {_, _, record} = f_fixture(context, body)
+      assert record.status == "unconfirmed"
+    end
+  end
+
+  test "F15 established literal field access preserves identities while unknown access does not",
+       context do
+    body =
+      "run() -> S=\#{transport => lists}, M=erlang:map_get(transport,S), loop(\#{transport => M}). loop(S) -> M=erlang:map_get(transport,S), loop(\#{transport => M})."
+
+    {_, _, record} = f_fixture(context, body)
+    assert record.status == "checked"
+    body = String.replace(body, "S=\#{transport => lists}", "S=external:value()")
+    {_, _, record} = f_fixture(context, body)
+    assert record.status == "unconfirmed"
+  end
+
+  test "F16 malformed field requests cannot change independently checked scalar proofs",
+       context do
+    body =
+      "run() -> entry(lists). entry(M) -> loop(\#{transport => M}), M:reverse([]). loop(S) -> loop(S)."
+
+    f_fixture(context, body)
+    scalar = %{f_field: [{{:entry, 1}, 0, [:lists]}]}
+    before = NoOTP.ReleaseAudit.artifacts(parameter_invariants: scalar)
+    assert t_inspection(before, :f_field).parameter_invariant_derivation.status == "checked"
+
+    for requests <- [
+          nil,
+          [],
+          %{f_field: [{{:loop, 1}, 0, :transport, []}]},
+          %{f_field: f_entries() ++ f_entries()}
+        ] do
+      result =
+        NoOTP.ReleaseAudit.artifacts(
+          parameter_invariants: scalar,
+          private_field_invariants: requests
+        )
+
+      assert result.private_field_derivations.requests_valid == false
+      assert Map.delete(result, :private_field_derivations) == before
+    end
+
+    result =
+      NoOTP.ReleaseAudit.artifacts(
+        parameter_invariants: scalar,
+        private_field_invariants: %{f_field: f_entries()}
+      )
+
+    assert hd(result.private_field_derivations.modules).status == "checked"
+    assert Map.delete(result, :private_field_derivations) == before
+  end
+
+  test "F17 duplicate definitions and finite domain overflow fail closed", context do
+    body = "run() -> loop(\#{transport => lists}). loop(S) -> loop(S)."
+    f_fixture(context, body)
+    targets = for index <- 1..17, do: String.to_atom("field_bound_#{index}")
+
+    result =
+      NoOTP.ReleaseAudit.artifacts(private_field_invariants: %{f_field: f_entries(targets)})
+
+    assert result.private_field_derivations.requests_valid == false
+    path = Path.join(b_physical(context.ebin), "f_field.beam")
+
+    s_rewrite(path, fn forms ->
+      forms ++ [{:function, 1, :loop, 1, [{:clause, 1, [{:var, 1, :S}], [], [{:var, 1, :S}]}]}]
+    end)
+
+    result = NoOTP.ReleaseAudit.artifacts(private_field_invariants: %{f_field: f_entries()})
+    assert hd(result.private_field_derivations.modules).inventory == nil
+  end
+
+  test "F18 current SocketClient constructor and timer helpers remain conditional diagnostics",
+       context do
+    {before, scalar} = z_actual_source(context, :original)
+    module = NoOTPActualForwardedSocketClient
+
+    entries =
+      for key <- f_state_carriers(),
+          {field, atoms} <- [
+            transport: [HTTP.Transport.TCP, HTTP.Transport.ExSSL, HTTP.Transport.Unix],
+            protocol_module: [HTTP.HTTP1, HTTP.HTTP2]
+          ],
+          do: {key, 0, field, atoms}
+
+    report =
+      NoOTP.ReleaseAudit.artifacts(
+        parameter_invariants: %{module => z_transport_invariants()},
+        private_field_invariants: %{module => entries}
+      )
+
+    assert t_inspection(report, module) == scalar
+    assert length(before.unresolved_dispatch) == 18
+    assert length(scalar.unresolved_dispatch) == 12
+    [record] = report.private_field_derivations.modules
+    assert record.status == "unconfirmed"
+    assert record.inventory.complete
+    assert length(record.slots) == 48
+
+    constructor =
+      Enum.find(record.constructions, fn entry ->
+        entry.site.owner.function == "initialize_legacy_owner" and
+          f_json_field(entry.value, "transport") != nil
+      end)
+
+    assert constructor != nil
+    transport = f_json_field(constructor.value, "transport")
+
+    assert transport.targets ==
+             Enum.sort(
+               Enum.map(
+                 [HTTP.Transport.TCP, HTTP.Transport.ExSSL, HTTP.Transport.Unix],
+                 &to_string/1
+               )
+             )
+
+    assert transport.origins == [
+             %{
+               kind: "checked_parameter",
+               source: %{function: "initialize_legacy_owner", arity: 4, parameter_index: 1}
+             }
+           ]
+
+    assert f_json_field(constructor.value, "protocol_module") == nil
+
+    for name <- ["arm_read_idle", "disarm_read_idle"] do
+      summary = Enum.find(record.conditional_returns, &(&1.function == name))
+
+      assert f_json_field(summary.value, "transport").origins == [
+               %{
+                 kind: "field_identity",
+                 source: %{function: name, arity: 1, parameter_index: 0, field: "transport"}
+               }
+             ]
+    end
+
+    for name <- ["start_prepared_request", "handle_events"] do
+      summary = Enum.find(record.conditional_returns, &(&1.function == name))
+      assert summary.value.kind == "unknown"
+    end
+
+    assert Enum.any?(record.callers, fn call ->
+             call.site.owner.function == "handle_events" and
+               call.target.function == "handle_event" and call.origin.kind == "unknown"
+           end)
+
+    rejected =
+      NoOTP.ReleaseAudit.artifacts(
+        parameter_invariants: %{module => z_transport_invariants()},
+        private_field_invariants: %{module => [{{:missing, 1}, 0, :transport, [:ssl]}]}
+      )
+
+    assert t_inspection(rejected, module) == scalar
+    assert hd(rejected.private_field_derivations.modules).status == "unconfirmed"
+  end
+
+  defp f_entries(atoms \\ [:lists]), do: [{{:loop, 1}, 0, :transport, atoms}]
+
+  defp f_fixture(context, body, entries \\ f_entries(), exports \\ "run/0") do
+    bytes = b_compile(:f_field, "-export([" <> exports <> "]). " <> body, true)
+    before = t_install(context, [{:f_field, bytes}])
+    report = NoOTP.ReleaseAudit.artifacts(private_field_invariants: %{f_field: entries})
+    [record] = report.private_field_derivations.modules
+    {before, report, record}
+  end
+
+  defp f_json_field(%{kind: "partial_map", fields: fields}, field) do
+    case Enum.find(fields, &(&1.field == field)) do
+      nil -> nil
+      entry -> entry.value
+    end
+  end
+
+  defp f_json_field(_, _), do: nil
+
+  defp f_state_carriers do
+    [
+      activate_socket: 1,
+      arm_read_idle: 1,
+      await_failed_write: 3,
+      await_http1_upload_completion: 2,
+      cleanup: 1,
+      close_http1_socket: 1,
+      disarm_read_idle: 1,
+      fail: 2,
+      fail_transport: 2,
+      finish: 1,
+      finish_completed: 1,
+      flush_protocol_write: 3,
+      flush_protocol_writes: 2,
+      handle_closed: 1,
+      handle_data: 2,
+      handle_event: 2,
+      handle_events: 2,
+      handle_http1_headers: 3,
+      owner_loop: 1,
+      rearm: 1,
+      redirect: 2,
+      settle_http1_upload: 1,
+      start_prepared_request: 2,
+      stop_http1_upload: 2
+    ]
+  end
 end

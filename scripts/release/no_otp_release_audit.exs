@@ -170,6 +170,8 @@ defmodule NoOTP.ReleaseAudit do
       missing_abstract_code: Enum.filter(inspections, & &1.missing_abstract_code)
     }
 
+    report = field_preflight(report, context, Keyword.fetch(options, :private_field_invariants))
+
     callable_preflight(
       report,
       beams,
@@ -178,6 +180,789 @@ defmodule NoOTP.ReleaseAudit do
       Keyword.fetch(options, :private_shape_invariants)
     )
   end
+
+  # Auxiliary facts only. No partial map is substituted into executable forms.
+  # Each fact records guaranteed key presence, a finite atom domain and its
+  # origin independently; a matching map pattern is never an origin proof.
+  defp field_preflight(report, _context, :error), do: report
+
+  defp field_preflight(report, context, {:ok, requests}) do
+    valid? =
+      is_map(requests) and map_size(requests) <= 64 and
+        :erlang.external_size(requests) <= @max_finite_bytes and
+        Enum.all?(requests, fn {module, entries} ->
+          is_atom(module) and is_list(entries) and entries != [] and
+            length(entries) <= @max_parameter_functions and
+            Enum.all?(entries, &field_request?/1) and
+            length(Enum.uniq_by(entries, fn {key, index, field, _} -> {key, index, field} end)) ==
+              length(entries)
+        end)
+
+    modules =
+      if valid? do
+        requests
+        |> Enum.sort()
+        |> Enum.map(fn {module, entries} ->
+          inspection = Enum.find(report.beam_inspections, &(&1.module == inspect(module)))
+          field_module(module, entries, inspection, context)
+        end)
+      else
+        []
+      end
+
+    Map.put(report, :private_field_derivations, %{
+      schema: 1,
+      stage: "diagnostic_only",
+      requests_valid: valid?,
+      modules: modules
+    })
+  end
+
+  defp field_request?({{name, arity}, index, field, atoms}) do
+    is_atom(name) and is_integer(arity) and arity in 1..255 and
+      is_integer(index) and index in 0..(arity - 1) and is_atom(field) and
+      is_list(atoms) and atoms != [] and length(atoms) <= @max_finite_targets and
+      Enum.all?(atoms, &is_atom/1) and length(Enum.uniq(atoms)) == length(atoms)
+  end
+
+  defp field_request?(_), do: false
+
+  defp field_module(module, entries, inspection, context) do
+    base = %{
+      module: inspect(module),
+      beam: if(inspection, do: inspection.beam, else: nil),
+      sha256: if(inspection, do: inspection.sha256, else: nil),
+      status: "unconfirmed",
+      selected: false,
+      inventory: nil,
+      slots: [],
+      callers: [],
+      constructions: [],
+      conditional_returns: []
+    }
+
+    with %{missing_abstract_code: false} <- inspection,
+         {:ok, producer} <- selected_producer(module, context),
+         true <- producer.path == inspection.beam,
+         true <- Base.encode16(producer.sha256, case: :lower) == inspection.sha256,
+         {:ok, {^module, chunks}} <-
+           :beam_lib.chunks(String.to_charlist(inspection.beam), [:abstract_code]),
+         {:raw_abstract_v1, forms} <- Keyword.fetch!(chunks, :abstract_code),
+         {:ok, result} <- field_proof(forms, producer.exports, entries, inspection),
+         true <- digest(inspection.beam) == inspection.sha256 do
+      Map.merge(base, Map.put(result, :selected, true))
+    else
+      _ -> base
+    end
+  end
+
+  defp field_proof(forms, exports, entries, inspection) do
+    definitions = Map.new(for {:function, _, name, arity, _} = f <- forms, do: {{name, arity}, f})
+    declared = for {:attribute, _, :export, items} <- forms, item <- items, do: item
+    options = for {:attribute, _, :compile, items} <- forms, item <- List.wrap(items), do: item
+    exported = MapSet.new(exports ++ declared)
+
+    inventory = %{
+      definitions: definitions,
+      edges: MapSet.new(),
+      captures: MapSet.new(),
+      complete: true,
+      nodes: 0,
+      calls: 0
+    }
+
+    inventory =
+      Enum.reduce(definitions, inventory, fn {owner, {:function, _, _, _, clauses}}, acc ->
+        caller_syntax(clauses, owner, acc)
+      end)
+
+    domains = Map.new(entries, fn {key, index, field, atoms} -> {{key, index, field}, atoms} end)
+
+    eligible? =
+      inventory.complete and :export_all not in options and
+        map_size(definitions) == Enum.count(forms, &match?({:function, _, _, _, _}, &1)) and
+        map_size(definitions) <= @max_parameter_functions and
+        Enum.all?(domains, fn {{key, index, _field}, _atoms} ->
+          not MapSet.member?(exported, key) and not MapSet.member?(inventory.captures, key) and
+            field_formals?(Map.get(definitions, key), index)
+        end)
+
+    if eligible? do
+      context = %{
+        domains: domains,
+        scalars: field_checked_scalars(inspection.parameter_invariant_derivation, definitions),
+        summaries: %{},
+        record: false
+      }
+
+      # Conditional summaries start with field identities, not trusted values
+      # from callers. One non-recursive pass is enough for direct preservation;
+      # unknown local/remote returns remain unknown, including with passthrough.
+      {summaries, summary_state} = field_functions(forms, context, field_state())
+      context = %{context | summaries: summaries, record: true}
+      {_returns, state} = field_functions(forms, context, field_state())
+      expected = field_incoming_inventory(forms, domains)
+      actual = MapSet.new(state.callers, fn {slot, _origin, _fact, site} -> {slot, site.path} end)
+
+      complete? =
+        summary_state.complete and state.complete and expected.complete and
+          actual == expected.sites and MapSet.size(actual) == length(state.callers)
+
+      origins =
+        Enum.reduce(state.callers, Map.new(domains, fn {slot, _} -> {slot, []} end), fn
+          {slot, origin, _fact, _site}, acc -> Map.update!(acc, slot, &[origin | &1])
+        end)
+
+      checked? =
+        complete? and
+          Enum.all?(origins, fn {_slot, incoming} ->
+            incoming != [] and Enum.all?(incoming, &(&1 != :unknown))
+          end) and invariant_seeded?(origins, MapSet.new())
+
+      {:ok,
+       %{
+         status: if(checked?, do: "checked", else: "unconfirmed"),
+         inventory: %{
+           complete: complete?,
+           nodes: inventory.nodes,
+           calls: inventory.calls,
+           evaluated_nodes: summary_state.nodes + state.nodes
+         },
+         slots:
+           Enum.map(entries, fn {key, index, field, atoms} ->
+             Map.put(field_slot({key, index, field}), :targets, field_atoms(atoms))
+           end),
+         callers:
+           Enum.reverse(state.callers)
+           |> Enum.map(fn {slot, origin, fact, site} ->
+             %{
+               target: field_slot(slot),
+               origin: field_origin_json(origin),
+               fact: field_value_json(fact),
+               site: site
+             }
+           end),
+         constructions: Enum.reverse(state.constructions),
+         conditional_returns:
+           context.domains
+           |> Enum.map(fn {{key, _, _}, _} -> key end)
+           |> Enum.uniq()
+           |> Enum.sort()
+           |> Enum.map(fn {name, arity} = key ->
+             %{
+               function: to_string(name),
+               arity: arity,
+               value: field_value_json(Map.get(summaries, key, :unknown))
+             }
+           end)
+       }}
+    else
+      :unknown
+    end
+  end
+
+  # Independently match the transfer walk against every raw compiled local
+  # occurrence. Unsupported scopes may lose facts but may never lose callers.
+  defp field_incoming_inventory(forms, domains) do
+    forms
+    |> Enum.with_index()
+    |> Enum.reduce(%{nodes: 0, complete: true, sites: MapSet.new()}, fn
+      {{:function, _, _, _, clauses}, index}, acc ->
+        field_incoming_sites(clauses, [index, 4], domains, acc)
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp field_incoming_sites(_term, _path, _domains, %{complete: false} = state), do: state
+
+  defp field_incoming_sites(term, path, domains, state) do
+    state = %{state | nodes: state.nodes + 1}
+
+    if state.nodes > @max_parameter_nodes do
+      %{state | complete: false}
+    else
+      state =
+        case term do
+          {:call, _, {:atom, _, name}, args} ->
+            key = {name, length(args)}
+
+            sites =
+              Enum.reduce(domains, state.sites, fn
+                {{^key, _, _} = slot, _}, acc -> MapSet.put(acc, {slot, path})
+                _, acc -> acc
+              end)
+
+            %{state | sites: sites}
+
+          _ ->
+            state
+        end
+
+      Enum.reduce(callable_children(term), state, fn {child, index}, acc ->
+        field_incoming_sites(child, path ++ [index], domains, acc)
+      end)
+    end
+  end
+
+  defp field_formals?({:function, _, _, _, clauses}, index) do
+    clauses != [] and
+      Enum.all?(clauses, fn {:clause, _, patterns, _, _} ->
+        case Enum.at(patterns, index) do
+          {:var, _, name} -> name != :_
+          {:match, _, {:var, _, name}, {:map, _, _}} -> name != :_
+          {:match, _, {:map, _, _}, {:var, _, name}} -> name != :_
+          _ -> false
+        end
+      end)
+  end
+
+  defp field_formals?(_, _), do: false
+
+  defp field_checked_scalars(proof, definitions) do
+    for slot <- proof.checked_slots,
+        {key = {name, arity}, _} <- definitions,
+        to_string(name) == slot.function and arity == slot.arity,
+        into: %{} do
+      # The existing scalar proof supplies serialized atoms; no request is
+      # consulted and no new atom is created by this diagnostic pass.
+      atoms = Enum.map(slot.targets, &String.to_existing_atom/1)
+
+      {{key, slot.parameter_index},
+       {:atoms, atoms, [{:checked_parameter, key, slot.parameter_index}]}}
+    end
+  end
+
+  defp field_state, do: %{nodes: 0, complete: true, callers: [], constructions: []}
+
+  defp field_functions(forms, context, state) do
+    forms
+    |> Enum.with_index()
+    |> Enum.reduce({%{}, state}, fn
+      {{:function, _, name, arity, clauses}, index}, {returns, state} ->
+        owner = {name, arity}
+
+        {values, state} =
+          clauses
+          |> Enum.with_index()
+          |> Enum.map_reduce(state, fn {{:clause, _, patterns, guards, body}, ci}, acc ->
+            environment =
+              patterns
+              |> Enum.with_index()
+              |> Enum.reduce(%{}, fn {pattern, parameter}, env ->
+                fields =
+                  for {{^owner, ^parameter, field} = slot, atoms} <- context.domains,
+                      into: %{},
+                      do: {field, {:atoms, atoms, [{:field_identity, slot}]}}
+
+                value =
+                  if map_size(fields) > 0,
+                    do: {:partial_map, fields},
+                    else: Map.get(context.scalars, {owner, parameter}, :unknown)
+
+                {_certainty, env} = field_bind(pattern, value, env)
+                env
+              end)
+
+            path = [index, 4, ci]
+
+            {_guard, _env, acc} =
+              field_expression(guards, environment, owner, path ++ [3], context, acc)
+
+            {value, _env, acc} =
+              field_sequence(body, environment, owner, path ++ [4], context, acc)
+
+            {value, acc}
+          end)
+
+        value = field_join(values)
+        value = if :erlang.external_size(value) <= @max_finite_bytes, do: value, else: :unknown
+        {Map.put(returns, owner, value), state}
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp field_sequence(expressions, environment, owner, path, context, state) do
+    expressions
+    |> Enum.with_index()
+    |> Enum.reduce({:unknown, environment, state}, fn {expression, index}, {_value, env, acc} ->
+      field_expression(expression, env, owner, path ++ [index], context, acc)
+    end)
+  end
+
+  defp field_expression(_term, environment, _owner, _path, _context, %{complete: false} = state),
+    do: {:unknown, environment, state}
+
+  defp field_expression(term, environment, owner, path, context, state) do
+    state = %{state | nodes: state.nodes + 1}
+
+    if state.nodes > @max_parameter_nodes do
+      {:unknown, environment, %{state | complete: false}}
+    else
+      {value, environment, state} = field_value(term, environment, owner, path, context, state)
+      value = if :erlang.external_size(value) <= @max_finite_bytes, do: value, else: :unknown
+      {value, environment, state}
+    end
+  end
+
+  defp field_value({:var, _, name}, env, _owner, _path, _context, state),
+    do: {Map.get(env, name, :unknown), env, state}
+
+  defp field_value({:atom, _, atom}, env, owner, path, _context, state),
+    do: {{:atoms, [atom], [{:literal, owner, path}]}, env, state}
+
+  defp field_value({:tuple, _, terms}, env, owner, path, context, state) do
+    {values, env, state} = field_arguments(terms, env, owner, path ++ [2], context, state)
+    {{:tuple_value, values}, env, state}
+  end
+
+  defp field_value({:map, _, fields}, env, owner, path, context, state),
+    do: field_map(fields, {:partial_map, %{}}, env, owner, path, 2, context, state)
+
+  defp field_value({:map, _, base, fields}, env, owner, path, context, state) do
+    {value, env, state} = field_expression(base, env, owner, path ++ [2], context, state)
+    field_map(fields, value, env, owner, path, 3, context, state)
+  end
+
+  defp field_value({:match, _, pattern, expression}, env, owner, path, context, state) do
+    {value, env, state} = field_expression(expression, env, owner, path ++ [3], context, state)
+    {_certainty, env} = field_bind(pattern, value, env)
+    {value, env, state}
+  end
+
+  defp field_value({:block, _, expressions}, env, owner, path, context, state),
+    do: field_sequence(expressions, env, owner, path ++ [2], context, state)
+
+  defp field_value({:case, _, expression, clauses}, env, owner, path, context, state) do
+    {value, env, state} = field_expression(expression, env, owner, path ++ [2], context, state)
+    field_cases(clauses, value, env, owner, path ++ [3], context, state)
+  end
+
+  defp field_value({:call, _, {:atom, _, name}, args} = term, env, owner, path, context, state) do
+    {values, env, state} = field_arguments(args, env, owner, path ++ [3], context, state)
+    key = {name, length(args)}
+    site = field_site(term, owner, path)
+
+    state =
+      if context.record do
+        Enum.reduce(context.domains, state, fn
+          {{^key, index, field} = slot, atoms}, acc ->
+            fact = field_get(Enum.at(values, index), field)
+            origin = field_incoming(fact, owner, field, atoms, context.domains)
+            %{acc | callers: [{slot, origin, fact, site} | acc.callers]}
+
+          _, acc ->
+            acc
+        end)
+      else
+        state
+      end
+
+    value = field_call_value(key, values, context)
+    {value, env, state}
+  end
+
+  defp field_value(
+         {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :map_get}},
+          [{:atom, _, key}, expression]},
+         env,
+         owner,
+         path,
+         context,
+         state
+       ) do
+    {value, env, state} = field_expression(expression, env, owner, path ++ [3, 1], context, state)
+    {field_get(value, key), env, state}
+  end
+
+  defp field_value({:fun, _, {:clauses, clauses}}, env, owner, path, context, state),
+    do: field_callback(clauses, env, owner, path ++ [2, 1], context, state)
+
+  defp field_value({:named_fun, _, name, clauses}, env, owner, path, context, state),
+    do: field_callback(clauses, Map.delete(env, name), owner, path ++ [3], context, state)
+
+  # Unsupported control flow still contributes every syntactic incoming call.
+  # Its result and newly bound variables are unknown. In particular neither
+  # actor replies nor reducer callback parameters inherit a caller's state.
+  defp field_value(term, env, owner, path, context, state) do
+    scope =
+      if is_tuple(term) and tuple_size(term) > 0 and
+           elem(term, 0) in [:lc, :bc, :mc, :try, :receive],
+         do: %{},
+         else: env
+
+    state =
+      Enum.reduce(callable_children(term), state, fn {child, index}, acc ->
+        {_value, _scope, acc} =
+          field_expression(child, scope, owner, path ++ [index], context, acc)
+
+        acc
+      end)
+
+    {:unknown, env, state}
+  end
+
+  defp field_arguments(terms, env, owner, path, context, state) do
+    {values, {env, state}} =
+      terms
+      |> Enum.with_index()
+      |> Enum.map_reduce({env, state}, fn {term, index}, {scope, acc} ->
+        {value, scope, acc} = field_expression(term, scope, owner, path ++ [index], context, acc)
+        {value, {scope, acc}}
+      end)
+
+    {values, env, state}
+  end
+
+  defp field_map(fields, base, env, owner, path, offset, context, state) do
+    initial =
+      case base do
+        {:partial_map, known} -> known
+        _ -> %{}
+      end
+
+    {known, env, state} =
+      fields
+      |> Enum.with_index()
+      |> Enum.reduce({initial, env, state}, fn
+        {{kind, _, key, expression}, index}, {known, env, state}
+        when kind in [:map_field_assoc, :map_field_exact] ->
+          field_path = path ++ [offset, index]
+
+          {_key, env, state} =
+            field_expression(key, env, owner, field_path ++ [2], context, state)
+
+          {value, env, state} =
+            field_expression(expression, env, owner, field_path ++ [3], context, state)
+
+          known =
+            case {key, value} do
+              {{:atom, _, atom}, {:atoms, _, _}} -> Map.put(known, atom, value)
+              {{:atom, _, atom}, _} -> Map.delete(known, atom)
+              _ -> %{}
+            end
+
+          {known, env, state}
+
+        _, {_known, env, state} ->
+          {%{}, env, %{state | complete: false}}
+      end)
+
+    value = {:partial_map, known}
+    value = if :erlang.external_size(value) <= @max_finite_bytes, do: value, else: :unknown
+    tracked = Enum.map(context.domains, fn {{_, _, field}, _} -> field end)
+
+    observed? =
+      Enum.any?(fields, fn
+        {_, _, {:atom, _, key}, _} -> key in tracked
+        _ -> false
+      end)
+
+    state =
+      if context.record and observed? do
+        site = %{owner: field_owner(owner), path: path, line: field_line(fields)}
+        entry = %{site: site, value: field_value_json(value)}
+        %{state | constructions: [entry | state.constructions]}
+      else
+        state
+      end
+
+    {value, env, state}
+  end
+
+  defp field_cases(clauses, value, env, owner, path, context, state) do
+    {branches, state, _stopped} =
+      clauses
+      |> Enum.with_index()
+      |> Enum.reduce({[], state, false}, fn
+        {{:clause, _, [pattern], guards, body}, index}, {branches, state, stopped} ->
+          {certainty, scope} = field_bind(pattern, value, env)
+          # Even a nonmatching branch remains in the incoming inventory; its
+          # calls are conservatively unknown rather than silently omitted.
+          audit_scope = if stopped or certainty == :no_match, do: %{}, else: scope
+
+          {_guard, _scope, state} =
+            field_expression(guards, audit_scope, owner, path ++ [index, 3], context, state)
+
+          {result, scope, state} =
+            field_sequence(body, audit_scope, owner, path ++ [index, 4], context, state)
+
+          branches =
+            if stopped or certainty == :no_match, do: branches, else: [{result, scope} | branches]
+
+          {branches, state, stopped or (certainty == :certain and guards == [])}
+
+        {_clause, _index}, {branches, state, _} ->
+          {[{:unknown, env} | branches], %{state | complete: false}, false}
+      end)
+
+    values = Enum.map(branches, &elem(&1, 0))
+    scopes = Enum.map(branches, &elem(&1, 1))
+    {field_join(values), field_join_scopes(scopes, env), state}
+  end
+
+  defp field_callback(clauses, env, owner, path, context, state) do
+    state =
+      clauses
+      |> Enum.with_index()
+      |> Enum.reduce(state, fn
+        {{:clause, _, patterns, guards, body}, index}, acc ->
+          scope = Map.drop(env, pattern_variables(patterns))
+
+          {_guard, _env, acc} =
+            field_expression(guards, scope, owner, path ++ [index, 3], context, acc)
+
+          {_value, _env, acc} =
+            field_sequence(body, scope, owner, path ++ [index, 4], context, acc)
+
+          acc
+      end)
+
+    {:unknown, env, state}
+  end
+
+  defp field_bind({:var, _, :_}, _value, env), do: {:certain, env}
+
+  defp field_bind({:var, _, name}, value, env) do
+    case Map.fetch(env, name) do
+      :error -> {:certain, Map.put(env, name, value)}
+      _ -> {:possible, env}
+    end
+  end
+
+  defp field_bind({:match, _, left, right}, value, env) do
+    {a, env} = field_bind(left, value, env)
+    {b, env} = field_bind(right, value, env)
+    {field_certainty([a, b]), env}
+  end
+
+  defp field_bind({:tuple, _, patterns}, {:tuple_value, values}, env)
+       when length(patterns) == length(values),
+       do: field_bind_pairs(Enum.zip(patterns, values), env)
+
+  defp field_bind({:tuple, _, _}, {:tuple_value, _}, env), do: {:no_match, env}
+
+  defp field_bind({:atom, _, expected}, {:atoms, atoms, _}, env) do
+    cond do
+      expected not in atoms -> {:no_match, env}
+      atoms == [expected] -> {:certain, env}
+      true -> {:possible, env}
+    end
+  end
+
+  defp field_bind({:map, _, fields}, {:partial_map, known}, env) do
+    {certainty, env} =
+      Enum.reduce(fields, {[], env}, fn
+        {:map_field_exact, _, {:atom, _, key}, pattern}, {certainties, env} ->
+          present? = Map.has_key?(known, key)
+          {certainty, env} = field_bind(pattern, Map.get(known, key, :unknown), env)
+          certainty = if present?, do: certainty, else: :possible
+          {[certainty | certainties], env}
+
+        field, {certainties, env} ->
+          {[:possible | certainties],
+           Map.merge(env, Map.new(pattern_variables(field), &{&1, :unknown}))}
+      end)
+
+    {field_certainty(certainty), env}
+  end
+
+  defp field_bind(pattern, _value, env),
+    do: {:possible, Enum.reduce(pattern_variables(pattern), env, &Map.put_new(&2, &1, :unknown))}
+
+  defp field_bind_pairs(pairs, env) do
+    {certainties, env} =
+      Enum.map_reduce(pairs, env, fn {pattern, value}, scope ->
+        field_bind(pattern, value, scope)
+      end)
+
+    {field_certainty(certainties), env}
+  end
+
+  defp field_certainty(values) do
+    cond do
+      :no_match in values -> :no_match
+      Enum.all?(values, &(&1 == :certain)) -> :certain
+      true -> :possible
+    end
+  end
+
+  defp field_join([]), do: :unknown
+  defp field_join([value]), do: value
+
+  defp field_join(values) do
+    cond do
+      Enum.all?(values, &match?({:atoms, _, _}, &1)) ->
+        atoms = values |> Enum.flat_map(&elem(&1, 1)) |> Enum.uniq() |> Enum.sort()
+        origins = values |> Enum.flat_map(&elem(&1, 2)) |> Enum.uniq() |> Enum.sort()
+
+        if length(atoms) <= @max_finite_targets and length(origins) <= @max_finite_targets,
+          do: {:atoms, atoms, origins},
+          else: :unknown
+
+      Enum.all?(values, &match?({:partial_map, _}, &1)) ->
+        maps = Enum.map(values, &elem(&1, 1))
+
+        fields =
+          hd(maps)
+          |> Map.keys()
+          |> Enum.filter(fn key -> Enum.all?(maps, &Map.has_key?(&1, key)) end)
+
+        known =
+          Enum.reduce(fields, %{}, fn key, acc ->
+            case field_join(Enum.map(maps, &Map.fetch!(&1, key))) do
+              {:atoms, _, _} = fact -> Map.put(acc, key, fact)
+              _ -> acc
+            end
+          end)
+
+        {:partial_map, known}
+
+      Enum.all?(values, &match?({:tuple_value, _}, &1)) and
+          length(Enum.uniq(Enum.map(values, &length(elem(&1, 1))))) == 1 ->
+        fields =
+          values
+          |> Enum.map(&elem(&1, 1))
+          |> Enum.zip()
+          |> Enum.map(&(Tuple.to_list(&1) |> field_join()))
+
+        {:tuple_value, fields}
+
+      true ->
+        :unknown
+    end
+  end
+
+  defp field_join_scopes([], fallback), do: fallback
+
+  defp field_join_scopes([first | rest] = scopes, _fallback) do
+    for key <- Map.keys(first),
+        Enum.all?(rest, &Map.has_key?(&1, key)),
+        into: %{},
+        do: {key, field_join(Enum.map(scopes, &Map.fetch!(&1, key)))}
+  end
+
+  defp field_get({:partial_map, fields}, key), do: Map.get(fields, key, :unknown)
+  defp field_get(_, _), do: :unknown
+
+  defp field_incoming({:atoms, values, origins}, owner, field, allowed, domains) do
+    inside? = Enum.any?(domains, fn {{key, _, _}, _} -> key == owner end)
+    subset? = Enum.all?(values, &(&1 in allowed))
+
+    case origins do
+      [{:field_identity, {_, _, ^field} = source}] when subset? ->
+        if Map.has_key?(domains, source), do: {:identity, source}, else: :unknown
+
+      [_ | _] when subset? and not inside? ->
+        if Enum.all?(origins, fn origin -> elem(origin, 0) in [:literal, :checked_parameter] end),
+          do: {:seeds, values},
+          else: :unknown
+
+      _ ->
+        :unknown
+    end
+  end
+
+  defp field_incoming(_, _, _, _, _), do: :unknown
+
+  defp field_call_value(key, args, context) do
+    applicable? =
+      Enum.all?(context.domains, fn
+        {{^key, index, field}, allowed} ->
+          case field_get(Enum.at(args, index), field) do
+            {:atoms, values, _} -> Enum.all?(values, &(&1 in allowed))
+            _ -> false
+          end
+
+        _ ->
+          true
+      end)
+
+    if applicable?,
+      do: field_substitute(Map.get(context.summaries, key, :unknown), key, args),
+      else: :unknown
+  end
+
+  defp field_substitute({:atoms, _, [{:field_identity, {key, index, field}}]}, key, args),
+    do: field_get(Enum.at(args, index), field)
+
+  defp field_substitute({:atoms, _, origins} = value, _key, _args) do
+    if Enum.any?(origins, &match?({:field_identity, _}, &1)), do: :unknown, else: value
+  end
+
+  defp field_substitute({:partial_map, fields}, key, args) do
+    known =
+      Enum.reduce(fields, %{}, fn {field, value}, acc ->
+        case field_substitute(value, key, args) do
+          {:atoms, _, _} = fact -> Map.put(acc, field, fact)
+          _ -> acc
+        end
+      end)
+
+    {:partial_map, known}
+  end
+
+  defp field_substitute({:tuple_value, values}, key, args),
+    do: {:tuple_value, Enum.map(values, &field_substitute(&1, key, args))}
+
+  defp field_substitute(_, _, _), do: :unknown
+
+  defp field_atoms(atoms), do: atoms |> Enum.map(&to_string/1) |> Enum.sort()
+  defp field_owner({name, arity}), do: %{function: to_string(name), arity: arity}
+
+  defp field_slot({key, index, field}),
+    do: Map.merge(field_owner(key), %{parameter_index: index, field: to_string(field)})
+
+  defp field_site(term, owner, path),
+    do: %{owner: field_owner(owner), path: path, line: field_annotation_line(elem(term, 1))}
+
+  defp field_line([field | _]), do: field_annotation_line(elem(field, 1))
+  defp field_line([]), do: 0
+
+  defp field_annotation_line(annotation),
+    do: if(callable_annotation?(annotation), do: :erl_anno.line(annotation), else: 0)
+
+  defp field_origin_json(:unknown), do: %{kind: "unknown"}
+  defp field_origin_json({:seeds, atoms}), do: %{kind: "seed", targets: field_atoms(atoms)}
+
+  defp field_origin_json({:identity, slot}),
+    do: %{kind: "field_identity", source: field_slot(slot)}
+
+  defp field_origin_json({:field_identity, slot}),
+    do: %{kind: "field_identity", source: field_slot(slot)}
+
+  defp field_origin_json({:checked_parameter, key, index}),
+    do: %{kind: "checked_parameter", source: Map.put(field_owner(key), :parameter_index, index)}
+
+  defp field_origin_json({:literal, owner, path}),
+    do: %{kind: "literal", owner: field_owner(owner), path: path}
+
+  defp field_value_json(:unknown), do: %{kind: "unknown"}
+
+  defp field_value_json({:atoms, atoms, origins}),
+    do: %{
+      kind: "atoms",
+      targets: field_atoms(atoms),
+      origins: Enum.map(origins, &field_origin_json/1)
+    }
+
+  defp field_value_json({:partial_map, fields}) do
+    %{
+      kind: "partial_map",
+      fields:
+        fields
+        |> Enum.sort()
+        |> Enum.map(fn {field, value} ->
+          %{field: to_string(field), value: field_value_json(value)}
+        end)
+    }
+  end
+
+  defp field_value_json({:tuple_value, values}),
+    do: %{kind: "tuple", elements: Enum.map(values, &field_value_json/1)}
 
   # This prerequisite inventories actual compiled incoming edges. It does not
   # certify argument origin or move any dispatch out of unresolved_dispatch.

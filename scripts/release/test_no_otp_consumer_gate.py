@@ -809,5 +809,151 @@ class PrivateShapeTests(unittest.TestCase):
         gate.validate_callable_preflight(report)
 
 
+class PrivateFieldTests(unittest.TestCase):
+    @staticmethod
+    def report():
+        report = CallablePreflightTests.report()
+        inspection = report['beam_inspections'][0]
+        inspection['parameter_invariant_derivation'] = dict(status='not_requested', checked_slots=[])
+        slot = dict(function='loop', arity=1, parameter_index=0, field='transport')
+        origin = dict(kind='field_identity', source=slot)
+        literal = dict(kind='literal', owner=dict(function='run', arity=0), path=[2, 4, 0, 4, 0, 3, 0])
+        seed_fact = dict(kind='atoms', targets=['lists'], origins=[literal])
+        identity_fact = dict(kind='atoms', targets=['lists'], origins=[origin])
+        seed_site = dict(owner=dict(function='run', arity=0), path=[2, 4, 0, 4, 0], line=1)
+        back_site = dict(owner=dict(function='loop', arity=1), path=[3, 4, 0, 4, 0], line=2)
+        record = dict(module=inspection['module'], beam=inspection['beam'], sha256=inspection['sha256'],
+                      selected=True, status='checked',
+                      inventory=dict(complete=True, nodes=20, calls=2, evaluated_nodes=40),
+                      slots=[dict(slot, targets=['lists'])],
+                      callers=[dict(target=slot, origin=dict(kind='seed', targets=['lists']),
+                                    fact=seed_fact, site=seed_site),
+                               dict(target=slot, origin=origin, fact=identity_fact, site=back_site)],
+                      constructions=[dict(site=seed_site, value=dict(kind='partial_map', fields=[
+                          dict(field='transport', value=seed_fact)]))],
+                      conditional_returns=[dict(function='loop', arity=1, value=dict(kind='unknown'))])
+        report['private_field_derivations'] = dict(schema=1, stage='diagnostic_only',
+                                                 requests_valid=True, modules=[record])
+        return json.loads(json.dumps(report))
+
+    @staticmethod
+    def record(report):
+        return report['private_field_derivations']['modules'][0]
+
+    def test_checked_field_graph_is_diagnostic_only(self):
+        report = self.report()
+        gate.validate_artifacts(report, '1.2.3')
+        report['unresolved_dispatch'] = [dict(kind='unresolved_module_dispatch')]
+        with self.assertRaises(gate.GateError):
+            gate.validate_artifacts(report, '1.2.3')
+
+    def test_unknown_origin_requires_unconfirmed_graph(self):
+        report = self.report()
+        record = self.record(report)
+        record['callers'][0].update(origin=dict(kind='unknown'), fact=dict(kind='unknown'))
+        with self.assertRaises(gate.GateError):
+            gate.validate_private_fields(report)
+        record['status'] = 'unconfirmed'
+        gate.validate_private_fields(report)
+
+    def test_recursive_allowed_literal_is_not_an_identity(self):
+        report = self.report()
+        record = self.record(report)
+        seed = record['callers'][0]
+        record['callers'][1].update(origin=seed['origin'], fact=seed['fact'])
+        with self.assertRaises(gate.GateError):
+            gate.validate_private_fields(report)
+
+    def test_identity_cycle_without_seed_cannot_claim_checked(self):
+        report = self.report()
+        record = self.record(report)
+        record['callers'] = record['callers'][1:]
+        with self.assertRaises(gate.GateError):
+            gate.validate_private_fields(report)
+        record['status'] = 'unconfirmed'
+        gate.validate_private_fields(report)
+
+    def test_field_evidence_cannot_borrow_requested_but_unchecked_scalar(self):
+        report = self.report()
+        record = self.record(report)
+        source = dict(function='init', arity=1, parameter_index=0)
+        record['callers'][0]['fact']['origins'] = [dict(kind='checked_parameter', source=source)]
+        with self.assertRaises(gate.GateError):
+            gate.validate_private_fields(report)
+        report['beam_inspections'][0]['parameter_invariant_derivation'] = dict(
+            status='checked', checked_slots=[dict(source, targets=['lists'])])
+        gate.validate_private_fields(report)
+
+    def test_stale_artifact_missing_selection_and_nonflat_values_are_rejected(self):
+        mutations = [lambda r: r.update(sha256='b' * 64),
+                     lambda r: r.update(selected=False),
+                     lambda r: r['constructions'][0]['value']['fields'][0].update(
+                         value=dict(kind='tuple', elements=[])),
+                     lambda r: r['callers'][0]['fact'].update(targets=['ssl'])]
+        for mutate in mutations:
+            report = self.report()
+            mutate(self.record(report))
+            with self.subTest(mutation=mutate), self.assertRaises(gate.GateError):
+                gate.validate_private_fields(report)
+
+    def test_duplicate_slots_call_sites_and_modules_are_rejected(self):
+        mutations = [lambda p: p['modules'].append(p['modules'][0]),
+                     lambda p: p['modules'][0]['slots'].append(p['modules'][0]['slots'][0]),
+                     lambda p: p['modules'][0]['callers'].append(p['modules'][0]['callers'][0])]
+        for mutate in mutations:
+            report = self.report()
+            mutate(report['private_field_derivations'])
+            with self.assertRaises(gate.GateError):
+                gate.validate_private_fields(report)
+
+    def test_rejected_requests_and_ineligible_modules_carry_no_certificate(self):
+        report = self.report()
+        proof = report['private_field_derivations']
+        proof['requests_valid'] = False
+        with self.assertRaises(gate.GateError):
+            gate.validate_private_fields(report)
+        proof['modules'] = []
+        gate.validate_private_fields(report)
+        report = self.report()
+        record = self.record(report)
+        record.update(status='unconfirmed', selected=False, inventory=None,
+                      slots=[], callers=[], constructions=[], conditional_returns=[])
+        gate.validate_private_fields(report)
+        record['status'] = 'checked'
+        with self.assertRaises(gate.GateError):
+            gate.validate_private_fields(report)
+
+    def test_exhausted_field_inventory_never_claims_complete(self):
+        report = self.report()
+        record = self.record(report)
+        record['inventory']['evaluated_nodes'] = 200_001
+        with self.assertRaises(gate.GateError):
+            gate.validate_private_fields(report)
+        record.update(status='unconfirmed')
+        record['inventory']['complete'] = False
+        gate.validate_private_fields(report)
+
+    def test_unknown_value_cannot_hide_an_asserted_finite_fact(self):
+        report = self.report()
+        self.record(report)['conditional_returns'][0]['value']['targets'] = ['lists']
+        with self.assertRaises(gate.GateError):
+            gate.validate_private_fields(report)
+
+    def test_extra_field_namespace_cannot_classify_external_code(self):
+        for where in ('proof', 'module'):
+            report = self.report()
+            target = report['private_field_derivations'] if where == 'proof' else self.record(report)
+            target['external_callable_records'] = [dict(status='checked')]
+            with self.assertRaises(gate.GateError):
+                gate.validate_private_fields(report)
+
+    def test_origin_identity_cannot_change_field_or_allowed_domain(self):
+        report = self.report()
+        record = self.record(report)
+        record['callers'][1]['origin']['source']['field'] = 'protocol_module'
+        with self.assertRaises(gate.GateError):
+            gate.validate_private_fields(report)
+
+
 if __name__ == "__main__":
     unittest.main()

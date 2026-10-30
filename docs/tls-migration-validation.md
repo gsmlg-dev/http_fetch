@@ -71,6 +71,16 @@ comparison does not establish a fresh candidate release or traffic result.
 Receipts are retained under
 `/private/tmp/http-fetch-root-resume-20261029T0820Z/audit30-acceptance`.
 
+An additive field diagnostic records 48 requested SocketClient field origins and
+keeps protocol replies, streaming returns and reducer inputs unconfirmed. It
+removes no dispatch findings; the immutable comparison retains 175 configured and
+184 default findings. All 328 compiled controls pass in 57.5 seconds under the
+unchanged 60-second wrapper on Elixir 1.18.5 / OTP 29, with 125 tooling/resource checks.
+Each compiled child now receives a fresh temporary directory. Strict compilation,
+formatting and whole/composed fixture equivalence retain their passing evidence
+for unchanged inputs. Receipts are under
+`/private/tmp/http-fetch-root-resume-20261030T0115Z`.
+
 P6 release/traffic acceptance and P7 coordinated publication remain open.
 Credo/Dialyzer remain user-deferred; performance is TODO outside this goal.
 

@@ -62,13 +62,71 @@ defmodule NoOTP.Consumer do
        [{{:deliver, 3}, 2, {:notify, 3}, 2, :discover}]}
     ]
 
+    # Flat field diagnostics are conditional facts only. The graph stays
+    # unconfirmed until protocol replies, streaming returns and reducer inputs
+    # have separately checked origins; these requests remove no findings.
+    private_field_invariants = %{
+      HTTP.SocketClient => [
+        {{:activate_socket, 1}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:activate_socket, 1}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:arm_read_idle, 1}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:arm_read_idle, 1}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:await_failed_write, 3}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:await_failed_write, 3}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:await_http1_upload_completion, 2}, 0, :transport,
+         transport_targets ++ [HTTP.Transport.Unix]},
+        {{:await_http1_upload_completion, 2}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:cleanup, 1}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:cleanup, 1}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:close_http1_socket, 1}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:close_http1_socket, 1}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:disarm_read_idle, 1}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:disarm_read_idle, 1}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:fail, 2}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:fail, 2}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:fail_transport, 2}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:fail_transport, 2}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:finish, 1}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:finish, 1}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:finish_completed, 1}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:finish_completed, 1}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:flush_protocol_write, 3}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:flush_protocol_write, 3}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:flush_protocol_writes, 2}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:flush_protocol_writes, 2}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:handle_closed, 1}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:handle_closed, 1}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:handle_data, 2}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:handle_data, 2}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:handle_event, 2}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:handle_event, 2}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:handle_events, 2}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:handle_events, 2}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:handle_http1_headers, 3}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:handle_http1_headers, 3}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:owner_loop, 1}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:owner_loop, 1}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:rearm, 1}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:rearm, 1}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:redirect, 2}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:redirect, 2}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:settle_http1_upload, 1}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:settle_http1_upload, 1}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:start_prepared_request, 2}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:start_prepared_request, 2}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]},
+        {{:stop_http1_upload, 2}, 0, :transport, transport_targets ++ [HTTP.Transport.Unix]},
+        {{:stop_http1_upload, 2}, 0, :protocol_module, [HTTP.HTTP1, HTTP.HTTP2]}
+      ]
+    }
+
     report = %{
       nonce: config["nonce"],
       artifacts:
         NoOTP.ReleaseAudit.artifacts(
           parameter_invariants: parameter_invariants,
           public_callable_roots: public_callable_roots,
-          private_shape_invariants: private_shape_invariants
+          private_shape_invariants: private_shape_invariants,
+          private_field_invariants: private_field_invariants
         ),
       before: NoOTP.ReleaseAudit.runtime(),
       initial_code_paths: initial_paths,
