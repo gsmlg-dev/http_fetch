@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock, call, patch
 
 HERE = Path(__file__).resolve().parent
-EXPECTED_TESTS = 19
+EXPECTED_TESTS = 31
 
 
 def run_compiled_controls():
@@ -62,7 +62,7 @@ class IncomingTargetWrapperResourceTests(unittest.TestCase):
         self.addCleanup(temp_patch.stop)
         self.roots = []
 
-    def invoke(self, output="19 tests, 0 failures\n", returncode=0, outcomes=None, spawn_error=None):
+    def invoke(self, output="31 tests, 0 failures\n", returncode=0, outcomes=None, spawn_error=None):
         child = Mock(pid=712346, returncode=returncode)
         captured = {}
         responses = iter(outcomes) if outcomes is not None else None
@@ -110,7 +110,7 @@ class IncomingTargetWrapperResourceTests(unittest.TestCase):
         return child, killpg, error
 
     def test_success_isolated_roots_and_ansi_summary(self):
-        for output in ["19 tests, 0 failures\n", "\x1b[32m19 tests, 0 failures\x1b[0m\n"]:
+        for output in ["31 tests, 0 failures\n", "\x1b[32m31 tests, 0 failures\x1b[0m\n"]:
             child, signals, error = self.invoke(output=output)
             self.assertIsNone(error)
             self.assertEqual(child.communicate.call_args_list, [call(timeout=60)])
@@ -123,14 +123,14 @@ class IncomingTargetWrapperResourceTests(unittest.TestCase):
         signals.assert_not_called()
 
     def test_partial_duplicate_and_wrong_summaries_are_rejected(self):
-        for output in ["18 tests, 0 failures\n", "19 tests, 1 failures\n", "119 tests, 0 failures\n",
-                       "19 tests, 0 failures\n19 tests, 0 failures\n", ""]:
+        for output in ["30 tests, 0 failures\n", "31 tests, 1 failures\n", "131 tests, 0 failures\n",
+                       "31 tests, 0 failures\n31 tests, 0 failures\n", ""]:
             _, _, error = self.invoke(output=output)
             self.assertIsInstance(error, AssertionError)
 
     def test_excluded_or_skipped_controls_are_rejected(self):
         for suffix in ["1 excluded", "1 skipped"]:
-            _, _, error = self.invoke(output="19 tests, 0 failures, " + suffix)
+            _, _, error = self.invoke(output="31 tests, 0 failures, " + suffix)
             self.assertIsInstance(error, AssertionError)
 
     def test_term_timeout_reaps_before_removing_root(self):
@@ -157,7 +157,7 @@ class IncomingTargetWrapperResourceTests(unittest.TestCase):
         signals.assert_not_called()
 
     def test_zero_skip_and_exclusion_counts_do_not_hide_selected_controls(self):
-        _, _, error = self.invoke(output="19 tests, 0 failures, 0 excluded, 0 skipped\n")
+        _, _, error = self.invoke(output="31 tests, 0 failures, 0 excluded, 0 skipped\n")
         self.assertIsNone(error)
 
 

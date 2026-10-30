@@ -1264,7 +1264,7 @@ defmodule NoOTP.ReleaseAudit do
                   }
 
                 :unknown ->
-                  nil
+                  incoming_anonymous_evidence(term, entry, markers, snapshot)
               end
 
             _ ->
@@ -1590,6 +1590,61 @@ defmodule NoOTP.ReleaseAudit do
        do: {m, f, a}
 
   defp incoming_fun_target(_, _), do: :unknown
+
+  # Only the immediate callee is classified. The lexical pipeline retains every
+  # original closure body, and anonymous identity is never a named MFA or a
+  # statement about the callback's effects. Mixed or incomplete domains fail closed.
+  defp incoming_anonymous_evidence(term, entry, markers, snapshot) do
+    with {:call, _, _, arguments} when is_list(arguments) <- term,
+         true <- length(arguments) <= 255,
+         {:ok, candidates} <- call_candidates(term),
+         true <- candidates != [] and length(candidates) <= @max_finite_targets,
+         true <- Enum.all?(candidates, &incoming_anonymous_call?/1) do
+      %{
+        targets: [],
+        anonymous_invocation: %{
+          kind: "anonymous_closure",
+          invocation_arity: length(arguments),
+          alternative_count: length(candidates)
+        },
+        source_sha256: snapshot.sha256,
+        original_node_sha256: incoming_term_digest(entry.original),
+        resolved_node_sha256: incoming_term_digest(incoming_restore(term, markers)),
+        method: "existing_finite_pipeline",
+        exact_occurrence: true,
+        annotation_equivalence: true,
+        parameter_invariants: false
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp incoming_anonymous_call?({:call, _, {:audit_fun_value, _, value}, _arguments}),
+    do: incoming_anonymous_value?(value)
+
+  defp incoming_anonymous_call?({:call, _, callee, _arguments}),
+    do: incoming_anonymous_value?(callee)
+
+  defp incoming_anonymous_call?(_term), do: false
+
+  # Resolved lexical identities deliberately use empty clauses; call-site arity
+  # is evidence about the invocation only, not the closure's accepted arity.
+  defp incoming_anonymous_value?({:fun, _, {:clauses, clauses}}) when is_list(clauses), do: true
+
+  defp incoming_anonymous_value?({:named_fun, _, name, clauses})
+       when is_atom(name) and is_list(clauses),
+       do: true
+
+  defp incoming_anonymous_value?(_term), do: false
+
+  defp incoming_target_record(site, _root, %{anonymous_invocation: _} = proof),
+    do: %{
+      site: site,
+      status: "checked_anonymous_incompatible",
+      targets: [],
+      derivation: Map.delete(proof, :targets)
+    }
 
   defp incoming_target_record(site, root, %{targets: targets} = proof) do
     meta? =

@@ -341,6 +341,331 @@ defmodule NoOTP.IncomingTargetTest do
              ])
   end
 
+  test "I20 anonymous aliases retain duplicate invocation identities without named targets",
+       context do
+    install(
+      context,
+      :incoming_case,
+      "-export([run/1]). run(X) -> Captured=X, F=fun(Y) -> {Captured,Y} end, G=F, G(X), G(X)."
+    )
+
+    before = audit(context, false)
+    after_report = audit(context)
+    [first, second] = records(after_report, :incoming_case, "run")
+    anonymous_record(first, 1)
+    anonymous_record(second, 1)
+    refute first.site.path == second.site.path
+    refute first.site.ordinal == second.site.ordinal
+    assert ordinary(after_report) == before
+    [root] = after_report.callable_provenance_preflight.roots
+    [derived] = after_report.callable_provenance_preflight.target_derivations.roots
+    assert Enum.map(derived.records, & &1.site) == root.incoming
+  end
+
+  test "I21 actual Elixir with else closure invocations gain only anonymous evidence", context do
+    install_elixir(context, """
+    defmodule NoOTPIncomingAnonymousFixture do
+      def run(value) do
+        with {:ok, first} <- step(value),
+             true <- is_integer(first),
+             {:ok, second} <- step(first) do
+          {:ok, second}
+        else
+          false -> :not_integer
+          other -> other
+        end
+      end
+      defp step(value), do: {:ok, value}
+    end
+    """)
+
+    before = audit(context, false)
+    report = audit(context)
+    found = records(report, NoOTPIncomingAnonymousFixture, "run")
+    assert length(found) >= 2
+    Enum.each(found, &anonymous_record(&1, 1))
+    assert ordinary(report) == before
+    assert report.callable_provenance_preflight.external_callable_records == []
+    refute :code.is_loaded(NoOTPIncomingAnonymousFixture)
+  end
+
+  test "I22 a complete finite union of anonymous closures is incompatible with named roots",
+       context do
+    install(
+      context,
+      :incoming_case,
+      "-export([run/2]). run(Tag,X) -> F=case Tag of a -> fun(Y) -> {a,Y} end; _ -> fun(Y) -> {b,Y} end end, F(X)."
+    )
+
+    [record] = records(audit(context), :incoming_case, "run")
+    anonymous_record(record, 1)
+  end
+
+  test "I23 unknown and named alternatives never borrow anonymous evidence", context do
+    install(
+      context,
+      :incoming_case,
+      "-export([unknown/2,mixed/2,data/1,named/0,direct/2]). unknown(F,X) -> G=case X of a -> fun(Y) -> Y end; _ -> F end, G(X). mixed(Tag,X) -> F=case Tag of a -> fun(A,B) -> {A,B} end; _ -> fun incoming_root:entry/2 end, F(X,X). data(X) -> F=entry, F(X). named() -> fun incoming_root:entry/2. direct(A,B) -> incoming_root:entry(A,B)."
+    )
+
+    before = audit(context, false)
+    report = audit(context)
+
+    for owner <- ["unknown", "data"] do
+      [record] = records(report, :incoming_case, owner)
+      assert record.status == "unknown"
+    end
+
+    # The mixed capture is copied into the invocation's finite domain. Its
+    # marker is no longer unique, so it remains an obligation, not a proof.
+    mixed = records(report, :incoming_case, "mixed")
+    assert length(mixed) == 2
+    [capture] = Enum.filter(mixed, &(&1.site.kind == "capture"))
+
+    [invocation] =
+      Enum.filter(mixed, &(&1.site.kind == "callable_or_metadispatch_requires_proof"))
+
+    assert capture.status == "unknown" and capture.derivation == nil
+    assert invocation.status == "unknown" and invocation.derivation == nil
+    assert capture.targets == [] and invocation.targets == []
+    refute capture.site.path == invocation.site.path
+    refute capture.site.ordinal == invocation.site.ordinal
+    assert Enum.any?(mixed, &(&1.status == "unknown"))
+    refute Enum.any?(mixed, &(&1.status == "checked_anonymous_incompatible"))
+
+    # Independent single-occurrence named edges retain the positive contract.
+    for {owner, kind} <- [{"named", "capture"}, {"direct", "direct_arguments_require_proof"}] do
+      [record] = records(report, :incoming_case, owner)
+      assert record.status == "checked_finite_target"
+      assert record.site.kind == kind
+      assert record.targets == [%{module: ":incoming_root", function: "entry", arity: 2}]
+      assert record.derivation.exact_occurrence
+      assert record.derivation.annotation_equivalence
+    end
+
+    [raw_root] = report.callable_provenance_preflight.roots
+    [derived_root] = report.callable_provenance_preflight.target_derivations.roots
+    assert Enum.map(derived_root.records, & &1.site) == raw_root.incoming
+
+    raw_mixed =
+      Enum.filter(
+        raw_root.incoming,
+        &(&1.module == ":incoming_case" and &1.owner.function == "mixed")
+      )
+
+    assert raw_mixed == Enum.map(mixed, & &1.site)
+    assert ordinary(report) == before
+    assert report.callable_provenance_preflight.external_callable_records == []
+  end
+
+  test "I24 shadowed closure parameters retain their unknown inner invocation", context do
+    install(
+      context,
+      :incoming_case,
+      "-export([run/1]). run(X) -> F=fun(Y) -> Y end, G=fun(F) -> F(X) end, G(X)."
+    )
+
+    before = audit(context, false)
+    report = audit(context)
+    found = records(report, :incoming_case, "run")
+    assert Enum.count(found, &(&1.status == "unknown")) == 1
+    [outer] = Enum.filter(found, &(&1.status == "checked_anonymous_incompatible"))
+    anonymous_record(outer, 1)
+    assert ordinary(report) == before
+    assert report.unresolved_dispatch != []
+  end
+
+  test "I25 anonymous bodies retain named root and OTP obligations without executing", context do
+    Process.delete(:incoming_anonymous_executed)
+
+    install(
+      context,
+      :incoming_case,
+      "-export([run/1]). run(X) -> F=fun(Y) -> erlang:put(incoming_anonymous_executed,true), incoming_root:entry(Y,Y) end, F(X)."
+    )
+
+    before = audit(context, false)
+    report = audit(context)
+    found = records(report, :incoming_case, "run")
+    assert Enum.any?(found, &(&1.status == "checked_finite_target"))
+    [anonymous] = Enum.filter(found, &(&1.status == "checked_anonymous_incompatible"))
+    anonymous_record(anonymous, 1)
+    assert ordinary(report) == before
+    assert report.callable_provenance_preflight.external_callable_records == []
+    assert Process.get(:incoming_anonymous_executed) == nil
+    refute :code.is_loaded(:incoming_case)
+
+    # Direct OTP imports must still reject selected-producer evidence globally.
+    install(
+      context,
+      :incoming_case,
+      "-export([run/1]). run(X) -> F=fun(Y) -> ssl:connect(Y,443,[]), incoming_root:entry(Y,Y) end, F(X)."
+    )
+
+    before = audit(context, false)
+    report = audit(context)
+    assert Enum.all?(records(report, :incoming_case, "run"), &(&1.status == "unknown"))
+    assert Enum.any?(report.unresolved_dispatch, &(&1.kind == "literal_module_ssl"))
+    assert report.direct_otp_ssl_imports != []
+    assert ordinary(report) == before
+  end
+
+  test "I26 anonymous arguments do not turn apply or spawn into immediate closure calls",
+       context do
+    install(
+      context,
+      :incoming_case,
+      "-export([run/1,launch/1]). run(X) -> F=fun(Y) -> Y end, Apply=fun erlang:apply/2, Apply(F,[X]). launch(X) -> F=fun() -> X end, Spawn=fun erlang:spawn/1, Spawn(F)."
+    )
+
+    report = audit(context)
+
+    for owner <- ["run", "launch"] do
+      found = records(report, :incoming_case, owner)
+      assert found != []
+      assert Enum.all?(found, &(&1.status == "unknown"))
+    end
+  end
+
+  test "I27 recursive anonymous identities retain unknown captured callback bodies", context do
+    install(
+      context,
+      :incoming_case,
+      "-export([run/1]). run(X) -> F=fun Loop(0) -> X(0); Loop(N) -> Loop(N-1) end, F(1)."
+    )
+
+    before = audit(context, false)
+    report = audit(context)
+    found = records(report, :incoming_case, "run")
+    assert Enum.count(found, &(&1.status == "unknown")) == 1
+    anonymous = Enum.filter(found, &(&1.status == "checked_anonymous_incompatible"))
+    assert length(anonymous) == 2
+    Enum.each(anonymous, &anonymous_record(&1, 1))
+    assert report.unresolved_dispatch != []
+    assert ordinary(report) == before
+  end
+
+  test "I28 anonymous proof still requires selected current debug artifacts", context do
+    body = "-export([run/1]). run(X) -> F=fun(Y) -> Y end, F(X)."
+    bytes = install(context, :incoming_case, body)
+    shadow = Path.join(context.directory, "anonymous-shadow")
+    File.mkdir_p!(shadow)
+    File.write!(Path.join(shadow, "incoming_case.beam"), bytes)
+    true = :code.add_patha(String.to_charlist(shadow))
+    on_exit(fn -> :code.del_path(String.to_charlist(shadow)) end)
+    [record] = records(audit(context), :incoming_case, "run")
+    assert record.status == "unknown"
+    true = :code.del_path(String.to_charlist(shadow))
+    install(context, :incoming_provider, "-export([run/0]). run() -> ok.", false)
+    [record] = records(audit(context), :incoming_case, "run")
+    assert record.status == "unknown"
+  end
+
+  test "I29 raw anonymous-looking proof nodes and invalid annotations remain unknown", context do
+    for mutation <- [:proof_node, :annotation] do
+      install(context, :incoming_case, "-export([run/1]). run(X) -> F=fun(Y) -> Y end, F(X).")
+
+      rewrite(context, :incoming_case, fn forms ->
+        Enum.map(forms, fn
+          {:function, a, :run, 1, [{:clause, c, p, g, body}]} ->
+            body =
+              case mutation do
+                :proof_node ->
+                  [{:audit_fun_value, 1, {:fun, 1, {:clauses, []}}} | body]
+
+                :annotation ->
+                  List.update_at(body, -1, &put_elem(&1, 1, location: 1, text: :invalid))
+              end
+
+            {:function, a, :run, 1, [{:clause, c, p, g, body}]}
+
+          form ->
+            form
+        end)
+      end)
+
+      report = audit(context)
+      [record] = records(report, :incoming_case, "run")
+      assert record.status == "unknown"
+      assert ordinary(report) == audit(context, false)
+    end
+  end
+
+  test "I30 escaped unknown callbacks and closure factories do not imply caller identity",
+       context do
+    install(
+      context,
+      :incoming_case,
+      "-export([run/2,leak/0,factory/1]). run(F,X) -> invoke(F,X). leak() -> fun invoke/2. invoke(F,X) -> F(X). factory(X) -> F=external:factory(X), F(X)."
+    )
+
+    report = audit(context)
+
+    for owner <- ["invoke", "factory"] do
+      [record] = records(report, :incoming_case, owner)
+      assert record.status == "unknown"
+      assert record.derivation == nil
+    end
+  end
+
+  test "I31 anonymous evidence keeps complete-module budgets and request gates", context do
+    source = "-export([run/1]). run(X) -> F=fun(Y) -> Y end, F(X)."
+    install(context, :incoming_case, source)
+
+    for request <- [:enabled, %{anonymous: true}] do
+      [record] = records(audit(context, request), :incoming_case, "run")
+      assert record.status == "unknown"
+    end
+
+    missing = %{context | roots: [{:incoming_absent, :entry, 2}]}
+    [record] = records(audit(missing), :incoming_case, "run")
+    assert record.status == "unknown"
+
+    rewrite(context, :incoming_case, fn forms ->
+      extras =
+        for index <- 1..257 do
+          {:function, 1, String.to_atom("incoming_anonymous_budget_#{index}"), 0,
+           [{:clause, 1, [], [], [{:atom, 1, :ok}]}]}
+        end
+
+      forms ++ extras
+    end)
+
+    [record] = records(audit(context), :incoming_case, "run")
+    assert record.status == "unknown"
+  end
+
+  defp anonymous_record(record, arity) do
+    assert record.status == "checked_anonymous_incompatible"
+    assert record.targets == []
+    assert record.derivation.exact_occurrence
+    assert record.derivation.annotation_equivalence
+    refute record.derivation.parameter_invariants
+    assert record.derivation.method == "existing_finite_pipeline"
+    assert record.derivation.anonymous_invocation.kind == "anonymous_closure"
+    assert record.derivation.anonymous_invocation.invocation_arity == arity
+    assert record.derivation.anonymous_invocation.alternative_count in 1..16
+
+    for key <- [:source_sha256, :original_node_sha256, :resolved_node_sha256] do
+      assert Regex.match?(~r/^[0-9a-f]{64}$/, Map.fetch!(record.derivation, key))
+    end
+  end
+
+  defp install_elixir(context, source) do
+    module = NoOTPIncomingAnonymousFixture
+    refute :code.is_loaded(module)
+
+    on_exit(fn ->
+      :code.purge(module)
+      :code.delete(module)
+    end)
+
+    assert [{^module, bytes}] = Code.compile_string(source)
+    :code.purge(module)
+    :code.delete(module)
+    File.write!(Path.join(context.ebin, Atom.to_string(module) <> ".beam"), bytes)
+  end
+
   defp audit(context, request \\ true),
     do:
       NoOTP.ReleaseAudit.artifacts(
