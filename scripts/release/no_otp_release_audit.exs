@@ -175,7 +175,11 @@ defmodule NoOTP.ReleaseAudit do
     callable_preflight(
       report,
       beams,
-      context,
+      Map.put(
+        context,
+        :incoming_target_derivations,
+        Keyword.fetch(options, :incoming_target_derivations)
+      ),
       Keyword.fetch(options, :public_callable_roots),
       Keyword.fetch(options, :private_shape_invariants)
     )
@@ -1102,8 +1106,512 @@ defmodule NoOTP.ReleaseAudit do
           analysis
       end
 
+    analysis = incoming_target_derivations(analysis, sites, context)
     Map.put(report, :callable_provenance_preflight, analysis)
   end
+
+  # Optional incoming-target evidence. Raw incoming records and ordinary findings
+  # are never rewritten. A finite immediate target is not an external origin or
+  # a proof about the target's body; every original body remains audited.
+  @incoming_annotation_sizes Map.merge(@callable_header_sizes, %{
+                               audit_return: [3, 4],
+                               audit_selector: [4],
+                               audit_fun_value: [3],
+                               audit_union: [3]
+                             })
+
+  defp incoming_target_derivations(analysis, sites, context) do
+    case Map.get(context, :incoming_target_derivations, :error) do
+      :error ->
+        analysis
+
+      {:ok, false} ->
+        analysis
+
+      request ->
+        valid? = request == {:ok, true} and analysis.requests_valid
+
+        available? =
+          valid? and analysis.scan_complete and
+            Enum.all?(analysis.snapshots, &(&1.selected and &1.debug))
+
+        requested =
+          for root <- analysis.roots,
+              site <- root.incoming,
+              into: MapSet.new(),
+              do: {site.beam, site.ordinal}
+
+        selected_sites =
+          Enum.filter(sites, fn {site, _, _} ->
+            MapSet.member?(requested, {site.beam, site.ordinal})
+          end)
+
+        evidence =
+          if available? do
+            sites
+            |> Enum.group_by(fn {site, _, _} -> site.beam end)
+            |> Enum.filter(fn {beam, _} ->
+              Enum.any?(selected_sites, fn {s, _, _} -> s.beam == beam end)
+            end)
+            |> Enum.flat_map(fn {beam, module_sites} ->
+              snapshot = Enum.find(analysis.snapshots, &(&1.beam == beam))
+              incoming_module_targets(snapshot, module_sites, context)
+            end)
+            |> Map.new()
+          else
+            %{}
+          end
+
+        current? = available? and incoming_snapshots_current?(analysis.snapshots, context)
+
+        roots =
+          Enum.map(analysis.roots, fn root ->
+            records =
+              Enum.map(root.incoming, fn site ->
+                proof =
+                  if current? and root.exported,
+                    do: Map.get(evidence, {site.beam, site.ordinal}),
+                    else: nil
+
+                incoming_target_record(site, root.root, proof)
+              end)
+
+            %{root: root.root, records: records}
+          end)
+
+        Map.put(analysis, :target_derivations, %{
+          schema: 1,
+          requests_valid: valid?,
+          inventory_complete: analysis.scan_complete,
+          snapshots_current: current?,
+          scope: "immediate_target_only",
+          roots: roots
+        })
+    end
+  end
+
+  defp incoming_snapshots_current?(snapshots, context) do
+    Enum.all?(snapshots, fn snapshot ->
+      with true <- snapshot.selected and snapshot.debug,
+           {:ok, {module, _}} <- :beam_lib.chunks(String.to_charlist(snapshot.beam), [:exports]),
+           {:ok, selected} <- selected_producer(module, context) do
+        selected.path == snapshot.beam and
+          Base.encode16(selected.sha256, case: :lower) == snapshot.sha256
+      else
+        _ -> false
+      end
+    end)
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  defp incoming_module_targets(snapshot, sites, context) do
+    with {:ok, {module, chunks}} <-
+           :beam_lib.chunks(String.to_charlist(snapshot.beam), [
+             :imports,
+             :exports,
+             :abstract_code
+           ]),
+         {:raw_abstract_v1, forms} <- Keyword.fetch!(chunks, :abstract_code),
+         true <- digest(snapshot.beam) == snapshot.sha256,
+         {:ok, selected} <- selected_producer(module, context),
+         true <-
+           selected.path == snapshot.beam and
+             Base.encode16(selected.sha256, case: :lower) == snapshot.sha256,
+         {:ok, maximum} <- incoming_raw_syntax(forms),
+         true <- length(sites) <= @max_parameter_calls do
+      markers =
+        Map.new(sites, fn {site, scope, term} ->
+          {maximum + site.ordinal + 1, %{site: site, scope: scope, original: term}}
+        end)
+
+      paths =
+        Map.new(markers, fn {marker, entry} -> {entry.site.path, {marker, entry.original}} end)
+
+      true = map_size(paths) == length(sites)
+      marked = incoming_mark(forms, [], paths)
+      exports = Keyword.fetch!(chunks, :exports)
+      imports = Keyword.fetch!(chunks, :imports)
+      ordinary = incoming_resolve(forms, exports, imports, context)
+      resolved = incoming_resolve(marked, exports, imports, context)
+
+      # Annotations carry identity only in this private pass. Require exact
+      # equality with the independently unmarked pipeline before using a result.
+      true = incoming_restore(resolved, markers) == ordinary
+      matches = incoming_matches(resolved, markers)
+      true = digest(snapshot.beam) == snapshot.sha256
+      {:ok, ^selected} = selected_producer(module, context)
+
+      Enum.map(markers, fn {marker, entry} ->
+        key = {entry.site.beam, entry.site.ordinal}
+
+        proof =
+          case Map.get(matches, marker, []) do
+            [{owner, term}] when owner == entry.site.owner ->
+              case incoming_finite_targets(term, entry.scope) do
+                {:ok, targets} ->
+                  %{
+                    targets: targets,
+                    source_sha256: snapshot.sha256,
+                    original_node_sha256: incoming_term_digest(entry.original),
+                    resolved_node_sha256: incoming_term_digest(incoming_restore(term, markers)),
+                    method: "existing_finite_pipeline",
+                    exact_occurrence: true,
+                    annotation_equivalence: true,
+                    parameter_invariants: false
+                  }
+
+                :unknown ->
+                  nil
+              end
+
+            _ ->
+              nil
+          end
+
+        {key, proof}
+      end)
+    else
+      _ -> []
+    end
+  rescue
+    _ -> []
+  catch
+    _, _ -> []
+  end
+
+  defp incoming_term_digest(term),
+    do: :crypto.hash(:sha256, :erlang.term_to_binary(term)) |> Base.encode16(case: :lower)
+
+  defp incoming_raw_syntax(forms) do
+    functions = for {:function, _, _, _, _} = form <- forms, do: form
+    keys = for {:function, _, name, arity, _} <- functions, do: {name, arity}
+
+    true =
+      length(functions) <= @max_parameter_functions and length(Enum.uniq(keys)) == length(keys)
+
+    state =
+      Enum.reduce(functions, %{nodes: 0, calls: 0, maximum: 0}, fn
+        {:function, annotation, name, arity, clauses}, state
+        when is_atom(name) and is_integer(arity) and arity in 0..255 and is_list(clauses) ->
+          true = callable_annotation?(annotation)
+
+          true =
+            clauses != [] and
+              Enum.all?(clauses, fn
+                {:clause, _, patterns, guards, body}
+                when is_list(patterns) and is_list(guards) and is_list(body) ->
+                  length(patterns) == arity
+
+                _ ->
+                  false
+              end)
+
+          state = %{state | maximum: max(state.maximum, :erl_anno.line(annotation))}
+          incoming_syntax(clauses, state)
+      end)
+
+    {:ok, state.maximum}
+  end
+
+  defp incoming_syntax(term, state) do
+    state = %{state | nodes: state.nodes + 1}
+    true = state.nodes <= @max_parameter_nodes
+    incoming_syntax_node(term, state)
+  end
+
+  defp incoming_syntax_node({:function, name, arity}, state)
+       when is_atom(name) and is_integer(arity) and arity in 0..255,
+       do: state
+
+  defp incoming_syntax_node({:function, module, function, arity}, state),
+    do: incoming_syntax([module, function, arity], state)
+
+  defp incoming_syntax_node({:clauses, clauses}, state) when is_list(clauses),
+    do: incoming_syntax(clauses, state)
+
+  defp incoming_syntax_node({:bin_element, annotation, value, size, types}, state) do
+    true = callable_annotation?(annotation)
+
+    true =
+      types == :default or
+        (is_list(types) and
+           Enum.all?(types, fn
+             value when is_atom(value) -> true
+             {:unit, unit} when is_integer(unit) and unit in 1..256 -> true
+             _ -> false
+           end))
+
+    state = %{state | maximum: max(state.maximum, :erl_anno.line(annotation))}
+    incoming_syntax([value, size], state)
+  end
+
+  defp incoming_syntax_node(term, state) when is_tuple(term) do
+    true =
+      tuple_size(term) >= 2 and
+        tuple_size(term) in Map.get(@callable_header_sizes, elem(term, 0), []) and
+        callable_annotation?(elem(term, 1))
+
+    calls = state.calls + if(elem(term, 0) in [:call, :fun], do: 1, else: 0)
+    true = calls <= @max_parameter_calls
+    state = %{state | calls: calls, maximum: max(state.maximum, :erl_anno.line(elem(term, 1)))}
+
+    Enum.reduce(callable_children(term), state, fn {child, _}, acc ->
+      incoming_syntax(child, acc)
+    end)
+  end
+
+  defp incoming_syntax_node(terms, state) when is_list(terms),
+    do: Enum.reduce(terms, state, &incoming_syntax/2)
+
+  defp incoming_syntax_node(_term, state), do: state
+
+  defp incoming_mark(terms, path, paths) when is_list(terms) do
+    terms
+    |> Enum.with_index()
+    |> Enum.map(fn {child, index} -> incoming_mark(child, path ++ [index], paths) end)
+  end
+
+  defp incoming_mark(term, path, paths) do
+    marked =
+      Enum.reduce(callable_children(term), term, fn {child, index}, acc ->
+        incoming_replace_child(acc, index, incoming_mark(child, path ++ [index], paths))
+      end)
+
+    case Map.fetch(paths, path) do
+      {:ok, {marker, ^term}} -> put_elem(marked, 1, marker)
+      :error -> marked
+    end
+  end
+
+  defp incoming_replace_child(term, index, value) when is_tuple(term),
+    do: put_elem(term, index, value)
+
+  defp incoming_restore(term, markers) when is_tuple(term) do
+    term = term |> Tuple.to_list() |> Enum.map(&incoming_restore(&1, markers)) |> List.to_tuple()
+
+    if tuple_size(term) >= 2 and
+         tuple_size(term) in Map.get(@incoming_annotation_sizes, elem(term, 0), []) do
+      case Map.fetch(markers, elem(term, 1)) do
+        {:ok, entry} -> put_elem(term, 1, elem(entry.original, 1))
+        :error -> term
+      end
+    else
+      term
+    end
+  end
+
+  defp incoming_restore(terms, markers) when is_list(terms),
+    do: Enum.map(terms, &incoming_restore(&1, markers))
+
+  defp incoming_restore(term, _markers), do: term
+
+  defp incoming_resolve(forms, exports, imports, context) do
+    prepared =
+      forms
+      |> prove_remote_tuple_cases(context)
+      |> prove_local_tuple_cases(context)
+      |> prove_internal_pair_calls(context)
+      |> prove_return_calls(context)
+      |> qualify_named_dispatches(imports)
+      |> prove_selector_returns()
+      |> incoming_selector_assignments()
+
+    {resolved, _proof} = resolve_lexical(prepared, exports, [])
+    resolved
+  end
+
+  # Diagnostic only: an all-input finite atom summary may seed a direct
+  # variable assignment. The ordinary selector consumer intentionally does not
+  # support this shape. Preserve its complete original call and arguments.
+  defp incoming_selector_assignments(forms) do
+    definitions =
+      Map.new(for {:function, _, name, arity, _} = form <- forms, do: {{name, arity}, form})
+
+    analysis = %{
+      definitions: definitions,
+      edges: MapSet.new(),
+      captures: MapSet.new(),
+      complete: true,
+      nodes: 0,
+      calls: 0
+    }
+
+    summaries =
+      if map_size(definitions) <= @max_parameter_functions do
+        analysis =
+          Enum.reduce(definitions, analysis, fn {owner, {:function, _, _, _, clauses}}, state ->
+            caller_syntax(clauses, owner, state)
+          end)
+
+        if analysis.complete do
+          edges =
+            Enum.reduce(definitions, analysis.edges, fn {owner, form}, edges ->
+              selector_capture_edges(form, owner, definitions, edges)
+            end)
+
+          if MapSet.size(edges) <= @max_parameter_calls,
+            do: selector_returns(definitions, edges, %{}),
+            else: %{}
+        else
+          %{}
+        end
+      else
+        %{}
+      end
+
+    incoming_selector_assignment_nodes(forms, summaries)
+  end
+
+  defp incoming_selector_assignment_nodes(
+         {:match, annotation, {:var, _, variable} = pattern,
+          {:call, line, {:atom, _, name}, arguments} = call},
+         summaries
+       )
+       when variable != :_ and is_list(arguments) do
+    expression =
+      case Map.fetch(summaries, {name, length(arguments)}) do
+        {:ok, value} -> {:audit_selector, line, call, value}
+        :error -> call
+      end
+
+    {:match, annotation, pattern, expression}
+  end
+
+  defp incoming_selector_assignment_nodes(term, summaries) when is_tuple(term),
+    do:
+      term
+      |> Tuple.to_list()
+      |> Enum.map(&incoming_selector_assignment_nodes(&1, summaries))
+      |> List.to_tuple()
+
+  defp incoming_selector_assignment_nodes(terms, summaries) when is_list(terms),
+    do: Enum.map(terms, &incoming_selector_assignment_nodes(&1, summaries))
+
+  defp incoming_selector_assignment_nodes(term, _summaries), do: term
+
+  defp incoming_matches(forms, markers) do
+    {_nodes, matches} =
+      Enum.reduce(forms, {0, %{}}, fn
+        {:function, _, name, arity, clauses}, state ->
+          incoming_match_nodes(
+            clauses,
+            %{function: to_string(name), arity: arity},
+            markers,
+            state
+          )
+
+        _, state ->
+          state
+      end)
+
+    matches
+  end
+
+  defp incoming_match_nodes(term, owner, markers, {nodes, matches}) do
+    nodes = nodes + 1
+    true = nodes <= @max_parameter_nodes
+
+    matches =
+      if (match?({:call, _, _, _}, term) or match?({:fun, _, {:function, _, _}}, term) or
+            match?({:fun, _, {:function, _, _, _}}, term)) and
+           Map.has_key?(markers, elem(term, 1)) do
+        Map.update(matches, elem(term, 1), [{owner, term}], &[{owner, term} | &1])
+      else
+        matches
+      end
+
+    Enum.reduce(callable_children(term), {nodes, matches}, fn {child, _}, state ->
+      incoming_match_nodes(child, owner, markers, state)
+    end)
+  end
+
+  defp incoming_finite_targets({:call, _, _, _} = call, scope) do
+    with {:ok, candidates} <- call_candidates(call),
+         true <- candidates != [] do
+      incoming_target_choices(Enum.map(candidates, &incoming_call_target(&1, scope)))
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp incoming_finite_targets({:fun, _, _} = capture, scope) do
+    with {:ok, candidates} <- expand_finite(capture), true <- candidates != [] do
+      incoming_target_choices(Enum.map(candidates, &incoming_fun_target(&1, scope)))
+    else
+      _ -> :unknown
+    end
+  end
+
+  defp incoming_finite_targets(_, _), do: :unknown
+
+  defp incoming_target_choices(choices) do
+    if choices != [] and :unknown not in choices and length(choices) <= @max_finite_targets,
+      do: {:ok, Enum.uniq(choices)},
+      else: :unknown
+  end
+
+  defp incoming_call_target({:call, _, {:remote, _, {:atom, _, m}, {:atom, _, f}}, args}, _scope)
+       when is_atom(m) and is_atom(f) and is_list(args),
+       do: {m, f, length(args)}
+
+  defp incoming_call_target({:call, _, {:atom, _, f}, args}, scope)
+       when is_atom(f) and is_list(args) do
+    key = {f, length(args)}
+
+    cond do
+      MapSet.member?(scope.definitions, key) -> {scope.module, f, length(args)}
+      true -> Enum.find(scope.imports, :unknown, fn {_m, name, arity} -> {name, arity} == key end)
+    end
+  end
+
+  defp incoming_call_target({:call, _, {:audit_fun_value, _, value}, _args}, scope),
+    do: incoming_fun_target(value, scope)
+
+  defp incoming_call_target({:call, _, {:fun, _, _} = value, _args}, scope),
+    do: incoming_fun_target(value, scope)
+
+  defp incoming_call_target(_, _), do: :unknown
+
+  defp incoming_fun_target({:fun, _, {:function, name, arity}}, scope)
+       when is_atom(name) and is_integer(arity) and arity in 0..255 do
+    if MapSet.member?(scope.definitions, {name, arity}),
+      do: {scope.module, name, arity},
+      else: :unknown
+  end
+
+  defp incoming_fun_target(
+         {:fun, _, {:function, {:atom, _, m}, {:atom, _, f}, {:integer, _, a}}},
+         _scope
+       )
+       when is_atom(m) and is_atom(f) and is_integer(a) and a in 0..255,
+       do: {m, f, a}
+
+  defp incoming_fun_target(_, _), do: :unknown
+
+  defp incoming_target_record(site, root, %{targets: targets} = proof) do
+    meta? =
+      Enum.any?(targets, fn {m, f, a} ->
+        m == :erlang and (f == :apply or {f, a} in @dispatches)
+      end)
+
+    if meta? do
+      incoming_target_record(site, root, nil)
+    else
+      targets =
+        Enum.map(targets, fn {m, f, a} ->
+          %{module: inspect(m), function: to_string(f), arity: a}
+        end)
+
+      status = if root in targets, do: "checked_finite_target", else: "checked_incompatible"
+      %{site: site, status: status, targets: targets, derivation: Map.delete(proof, :targets)}
+    end
+  end
+
+  defp incoming_target_record(site, _root, nil),
+    do: %{site: site, status: "unknown", targets: [], derivation: nil}
 
   # Conditional outer-shape facts about private parameters, never callable
   # classifications. All callers are checked on raw forms; ordinary resolution

@@ -125,6 +125,7 @@ defmodule NoOTP.Consumer do
         NoOTP.ReleaseAudit.artifacts(
           parameter_invariants: parameter_invariants,
           public_callable_roots: public_callable_roots,
+          incoming_target_derivations: true,
           private_shape_invariants: private_shape_invariants,
           private_field_invariants: private_field_invariants
         ),
