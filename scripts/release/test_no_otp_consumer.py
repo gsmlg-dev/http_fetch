@@ -1,4 +1,4 @@
-"""Run single-VM public close-correlation controls from the real consumer source."""
+"""Run single-VM H3 readiness and timeout controls from the real consumer source."""
 from pathlib import Path
 import os
 import re
@@ -10,7 +10,7 @@ HERE = Path(__file__).resolve().parent
 
 
 class CompiledConsumerTests(unittest.TestCase):
-    def test_public_h3_close_reason_controls(self):
+    def test_public_h3_readiness_and_timeout_controls(self):
         env = dict(os.environ)
         env.pop("NO_OTP_CONSUMER_SOURCE", None)
         child = subprocess.Popen(
@@ -29,7 +29,7 @@ class CompiledConsumerTests(unittest.TestCase):
             self.fail("compiled consumer controls timed out:\n" + output)
         self.assertEqual(child.returncode, 0, output)
         output = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output)
-        self.assertRegex(output, r"\b6 tests, 0 failures\b")
+        self.assertRegex(output, r"\b13 tests, 0 failures\b")
         self.assertNotRegex(output, r"\b[1-9]\d* (?:excluded|skipped)\b")
 
 

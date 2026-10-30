@@ -510,20 +510,44 @@ defmodule NoOTP.Consumer do
   end
 
   defp h3_timeout(session, ref, deadline) do
-    if now() >= deadline do
+    # As with the TCP timeout cases, reserve part of the original scenario
+    # budget for reconciliation and close. A poll's admission deadline stays
+    # the original one, so an unknown result can still be reconciled.
+    response_deadline = now() + max(div(remaining(deadline), 2), 1)
+    h3_timeout(session, ref, response_deadline, deadline)
+  end
+
+  defp h3_timeout(session, ref, response_deadline, deadline) do
+    remaining(deadline)
+
+    if now() >= response_deadline do
       :ok = Session.close(session)
     else
-      {:ok, advanced, events} = Session.poll(session, 128, timeout: remaining(deadline))
+      result =
+        Session.poll(session, 128,
+          timeout: remaining(response_deadline),
+          deadline: {:abs_ms, deadline}
+        )
 
-      false =
-        Enum.any?(events, fn
-          {:done, ^ref} -> true
-          {:stream_reset, ^ref, _, _} -> true
-          _ -> false
-        end)
-
-      h3_timeout(advanced, ref, deadline)
+      h3_timeout_result(result, ref, response_deadline, deadline)
     end
+  end
+
+  defp h3_timeout_result({:ok, advanced, events}, ref, response_deadline, deadline) do
+    false =
+      Enum.any?(events, fn
+        {:done, ^ref} -> true
+        {:stream_reset, ^ref, _, _} -> true
+        _ -> false
+      end)
+
+    h3_timeout(advanced, ref, response_deadline, deadline)
+  end
+
+  defp h3_timeout_result({:unknown, advanced, _operation}, ref, response_deadline, deadline) do
+    remaining(deadline)
+    Process.sleep(1)
+    h3_timeout_result(Session.resume(advanced), ref, response_deadline, deadline)
   end
 
   defp h3_response(session, ref, deadline, body, headers) do
