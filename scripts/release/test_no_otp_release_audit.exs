@@ -4,7 +4,9 @@ ExUnit.start()
 defmodule NoOTP.ReleaseAuditTest do
   use ExUnit.Case, async: false
 
-  setup do
+  setup context do
+    Process.put(:no_otp_b_compile_bytes, context.z_source_bytes)
+
     directory =
       Path.join(System.tmp_dir!(), "no-otp-lexical-#{System.unique_integer([:positive])}")
 
@@ -1396,9 +1398,90 @@ defmodule NoOTP.ReleaseAuditTest do
     options =
       [:binary, :return_errors, :return_warnings] ++ if(debug, do: [:debug_info], else: [])
 
-    assert {:ok, ^module, bytes, _warnings} = :compile.forms(forms, options)
+    result = b_compile_cached(module, source, forms, options)
+    assert {:ok, ^module, bytes, _warnings} = result
     bytes
   end
+
+  # Only this serial ExUnit module's test process receives the setup_all table.
+  # Tasks do not inherit this context. Entries hold pristine compiler output,
+  # never installed/mutated artifacts or audit results.
+  defp b_compile_cached(module, source, forms, options) do
+    cache = Process.get(:no_otp_b_compile_bytes)
+    environment = System.get_env("ERL_COMPILER_OPTIONS")
+
+    with true <- is_reference(cache),
+         true <- b_compile_cache_eligible?(forms, options, environment),
+         {:ok, identity} <- b_compile_identity() do
+      key = b_compile_key(module, source, options, environment, identity)
+
+      case b_compile_lookup(cache, key) do
+        {:hit, result} ->
+          result
+
+        :miss ->
+          result = :compile.forms(forms, options)
+          b_compile_store(cache, key, module, result)
+          result
+      end
+    else
+      _ -> :compile.forms(forms, options)
+    end
+  end
+
+  # Unknown compiler configuration is compiled normally, including transforms.
+  # Do not infer the identity of external compile-time dependencies.
+  defp b_compile_cache_eligible?(forms, options, environment) do
+    is_nil(environment) and
+      Enum.all?(options, &(&1 in [:binary, :return_errors, :return_warnings, :debug_info])) and
+      not Enum.any?(forms, fn
+        {:attribute, _, attribute, _} when attribute in [:compile, :behaviour, :behavior] -> true
+        _ -> false
+      end)
+  end
+
+  defp b_compile_identity do
+    with {:module, :compile} <- :code.ensure_loaded(:compile),
+         [_ | _] = path <- :code.which(:compile),
+         md5 when is_binary(md5) <- :compile.module_info(:md5) do
+      {:ok,
+       {System.version(), :erlang.system_info(:otp_release), :erlang.system_info(:version),
+        :erlang.system_info(:system_architecture), :erlang.system_info(:emu_flavor), path, md5}}
+    else
+      _ -> :uncacheable
+    end
+  rescue
+    ArgumentError -> :uncacheable
+    UndefinedFunctionError -> :uncacheable
+  end
+
+  defp b_compile_key(module, source, options, environment, identity),
+    do: {:b_compile_bytes, 1, {module, source, options, environment, identity}}
+
+  defp b_compile_lookup(cache, key) do
+    case :ets.lookup(cache, key) do
+      [{^key, result}] -> {:hit, result}
+      [] -> :miss
+    end
+  rescue
+    ArgumentError -> :miss
+  end
+
+  defp b_compile_store(cache, key, module, {:ok, module, bytes, warnings} = result)
+       when is_binary(bytes) and is_list(warnings) do
+    # This namespace has one writer at a time (async: false and process-local
+    # context). The existing source cache has a disjoint key shape.
+    if byte_size(:erlang.term_to_binary({key, result})) <= 262_144 and
+         :ets.select_count(cache, [{{{:b_compile_bytes, 1, :_}, :_}, [], [true]}]) < 128 do
+      :ets.insert_new(cache, {key, result})
+    end
+
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp b_compile_store(_cache, _key, _module, _result), do: :ok
 
   defp b_run(context, fixture, input \\ "\#{'__struct__' => b_struct, map => \#{}}") do
     body =
