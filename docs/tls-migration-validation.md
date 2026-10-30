@@ -33,13 +33,13 @@ and full automation results remain at
 No RC has been published. P6 release acceptance and P7 publication remain open;
 Credo/Dialyzer and performance retain their existing deferrals.
 
-## P6 source-removal checkpoint — 2026-10-29
+## P6 source-removal checkpoint — 2026-10-30
 
 Production removal is committed at `55d719467f691d857df18323e162afcae338ecd3`.
 It deletes the retired OTP transport and nested adapter, removes production OTP
 selectors and the five unconditional application dependencies, and explicitly
 rejects `tls_backend: :ssl`. The current production sources, app manifests,
-configuration and lockfile remain identical through `60c1c4a`.
+configuration and lockfile remain identical through `90ccdf1`.
 
 All-nine [units](https://github.com/gsmlg-dev/http_fetch/actions/runs/40809490861)
 and the configured [E2E workflow](https://github.com/gsmlg-dev/http_fetch/actions/runs/40809490824)
@@ -49,10 +49,14 @@ passes at `a29248a`, including the corrected H3 attach-timeout precondition. The
 are configured Linux results. The earlier macOS blocked-writer observation race
 remains open; no unrestricted macOS integration pass is claimed.
 
-The isolated production [release audit](https://github.com/gsmlg-dev/http_fetch/actions/runs/40817866344)
-at `71162cb` scans 348 BEAM files. It finds zero direct OTP SSL imports,
-application dependencies, boot entries or bundled SSL paths. OTP SSL is
-unavailable, unloaded and unstarted before and after the scan. Its 192 unresolved
+The full manual [CI run](https://github.com/gsmlg-dev/http_fetch/actions/runs/40995936254)
+at `90ccdf1` passes all nine apps' strict compilation, formatting and packaging,
+candidate Hex consumers/TLS smoke, shared H2 consumers and historical TLS
+compatibility, with Credo/Dialyzer explicitly deferred.
+
+Its isolated production release audit scans 348 BEAM files and finds zero direct
+OTP SSL imports, application dependencies, boot entries or bundled SSL paths. OTP SSL is
+unavailable, unloaded and unstarted before and after the scan. Its 175 unresolved
 dynamic calls still reject the release gate, so no traffic scenario executes.
 
 The latest auditor extension proves complete single-hop local wrappers around
