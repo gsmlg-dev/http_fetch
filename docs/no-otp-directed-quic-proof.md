@@ -103,6 +103,6 @@ actual origin proof.
 
 The original 28 compiled findings remain in the strict audit. This source
 review is ready for the directed release gate to bind it to actual BEAMs;
-it does not by itself accept P6. HTTP/3's separate `:ops` contract decision,
-the other package proofs and the two OTP 28 manual-ticket reference failures
+it does not by itself accept P6. The other package proofs and the two OTP 28
+manual-ticket reference failures
 remain open. The 70 passing no-OTP traffic cases remain supporting evidence.

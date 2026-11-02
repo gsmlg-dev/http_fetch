@@ -79,15 +79,17 @@ private messages are outside the approved boundary.
 User callback bodies are arbitrary external code and are not certified free of
 OTP SSL. Their origins must still be established, including every library-created
 alternative, nested closure and possible library reentry. The approved module
-extension roots are Session `:transport`, WebTransport `:backend`, and TLSDriver
-`:adapter`. Default and library implementations remain fully audited.
+extension roots are Session `:transport`, WebTransport `:backend`, TLSDriver
+`:adapter`, and Transport.Quic `:ops` (user decision on 2026-11-02).
+Default and library implementations remain fully audited.
 
 Direct arbitrary calls into internal `HTTP.HTTP3.request/3`, H2 initialization
 and framework callbacks are outside the supported input guarantee. Their actual
 production callers and state transfers remain in scope. This boundary does not
-turn transport maps, callback throws, unknown return values, or `:ops` injection
-into safe sources. A public struct or an exported helper alone establishes no
-approved extension contract.
+turn transport maps, callback throws or unknown return values into safe sources.
+The approved `:ops` boundary still requires origin and built-in-body proofs.
+A public struct or an exported helper alone establishes no approved extension
+contract.
 
 ## Directed obligations
 
@@ -111,6 +113,10 @@ The [directed HTTP source review](no-otp-directed-http-proof.md) covers 76
 HTTP-1–HTTP-9 and WT-1 occurrences, including actual pool/owner constructors,
 stale connection replies and the unsupported built-in WebTransport backend.
 
+The [directed HTTP3 source review](no-otp-directed-h3-proof.md) covers 50
+H3-1–H3-5 occurrences. It records the approved `:ops` boundary and audits the
+default Quic implementation, shared endpoints and retained stream selectors.
+
 | Proof | Actual implementation and entry | Source finding and remaining proof |
 | --- | --- | --- |
 | Q1 | `Quic.Cleanup.new/1 -> retire/2` | `new/1` constructs the retirement closure around its handle, secret and atomics fence. Bind all library leases reaching `retire/2` to this constructor; do not treat arbitrary `%Lease{}` values as safe. |
@@ -118,7 +124,7 @@ stale connection replies and the unsupported built-in WebTransport backend.
 | Q3 | Public QUIC external server IO -> `ExternalWriter` | `{:external, local, send_fun}` is validated as a two-argument callback and stored by `ExternalWriter.init/1`. Bind its sole invocation to that origin, including library-supplied callback alternatives. |
 | Q4 | `Quic.TLSDriver.new/2` | Approved `:adapter` root, default `SSL.QUIC`, retained in the driver. Check all feed/info/abort/receive-level paths and state updates; audit `SSL.QUIC` and any library-supplied adapters. |
 | H3-1 | `QuicHttp3.Session.new/1` | Approved `:transport` root, default `QuicHttp3.Transport.Quic`. Prove transport retention, all operation wrappers, resume, and ready paths; retain native cleanup restrictions. |
-| H3-2 | `QuicHttp3.Transport.Quic.client/1, connect/3` | `:ops` defaults to `Quic` and is retained in endpoint/connection/stream descriptors. Arbitrary `:ops` is not an approved root. Prove production options exclude injection and cover shared endpoints, or retain this contract blocker. |
+| H3-2 | `QuicHttp3.Transport.Quic.client/1, connect/3` | `:ops` is an approved user-module root as of 2026-11-02. Its retained connection/stream selectors, shared endpoint equality checks, default Quic bodies and unchanged native cleanup restrictions are traced in the HTTP3 review. |
 | H3-3 | Internal `HTTP.QUIC.ExQuic` wrappers | Production wrappers default to `Quic`; the extra driver parameter is a test seam. Inventory actual production incoming calls, including explicit driver arguments, before restricting targets to `Quic`. |
 | H3-4 | `HTTP.HTTP3.Stream` connector | `connector_wait/5` invokes a callback obtained by the descriptor path. Prove all supported connector producers and retained-worker handoffs; do not classify an unknown callback from its name. |
 | H3-5 | Fetch -> `HTTP.HTTP3.request/3 -> await/5` | Production SocketClient supplies `handle_http3_event/2`; the recursive loop preserves the handler. Bind both callsites and any library reentry to that caller. Arbitrary direct handlers at this internal entry are outside the approved guarantee. |

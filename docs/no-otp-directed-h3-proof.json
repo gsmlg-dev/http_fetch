@@ -1,0 +1,536 @@
+{
+  "schema": 1,
+  "review": "no-otp-directed-h3-proof.md",
+  "source_commit": "524edb284aa26b92a0dd2aace4d5dd8a3d395c0a",
+  "artifact": 13119243608,
+  "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
+  "original_findings_removed": 0,
+  "source_inputs_sha256": {
+    "apps/elixir_quic_http3/lib/quic_http3/session.ex": "c0b460040007aea68cbca830c60a15c5fb2efda12c1c345bd24c095caa63544f",
+    "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "e3eceea332cdee69f921bae15452e8b4d41fc76265b8bfff76a2dfbf5c28385a",
+    "apps/http_core/lib/http/quic/ex_quic.ex": "0cb045e39b362131a53d5b3a1d7a19f5f5f25c7f192cf64a16b28ed488e0ffc6",
+    "apps/http_fetch/lib/http.ex": "1a7ad0e36ccb4798d977428807270c96033376af6fc0a1da264fab7eaf51df8f",
+    "apps/http_fetch/lib/http/fetch_options.ex": "a04c342787355fd33358d573b1b1ebd5a7d280aff48c6c0035840dd7e6c73a08",
+    "apps/http_fetch/lib/http/socket_client.ex": "9f0c86be61a71a0d7a91a62d0500bf35739b95d3f15567842457f2c3520b3e04",
+    "apps/http_event_source/lib/http/event_source/options.ex": "d1c36a500c8f5f86b6c5334d8e34b355451d9367487f5d1f4b37df0a31b44202",
+    "apps/http_event_source/lib/http/event_source/connection.ex": "1f279f60ba0aca8c035ff3ad1b571dc2a4d3b8abee5b44820455e54e59b294e9",
+    "apps/http_runtime/lib/http/http3.ex": "b691a8f1c780c3b9e920c7148f38a17d82975d2788170579073753bea61df92d",
+    "apps/http_runtime/lib/http/http3/stream.ex": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
+    "apps/http_runtime/lib/http/http3/pool_key.ex": "6e078977445c6dd0f80c2fbceb86f72002692313d4bfaf37dd4f60054c67f134",
+    "apps/http_runtime/lib/http/http3/pool.ex": "730b52081a9f99621e5edd677167556dbeede70fd74cef7d1164e9e230118d44",
+    "apps/http_runtime/lib/http/http3/connection_owner.ex": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37"
+  },
+  "production_source_census": {
+    "files": 244,
+    "sorted_path_sha256_json": "097ad232bd57e7dcf49f79ea829eb9e43ad6b155a42487a4ee1dae66983505b5"
+  },
+  "occurrences": [
+    {
+      "inventory_occurrence": 29,
+      "module": "QuicHttp3.Session",
+      "mfa": "drive/1",
+      "line": 454,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 30,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 537,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 31,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 541,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 32,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 544,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 33,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 547,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 34,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 550,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 35,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 553,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 36,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 556,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 37,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 559,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 38,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 562,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 39,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 565,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 40,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 567,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 41,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 570,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 42,
+      "module": "QuicHttp3.Session",
+      "mfa": "ready/1",
+      "line": 120,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 43,
+      "module": "QuicHttp3.Session",
+      "mfa": "resume/1",
+      "line": 353,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1",
+      "beam_sha256": "a4237c8a236d61ec1e18c7883234b82efaa2bddfffa09adbc4149ef175f1b658"
+    },
+    {
+      "inventory_occurrence": 44,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "attach/3",
+      "line": 199,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 45,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "client/1",
+      "line": 57,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 46,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "close/4",
+      "line": 291,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 47,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "connect/3",
+      "line": 101,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 48,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "events/3",
+      "line": 274,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 49,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "info/1",
+      "line": 133,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 50,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "open_stream/3",
+      "line": 247,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 51,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "operation_status/3",
+      "line": 150,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 52,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "read/3",
+      "line": 263,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 53,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "read_datagrams/3",
+      "line": 302,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 54,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "ready/2",
+      "line": 123,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 55,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "reset_stream/3",
+      "line": 281,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 56,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "send_datagram/3",
+      "line": 295,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 57,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "send_stream/4",
+      "line": 256,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 58,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "start_endpoint/5",
+      "line": 483,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 59,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "stop_owned_endpoint/2",
+      "line": 491,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 60,
+      "module": "QuicHttp3.Transport.Quic",
+      "mfa": "stop_stream/3",
+      "line": 285,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+      "proof": "H3-2",
+      "beam_sha256": "9bb7ecfcf29cc010347160138feefaa030dbd37b4afb419f25fae04ab27ff979"
+    },
+    {
+      "inventory_occurrence": 76,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "attach/4",
+      "line": 22,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 77,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "capabilities/1",
+      "line": 26,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 78,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "client/4",
+      "line": 12,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 79,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "close/5",
+      "line": 62,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 80,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "connect/4",
+      "line": 19,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 81,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "events/4",
+      "line": 51,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 82,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "info/2",
+      "line": 25,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 83,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "local/2",
+      "line": 16,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 84,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "open_stream/4",
+      "line": 29,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 85,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "operation_status/3",
+      "line": 65,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 86,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "read/4",
+      "line": 44,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 87,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "ready/2",
+      "line": 24,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 88,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "reset_stream/4",
+      "line": 56,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 89,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "send_stream/5",
+      "line": 35,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 90,
+      "module": "HTTP.QUIC.ExQuic",
+      "mfa": "stop_stream/4",
+      "line": 59,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/quic/ex_quic.ex",
+      "proof": "H3-3",
+      "beam_sha256": "8277143de28bb3e58b1330bf45737ae05aedf6fe6e1f7eccb75326e065a2225b"
+    },
+    {
+      "inventory_occurrence": 142,
+      "module": "HTTP.HTTP3.Stream",
+      "mfa": "connector_wait/5",
+      "line": 333,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_runtime/lib/http/http3/stream.ex",
+      "proof": "H3-4",
+      "beam_sha256": "b31da022d8a218900a41dab5795ca36fbc672774fadbd42aaf2269a546874b5a"
+    },
+    {
+      "inventory_occurrence": 143,
+      "module": "HTTP.HTTP3",
+      "mfa": "await/5",
+      "line": 40,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_runtime/lib/http/http3.ex",
+      "proof": "H3-5",
+      "beam_sha256": "fea95ff623e433c0581f27075cb9aebd9dd13a2b84e517969b5bd7606cf06185"
+    },
+    {
+      "inventory_occurrence": 144,
+      "module": "HTTP.HTTP3",
+      "mfa": "await/5",
+      "line": 53,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_runtime/lib/http/http3.ex",
+      "proof": "H3-5",
+      "beam_sha256": "fea95ff623e433c0581f27075cb9aebd9dd13a2b84e517969b5bd7606cf06185"
+    }
+  ],
+  "checks": {
+    "source_inputs_match_packaged_sources": true,
+    "strict_release_static_status": "FAIL",
+    "strict_release_total_unresolved": 175,
+    "P6_accepted": false
+  },
+  "approved_ops_boundary": "User decision 2026-11-02: preserve :ops; audit default Quic and library implementations; external callback bodies excluded; native cleanup restrictions unchanged."
+}
