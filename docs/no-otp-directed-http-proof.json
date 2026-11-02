@@ -1,0 +1,815 @@
+{
+  "schema": 1,
+  "review": "no-otp-directed-http-proof.md",
+  "source_commit": "524edb284aa26b92a0dd2aace4d5dd8a3d395c0a",
+  "artifact": 13119243608,
+  "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
+  "original_findings_removed": 0,
+  "source_inputs_sha256": {
+    "apps/http_fetch/lib/http.ex": "1a7ad0e36ccb4798d977428807270c96033376af6fc0a1da264fab7eaf51df8f",
+    "apps/http_fetch/lib/http/fetch_options.ex": "a04c342787355fd33358d573b1b1ebd5a7d280aff48c6c0035840dd7e6c73a08",
+    "apps/http_fetch/lib/http/socket_client.ex": "9f0c86be61a71a0d7a91a62d0500bf35739b95d3f15567842457f2c3520b3e04",
+    "apps/http_fetch/lib/http/promise.ex": "d49110cfae54440fd16568391a3a2c1a90ef0c7831ee458185e0e361e9c74064",
+    "apps/http_fetch/lib/http/http1/idle_timeout.ex": "af2b917e837503e3f84c9e1e5c3a7cb9a2e1c34efc9a61ff19e82547f0f7180d",
+    "apps/http_fetch/lib/http/http1/upload.ex": "883b0768562703422acaac33cff16fc86165ff393a6e16c420e8251aa1b27c56",
+    "apps/http_core/lib/http/tls_backend.ex": "83f3f446e37f913312b2be044825fadeb5f02730df1608d1cbab54970f11548c",
+    "apps/http_core/lib/http/proxy.ex": "851216b2352d2e89c0b34300cd280df851e8e4d47b10b20be4c1381dd70a673d",
+    "apps/http_core/lib/http/request_lifecycle.ex": "979a086365ae7f09486d8f5f322f569b6f8bb1fb297238ce8640b3c32aeb5f62",
+    "apps/http_core/lib/http/transport/tcp.ex": "488a125fc494d681fcd1a079b0e0424be3eca8f1bfdd2b5984f7e66dc277eed0",
+    "apps/http_core/lib/http/transport/unix.ex": "9d6601dc791cc0704e8a40ee74d79f0e85c8241bcdcde96c380f0b0d7ec0f084",
+    "apps/http_core/lib/http/transport/ex_ssl.ex": "20cda2e3507a1fa52ec8a5baf7259ceab9c407d434dda8e9601cfaadb514893f",
+    "apps/http_runtime/lib/http_runtime.ex": "228abb1c3b31906f0df84957e50882f9bc3c79eb9c3f065f6b25ee7b1b3e9029",
+    "apps/http_runtime/lib/http/runtime/dialer.ex": "3c2a2817df01e2155c7b5a3999b49f6cbfbc9d7ff1590060bb989ffaf78431fc",
+    "apps/http_runtime/lib/http/runtime/stream.ex": "fcad24e0dbc826c2caac89acbd09942c043fe2f608d075a1b996dffc35fdb35e",
+    "apps/http_runtime/lib/http/http1/pool.ex": "326c9924bd7a2067c0f031e7b09f17bda8e9d13ca4a4c9169cceb326385d430c",
+    "apps/http_runtime/lib/http/http2/pool.ex": "4ced263161512e0480e681975ba1d5f40a7576ac3d7baf008dfa60376dcd9588",
+    "apps/http_runtime/lib/http/http2/connection_owner.ex": "f5250c2b7c82bd56e5d7f8f6f6d62033313666546039b07971a7935942c0d5f9",
+    "apps/http_runtime/lib/http/http2/connection_supervisor.ex": "6624225a4b82240eed4315fa12bb1a61c9b103aa1b09ffab66ebc56ba142f3e0",
+    "apps/http_runtime/lib/http/protocol_client/session.ex": "53db8f26b74a84ba5f7980334bbbb21d4d1f9ef24dba03f2fc842018a03d8711",
+    "apps/http_runtime/lib/http/managed_transport.ex": "74b17c5450acd6834647b3fc305c0246120dae8bbbdd495de92a6f71f1d8d95f",
+    "apps/http_runtime/lib/http/managed_transport/scope.ex": "c822312d48110046a5c0fede5e6768236a1e3d8e3ed077eaede961bc5f30f0e5",
+    "apps/http_runtime/lib/http/managed_transport/policy.ex": "b283eba84c5b438eb53f35ab548682a0f83f3a7b675082f56c4a01d6767cfbd0",
+    "apps/http_runtime/lib/http/http3/connection_owner.ex": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
+    "apps/http_runtime/lib/http/http3/stream.ex": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
+    "apps/http_event_source/lib/http/event_source/options.ex": "d1c36a500c8f5f86b6c5334d8e34b355451d9367487f5d1f4b37df0a31b44202",
+    "apps/http_event_source/lib/http/event_source/connection.ex": "1f279f60ba0aca8c035ff3ad1b571dc2a4d3b8abee5b44820455e54e59b294e9",
+    "apps/http_web_socket/lib/http/web_socket/options.ex": "195b79883dc1a24a19ce3edad9577689720ea4418d0d0945e973819e881473b6",
+    "apps/http_web_socket/lib/http/web_socket/connection.ex": "434e0718b79e0cd304ce3de3ef2a2de49710f3c220931b48d30870eb69f3d1d5",
+    "apps/http_web_transport/lib/http/web_transport.ex": "38751209dffad6dd099a61e4038874ef66d8c57303f42c565483f12904c0346d",
+    "apps/http_web_transport/lib/http/web_transport/options.ex": "ce28ffe039cd91eb32ddbf1365bd60c2a16fea71fc6a1badc598827527f90145",
+    "apps/http_web_transport/lib/http/web_transport/session.ex": "295d1da9978afbedd308080261d9a7a9f1fadaa504e16183299b64b3979e83e3",
+    "apps/http_web_transport/lib/http/web_transport/transport/quic.ex": "e9b14e849bbffffd2e1f2740611623885c4bb236b481bb6fb0425206d9da5e1b"
+  },
+  "production_source_census": {
+    "files": 244,
+    "sorted_path_sha256_json": "097ad232bd57e7dcf49f79ea829eb9e43ad6b155a42487a4ee1dae66983505b5"
+  },
+  "occurrences": [
+    {
+      "inventory_occurrence": 75,
+      "module": "HTTP.Proxy",
+      "mfa": "upgrade_tunnel/3",
+      "line": 216,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_core/lib/http/proxy.ex",
+      "proof": "HTTP-1",
+      "beam_sha256": "d4de2db0281eef92fa5b79537005e04fcb7291002c0e260979d5dc1f1636b646"
+    },
+    {
+      "inventory_occurrence": 91,
+      "module": "HTTP.RequestLifecycle",
+      "mfa": "launch/2",
+      "line": 15,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_core/lib/http/request_lifecycle.ex",
+      "proof": "HTTP-2",
+      "beam_sha256": "47a87a4ea3eaa036caee4480903048b3787756eb7e5cbe687cdf3343031e8721"
+    },
+    {
+      "inventory_occurrence": 92,
+      "module": "HTTP.RequestLifecycle",
+      "mfa": "reject_worker/2",
+      "line": 129,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_core/lib/http/request_lifecycle.ex",
+      "proof": "HTTP-2",
+      "beam_sha256": "47a87a4ea3eaa036caee4480903048b3787756eb7e5cbe687cdf3343031e8721"
+    },
+    {
+      "inventory_occurrence": 93,
+      "module": "HTTP.RequestLifecycle",
+      "mfa": "run_worker/6",
+      "line": 121,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_core/lib/http/request_lifecycle.ex",
+      "proof": "HTTP-2",
+      "beam_sha256": "47a87a4ea3eaa036caee4480903048b3787756eb7e5cbe687cdf3343031e8721"
+    },
+    {
+      "inventory_occurrence": 94,
+      "module": "HTTP.EventSource.Connection",
+      "mfa": "detach_transport/1",
+      "line": 721,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_event_source/lib/http/event_source/connection.ex",
+      "proof": "HTTP-3",
+      "beam_sha256": "dea7ee6e5b40d748af1d3c84f1aabea0cdf861a1267d045b8aecfcc4be2a313d"
+    },
+    {
+      "inventory_occurrence": 95,
+      "module": "HTTP.EventSource.Connection",
+      "mfa": "handle_info/2",
+      "line": 214,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_event_source/lib/http/event_source/connection.ex",
+      "proof": "HTTP-3",
+      "beam_sha256": "dea7ee6e5b40d748af1d3c84f1aabea0cdf861a1267d045b8aecfcc4be2a313d"
+    },
+    {
+      "inventory_occurrence": 96,
+      "module": "HTTP.EventSource.Connection",
+      "mfa": "handle_info/2",
+      "line": 227,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_event_source/lib/http/event_source/connection.ex",
+      "proof": "HTTP-3",
+      "beam_sha256": "dea7ee6e5b40d748af1d3c84f1aabea0cdf861a1267d045b8aecfcc4be2a313d"
+    },
+    {
+      "inventory_occurrence": 97,
+      "module": "HTTP.EventSource.Connection",
+      "mfa": "handle_info/2",
+      "line": 256,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_event_source/lib/http/event_source/connection.ex",
+      "proof": "HTTP-3",
+      "beam_sha256": "dea7ee6e5b40d748af1d3c84f1aabea0cdf861a1267d045b8aecfcc4be2a313d"
+    },
+    {
+      "inventory_occurrence": 98,
+      "module": "HTTP.EventSource.Connection",
+      "mfa": "open_http1/2",
+      "line": 387,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_event_source/lib/http/event_source/connection.ex",
+      "proof": "HTTP-3",
+      "beam_sha256": "dea7ee6e5b40d748af1d3c84f1aabea0cdf861a1267d045b8aecfcc4be2a313d"
+    },
+    {
+      "inventory_occurrence": 99,
+      "module": "HTTP.EventSource.Connection",
+      "mfa": "open_http1/2",
+      "line": 392,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_event_source/lib/http/event_source/connection.ex",
+      "proof": "HTTP-3",
+      "beam_sha256": "dea7ee6e5b40d748af1d3c84f1aabea0cdf861a1267d045b8aecfcc4be2a313d"
+    },
+    {
+      "inventory_occurrence": 100,
+      "module": "HTTP.EventSource.Connection",
+      "mfa": "open_transport/1",
+      "line": 401,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_event_source/lib/http/event_source/connection.ex",
+      "proof": "HTTP-3",
+      "beam_sha256": "dea7ee6e5b40d748af1d3c84f1aabea0cdf861a1267d045b8aecfcc4be2a313d"
+    },
+    {
+      "inventory_occurrence": 101,
+      "module": "HTTP.EventSource.Connection",
+      "mfa": "rearm/1",
+      "line": 635,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_event_source/lib/http/event_source/connection.ex",
+      "proof": "HTTP-3",
+      "beam_sha256": "dea7ee6e5b40d748af1d3c84f1aabea0cdf861a1267d045b8aecfcc4be2a313d"
+    },
+    {
+      "inventory_occurrence": 102,
+      "module": "HTTP.EventSource.Connection",
+      "mfa": "send_request/3",
+      "line": 433,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_event_source/lib/http/event_source/connection.ex",
+      "proof": "HTTP-3",
+      "beam_sha256": "dea7ee6e5b40d748af1d3c84f1aabea0cdf861a1267d045b8aecfcc4be2a313d"
+    },
+    {
+      "inventory_occurrence": 103,
+      "module": "HTTP.HTTP1.IdleTimeout",
+      "mfa": "send/4",
+      "line": 12,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/http1/idle_timeout.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "470b94fb0b53c95a38be7351322b51ca9b52c47ac37df34db6e62a73f1670b7a"
+    },
+    {
+      "inventory_occurrence": 104,
+      "module": "HTTP.HTTP1.IdleTimeout",
+      "mfa": "send_chunk/5",
+      "line": 62,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/http1/idle_timeout.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "470b94fb0b53c95a38be7351322b51ca9b52c47ac37df34db6e62a73f1670b7a"
+    },
+    {
+      "inventory_occurrence": 105,
+      "module": "HTTP.HTTP1.IdleTimeout",
+      "mfa": "send_chunk/5",
+      "line": 63,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/http1/idle_timeout.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "470b94fb0b53c95a38be7351322b51ca9b52c47ac37df34db6e62a73f1670b7a"
+    },
+    {
+      "inventory_occurrence": 106,
+      "module": "HTTP.Promise",
+      "mfa": "apply_callback/2",
+      "line": 124,
+      "kind": "unresolved_apply",
+      "source": "apps/http_fetch/lib/http/promise.ex",
+      "proof": "HTTP-5",
+      "beam_sha256": "71393b9afe724841d8045139c080f86024d8957e989a518f24e16dfc4ff3770d"
+    },
+    {
+      "inventory_occurrence": 107,
+      "module": "HTTP.SocketClient",
+      "mfa": "activate_socket/1",
+      "line": 2354,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 108,
+      "module": "HTTP.SocketClient",
+      "mfa": "activate_socket/1",
+      "line": 2359,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 109,
+      "module": "HTTP.SocketClient",
+      "mfa": "await_request_send/5",
+      "line": 2118,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 110,
+      "module": "HTTP.SocketClient",
+      "mfa": "await_request_send/5",
+      "line": 2123,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 111,
+      "module": "HTTP.SocketClient",
+      "mfa": "await_request_send/5",
+      "line": 2128,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 112,
+      "module": "HTTP.SocketClient",
+      "mfa": "close_http1_socket/1",
+      "line": 2219,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 113,
+      "module": "HTTP.SocketClient",
+      "mfa": "handle_closed/1",
+      "line": 1552,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 114,
+      "module": "HTTP.SocketClient",
+      "mfa": "handle_data/2",
+      "line": 1533,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 115,
+      "module": "HTTP.SocketClient",
+      "mfa": "owner_loop/1",
+      "line": 1522,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 116,
+      "module": "HTTP.SocketClient",
+      "mfa": "send_request/5",
+      "line": 2100,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 117,
+      "module": "HTTP.SocketClient",
+      "mfa": "send_request/5",
+      "line": 2105,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 118,
+      "module": "HTTP.SocketClient",
+      "mfa": "stop_http1_upload/2",
+      "line": 2198,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_fetch/lib/http/socket_client.ex",
+      "proof": "HTTP-4",
+      "beam_sha256": "bd6c2591c9967d618b24768962634ff618ad5162f9057640f75604124469be2e"
+    },
+    {
+      "inventory_occurrence": 119,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "checkin/4",
+      "line": 62,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 120,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "checkin/4",
+      "line": 55,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 121,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "checkin/4",
+      "line": 57,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 122,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "checkin/4",
+      "line": 59,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 123,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "handle_call/3",
+      "line": 152,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 124,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "handle_info/2",
+      "line": 350,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 125,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "lease/2",
+      "line": 293,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 126,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "publish_checkin/4",
+      "line": 409,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 127,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "queued_socket_event?/1",
+      "line": 358,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 128,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "ready_to_lease/2",
+      "line": 300,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 129,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "ready_to_lease/2",
+      "line": 301,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 130,
+      "module": "HTTP.HTTP1.Pool",
+      "mfa": "retire_entry/1",
+      "line": 514,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http1/pool.ex",
+      "proof": "HTTP-6",
+      "beam_sha256": "a04f42729ae3b4b1cd19bcfb82c28911daeb356c30d883b3266689e4a24e68e1"
+    },
+    {
+      "inventory_occurrence": 131,
+      "module": "HTTP.HTTP2.ConnectionOwner",
+      "mfa": "activate_socket/1",
+      "line": 1712,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
+      "proof": "HTTP-7",
+      "beam_sha256": "60ca42c9702eae255f4448744f4638a05d9bde257fac4bed12c85bb1b74e8bb4"
+    },
+    {
+      "inventory_occurrence": 132,
+      "module": "HTTP.HTTP2.ConnectionOwner",
+      "mfa": "activate_socket/1",
+      "line": 1715,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
+      "proof": "HTTP-7",
+      "beam_sha256": "60ca42c9702eae255f4448744f4638a05d9bde257fac4bed12c85bb1b74e8bb4"
+    },
+    {
+      "inventory_occurrence": 133,
+      "module": "HTTP.HTTP2.ConnectionOwner",
+      "mfa": "close_transport/1",
+      "line": 1967,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
+      "proof": "HTTP-7",
+      "beam_sha256": "60ca42c9702eae255f4448744f4638a05d9bde257fac4bed12c85bb1b74e8bb4"
+    },
+    {
+      "inventory_occurrence": 134,
+      "module": "HTTP.HTTP2.ConnectionOwner",
+      "mfa": "close_transport/1",
+      "line": 1968,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
+      "proof": "HTTP-7",
+      "beam_sha256": "60ca42c9702eae255f4448744f4638a05d9bde257fac4bed12c85bb1b74e8bb4"
+    },
+    {
+      "inventory_occurrence": 135,
+      "module": "HTTP.HTTP2.ConnectionOwner",
+      "mfa": "normalize_transport/2",
+      "line": 1732,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
+      "proof": "HTTP-7",
+      "beam_sha256": "60ca42c9702eae255f4448744f4638a05d9bde257fac4bed12c85bb1b74e8bb4"
+    },
+    {
+      "inventory_occurrence": 136,
+      "module": "HTTP.HTTP2.ConnectionOwner",
+      "mfa": "normalize_transport/2",
+      "line": 1735,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
+      "proof": "HTTP-7",
+      "beam_sha256": "60ca42c9702eae255f4448744f4638a05d9bde257fac4bed12c85bb1b74e8bb4"
+    },
+    {
+      "inventory_occurrence": 137,
+      "module": "HTTP.HTTP2.ConnectionOwner",
+      "mfa": "set_transport_options/2",
+      "line": 1697,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
+      "proof": "HTTP-7",
+      "beam_sha256": "60ca42c9702eae255f4448744f4638a05d9bde257fac4bed12c85bb1b74e8bb4"
+    },
+    {
+      "inventory_occurrence": 138,
+      "module": "HTTP.HTTP2.ConnectionOwner",
+      "mfa": "set_transport_options/2",
+      "line": 1700,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
+      "proof": "HTTP-7",
+      "beam_sha256": "60ca42c9702eae255f4448744f4638a05d9bde257fac4bed12c85bb1b74e8bb4"
+    },
+    {
+      "inventory_occurrence": 139,
+      "module": "HTTP.HTTP2.ConnectionOwner",
+      "mfa": "transport_send/2",
+      "line": 1959,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
+      "proof": "HTTP-7",
+      "beam_sha256": "60ca42c9702eae255f4448744f4638a05d9bde257fac4bed12c85bb1b74e8bb4"
+    },
+    {
+      "inventory_occurrence": 140,
+      "module": "HTTP.HTTP2.ConnectionOwner",
+      "mfa": "transport_send/2",
+      "line": 1960,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
+      "proof": "HTTP-7",
+      "beam_sha256": "60ca42c9702eae255f4448744f4638a05d9bde257fac4bed12c85bb1b74e8bb4"
+    },
+    {
+      "inventory_occurrence": 141,
+      "module": "HTTP.HTTP2.Pool",
+      "mfa": "reserve_available/6",
+      "line": 731,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/http_runtime/lib/http/http2/pool.ex",
+      "proof": "HTTP-8",
+      "beam_sha256": "2f0341a3b85e88b84bd73c9aa68010d4fdc1d9447c7ccf16a86d975d8f0d7af4"
+    },
+    {
+      "inventory_occurrence": 145,
+      "module": "HTTP.Runtime.Dialer",
+      "mfa": "close_connect_socket/2",
+      "line": 375,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/runtime/dialer.ex",
+      "proof": "HTTP-1",
+      "beam_sha256": "d347354aef0c5976d2a8fadb3c836ea82393fc065c2ac91550363f50a6a7e346"
+    },
+    {
+      "inventory_occurrence": 146,
+      "module": "HTTP.Runtime.Dialer",
+      "mfa": "connect_in_worker/7",
+      "line": 380,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/runtime/dialer.ex",
+      "proof": "HTTP-1",
+      "beam_sha256": "d347354aef0c5976d2a8fadb3c836ea82393fc065c2ac91550363f50a6a7e346"
+    },
+    {
+      "inventory_occurrence": 147,
+      "module": "HTTP.Runtime.Dialer",
+      "mfa": "transfer_connected_socket/5",
+      "line": 397,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/runtime/dialer.ex",
+      "proof": "HTTP-1",
+      "beam_sha256": "d347354aef0c5976d2a8fadb3c836ea82393fc065c2ac91550363f50a6a7e346"
+    },
+    {
+      "inventory_occurrence": 148,
+      "module": "HTTP.Runtime.Dialer",
+      "mfa": "transfer_connected_socket/5",
+      "line": 402,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/runtime/dialer.ex",
+      "proof": "HTTP-1",
+      "beam_sha256": "d347354aef0c5976d2a8fadb3c836ea82393fc065c2ac91550363f50a6a7e346"
+    },
+    {
+      "inventory_occurrence": 149,
+      "module": "HTTP.Runtime.Dialer",
+      "mfa": "transfer_connected_socket/5",
+      "line": 407,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/runtime/dialer.ex",
+      "proof": "HTTP-1",
+      "beam_sha256": "d347354aef0c5976d2a8fadb3c836ea82393fc065c2ac91550363f50a6a7e346"
+    },
+    {
+      "inventory_occurrence": 150,
+      "module": "HTTP.Runtime.Dialer",
+      "mfa": "transfer_connected_socket/5",
+      "line": 411,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/runtime/dialer.ex",
+      "proof": "HTTP-1",
+      "beam_sha256": "d347354aef0c5976d2a8fadb3c836ea82393fc065c2ac91550363f50a6a7e346"
+    },
+    {
+      "inventory_occurrence": 151,
+      "module": "HTTP.Runtime.Dialer",
+      "mfa": "transfer_connected_socket/5",
+      "line": 415,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_runtime/lib/http/runtime/dialer.ex",
+      "proof": "HTTP-1",
+      "beam_sha256": "d347354aef0c5976d2a8fadb3c836ea82393fc065c2ac91550363f50a6a7e346"
+    },
+    {
+      "inventory_occurrence": 152,
+      "module": "HTTP.WebSocket.Connection",
+      "mfa": "abort_transport/2",
+      "line": 1360,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
+      "proof": "HTTP-9",
+      "beam_sha256": "66c6027bc5044c5c76f8153c0826ce536278ebb0ea48e6c14eb818a090fd186f"
+    },
+    {
+      "inventory_occurrence": 153,
+      "module": "HTTP.WebSocket.Connection",
+      "mfa": "abort_transport/2",
+      "line": 1361,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
+      "proof": "HTTP-9",
+      "beam_sha256": "66c6027bc5044c5c76f8153c0826ce536278ebb0ea48e6c14eb818a090fd186f"
+    },
+    {
+      "inventory_occurrence": 154,
+      "module": "HTTP.WebSocket.Connection",
+      "mfa": "detach/1",
+      "line": 1340,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
+      "proof": "HTTP-9",
+      "beam_sha256": "66c6027bc5044c5c76f8153c0826ce536278ebb0ea48e6c14eb818a090fd186f"
+    },
+    {
+      "inventory_occurrence": 155,
+      "module": "HTTP.WebSocket.Connection",
+      "mfa": "handle_info/2",
+      "line": 342,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
+      "proof": "HTTP-9",
+      "beam_sha256": "66c6027bc5044c5c76f8153c0826ce536278ebb0ea48e6c14eb818a090fd186f"
+    },
+    {
+      "inventory_occurrence": 156,
+      "module": "HTTP.WebSocket.Connection",
+      "mfa": "handle_info/2",
+      "line": 426,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
+      "proof": "HTTP-9",
+      "beam_sha256": "66c6027bc5044c5c76f8153c0826ce536278ebb0ea48e6c14eb818a090fd186f"
+    },
+    {
+      "inventory_occurrence": 157,
+      "module": "HTTP.WebSocket.Connection",
+      "mfa": "rearm/1",
+      "line": 1227,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
+      "proof": "HTTP-9",
+      "beam_sha256": "66c6027bc5044c5c76f8153c0826ce536278ebb0ea48e6c14eb818a090fd186f"
+    },
+    {
+      "inventory_occurrence": 158,
+      "module": "HTTP.WebSocket.Connection",
+      "mfa": "submit/2",
+      "line": 789,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
+      "proof": "HTTP-9",
+      "beam_sha256": "66c6027bc5044c5c76f8153c0826ce536278ebb0ea48e6c14eb818a090fd186f"
+    },
+    {
+      "inventory_occurrence": 159,
+      "module": "HTTP.WebTransport.Session",
+      "mfa": "close_session/2",
+      "line": 538,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_transport/lib/http/web_transport/session.ex",
+      "proof": "WT-1",
+      "beam_sha256": "031ff133dfb551ee57f95819abadbd55ffc8a3c70321eb7e555ff72b74d3707e"
+    },
+    {
+      "inventory_occurrence": 160,
+      "module": "HTTP.WebTransport.Session",
+      "mfa": "create_stream/3",
+      "line": 434,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_transport/lib/http/web_transport/session.ex",
+      "proof": "WT-1",
+      "beam_sha256": "031ff133dfb551ee57f95819abadbd55ffc8a3c70321eb7e555ff72b74d3707e"
+    },
+    {
+      "inventory_occurrence": 161,
+      "module": "HTTP.WebTransport.Session",
+      "mfa": "create_stream/3",
+      "line": 446,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_transport/lib/http/web_transport/session.ex",
+      "proof": "WT-1",
+      "beam_sha256": "031ff133dfb551ee57f95819abadbd55ffc8a3c70321eb7e555ff72b74d3707e"
+    },
+    {
+      "inventory_occurrence": 162,
+      "module": "HTTP.WebTransport.Session",
+      "mfa": "handle_call/3",
+      "line": 172,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_transport/lib/http/web_transport/session.ex",
+      "proof": "WT-1",
+      "beam_sha256": "031ff133dfb551ee57f95819abadbd55ffc8a3c70321eb7e555ff72b74d3707e"
+    },
+    {
+      "inventory_occurrence": 163,
+      "module": "HTTP.WebTransport.Session",
+      "mfa": "handle_call/3",
+      "line": 182,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_transport/lib/http/web_transport/session.ex",
+      "proof": "WT-1",
+      "beam_sha256": "031ff133dfb551ee57f95819abadbd55ffc8a3c70321eb7e555ff72b74d3707e"
+    },
+    {
+      "inventory_occurrence": 164,
+      "module": "HTTP.WebTransport.Session",
+      "mfa": "handle_call/3",
+      "line": 193,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_transport/lib/http/web_transport/session.ex",
+      "proof": "WT-1",
+      "beam_sha256": "031ff133dfb551ee57f95819abadbd55ffc8a3c70321eb7e555ff72b74d3707e"
+    },
+    {
+      "inventory_occurrence": 165,
+      "module": "HTTP.WebTransport.Session",
+      "mfa": "handle_call/3",
+      "line": 201,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_transport/lib/http/web_transport/session.ex",
+      "proof": "WT-1",
+      "beam_sha256": "031ff133dfb551ee57f95819abadbd55ffc8a3c70321eb7e555ff72b74d3707e"
+    },
+    {
+      "inventory_occurrence": 166,
+      "module": "HTTP.WebTransport.Session",
+      "mfa": "handle_call/3",
+      "line": 216,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_transport/lib/http/web_transport/session.ex",
+      "proof": "WT-1",
+      "beam_sha256": "031ff133dfb551ee57f95819abadbd55ffc8a3c70321eb7e555ff72b74d3707e"
+    },
+    {
+      "inventory_occurrence": 167,
+      "module": "HTTP.WebTransport.Session",
+      "mfa": "handle_continue/2",
+      "line": 90,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_transport/lib/http/web_transport/session.ex",
+      "proof": "WT-1",
+      "beam_sha256": "031ff133dfb551ee57f95819abadbd55ffc8a3c70321eb7e555ff72b74d3707e"
+    },
+    {
+      "inventory_occurrence": 168,
+      "module": "HTTP.WebTransport.Session",
+      "mfa": "send_datagram/3",
+      "line": 411,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/http_web_transport/lib/http/web_transport/session.ex",
+      "proof": "WT-1",
+      "beam_sha256": "031ff133dfb551ee57f95819abadbd55ffc8a3c70321eb7e555ff72b74d3707e"
+    }
+  ],
+  "checks": {
+    "source_inputs_match_packaged_sources": true,
+    "strict_release_static_status": "FAIL",
+    "strict_release_total_unresolved": 175,
+    "P6_accepted": false
+  }
+}

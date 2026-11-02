@@ -107,6 +107,10 @@ Q1–Q4 occurrences: opaque cleanup capability construction, the two concrete IO
 implementations, the external datagram callback and the approved TLS adapter.
 It likewise preserves the compiled findings pending directed gate acceptance.
 
+The [directed HTTP source review](no-otp-directed-http-proof.md) covers 76
+HTTP-1–HTTP-9 and WT-1 occurrences, including actual pool/owner constructors,
+stale connection replies and the unsupported built-in WebTransport backend.
+
 | Proof | Actual implementation and entry | Source finding and remaining proof |
 | --- | --- | --- |
 | Q1 | `Quic.Cleanup.new/1 -> retire/2` | `new/1` constructs the retirement closure around its handle, secret and atomics fence. Bind all library leases reaching `retire/2` to this constructor; do not treat arbitrary `%Lease{}` values as safe. |
