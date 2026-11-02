@@ -16,7 +16,8 @@ jobs:
       fail-fast: false
       matrix:
         fixture: [original]
-        scope: [stress]
+        scope: [full_stress]
+        repetition: [1, 2, 3]
     env:
       MIX_ENV: test
       HTTP_FETCH_CI_APP: http_fetch
@@ -52,7 +53,7 @@ jobs:
 
           path = Path('apps/http_fetch/test/http/http1_write_idle_wire_test.exs')
           source = path.read_text()
-          if os.environ['DIAGNOSTIC_SCOPE'] == 'stress':
+          if os.environ['DIAGNOSTIC_SCOPE'] in ('stress', 'full_stress'):
               marker = '    test "#{backend} a nonreading peer expires streamed writes and closes the source" do\n'
               assert source.count(marker) == 1
               source = source.replace(marker, '    for attempt <- 1..20 do\n' + marker.replace('source"', 'source #{attempt}"'))
