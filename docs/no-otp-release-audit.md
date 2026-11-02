@@ -27,8 +27,32 @@ they do not establish callable safety.
 No OTP SSL application dependency, bundled SSL directory, boot entry, direct SSL
 import, missing abstract code or duplicate candidate application was reported.
 Before and after the audit, OTP SSL was unavailable, unloaded and unstarted.
-The strict dispatch check rejected the release before traffic: **zero scenarios
-executed**. This establishes neither traffic success nor P6 acceptance.
+At that baseline, the strict dispatch check rejected the release before traffic:
+**zero scenarios executed**. The later traffic evidence below preserves that
+static failure.
+
+## Actual no-OTP SSL traffic — 2026-11-02
+
+At `524edb284aa26b92a0dd2aace4d5dd8a3d395c0a`,
+[CI run 41395793221](https://github.com/gsmlg-dev/http_fetch/actions/runs/41395793221),
+job `125116856947`, artifact `13119243608`, builds isolated candidate releases
+on Elixir 1.18.6 / OTP 28 / ERTS 16.4.0.7. Both TLS plans pass all 35 scenarios:
+H1, H2, WebSocket, EventSource, managed H1/H2 and explicit H3, each with success,
+invalid identity, timeout, cancellation and shutdown. The TLS1.2 plan still uses
+TLS1.3 for H3, as required by QUIC.
+
+The 70 consumer results and independent peer observations agree on nonce,
+identity, TLS/ALPN, request counts, no fallback/replay and confirmed cleanup.
+All peer statistics report zero active connections and no errors; peer teardown
+has no errors. OTP SSL remains unavailable, unloaded and unstarted before and
+after traffic. All 269 packaged source hashes match the current sources, with
+the existing portable `mix.exs` transformation applied.
+
+This is passing **traffic evidence**. Both strict release commands and overall
+gates still fail with all 175 unresolved dispatch findings retained. No directed
+proof or P6 acceptance is inferred from successful traffic. Root's independent
+artifact/peer/source verification is retained in
+`/private/tmp/http-fetch-directed-p6-20261102T0522Z/TRAFFIC-70-ACCEPTANCE.json`.
 
 | Production package | Remaining occurrences |
 | --- | ---: |

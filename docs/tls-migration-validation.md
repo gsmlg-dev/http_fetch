@@ -1,5 +1,21 @@
 # TLS migration execution ledger
 
+## P6 real release traffic checkpoint — 2026-11-02
+
+The [directed release audit](no-otp-release-audit.md#actual-no-otp-ssl-traffic--2026-11-02)
+records 70 passing isolated candidate-release scenarios at `524edb2`: both TLS
+plans pass all seven clients' success, invalid-identity, timeout, cancellation
+and shutdown checks. Root independently revalidates all consumer/peer pairs,
+nonces, TLS/ALPN, no fallback/replay, cleanup, zero active peer connections and
+269 packaged source hashes. OTP SSL is unavailable, unloaded and unstarted
+before and after both runs. The TLS1.2 plan uses TLS1.3 for QUIC.
+
+The strict release gate remains failed with the same 175 dynamic dispatch
+findings. General static-analysis development stays paused; concrete source and
+production-entry proofs remain required. The two OTP manual-ticket integration
+failures also remain separate release blockers. P6 and `1.0.0-rc.0` publication
+are not accepted by this traffic checkpoint.
+
 ## P7 release-candidate preparation — 2026-10-29
 
 Release tooling at `9840e8e2966885a3af5d4c1f33d7eb7245e4d4f7` accepts canonical
