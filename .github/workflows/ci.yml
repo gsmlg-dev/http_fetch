@@ -183,13 +183,16 @@ jobs:
       - name: Require isolated candidate release without OTP SSL
         run: |
           set -euo pipefail
+          status=0
           for tls in TLSv1.2 TLSv1.3; do
             "$RUNNER_TEMP/no-otp-peer-python/bin/python" scripts/release/no_otp_consumer_gate.py \
               "$RELEASE_VERSION" "$RUNNER_TEMP/archives" "$RUNNER_TEMP/stage" \
               --source-root "$GITHUB_WORKSPACE" --source-sha "$(git rev-parse HEAD)" \
               --peer-plan "$RUNNER_TEMP/no-otp-plan-$tls.json" \
-              --output "$RUNNER_TEMP/no-otp-release/candidate-$tls"
+              --output "$RUNNER_TEMP/no-otp-release/candidate-$tls" \
+              --collect-blocked-traffic || status=1
           done
+          exit "$status"
       - name: Preserve no-OTP release diagnostics
         if: always()
         uses: actions/upload-artifact@v4

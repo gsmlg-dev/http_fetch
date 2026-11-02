@@ -141,9 +141,15 @@ defmodule NoOTP.Consumer do
 
     report =
       try do
-        unless NoOTP.ReleaseAudit.clean?(report.artifacts, report.before),
-          do:
-            raise("release closure/import/dispatch/runtime isolation is forbidden or unconfirmed")
+        traffic_diagnostic = config["collect_blocked_traffic"] == true
+
+        unless NoOTP.ReleaseAudit.clean?(report.artifacts, report.before) or
+                 (traffic_diagnostic and
+                    NoOTP.ReleaseAudit.isolated?(report.artifacts, report.before)),
+               do:
+                 raise(
+                   "release closure/import/dispatch/runtime isolation is forbidden or unconfirmed"
+                 )
 
         {:ok, :ex_ssl} = HTTP.TLSBackend.resolve()
         {:error, _legacy_backend_rejected} = HTTP.TLSBackend.resolve(:ssl)

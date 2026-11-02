@@ -697,7 +697,7 @@ def validate_private_fields(report):
                 'private field graph status disagrees with complete seeded origins')
 
 
-def validate_artifacts(report, version):
+def validate_artifacts(report, version, *, allow_unresolved=False):
     require(isinstance(report, dict), 'artifact audit missing')
     validate_callable_preflight(report)
     validate_private_fields(report)
@@ -706,6 +706,9 @@ def validate_artifacts(report, version):
     for field in ('ssl_app_dependencies', 'ssl_bundle_paths', 'ssl_boot_entries',
                   'direct_otp_ssl_imports', 'unresolved_dispatch', 'missing_abstract_code',
                   'duplicate_package_apps'):
+        if field == 'unresolved_dispatch' and allow_unresolved:
+            require(isinstance(report.get(field), list), 'unresolved dispatch inventory missing')
+            continue
         require(report.get(field) == [], f'{field}: forbidden or unconfirmed production evidence')
     require(report.get('package_versions') == {package: version for package in PACKAGES},
             'all nine release package versions must match candidate archives')
@@ -927,9 +930,12 @@ def bounded_registry_commands(runner, source=None):
         consumer_gate.ROOT = original_root
 
 
-def run(version, archives, stage, source, source_sha, plan, output, max_seconds=1800, *, published=False):
+def run(version, archives, stage, source, source_sha, plan, output, max_seconds=1800, *,
+        published=False, collect_blocked_traffic=False):
     validate_version(version)
     validate_plan(plan)
+    require(not (published and collect_blocked_traffic),
+            'published verification requires the strict release gate')
     require(re.fullmatch(r'[a-f0-9]{40}', source_sha), 'full source SHA required')
     output, source = output.resolve(), source.resolve()
     require(not output.exists() and not within(output, source), 'new isolated output outside source tree required')
@@ -944,6 +950,8 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
     peers = []
     report = dict(gate='no_otp_production_release', status='FAIL', nonce=nonce,
                   source_sha=source_sha, version=version, output=str(output),
+                  static_status='NOT_RUN', traffic_status='NOT_RUN',
+                  collect_blocked_traffic=collect_blocked_traffic,
                   dependency_source='published' if published else 'candidate')
     try:
         head = runner.command(['git', 'rev-parse', 'HEAD'], cwd=source, env=env).strip()
@@ -969,6 +977,8 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
                    NO_OTP_RELEASE=str(release), NO_OTP_REPORT=str(output / 'release-report.json'))
         # Public CA input only: peer private keys are never read/copied by the gate.
         config = dict(schema=1, nonce=nonce, version=version, scenarios=[])
+        if collect_blocked_traffic:
+            config['collect_blocked_traffic'] = True
         with bounded_registry_commands(runner, source):
             registry = nullcontext(None)
             if not published:
@@ -997,10 +1007,31 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
         config_path = output / 'traffic.json'
         config_path.write_text(json.dumps(config, indent=2))
         env['NO_OTP_CONFIG'] = str(config_path)
-        runner.command(release_command(release), cwd=output, env=env, limit=runner.remaining(1200))
+        command_error = None
+        try:
+            runner.command(release_command(release), cwd=output, env=env, limit=runner.remaining(1200))
+        except GateError as error:
+            if not collect_blocked_traffic:
+                raise
+            command_error = str(error)
+            report['release_command_error'] = command_error
         actual = json.loads(Path(env['NO_OTP_REPORT']).read_text())
         report['release'] = actual
-        validate_artifacts(actual.get('artifacts'), version)
+        report['traffic_status'] = 'FAIL'
+        require(actual.get('nonce') == nonce, 'release report nonce mismatch')
+        report['static_status'] = 'FAIL'
+        if collect_blocked_traffic:
+            validate_artifacts(actual.get('artifacts'), version, allow_unresolved=True)
+        static_error = None
+        try:
+            validate_artifacts(actual.get('artifacts'), version)
+            report['static_status'] = 'PASS'
+        except GateError as error:
+            report['static_status'] = 'FAIL'
+            if not collect_blocked_traffic:
+                raise
+            static_error = str(error)
+            report['static_error'] = static_error
         validate_runtime(actual.get('before'), release)
         validate_runtime(actual.get('after'), release)
         require(actual.get('runtime', {}).get('elixir') and actual['runtime'].get('otp'), 'runtime versions missing')
@@ -1011,6 +1042,9 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
             selected = [record for record in actual['scenarios'] if record.get('id') == case['id']]
             require(len(selected) == 1, 'release scenario duplicate/missing')
             validate_scenario(case, selected[0], by_name[case['peer']].scenario(case, nonce), nonce)
+        report['traffic_status'] = 'PASS'
+        require(static_error is None, static_error)
+        require(command_error is None, f'release command did not exit successfully: {command_error}')
         report['status'] = 'PASS'
     except BaseException as error:
         report['error'] = str(error)
@@ -1042,11 +1076,16 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--max-seconds', type=int, default=1800)
     parser.add_argument('--published', action='store_true')
+    parser.add_argument('--collect-blocked-traffic', action='store_true',
+                        help='collect traffic evidence while retaining static gate failures')
     args = parser.parse_args()
     require(1 <= args.max_seconds <= 7200, 'bounded gate duration required')
+    options = dict(published=args.published)
+    if args.collect_blocked_traffic:
+        options['collect_blocked_traffic'] = True
     result = run(args.version, args.archives.resolve(), args.stage.resolve(), args.source_root,
                  args.source_sha, json.loads(args.peer_plan.read_text()), args.output, args.max_seconds,
-                 published=args.published)
+                 **options)
     print(json.dumps(dict(gate=result['gate'], status=result['status'], output=result['output'])))
 
 

@@ -2280,13 +2280,18 @@ defmodule NoOTP.ReleaseAudit do
   end
 
   def clean?(artifacts, runtime) do
+    Map.fetch!(artifacts, :unresolved_dispatch) == [] and isolated?(artifacts, runtime)
+  end
+
+  # Traffic diagnostics may run with unresolved dispatches, but retain the strict
+  # clean?/2 failure. Every artifact and runtime isolation check still applies.
+  def isolated?(artifacts, runtime) do
     Enum.all?(
       [
         :ssl_app_dependencies,
         :ssl_bundle_paths,
         :ssl_boot_entries,
         :direct_otp_ssl_imports,
-        :unresolved_dispatch,
         :missing_abstract_code,
         :duplicate_package_apps
       ],
