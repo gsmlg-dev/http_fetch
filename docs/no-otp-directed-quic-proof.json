@@ -1,0 +1,319 @@
+{
+  "schema": 1,
+  "review": "no-otp-directed-quic-proof.md",
+  "source_commit": "524edb284aa26b92a0dd2aace4d5dd8a3d395c0a",
+  "artifact": 13119243608,
+  "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
+  "original_findings_removed": 0,
+  "source_inputs_sha256": {
+    "apps/elixir_quic/lib/quic.ex": "e31332fe885e0baa1c32ed7436430db6cec0066cac6fb27bea9acbeaee54c1b4",
+    "apps/elixir_quic/lib/quic/cleanup.ex": "b25e373c6e11a96d9248caece562c671b6f87b8a3c6c33ee24943871e1852b99",
+    "apps/elixir_quic/lib/quic/cleanup/observer.ex": "c74428b9ef5cddb0eed7c8966e7593dc3d4371a1709c169fe5cccab2363e5918",
+    "apps/elixir_quic/lib/quic/endpoint.ex": "1c379e6a4ae99000a40bf195a3417e4a77c5ca4a5ceed05a91aa4deac6839880",
+    "apps/elixir_quic/lib/quic/connection.ex": "8d2e53afa19b89020538fb633dd6b5c88fcd32edbc01f000ca7949761e4d129a",
+    "apps/elixir_quic/lib/quic/io/gen_udp.ex": "1e5c46de218a0614659660815d4560d137191907430d74c4e2027eff307bc98f",
+    "apps/elixir_quic/lib/quic/io/external_writer.ex": "1fda217ed39c3cbf474d4185a0af5fc5fae94667fd2ab32dcd8fbbd3ed6b2ddb",
+    "apps/elixir_quic/lib/quic/abyss_dispatcher.ex": "ecefccf8f0eb0b44f57f1ef7043c48fe8fd18d2865259aea06eee7aed420b7f2",
+    "apps/elixir_quic/lib/quic/tls_driver.ex": "d404c7c833e7b1ffd4116f8c29eb84f3d1c29fd02f12a6807300a24e4f859e22",
+    "apps/elixir_quic/lib/quic/handshake_scheduler.ex": "9b401040903afaa02e38e0a5c027553c174aa32229b82be4084c483590a55d77",
+    "apps/ex_ssl/lib/ssl/quic.ex": "d8575ea864739830c9b52185ad09aa3af03cf8a61d8164ebce5473b4cbdfddf3",
+    "apps/ex_ssl/lib/ssl/quic/config.ex": "a523334dc65a9e82f39943cf9a9bcc7144546cb3ac3f9d0389bd937aee2e01b1",
+    "apps/elixir_quic_http3/lib/quic_http3/session.ex": "c0b460040007aea68cbca830c60a15c5fb2efda12c1c345bd24c095caa63544f",
+    "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "e3eceea332cdee69f921bae15452e8b4d41fc76265b8bfff76a2dfbf5c28385a",
+    "apps/http_runtime/lib/http/http3/pool.ex": "730b52081a9f99621e5edd677167556dbeede70fd74cef7d1164e9e230118d44",
+    "apps/http_runtime/lib/http/http3/connection_owner.ex": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
+    "apps/http_runtime/lib/http/http3/stream.ex": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78"
+  },
+  "production_source_census": {
+    "files": 244,
+    "sorted_path_sha256_json": "097ad232bd57e7dcf49f79ea829eb9e43ad6b155a42487a4ee1dae66983505b5"
+  },
+  "occurrences": [
+    {
+      "module": "Quic.Cleanup",
+      "mfa": "retire/2",
+      "line": 171,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/elixir_quic/lib/quic/cleanup.ex",
+      "proof": "Q1",
+      "beam_sha256": "421bfe71c265ace98833e4d6a42ad24b290d3f1ccc7364f570cfe98c741542c2",
+      "inventory_occurrence": 1
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "begin_closing/2",
+      "line": 1165,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 2
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "begin_closing/2",
+      "line": 1121,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 3
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "closing_timer/1",
+      "line": 1046,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 4
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "draining_timer/1",
+      "line": 1051,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 5
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "expired?/1",
+      "line": 1483,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 6
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "flush/1",
+      "line": 986,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 7
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "handle_event/4",
+      "line": 324,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 8
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "handle_event/4",
+      "line": 691,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 9
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "handle_event/4",
+      "line": 702,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 10
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "handle_event/4",
+      "line": 714,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 11
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "handle_event/4",
+      "line": 724,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 12
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "handshake_deadline/3",
+      "line": 124,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 13
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "idle_timer/1",
+      "line": 1038,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 14
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "local_send/2",
+      "line": 1209,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 15
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "local_send/2",
+      "line": 1211,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 16
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "local_send/2",
+      "line": 1214,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 17
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "receive_packet/4",
+      "line": 816,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 18
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "recovery_timer/1",
+      "line": 1031,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 19
+    },
+    {
+      "module": "Quic.Connection",
+      "mfa": "refresh_idle/1",
+      "line": 1070,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2",
+      "beam_sha256": "8ffdf22a55bd7f3947a61dbafa54a5539eec51e15aaa8d43ebf9bc0e89834546",
+      "inventory_occurrence": 20
+    },
+    {
+      "module": "Quic.Endpoint",
+      "mfa": "admit_initial/5",
+      "line": 373,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/endpoint.ex",
+      "proof": "Q2",
+      "beam_sha256": "b50c6e7866be1e8d05a4838c539c6cfd1638e5f6383f669444d072e4745a28d3",
+      "inventory_occurrence": 21
+    },
+    {
+      "module": "Quic.IO.ExternalWriter",
+      "mfa": "handle_call/3",
+      "line": 42,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/elixir_quic/lib/quic/io/external_writer.ex",
+      "proof": "Q3",
+      "beam_sha256": "1a379db06b1ec6ddc95b1967c764fe947ed92d03ced3ef2fe766e3d2bd77935e",
+      "inventory_occurrence": 22
+    },
+    {
+      "module": "Quic.TLSDriver",
+      "mfa": "abort/2",
+      "line": 146,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
+      "proof": "Q4",
+      "beam_sha256": "1a6b9f99f2d29f8ea946e6185fc63c8040864fcc67c53f547e088c5498822b59",
+      "inventory_occurrence": 23
+    },
+    {
+      "module": "Quic.TLSDriver",
+      "mfa": "apply_tls/3",
+      "line": 214,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
+      "proof": "Q4",
+      "beam_sha256": "1a6b9f99f2d29f8ea946e6185fc63c8040864fcc67c53f547e088c5498822b59",
+      "inventory_occurrence": 24
+    },
+    {
+      "module": "Quic.TLSDriver",
+      "mfa": "call_new/3",
+      "line": 333,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
+      "proof": "Q4",
+      "beam_sha256": "1a6b9f99f2d29f8ea946e6185fc63c8040864fcc67c53f547e088c5498822b59",
+      "inventory_occurrence": 25
+    },
+    {
+      "module": "Quic.TLSDriver",
+      "mfa": "drain_pending/1",
+      "line": 243,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
+      "proof": "Q4",
+      "beam_sha256": "1a6b9f99f2d29f8ea946e6185fc63c8040864fcc67c53f547e088c5498822b59",
+      "inventory_occurrence": 26
+    },
+    {
+      "module": "Quic.TLSDriver",
+      "mfa": "info/1",
+      "line": 143,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
+      "proof": "Q4",
+      "beam_sha256": "1a6b9f99f2d29f8ea946e6185fc63c8040864fcc67c53f547e088c5498822b59",
+      "inventory_occurrence": 27
+    },
+    {
+      "module": "Quic.TLSDriver",
+      "mfa": "receive_level/1",
+      "line": 334,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
+      "proof": "Q4",
+      "beam_sha256": "1a6b9f99f2d29f8ea946e6185fc63c8040864fcc67c53f547e088c5498822b59",
+      "inventory_occurrence": 28
+    }
+  ],
+  "checks": {
+    "source_inputs_match_packaged_sources": true,
+    "strict_release_static_status": "FAIL",
+    "strict_release_total_unresolved": 175,
+    "P6_accepted": false
+  }
+}

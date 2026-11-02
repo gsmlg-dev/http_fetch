@@ -102,6 +102,11 @@ TLS-1 through TLS-6 occurrences against 26 selected source inputs and the comple
 244-file production-source census. It preserves the compiled findings until
 their source-bound discharge is accepted.
 
+The [directed QUIC source review](no-otp-directed-quic-proof.md) traces all 28
+Q1–Q4 occurrences: opaque cleanup capability construction, the two concrete IO
+implementations, the external datagram callback and the approved TLS adapter.
+It likewise preserves the compiled findings pending directed gate acceptance.
+
 | Proof | Actual implementation and entry | Source finding and remaining proof |
 | --- | --- | --- |
 | Q1 | `Quic.Cleanup.new/1 -> retire/2` | `new/1` constructs the retirement closure around its handle, secret and atomics fence. Bind all library leases reaching `retire/2` to this constructor; do not treat arbitrary `%Lease{}` values as safe. |
