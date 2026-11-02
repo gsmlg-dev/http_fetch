@@ -15,8 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        otp: ['28', '29']
-        setting: [default, sha256, sha384, secp256r1]
+        include:
+          - {otp: '28', setting: default}
+          - {otp: '29', setting: default}
+          - {otp: '28', setting: sha256}
+          - {otp: '29', setting: sha256}
+          - {otp: '28', setting: secp256r1}
+          - {otp: '28', setting: x25519}
     env:
       MIX_ENV: test
       HTTP_FETCH_CI_APP: ex_ssl
@@ -51,8 +56,46 @@ jobs:
               'sha256': '      ciphers: [%{key_exchange: :any, cipher: :aes_128_gcm, mac: :aead, prf: :sha256}],\n',
               'sha384': '      ciphers: [%{key_exchange: :any, cipher: :aes_256_gcm, mac: :aead, prf: :sha384}],\n',
               'secp256r1': '      supported_groups: [:secp256r1],\n',
+              'x25519': '      supported_groups: [:x25519],\n',
           }
-          path.write_text(source.replace(marker, settings[os.environ['DIAGNOSTIC_SETTING']] + marker))
+          source = source.replace(marker, settings[os.environ['DIAGNOSTIC_SETTING']] + marker)
+          connect = '    assert {:ok, socket} = backend.connect(@host, peer.port, opts, 5_000)'
+          assert source.count(connect) == 1
+          source = source.replace(connect, '''    result = backend.connect(@host, peer.port, opts, 5_000)
+              if match?({:error, _}, result), do: IO.inspect(OpenSSLPeer.event(peer, "handshake", 5_000), label: "bounded_peer_diagnostic")
+              assert {:ok, socket} = result''')
+          event = '    assert event["client_der_b64"]'
+          assert source.count(event) == 1
+          source = source.replace(event, '    IO.inspect(Map.take(event, ["resumed", "cipher", "diagnostic"]), label: "bounded_peer_diagnostic")\n' + event)
+          path.write_text(source)
+
+          peer = Path('apps/ex_ssl/test/support/openssl_peer.py')
+          source = peer.read_text()
+          marker = '    context.set_ciphers(args.cipher)'
+          assert source.count(marker) == 1
+          source = source.replace(marker, marker + '''
+              context._diagnostic = []
+              def diagnostic(_connection, direction, _version, content_type, message_type, data):
+                  if direction != "write" or int(content_type) != 22 or int(message_type) != 2:
+                      return
+                  hrr = data[6:38].hex() == "cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c"
+                  offset = 39 + data[38]
+                  cipher = int.from_bytes(data[offset:offset + 2], "big")
+                  offset += 5
+                  groups = []
+                  while offset + 4 <= len(data):
+                      kind = int.from_bytes(data[offset:offset + 2], "big")
+                      size = int.from_bytes(data[offset + 2:offset + 4], "big")
+                      if kind == 51:
+                          groups.append(int.from_bytes(data[offset + 4:offset + 6], "big"))
+                      offset += 4 + size
+                  context._diagnostic.append(dict(hrr=hrr, cipher=cipher, groups=groups))
+              context._msg_callback = diagnostic
+          ''')
+          source = source.replace('cipher=connection.cipher()[0],', 'cipher=connection.cipher()[0], diagnostic=context._diagnostic,')
+          source = source.replace('announce("failure", error=type(error).__name__)', 'announce("failure", error=type(error).__name__, diagnostic=context._diagnostic)')
+          compile(source, str(peer), 'exec')
+          peer.write_text(source)
           PY
       - name: Run every original ticket assertion
-        run: mix test apps/ex_ssl/test/ssl/manual_ticket_integration_test.exs --include integration --seed 0 --trace
+        run: mix test apps/ex_ssl/test/ssl/manual_ticket_integration_test.exs:19 apps/ex_ssl/test/ssl/manual_ticket_integration_test.exs:113 --include integration --seed 0 --trace
