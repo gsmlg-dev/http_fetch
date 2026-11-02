@@ -1,5 +1,57 @@
 # TLS migration execution ledger
 
+## P7 coordinated RC publication — 2026-11-02
+
+All nine `1.0.0-rc.0` packages are published through the existing coordinated
+[release workflow 41424352487](https://github.com/gsmlg-dev/http_fetch/actions/runs/41424352487),
+job `125207226556`, which passes all non-deferred gates on Elixir 1.18.6 / OTP 28.
+Immutable tag `v1.0.0-rc.0` points to version commit
+`233a65373871f0073e69f49d7e6e70de92721e15`. GitHub's
+[release](https://github.com/gsmlg-dev/http_fetch/releases/tag/v1.0.0-rc.0)
+is a prerelease with nine assets; latest stable remains `v0.21.19`.
+Formal `1.0.0` requires a later validation period and release decision.
+
+The complete umbrella regression, formatting, automation, Go E2E, imported
+QUIC/HTTP3 and impaired-stream gates pass. Pinned Caddy JA3/JA4, aioquic,
+documentation, public HTTP3, nine archive/source audits, isolated candidate
+consumers, candidate HTTP2/TLS groups and strict candidate releases also pass.
+The first attempt `41418706974` failed before any tag or package write when
+Abyss staging copied an ExUnit-generated named pipe. Scoped fix `5e1302d`
+excludes only package-root test output, preserving nested source and fixtures;
+the real pinned Abyss workload passes in the final release. Production code,
+external payload/FIN checks and their deadlines are unchanged by that fix.
+
+Cold published `all`, `external` and `feature` consumers pass. Root independently
+matches all 71 TLS group logs to the current fixture manifest: 3,066 checks,
+zero failures, skips or exclusions, with exact published Hex provenance.
+Published isolated public HTTP3 traffic also passes. Both candidate and published
+production releases pass the TLS1.2/TLS1.3 plans, each with 35 scenarios: 140
+consumer-peer pairs in total. WSS/SSE use the plan's H2 routes; the H3 Session
+cases use TLS1.3 in both plans, with public Fetch/SSE H3 covered separately.
+
+Every release inspects 350 BEAMs, binds 256 reviewed source inputs and preserves
+all 175 original dispatch findings with zero unproved occurrences. OTP SSL is
+absent from dependencies, boot, bundle and direct imports, and remains unavailable,
+unloaded and unstarted before and after traffic. Independent peers confirm
+identity/TLS/ALPN, request counts, no fallback/replay, complete provider cleanup,
+zero active connections and no errors. Root reconciles native and wrapper
+canonical-path evidence without changing either gate or its expectations.
+
+All nine downloaded GitHub archives match official Hex checksums, GitHub asset
+digests, the exact internal dependency graph and 269 portable source inputs.
+Candidate source `5e1302d` differs from the release tag only by the coordinated
+version replacement in ten manifests; every other tracked input is identical.
+Receipts are retained in
+`/private/tmp/http-fetch-directed-p6-20261102T0522Z/RC0-INDEPENDENT-ACCEPTANCE.json`,
+`RC0-PUBLISHED-TLS-ACCEPTANCE.json`, `RC0-HEX-PUBLICATION.json`,
+`RC0-CANDIDATE-TAG-IDENTITY.json` and `RC0-RELEASE-WORKFLOW.json`.
+Workflow artifacts `13135505162`, `13134901791` and `13134348064` retain the
+no-OTP, published TLS and HTTP3 diagnostics, respectively.
+
+P0–P7's non-deferred migration and release gates are complete. Credo/Dialyzer
+remain explicitly deferred, and performance remains TODO outside this goal;
+neither is claimed as passing. General static-analysis expansion remains paused.
+
 ## P6 integrated acceptance — 2026-11-02
 
 The [directed release audit](no-otp-release-audit.md#integrated-p6-acceptance--2026-11-02)
@@ -36,9 +88,10 @@ also passes. Receipts are retained in
 `/private/tmp/http-fetch-directed-p6-20261102T0522Z/ALL9-INTEGRATION-ACCEPTANCE.json`
 and `CANDIDATE-RUNTIME-MATRIX-ACCEPTANCE.json`.
 
-P7's full release workflow, `1.0.0-rc.0` publication and cold published-consumer
-verification remain open. Credo/Dialyzer and performance retain their user-approved
-deferrals; no deferred check is reported as passing.
+At this P6 checkpoint, P7's full release workflow, `1.0.0-rc.0` publication and
+cold published-consumer verification were still open; they are completed above.
+Credo/Dialyzer and performance retain their user-approved deferrals; no deferred
+check is reported as passing.
 
 ## P7 release-candidate preparation — 2026-10-29
 
@@ -70,8 +123,9 @@ for the new `rc.0` checks are retained at
 and full automation results remain at
 `/private/tmp/http-fetch-root-resume-20261029T0530Z` as historical evidence.
 
-No RC has been published. P6 release acceptance and P7 publication remain open;
-Credo/Dialyzer and performance retain their existing deferrals.
+At this preparation checkpoint no RC had been published, and P6 release acceptance
+and P7 publication remained open. Credo/Dialyzer and performance retained their
+existing deferrals.
 
 ## P6 source-removal checkpoint — 2026-10-30
 

@@ -10,7 +10,11 @@ runtime gates pass. P6 removes the production OTP adapter and selectors; its
 isolated release, directed dynamic-dispatch proof and 70 real-traffic scenarios
 pass at `31a8a15`, with unchanged production sources through `658bbd5`. All-nine
 integration passes at `658bbd5`, closing P6's non-deferred acceptance gates.
-P7 remains open; the migration has not been published.
+P7 is complete at `233a653`: all nine `1.0.0-rc.0` packages are published,
+and cold published consumers pass the complete release gates. The
+[RC release](https://github.com/gsmlg-dev/http_fetch/releases/tag/v1.0.0-rc.0)
+is a prerelease; `v0.21.19` remains the latest stable release. Formal `1.0.0`
+requires a later validation period and release decision.
 
 See [design and compatibility table](tls-migration-design.md) and
 [execution evidence](tls-migration-validation.md). A checkbox means executed and
@@ -51,7 +55,8 @@ default behavior or production OTP removal.
 P5's later [acceptance boundary](tls-migration-validation.md#p5-default-promotion-acceptance--2026-10-28)
 adds the complete default matrix, current all-nine integration and three candidate
 runtime selections, each passing 71 groups and 3,061 checks. Source/archive identity
-is verified; P6 production removal and P7 publication remain required.
+is verified. That P5 boundary did not establish P6 production removal or P7
+publication; their later accepted results are recorded below.
 
 User decisions override the historical checklist where noted: performance work,
 including comparative latency/throughput and load/soak budgets, is TODO outside
@@ -430,8 +435,8 @@ pass the configured Linux source suites. The strict candidate release and
 70 traffic scenarios pass at `31a8a15`; production sources remain unchanged
 through `658bbd5`, whose complete nine-app integration workflow passes. The
 OTP 28 reference and integration-fixture regressions are closed by their actual
-full-suite results. P6 is accepted; P7's complete release regression and cold
-published-consumer checks remain required.
+full-suite results. P6 is accepted; P7's later complete release regression and
+cold published-consumer checks also pass at `233a653`.
 
 Caller-supplied implementations at `QuicHttp3.Session.new/1` (`:transport`),
 `HTTP.WebTransport.new/2` (`:backend`), `Quic.TLSDriver.new/2` (`:adapter`,
@@ -457,25 +462,33 @@ WebTransport support. Other injection seams receive no blanket exemption.
 
 ## P7 — Coordinated release and published verification (after P6)
 
-The next coordinated release is `1.0.0-rc.0`, as selected by the user. Verify
-that exact version is available before publication. GitHub marks it as a
-prerelease and keeps the existing stable release as latest. All source, candidate
-and cold published-consumer gates remain required. Formal `1.0.0` follows a later
-validation period and release decision.
+All nine `1.0.0-rc.0` packages are published at immutable tag
+`v1.0.0-rc.0` / `233a65373871f0073e69f49d7e6e70de92721e15`.
+The complete [release workflow](https://github.com/gsmlg-dev/http_fetch/actions/runs/41424352487)
+passes, including cold published HTTP3/TLS consumers and both published
+no-OTP-SSL release plans. Root independently reconciles all nine actual archives,
+Hex metadata, GitHub assets, source identities and all 140 candidate/published
+consumer-peer pairs. See the [publication evidence](tls-migration-validation.md#p7-coordinated-rc-publication--2026-11-02).
+GitHub marks this as a prerelease and keeps `v0.21.19` as latest stable.
+Formal `1.0.0` follows a later validation period and release decision.
 
-- [ ] Full umbrella regression, formatting and required functional CI pass.
+- [x] Full umbrella regression, formatting and required functional CI pass.
       Report user-deferred Credo/Dialyzer separately; retain their actual failures.
-- [ ] Commit the completed migration and push the reviewed source to GitHub before
+- [x] Commit the completed migration and push the reviewed source to GitHub before
       releasing the next coordinated major version through existing version tooling;
       all source, candidate, CI and release gates must pass first.
-- [ ] Use existing source/archive identity, immutable tags and release recovery tooling.
-- [ ] Publish in dependency order: ex_ssl → elixir_quic → http_core →
+- [x] Use existing source/archive identity, immutable tags and release recovery tooling.
+- [x] Publish in dependency order: ex_ssl → elixir_quic → http_core →
       elixir_quic_http3 → http_runtime → Fetch/SSE/WebSocket/WebTransport.
-- [ ] All nine versions and exact internal requirements remain coordinated.
-- [ ] Cold published consumers repeat default ExSSL H1/H2/WSS/SSE, existing published
+- [x] All nine versions and exact internal requirements remain coordinated.
+- [x] Cold published consumers repeat default ExSSL H1/H2/WSS/SSE, existing published
       H3 and production-release-without-OTP-SSL checks.
-- [ ] Record exact partial publication state if any step fails; no completion claim.
-- [ ] Current docs distinguish implemented, executed, released and unsupported behavior.
+- [x] Record exact partial publication state if any step fails; no completion claim.
+      The first attempt failed before any tag or package write; the final attempt
+      verifies all nine packages and all published-consumer gates.
+- [x] Current docs distinguish implemented, executed, released and unsupported behavior.
 
-Final done: all applicable gates above pass, production OTP TLS is absent, and cold
-published consumers independently confirm the complete release behavior.
+Exit accepted for `1.0.0-rc.0`: all non-deferred gates pass, production OTP TLS is
+absent, and cold published consumers independently confirm the release behavior.
+Performance remains TODO outside this goal; Credo/Dialyzer retain their explicit
+deferral and are not reported as passing.

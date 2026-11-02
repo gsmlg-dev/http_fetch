@@ -6,8 +6,29 @@ the complete nine-app integration workflow now also passes. General
 static-analysis development is paused. The proof covers
 actual shipped implementations from supported public entries and the user-approved
 callback boundaries. The original dispatch inventory remains intact.
-`1.0.0-rc.0` publication and cold published-consumer verification follow P6.
+All nine `1.0.0-rc.0` packages are now published at `233a653`, and cold
+published-consumer verification passes the complete release workflow.
 Performance, Credo and Dialyzer work remain deferred by the user.
+
+## Published RC acceptance — 2026-11-02
+
+[Release workflow 41424352487](https://github.com/gsmlg-dev/http_fetch/actions/runs/41424352487)
+passes all non-deferred source, candidate and cold published-consumer gates.
+Both candidate and published releases pass two 35-scenario TLS plans: 140 actual
+consumer-peer pairs. Each release retains all 175 original findings and proves
+them against 350 inspected BEAMs and 256 reviewed sources, with zero unproved
+sites. OTP SSL remains unavailable, unloaded and unstarted before and after
+traffic. Independent peers confirm the requested protocol, no fallback/replay
+and complete cleanup, with zero active connections or errors.
+
+Root independently matches all nine actual archives to Hex checksums, GitHub
+asset digests and tag sources, and reconciles all four native reports, wrapper
+path records and peer observations. Published TLS consumers pass 71 groups /
+3,066 checks without failures, skips or exclusions; published public H3 also
+passes. The [publication ledger](tls-migration-validation.md#p7-coordinated-rc-publication--2026-11-02)
+records exact commits, artifacts and receipts. The
+[GitHub release](https://github.com/gsmlg-dev/http_fetch/releases/tag/v1.0.0-rc.0)
+is a prerelease; `v0.21.19` remains latest stable.
 
 ## Integrated P6 acceptance — 2026-11-02
 
@@ -189,23 +210,25 @@ The approved `:ops` boundary still requires origin and built-in-body proofs.
 A public struct or an exported helper alone establishes no approved extension
 contract.
 
-## Directed obligations
+## Reviewed obligations
 
 Each identifier below maps to exact occurrences in the CSV. These are concrete
-source findings and remaining obligations, **not accepted certificates**. No new
-general interpreter, callable reducer, or origin graph is required to classify
-these sites. Missing producer, state-transfer, reentry, or contract evidence keeps
-the original finding blocked.
+source findings and the original proof obligations. The accepted source-bound
+native binding above discharges every occurrence for this release while retaining
+the original inventory. No new general interpreter, callable reducer, or origin
+graph is required. Missing producer, state-transfer, reentry, or contract evidence
+keeps a finding blocked; changed inputs require fresh acceptance.
 
 The [directed TLS source review](no-otp-directed-tls-proof.md) now traces all 14
 TLS-1 through TLS-6 occurrences against 26 selected source inputs and the complete
-244-file production-source census. It preserves the compiled findings until
-their source-bound discharge is accepted.
+244-file production-source census. The compiled findings remain retained and
+are discharged only by the accepted source-bound native binding.
 
 The [directed QUIC source review](no-otp-directed-quic-proof.md) traces all 28
 Q1–Q4 occurrences: opaque cleanup capability construction, the two concrete IO
 implementations, the external datagram callback and the approved TLS adapter.
-It likewise preserves the compiled findings pending directed gate acceptance.
+It likewise preserves the compiled findings and their reviewed derivations for
+the native binding.
 
 The [directed HTTP source review](no-otp-directed-http-proof.md) covers 76
 HTTP-1–HTTP-9 and WT-1 occurrences, including actual pool/owner constructors,
@@ -276,7 +299,8 @@ as recorded above. The generic audit remains unchanged.
    strict release result failed, record traffic and static results separately,
    and retain code-path, package, TLS identity, no-replay and cleanup assertions.
 3. Require both static proof and the full real-traffic matrix before accepting P6.
-   The current two OTP manual-ticket `decrypt_error` integration failures are
-   separate release blockers; they cannot be hidden by focused traffic success.
+   The earlier OTP manual-ticket `decrypt_error` failures were separate blockers;
+   their later full-suite acceptance is recorded above.
 4. Publish all nine packages as `1.0.0-rc.0` through the existing coordinated
    release workflow, then validate cold published consumers and actual releases.
+   The published RC acceptance above completes this sequence.
