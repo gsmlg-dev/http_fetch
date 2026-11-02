@@ -1,12 +1,47 @@
 # Directed production release audit
 
-P6 is **blocked**. General static-analysis development is paused. The remaining
-work proves the actual shipped implementations from supported public entries and
-the user-approved callback boundaries. No dispatch is cleared by this inventory.
+The strict production no-OTP-SSL gate **passes** at `bf13e62`. P6 integration
+acceptance remains **blocked** by the two OTP manual-ticket reference regressions
+reported below. General static-analysis development is paused. The proof covers
+actual shipped implementations from supported public entries and the user-approved
+callback boundaries. The original dispatch inventory remains intact.
 `1.0.0-rc.0` publication and cold published-consumer verification follow P6.
 Performance, Credo and Dialyzer work remain deferred by the user.
 
-## Artifact and current evidence
+## Strict release acceptance — 2026-11-02
+
+At `bf13e6248b7e33e2de9c2b899dabcb0399036e2a`,
+[CI run 41402393470](https://github.com/gsmlg-dev/http_fetch/actions/runs/41402393470),
+job `125137168973`, artifact `13122326455`, both strict candidate release gates
+pass on Elixir 1.18.6 / OTP 28 / ERTS 16.4.0.7. Neither uses blocked-traffic mode.
+Each release inspects 350 BEAMs and retains all 175 original dynamic findings.
+The five concrete source reviews bind every occurrence exactly once to the
+reviewed producer, retained state and approved callback boundary; zero findings
+remain unproved. The complete binding covers 256 source inputs, including the
+production dependency and the three release fixture modules.
+
+Both TLS plans pass all 35 actual scenarios, with independent peer confirmation
+of TLS/ALPN, request counts, no fallback/replay and provider cleanup. All peers
+report zero active connections and no errors. OTP SSL is absent from application,
+boot, bundle and direct-import inventories and is unavailable, unloaded and
+unstarted before and after traffic. Root independently reconciled the native
+binding receipt, unchanged findings and all 70 peer/consumer pairs against the
+current sources. Evidence is retained in
+`/private/tmp/http-fetch-directed-p6-20261102T0522Z/STRICT-70-ACCEPTANCE.json`.
+
+The same source passes all-nine
+[unit](https://github.com/gsmlg-dev/http_fetch/actions/runs/41402395490) and
+[E2E](https://github.com/gsmlg-dev/http_fetch/actions/runs/41402399467) workflows.
+Eight applications pass their
+[integration](https://github.com/gsmlg-dev/http_fetch/actions/runs/41402397411)
+jobs. ExSSL's integration job reports 3,540 tests, two failures and 692 exclusions:
+the OTP manual-ticket and OTP resumed-mTLS reference cases receive a peer
+`decrypt_error`. Candidate TLS feature consumption reports the same two failures.
+They remain release blockers; the passing no-OTP production release does not
+waive them. The corresponding nine-case file passes locally on OTP 29, which
+does not establish the required OTP 28 result.
+
+## Original artifact and baseline evidence
 
 The inventory uses the production release from commit
 `e1cc63619e2c4146eac9e0367828278792110ee6`, CI run
@@ -168,9 +203,9 @@ hash equality alone does not establish their safety.
 
 `--directed-review` enables this binding in the strict candidate and published
 release gates. It cannot be combined with blocked-traffic diagnostics. Review
-input changes trigger candidate acceptance in CI. The binding and complete
-release/CI tooling regressions pass; actual release and traffic acceptance remain
-pending. The generic audit remains unchanged.
+input changes trigger candidate acceptance in CI. The binding, complete
+release/CI tooling regressions and actual strict release and traffic gates pass
+as recorded above. The generic audit remains unchanged.
 
 1. Complete each directed producer/state/callback proof, bound to the selected
    sources and original occurrence identities. Preserve all remaining blockers.

@@ -2,13 +2,14 @@
 
 Execution checklist derived from the accepted 2026-10-21 HTTP Fetch migration plan.
 Baseline: `main@6b69bde3f43f2270317c38fbe68d5ac9635d3b36`, nine packages at `0.21.14`.
-Status (2026-10-29): P0–P4 acceptance is complete at `3c561646b7f1bc9042c5cadbc37ed7c6b48fae15`,
+Status (2026-11-02): P0–P4 acceptance is complete at `3c561646b7f1bc9042c5cadbc37ed7c6b48fae15`,
 including resumption, nested HTTPS proxies, public lifecycle, completion and
 managed H1/H2. P5 default promotion is accepted at
 `0f4b3dd0f37caadc71b6db7bdc9fff74e9170825` after source, candidate and configured
 runtime gates pass. P6 removes the production OTP adapter and selectors; its
-isolated release, dynamic-dispatch and traffic acceptance remain open. P7 remains
-open; the migration has not been published.
+isolated release, directed dynamic-dispatch proof and 70 real-traffic scenarios
+pass at `bf13e62`. Two OTP 28 manual-ticket reference regressions still block
+integration acceptance. P7 remains open; the migration has not been published.
 
 See [design and compatibility table](tls-migration-design.md) and
 [execution evidence](tls-migration-validation.md). A checkbox means executed and
@@ -423,12 +424,16 @@ actual versions with repository tooling; no guessed reserved versions.
 ## P6 — Remove production OTP SSL (after P5)
 
 The [source-removal checkpoint](tls-migration-validation.md#p6-source-removal-checkpoint--2026-10-29)
-passes the configured Linux source suites. The remaining release checks below
-must pass before P6 is accepted.
+passes the configured Linux source suites. The strict candidate release and
+traffic checks below pass at `bf13e62`; see the
+[directed release evidence](no-otp-release-audit.md#strict-release-acceptance--2026-11-02).
+The two OTP 28 manual-ticket reference regressions must be resolved before P6
+integration acceptance and publication.
 
 Caller-supplied implementations at `QuicHttp3.Session.new/1` (`:transport`),
-`HTTP.WebTransport.new/2` (`:backend`) and `Quic.TLSDriver.new/2` (`:adapter`,
-including its retained test hook) use the approved checked callback-origin
+`HTTP.WebTransport.new/2` (`:backend`), `Quic.TLSDriver.new/2` (`:adapter`,
+including its retained test hook) and `QuicHttp3.Transport.Quic` (`:ops`)
+use the approved checked callback-origin
 boundary. Their input origins and allowed operations still require proof. Every
 default and library-supplied implementation remains fully audited; this boundary
 does not certify user implementation bodies as OTP-free or establish native
@@ -437,15 +442,15 @@ WebTransport support. Other injection seams receive no blanket exemption.
 - [x] Delete OTP transport implementation, backend branches, private socket types/layouts.
 - [x] Remove five unconditional ssl extra_applications and audit transitive/generated apps.
 - [x] Legacy tls_backend=:ssl returns an explicit configuration error.
-- [ ] Test peers start OTP SSL only in isolated test/external environments.
-- [ ] Build an actual fresh candidate production consumer release with no umbrella
+- [x] Test peers start OTP SSL only in isolated test/external environments.
+- [x] Build an actual fresh candidate production consumer release with no umbrella
       overrides/test support; ssl absent from app closure, rel/boot and bundled dirs.
-- [ ] Execute release with OTP SSL unavailable on code path, checking loaded/started
+- [x] Execute release with OTP SSL unavailable on code path, checking loaded/started
       apps before and after traffic; do not modify host Erlang installation.
-- [ ] Scan BEAM imports plus dynamic dispatch; source inventory alone is insufficient.
-- [ ] External peers exercise H1/H2 HTTPS, WSS, SSE, managed cleanup and supported H3,
+- [x] Scan BEAM imports plus dynamic dispatch; source inventory alone is insufficient.
+- [x] External peers exercise H1/H2 HTTPS, WSS, SSE, managed cleanup and supported H3,
       including identity failure, deadline, abort and long-lived shutdown.
-- [ ] Record source SHA, archive hashes, runtimes/module paths and peer observations.
+- [x] Record source SHA, archive hashes, runtimes/module paths and peer observations.
 
 ## P7 — Coordinated release and published verification (after P6)
 
