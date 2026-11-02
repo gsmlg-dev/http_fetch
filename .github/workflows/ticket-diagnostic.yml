@@ -1,0 +1,58 @@
+name: Bounded manual ticket diagnostic
+
+on:
+  push:
+    branches: [diagnostic/otp28-manual-tickets-20261102]
+    paths: [.github/workflows/ticket-diagnostic.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ['28', '29']
+        setting: [default, sha256, sha384, secp256r1]
+    env:
+      MIX_ENV: test
+      HTTP_FETCH_CI_APP: ex_ssl
+      DIAGNOSTIC_SETTING: ${{ matrix.setting }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: ${{ matrix.otp }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Record public runtime versions
+        run: |
+          elixir --version
+          python3 -c 'import ssl; print(ssl.OPENSSL_VERSION)'
+      - name: Prepare the original reference tests
+        run: |
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path('apps/ex_ssl/test/ssl/manual_ticket_integration_test.exs')
+          source = path.read_text()
+          marker = '      session_tickets: :manual\n'
+          assert source.count(marker) == 1
+          settings = {
+              'default': '',
+              'sha256': '      ciphers: [%{key_exchange: :any, cipher: :aes_128_gcm, mac: :aead, prf: :sha256}],\n',
+              'sha384': '      ciphers: [%{key_exchange: :any, cipher: :aes_256_gcm, mac: :aead, prf: :sha384}],\n',
+              'secp256r1': '      supported_groups: [:secp256r1],\n',
+          }
+          path.write_text(source.replace(marker, settings[os.environ['DIAGNOSTIC_SETTING']] + marker))
+          PY
+      - name: Run every original ticket assertion
+        run: mix test apps/ex_ssl/test/ssl/manual_ticket_integration_test.exs --include integration --seed 0 --trace
