@@ -1,0 +1,127 @@
+name: Bounded write idle peer terminal diagnostic
+
+on:
+  push:
+    branches: [diagnostic/write-idle-20261102]
+    paths: [.github/workflows/write-idle-diagnostic.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  terminal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [original, read_batch]
+        scope: [file, full]
+    env:
+      MIX_ENV: test
+      HTTP_FETCH_CI_APP: http_fetch
+      HTTP_QUIC_PHASE1_REAL: '1'
+      DIAGNOSTIC_FIXTURE: ${{ matrix.fixture }}
+      DIAGNOSTIC_SCOPE: ${{ matrix.scope }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: integration-http_fetch-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs', 'apps/http_fetch/mix.exs') }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v5
+      - name: Prepare unchanged integration environment
+        run: |
+          python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+      - name: Add metadata probes and optional post-pressure peer receive batch
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path('apps/http_fetch/test/http/http1_write_idle_wire_test.exs')
+          source = path.read_text()
+          marker = '        endpoints = {local, remote}\n'
+          assert source.count(marker) == 1
+          source = source.replace(marker, marker + '        Process.put(:write_idle_tcp, tcp)\n')
+          marker = '      :await_close ->\n'
+          assert source.count(marker) == 1
+          batch = ''
+          if os.environ['DIAGNOSTIC_FIXTURE'] == 'read_batch':
+              batch = '''        batch_result = if(transport == :ssl, do: :ssl.setopts(socket, buffer: 65_536), else: :inet.setopts(socket, buffer: 65_536))
+                  IO.inspect(%{peer: self(), result: batch_result}, label: "idle_peer_batch_result")
+          '''
+          source = source.replace(marker, marker + batch + '''        Process.put(:write_idle_drain_started, System.monotonic_time(:millisecond))
+                  Process.put(:write_idle_received_bytes, 0)
+                  IO.inspect(%{peer: self(), transport: transport, endpoints: endpoints, tcp_options: :inet.getopts(Process.get(:write_idle_tcp), [:buffer, :recbuf])}, label: "idle_peer_drain_started")
+          ''')
+          marker = '      {:ok, _bytes} -> drain_closed(transport, socket)\n'
+          assert source.count(marker) == 1
+          source = source.replace(marker, '''      {:ok, bytes} ->
+                  Process.put(:write_idle_received_bytes, Process.get(:write_idle_received_bytes, 0) + byte_size(bytes))
+                  drain_closed(transport, socket)
+          ''')
+          marker = '      {:error, reason} -> assert reason in [:closed, :econnreset]\n'
+          assert source.count(marker) == 1
+          source = source.replace(marker, '''      {:error, reason} ->
+                  IO.inspect(%{peer: self(), terminal: reason, drained_bytes: Process.get(:write_idle_received_bytes), elapsed_ms: System.monotonic_time(:millisecond) - Process.get(:write_idle_drain_started)}, label: "idle_peer_drain_terminal")
+                  assert reason in [:closed, :econnreset]
+          ''')
+          marker = '    assert_receive {:request_received, ^peer, endpoints}, @wait\n'
+          assert source.count(marker) == 1
+          source = source.replace(marker, marker + '''    Process.put(:write_idle_endpoints, endpoints)
+              {_server, {client_ip, client_port}} = endpoints
+              native = Enum.filter(:socket.which_sockets(), fn socket -> match?({:ok, %{addr: ^client_ip, port: ^client_port}}, :socket.sockname(socket)) end)
+              Process.put(:write_idle_original_native, native)
+          ''')
+          marker = '''    send(peer, :await_close)
+              assert_receive {:peer_closed, ^peer}, @wait
+          '''
+          assert source.count(marker) == 1
+          source = source.replace(marker, '''    send(peer, :await_close)
+              try do
+                assert_receive {:peer_closed, ^peer}, @wait
+              rescue
+                error in ExUnit.AssertionError ->
+                  original_stack = __STACKTRACE__
+                  try do
+                  completion = RequestCompletion.await(Promise.completion(promise), 0)
+                  native = Enum.map(Process.get(:write_idle_original_native, []), fn socket ->
+                    info = :socket.info(socket)
+                    safe_info = if is_map(info), do: Map.take(info, [:owner, :rstates, :wstates, :num_readers, :num_writers]), else: info
+                    %{sockname: :socket.sockname(socket), info: safe_info}
+                  end)
+                  dictionary = case Process.info(peer, :dictionary) do
+                    {:dictionary, values} -> Keyword.take(values, [:write_idle_received_bytes, :write_idle_drain_started])
+                    _ -> []
+                  end
+                  IO.inspect(%{completion: completion, original_native: native, peer: Process.info(peer, [:status, :current_stacktrace, :message_queue_len]), drain: dictionary}, label: "idle_failed_original_close")
+                  {{_ip, port}, _client} = Process.get(:write_idle_endpoints)
+                  {tcp, status} = if System.find_executable("ss"), do: System.cmd("ss", ["-tin", "sport = :#{port} or dport = :#{port}"]), else: {"ss unavailable", 127}
+                  IO.inspect(%{exit: status, tcp: tcp}, label: "idle_failed_tcp_metadata")
+                  catch
+                    kind, _reason -> IO.inspect(%{kind: kind}, label: "idle_metadata_probe_unavailable")
+                  end
+                  reraise error, original_stack
+              end
+          ''')
+          path.write_text(source)
+          PY
+      - name: Run original deadlines and assertions at the failing seed
+        run: |
+          if [ "$DIAGNOSTIC_SCOPE" = file ]; then
+            mix test apps/http_fetch/test/http/http1_write_idle_wire_test.exs --only integration --seed 286260 --trace
+          else
+            mix test apps/http_fetch/test --only integration --seed 286260
+          fi
