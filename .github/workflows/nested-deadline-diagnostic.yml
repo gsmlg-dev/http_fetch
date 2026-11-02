@@ -1,0 +1,89 @@
+name: Bounded nested proxy deadline diagnostic
+
+on:
+  push:
+    branches: [diagnostic/nested-deadline-20261102]
+    paths: [.github/workflows/nested-deadline-diagnostic.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [original, primed]
+        scope: [nested, full]
+    env:
+      MIX_ENV: test
+      HTTP_FETCH_CI_APP: http_fetch
+      HTTP_QUIC_PHASE1_REAL: '1'
+      DIAGNOSTIC_FIXTURE: ${{ matrix.fixture }}
+      DIAGNOSTIC_SCOPE: ${{ matrix.scope }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: integration-http_fetch-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs', 'apps/http_fetch/mix.exs') }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v5
+      - name: Prepare original integration environment
+        run: |
+          python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+      - name: Instrument only public fixture timing and optional untimed priming
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path('apps/http_fetch/test/http/nested_https_proxy_test.exs')
+          source = path.read_text()
+          marker = '        case :ssl.handshake(raw, 4_000) do\n'
+          assert source.count(marker) == 2
+          source = source.replace(marker, '''        started = System.monotonic_time(:millisecond)
+                  result = :ssl.handshake(raw, 4_000)
+                  IO.inspect(%{mode: mode, phase: :reference_handshake, elapsed_ms: System.monotonic_time(:millisecond) - started, ok: match?({:ok, _}, result)}, label: "nested_timing")
+                  case result do
+          ''')
+          marker = '      promise = HTTP.fetch(url, stop_options(options(proxy), stage, unquote(stop)))\n'
+          assert source.count(marker) == 1
+          source = source.replace(marker, '''      IO.inspect(%{stage: stage, stop: unquote(stop), at_ms: System.monotonic_time(:millisecond)}, label: "nested_request_start")
+          ''' + marker)
+          if os.environ['DIAGNOSTIC_FIXTURE'] == 'primed':
+              marker = '  @fixtures Path.expand("../support/fixtures", __DIR__)\n'
+              assert source.count(marker) == 1
+              source = source.replace(marker, marker + '''
+
+            setup_all do
+              {url, proxy, peer} = nested_peer(:serve)
+              promise = HTTP.fetch(url, options(proxy))
+              assert %HTTP.Response{status: 200, body: "ok"} = HTTP.Promise.await(promise, 4_000)
+              assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 2_000)
+              assert_receive {:proxy_closed, ^peer}, 2_000
+              assert_receive {:origin_closed, {:error, :closed}}, 2_000
+              :ok
+            end
+          ''')
+          path.write_text(source)
+          PY
+      - name: Run all original assertions at the failing seed
+        run: |
+          if [ "$DIAGNOSTIC_SCOPE" = nested ]; then
+            mix test apps/http_fetch/test/http/nested_https_proxy_test.exs --only integration --seed 741436 --trace
+          else
+            mix test apps/http_fetch/test --only integration --seed 741436
+          fi
