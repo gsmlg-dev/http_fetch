@@ -5,6 +5,7 @@ defmodule HTTP.ConnectDeadlineOrderingTest do
 
   @moduletag :integration
   @peer_timeout 3_000
+  @cacertfile Path.expand("../support/fixtures/pinned-ca.pem", __DIR__)
 
   for backend <- [nil, :ex_ssl],
       {control, request_timeout, expected} <- [
@@ -40,7 +41,8 @@ defmodule HTTP.ConnectDeadlineOrderingTest do
           connect_address: {127, 0, 0, 1},
           redirect: :manual,
           tls_backend: backend,
-          connect_timeout: 500
+          connect_timeout: 500,
+          ssl: [cacertfile: @cacertfile]
         ]
       }
 
