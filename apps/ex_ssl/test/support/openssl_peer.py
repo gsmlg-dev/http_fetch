@@ -12,6 +12,7 @@ import sys
 import time
 
 MAX_BODY = 4 * 1024 * 1024
+HRR_RANDOM = bytes.fromhex("cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c")
 
 
 def announce(kind, **fields):
@@ -101,6 +102,14 @@ def make_context(args, versions):
     context.options |= ssl.OP_NO_COMPRESSION | ssl.OP_NO_RENEGOTIATION
     context.load_cert_chain(args.certfile, args.keyfile)
     context.set_ciphers(args.cipher)
+    context.hello_retry_requests = 0
+
+    def observe_handshake(_connection, direction, _version, content_type, message_type, data):
+        if (direction == "write" and int(content_type) == 22 and int(message_type) == 2
+                and data[6:38] == HRR_RANDOM):
+            context.hello_retry_requests += 1
+
+    context._msg_callback = observe_handshake
     if args.alpn:
         context.set_alpn_protocols(args.alpn.split(","))
     if args.verify != "none":
@@ -166,6 +175,7 @@ def main():
             # Preserve the same OpenSSL session cache while changing the current
             # handshake's ALPN preference, as RFC 7301 permits on resumption.
             context.set_alpn_protocols(args.alpn_after_first.split(","))
+        context.hello_retry_requests = 0
         try:
             with context.wrap_socket(raw, server_side=True) as connection:
                 der = connection.getpeercert(binary_form=True)
@@ -174,6 +184,7 @@ def main():
                     version=connection.version(),
                     resumed=connection.session_reused,
                     cipher=connection.cipher()[0],
+                    hello_retry_requests=context.hello_retry_requests,
                     alpn=connection.selected_alpn_protocol(),
                     client_der_b64=base64.b64encode(der).decode("ascii") if der else None,
                 )

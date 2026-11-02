@@ -20,14 +20,16 @@ defmodule SSL.ManualTicketIntegrationTest do
       fixtures: f
     } do
       with_peer(f, [], fn peer ->
-        ticket = exchange(@backend, peer, options(f), false, f.server.der)
+        ticket = exchange(@backend, peer, options(f), false, f.server.der, nil, 0)
 
         exchange(
           @backend,
           peer,
           Keyword.put(options(f), :use_ticket, [ticket]),
           true,
-          f.server.der
+          f.server.der,
+          nil,
+          0
         )
 
         if @backend == SSL do
@@ -39,6 +41,17 @@ defmodule SSL.ManualTicketIntegrationTest do
         end
       end)
     end
+  end
+
+  test "manual tickets bind forced HelloRetryRequest on full and resumed handshakes", %{
+    fixtures: f
+  } do
+    with_peer(f, [group: "secp384r1"], fn peer ->
+      opts = Keyword.put(options(f), :supported_groups, [:x25519, :secp384r1])
+      ticket = exchange(SSL, peer, opts, false, f.server.der, nil, 1)
+      selected = Keyword.put(opts, :use_ticket, [ticket])
+      exchange(SSL, peer, selected, true, f.server.der, nil, 1)
+    end)
   end
 
   test "an expired manual ticket takes one full authenticated handshake", %{fixtures: f} do
@@ -113,9 +126,9 @@ defmodule SSL.ManualTicketIntegrationTest do
   test "OTP manual mTLS resumes the authenticated client identity", %{fixtures: f} do
     with_peer(f, [cafile: f.ca.certificate, verify: :required], fn peer ->
       opts = options(f) ++ [certfile: f.rsa.certificate, keyfile: f.rsa.key]
-      ticket = exchange(:ssl, peer, opts, false, f.server.der, f.rsa.der)
+      ticket = exchange(:ssl, peer, opts, false, f.server.der, f.rsa.der, 0)
       selected = Keyword.put(opts, :use_ticket, [ticket])
-      exchange(:ssl, peer, selected, true, f.server.der, f.rsa.der)
+      exchange(:ssl, peer, selected, true, f.server.der, f.rsa.der, 0)
     end)
   end
 
@@ -136,7 +149,15 @@ defmodule SSL.ManualTicketIntegrationTest do
     end)
   end
 
-  defp exchange(backend, peer, opts, resumed, expected_der, client_der \\ nil) do
+  defp exchange(
+         backend,
+         peer,
+         opts,
+         resumed,
+         expected_der,
+         client_der \\ nil,
+         expected_hrr \\ nil
+       ) do
     assert {:ok, socket} = backend.connect(@host, peer.port, opts, 5_000)
     on_exit(fn -> backend.close(socket) end)
 
@@ -144,6 +165,11 @@ defmodule SSL.ManualTicketIntegrationTest do
              OpenSSLPeer.event(peer, "handshake", 5_000)
 
     assert event["client_der_b64"] == if(client_der, do: Base.encode64(client_der), else: :null)
+
+    if not is_nil(expected_hrr) do
+      assert event["hello_retry_requests"] == expected_hrr
+    end
+
     assert {:ok, info} = backend.connection_information(socket, [:session_resumption, :protocol])
     assert Keyword.fetch!(info, :session_resumption) == resumed
     assert Keyword.fetch!(info, :protocol) == :"tlsv1.3"
@@ -203,6 +229,10 @@ defmodule SSL.ManualTicketIntegrationTest do
       cacerts: [f.ca.der],
       server_name_indication: ~c"exssl.test",
       versions: [:"tlsv1.3"],
+      # Compare the supported classical group on both runtimes. OTP 28's
+      # default hybrid-group HRR fails manual resumption with OpenSSL 3.5.
+      # The forced classical HRR path remains independently asserted above.
+      supported_groups: [:x25519],
       alpn_advertised_protocols: ["http/1.1"],
       session_tickets: :manual
     ]
