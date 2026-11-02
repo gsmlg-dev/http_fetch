@@ -90,6 +90,18 @@ defmodule HTTP.WebSocketTest do
 
   @tag :integration
   test "upgrades, exchanges frames, and closes over verified TLS 1.3" do
+    # Finish first-use TLS initialization before the one-second event checks.
+    {:ok, _warm_server, warm_port} =
+      HTTPWebSocket.TestServer.start_link(tls: true, certfile: @certfile, keyfile: @keyfile)
+
+    warm =
+      WebSocket.new("wss://127.0.0.1:#{warm_port}/warm", [], ssl: [cacertfile: @cacertfile])
+
+    assert_receive {WebSocket, ^warm, %Open{}}, 4_000
+    assert :ok = WebSocket.close(warm, 1000, "warm")
+    assert_receive {WebSocket, ^warm, %Close{code: 1000, was_clean: true}}, 1_000
+    assert :ok = HTTP.ClientCompletion.await(WebSocket.completion(warm), 1_000)
+
     for backend <- [nil, :ex_ssl] do
       {:ok, _server, port} =
         HTTPWebSocket.TestServer.start_link(
