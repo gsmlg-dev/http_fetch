@@ -1,13 +1,47 @@
 # Directed production release audit
 
-The strict production no-OTP-SSL gate **passes** at `31a8a15`. P6 integration
-acceptance remains **blocked** by the nested origin-deadline fixture described
-below. The OTP 28 manual-ticket reference regressions are resolved. General
+P6's non-deferred gates **pass** at `658bbd5`. The strict production no-OTP-SSL
+gate passes at `31a8a15`, with identical production sources through `658bbd5`;
+the complete nine-app integration workflow now also passes. General
 static-analysis development is paused. The proof covers
 actual shipped implementations from supported public entries and the user-approved
 callback boundaries. The original dispatch inventory remains intact.
 `1.0.0-rc.0` publication and cold published-consumer verification follow P6.
 Performance, Credo and Dialyzer work remain deferred by the user.
+
+## Integrated P6 acceptance — 2026-11-02
+
+All nine jobs in [integration run 41417340062](https://github.com/gsmlg-dev/http_fetch/actions/runs/41417340062)
+pass at `658bbd5b77964535bd1756f8ad8dbf8bac08041d` on Elixir 1.18 / OTP 28.
+Fetch reports 20 doctests and 1,591 tests, zero failures and 351 selection
+exclusions. WebTransport has no integration-tagged cases; its successful empty
+selection is not counted as executed coverage. Root reconciles every app's
+summary and log hash in
+`/private/tmp/http-fetch-directed-p6-20261102T0522Z/ALL9-INTEGRATION-ACCEPTANCE.json`.
+
+The unchanged production implementation retains the passing full manual CI,
+all-nine unit and configured E2E results below. The additional
+[runtime matrix](https://github.com/gsmlg-dev/http_fetch/actions/runs/41407872020)
+passes 71 current-candidate groups and 3,066 checks on both Elixir 1.19 / OTP 28
+and Elixir 1.20 / OTP 29, with zero failures, skips or exclusions. Historical
+published `ex_ssl` 0.7.2 reference results remain separate. The
+[independent public H3 gate](https://github.com/gsmlg-dev/http_fetch/actions/runs/41408366124)
+also passes.
+
+Four integration fixtures changed after `31a8a15`: nested proxy and WSS fixtures
+complete verified initialization before their original timing assertions; the
+pinned native timeout fixture uses its explicit test CA; blocked-upload checks
+confirm public cleanup and original provider DOWN before releasing the deliberately
+nonreading peer. Existing errors, identities, resource assertions and time limits
+remain intact. No production code, manifest, configuration or gate changed.
+
+The earlier single 8-second upload peer-closure observation failure was not
+reproduced by the focused diagnostic or three full-context diagnostic jobs.
+The cleanup-order change strengthens an independent precondition; it does not
+establish or claim a production root-cause repair. The original failure and all
+diagnostic receipts remain recorded. Current full integration supplies the
+acceptance result. The complete release workflow, coordinated publication and
+cold published-consumer verification remain mandatory P7 gates.
 
 ## Reference regression acceptance — 2026-11-02
 
@@ -33,9 +67,9 @@ All-nine [units](https://github.com/gsmlg-dev/http_fetch/actions/runs/4140567407
 and configured [E2E](https://github.com/gsmlg-dev/http_fetch/actions/runs/41405683173)
 pass. Eight [integration](https://github.com/gsmlg-dev/http_fetch/actions/runs/41405678859)
 jobs pass. Fetch reports one failure: the 500ms total deadline expires during
-proxy TLS before the `origin_gate` fixture reaches its required phase. This is
-still a release blocker; a passing focused local file is insufficient to close
-it. The strict release result does not waive this remaining source regression.
+proxy TLS before the `origin_gate` fixture reaches its required phase. This was
+a release blocker at that checkpoint. The later full integration result above
+closes it; a passing focused local file alone was insufficient.
 
 ## Strict release acceptance — 2026-11-02
 
@@ -66,9 +100,9 @@ Eight applications pass their
 jobs. ExSSL's integration job reports 3,540 tests, two failures and 692 exclusions:
 the OTP manual-ticket and OTP resumed-mTLS reference cases receive a peer
 `decrypt_error`. Candidate TLS feature consumption reports the same two failures.
-They remain release blockers; the passing no-OTP production release does not
-waive them. The corresponding nine-case file passes locally on OTP 29, which
-does not establish the required OTP 28 result.
+They were release blockers at that checkpoint; the passing no-OTP production
+release did not waive them. The subsequent OTP 28 reference acceptance above
+closes them. A local OTP 29 pass alone did not establish that result.
 
 ## Original artifact and baseline evidence
 

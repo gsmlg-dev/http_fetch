@@ -1,8 +1,8 @@
 # TLS migration execution ledger
 
-## P6 strict release and reference checkpoint — 2026-11-02
+## P6 integrated acceptance — 2026-11-02
 
-The [directed release audit](no-otp-release-audit.md#reference-regression-acceptance--2026-11-02)
+The [directed release audit](no-otp-release-audit.md#integrated-p6-acceptance--2026-11-02)
 records strict acceptance at `31a8a15`. Five concrete source reviews prove all
 175 original dispatch occurrences against complete shipped source and compiled
 artifacts, including the approved user callback boundaries. General static
@@ -18,11 +18,27 @@ classical group plus a real forced-HelloRetryRequest resumption case; production
 TLS behavior and existing assertions are unchanged. The complete ExSSL
 integration suite and all candidate TLS feature groups pass.
 
-Eight integration app jobs pass. Fetch's remaining nested origin-deadline test
-expires before reaching its required phase; it remains a release blocker while
-the focused diagnostic runs. P6 integration acceptance and `1.0.0-rc.0`
-publication remain open. Credo/Dialyzer and performance retain their user-approved
-deferrals.
+All nine [integration jobs](https://github.com/gsmlg-dev/http_fetch/actions/runs/41417340062)
+pass at `658bbd5`, closing P6's non-deferred gates. Production sources, manifests,
+configuration, scripts and workflows are identical from `31a8a15` to `658bbd5`;
+only four integration fixtures change. Their original timing and cleanup
+assertions remain. The earlier single blocked-upload peer observation failure
+was not reproduced by three full-context diagnostics; no production root-cause
+repair is inferred. The complete current integration run, rather than a focused
+or diagnostic result, supplies acceptance. WebTransport has no integration-tagged
+cases and is not counted as executed coverage.
+
+The [runtime matrix](https://github.com/gsmlg-dev/http_fetch/actions/runs/41407872020)
+passes 71 current-candidate groups and 3,066 checks on Elixir 1.19 / OTP 28 and
+Elixir 1.20 / OTP 29, with no failures, skips or exclusions. Historical published
+0.7.2 results remain separate. The [public H3 gate](https://github.com/gsmlg-dev/http_fetch/actions/runs/41408366124)
+also passes. Receipts are retained in
+`/private/tmp/http-fetch-directed-p6-20261102T0522Z/ALL9-INTEGRATION-ACCEPTANCE.json`
+and `CANDIDATE-RUNTIME-MATRIX-ACCEPTANCE.json`.
+
+P7's full release workflow, `1.0.0-rc.0` publication and cold published-consumer
+verification remain open. Credo/Dialyzer and performance retain their user-approved
+deferrals; no deferred check is reported as passing.
 
 ## P7 release-candidate preparation — 2026-10-29
 

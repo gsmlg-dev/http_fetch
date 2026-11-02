@@ -8,8 +8,9 @@ managed H1/H2. P5 default promotion is accepted at
 `0f4b3dd0f37caadc71b6db7bdc9fff74e9170825` after source, candidate and configured
 runtime gates pass. P6 removes the production OTP adapter and selectors; its
 isolated release, directed dynamic-dispatch proof and 70 real-traffic scenarios
-pass at `bf13e62`. Two OTP 28 manual-ticket reference regressions still block
-integration acceptance. P7 remains open; the migration has not been published.
+pass at `31a8a15`, with unchanged production sources through `658bbd5`. All-nine
+integration passes at `658bbd5`, closing P6's non-deferred acceptance gates.
+P7 remains open; the migration has not been published.
 
 See [design and compatibility table](tls-migration-design.md) and
 [execution evidence](tls-migration-validation.md). A checkbox means executed and
@@ -423,12 +424,14 @@ actual versions with repository tooling; no guessed reserved versions.
 
 ## P6 — Remove production OTP SSL (after P5)
 
-The [source-removal checkpoint](tls-migration-validation.md#p6-source-removal-checkpoint--2026-10-29)
-passes the configured Linux source suites. The strict candidate release and
-traffic checks below pass at `bf13e62`; see the
-[directed release evidence](no-otp-release-audit.md#strict-release-acceptance--2026-11-02).
-The two OTP 28 manual-ticket reference regressions must be resolved before P6
-integration acceptance and publication.
+The [source-removal checkpoint](tls-migration-validation.md#p6-source-removal-checkpoint--2026-10-30)
+and [integrated acceptance](no-otp-release-audit.md#integrated-p6-acceptance--2026-11-02)
+pass the configured Linux source suites. The strict candidate release and
+70 traffic scenarios pass at `31a8a15`; production sources remain unchanged
+through `658bbd5`, whose complete nine-app integration workflow passes. The
+OTP 28 reference and integration-fixture regressions are closed by their actual
+full-suite results. P6 is accepted; P7's complete release regression and cold
+published-consumer checks remain required.
 
 Caller-supplied implementations at `QuicHttp3.Session.new/1` (`:transport`),
 `HTTP.WebTransport.new/2` (`:backend`), `Quic.TLSDriver.new/2` (`:adapter`,

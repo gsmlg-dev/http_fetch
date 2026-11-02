@@ -7,11 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0-rc.0] - Unreleased
+## [1.0.0-rc.0] - 2026-11-02
 
-The initial TLS migration release candidate is `1.0.0-rc.0`; it has not been
-published. The changes below describe the current source; production release
-isolation and published consumer acceptance remain pending. See the
+The initial coordinated TLS migration release candidate is `1.0.0-rc.0`.
+Candidate production releases pass the supported traffic matrix with OTP SSL
+unavailable. The release workflow also requires cold published consumers to
+repeat the critical checks. See the
 [migration checklist](docs/tls-migration-plan.md)
 and [validation ledger](docs/tls-migration-validation.md) for executed gates.
 
