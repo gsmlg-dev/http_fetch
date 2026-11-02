@@ -79,7 +79,8 @@ def affected_consumers(paths, consumers, graph=None):
 
 
 def candidate_tls_required(paths):
-    return bool(source_owners(paths)) or any(shared_h2_path(path) for path in paths)
+    return (bool(source_owners(paths)) or any(shared_h2_path(path) for path in paths)
+            or any(path.startswith("docs/no-otp-") for path in paths))
 
 
 def select_apps(paths, workflow):

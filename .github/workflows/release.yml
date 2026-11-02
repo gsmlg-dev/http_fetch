@@ -266,7 +266,7 @@ jobs:
               "$RELEASE_VERSION" "$RUNNER_TEMP/archives" "$RUNNER_TEMP/stage" \
               --source-root "$GITHUB_WORKSPACE" --source-sha "$(git rev-parse HEAD)" \
               --peer-plan "$RUNNER_TEMP/no-otp-plan-$tls.json" \
-              --output "$RUNNER_TEMP/no-otp-release/candidate-$tls"
+              --output "$RUNNER_TEMP/no-otp-release/candidate-$tls" --directed-review
           done
 
       - name: Preflight Hex and GitHub immutability before any remote write
@@ -321,7 +321,7 @@ jobs:
               "$RELEASE_VERSION" "$RUNNER_TEMP/archives" "$RUNNER_TEMP/stage" \
               --source-root "$GITHUB_WORKSPACE" --source-sha "$(git rev-parse HEAD)" \
               --peer-plan "$RUNNER_TEMP/no-otp-plan-$tls.json" \
-              --output "$RUNNER_TEMP/no-otp-release/published-$tls" --published
+              --output "$RUNNER_TEMP/no-otp-release/published-$tls" --published --directed-review
           done
 
       - name: Attach and verify all immutable GitHub release archives

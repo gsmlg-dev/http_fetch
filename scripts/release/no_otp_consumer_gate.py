@@ -40,6 +40,7 @@ from urllib.parse import urlsplit
 
 import archive_audit
 import consumer_gate
+import no_otp_directed_review as directed_proof
 from stage import PACKAGES, portable_manifest
 
 HERE = Path(__file__).resolve().parent
@@ -697,7 +698,7 @@ def validate_private_fields(report):
                 'private field graph status disagrees with complete seeded origins')
 
 
-def validate_artifacts(report, version, *, allow_unresolved=False):
+def validate_artifacts(report, version, *, allow_unresolved=False, directed_review=None):
     require(isinstance(report, dict), 'artifact audit missing')
     validate_callable_preflight(report)
     validate_private_fields(report)
@@ -706,12 +707,17 @@ def validate_artifacts(report, version, *, allow_unresolved=False):
     for field in ('ssl_app_dependencies', 'ssl_bundle_paths', 'ssl_boot_entries',
                   'direct_otp_ssl_imports', 'unresolved_dispatch', 'missing_abstract_code',
                   'duplicate_package_apps'):
-        if field == 'unresolved_dispatch' and allow_unresolved:
+        if field == 'unresolved_dispatch' and (allow_unresolved or directed_review is not None):
             require(isinstance(report.get(field), list), 'unresolved dispatch inventory missing')
             continue
         require(report.get(field) == [], f'{field}: forbidden or unconfirmed production evidence')
     require(report.get('package_versions') == {package: version for package in PACKAGES},
             'all nine release package versions must match candidate archives')
+    if directed_review is not None:
+        try:
+            directed_proof.validate(report, directed_review)
+        except ValueError as error:
+            raise GateError(str(error)) from error
 
 
 def validate_scenario(case, consumer, peer, nonce):
@@ -931,11 +937,13 @@ def bounded_registry_commands(runner, source=None):
 
 
 def run(version, archives, stage, source, source_sha, plan, output, max_seconds=1800, *,
-        published=False, collect_blocked_traffic=False):
+        published=False, collect_blocked_traffic=False, directed_review=False):
     validate_version(version)
     validate_plan(plan)
     require(not (published and collect_blocked_traffic),
             'published verification requires the strict release gate')
+    require(not (directed_review and collect_blocked_traffic),
+            'directed review requires the strict release gate')
     require(re.fullmatch(r'[a-f0-9]{40}', source_sha), 'full source SHA required')
     output, source = output.resolve(), source.resolve()
     require(not output.exists() and not within(output, source), 'new isolated output outside source tree required')
@@ -961,6 +969,12 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
         runner.command(['unbuffer', 'elixir', str(source / 'scripts/release/archives.exs'),
                         version, str(archives)], cwd=source, env=env)
         report['staged_source_sha256'] = verify_source(stage, source, archives, version)
+        review_bundle = None
+        if directed_review:
+            try:
+                review_bundle = directed_proof.load(source, version, PACKAGES)
+            except ValueError as error:
+                raise GateError(str(error)) from error
         report['archives'] = {package: hashlib.sha256(
             (archives / f'{package}-{version}.tar').read_bytes()).hexdigest() for package in PACKAGES}
         if published:
@@ -971,7 +985,7 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
             report['published_archives'] = {package: 'matching' for package in PACKAGES}
         project.joinpath('lib').mkdir(parents=True)
         project.joinpath('mix.exs').write_text(project_source(version))
-        for stem in ('no_otp_consumer', 'no_otp_release_audit'):
+        for stem in ('no_otp_consumer', 'no_otp_release_audit', 'no_otp_directed_review'):
             shutil.copyfile(HERE / f'{stem}.exs', project / 'lib' / f'{stem}.ex')
         env.update(NO_OTP_VERSION=version, NO_OTP_PROJECT=str(project), NO_OTP_NONCE=nonce,
                    NO_OTP_RELEASE=str(release), NO_OTP_REPORT=str(output / 'release-report.json'))
@@ -979,6 +993,8 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
         config = dict(schema=1, nonce=nonce, version=version, scenarios=[])
         if collect_blocked_traffic:
             config['collect_blocked_traffic'] = True
+        if review_bundle is not None:
+            config['directed_review'] = review_bundle
         with bounded_registry_commands(runner, source):
             registry = nullcontext(None)
             if not published:
@@ -1024,7 +1040,10 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
             validate_artifacts(actual.get('artifacts'), version, allow_unresolved=True)
         static_error = None
         try:
-            validate_artifacts(actual.get('artifacts'), version)
+            if review_bundle is None:
+                validate_artifacts(actual.get('artifacts'), version)
+            else:
+                validate_artifacts(actual.get('artifacts'), version, directed_review=review_bundle)
             report['static_status'] = 'PASS'
         except GateError as error:
             report['static_status'] = 'FAIL'
@@ -1078,11 +1097,15 @@ def main():
     parser.add_argument('--published', action='store_true')
     parser.add_argument('--collect-blocked-traffic', action='store_true',
                         help='collect traffic evidence while retaining static gate failures')
+    parser.add_argument('--directed-review', action='store_true',
+                        help='bind the concrete reviewed source proofs to this strict release')
     args = parser.parse_args()
     require(1 <= args.max_seconds <= 7200, 'bounded gate duration required')
     options = dict(published=args.published)
     if args.collect_blocked_traffic:
         options['collect_blocked_traffic'] = True
+    if args.directed_review:
+        options['directed_review'] = True
     result = run(args.version, args.archives.resolve(), args.stage.resolve(), args.source_root,
                  args.source_sha, json.loads(args.peer_plan.read_text()), args.output, args.max_seconds,
                  **options)

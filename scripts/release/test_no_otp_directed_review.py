@@ -5,7 +5,9 @@ import os
 from pathlib import Path
 import subprocess
 import unittest
+from unittest.mock import patch
 
+import no_otp_consumer_gate as gate
 import no_otp_directed_review as review
 from stage import PACKAGES
 
@@ -87,6 +89,40 @@ class DirectedReviewTests(unittest.TestCase):
                 change(artifacts['directed_review'])
                 with self.assertRaises(ValueError):
                     review.validate(artifacts, bundle)
+
+    def test_strict_gate_requires_a_bound_receipt_and_keeps_every_other_artifact_check(self):
+        artifacts, bundle = self.fixture()
+        artifacts.update(checked_app_files=10, checked_rel_files=1, checked_boot_files=1,
+                         ssl_app_dependencies=[], ssl_bundle_paths=[], ssl_boot_entries=[],
+                         direct_otp_ssl_imports=[], missing_abstract_code=[], duplicate_package_apps=[],
+                         package_versions={package: '1.0.0-rc.0' for package in gate.PACKAGES})
+        with self.assertRaisesRegex(gate.GateError, 'unresolved_dispatch'):
+            gate.validate_artifacts(artifacts, '1.0.0-rc.0')
+        gate.validate_artifacts(artifacts, '1.0.0-rc.0', directed_review=bundle)
+        for field in ('ssl_app_dependencies', 'ssl_bundle_paths', 'ssl_boot_entries',
+                      'direct_otp_ssl_imports', 'missing_abstract_code', 'duplicate_package_apps'):
+            with self.subTest(field=field), self.assertRaisesRegex(gate.GateError, field):
+                gate.validate_artifacts(dict(artifacts, **{field: ['forbidden']}), '1.0.0-rc.0',
+                                        directed_review=bundle)
+
+    def test_cli_explicitly_requests_strict_directed_proof_for_published_release(self):
+        from test_no_otp_consumer_gate import plan
+        argv = ['gate', '1.0.0-rc.0', '/archives', '/stage', '--source-root', '/source',
+                '--source-sha', 'a' * 40, '--peer-plan', '/plan.json', '--output', '/fresh',
+                '--published', '--directed-review']
+        with patch.object(gate.sys, 'argv', argv), \
+                patch.object(Path, 'read_text', return_value=json.dumps(plan())), \
+                patch.object(gate, 'run', return_value={'gate': 'test', 'status': 'PASS', 'output': '/fresh'}) as run, \
+                patch('builtins.print'):
+            gate.main()
+        self.assertEqual(run.call_args.kwargs, dict(published=True, directed_review=True))
+
+    def test_diagnostic_mode_cannot_bypass_a_failed_directed_proof(self):
+        from test_no_otp_consumer_gate import plan
+        with self.assertRaisesRegex(gate.GateError, 'directed review requires the strict'):
+            gate.run('1.0.0-rc.0', Path('/archives'), Path('/stage'), Path('/source'),
+                     'a' * 40, plan(), Path('/fresh'), directed_review=True,
+                     collect_blocked_traffic=True)
 
 
 if __name__ == '__main__':

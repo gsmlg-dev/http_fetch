@@ -119,16 +119,19 @@ defmodule NoOTP.Consumer do
       ]
     }
 
+    artifacts =
+      NoOTP.ReleaseAudit.artifacts(
+        parameter_invariants: parameter_invariants,
+        public_callable_roots: public_callable_roots,
+        incoming_target_derivations: true,
+        private_shape_invariants: private_shape_invariants,
+        private_field_invariants: private_field_invariants
+      )
+      |> directed_artifacts(config, release)
+
     report = %{
       nonce: config["nonce"],
-      artifacts:
-        NoOTP.ReleaseAudit.artifacts(
-          parameter_invariants: parameter_invariants,
-          public_callable_roots: public_callable_roots,
-          incoming_target_derivations: true,
-          private_shape_invariants: private_shape_invariants,
-          private_field_invariants: private_field_invariants
-        ),
+      artifacts: artifacts,
       before: NoOTP.ReleaseAudit.runtime(),
       initial_code_paths: initial_paths,
       scenarios: [],
@@ -143,7 +146,7 @@ defmodule NoOTP.Consumer do
       try do
         traffic_diagnostic = config["collect_blocked_traffic"] == true
 
-        unless NoOTP.ReleaseAudit.clean?(report.artifacts, report.before) or
+        unless release_clean?(report.artifacts, report.before) or
                  (traffic_diagnostic and
                     NoOTP.ReleaseAudit.isolated?(report.artifacts, report.before)),
                do:
@@ -165,11 +168,32 @@ defmodule NoOTP.Consumer do
 
     unless not Map.has_key?(report, :error) and
              Enum.all?(report.scenarios, &(&1.result == "PASS")) and
-             NoOTP.ReleaseAudit.clean?(report.artifacts, report.after),
+             release_clean?(report.artifacts, report.after),
            do:
              raise(
                "no-OTP production release failed; retained release-report.json contains evidence"
              )
+  end
+
+  defp directed_artifacts(artifacts, %{"directed_review" => bundle}, release) do
+    Map.put(
+      artifacts,
+      :directed_review,
+      NoOTP.DirectedReview.bind(
+        artifacts,
+        bundle,
+        System.fetch_env!("NO_OTP_PROJECT"),
+        release
+      )
+    )
+  end
+
+  defp directed_artifacts(artifacts, _config, _release), do: artifacts
+
+  defp release_clean?(artifacts, runtime) do
+    NoOTP.ReleaseAudit.clean?(artifacts, runtime) or
+      (NoOTP.ReleaseAudit.isolated?(artifacts, runtime) and
+         NoOTP.DirectedReview.accepted?(artifacts))
   end
 
   defp scenario(case_spec, nonce) do

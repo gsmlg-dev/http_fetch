@@ -166,8 +166,11 @@ receipt. New sources, changed producers, extra or missing sites, and mismatched
 build bytes fail closed. These bindings identify the concrete derivations above;
 hash equality alone does not establish their safety.
 
-The binding helpers' focused checks pass; integration into the actual release
-gate and its real traffic remain pending. The generic audit remains unchanged.
+`--directed-review` enables this binding in the strict candidate and published
+release gates. It cannot be combined with blocked-traffic diagnostics. Review
+input changes trigger candidate acceptance in CI. The binding and complete
+release/CI tooling regressions pass; actual release and traffic acceptance remain
+pending. The generic audit remains unchanged.
 
 1. Complete each directed producer/state/callback proof, bound to the selected
    sources and original occurrence identities. Preserve all remaining blockers.

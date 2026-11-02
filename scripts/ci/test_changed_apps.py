@@ -88,6 +88,13 @@ class SelectionTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertFalse(changed_apps.candidate_tls_required([path]))
 
+    def test_directed_release_review_inputs_require_candidate_tls_acceptance(self):
+        for path in ("docs/no-otp-directed-release.json", "docs/no-otp-directed-tls-proof.md",
+                     "docs/no-otp-directed-h3-proof.json", "docs/no-otp-release-dispatch-inventory.csv"):
+            with self.subTest(path=path):
+                self.assertTrue(changed_apps.candidate_tls_required([path]))
+                self.assertEqual(select_apps([path], "ci.yml"), [])
+
     def test_quic_selection_uses_current_dependency_graph(self):
         graph = {app: set() for app in ALL}
         graph["elixir_quic_http3"] = {"http_runtime"}

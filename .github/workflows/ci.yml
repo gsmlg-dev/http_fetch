@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches: ["**"]
-    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
+    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
   pull_request:
     branches: [main]
-    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
+    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
 
   workflow_dispatch:
     inputs:
@@ -190,7 +190,7 @@ jobs:
               --source-root "$GITHUB_WORKSPACE" --source-sha "$(git rev-parse HEAD)" \
               --peer-plan "$RUNNER_TEMP/no-otp-plan-$tls.json" \
               --output "$RUNNER_TEMP/no-otp-release/candidate-$tls" \
-              --collect-blocked-traffic || status=1
+              --directed-review || status=1
           done
           exit "$status"
       - name: Preserve no-OTP release diagnostics
