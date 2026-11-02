@@ -5412,3 +5412,2192 @@ defmodule NoOTP.ReleaseAudit do
 
   defp digest(path), do: :crypto.hash(:sha256, File.read!(path)) |> Base.encode16(case: :lower)
 end
+
+defmodule NoOTP.ReleaseAudit.StateEquation do
+  @moduledoc false
+  @max_parameter_functions 256
+  @max_parameter_calls 4_096
+  @max_parameter_nodes 100_000
+  @callable_header_sizes %{
+    clause: [5],
+    atom: [3],
+    integer: [3],
+    float: [3],
+    char: [3],
+    string: [3],
+    nil: [2],
+    var: [3],
+    cons: [4],
+    tuple: [3],
+    map: [3, 4],
+    map_field_assoc: [4],
+    map_field_exact: [4],
+    bin: [3],
+    bin_element: [5],
+    match: [4],
+    block: [3],
+    case: [4],
+    if: [3],
+    receive: [3, 5],
+    try: [6],
+    catch: [3],
+    op: [4, 5],
+    remote: [4],
+    named_fun: [4],
+    lc: [4],
+    bc: [4],
+    mc: [4],
+    generate: [4],
+    b_generate: [4],
+    m_generate: [4],
+    generate_strict: [4],
+    b_generate_strict: [4],
+    m_generate_strict: [4],
+    call: [4],
+    fun: [3],
+    record: [4, 5],
+    record_field: [3, 4, 5],
+    record_index: [4]
+  }
+
+  @joint_limits %{alternatives: 16, bytes: 65_536, functions: 256, calls: 4_096, nodes: 100_000}
+
+  # A conditional value/effect theorem, never an entry-origin certificate.
+  # Both a normal callback result and a caught throw can supply GenServer's
+  # next state. Error/exit alternatives are retained for local catch clauses.
+  def prove(context, module, {name, arity} = entry, index, field, atoms, limits) do
+    valid =
+      limits === @joint_limits and is_atom(module) and is_atom(name) and is_integer(arity) and
+        arity in 1..255 and
+        is_integer(index) and index >= 0 and index < arity and is_atom(field) and
+        is_list(atoms) and atoms != [] and length(atoms) <= limits.alternatives and
+        Enum.all?(atoms, &is_atom/1) and length(Enum.uniq(atoms)) == length(atoms)
+
+    if valid do
+      input = {:map_value, %{field => {:atoms, atoms}}, :open}
+      arguments = List.replace_at(List.duplicate(:unknown, arity), index, input)
+
+      {flow, state} = evaluate_entry(context, module, entry, arguments, limits)
+      normal = Enum.map(flow.normal, &elem(&1, 0))
+      thrown = for {:throw, value} <- flow.exceptions, do: value
+      outcomes = normal ++ thrown
+      accepted = Enum.map(outcomes, &result_state/1)
+      states = for {:state, value} <- accepted, do: value
+
+      checked =
+        state.complete and sources_current?(state) and outcomes != [] and :unknown not in accepted and
+          Enum.all?(states, &preserves?(&1, field, atoms))
+
+      %{
+        status: if(checked, do: "checked_conditional", else: "unconfirmed"),
+        scope: "callback_result_and_throw_only",
+        entry: %{function: to_string(name), arity: arity, parameter_index: index},
+        field: to_string(field),
+        targets: Enum.map(atoms, &to_string/1),
+        complete: state.complete,
+        evaluated_nodes: state.nodes,
+        evaluated_calls: state.calls,
+        normal_results: length(normal),
+        thrown_results: length(thrown),
+        accepted_state_results: length(states),
+        dependencies:
+          Enum.map(state.dependencies, fn {{module, function, count}, digest} ->
+            %{
+              module: inspect(module),
+              function: to_string(function),
+              arity: count,
+              form_sha256: digest
+            }
+          end),
+        entry_origins_proved: false,
+        ordinary_findings_removed: 0
+      }
+    else
+      %{status: "unconfirmed", scope: "callback_result_and_throw_only", complete: false}
+    end
+  end
+
+  # The seeded graph uses this internal entry with source-derived abstract
+  # arguments. It is not an exported configuration/certificate interface.
+  defp evaluate_entry(context, module, entry, arguments, limits) do
+    state = %{
+      definitions: %{},
+      module: module,
+      context: context,
+      catalog: %{},
+      imports: [],
+      limits: limits,
+      nodes: 0,
+      calls: 0,
+      complete: true,
+      visiting: MapSet.new(),
+      memo: %{},
+      dependencies: MapSet.new()
+    }
+
+    {flow, state} =
+      if length(arguments) <= 255 and :erlang.external_size(arguments) <= limits.bytes do
+        case select_source(module, state) do
+          {:ok, source, selected_state} ->
+            selected_state = %{
+              selected_state
+              | definitions: source.definitions,
+                imports: source.imports
+            }
+
+            stabilize(entry, arguments, selected_state, limits.functions)
+
+          :unknown ->
+            unknown(%{}, state)
+        end
+      else
+        unknown(%{}, state)
+      end
+
+    if state.complete and sources_current?(state),
+      do: {flow, state},
+      else: unknown(%{}, state)
+  end
+
+  # Only this reader creates catalog entries. Public options never supply forms,
+  # selection flags, hashes or a pre-approved source catalog.
+  defp select_source(module, state) when is_atom(module) do
+    case Map.fetch(state.catalog, module) do
+      {:ok, source} ->
+        {:ok, source, state}
+
+      :error ->
+        with true <- map_size(state.catalog) < state.limits.functions,
+             {:ok, selected} <- selected_producer(module, state.context),
+             {:ok, bytes} <- File.read(selected.path),
+             true <- :crypto.hash(:sha256, bytes) === selected.sha256,
+             {:ok, {^module, chunks}} <-
+               :beam_lib.chunks(bytes, [:imports, :exports, :abstract_code]),
+             {:raw_abstract_v1, forms} <- Keyword.fetch!(chunks, :abstract_code),
+             {:ok, _maximum_annotation} <- incoming_raw_syntax(forms),
+             functions = for({:function, _, _, _, _} = form <- forms, do: form),
+             definitions =
+               Map.new(functions, fn {:function, _, name, arity, _} = form ->
+                 {{name, arity}, form}
+               end),
+             true <- map_size(definitions) === length(functions),
+             true <- definitions === selected.definitions,
+             exports = Keyword.fetch!(chunks, :exports),
+             true <- exports === selected.exports,
+             beam_imports = Keyword.fetch!(chunks, :imports),
+             true <- valid_imports?(beam_imports),
+             imports = declared_imports(forms),
+             true <- valid_imports?(imports),
+             true <-
+               length(Enum.uniq_by(imports, fn {_, f, a} -> {f, a} end)) === length(imports),
+             {:ok, ^selected} <- selected_producer(module, state.context),
+             {:ok, ^bytes} <- File.read(selected.path) do
+          source = %{
+            selection: selected,
+            definitions: definitions,
+            imports: imports,
+            beam_imports: beam_imports,
+            exports: exports,
+            raw_forms_sha256: incoming_term_digest(forms)
+          }
+
+          {:ok, source, %{state | catalog: Map.put(state.catalog, module, source)}}
+        else
+          _ -> :unknown
+        end
+    end
+  rescue
+    _ -> :unknown
+  catch
+    _, _ -> :unknown
+  end
+
+  defp select_source(_, _state), do: :unknown
+
+  # BEAM imports include remote calls and are NOT unqualified import bindings.
+  # Only raw -import declarations may redirect an otherwise non-local call.
+  defp declared_imports(forms) do
+    Enum.flat_map(forms, fn
+      {:attribute, _, :import, {module, entries}} when is_atom(module) and is_list(entries) ->
+        Enum.map(entries, fn {name, arity} -> {module, name, arity} end)
+
+      {:attribute, _, :import, _} ->
+        [:invalid]
+
+      _ ->
+        []
+    end)
+  end
+
+  defp valid_imports?(imports) when is_list(imports) do
+    Enum.all?(imports, fn
+      {module, name, arity}
+      when is_atom(module) and is_atom(name) and
+             is_integer(arity) and arity in 0..255 ->
+        true
+
+      _ ->
+        false
+    end) and length(imports) === length(Enum.uniq(imports))
+  end
+
+  defp valid_imports?(_), do: false
+
+  defp sources_current?(state) do
+    map_size(state.catalog) > 0 and
+      Enum.all?(state.catalog, fn {module, source} ->
+        selected_producer(module, state.context) === {:ok, source.selection}
+      end)
+  end
+
+  defp result_state({:tuple_value, [{:literal, :noreply}, value]}), do: {:state, value}
+  defp result_state({:tuple_value, [{:literal, :noreply}, value, _]}), do: {:state, value}
+  defp result_state({:tuple_value, [{:literal, :reply}, _, value]}), do: {:state, value}
+  defp result_state({:tuple_value, [{:literal, :reply}, _, value, _]}), do: {:state, value}
+  defp result_state({:tuple_value, [{:literal, :stop}, _, value]}), do: {:state, value}
+  defp result_state({:tuple_value, [{:literal, :stop}, _, _, value]}), do: {:state, value}
+  defp result_state(:unknown), do: :unknown
+  defp result_state({:map_iterator, _}), do: :unknown
+  defp result_state({:tuple_value, [:unknown | _]}), do: :unknown
+  defp result_state({:tuple_value, [{:atoms, _} | _]}), do: :unknown
+  defp result_state(_invalid_callback_result), do: :no_transition
+
+  defp preserves?({:map_value, fields, _rest}, field, allowed) do
+    case Map.get(fields, field, :unknown) do
+      {:literal, atom} when is_atom(atom) -> atom in allowed
+      {:atoms, atoms} -> atoms != [] and Enum.all?(atoms, &(&1 in allowed))
+      _ -> false
+    end
+  end
+
+  defp preserves?(_, _, _), do: false
+  defp empty, do: %{normal: [], exceptions: []}
+  defp value(value, env), do: %{normal: [{value, env}], exceptions: []}
+  defp exception(kind, reason), do: %{normal: [], exceptions: [{kind, reason}]}
+
+  defp unknown(env, state) do
+    {%{normal: [{:unknown, env}], exceptions: unknown_exceptions()}, %{state | complete: false}}
+  end
+
+  defp unknown_exceptions, do: for(kind <- [:throw, :error, :exit], do: {kind, :unknown})
+
+  defp merge(first, second) do
+    %{
+      normal: Enum.uniq(first.normal ++ second.normal),
+      exceptions: Enum.uniq(first.exceptions ++ second.exceptions)
+    }
+  end
+
+  defp bounded(flow, state) do
+    flow = compact_flow(flow, state.limits.alternatives)
+
+    if length(flow.normal) <= state.limits.alternatives and
+         length(flow.exceptions) <= state.limits.alternatives and
+         :erlang.external_size(flow) <= state.limits.bytes do
+      {flow, state}
+    else
+      unknown(%{}, state)
+    end
+  end
+
+  # Finite widening is an overapproximation. It never turns an unknown field or
+  # effect into a proved one, and it does not increase any configured budget.
+  defp compact_flow(flow, maximum) do
+    normal =
+      if length(flow.normal) > maximum do
+        flow.normal
+        |> Enum.group_by(fn {v, _env} -> value_shape(v) end)
+        |> Enum.map(fn {_shape, values} ->
+          Enum.reduce(values, fn {value, env}, {acc, scope} ->
+            {join_value(acc, value, maximum), join_environment(scope, env, maximum)}
+          end)
+        end)
+      else
+        flow.normal
+      end
+
+    exceptions =
+      if length(flow.exceptions) > maximum do
+        flow.exceptions
+        |> Enum.group_by(&elem(&1, 0))
+        |> Enum.map(fn {kind, outcomes} ->
+          reasons = Enum.map(outcomes, &elem(&1, 1))
+          {kind, join_values(reasons, maximum)}
+        end)
+      else
+        flow.exceptions
+      end
+
+    %{normal: normal, exceptions: exceptions}
+  end
+
+  defp value_shape({:tuple_value, [{:literal, tag} | fields]}) when is_atom(tag),
+    do: {:tagged_tuple, tag, length(fields)}
+
+  defp value_shape({:tuple_value, fields}), do: {:tuple, length(fields)}
+  defp value_shape({:map_value, _, _}), do: :map
+  defp value_shape({:list_value, _}), do: :list
+  defp value_shape({:list_of, _}), do: :list
+  defp value_shape(value), do: {:other, value}
+
+  defp join_environment(left, right, maximum) do
+    for {key, value} <- left,
+        Map.has_key?(right, key),
+        into: %{},
+        do: {key, join_value(value, Map.fetch!(right, key), maximum)}
+  end
+
+  defp join_values([], _maximum), do: :unknown
+
+  defp join_values([first | rest], maximum),
+    do: Enum.reduce(rest, first, &join_value(&2, &1, maximum))
+
+  defp join_value(left, right, _maximum) when left === right, do: left
+  defp join_value(:unknown, _right, _maximum), do: :unknown
+  defp join_value(_left, :unknown, _maximum), do: :unknown
+
+  defp join_value({:literal, a}, {:literal, b}, maximum) when is_atom(a) and is_atom(b),
+    do: join_atoms([a], [b], maximum)
+
+  defp join_value({:atoms, a}, {:atoms, b}, maximum), do: join_atoms(a, b, maximum)
+
+  defp join_value({:literal, a}, {:atoms, b}, maximum) when is_atom(a),
+    do: join_atoms([a], b, maximum)
+
+  defp join_value({:atoms, a}, {:literal, b}, maximum) when is_atom(b),
+    do: join_atoms(a, [b], maximum)
+
+  defp join_value({:tuple_value, left}, {:tuple_value, right}, maximum)
+       when length(left) == length(right),
+       do: {:tuple_value, Enum.zip_with(left, right, &join_value(&1, &2, maximum))}
+
+  defp join_value({:map_value, left, lr}, {:map_value, right, rr}, maximum) do
+    fields = join_environment(left, right, maximum)
+
+    rest =
+      cond do
+        # fields is the intersection formed by exact Map.has_key?/2 lookups.
+        # Retain closedness only when that intersection preserves both key sets.
+        lr == :closed and rr == :closed and map_size(fields) === map_size(left) and
+            map_size(fields) === map_size(right) ->
+          :closed
+
+        key_absent?(left, lr, :__struct__) and key_absent?(right, rr, :__struct__) ->
+          :open_without_struct
+
+        true ->
+          :open
+      end
+
+    {:map_value, fields, rest}
+  end
+
+  defp join_value({:list_value, left}, {:list_value, right}, maximum)
+       when length(left) == length(right),
+       do: {:list_value, Enum.zip_with(left, right, &join_value(&1, &2, maximum))}
+
+  defp join_value({:list_value, left}, {:list_value, right}, maximum),
+    do: {:list_of, join_values(left ++ right, maximum)}
+
+  defp join_value({:list_of, left}, {:list_of, right}, maximum),
+    do: {:list_of, join_value(left, right, maximum)}
+
+  defp join_value({:list_value, left}, {:list_of, right}, maximum),
+    do: {:list_of, join_values([right | left], maximum)}
+
+  defp join_value({:list_of, left}, {:list_value, right}, maximum),
+    do: {:list_of, join_values([left | right], maximum)}
+
+  defp join_value({:cons_value, lh, lt}, {:cons_value, rh, rt}, maximum),
+    do: {:cons_value, join_value(lh, rh, maximum), join_value(lt, rt, maximum)}
+
+  defp join_value(_left, _right, _maximum), do: :unknown
+
+  defp join_atoms(left, right, maximum) do
+    values = Enum.uniq(left ++ right) |> Enum.sort()
+    if length(values) <= maximum, do: {:atoms, values}, else: :unknown
+  end
+
+  defp key_absent?(fields, rest, key) do
+    not Map.has_key?(fields, key) and
+      (rest == :closed or (rest == :open_without_struct and key === :__struct__))
+  end
+
+  defp stabilize(entry, arguments, state, remaining) when remaining > 0 do
+    before = state.memo
+    {flow, state} = enter(entry, arguments, state)
+
+    cond do
+      not state.complete -> {flow, state}
+      state.memo === before -> {flow, state}
+      true -> stabilize(entry, arguments, state, remaining - 1)
+    end
+  end
+
+  defp stabilize(_entry, _arguments, state, _remaining), do: unknown(%{}, state)
+
+  defp enter(_key, _arguments, %{complete: false} = state), do: unknown(%{}, state)
+
+  defp enter(key, arguments, state) do
+    state = %{state | calls: state.calls + 1}
+    identity = {state.module, key, arguments}
+
+    cond do
+      state.calls > state.limits.calls ->
+        unknown(%{}, state)
+
+      MapSet.member?(state.visiting, identity) ->
+        # Bottom is an empty set of terminating outcomes, not an origin seed.
+        # Every assumed recursive output is recomputed to a stable equation.
+        {Map.get(state.memo, identity, empty()), state}
+
+      true ->
+        case Map.get(state.definitions, key) do
+          {:function, _, _, _, clauses} = form ->
+            digest =
+              :crypto.hash(:sha256, :erlang.term_to_binary(form)) |> Base.encode16(case: :lower)
+
+            dependencies =
+              MapSet.put(state.dependencies, {{state.module, elem(key, 0), elem(key, 1)}, digest})
+
+            if MapSet.size(dependencies) > state.limits.functions or
+                 map_size(state.memo) >= state.limits.calls do
+              unknown(%{}, state)
+            else
+              state = %{
+                state
+                | visiting: MapSet.put(state.visiting, identity),
+                  dependencies: dependencies
+              }
+
+              {flow, state} = clauses(clauses, arguments, %{}, state)
+
+              flow = %{
+                flow
+                | normal: Enum.map(flow.normal, fn {v, _} -> {v, %{}} end) |> Enum.uniq()
+              }
+
+              flow = merge(Map.get(state.memo, identity, empty()), flow)
+              {flow, state} = bounded(flow, state)
+
+              state = %{
+                state
+                | memo: Map.put(state.memo, identity, flow),
+                  visiting: MapSet.delete(state.visiting, identity)
+              }
+
+              if :erlang.external_size(state.memo) > state.limits.bytes,
+                do: unknown(%{}, state),
+                else: {flow, state}
+            end
+
+          _ ->
+            unknown(%{}, state)
+        end
+    end
+  end
+
+  defp clauses(clauses, arguments, env, state) do
+    alternatives = expand_iterator_arguments(arguments, state.limits.alternatives)
+
+    if alternatives == :unknown do
+      unknown(env, state)
+    else
+      Enum.reduce(alternatives, {empty(), state}, fn args, {out, state} ->
+        {flow, state} = clauses_until(clauses, args, env, state, empty())
+        bounded(merge(out, flow), state)
+      end)
+    end
+  end
+
+  defp expand_iterator_arguments([], _maximum), do: [[]]
+
+  defp expand_iterator_arguments([head | tail], maximum) do
+    rest = expand_iterator_arguments(tail, maximum)
+
+    choices =
+      case head do
+        {:map_iterator, map} -> iterator_alternatives(map, maximum)
+        _ -> [head]
+      end
+
+    if rest == :unknown or length(choices) * length(rest) > maximum,
+      do: :unknown,
+      else: for(value <- choices, values <- rest, do: [value | values])
+  end
+
+  # An opaque remaining iterator may be an eager tuple chain, a lazy improper
+  # list over the original map, or none. Remaining-key/order correlations are
+  # deliberately forgotten: revisiting entries and early exhaustion enlarge
+  # the outcome set and cannot create a finite-origin fact.
+  defp iterator_alternatives({:map_value, fields, rest} = map, maximum) do
+    terminal = [{:literal, :none}]
+    lazy = [{:cons_value, :unknown, map}]
+
+    if rest == :closed and map_size(fields) == 0 do
+      terminal ++ lazy
+    else
+      keys = Enum.map(Map.keys(fields), &{:literal, &1})
+      values = Map.values(fields)
+
+      {key, item} =
+        if rest == :closed,
+          do: {join_values(keys, maximum), join_values(values, maximum)},
+          else: {:unknown, :unknown}
+
+      terminal ++ lazy ++ [{:tuple_value, [key, item, {:map_iterator, map}]}]
+    end
+  end
+
+  defp clauses_until([], _arguments, _env, state, out),
+    do: bounded(merge(out, exception(:error, :unknown)), state)
+
+  defp clauses_until([{:clause, _, patterns, guards, body} | rest], arguments, env, state, out) do
+    case bind_many(patterns, arguments, env) do
+      :no_match ->
+        clauses_until(rest, arguments, env, state, out)
+
+      {:ok, scope} ->
+        if guards_false?(guards, scope) do
+          clauses_until(rest, arguments, env, state, out)
+        else
+          {flow, state} = sequence(body, scope, state)
+          {out, state} = bounded(merge(out, flow), state)
+
+          if definite_patterns?(patterns, arguments, env) and guards_true?(guards, scope),
+            do: {out, state},
+            else: clauses_until(rest, arguments, env, state, out)
+        end
+    end
+  end
+
+  defp clauses_until(_, _arguments, env, state, _out), do: unknown(env, state)
+
+  defp covered?(clauses, arguments, env) do
+    Enum.any?(clauses, fn
+      {:clause, _, patterns, guards, _body} ->
+        case bind_many(patterns, arguments, env) do
+          {:ok, scope} ->
+            definite_patterns?(patterns, arguments, env) and guards_true?(guards, scope)
+
+          :no_match ->
+            false
+        end
+
+      _ ->
+        false
+    end)
+  end
+
+  defp guards_true?([], _env), do: true
+
+  defp guards_true?(guards, env),
+    do: Enum.any?(guards, fn group -> Enum.all?(group, &(guard(&1, env) == true)) end)
+
+  defp definite_patterns?(patterns, values, env) when length(patterns) == length(values) do
+    Enum.reduce_while(Enum.zip(patterns, values), {:yes, env}, fn {pattern, value},
+                                                                  {:yes, scope} ->
+      if definite_pattern?(pattern, value, scope) do
+        case bind(pattern, value, scope) do
+          {:ok, scope} -> {:cont, {:yes, scope}}
+          :no_match -> {:halt, :no}
+        end
+      else
+        {:halt, :no}
+      end
+    end) != :no
+  end
+
+  defp definite_patterns?(_, _, _), do: false
+  defp definite_pattern?({:var, _, :_}, _value, _env), do: true
+
+  defp definite_pattern?({:var, _, name}, value, env) do
+    case Map.fetch(env, name) do
+      :error -> true
+      {:ok, {:literal, a}} -> value === {:literal, a}
+      _ -> false
+    end
+  end
+
+  defp definite_pattern?({:match, _, a, b}, value, env) do
+    definite_pattern?(a, value, env) and
+      case bind(a, value, env) do
+        {:ok, env} -> definite_pattern?(b, value, env)
+        :no_match -> false
+      end
+  end
+
+  defp definite_pattern?({kind, _, expected}, {:literal, actual}, _env)
+       when kind in [:atom, :integer, :char, :float],
+       do: expected === actual
+
+  defp definite_pattern?({:atom, _, expected}, {:atoms, [expected]}, _env), do: true
+
+  defp definite_pattern?({:tuple, _, patterns}, {:tuple_value, values}, env),
+    do: definite_patterns?(patterns, values, env)
+
+  defp definite_pattern?({nil, _}, {:list_value, []}, _env), do: true
+
+  defp definite_pattern?({:cons, _, h, t}, {:cons_value, head, tail}, env),
+    do: definite_patterns?([h, t], [head, tail], env)
+
+  defp definite_pattern?({:cons, _, h, t}, {:list_value, [a | rest]}, env),
+    do: definite_patterns?([h, t], [a, {:list_value, rest}], env)
+
+  defp definite_pattern?({:map, _, fields}, {:map_value, known, _rest}, env) do
+    Enum.reduce_while(fields, {:yes, env}, fn
+      {:map_field_exact, _, {:atom, _, key}, pattern}, {:yes, scope} ->
+        case Map.fetch(known, key) do
+          {:ok, value} ->
+            if definite_pattern?(pattern, value, scope) do
+              case bind(pattern, value, scope) do
+                {:ok, next} -> {:cont, {:yes, next}}
+                :no_match -> {:halt, :no}
+              end
+            else
+              {:halt, :no}
+            end
+
+          :error ->
+            {:halt, :no}
+        end
+
+      _, _ ->
+        {:halt, :no}
+    end) != :no
+  end
+
+  defp definite_pattern?(_, _, _), do: false
+
+  defp guards_false?([], _env), do: false
+
+  defp guards_false?(guards, env) do
+    Enum.all?(guards, fn group -> Enum.any?(group, &(guard(&1, env) == false)) end)
+  end
+
+  defp guard({:atom, _, value}, _env) when is_boolean(value), do: value
+
+  defp guard({:call, _, {:atom, _, name}, [argument]}, env),
+    do: type_guard(name, literal(argument, env))
+
+  defp guard({:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, name}}, [argument]}, env),
+    do: type_guard(name, literal(argument, env))
+
+  defp guard({:call, _, {:atom, _, :is_function}, [argument, count]}, env),
+    do: function_guard(literal(argument, env), literal(count, env))
+
+  defp guard(
+         {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :is_function}},
+          [argument, count]},
+         env
+       ),
+       do: function_guard(literal(argument, env), literal(count, env))
+
+  defp guard({:op, _, operator, left, right}, env)
+       when operator in [:"=:=", :"=/=", :==, :"/=", :<, :>, :"=<", :>=] do
+    case {literal(left, env), literal(right, env)} do
+      {{:literal, a}, {:literal, b}} -> compare(operator, a, b)
+      _ -> :unknown
+    end
+  end
+
+  defp guard({:op, _, :andalso, left, right}, env) do
+    case guard(left, env) do
+      false -> false
+      true -> guard(right, env)
+      _ -> :unknown
+    end
+  end
+
+  defp guard({:op, _, :orelse, left, right}, env) do
+    case guard(left, env) do
+      true -> true
+      false -> guard(right, env)
+      _ -> :unknown
+    end
+  end
+
+  defp guard({:op, _, :not, expression}, env) do
+    case guard(expression, env) do
+      result when is_boolean(result) -> not result
+      _ -> :unknown
+    end
+  end
+
+  defp guard(_, _env), do: :unknown
+
+  defp function_guard(argument, {:literal, arity}) when is_integer(arity) and arity >= 0 do
+    case argument do
+      {:local_capture, _, _, count} -> count == arity
+      {:remote_capture, _, _, count} -> count == arity
+      {:closure, _, [{:clause, _, patterns, _, _} | _], _} -> length(patterns) == arity
+      {:literal, _} -> false
+      {:atoms, _} -> false
+      {:map_value, _, _} -> false
+      {:tuple_value, _} -> false
+      {:list_value, _} -> false
+      :binary_value -> false
+      _ -> :unknown
+    end
+  end
+
+  defp function_guard(_argument, _arity), do: :unknown
+
+  defp compare(:"=:=", a, b), do: a === b
+  defp compare(:"=/=", a, b), do: a !== b
+  defp compare(:==, a, b), do: a == b
+  defp compare(:"/=", a, b), do: a != b
+  defp compare(:<, a, b), do: a < b
+  defp compare(:>, a, b), do: a > b
+  defp compare(:"=<", a, b), do: a <= b
+  defp compare(:>=, a, b), do: a >= b
+
+  defp type_guard(:is_map, {:map_value, _, _}), do: true
+  defp type_guard(:is_map, {:literal, _}), do: false
+  defp type_guard(:is_atom, {:literal, atom}), do: is_atom(atom)
+  defp type_guard(:is_atom, {:atoms, _}), do: true
+  defp type_guard(:is_atom, {:map_value, _, _}), do: false
+  defp type_guard(:is_list, {:list_value, _}), do: true
+  defp type_guard(:is_list, {:list_of, _}), do: true
+
+  defp type_guard(name, {:list_of, _})
+       when name in [:is_map, :is_atom, :is_tuple, :is_function, :is_integer, :is_binary],
+       do: false
+
+  defp type_guard(:is_list, {:cons_value, _, tail}), do: type_guard(:is_list, tail)
+  defp type_guard(:is_list, {:map_value, _, _}), do: false
+  defp type_guard(:is_list, {:tuple_value, _}), do: false
+  defp type_guard(:is_map, {:cons_value, _, _}), do: false
+  defp type_guard(:is_atom, {:cons_value, _, _}), do: false
+  defp type_guard(:is_tuple, {:cons_value, _, _}), do: false
+  defp type_guard(:is_function, {:cons_value, _, _}), do: false
+  defp type_guard(:is_list, {:literal, _}), do: false
+  defp type_guard(:is_map, {:atoms, _}), do: false
+  defp type_guard(:is_map, {:tuple_value, _}), do: false
+  defp type_guard(:is_map, {:list_value, _}), do: false
+  defp type_guard(:is_tuple, {:tuple_value, _}), do: true
+  defp type_guard(:is_tuple, {:literal, value}), do: is_tuple(value)
+  defp type_guard(:is_tuple, {:atoms, _}), do: false
+  defp type_guard(:is_tuple, {:map_value, _, _}), do: false
+  defp type_guard(:is_tuple, {:list_value, _}), do: false
+  defp type_guard(:is_function, {:closure, _, _, _}), do: true
+  defp type_guard(:is_function, {:local_capture, _, _, _}), do: true
+  defp type_guard(:is_function, {:remote_capture, _, _, _}), do: true
+  defp type_guard(:is_function, {:literal, _}), do: false
+  defp type_guard(:is_function, {:atoms, _}), do: false
+  defp type_guard(:is_function, {:map_value, _, _}), do: false
+  defp type_guard(:is_function, {:list_value, _}), do: false
+  defp type_guard(:is_function, {:tuple_value, _}), do: false
+  defp type_guard(:is_integer, {:literal, value}), do: is_integer(value)
+  defp type_guard(:is_binary, :binary_value), do: true
+  defp type_guard(:is_binary, :bitstring_value), do: :unknown
+
+  defp type_guard(name, :bitstring_value)
+       when name in [:is_atom, :is_map, :is_tuple, :is_list, :is_function, :is_integer],
+       do: false
+
+  defp type_guard(:is_atom, :binary_value), do: false
+  defp type_guard(:is_map, :binary_value), do: false
+  defp type_guard(:is_tuple, :binary_value), do: false
+  defp type_guard(:is_list, :binary_value), do: false
+  defp type_guard(:is_function, :binary_value), do: false
+  defp type_guard(:is_binary, {:literal, value}), do: is_binary(value)
+  defp type_guard(:is_pid, {:literal, _}), do: false
+  defp type_guard(:is_reference, {:literal, _}), do: false
+  defp type_guard(_, _), do: :unknown
+  defp literal({:var, _, name}, env), do: Map.get(env, name, :unknown)
+  defp literal({:atom, _, atom}, _env), do: {:literal, atom}
+
+  defp literal({kind, _, number}, _env) when kind in [:integer, :float, :char],
+    do: {:literal, number}
+
+  defp literal(_, _env), do: :unknown
+
+  defp sequence([], env, state), do: {value({:literal, :ok}, env), state}
+
+  defp sequence([expression | rest], env, state) do
+    {flow, state} = expression(expression, env, state)
+
+    if rest == [] do
+      {flow, state}
+    else
+      Enum.reduce(flow.normal, {%{empty() | exceptions: flow.exceptions}, state}, fn
+        {_value, scope}, {out, state} ->
+          {next, state} = sequence(rest, scope, state)
+          bounded(merge(out, next), state)
+      end)
+    end
+  end
+
+  defp expression(_expression, env, %{complete: false} = state), do: unknown(env, state)
+
+  defp expression(expression, env, state) do
+    state = %{state | nodes: state.nodes + 1}
+
+    if state.nodes > state.limits.nodes,
+      do: unknown(env, state),
+      else: evaluate(expression, env, state)
+  end
+
+  defp evaluate({:fun, _, {:clauses, body}}, env, state),
+    do: {value({:closure, state.module, body, env}, env), state}
+
+  defp evaluate({:fun, _, {:function, name, arity}}, env, state)
+       when is_atom(name) and is_integer(arity),
+       do: {value({:local_capture, state.module, name, arity}, env), state}
+
+  defp evaluate(
+         {:fun, _, {:function, {:atom, _, module}, {:atom, _, name}, {:integer, _, arity}}},
+         env,
+         state
+       ),
+       do: {value({:remote_capture, module, name, arity}, env), state}
+
+  defp evaluate({:var, _, name}, env, state),
+    do: {value(Map.get(env, name, :unknown), env), state}
+
+  defp evaluate({kind, _, term}, env, state) when kind in [:atom, :integer, :char, :float],
+    do: {value({:literal, term}, env), state}
+
+  defp evaluate({:string, _, characters}, env, state) when is_list(characters),
+    do: bounded(value({:list_value, Enum.map(characters, &{:literal, &1})}, env), state)
+
+  defp evaluate({:bin, _, elements}, env, state) when is_list(elements) do
+    binary_elements(elements, env, state)
+  end
+
+  defp evaluate({nil, _}, env, state), do: {value({:list_value, []}, env), state}
+  defp evaluate({:tuple, _, terms}, env, state), do: invoke_arguments(terms, env, state, :tuple)
+
+  defp evaluate({:cons, _, head, tail}, env, state) do
+    invoke_arguments([head, tail], env, state, {:cons, state.limits.alternatives})
+  end
+
+  defp evaluate({:map, _, fields}, env, state),
+    do: map_fields(fields, {:map_value, %{}, :closed}, env, state)
+
+  defp evaluate({:map, _, base, fields}, env, state) do
+    {flow, state} = expression(base, env, state)
+    continue(flow, state, {:map_fields, fields})
+  end
+
+  defp evaluate({:match, _, pattern, source}, env, state) do
+    {flow, state} = expression(source, env, state)
+    continue(flow, state, {:match, pattern})
+  end
+
+  defp evaluate({:block, _, body}, env, state), do: sequence(body, env, state)
+
+  defp evaluate({:case, _, source, branches}, env, state) do
+    {flow, state} = expression(source, env, state)
+    continue(flow, state, {:case, branches})
+  end
+
+  defp evaluate({:if, _, branches}, env, state), do: clauses(branches, [], env, state)
+
+  defp evaluate({:receive, _, branches}, env, state),
+    do: clauses(branches, [:unknown], env, state)
+
+  defp evaluate({:receive, _, branches, timeout, after_body}, env, state) do
+    {timer, state} = expression(timeout, env, state)
+    continue(timer, state, {:receive, branches, after_body})
+  end
+
+  defp evaluate({:lc, _, body, qualifiers}, env, state) when is_list(qualifiers) do
+    {flow, state} = comprehension(qualifiers, body, env, state)
+    items = Enum.map(flow.normal, &elem(&1, 0))
+
+    result =
+      if items == [],
+        do: {:list_value, []},
+        else: {:list_of, join_values(items, state.limits.alternatives)}
+
+    bounded(%{normal: [{result, env}], exceptions: flow.exceptions}, state)
+  end
+
+  defp evaluate({:try, _, body, success, catches, after_body}, env, state) do
+    {body_flow, state} = sequence(body, env, state)
+
+    {normal, state} =
+      if success == [] do
+        {%{body_flow | exceptions: []}, state}
+      else
+        continue(%{body_flow | exceptions: []}, state, {:try_success, success, env})
+      end
+
+    {caught, state} =
+      Enum.reduce(body_flow.exceptions, {empty(), state}, fn {kind, reason} = raised,
+                                                             {out, state} ->
+        argument = {:tuple_value, [{:literal, kind}, reason, :caught_stacktrace]}
+        {flow, state} = clauses(catches, [argument], env, state)
+        # An exception disappears only when an ordered catch clause is proved
+        # exhaustive for this abstract payload and its guard must succeed.
+        flow =
+          if covered?(catches, [argument], env),
+            do: flow,
+            else: %{flow | exceptions: Enum.uniq([raised | flow.exceptions])}
+
+        bounded(merge(out, flow), state)
+      end)
+
+    combined = merge(normal, caught)
+
+    if after_body == [] do
+      bounded(combined, state)
+    else
+      {after_flow, state} = sequence(after_body, env, state)
+      retained = if after_flow.normal == [], do: empty(), else: combined
+
+      bounded(
+        %{retained | exceptions: Enum.uniq(retained.exceptions ++ after_flow.exceptions)},
+        state
+      )
+    end
+  end
+
+  defp evaluate({:catch, _, source}, env, state) do
+    {flow, state} = expression(source, env, state)
+
+    normal =
+      flow.normal ++
+        Enum.map(flow.exceptions, fn
+          {:throw, reason} ->
+            {reason, env}
+
+          {:exit, reason} ->
+            {{:tuple_value, [{:literal, :EXIT}, reason]}, env}
+
+          {:error, reason} ->
+            {{:tuple_value, [{:literal, :EXIT}, {:tuple_value, [reason, :unknown]}]}, env}
+        end)
+
+    bounded(%{normal: normal, exceptions: []}, state)
+  end
+
+  defp evaluate({:call, _, {:atom, _, name}, arguments}, env, state) do
+    invoke_arguments(arguments, env, state, {:local_call, name})
+  end
+
+  defp evaluate(
+         {:call, _, {:remote, _, {:atom, _, module}, {:atom, _, name}}, arguments},
+         env,
+         state
+       ) do
+    invoke_arguments(arguments, env, state, {:remote_call, module, name})
+  end
+
+  defp evaluate({:call, _, {:remote, _, module, function}, arguments}, env, state) do
+    invoke_arguments([module, function | arguments], env, state, :dynamic_remote_call)
+  end
+
+  defp evaluate({:call, _, callee, arguments}, env, state) do
+    {flow, state} = expression(callee, env, state)
+    continue(flow, state, {:call, arguments})
+  end
+
+  defp evaluate({:op, _, operator, left, right}, env, state)
+       when operator in [:andalso, :orelse] do
+    {flow, state} = expression(left, env, state)
+    continue(flow, state, {:short_circuit, operator, right})
+  end
+
+  defp evaluate({:op, _, operator, argument}, env, state),
+    do: invoke_arguments([argument], env, state, {:primitive, operator})
+
+  defp evaluate({:op, _, operator, left, right}, env, state),
+    do: invoke_arguments([left, right], env, state, {:primitive, operator})
+
+  defp evaluate(_, env, state), do: unknown(env, state)
+
+  defp comprehension([], body, env, state), do: expression(body, env, state)
+
+  defp comprehension([{:generate, _, pattern, source} | rest], body, env, state) do
+    {flow, state} = expression(source, env, state)
+    continue(flow, state, {:generator, pattern, rest, body})
+  end
+
+  defp comprehension([{:b_generate, _, _, _} | _], _body, env, state), do: unknown(env, state)
+  defp comprehension([{:m_generate, _, _, _} | _], _body, env, state), do: unknown(env, state)
+
+  defp comprehension([{:generate_strict, _, _, _} | _], _body, env, state),
+    do: unknown(env, state)
+
+  defp comprehension([{:b_generate_strict, _, _, _} | _], _body, env, state),
+    do: unknown(env, state)
+
+  defp comprehension([{:m_generate_strict, _, _, _} | _], _body, env, state),
+    do: unknown(env, state)
+
+  defp comprehension([filter | rest], body, env, state) do
+    {flow, state} = expression(filter, env, state)
+    continue(flow, state, {:filter, rest, body})
+  end
+
+  defp comprehension_items(items, pattern, rest, body, env, state) do
+    Enum.reduce(items, {empty(), state}, fn item, {out, state} ->
+      scope = Map.drop(env, pattern_names(pattern))
+
+      case bind(pattern, item, scope) do
+        :no_match ->
+          {out, state}
+
+        {:ok, scope} ->
+          {next, state} = comprehension(rest, body, scope, state)
+          bounded(merge(out, next), state)
+      end
+    end)
+  end
+
+  # Construction inspects every value and explicit size expression. The binary
+  # payload is opaque; invalid segment types/sizes retain an error alternative.
+  defp binary_elements([], env, state), do: {value(:bitstring_value, env), state}
+
+  defp binary_elements([{:bin_element, _, term, size, _types} | rest], env, state) do
+    terms = if size == :default, do: [term], else: [term, size]
+    invoke_arguments(terms, env, state, {:binary_elements, rest})
+  end
+
+  defp binary_elements(_elements, env, state), do: unknown(env, state)
+
+  defp invoke_value({:closure, module, clauses, captured}, args, caller, state) do
+    case select_source(module, state) do
+      {:ok, %{definitions: definitions, imports: imports}, state} ->
+        previous = {state.module, state.definitions, state.imports}
+        nested = %{state | module: module, definitions: definitions, imports: imports}
+        {flow, next} = closure_clauses(clauses, args, captured, nested)
+        {old_module, old_definitions, old_imports} = previous
+        next = %{next | module: old_module, definitions: old_definitions, imports: old_imports}
+
+        {%{flow | normal: Enum.map(flow.normal, fn {result, _scope} -> {result, caller} end)},
+         next}
+
+      _ ->
+        unknown(caller, state)
+    end
+  end
+
+  defp invoke_value({:local_capture, module, name, count}, args, caller, state)
+       when length(args) == count do
+    case select_source(module, state) do
+      {:ok, %{definitions: definitions, imports: imports}, state} ->
+        previous = {state.module, state.definitions, state.imports}
+        nested = %{state | module: module, definitions: definitions, imports: imports}
+        {flow, next} = enter({name, count}, args, nested)
+        {old_module, old_definitions, old_imports} = previous
+        next = %{next | module: old_module, definitions: old_definitions, imports: old_imports}
+
+        {%{flow | normal: Enum.map(flow.normal, fn {result, _scope} -> {result, caller} end)},
+         next}
+
+      _ ->
+        unknown(caller, state)
+    end
+  end
+
+  defp invoke_value({:remote_capture, module, name, count}, args, caller, state)
+       when length(args) == count,
+       do: remote(module, name, args, caller, state)
+
+  defp invoke_value({:local_capture, _, _, _}, _args, _caller, state),
+    do: {exception(:error, :unknown), state}
+
+  defp invoke_value({:remote_capture, _, _, _}, _args, _caller, state),
+    do: {exception(:error, :unknown), state}
+
+  defp invoke_value({:literal, _}, _args, _caller, state),
+    do: {exception(:error, :unknown), state}
+
+  defp invoke_value(_unknown, _args, caller, state), do: unknown(caller, state)
+
+  defp closure_clauses(clauses, arguments, captured, state) do
+    alternatives = expand_iterator_arguments(arguments, state.limits.alternatives)
+
+    if alternatives == :unknown do
+      unknown(captured, state)
+    else
+      Enum.reduce(alternatives, {empty(), state}, fn args, {out, state} ->
+        {flow, state} = closure_clauses_until(clauses, args, captured, state, empty())
+        bounded(merge(out, flow), state)
+      end)
+    end
+  end
+
+  defp closure_clauses_until([], _arguments, _captured, state, out),
+    do: bounded(merge(out, exception(:error, :unknown)), state)
+
+  defp closure_clauses_until(
+         [{:clause, _, patterns, guards, body} | rest],
+         arguments,
+         captured,
+         state,
+         out
+       ) do
+    # Each clause introduces its own parameters. A name shadowed in a different
+    # clause must not erase this clause's genuine lexical capture.
+    env = Map.drop(captured, pattern_names(patterns))
+
+    case bind_many(patterns, arguments, env) do
+      :no_match ->
+        closure_clauses_until(rest, arguments, captured, state, out)
+
+      {:ok, scope} ->
+        if guards_false?(guards, scope) do
+          closure_clauses_until(rest, arguments, captured, state, out)
+        else
+          {flow, state} = sequence(body, scope, state)
+          {out, state} = bounded(merge(out, flow), state)
+
+          if definite_patterns?(patterns, arguments, env) and guards_true?(guards, scope),
+            do: {out, state},
+            else: closure_clauses_until(rest, arguments, captured, state, out)
+        end
+    end
+  end
+
+  defp closure_clauses_until(_clauses, _arguments, captured, state, _out),
+    do: unknown(captured, state)
+
+  defp pattern_names({:var, _, name}), do: [name]
+
+  defp pattern_names(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.flat_map(&pattern_names/1)
+
+  defp pattern_names(term) when is_list(term), do: Enum.flat_map(term, &pattern_names/1)
+  defp pattern_names(_), do: []
+
+  defp invoke_arguments(terms, env, state, continuation) do
+    {flow, state} = arguments(terms, env, state)
+    continue(flow, state, continuation)
+  end
+
+  defp arguments([], env, state), do: {value([], env), state}
+
+  defp arguments([term | rest], env, state) do
+    {flow, state} = expression(term, env, state)
+    continue(flow, state, {:arguments, rest})
+  end
+
+  defp continue(flow, state, continuation) do
+    Enum.reduce(flow.normal, {%{empty() | exceptions: flow.exceptions}, state}, fn
+      {result, scope}, {out, state} ->
+        {flow, state} = resume(continuation, result, scope, state)
+        bounded(merge(out, flow), state)
+    end)
+  end
+
+  # Continuations carry only captured data. Every branch is a static local call,
+  # including continuations created by recursive interpreter functions.
+  defp resume({:map_fields, fields}, base, env, state) do
+    map_fields(fields, base, env, state)
+  end
+
+  defp resume({:match, pattern}, result, scope, state) do
+    case bind(pattern, result, scope) do
+      {:ok, bound} ->
+        flow = value(result, bound)
+
+        flow =
+          if definite_pattern?(pattern, result, scope),
+            do: flow,
+            else: merge(flow, exception(:error, :unknown))
+
+        {flow, state}
+
+      :no_match ->
+        {exception(:error, :unknown), state}
+    end
+  end
+
+  defp resume({:case, branches}, result, scope, state) do
+    clauses(branches, [result], scope, state)
+  end
+
+  defp resume({:receive, branches, after_body}, _timeout, scope, state) do
+    {received, state} = clauses(branches, [:unknown], scope, state)
+    {expired, state} = sequence(after_body, scope, state)
+    bounded(merge(received, expired) |> merge(exception(:error, :unknown)), state)
+  end
+
+  defp resume({:try_success, success, env}, result, _scope, state) do
+    clauses(success, [result], env, state)
+  end
+
+  defp resume({:local_call, name}, args, scope, state) do
+    if Map.has_key?(state.definitions, {name, length(args)}) do
+      {flow, state} = enter({name, length(args)}, args, state)
+      {%{flow | normal: Enum.map(flow.normal, fn {v, _} -> {v, scope} end)}, state}
+    else
+      imported = Enum.find(state.imports, fn {_, f, a} -> f == name and a == length(args) end)
+      module = if imported, do: elem(imported, 0), else: :erlang
+      remote(module, name, args, scope, state)
+    end
+  end
+
+  defp resume({:remote_call, module, name}, args, scope, state) do
+    remote(module, name, args, scope, state)
+  end
+
+  defp resume(:dynamic_remote_call, [target, name | args], scope, state) do
+    targets = atom_choices(target)
+    names = atom_choices(name)
+
+    if targets == :unknown or names == :unknown or targets == [] or names == [] do
+      unknown(scope, state)
+    else
+      Enum.reduce(for(m <- targets, f <- names, do: {m, f}), {empty(), state}, fn
+        {m, f}, {out, state} ->
+          {next, state} = remote(m, f, args, scope, state)
+          bounded(merge(out, next), state)
+      end)
+    end
+  end
+
+  defp resume({:call, arguments}, callable, scope, state) do
+    invoke_arguments(arguments, scope, state, {:invoke, callable})
+  end
+
+  defp resume({:invoke, callable}, args, caller, state) do
+    invoke_value(callable, args, caller, state)
+  end
+
+  defp resume({:short_circuit, operator, right}, first, scope, state) do
+    case {operator, first} do
+      {:andalso, {:literal, false}} ->
+        {value({:literal, false}, scope), state}
+
+      {:orelse, {:literal, true}} ->
+        {value({:literal, true}, scope), state}
+
+      {:andalso, {:literal, true}} ->
+        expression(right, scope, state)
+
+      {:orelse, {:literal, false}} ->
+        expression(right, scope, state)
+
+      {_, {:literal, _}} ->
+        {exception(:error, :unknown), state}
+
+      _ ->
+        {second, state} = expression(right, scope, state)
+        out = merge(second, value(:unknown, scope)) |> merge(exception(:error, :unknown))
+        bounded(out, state)
+    end
+  end
+
+  defp resume({:primitive, operator}, args, scope, state) do
+    primitive(:erlang, operator, args, scope, state)
+  end
+
+  defp resume({:generator, pattern, rest, body}, generator, scope, state) do
+    case generator do
+      {:list_value, items} -> comprehension_items(items, pattern, rest, body, scope, state)
+      {:list_of, item} -> comprehension_items([item], pattern, rest, body, scope, state)
+      _ -> unknown(scope, state)
+    end
+  end
+
+  defp resume({:filter, rest, body}, result, scope, state) do
+    case result do
+      {:literal, false} ->
+        {empty(), state}
+
+      {:literal, true} ->
+        comprehension(rest, body, scope, state)
+
+      {:literal, _} ->
+        {exception(:error, :unknown), state}
+
+      _ ->
+        {next, state} = comprehension(rest, body, scope, state)
+        bounded(merge(next, exception(:error, :unknown)), state)
+    end
+  end
+
+  defp resume({:binary_elements, rest}, _values, scope, state) do
+    {tail, state} = binary_elements(rest, scope, state)
+    bounded(merge(tail, exception(:error, :unknown)), state)
+  end
+
+  defp resume({:arguments, rest}, head, scope, state) do
+    {tail, state} = arguments(rest, scope, state)
+
+    {%{tail | normal: Enum.map(tail.normal, fn {args, scope} -> {[head | args], scope} end)},
+     state}
+  end
+
+  defp resume({:map_update, kind, base, rest}, [key, result], scope, state) do
+    {updated, state} = map_update(kind, key, result, base, scope, state)
+    continue(updated, state, {:map_fields, rest})
+  end
+
+  defp resume({:map_pair, pair}, map, scope, state) do
+    case pair do
+      {:tuple_value, [key, item]} ->
+        map_update(:map_field_assoc, key, item, map, scope, state)
+
+      :unknown ->
+        {merge(value({:map_value, %{}, :open}, scope), exception(:error, :unknown)), state}
+
+      _ ->
+        {exception(:error, :unknown), state}
+    end
+  end
+
+  defp resume(:tuple, args, scope, state) do
+    {value({:tuple_value, args}, scope), state}
+  end
+
+  defp resume({:cons, maximum}, [head, tail], scope, state) do
+    result =
+      case tail do
+        {:list_value, tail} -> {:list_value, [head | tail]}
+        {:list_of, element} -> {:list_of, join_value(head, element, maximum)}
+        tail -> {:cons_value, head, tail}
+      end
+
+    {value(result, scope), state}
+  end
+
+  # :closed proves the exact key set. :open retains only guaranteed fields;
+  # absence from those fields never proves absence of an atom __struct__ key.
+  defp map_fields([], result, env, state), do: {value(result, env), state}
+
+  defp map_fields([{kind, _, key, term} | rest], base, env, state)
+       when kind in [:map_field_assoc, :map_field_exact] do
+    invoke_arguments([key, term], env, state, {:map_update, kind, base, rest})
+  end
+
+  defp map_fields(_, _base, env, state), do: unknown(env, state)
+
+  defp map_update(kind, {:literal, key}, result, {:map_value, fields, rest}, env, state) do
+    present = Map.has_key?(fields, key)
+
+    cond do
+      kind == :map_field_exact and key_absent?(fields, rest, key) ->
+        {exception(:error, :unknown), state}
+
+      true ->
+        next = value({:map_value, Map.put(fields, key, result), rest}, env)
+
+        next =
+          if kind == :map_field_exact and not present,
+            do: merge(next, exception(:error, :unknown)),
+            else: next
+
+        bounded(next, state)
+    end
+  end
+
+  defp map_update(kind, _unknown_key, _result, {:map_value, fields, rest}, env, state) do
+    # An unknown key can overwrite any known field, including __struct__.
+    if kind == :map_field_exact and rest == :closed and map_size(fields) == 0 do
+      {exception(:error, :unknown), state}
+    else
+      next = value({:map_value, %{}, :open}, env)
+      next = if kind == :map_field_exact, do: merge(next, exception(:error, :unknown)), else: next
+      bounded(next, state)
+    end
+  end
+
+  defp map_update(_kind, _key, _result, _base, env, state), do: unknown(env, state)
+
+  defp atom_choices({:literal, atom}) when is_atom(atom), do: [atom]
+  defp atom_choices({:atoms, atoms}), do: atoms
+  defp atom_choices(_), do: :unknown
+
+  defp remote(module, name, args, env, state) do
+    case primitive_result(module, name, args, env, state) do
+      :not_a_primitive ->
+        case select_source(module, state) do
+          {:ok, %{definitions: definitions, imports: imports, exports: exports}, state} ->
+            if {name, length(args)} in exports do
+              previous = {state.module, state.definitions, state.imports}
+              nested = %{state | module: module, definitions: definitions, imports: imports}
+              {flow, next} = enter({name, length(args)}, args, nested)
+              {old_module, old_definitions, old_imports} = previous
+
+              next = %{
+                next
+                | module: old_module,
+                  definitions: old_definitions,
+                  imports: old_imports
+              }
+
+              {%{flow | normal: Enum.map(flow.normal, fn {result, _} -> {result, env} end)}, next}
+            else
+              {exception(:error, :unknown), state}
+            end
+
+          _ ->
+            unknown(env, state)
+        end
+
+      result ->
+        result
+    end
+  end
+
+  # Primitive semantics are language operations, not library/helper exemptions.
+  # Every other target must be interpreted from selected source in the catalog.
+  defp primitive_result(module, name, args, env, state) do
+    case {module, name, length(args)} do
+      {:erlang, :function_exported, 3} ->
+        primitive(module, name, args, env, state)
+
+      {:erlang, f, _}
+      when f in [
+             :throw,
+             :error,
+             :exit,
+             :raise,
+             :map_get,
+             :element,
+             :is_atom,
+             :is_map,
+             :is_tuple,
+             :is_list,
+             :is_function,
+             :is_pid,
+             :is_reference,
+             :is_integer,
+             :is_binary,
+             :length,
+             :tuple_size,
+             :map_size,
+             :byte_size,
+             :self,
+             :make_ref,
+             :hd,
+             :tl,
+             :++,
+             :setelement,
+             :is_map_key,
+             :+,
+             :-,
+             :*,
+             :div,
+             :rem,
+             :==,
+             :"=:=",
+             :"/=",
+             :"=/=",
+             :<,
+             :>,
+             :"=<",
+             :>=,
+             :not,
+             :and,
+             :or,
+             :xor
+           ] ->
+        primitive(module, name, args, env, state)
+
+      {:erts_internal, :map_next, 3} ->
+        if :erlang.is_builtin(:erts_internal, :map_next, 3),
+          do: primitive(module, name, args, env, state),
+          else: :not_a_primitive
+
+      {:maps, function, arity}
+      when {function, arity} in [
+             put: 3,
+             get: 2,
+             find: 2,
+             keys: 1,
+             values: 1,
+             size: 1,
+             is_key: 2,
+             remove: 2,
+             update: 3,
+             from_list: 1,
+             merge: 2
+           ] ->
+        if :erlang.is_builtin(module, function, arity),
+          do: primitive(module, function, args, env, state),
+          else: :not_a_primitive
+
+      _ ->
+        :not_a_primitive
+    end
+  end
+
+  # For the proved argument subset, this native BIF returns a Boolean without
+  # invoking or loading the queried target. Keep both outcomes; never query it.
+  defp primitive(
+         :erlang,
+         :function_exported,
+         [module, function, {:literal, arity}],
+         env,
+         state
+       )
+       when is_integer(arity) and arity >= 0 and arity <= 255 do
+    modules = atom_choices(module)
+    functions = atom_choices(function)
+
+    valid =
+      is_list(modules) and modules != [] and length(modules) <= state.limits.alternatives and
+        Enum.all?(modules, &is_atom/1) and is_list(functions) and functions != [] and
+        length(functions) <= state.limits.alternatives and Enum.all?(functions, &is_atom/1)
+
+    if valid,
+      do: bounded(merge(value({:literal, true}, env), value({:literal, false}, env)), state),
+      else: unknown(env, state)
+  end
+
+  # Native map_next does not call values stored in the map. Only iterator mode
+  # is modeled here; source maps:next/iterator/fold wrappers still execute in
+  # this interpreter, including every reachable reducer and catch clause.
+  defp primitive(
+         :erts_internal,
+         :map_next,
+         [_path, {:map_value, _, _} = map, {:literal, :iterator}],
+         env,
+         state
+       ),
+       do: {merge(value({:map_iterator, map}, env), exception(:error, :unknown)), state}
+
+  defp primitive(:erts_internal, :map_next, [_path, _map, {:literal, :iterator}], env, state),
+    do:
+      {merge(value({:map_iterator, {:map_value, %{}, :open}}, env), exception(:error, :unknown)),
+       state}
+
+  defp primitive(:erlang, name, [argument], env, state)
+       when name in [
+              :is_map,
+              :is_atom,
+              :is_list,
+              :is_tuple,
+              :is_function,
+              :is_pid,
+              :is_reference,
+              :is_integer,
+              :is_binary
+            ] do
+    result =
+      case type_guard(name, argument) do
+        result when is_boolean(result) -> {:literal, result}
+        _ -> :unknown
+      end
+
+    {value(result, env), state}
+  end
+
+  defp primitive(:erlang, :is_function, [argument, {:literal, arity}], env, state)
+       when is_integer(arity) and arity >= 0 do
+    result =
+      case function_guard(argument, {:literal, arity}) do
+        flag when is_boolean(flag) -> {:literal, flag}
+        _ -> :unknown
+      end
+
+    {value(result, env), state}
+  end
+
+  defp primitive(:erlang, operator, [{:literal, a}, {:literal, b}], env, state)
+       when operator in [:"=:=", :"=/=", :==, :"/=", :<, :>, :"=<", :>=] do
+    result = compare(operator, a, b)
+    {value({:literal, result}, env), state}
+  end
+
+  defp primitive(:erlang, :++, [{:list_value, left}, right], env, state) do
+    joined =
+      Enum.reduce(Enum.reverse(left), right, fn item, tail ->
+        case tail do
+          {:list_value, items} -> {:list_value, [item | items]}
+          _ -> {:cons_value, item, tail}
+        end
+      end)
+
+    bounded(value(joined, env), state)
+  end
+
+  defp primitive(:erlang, :hd, [{:list_value, [head | _]}], env, state),
+    do: {value(head, env), state}
+
+  defp primitive(:erlang, :hd, [{:cons_value, head, _}], env, state),
+    do: {value(head, env), state}
+
+  defp primitive(:erlang, :tl, [{:list_value, [_ | tail]}], env, state),
+    do: {value({:list_value, tail}, env), state}
+
+  defp primitive(:erlang, :tl, [{:cons_value, _, tail}], env, state),
+    do: {value(tail, env), state}
+
+  defp primitive(:erlang, :length, [{:list_value, items}], env, state),
+    do: {value({:literal, length(items)}, env), state}
+
+  defp primitive(:erlang, :tuple_size, [{:tuple_value, items}], env, state),
+    do: {value({:literal, length(items)}, env), state}
+
+  defp primitive(:erlang, :map_size, [{:map_value, fields, :closed}], env, state),
+    do: {value({:literal, map_size(fields)}, env), state}
+
+  defp primitive(
+         :erlang,
+         :setelement,
+         [{:literal, index}, {:tuple_value, fields}, item],
+         env,
+         state
+       )
+       when is_integer(index) and index > 0 and index <= length(fields),
+       do: bounded(value({:tuple_value, List.replace_at(fields, index - 1, item)}, env), state)
+
+  defp primitive(:erlang, :is_map_key, [{:literal, key}, {:map_value, fields, rest}], env, state) do
+    result =
+      cond do
+        Map.has_key?(fields, key) -> {:literal, true}
+        key_absent?(fields, rest, key) -> {:literal, false}
+        true -> :unknown
+      end
+
+    {value(result, env), state}
+  end
+
+  defp primitive(:erlang, :error, [_reason | arguments], _env, state)
+       when length(arguments) in [1, 2],
+       do: {exception(:error, :unknown), state}
+
+  defp primitive(:erlang, :not, [{:literal, a}], env, state) when is_boolean(a),
+    do: {value({:literal, not a}, env), state}
+
+  defp primitive(:erlang, kind, [reason], _env, state) when kind in [:throw, :error, :exit],
+    do: {exception(kind, reason), state}
+
+  defp primitive(:erlang, :raise, [{:literal, kind}, reason, :caught_stacktrace], _env, state)
+       when kind in [:throw, :error, :exit],
+       do: {exception(kind, reason), state}
+
+  # Unproved stack terms may produce invalid-stack outcomes. Do not suppress
+  # their possible normal/error paths by pretending the requested class wins.
+  defp primitive(:erlang, :raise, _arguments, env, state), do: unknown(env, state)
+
+  defp primitive(:erlang, :map_get, [{:literal, key}, {:map_value, fields, rest}], env, state) do
+    case Map.fetch(fields, key) do
+      {:ok, result} ->
+        {value(result, env), state}
+
+      :error ->
+        if key_absent?(fields, rest, key),
+          do: {exception(:error, :unknown), state},
+          else: {merge(value(:unknown, env), exception(:error, :unknown)), state}
+    end
+  end
+
+  defp primitive(:erlang, :element, [{:literal, index}, {:tuple_value, fields}], env, state)
+       when is_integer(index) and index > 0 and index <= length(fields),
+       do: {value(Enum.at(fields, index - 1), env), state}
+
+  defp primitive(:maps, :put, [key, result, base], env, state),
+    do: map_update(:map_field_assoc, key, result, base, env, state)
+
+  # These clauses apply only when is_builtin/3 confirms the runtime operation.
+  # Source wrappers such as maps:fold/3 and maps:to_list/1 are still interpreted.
+  defp primitive(:maps, :get, args, env, state),
+    do: primitive(:erlang, :map_get, args, env, state)
+
+  defp primitive(:maps, :size, args, env, state),
+    do: primitive(:erlang, :map_size, args, env, state)
+
+  defp primitive(:maps, :is_key, args, env, state),
+    do: primitive(:erlang, :is_map_key, args, env, state)
+
+  defp primitive(:maps, :update, [key, item, base], env, state),
+    do: map_update(:map_field_exact, key, item, base, env, state)
+
+  defp primitive(:maps, :find, [{:literal, key}, {:map_value, fields, rest}], env, state) do
+    result =
+      case Map.fetch(fields, key) do
+        {:ok, item} ->
+          value({:tuple_value, [{:literal, :ok}, item]}, env)
+
+        :error ->
+          if key_absent?(fields, rest, key),
+            do: value({:literal, :error}, env),
+            else:
+              merge(
+                value({:literal, :error}, env),
+                value({:tuple_value, [{:literal, :ok}, :unknown]}, env)
+              )
+      end
+
+    bounded(result, state)
+  end
+
+  defp primitive(:maps, function, [{:map_value, fields, :closed}], env, state)
+       when function in [:keys, :values] do
+    items =
+      if function == :keys,
+        do: Enum.map(Map.keys(fields), &{:literal, &1}),
+        else: Map.values(fields)
+
+    result =
+      if items == [],
+        do: {:list_value, []},
+        else: {:list_of, join_values(items, state.limits.alternatives)}
+
+    bounded(value(result, env), state)
+  end
+
+  defp primitive(:maps, function, [{:map_value, _, _}], env, state)
+       when function in [:keys, :values],
+       do: {value({:list_of, :unknown}, env), state}
+
+  defp primitive(:maps, function, [_unknown], env, state) when function in [:keys, :values],
+    do: {merge(value({:list_of, :unknown}, env), exception(:error, :unknown)), state}
+
+  defp primitive(:maps, :remove, [{:literal, key}, {:map_value, fields, rest}], env, state),
+    do: {value({:map_value, Map.delete(fields, key), rest}, env), state}
+
+  defp primitive(:maps, :remove, [_key, {:map_value, fields, rest}], env, state) do
+    next_rest = if key_absent?(fields, rest, :__struct__), do: :open_without_struct, else: :open
+    {value({:map_value, %{}, next_rest}, env), state}
+  end
+
+  defp primitive(:maps, :from_list, [{:list_value, pairs}], env, state) do
+    Enum.reduce(pairs, {value({:map_value, %{}, :closed}, env), state}, fn pair, {flow, state} ->
+      continue(flow, state, {:map_pair, pair})
+    end)
+  end
+
+  defp primitive(:maps, :merge, [{:map_value, left, lr}, {:map_value, right, rr}], env, state) do
+    fields =
+      Enum.reduce(left, right, fn {key, item}, acc ->
+        if key_absent?(right, rr, key), do: Map.put(acc, key, item), else: acc
+      end)
+
+    rest =
+      cond do
+        lr == :closed and rr == :closed ->
+          :closed
+
+        key_absent?(left, lr, :__struct__) and key_absent?(right, rr, :__struct__) ->
+          :open_without_struct
+
+        true ->
+          :open
+      end
+
+    bounded(value({:map_value, fields, rest}, env), state)
+  end
+
+  defp primitive(:maps, function, _args, env, state)
+       when function in [:remove, :from_list, :merge, :put, :update],
+       do: {merge(value({:map_value, %{}, :open}, env), exception(:error, :unknown)), state}
+
+  defp primitive(:erlang, function, _arguments, env, state)
+       when function in [
+              :is_atom,
+              :is_map,
+              :is_tuple,
+              :is_list,
+              :is_function,
+              :is_pid,
+              :is_reference,
+              :is_integer,
+              :is_binary,
+              :length,
+              :tuple_size,
+              :map_size,
+              :byte_size,
+              :self,
+              :make_ref,
+              :+,
+              :-,
+              :*,
+              :div,
+              :rem,
+              :==,
+              :"=:=",
+              :"/=",
+              :"=/=",
+              :<,
+              :>,
+              :"=<",
+              :>=,
+              :not,
+              :and,
+              :or,
+              :xor
+            ] do
+    {%{normal: [{:unknown, env}], exceptions: [{:error, :unknown}]}, state}
+  end
+
+  defp primitive(_module, _function, _arguments, env, state), do: unknown(env, state)
+
+  defp bind_many(patterns, values, env) when length(patterns) == length(values) do
+    Enum.reduce_while(Enum.zip(patterns, values), {:ok, env}, fn {pattern, value}, {:ok, scope} ->
+      case bind(pattern, value, scope) do
+        :no_match -> {:halt, :no_match}
+        bound -> {:cont, bound}
+      end
+    end)
+  end
+
+  defp bind_many(_, _, _), do: :no_match
+  defp bind({:var, _, :_}, _value, env), do: {:ok, env}
+
+  defp bind({:var, _, name}, value, env) do
+    case {Map.fetch(env, name), value} do
+      {{:ok, {:literal, before}}, {:literal, after_value}} when before !== after_value ->
+        :no_match
+
+      _ ->
+        {:ok, Map.put_new(env, name, value)}
+    end
+  end
+
+  defp bind({:match, _, first, second}, value, env) do
+    with {:ok, env} <- bind(first, value, env), do: bind(second, value, env)
+  end
+
+  defp bind({kind, _, expected}, {:literal, actual}, env)
+       when kind in [:atom, :integer, :char, :float],
+       do: if(expected === actual, do: {:ok, env}, else: :no_match)
+
+  defp bind({:atom, _, expected}, {:atoms, values}, env),
+    do: if(expected in values, do: {:ok, env}, else: :no_match)
+
+  defp bind({:tuple, _, patterns}, {:tuple_value, values}, env),
+    do: bind_many(patterns, values, env)
+
+  defp bind({:tuple, _, _}, {:literal, _}, _env), do: :no_match
+
+  defp bind({:map, _, fields}, {:map_value, known, rest}, env) do
+    Enum.reduce_while(fields, {:ok, env}, fn
+      {:map_field_exact, _, {:atom, _, key}, pattern}, {:ok, scope} ->
+        if key_absent?(known, rest, key) do
+          {:halt, :no_match}
+        else
+          case bind(pattern, Map.get(known, key, :unknown), scope) do
+            :no_match -> {:halt, :no_match}
+            bound -> {:cont, bound}
+          end
+        end
+
+      _, _ ->
+        {:halt, :no_match}
+    end)
+  end
+
+  defp bind({:map, _, _}, {:literal, _}, _env), do: :no_match
+
+  defp bind({:bin, _, _} = pattern, value, env) when value in [:binary_value, :bitstring_value],
+    do: {:ok, unknown_bindings(pattern, env)}
+
+  defp bind({:bin, _, _}, {:literal, _}, _env), do: :no_match
+
+  defp bind({:cons, _, head, tail}, {:list_of, element} = list, env) do
+    with {:ok, env} <- bind(head, element, env), do: bind(tail, list, env)
+  end
+
+  defp bind({nil, _}, {:list_of, _}, env), do: {:ok, env}
+
+  defp bind({:cons, _, head, tail}, {:cons_value, first, rest}, env) do
+    with {:ok, env} <- bind(head, first, env), do: bind(tail, rest, env)
+  end
+
+  defp bind({:cons, _, head, tail}, {:list_value, [first | rest]}, env) do
+    with {:ok, env} <- bind(head, first, env), do: bind(tail, {:list_value, rest}, env)
+  end
+
+  defp bind({:cons, _, _, _}, {:list_value, []}, _env), do: :no_match
+  defp bind({nil, _}, {:list_value, []}, env), do: {:ok, env}
+  defp bind({nil, _}, {:list_value, [_ | _]}, _env), do: :no_match
+  defp bind({nil, _}, {:cons_value, _, _}, _env), do: :no_match
+
+  defp bind(pattern, abstract, env) do
+    expected = pattern_kind(pattern)
+    actual = abstract_kind(abstract)
+
+    compatible =
+      expected == :unknown or actual == :unknown or expected == actual or
+        (actual == :list and expected in [nil, :cons])
+
+    if compatible, do: {:ok, unknown_bindings(pattern, env)}, else: :no_match
+  end
+
+  defp pattern_kind({:atom, _, _}), do: :atom
+  defp pattern_kind({kind, _, _}) when kind in [:integer, :char], do: :integer
+  defp pattern_kind({:float, _, _}), do: :float
+  defp pattern_kind({:tuple, _, _}), do: :tuple
+  defp pattern_kind({:map, _, _}), do: :map
+  defp pattern_kind({:bin, _, _}), do: :bitstring
+  defp pattern_kind({:cons, _, _, _}), do: :cons
+  defp pattern_kind({nil, _}), do: nil
+  defp pattern_kind(_), do: :unknown
+
+  defp abstract_kind({:literal, atom}) when is_atom(atom), do: :atom
+  defp abstract_kind({:literal, number}) when is_integer(number), do: :integer
+  defp abstract_kind({:literal, number}) when is_float(number), do: :float
+  defp abstract_kind({:atoms, _}), do: :atom
+  defp abstract_kind({:map_value, _, _}), do: :map
+  defp abstract_kind({:tuple_value, _}), do: :tuple
+  defp abstract_kind({:cons_value, _, _}), do: :cons
+  defp abstract_kind({:list_value, []}), do: nil
+  defp abstract_kind({:list_value, [_ | _]}), do: :cons
+  defp abstract_kind({:list_of, _}), do: :list
+  defp abstract_kind({:closure, _, _, _}), do: :function
+  defp abstract_kind({:local_capture, _, _, _}), do: :function
+  defp abstract_kind({:remote_capture, _, _, _}), do: :function
+  defp abstract_kind(value) when value in [:binary_value, :bitstring_value], do: :bitstring
+  defp abstract_kind(_), do: :unknown
+
+  defp unknown_bindings({:var, _, name}, env), do: Map.put_new(env, name, :unknown)
+
+  defp unknown_bindings(tuple, env) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> Enum.reduce(env, &unknown_bindings/2)
+
+  defp unknown_bindings(list, env) when is_list(list),
+    do: Enum.reduce(list, env, &unknown_bindings/2)
+
+  defp unknown_bindings(_, env), do: env
+
+  defp incoming_term_digest(term),
+    do: :crypto.hash(:sha256, :erlang.term_to_binary(term)) |> Base.encode16(case: :lower)
+
+  defp incoming_raw_syntax(forms) do
+    functions = for {:function, _, _, _, _} = form <- forms, do: form
+    keys = for {:function, _, name, arity, _} <- functions, do: {name, arity}
+
+    true =
+      length(functions) <= @max_parameter_functions and length(Enum.uniq(keys)) == length(keys)
+
+    state =
+      Enum.reduce(functions, %{nodes: 0, calls: 0, maximum: 0}, fn
+        {:function, annotation, name, arity, clauses}, state
+        when is_atom(name) and is_integer(arity) and arity in 0..255 and is_list(clauses) ->
+          true = callable_annotation?(annotation)
+
+          true =
+            clauses != [] and
+              Enum.all?(clauses, fn
+                {:clause, _, patterns, guards, body}
+                when is_list(patterns) and is_list(guards) and is_list(body) ->
+                  length(patterns) == arity
+
+                _ ->
+                  false
+              end)
+
+          state = %{state | maximum: max(state.maximum, :erl_anno.line(annotation))}
+          incoming_syntax(clauses, state)
+      end)
+
+    {:ok, state.maximum}
+  end
+
+  defp incoming_syntax(term, state) do
+    state = %{state | nodes: state.nodes + 1}
+    true = state.nodes <= @max_parameter_nodes
+    incoming_syntax_node(term, state)
+  end
+
+  defp incoming_syntax_node({:function, name, arity}, state)
+       when is_atom(name) and is_integer(arity) and arity in 0..255,
+       do: state
+
+  defp incoming_syntax_node({:function, module, function, arity}, state),
+    do: incoming_syntax([module, function, arity], state)
+
+  defp incoming_syntax_node({:clauses, clauses}, state) when is_list(clauses),
+    do: incoming_syntax(clauses, state)
+
+  defp incoming_syntax_node({:bin_element, annotation, value, size, types}, state) do
+    true = callable_annotation?(annotation)
+
+    true =
+      types == :default or
+        (is_list(types) and
+           Enum.all?(types, fn
+             value when is_atom(value) -> true
+             {:unit, unit} when is_integer(unit) and unit in 1..256 -> true
+             _ -> false
+           end))
+
+    state = %{state | maximum: max(state.maximum, :erl_anno.line(annotation))}
+    incoming_syntax([value, size], state)
+  end
+
+  defp incoming_syntax_node(term, state) when is_tuple(term) do
+    true =
+      tuple_size(term) >= 2 and
+        tuple_size(term) in Map.get(@callable_header_sizes, elem(term, 0), []) and
+        callable_annotation?(elem(term, 1))
+
+    calls = state.calls + if(elem(term, 0) in [:call, :fun], do: 1, else: 0)
+    true = calls <= @max_parameter_calls
+    state = %{state | calls: calls, maximum: max(state.maximum, :erl_anno.line(elem(term, 1)))}
+
+    Enum.reduce(callable_children(term), state, fn {child, _}, acc ->
+      incoming_syntax(child, acc)
+    end)
+  end
+
+  defp incoming_syntax_node(terms, state) when is_list(terms),
+    do: Enum.reduce(terms, state, &incoming_syntax/2)
+
+  defp incoming_syntax_node(_term, state), do: state
+
+  defp callable_children(term) when is_tuple(term) do
+    children = term |> Tuple.to_list() |> Enum.with_index()
+
+    header? =
+      tuple_size(term) >= 2 and
+        tuple_size(term) in Map.get(@callable_header_sizes, elem(term, 0), []) and
+        callable_annotation?(elem(term, 1))
+
+    if header?, do: Enum.drop(children, 2), else: children
+  end
+
+  defp callable_children(term) when is_list(term), do: Enum.with_index(term)
+  defp callable_children(_term), do: []
+
+  defp callable_annotation?(line) when is_integer(line) and line >= 0, do: true
+
+  defp callable_annotation?({line, column})
+       when is_integer(line) and line >= 0 and is_integer(column) and column >= 1,
+       do: true
+
+  defp callable_annotation?(properties) when is_list(properties),
+    do: callable_annotation_properties?(properties, 16, false)
+
+  defp callable_annotation?(_unknown), do: false
+
+  defp callable_annotation_properties?([], _remaining, location?), do: location?
+
+  defp callable_annotation_properties?([{key, value} | rest], remaining, location?)
+       when remaining > 0 do
+    callable_annotation_property?(key, value) and
+      callable_annotation_properties?(rest, remaining - 1, location? or key == :location)
+  end
+
+  defp callable_annotation_properties?(_unknown, _remaining, _location?), do: false
+
+  defp callable_annotation_property?(key, value) when key in [:location, :end_location] do
+    case value do
+      line when is_integer(line) and line >= 0 ->
+        true
+
+      {line, column}
+      when is_integer(line) and line >= 0 and is_integer(column) and column >= 1 ->
+        true
+
+      _ ->
+        false
+    end
+  end
+
+  defp callable_annotation_property?(key, true) when key in [:generated, :record], do: true
+
+  defp callable_annotation_property?(:file, value) when is_binary(value),
+    do: byte_size(value) <= 4_096
+
+  defp callable_annotation_property?(key, value) when key in [:file, :text],
+    do: callable_annotation_characters?(value, 4_096)
+
+  defp callable_annotation_property?(_key, _value), do: false
+
+  # erl_anno:is_anno/1 accepts arbitrary lists for file/text. Validate each
+  # character ourselves so executable-shaped terms in those lists cannot be
+  # hidden as metadata. Bounds limit validation work; excess falls back raw.
+  defp callable_annotation_characters?([], _remaining), do: true
+
+  defp callable_annotation_characters?([character | rest], remaining)
+       when remaining > 0 and is_integer(character) and character in 0..0x10FFFF,
+       do: callable_annotation_characters?(rest, remaining - 1)
+
+  defp callable_annotation_characters?(_unknown, _remaining), do: false
+
+  defp canonical_path(path) do
+    if Path.type(path) != :absolute do
+      %{raw: path, resolved: nil, error: %{reason: "noncanonical_lexical_path"}}
+    else
+      canonical_components(path)
+    end
+  end
+
+  defp canonical_components(path) do
+    result =
+      Enum.reduce_while(Path.split(path), {:ok, ""}, fn part, {:ok, parent} ->
+        current = if parent == "", do: part, else: Path.join(parent, part)
+
+        case File.lstat(current) do
+          {:ok, %{type: :symlink}} ->
+            target =
+              case File.read_link(current) do
+                {:ok, target} -> target
+                {:error, reason} -> inspect(reason)
+              end
+
+            {:halt, {:error, %{reason: "symlink_component", component: current, target: target}}}
+
+          {:ok, _} ->
+            # Standard releases use lib/../releases for consolidated modules.
+            # Normalize only after lstat has checked the traversed component;
+            # expanding first would hide a symlink immediately before "..".
+            {:cont, {:ok, Path.expand(current)}}
+
+          {:error, reason} ->
+            {:halt, {:error, %{reason: inspect(reason), component: current}}}
+        end
+      end)
+
+    case result do
+      {:ok, resolved} -> %{raw: path, resolved: resolved, error: nil}
+      {:error, error} -> %{raw: path, resolved: nil, error: error}
+    end
+  end
+
+  defp selected_producer(module, context) do
+    with %{resolved: release, error: nil} when is_binary(release) <- context.release,
+         path when is_list(path) <- :code.which(module),
+         raw = to_string(path),
+         %{resolved: selected, error: nil} <- canonical_path(raw),
+         true <- String.starts_with?(selected, release <> "/"),
+         first when is_binary(first) <-
+           Enum.find_value(context.paths, fn directory ->
+             candidate = Path.join(directory, Atom.to_string(module) <> ".beam")
+             if File.regular?(candidate), do: candidate
+           end),
+         %{resolved: ^selected, error: nil} <- canonical_path(first),
+         loaded <- :code.is_loaded(module),
+         true <- loaded_selection?(loaded, selected),
+         status when status in [:loaded, :not_loaded] <- :code.module_status(module),
+         {:ok, bytes} <- File.read(selected),
+         {:ok, {^module, chunks}} <-
+           :beam_lib.chunks(bytes, [:imports, :exports, :abstract_code]),
+         {:raw_abstract_v1, forms} <- Keyword.get(chunks, :abstract_code),
+         false <- Enum.any?(forms, &match?({:attribute, _, :on_load, _}, &1)),
+         false <- Enum.any?(Keyword.fetch!(chunks, :imports), &match?({:ssl, _, _}, &1)),
+         true <- Enum.map(:code.get_path(), &to_string/1) == context.paths,
+         ^path <- :code.which(module),
+         ^loaded <- :code.is_loaded(module),
+         ^status <- :code.module_status(module),
+         {:ok, ^bytes} <- File.read(selected) do
+      {:ok,
+       %{
+         module: module,
+         path: selected,
+         raw: raw,
+         loaded: loaded,
+         status: status,
+         sha256: :crypto.hash(:sha256, bytes),
+         exports: Keyword.fetch!(chunks, :exports),
+         definitions:
+           Map.new(for {:function, _, name, arity, _} = form <- forms, do: {{name, arity}, form})
+       }}
+    else
+      _ -> :unknown
+    end
+  rescue
+    _ -> :unknown
+  catch
+    _, _ -> :unknown
+  end
+
+  defp loaded_selection?(false, _selected), do: true
+
+  defp loaded_selection?({:file, path}, selected) when is_list(path),
+    do: match?(%{resolved: ^selected, error: nil}, canonical_path(to_string(path)))
+
+  defp loaded_selection?(_loaded, _selected), do: false
+end

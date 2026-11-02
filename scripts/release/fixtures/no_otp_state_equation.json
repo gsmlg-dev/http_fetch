@@ -1,0 +1,633 @@
+{
+  "schema": 1,
+  "scope": "Conditional callback-result/throw preservation only; no entry origins or finding removal.",
+  "conditional": [
+    {
+      "id": "unchanged_state_baseline",
+      "mode": "positive",
+      "reason": "Unchanged conditional state baseline.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_0",
+      "source": "-module(c43_equation_fixture_0).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> {noreply, State}.\n\n",
+      "expected_status": "checked_conditional",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "numeric_pattern_exact",
+      "mode": "negative",
+      "reason": "Integer pattern must not match floating-point value.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_1",
+      "source": "-module(c43_equation_fixture_1).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> case identity(1.0) of 1 -> {noreply, State}; _ -> {noreply, State#{transport => unknown}} end.\nidentity(X) -> X.\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "repeated_variable_exact",
+      "mode": "negative",
+      "reason": "Repeated variables require exact numeric identity.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_2",
+      "source": "-module(c43_equation_fixture_2).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> case identity({1,1.0}) of {X,X} -> {noreply, State}; _ -> {noreply, State#{transport => unknown}} end.\nidentity(X) -> X.\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "raise_invalid_stack_continues",
+      "mode": "negative",
+      "reason": "Native raise/3 returns normally badarg on malformed stack; continuation must not disappear.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_3",
+      "source": "-module(c43_equation_fixture_3).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> erlang:raise(throw, ignored, invalid_stack), {noreply, State#{transport => unknown}}.\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "raise_invalid_class_continues",
+      "mode": "negative",
+      "reason": "Native raise/3 invalid class may return normally badarg.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_4",
+      "source": "-module(c43_equation_fixture_4).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> erlang:raise(invalid_class, ignored, []), {noreply, State#{transport => unknown}}.\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "direct_throw_replacement",
+      "mode": "negative",
+      "reason": "GenServer catches throw payload as callback result.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_5",
+      "source": "-module(c43_equation_fixture_5).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> throw({noreply, State#{transport => unknown}}).\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "helper_throw_replacement",
+      "mode": "negative",
+      "reason": "Reachable helper throw bypasses normal preserving return.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_6",
+      "source": "-module(c43_equation_fixture_6).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> replacement(State), {noreply, State}.\nreplacement(State) -> throw({noreply, State#{transport => unknown}}).\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "caught_throw_discarded",
+      "mode": "positive",
+      "reason": "Exhaustively caught discarded throw is not a replacement state.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_7",
+      "source": "-module(c43_equation_fixture_7).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> try throw({noreply, State#{transport => unknown}}) catch throw:_ -> {noreply, State} end.\n\n",
+      "expected_status": "checked_conditional",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "after_throw_overrides",
+      "mode": "negative",
+      "reason": "An after exception replaces the normal outcome.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_8",
+      "source": "-module(c43_equation_fixture_8).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> try {noreply, State} after throw({noreply, State#{transport => unknown}}) end.\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 1,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "closed_map_struct_absent",
+      "mode": "positive",
+      "reason": "Exact closed map key set excludes struct branch.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_9",
+      "source": "-module(c43_equation_fixture_9).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> case identity(#{value => ok}) of #{'__struct__' := _} -> {noreply, State#{transport => unknown}}; #{} -> {noreply, State} end.\nidentity(X) -> X.\n",
+      "expected_status": "checked_conditional",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "closed_map_struct_present",
+      "mode": "negative",
+      "reason": "Atom __struct__ branch remains reachable.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_10",
+      "source": "-module(c43_equation_fixture_10).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> case identity(#{'__struct__' => example_struct}) of #{'__struct__' := _} -> {noreply, State#{transport => unknown}}; #{} -> {noreply, State} end.\nidentity(X) -> X.\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "raw_import_bindings",
+      "mode": "negative",
+      "reason": "Unrelated remote BEAM import cannot redirect local erlang throw/1.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_11",
+      "source": "-module(c43_equation_fixture_11).\n-export([handle_call/3,unrelated_remote_import/1]).\nhandle_call(_, _, State) -> try throw(replaced) catch throw:replaced -> {noreply, State#{transport => unknown}} end.\nunrelated_remote_import(X) -> fixture_decoy:throw(X).\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "malformed_error_arguments",
+      "mode": "negative",
+      "reason": "Unproved error argument shape must retain unknown error reason.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_12",
+      "source": "-module(c43_equation_fixture_12).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> try erlang:error(expected_reason, invalid_args) catch error:expected_reason -> {noreply, State}; error:_ -> {noreply, State#{transport => unknown}} end.\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "source_list_fold_preserves",
+      "mode": "positive",
+      "reason": "Selected foldl source and lexical reducer preserve accumulator.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_13",
+      "source": "-module(c43_equation_fixture_13).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> Next = lists:foldl(fun(_, Acc) -> Acc end, State, [a,b]), {noreply, Next}.\n\n",
+      "expected_status": "checked_conditional",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "source_list_fold_mutates",
+      "mode": "negative",
+      "reason": "Selected foldl reducer mutation is propagated.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_14",
+      "source": "-module(c43_equation_fixture_14).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> Next = lists:foldl(fun(_, Acc) -> Acc#{transport => unknown} end, State, [a,b]), {noreply, Next}.\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "source_list_fold_throws",
+      "mode": "negative",
+      "reason": "Reducer exception must escape through selected list implementation.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_15",
+      "source": "-module(c43_equation_fixture_15).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> Next = lists:foldl(fun(_, Acc) -> throw({noreply, Acc#{transport => unknown}}) end, State, [a,b]), {noreply, Next}.\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "non_byte_aligned_bitstring",
+      "mode": "negative",
+      "reason": "A binary AST can construct a non-byte-aligned bitstring; is_binary cannot be assumed true.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_16",
+      "source": "-module(c43_equation_fixture_16).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> case is_binary(identity(<<1:1>>)) of true -> {noreply, State}; false -> {noreply, State#{transport => unknown}} end.\nidentity(X) -> X.\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "clause_local_shadow_preserves_other_capture",
+      "mode": "positive",
+      "reason": "A parameter shadowing State in the second clause must not erase its capture in the first.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_17",
+      "source": "-module(c43_equation_fixture_17).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> F = fun({first, X}) -> {X, State}; ({second, State}) -> {ok, State} end, {_, Next} = F({first, value}), {noreply, Next}.\n\n",
+      "expected_status": "checked_conditional",
+      "expected_warnings": 1,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "clause_parameter_does_not_inherit_capture",
+      "mode": "negative",
+      "reason": "The matching clause parameter shadows captured State and retains unsafe replacement.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_18",
+      "source": "-module(c43_equation_fixture_18).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> F = fun({first, State}) -> State; ({second, X}) -> {X, State} end, Next = F({first, State#{transport => unknown}}), {noreply, Next}.\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 1,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "unknown_helper_effect",
+      "mode": "negative",
+      "reason": "Missing selected helper cannot be assumed free of replacement throws.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_19",
+      "source": "-module(c43_equation_fixture_19).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> fixture_unknown:effect(State), {noreply, State}.\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "map_fold_preserves",
+      "mode": "positive",
+      "reason": "Actual selected maps fold/iterator source and bounded native iterator domain preserve reducer accumulator.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_20",
+      "source": "-module(c43_equation_fixture_20).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> Next = maps:fold(fun(_, _, Acc) -> Acc end, State, #{one => value}), {noreply, Next}.\n\n",
+      "expected_status": "checked_conditional",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "map_fold_replacement_throw",
+      "mode": "negative",
+      "reason": "Selected map reducer source propagates replacement throw into GenServer transition.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_21",
+      "source": "-module(c43_equation_fixture_21).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> Next = maps:fold(fun(_, _, Acc) -> throw({noreply, Acc#{transport => unknown}}) end, State, #{one => value}), {noreply, Next}.\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "numeric_map_keys_remain_distinct",
+      "mode": "negative",
+      "reason": "Integer and floating-point map keys are distinct; both native map_size values are one. Joining their shape must not invent an empty closed map.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_22",
+      "source": "-module(c43_equation_fixture_22).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> Values = maps:values(#{a => #{1 => value}, b => #{1.0 => value}}), Next = lists:foldl(fun(Item, Acc) -> case map_size(Item) of 0 -> Acc; _ -> Acc#{transport => unknown} end end, State, Values), {noreply, Next}.\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "numeric_map_keys_with_common_field_remain_distinct",
+      "mode": "negative",
+      "reason": "Exact intersection retains shared but must not erase the distinct numeric keys by claiming a closed one-entry map.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_23",
+      "source": "-module(c43_equation_fixture_23).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> Values = maps:values(#{a => #{shared => value, 1 => value}, b => #{shared => value, 1.0 => value}}), Next = lists:foldl(fun(Item, Acc) -> case map_size(Item) of 1 -> Acc; _ -> Acc#{transport => unknown} end end, State, Values), {noreply, Next}.\n\n",
+      "expected_status": "unconfirmed",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    },
+    {
+      "id": "identical_exact_map_keys_remain_closed",
+      "mode": "positive",
+      "reason": "Identical exact key sets retain closedness even when their values differ.",
+      "language": "erlang",
+      "module": "c43_equation_fixture_24",
+      "source": "-module(c43_equation_fixture_24).\n-export([handle_call/3]).\nhandle_call(_, _, State) -> Values = maps:values(#{a => #{1 => first_value}, b => #{1 => second_value}}), Next = lists:foldl(fun(Item, Acc) -> case map_size(Item) of 1 -> Acc; _ -> Acc#{transport => unknown} end end, State, Values), {noreply, Next}.\n\n",
+      "expected_status": "checked_conditional",
+      "expected_warnings": 0,
+      "required_raw_ops": [],
+      "required_calls": []
+    }
+  ],
+  "guards": [
+    {
+      "id": "source_created_pending_ack_false",
+      "mode": "positive",
+      "language": "elixir",
+      "module": "Elixir.C47GuardFixture.SourceTruthiness",
+      "source": "defmodule C47GuardFixture.SourceTruthiness do\n  def handle_call(_request, _from, state) do\n    next = %{transport: state.transport, pending_ack?: false}\n\n    if next.pending_ack? do\n      throw({:noreply, %{next | transport: :unknown}})\n    else\n      {:noreply, next}\n    end\n  end\nend\n",
+      "required_raw_ops": [
+        "orelse"
+      ],
+      "expected_status": "checked_conditional",
+      "expected_warnings": 0,
+      "required_calls": []
+    },
+    {
+      "id": "source_created_pending_ack_nil",
+      "mode": "positive",
+      "language": "elixir",
+      "module": "Elixir.C47GuardFixture.NilTruthiness",
+      "source": "defmodule C47GuardFixture.NilTruthiness do\n  def handle_call(_request, _from, state) do\n    next = %{transport: state.transport, pending_ack?: nil}\n\n    if next.pending_ack? do\n      throw({:noreply, %{next | transport: :unknown}})\n    else\n      {:noreply, next}\n    end\n  end\nend\n",
+      "required_raw_ops": [
+        "orelse"
+      ],
+      "expected_status": "checked_conditional",
+      "expected_warnings": 0,
+      "required_calls": []
+    },
+    {
+      "id": "andalso_false_skips_rhs",
+      "mode": "positive",
+      "language": "erlang",
+      "module": "c47_guard_andalso_false_skips_rhs",
+      "source": "-module(c47_guard_andalso_false_skips_rhs).\n-export([handle_call/3]).\n\nhandle_call(_Request, _From, State) ->\n    case State of\n        S when is_atom(S) andalso map_get(missing_guard_value, S) ->\n            throw({noreply, State#{transport := unsafe_transport}});\n        _ ->\n            {noreply, State}\n    end.\n",
+      "required_raw_ops": [
+        "andalso"
+      ],
+      "expected_status": "checked_conditional",
+      "reason": "Known map makes is_atom false; RHS and poisoned body must not be selected.",
+      "expected_warnings": 0,
+      "required_calls": []
+    },
+    {
+      "id": "orelse_true_skips_rhs",
+      "mode": "positive",
+      "language": "erlang",
+      "module": "c47_guard_orelse_true_skips_rhs",
+      "source": "-module(c47_guard_orelse_true_skips_rhs).\n-export([handle_call/3]).\n\nhandle_call(_Request, _From, State) ->\n    case State of\n        S when is_map(S) orelse map_get(missing_guard_value, S) ->\n            {noreply, State};\n        _ ->\n            throw({noreply, State#{transport := unsafe_transport}})\n    end.\n",
+      "required_raw_ops": [
+        "orelse"
+      ],
+      "expected_status": "checked_conditional",
+      "reason": "Known map makes is_map true; an unproved guard RHS must not open the poisoned fallback.",
+      "expected_warnings": 0,
+      "required_calls": []
+    },
+    {
+      "id": "required_rhs_boolean_results",
+      "mode": "positive",
+      "language": "erlang",
+      "module": "c47_guard_required_rhs_boolean_results",
+      "source": "-module(c47_guard_required_rhs_boolean_results).\n-export([handle_call/3]).\n\nhandle_call(and_case, _From, State) ->\n    case State of\n        S when is_map(S) andalso is_atom(S) ->\n            throw({noreply, State#{transport := unsafe_transport}});\n        _ ->\n            {noreply, State}\n    end;\nhandle_call(_Request, _From, State) ->\n    case State of\n        S when is_atom(S) orelse is_map(S) ->\n            {noreply, State};\n        _ ->\n            throw({noreply, State#{transport := unsafe_transport}})\n    end.\n",
+      "required_raw_ops": [
+        "andalso",
+        "orelse"
+      ],
+      "expected_status": "checked_conditional",
+      "reason": "Unknown request visits both source clauses; AND true requires false RHS, OR false requires true RHS.",
+      "expected_warnings": 0,
+      "required_calls": []
+    },
+    {
+      "id": "unknown_lhs_orelse_true",
+      "mode": "negative",
+      "language": "erlang",
+      "module": "c47_guard_unknown_lhs_orelse_true",
+      "source": "-module(c47_guard_unknown_lhs_orelse_true).\n-export([handle_call/3]).\n\nhandle_call(X, _From, State) when X orelse true ->\n    {noreply, State};\nhandle_call(_X, _From, State) ->\n    throw({noreply, State#{transport := unsafe_transport}}).\n",
+      "required_raw_ops": [
+        "orelse"
+      ],
+      "expected_status": "unconfirmed",
+      "reason": "X may be non-Boolean; default poison cannot be suppressed by the true RHS.",
+      "expected_warnings": 0,
+      "required_calls": []
+    },
+    {
+      "id": "not_unknown_lhs_andalso_false",
+      "mode": "negative",
+      "language": "erlang",
+      "module": "c47_guard_not_unknown_lhs_andalso_false",
+      "source": "-module(c47_guard_not_unknown_lhs_andalso_false).\n-export([handle_call/3]).\n\nhandle_call(X, _From, State) when not (X andalso false) ->\n    {noreply, State};\nhandle_call(_X, _From, State) ->\n    throw({noreply, State#{transport := unsafe_transport}}).\n",
+      "required_raw_ops": [
+        "not",
+        "andalso"
+      ],
+      "expected_status": "unconfirmed",
+      "reason": "Guard failure from non-Boolean X is not false and must not become true under not.",
+      "expected_warnings": 0,
+      "required_calls": []
+    },
+    {
+      "id": "nonboolean_map_lhs",
+      "mode": "negative",
+      "language": "erlang",
+      "module": "c47_guard_nonboolean_map_lhs",
+      "source": "-module(c47_guard_nonboolean_map_lhs).\n-export([handle_call/3]).\n\nhandle_call(_Request, _From, State) when State orelse true ->\n    {noreply, State};\nhandle_call(_Request, _From, State) ->\n    throw({noreply, State#{transport := unsafe_transport}}).\n",
+      "required_raw_ops": [
+        "orelse"
+      ],
+      "expected_status": "unconfirmed",
+      "reason": "State is an abstract map, hence an invalid Boolean LHS; safe-looking RHS does not erase fallback.",
+      "expected_warnings": 0,
+      "required_calls": []
+    },
+    {
+      "id": "required_rhs_unknown",
+      "mode": "negative",
+      "language": "erlang",
+      "module": "c47_guard_required_rhs_unknown",
+      "source": "-module(c47_guard_required_rhs_unknown).\n-export([handle_call/3]).\n\nhandle_call(X, _From, State) when is_map(State) andalso is_atom(X) ->\n    {noreply, State};\nhandle_call(_X, _From, State) ->\n    throw({noreply, State#{transport := unsafe_transport}}).\n",
+      "required_raw_ops": [
+        "andalso"
+      ],
+      "expected_status": "unconfirmed",
+      "reason": "Known true left requires evaluating unknown RHS; fallback replacement remains possible.",
+      "expected_warnings": 0,
+      "required_calls": []
+    },
+    {
+      "id": "reachable_replacement",
+      "mode": "negative",
+      "language": "erlang",
+      "module": "c47_guard_reachable_replacement",
+      "source": "-module(c47_guard_reachable_replacement).\n-export([handle_call/3]).\n\nhandle_call(_Request, _From, State) when is_map(State) orelse is_atom(State) ->\n    throw({noreply, State#{transport := unsafe_transport}});\nhandle_call(_Request, _From, State) ->\n    {noreply, State}.\n",
+      "required_raw_ops": [
+        "orelse"
+      ],
+      "expected_status": "unconfirmed",
+      "reason": "Definitely successful guard must preserve the reachable thrown replacement state.",
+      "expected_warnings": 0,
+      "required_calls": []
+    }
+  ],
+  "bifs": [
+    {
+      "id": "valid_function_exported_boolean",
+      "mode": "positive",
+      "language": "elixir",
+      "module": "Elixir.C48BifFixture.ValidFunctionExported",
+      "source": "defmodule C48BifFixture.ValidFunctionExported do\n  def handle_call(_request, _from, state) do\n    case :erlang.function_exported(:erlang, :is_atom, 1) do\n      true -> {:noreply, state}\n      false -> {:noreply, state}\n      _ -> throw({:noreply, %{state | transport: :unknown}})\n    end\n  end\nend\n",
+      "required_calls": [
+        {
+          "module": "erlang",
+          "function": "function_exported",
+          "arity": 3
+        }
+      ],
+      "expected_status": "checked_conditional",
+      "expected_warnings": 0,
+      "required_raw_ops": []
+    },
+    {
+      "id": "finite_atoms_arity_boundaries",
+      "mode": "positive",
+      "language": "erlang",
+      "module": "c48_bif_finite_atoms_arity_boundaries",
+      "source": "-module(c48_bif_finite_atoms_arity_boundaries).\n-export([handle_call/3]).\n\nhandle_call(Request, _From, State) ->\n    [Module | _] = maps:keys(#{erlang => ok, c48_unloaded_fixture_target => ok}),\n    [Function | _] = maps:keys(#{self => ok, c48_missing_export => ok}),\n    Arity = case Request of zero -> 0; _ -> 255 end,\n    case erlang:function_exported(Module, Function, Arity) of\n        true -> {noreply, State};\n        false -> {noreply, State};\n        _ -> throw({noreply, State#{transport := unsafe_transport}})\n    end.\n",
+      "required_calls": [
+        {
+          "module": "erlang",
+          "function": "function_exported",
+          "arity": 3
+        }
+      ],
+      "expected_status": "checked_conditional",
+      "reason": "Existing maps:keys abstraction supplies finite atom choices for both arguments; source branches exercise0 and255 without target lookup.",
+      "expected_warnings": 0,
+      "required_raw_ops": []
+    },
+    {
+      "id": "invalid_module",
+      "mode": "negative",
+      "language": "erlang",
+      "module": "c48_bif_invalid_module",
+      "source": "-module(c48_bif_invalid_module).\n-export([handle_call/3]).\n\nhandle_call(_Request, _From, State) ->\n    case erlang:function_exported(State, is_atom, 1) of\n        true -> {noreply, State};\n        false -> {noreply, State};\n        _ -> throw({noreply, State#{transport := unsafe_transport}})\n    end.\n",
+      "required_calls": [
+        {
+          "module": "erlang",
+          "function": "function_exported",
+          "arity": 3
+        }
+      ],
+      "expected_status": "unconfirmed",
+      "reason": "Known map is not an atom module; remain unknown rather than inventing a native error summary.",
+      "expected_warnings": 0,
+      "required_raw_ops": []
+    },
+    {
+      "id": "invalid_function",
+      "mode": "negative",
+      "language": "erlang",
+      "module": "c48_bif_invalid_function",
+      "source": "-module(c48_bif_invalid_function).\n-export([handle_call/3]).\n\nhandle_call(_Request, _From, State) ->\n    case erlang:function_exported(erlang, State, 1) of\n        true -> {noreply, State};\n        false -> {noreply, State};\n        _ -> throw({noreply, State#{transport := unsafe_transport}})\n    end.\n",
+      "required_calls": [
+        {
+          "module": "erlang",
+          "function": "function_exported",
+          "arity": 3
+        }
+      ],
+      "expected_status": "unconfirmed",
+      "reason": "Known map is not an atom function; remain failclosed.",
+      "expected_warnings": 0,
+      "required_raw_ops": []
+    },
+    {
+      "id": "float_arity",
+      "mode": "negative",
+      "language": "erlang",
+      "module": "c48_bif_float_arity",
+      "source": "-module(c48_bif_float_arity).\n-export([handle_call/3]).\n\nhandle_call(Request, _From, State) ->\n    Arity = case Request of float -> 1.0; _ -> 1 end,\n    case erlang:function_exported(erlang, is_atom, Arity) of\n        true -> {noreply, State};\n        false -> {noreply, State};\n        _ -> throw({noreply, State#{transport := unsafe_transport}})\n    end.\n",
+      "required_calls": [
+        {
+          "module": "erlang",
+          "function": "function_exported",
+          "arity": 3
+        }
+      ],
+      "expected_status": "unconfirmed",
+      "reason": "A reachable float arity is outside the proved subset, even when another branch is valid.",
+      "expected_warnings": 0,
+      "required_raw_ops": []
+    },
+    {
+      "id": "unknown_argument",
+      "mode": "negative",
+      "language": "erlang",
+      "module": "c48_bif_unknown_argument",
+      "source": "-module(c48_bif_unknown_argument).\n-export([handle_call/3]).\n\nhandle_call(Module, _From, State) ->\n    case erlang:function_exported(Module, is_atom, 1) of\n        true -> {noreply, State};\n        false -> {noreply, State};\n        _ -> throw({noreply, State#{transport := unsafe_transport}})\n    end.\n",
+      "required_calls": [
+        {
+          "module": "erlang",
+          "function": "function_exported",
+          "arity": 3
+        }
+      ],
+      "expected_status": "unconfirmed",
+      "reason": "Unknown module cannot be assumed to be an atom.",
+      "expected_warnings": 0,
+      "required_raw_ops": []
+    },
+    {
+      "id": "reachable_boolean_poison",
+      "mode": "negative",
+      "language": "erlang",
+      "module": "c48_bif_reachable_boolean_poison",
+      "source": "-module(c48_bif_reachable_boolean_poison).\n-export([handle_call/3]).\n\nhandle_call(true_branch, _From, State) ->\n    case erlang:function_exported(erlang, c48_missing_export, 1) of\n        true -> throw({noreply, State#{transport := unsafe_transport}});\n        false -> {noreply, State}\n    end;\nhandle_call(_Request, _From, State) ->\n    case erlang:function_exported(erlang, is_atom, 1) of\n        true -> {noreply, State};\n        false -> throw({noreply, State#{transport := unsafe_transport}})\n    end.\n",
+      "required_calls": [
+        {
+          "module": "erlang",
+          "function": "function_exported",
+          "arity": 3
+        }
+      ],
+      "expected_status": "unconfirmed",
+      "reason": "Both abstract Boolean alternatives must remain; looking up actual exports would incorrectly remove both poison paths.",
+      "expected_warnings": 0,
+      "required_raw_ops": []
+    },
+    {
+      "id": "outside_arity_subset",
+      "mode": "negative",
+      "language": "erlang",
+      "module": "c48_bif_outside_arity_subset",
+      "source": "-module(c48_bif_outside_arity_subset).\n-export([handle_call/3]).\n\nhandle_call(Request, _From, State) ->\n    Arity = case Request of negative -> -1; above -> 256; _ -> 1000000 end,\n    case erlang:function_exported(erlang, is_atom, Arity) of\n        true -> {noreply, State};\n        false -> {noreply, State};\n        _ -> throw({noreply, State#{transport := unsafe_transport}})\n    end.\n",
+      "required_calls": [
+        {
+          "module": "erlang",
+          "function": "function_exported",
+          "arity": 3
+        }
+      ],
+      "expected_status": "unconfirmed",
+      "reason": "Observed native false for these integers is not widened into acceptance; out-of-subset semantics remain unknown, not badarg.",
+      "expected_warnings": 0,
+      "required_raw_ops": []
+    }
+  ],
+  "selection": [
+    {
+      "id": "current_unloaded_source",
+      "expected_status": "checked_conditional"
+    },
+    {
+      "id": "loaded_bytes_differ_from_selected_disk",
+      "expected_status": "unconfirmed"
+    },
+    {
+      "id": "unloaded_source_restored",
+      "expected_status": "checked_conditional"
+    },
+    {
+      "id": "loaded_path_differs_from_first_selected_source",
+      "expected_status": "unconfirmed"
+    },
+    {
+      "id": "loaded_bytes_and_path_match",
+      "expected_status": "checked_conditional"
+    },
+    {
+      "id": "selected_source_has_literal_otp_ssl_import",
+      "expected_status": "unconfirmed"
+    },
+    {
+      "id": "selected_source_has_on_load_body",
+      "expected_status": "unconfirmed"
+    },
+    {
+      "id": "selected_source_is_missing",
+      "expected_status": "unconfirmed"
+    }
+  ],
+  "selection_sources": {
+    "original": "-module(c44_selection_fixture).\n-export([handle_call/3]).\nhandle_call(_,_,State) -> {noreply,State}.\n",
+    "replacement": "-module(c44_selection_fixture).\n-export([handle_call/3]).\nhandle_call(_,_,State) -> {noreply,State#{transport => unknown}}.\n",
+    "ssl_import": "-module(c44_selection_ssl_import).\n-export([handle_call/3,hidden/0]).\nhandle_call(_,_,State) -> {noreply,State}.\nhidden() -> ssl:connect(\"example.invalid\",443,[]).\n",
+    "onload": "-module(c44_selection_onload).\n-export([handle_call/3]).\n-on_load(init/0).\ninit() -> erlang:error(on_load_must_never_be_invoked_by_audit).\nhandle_call(_,_,State) -> {noreply,State}.\n"
+  }
+}
