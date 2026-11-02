@@ -154,6 +154,21 @@ are reviewed separately.
 
 ## Acceptance sequence
 
+The finite binding in [no-otp-directed-release.json](no-otp-directed-release.json)
+identifies the ten reviewed documents, the complete 244-file production source
+census, configuration and the actual telemetry source. The release-specific
+`no_otp_directed_review` helpers check these inputs without adding origin analysis.
+The native helper checks every inspected module's compiled source, owning
+function and call line, and requires byte identity between the fresh build and
+the release. Its receipt retains the original findings and identifies the source
+proof for each occurrence; a separate Python check reconciles the complete
+receipt. New sources, changed producers, extra or missing sites, and mismatched
+build bytes fail closed. These bindings identify the concrete derivations above;
+hash equality alone does not establish their safety.
+
+The binding helpers' focused checks pass; integration into the actual release
+gate and its real traffic remain pending. The generic audit remains unchanged.
+
 1. Complete each directed producer/state/callback proof, bound to the selected
    sources and original occurrence identities. Preserve all remaining blockers.
 2. Collect real traffic even while static dispatch blockers remain. Keep the
