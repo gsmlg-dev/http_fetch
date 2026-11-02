@@ -1,0 +1,115 @@
+{
+  "schema": 1,
+  "review": "no-otp-directed-telemetry-proof.md",
+  "source_commit": "524edb284aa26b92a0dd2aace4d5dd8a3d395c0a",
+  "artifact": 13119243608,
+  "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
+  "original_findings_removed": 0,
+  "source_inputs_sha256": {
+    "apps/http_fetch/lib/http/telemetry.ex": "0e18333a2ffb0250ef0db846445a68eeedbf326e8cb0276f4609360348c293c1"
+  },
+  "production_source_census": {
+    "files": 244,
+    "sorted_path_sha256_json": "097ad232bd57e7dcf49f79ea829eb9e43ad6b155a42487a4ee1dae66983505b5"
+  },
+  "dependency": {
+    "package": "telemetry",
+    "version": "1.4.2",
+    "hex_checksum": "a0cb522801dffb1c49fe6e30561badffc7b6d0e180db1300df759faa22062855",
+    "hex_outer_checksum": "928f6495066506077862c0d1646609eed891a4326bee3126ba54b60af61febb1",
+    "source_inputs_sha256": {
+      "src/telemetry.erl": "8bb2a1fa116def38f63a5b36b65fdc9af98022e6e378e047f38d49b584564278",
+      "src/telemetry.hrl": "f3dfef3a02a6ce5473a99ae01c48345bdc84c33edf4855274a56f6afe33af7e8",
+      "src/telemetry_app.erl": "436d3951199e51cfc3551490e816b7a339b37a80a44483466d51c09c517645b1",
+      "src/telemetry_ets.erl": "6e95766ef7596baf2bfc1bee1257a6b6bc74ee11d1103af7d55a616acbb8d44b",
+      "src/telemetry_handler_table.erl": "49c66d7e775fec3bc706bd110bb0576c1563f6861ba7ebde084febc6a41799ff",
+      "src/telemetry_pt.erl": "add3cf3df86e3f69f5ed84df5a42a12093195cd2258020a199c5eb1800e86699",
+      "src/telemetry_sup.erl": "d0c6f28c8b0e6486b4b120be39f67d1e0b405f478aa73800b4db08362e9ef19f",
+      "src/telemetry_test.erl": "67c90971b6cd054c4b48f87a510abe5093f4274e2d4daf114dd18685986b7621"
+    },
+    "baseline_beam_sha256": {
+      ":telemetry": "4ba845ea3bf80e6477b8d6220907ab0feacf0f0f8f34bd4f74150fd42a18620d",
+      ":telemetry_ets": "abcb7538cef8fabea50934647c471b5b095924f839ff0cc02824f163c524b37c",
+      ":telemetry_handler_table": "7643292d00592586a47fb3f285456b9b51e39ecbc715f7bc525fb0cc8588b7d0",
+      ":telemetry_pt": "1ceffa2b4c3c790e7ae181d1488d388fe3baff2b56ef9b9ce85621fad3d8ca50"
+    },
+    "build_source_verification": "Required before directed gate acceptance"
+  },
+  "occurrences": [
+    {
+      "inventory_occurrence": 169,
+      "module": ":telemetry",
+      "mfa": "do_execute/4",
+      "line": 202,
+      "kind": "unresolved_fun_invocation",
+      "source": "telemetry-1.4.2/src/telemetry.erl",
+      "proof": "TEL-1",
+      "beam_sha256": "4ba845ea3bf80e6477b8d6220907ab0feacf0f0f8f34bd4f74150fd42a18620d"
+    },
+    {
+      "inventory_occurrence": 170,
+      "module": ":telemetry",
+      "mfa": "span/3",
+      "line": 359,
+      "kind": "unresolved_fun_invocation",
+      "source": "telemetry-1.4.2/src/telemetry.erl",
+      "proof": "TEL-1",
+      "beam_sha256": "4ba845ea3bf80e6477b8d6220907ab0feacf0f0f8f34bd4f74150fd42a18620d"
+    },
+    {
+      "inventory_occurrence": 171,
+      "module": ":telemetry_handler_table",
+      "mfa": "persist/0",
+      "line": 50,
+      "kind": "unresolved_module_dispatch",
+      "source": "telemetry-1.4.2/src/telemetry_handler_table.erl",
+      "proof": "TEL-2",
+      "beam_sha256": "7643292d00592586a47fb3f285456b9b51e39ecbc715f7bc525fb0cc8588b7d0"
+    },
+    {
+      "inventory_occurrence": 172,
+      "module": ":telemetry_handler_table",
+      "mfa": "list_for_event/1",
+      "line": 64,
+      "kind": "unresolved_fun_invocation",
+      "source": "telemetry-1.4.2/src/telemetry_handler_table.erl",
+      "proof": "TEL-2",
+      "beam_sha256": "7643292d00592586a47fb3f285456b9b51e39ecbc715f7bc525fb0cc8588b7d0"
+    },
+    {
+      "inventory_occurrence": 173,
+      "module": ":telemetry_handler_table",
+      "mfa": "list_by_prefix/1",
+      "line": 69,
+      "kind": "unresolved_module_dispatch",
+      "source": "telemetry-1.4.2/src/telemetry_handler_table.erl",
+      "proof": "TEL-2",
+      "beam_sha256": "7643292d00592586a47fb3f285456b9b51e39ecbc715f7bc525fb0cc8588b7d0"
+    },
+    {
+      "inventory_occurrence": 174,
+      "module": ":telemetry_handler_table",
+      "mfa": "handle_call/3",
+      "line": 80,
+      "kind": "unresolved_module_dispatch",
+      "source": "telemetry-1.4.2/src/telemetry_handler_table.erl",
+      "proof": "TEL-2",
+      "beam_sha256": "7643292d00592586a47fb3f285456b9b51e39ecbc715f7bc525fb0cc8588b7d0"
+    },
+    {
+      "inventory_occurrence": 175,
+      "module": ":telemetry_handler_table",
+      "mfa": "handle_call/3",
+      "line": 89,
+      "kind": "unresolved_module_dispatch",
+      "source": "telemetry-1.4.2/src/telemetry_handler_table.erl",
+      "proof": "TEL-2",
+      "beam_sha256": "7643292d00592586a47fb3f285456b9b51e39ecbc715f7bc525fb0cc8588b7d0"
+    }
+  ],
+  "checks": {
+    "strict_release_static_status": "FAIL",
+    "strict_release_total_unresolved": 175,
+    "P6_accepted": false
+  }
+}

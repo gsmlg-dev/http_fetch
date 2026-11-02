@@ -117,6 +117,11 @@ The [directed HTTP3 source review](no-otp-directed-h3-proof.md) covers 50
 H3-1–H3-5 occurrences. It records the approved `:ops` boundary and audits the
 default Quic implementation, shared endpoints and retained stream selectors.
 
+The [directed telemetry review](no-otp-directed-telemetry-proof.md) covers the
+remaining seven TEL-1/TEL-2 occurrences. Logger/metrics attachment examples are
+documentation only; actual handler origins and the two storage implementations
+are reviewed separately.
+
 | Proof | Actual implementation and entry | Source finding and remaining proof |
 | --- | --- | --- |
 | Q1 | `Quic.Cleanup.new/1 -> retire/2` | `new/1` constructs the retirement closure around its handle, secret and atomics fence. Bind all library leases reaching `retire/2` to this constructor; do not treat arbitrary `%Lease{}` values as safe. |
@@ -144,7 +149,7 @@ default Quic implementation, shared endpoints and retained stream selectors.
 | HTTP-8 | H2 pool owner factory | `init/1` accepts `:owner_factory`; production application starts its pool with the default. Enumerate custom pool/scope constructors and prove whether supported public clients can reach an injected factory. |
 | HTTP-9 | Public WebSocket -> connection | Prove built-in transport selection and retention through connect, reconnect, queued frames, backpressure, EOF, abort, rearm and detach. |
 | WT-1 | `HTTP.WebTransport.new/2` | Approved `:backend` root flows through Options into Session. Audit the unsupported built-in QUIC backend and all library alternatives; no native WebTransport capability is added. |
-| TEL-1 | `telemetry:attach[_many]`, `span/3` | Handler/span functions are callback roots. Audit HTTP.Telemetry's built-in logging/metrics handlers and every library-supplied span; establish attachment-table provenance. |
+| TEL-1 | `telemetry:attach[_many]`, `span/3` | Handler/span functions originate at supported callbacks. The production source and BEAM census contains no library-supplied handler/span; HTTP.Telemetry's logging/metrics examples are documentation only. Attachment storage and reentry are traced in the telemetry review. |
 | TEL-2 | Telemetry application initialization and `persist/0` | `init/1` stores `telemetry_ets` and its list function; successful persistence switches to `telemetry_pt`. Default state has a literal empty-list closure. Prove every implementation-tuple writer and audit both built-in modules. Arbitrary external `persistent_term` mutation is not a supported callback root. |
 
 ## Acceptance sequence
