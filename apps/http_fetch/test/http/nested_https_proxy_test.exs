@@ -4,6 +4,18 @@ defmodule HTTP.NestedHTTPSProxyTest do
   @moduletag :integration
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
+  setup_all do
+    # Initialize both TLS implementations before the 500ms phase-specific cases.
+    # Every measured request still establishes and retires its own two sessions.
+    {url, proxy, peer} = nested_peer(:serve)
+    promise = HTTP.fetch(url, options(proxy))
+    assert %HTTP.Response{status: 200, body: "ok"} = HTTP.Promise.await(promise, 4_000)
+    assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 2_000)
+    assert_receive {:proxy_closed, ^peer}, 2_000
+    assert_receive {:origin_closed, {:error, :closed}}, 2_000
+    :ok
+  end
+
   test "verified HTTPS proxy CONNECT carries independently verified origin TLS and credentials stay outside" do
     {url, proxy, peer} = nested_peer(:serve)
 

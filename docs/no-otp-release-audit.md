@@ -1,12 +1,41 @@
 # Directed production release audit
 
-The strict production no-OTP-SSL gate **passes** at `bf13e62`. P6 integration
-acceptance remains **blocked** by the two OTP manual-ticket reference regressions
-reported below. General static-analysis development is paused. The proof covers
+The strict production no-OTP-SSL gate **passes** at `31a8a15`. P6 integration
+acceptance remains **blocked** by the nested origin-deadline fixture described
+below. The OTP 28 manual-ticket reference regressions are resolved. General
+static-analysis development is paused. The proof covers
 actual shipped implementations from supported public entries and the user-approved
 callback boundaries. The original dispatch inventory remains intact.
 `1.0.0-rc.0` publication and cold published-consumer verification follow P6.
 Performance, Credo and Dialyzer work remain deferred by the user.
+
+## Reference regression acceptance — 2026-11-02
+
+At `31a8a15da424d4ee658cedef0d9be7c477c597e3`, the full manual
+[CI run 41405668874](https://github.com/gsmlg-dev/http_fetch/actions/runs/41405668874)
+passes all nine compile/format/package jobs, all candidate TLS feature groups,
+candidate consumers, shared H2 compatibility and the strict no-OTP release gate.
+Both isolated TLS plans again prove all 175 dispatch occurrences and pass all
+35 traffic scenarios. Root independently reconciles the artifacts in
+`/private/tmp/http-fetch-directed-p6-20261102T0522Z/STRICT-31A-ACCEPTANCE.json`.
+
+The earlier OTP 28 failures concern its hybrid X25519MLKEM768 reference handshake
+after HelloRetryRequest. A bounded OTP 28/29 comparison verifies that the classical
+X25519 reference resumes correctly. The reference fixture now selects that common
+supported group and adds a real forced classical HelloRetryRequest resumption
+case. ExSSL production behavior is unchanged. All ten manual-ticket cases and
+40 targeted resumption checks pass locally; the complete OTP 28 ExSSL integration
+job passes 3,541 tests and 20 properties with 692 integration-selection exclusions.
+All candidate TLS feature groups also pass, including manual tickets and resumed
+mTLS. No resumption, identity or cleanup assertion is removed.
+
+All-nine [units](https://github.com/gsmlg-dev/http_fetch/actions/runs/41405674076)
+and configured [E2E](https://github.com/gsmlg-dev/http_fetch/actions/runs/41405683173)
+pass. Eight [integration](https://github.com/gsmlg-dev/http_fetch/actions/runs/41405678859)
+jobs pass. Fetch reports one failure: the 500ms total deadline expires during
+proxy TLS before the `origin_gate` fixture reaches its required phase. This is
+still a release blocker; a passing focused local file is insufficient to close
+it. The strict release result does not waive this remaining source regression.
 
 ## Strict release acceptance — 2026-11-02
 
