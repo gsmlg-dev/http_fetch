@@ -482,7 +482,6 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
 
   defp finish_provider(%Task{pid: peer} = task, promise, backend, provider) do
     deadline = System.monotonic_time(:millisecond) + @wait
-    send(peer, :await_close)
 
     try do
       Probe.await_down(provider, [:tcp, :connection, :writer, :observer], remaining!(deadline))
@@ -490,6 +489,7 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
       assert {:ok, %{cleanup: :confirmed}} =
                SSL.Lifecycle.await(provider.handle, {:abs_ms, deadline})
 
+      send(peer, :await_close)
       assert_receive {:peer_closed, ^peer}, remaining!(deadline)
       assert :ok = Task.await(task, @wait)
       assert_completion(promise, backend)
@@ -505,10 +505,11 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
   end
 
   defp finish(%Task{pid: peer} = task, promise, backend) do
+    # Confirm cleanup while the peer still refuses to read the blocked upload.
+    assert_completion(promise, backend)
     send(peer, :await_close)
     assert_receive {:peer_closed, ^peer}, @wait
     assert :ok = Task.await(task, @wait)
-    assert_completion(promise, backend)
   end
 
   defp assert_completion(promise, _backend) do
