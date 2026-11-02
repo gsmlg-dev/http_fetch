@@ -15,8 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fixture: [original, read_batch]
-        scope: [file, full]
+        fixture: [original]
+        scope: [stress]
     env:
       MIX_ENV: test
       HTTP_FETCH_CI_APP: http_fetch
@@ -52,6 +52,13 @@ jobs:
 
           path = Path('apps/http_fetch/test/http/http1_write_idle_wire_test.exs')
           source = path.read_text()
+          if os.environ['DIAGNOSTIC_SCOPE'] == 'stress':
+              marker = '    test "#{backend} a nonreading peer expires streamed writes and closes the source" do\n'
+              assert source.count(marker) == 1
+              source = source.replace(marker, '    for attempt <- 1..20 do\n' + marker.replace('source"', 'source #{attempt}"'))
+              marker = '    test "#{backend} buffered bodies use the same bounded write deadline" do\n'
+              assert source.count(marker) == 1
+              source = source.replace(marker, '    end\n\n' + marker)
           marker = '        endpoints = {local, remote}\n'
           assert source.count(marker) == 1
           source = source.replace(marker, marker + '        Process.put(:write_idle_tcp, tcp)\n')
@@ -64,7 +71,7 @@ jobs:
           '''
           source = source.replace(marker, marker + batch + '''        Process.put(:write_idle_drain_started, System.monotonic_time(:millisecond))
                   Process.put(:write_idle_received_bytes, 0)
-                  IO.inspect(%{peer: self(), transport: transport, endpoints: endpoints, tcp_options: :inet.getopts(Process.get(:write_idle_tcp), [:buffer, :recbuf])}, label: "idle_peer_drain_started")
+                  IO.inspect(%{peer: self(), at_ms: System.monotonic_time(:millisecond), transport: transport, endpoints: endpoints, tcp_options: :inet.getopts(Process.get(:write_idle_tcp), [:buffer, :recbuf])}, label: "idle_peer_drain_started")
           ''')
           marker = '      {:ok, _bytes} -> drain_closed(transport, socket)\n'
           assert source.count(marker) == 1
@@ -75,7 +82,7 @@ jobs:
           marker = '      {:error, reason} -> assert reason in [:closed, :econnreset]\n'
           assert source.count(marker) == 1
           source = source.replace(marker, '''      {:error, reason} ->
-                  IO.inspect(%{peer: self(), terminal: reason, drained_bytes: Process.get(:write_idle_received_bytes), elapsed_ms: System.monotonic_time(:millisecond) - Process.get(:write_idle_drain_started)}, label: "idle_peer_drain_terminal")
+                  IO.inspect(%{peer: self(), at_ms: System.monotonic_time(:millisecond), terminal: reason, drained_bytes: Process.get(:write_idle_received_bytes), elapsed_ms: System.monotonic_time(:millisecond) - Process.get(:write_idle_drain_started)}, label: "idle_peer_drain_terminal")
                   assert reason in [:closed, :econnreset]
           ''')
           marker = '    assert_receive {:request_received, ^peer, endpoints}, @wait\n'
@@ -84,12 +91,40 @@ jobs:
               {_server, {client_ip, client_port}} = endpoints
               native = Enum.filter(:socket.which_sockets(), fn socket -> match?({:ok, %{addr: ^client_ip, port: ^client_port}}, :socket.sockname(socket)) end)
               Process.put(:write_idle_original_native, native)
+              test = self()
+              Enum.each(native, fn socket ->
+                token = make_ref()
+                watcher = spawn(fn ->
+                  started = System.monotonic_time(:millisecond)
+                  try do
+                    monitor = :socket.monitor(socket)
+                    send(test, {:idle_monitor_ready, token})
+                    receive do
+                      {:DOWN, ^monitor, :socket, ^socket, reason} ->
+                        IO.inspect(%{endpoints: endpoints, at_ms: System.monotonic_time(:millisecond), elapsed_ms: System.monotonic_time(:millisecond) - started, reason: if(is_atom(reason), do: reason, else: :other)}, label: "idle_original_native_down")
+                    after
+                      16_000 -> IO.inspect(%{endpoints: endpoints}, label: "idle_original_native_still_pending")
+                    end
+                  catch
+                    kind, _reason ->
+                      send(test, {:idle_monitor_ready, token})
+                      IO.inspect(%{kind: kind, endpoints: endpoints}, label: "idle_native_monitor_unavailable")
+                  end
+                end)
+                on_exit(fn -> if Process.alive?(watcher), do: Process.exit(watcher, :kill) end)
+                receive do
+                  {:idle_monitor_ready, ^token} -> :ok
+                after
+                  50 -> IO.inspect(%{endpoints: endpoints}, label: "idle_native_monitor_registration_pending")
+                end
+              end)
           ''')
           marker = '''    send(peer, :await_close)
               assert_receive {:peer_closed, ^peer}, @wait
           '''
           assert source.count(marker) == 1
-          source = source.replace(marker, '''    send(peer, :await_close)
+          source = source.replace(marker, '''    IO.inspect(%{backend: backend, at_ms: System.monotonic_time(:millisecond), completion: RequestCompletion.await(Promise.completion(promise), 0)}, label: "idle_client_outcome_seen")
+              send(peer, :await_close)
               try do
                 assert_receive {:peer_closed, ^peer}, @wait
               rescue
@@ -120,7 +155,7 @@ jobs:
           PY
       - name: Run original deadlines and assertions at the failing seed
         run: |
-          if [ "$DIAGNOSTIC_SCOPE" = file ]; then
+          if [ "$DIAGNOSTIC_SCOPE" = file ] || [ "$DIAGNOSTIC_SCOPE" = stress ]; then
             mix test apps/http_fetch/test/http/http1_write_idle_wire_test.exs --only integration --seed 286260 --trace
           else
             mix test apps/http_fetch/test --only integration --seed 286260
