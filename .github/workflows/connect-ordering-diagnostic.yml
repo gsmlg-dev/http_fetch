@@ -1,0 +1,105 @@
+name: Bounded pinned connection ordering diagnostic
+
+on:
+  push:
+    branches: [diagnostic/connect-ordering-20261102]
+    paths: [.github/workflows/connect-ordering-diagnostic.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  ordering:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [original, fixture_ca]
+        scope: [file, full]
+    env:
+      MIX_ENV: test
+      HTTP_FETCH_CI_APP: http_fetch
+      HTTP_QUIC_PHASE1_REAL: '1'
+      DIAGNOSTIC_FIXTURE: ${{ matrix.fixture }}
+      DIAGNOSTIC_SCOPE: ${{ matrix.scope }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: integration-http_fetch-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs', 'apps/http_fetch/mix.exs') }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v5
+      - name: Prepare original integration environment
+        run: |
+          python3 -m pip install --requirement scripts/requirements-http2-stream-clients.txt
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+      - name: Measure fixture stages and compare explicit test trust
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path('apps/http_fetch/test/http/connect_deadline_ordering_test.exs')
+          source = path.read_text()
+          if os.environ['DIAGNOSTIC_FIXTURE'] == 'fixture_ca':
+              marker = '          connect_timeout: 500\n'
+              assert source.count(marker) == 1
+              source = source.replace(marker, '''          connect_timeout: 500,
+                    ssl: [cacertfile: Path.expand("../support/fixtures/pinned-ca.pem", __DIR__)]
+          ''')
+          marker = '      observer = self()\n'
+          assert source.count(marker) == 1
+          source = source.replace(marker, marker + '''      started = System.monotonic_time(:millisecond)
+                control = unquote(control)
+          ''')
+          marker = '          send(observer, {:client_hello, self()})\n'
+          assert source.count(marker) == 1
+          source = source.replace(marker, '''          IO.inspect(%{control: control, backend: backend, elapsed_ms: System.monotonic_time(:millisecond) - started}, label: "ordering_client_hello")
+          ''' + marker)
+          marker = '          Dialer.connect(\n'
+          assert source.count(marker) == 1
+          source = source.replace(marker, '          result = Dialer.connect(\n')
+          marker = '            unquote(request_timeout)\n          )\n'
+          assert source.count(marker) == 1
+          source = source.replace(marker, marker + '''          IO.inspect(%{control: control, backend: backend, elapsed_ms: System.monotonic_time(:millisecond) - started, result: result}, label: "ordering_dial_result")
+                    result
+          ''')
+          path.write_text(source)
+
+          path = Path('apps/ex_ssl/lib/ssl/options.ex')
+          source = path.read_text()
+          marker = '  def normalize(host, options) do\n'
+          assert source.count(marker) == 1
+          source = source.replace(marker, marker + '''    if is_list(options) and Keyword.keyword?(options) and Keyword.get(options, :server_name_indication) == ~c"pinned.invalid", do: Process.put(:connect_ordering_probe, true)
+          ''')
+          marker = '  defp trust_source(options) do\n'
+          assert source.count(marker) == 1
+          source = source.replace(marker, '''  defp trust_source(options) do
+              started = System.monotonic_time(:millisecond)
+              result = diagnostic_trust_source(options)
+              if Process.get(:connect_ordering_probe), do: IO.inspect(%{elapsed_ms: System.monotonic_time(:millisecond) - started, fixture_ca: Keyword.has_key?(options, :cacertfile), result: elem(result, 0)}, label: "ordering_trust_setup")
+              result
+            end
+
+            defp diagnostic_trust_source(options) do
+          ''')
+          path.write_text(source)
+          PY
+      - name: Run every original assertion at the failing seed
+        run: |
+          if [ "$DIAGNOSTIC_SCOPE" = file ]; then
+            mix test apps/http_fetch/test/http/connect_deadline_ordering_test.exs --only integration --seed 622086 --trace
+          else
+            mix test apps/http_fetch/test --only integration --seed 622086
+          fi
