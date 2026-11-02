@@ -29,7 +29,7 @@ class BlockedTrafficTests(unittest.TestCase):
 
     def test_native_diagnostic_isolation_keeps_every_other_gate(self):
         result = subprocess.run(
-            ["unbuffer", "elixir", str(Path(__file__).with_suffix(".exs"))],
+            ["elixir", str(Path(__file__).with_suffix(".exs"))],
             env={**os.environ, "NO_OTP_VERSION": "1.2.3"},
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout)
