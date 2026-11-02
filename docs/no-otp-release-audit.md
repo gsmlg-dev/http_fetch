@@ -97,6 +97,11 @@ general interpreter, callable reducer, or origin graph is required to classify
 these sites. Missing producer, state-transfer, reentry, or contract evidence keeps
 the original finding blocked.
 
+The [directed TLS source review](no-otp-directed-tls-proof.md) now traces all 14
+TLS-1 through TLS-6 occurrences against 26 selected source inputs and the complete
+244-file production-source census. It preserves the compiled findings until
+their source-bound discharge is accepted.
+
 | Proof | Actual implementation and entry | Source finding and remaining proof |
 | --- | --- | --- |
 | Q1 | `Quic.Cleanup.new/1 -> retire/2` | `new/1` constructs the retirement closure around its handle, secret and atomics fence. Bind all library leases reaching `retire/2` to this constructor; do not treat arbitrary `%Lease{}` values as safe. |

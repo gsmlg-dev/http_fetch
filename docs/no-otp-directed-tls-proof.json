@@ -1,0 +1,189 @@
+{
+  "schema": 1,
+  "review": "no-otp-directed-tls-proof.md",
+  "source_commit": "524edb284aa26b92a0dd2aace4d5dd8a3d395c0a",
+  "artifact": 13119243608,
+  "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
+  "original_findings_removed": 0,
+  "source_inputs_sha256": {
+    "apps/ex_ssl/lib/ssl.ex": "bc7d80e1e7e44b6d4b01257fc4cf2304e221274fefe38b9df625ed568fead6e8",
+    "apps/ex_ssl/lib/ssl/options.ex": "a1682b39e33811cf230dd4b6f91552d5f7dbf698c1760ff8ff85e3930c312151",
+    "apps/ex_ssl/lib/ssl/tcp_options.ex": "b007fe9db46cedb98867797b368d999dd0dbb773d938f11e057eb9cb88f47d75",
+    "apps/ex_ssl/lib/ssl/connection.ex": "2af9faca2ddcbd0da6464a0df312b70a0f51c3518c43c0107e6330a38fb16dfd",
+    "apps/ex_ssl/lib/ssl/prepared_upgrade.ex": "c62b7433f5848289a58df30bde1cdf18155a0dcd8a3dff0da49546aac3a74461",
+    "apps/ex_ssl/lib/ssl/client_identity.ex": "bbda9af456f8c6a182e7d30c1b97cbd4502e6d7fca9058b45a31f30a1cbef053",
+    "apps/ex_ssl/lib/ssl/client_hello/materializer.ex": "77fefe616a1f03a075be13dc5e689443c85c75878d59b4ea82833fb36b94518b",
+    "apps/ex_ssl/lib/ssl/crypto/key_exchange.ex": "2c1820fe441fb2169daaa74360582d54130338406faa8cc7ddcaa0d89ab44630",
+    "apps/ex_ssl/lib/ssl/pkix/pkix.ex": "e87da677850294e277f6246e9db21252593444fafbc23566ff459ffd046a0e95",
+    "apps/ex_ssl/lib/ssl/pkix/verify_fun.ex": "bd19c586e84a87d283dbaedada34c3ffd0abd0315267678c4d2b5aa6e39e7542",
+    "apps/ex_ssl/lib/ssl/pkix/partial_chain.ex": "331f54b411a5912512d682d69959ab3e1731244da3c8c4954b63224be3870b9a",
+    "apps/ex_ssl/lib/ssl/pkix/revocation.ex": "e3c9c47fe8ccb0f5cad95785fe216b439c4df97a922e312769872aa2fd753cd5",
+    "apps/ex_ssl/lib/ssl/policy_io.ex": "4ce0964a7fe2e68227cfd697c94c74b31c53d8fe83c008a49902779dee2ac8bb",
+    "apps/ex_ssl/lib/ssl/crl_cache.ex": "b9c111dcd14bfd81bda7a9f345ec48d08aa0920dbef3ad2f36a536f83f4cb219",
+    "apps/ex_ssl/lib/ssl/policy_io/http.ex": "16ffe9aec659046b154be8420d521b61bb2728a44ad0cc130ec597d089ec3827",
+    "apps/ex_ssl/lib/ssl/protocol/client_handshake.ex": "396ae77a824a5f995d556efe383f2adb2a5b85eca7cf7c6be093c38c0c145862",
+    "apps/ex_ssl/lib/ssl/protocol/handshake_machine.ex": "ebbbbe2cac633bc228063357c752a570f13434aa32f865deba0515c0471f785f",
+    "apps/ex_ssl/lib/ssl/protocol/server_flight_verifier.ex": "a6876ac59a2829e2874d01554719c2be899666bd1ad52cad9c0151e978a70857",
+    "apps/ex_ssl/lib/ssl/protocol/handshake_core.ex": "d9e3aa94a02997e33443de0e29cf804f62f9e9b72529e048317a4ed5d3a52d2c",
+    "apps/ex_ssl/lib/ssl/protocol/tls12.ex": "13d7708785642ba545908484f8979dc8cbd162d18f7b3fc0827a654885a2307b",
+    "apps/ex_ssl/lib/ssl/quic.ex": "d8575ea864739830c9b52185ad09aa3af03cf8a61d8164ebce5473b4cbdfddf3",
+    "apps/ex_ssl/lib/ssl/quic/config.ex": "a523334dc65a9e82f39943cf9a9bcc7144546cb3ac3f9d0389bd937aee2e01b1",
+    "apps/ex_ssl/lib/ssl/resumption_context.ex": "5770e0b4b47d32932fc2d99dd00f6a568b1084eb1f2b5a0623ca6d789136571e",
+    "apps/ex_ssl/lib/ssl/tls12_resumption_context.ex": "f788f4265884c47e2b17acd9de353312b5dbed8583839ac2b76714c2d0e7eaca",
+    "apps/elixir_quic/lib/quic/profile.ex": "2365ab1370f40fba20ff0df0cf9d91721bee6b3eb4c25b79820cd6ab74b706e0",
+    "apps/http_core/lib/http/transport/ex_ssl.ex": "20cda2e3507a1fa52ec8a5baf7259ceab9c407d434dda8e9601cfaadb514893f"
+  },
+  "production_source_census": {
+    "files": 244,
+    "sorted_path_sha256_json": "441c30bf244b76db4c68721f864482a01bb54c63935f43160cef7ab33147fe1e"
+  },
+  "occurrences": [
+    {
+      "inventory_occurrence": 61,
+      "proof": "TLS-1",
+      "module": "SSL.ClientHello.Materializer",
+      "mfa": "materialize_key_share/3",
+      "line": 368,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/ex_ssl/lib/ssl/client_hello/materializer.ex",
+      "beam_sha256": "8fafe470d8823ae58b68df4b60f49b0240f788029cafa8a8958c5c624b261f7e"
+    },
+    {
+      "inventory_occurrence": 62,
+      "proof": "TLS-2",
+      "module": "SSL.ClientIdentity",
+      "mfa": "resolve_password/1",
+      "line": 297,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/ex_ssl/lib/ssl/client_identity.ex",
+      "beam_sha256": "a0e479101873efd0490d2ad465ceb488992817aeebc951129fcdb52c24fec9a3"
+    },
+    {
+      "inventory_occurrence": 63,
+      "proof": "TLS-3",
+      "module": "SSL.PKIX.Revocation",
+      "mfa": "lookup/4",
+      "line": 232,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/ex_ssl/lib/ssl/pkix/revocation.ex",
+      "beam_sha256": "65618415aaf3283294849df54539e5fba998e0decfacd415169812ce59e39270"
+    },
+    {
+      "inventory_occurrence": 64,
+      "proof": "TLS-3",
+      "module": "SSL.PKIX.Revocation",
+      "mfa": "lookup/4",
+      "line": 231,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/ex_ssl/lib/ssl/pkix/revocation.ex",
+      "beam_sha256": "65618415aaf3283294849df54539e5fba998e0decfacd415169812ce59e39270"
+    },
+    {
+      "inventory_occurrence": 65,
+      "proof": "TLS-3",
+      "module": "SSL.PKIX.Revocation",
+      "mfa": "refresh/4",
+      "line": 380,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/ex_ssl/lib/ssl/pkix/revocation.ex",
+      "beam_sha256": "65618415aaf3283294849df54539e5fba998e0decfacd415169812ce59e39270"
+    },
+    {
+      "inventory_occurrence": 66,
+      "proof": "TLS-3",
+      "module": "SSL.PKIX.Revocation",
+      "mfa": "select/3",
+      "line": 262,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/ex_ssl/lib/ssl/pkix/revocation.ex",
+      "beam_sha256": "65618415aaf3283294849df54539e5fba998e0decfacd415169812ce59e39270"
+    },
+    {
+      "inventory_occurrence": 67,
+      "proof": "TLS-4",
+      "module": "SSL.PKIX.VerifyFun",
+      "mfa": "invoke/5",
+      "line": 71,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/ex_ssl/lib/ssl/pkix/verify_fun.ex",
+      "beam_sha256": "68aa2c9b73aca5b8a894239334f506dc0f16ff3d43fac9faa97c564f23d40eb6"
+    },
+    {
+      "inventory_occurrence": 68,
+      "proof": "TLS-4",
+      "module": "SSL.PKIX.VerifyFun",
+      "mfa": "invoke/5",
+      "line": 70,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/ex_ssl/lib/ssl/pkix/verify_fun.ex",
+      "beam_sha256": "68aa2c9b73aca5b8a894239334f506dc0f16ff3d43fac9faa97c564f23d40eb6"
+    },
+    {
+      "inventory_occurrence": 69,
+      "proof": "TLS-4",
+      "module": "SSL.PKIX.VerifyFun",
+      "mfa": "legacy/4",
+      "line": 85,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/ex_ssl/lib/ssl/pkix/verify_fun.ex",
+      "beam_sha256": "68aa2c9b73aca5b8a894239334f506dc0f16ff3d43fac9faa97c564f23d40eb6"
+    },
+    {
+      "inventory_occurrence": 70,
+      "proof": "TLS-4",
+      "module": "SSL.PKIX.VerifyFun",
+      "mfa": "policy_event/3",
+      "line": 62,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/ex_ssl/lib/ssl/pkix/verify_fun.ex",
+      "beam_sha256": "68aa2c9b73aca5b8a894239334f506dc0f16ff3d43fac9faa97c564f23d40eb6"
+    },
+    {
+      "inventory_occurrence": 71,
+      "proof": "TLS-4",
+      "module": "SSL.PKIX",
+      "mfa": "hostname_match_fun/3",
+      "line": 767,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/ex_ssl/lib/ssl/pkix/pkix.ex",
+      "beam_sha256": "c255a186d8beefa58ee8ece7521fd155280fd9afbc0d379010fc339b475d2002"
+    },
+    {
+      "inventory_occurrence": 72,
+      "proof": "TLS-5",
+      "module": "SSL.PolicyIO",
+      "mfa": "partial_selection/2",
+      "line": 434,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/ex_ssl/lib/ssl/policy_io.ex",
+      "beam_sha256": "9847f8a4cdef6fc15dd61193f09ae2c9901b74a40b5737cf00d09d95df6d15ac"
+    },
+    {
+      "inventory_occurrence": 73,
+      "proof": "TLS-6",
+      "module": "SSL.Protocol.HandshakeCore",
+      "mfa": "verify_peer/3",
+      "line": 768,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/ex_ssl/lib/ssl/protocol/handshake_core.ex",
+      "beam_sha256": "aa956c9e1a83cbb0af915f9df03ee3118e505575e584599e71d7bc075f862c1f"
+    },
+    {
+      "inventory_occurrence": 74,
+      "proof": "TLS-6",
+      "module": "SSL.Protocol.TLS12",
+      "mfa": "verify_certificate/3",
+      "line": 390,
+      "kind": "unresolved_fun_invocation",
+      "source": "apps/ex_ssl/lib/ssl/protocol/tls12.ex",
+      "beam_sha256": "d8ac4ce3717b8e687455d1ba502b1d14435ba47d9e1dd15cd0146df8c13e1bf8"
+    }
+  ],
+  "checks": {
+    "source_inputs_match_packaged_sources": true,
+    "manual_ticket_local_OTP29": "9 tests, 0 failures; manual-ticket-verified-runtime.json",
+    "strict_release_static_status": "FAIL",
+    "strict_release_total_unresolved": 175,
+    "P6_accepted": false
+  }
+}
