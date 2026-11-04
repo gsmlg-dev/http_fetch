@@ -10,7 +10,7 @@
     "apps/elixir_quic/lib/quic/cleanup.ex": "b25e373c6e11a96d9248caece562c671b6f87b8a3c6c33ee24943871e1852b99",
     "apps/elixir_quic/lib/quic/cleanup/observer.ex": "c74428b9ef5cddb0eed7c8966e7593dc3d4371a1709c169fe5cccab2363e5918",
     "apps/elixir_quic/lib/quic/endpoint.ex": "1c379e6a4ae99000a40bf195a3417e4a77c5ca4a5ceed05a91aa4deac6839880",
-    "apps/elixir_quic/lib/quic/connection.ex": "8d2e53afa19b89020538fb633dd6b5c88fcd32edbc01f000ca7949761e4d129a",
+    "apps/elixir_quic/lib/quic/connection.ex": "0800d05fe2a0c70002bf6c624dd2b35ec6888f9fd928004c3e13acf6001f539b",
     "apps/elixir_quic/lib/quic/io/gen_udp.ex": "1e5c46de218a0614659660815d4560d137191907430d74c4e2027eff307bc98f",
     "apps/elixir_quic/lib/quic/io/external_writer.ex": "1fda217ed39c3cbf474d4185a0af5fc5fae94667fd2ab32dcd8fbbd3ed6b2ddb",
     "apps/elixir_quic/lib/quic/abyss_dispatcher.ex": "ecefccf8f0eb0b44f57f1ef7043c48fe8fd18d2865259aea06eee7aed420b7f2",
@@ -42,7 +42,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "begin_closing/2",
-      "line": 1165,
+      "line": 1162,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -52,7 +52,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "begin_closing/2",
-      "line": 1121,
+      "line": 1118,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -62,7 +62,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "closing_timer/1",
-      "line": 1046,
+      "line": 1049,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -72,7 +72,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "draining_timer/1",
-      "line": 1051,
+      "line": 1054,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -82,7 +82,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "expired?/1",
-      "line": 1483,
+      "line": 1489,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -92,7 +92,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "flush/1",
-      "line": 986,
+      "line": 989,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -162,7 +162,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "idle_timer/1",
-      "line": 1038,
+      "line": 1041,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -172,7 +172,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "local_send/2",
-      "line": 1209,
+      "line": 1215,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -182,7 +182,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "local_send/2",
-      "line": 1211,
+      "line": 1217,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -192,7 +192,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "local_send/2",
-      "line": 1214,
+      "line": 1220,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -202,7 +202,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "receive_packet/4",
-      "line": 816,
+      "line": 810,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -212,7 +212,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "recovery_timer/1",
-      "line": 1031,
+      "line": 1034,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -222,7 +222,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "refresh_idle/1",
-      "line": 1070,
+      "line": 1073,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -315,5 +315,113 @@
     "strict_release_static_status": "FAIL",
     "strict_release_total_unresolved": 175,
     "P6_accepted": false
-  }
+  },
+  "source_review_amendments": [
+    {
+      "date": "2026-11-05",
+      "baseline_commit": "b3a145956c59824ab7e38e3d708fc3a197c30e90",
+      "source_commit": "5050bfcfd82c7a650d7d87113d30ca8360d91edf",
+      "changed_source_inputs": {
+        "apps/elixir_quic/lib/quic/connection.ex": {
+          "previous_sha256": "8d2e53afa19b89020538fb633dd6b5c88fcd32edbc01f000ca7949761e4d129a",
+          "sha256": "0800d05fe2a0c70002bf6c624dd2b35ec6888f9fd928004c3e13acf6001f539b"
+        }
+      },
+      "active_production_source_census": {
+        "files": 244,
+        "sorted_path_sha256_json": "2cb64b208594fddba09c99682b60169a61210afb88d410dd184dbf5e94dcc2e1",
+        "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
+      },
+      "compiled_inventory": {
+        "checked_beams": 350,
+        "raw_dispatches": 175,
+        "original_inventory_ids_preserved": 175,
+        "added_dispatches": 0,
+        "missing_dispatches": 0,
+        "changed_owning_mfas": 0
+      },
+      "occurrence_rebindings": [
+        {
+          "inventory_occurrence": 2,
+          "mfa": "begin_closing/2",
+          "previous_line": 1165,
+          "line": 1162
+        },
+        {
+          "inventory_occurrence": 3,
+          "mfa": "begin_closing/2",
+          "previous_line": 1121,
+          "line": 1118
+        },
+        {
+          "inventory_occurrence": 4,
+          "mfa": "closing_timer/1",
+          "previous_line": 1046,
+          "line": 1049
+        },
+        {
+          "inventory_occurrence": 5,
+          "mfa": "draining_timer/1",
+          "previous_line": 1051,
+          "line": 1054
+        },
+        {
+          "inventory_occurrence": 6,
+          "mfa": "expired?/1",
+          "previous_line": 1483,
+          "line": 1489
+        },
+        {
+          "inventory_occurrence": 7,
+          "mfa": "flush/1",
+          "previous_line": 986,
+          "line": 989
+        },
+        {
+          "inventory_occurrence": 14,
+          "mfa": "idle_timer/1",
+          "previous_line": 1038,
+          "line": 1041
+        },
+        {
+          "inventory_occurrence": 15,
+          "mfa": "local_send/2",
+          "previous_line": 1209,
+          "line": 1215
+        },
+        {
+          "inventory_occurrence": 16,
+          "mfa": "local_send/2",
+          "previous_line": 1211,
+          "line": 1217
+        },
+        {
+          "inventory_occurrence": 17,
+          "mfa": "local_send/2",
+          "previous_line": 1214,
+          "line": 1220
+        },
+        {
+          "inventory_occurrence": 18,
+          "mfa": "receive_packet/4",
+          "previous_line": 816,
+          "line": 810
+        },
+        {
+          "inventory_occurrence": 19,
+          "mfa": "recovery_timer/1",
+          "previous_line": 1031,
+          "line": 1034
+        },
+        {
+          "inventory_occurrence": 20,
+          "mfa": "refresh_idle/1",
+          "previous_line": 1070,
+          "line": 1073
+        }
+      ],
+      "historical_artifact_covers_amended_source": false,
+      "compiled_acceptance": "REQUIRED_BY_STRICT_CANDIDATE_AND_PUBLISHED_RELEASE_GATES"
+    }
+  ]
 }

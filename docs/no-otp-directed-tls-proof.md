@@ -145,3 +145,29 @@ No source-bound compiled discharge has been accepted by this document, and P6
 remains blocked. The separate manual-ticket suite passes 9/9 on local
 Elixir 1.18.5 / OTP 29; its two OTP 28 reference-client failures remain open.
 Credo/Dialyzer and performance retain their user-approved deferrals.
+
+## 2026-11-05 source review amendment: RC2 static checks
+
+This amendment reviews production commit `5050bfcfd82c7a650d7d87113d30ca8360d91edf`
+against RC1 (`b3a145956c59824ab7e38e3d708fc3a197c30e90`). `Socket.new/3` constructs
+the same PID/reference/status handle; `Socket.fetch/1` returns that exact handle
+after PID/reference checks and a bounded `:atomics.get/2` validation of the status.
+The status retains its actual opaque `:atomics.atomics_ref()` type. Validation
+does not authenticate the handle; the connection still checks its own reference.
+Malformed private carriers return `badarg` before reaching TCP/native operations.
+
+Every nested carrier branch still calls literal `SSL` functions. The writer's
+new private helper retains the original bytes, finite absolute deadline or
+infinite deadline, result message and receive order. Its guard expands to the
+original binary-or-list predicate. Connection and setup constructors acquire no
+new module or callback fields. TLS1.2 lifetime validation is the same conjunction
+in a private helper; cache puts and error cleanup explicitly discard only results
+that were already best effort. No callback producer or supported TLS selector
+changes, and no original TLS occurrence changes its line or owning function.
+
+The fresh isolated candidate compiled 350 BEAMs and retained exactly the original
+175 raw dispatches. Its 35 TLS1.3 peer scenarios passed; collection mode correctly
+retained a static FAIL until directed binding. The historical artifact, checks,
+source commit, census and BEAM hashes remain historical evidence. The JSON
+amendment records current selected inputs and a new 244-file source census;
+strict candidate and published release gates must bind the current BEAMs.

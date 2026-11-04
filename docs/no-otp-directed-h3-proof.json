@@ -13,7 +13,7 @@
     "apps/http_fetch/lib/http/fetch_options.ex": "a04c342787355fd33358d573b1b1ebd5a7d280aff48c6c0035840dd7e6c73a08",
     "apps/http_fetch/lib/http/socket_client.ex": "9f0c86be61a71a0d7a91a62d0500bf35739b95d3f15567842457f2c3520b3e04",
     "apps/http_event_source/lib/http/event_source/options.ex": "d1c36a500c8f5f86b6c5334d8e34b355451d9367487f5d1f4b37df0a31b44202",
-    "apps/http_event_source/lib/http/event_source/connection.ex": "1f279f60ba0aca8c035ff3ad1b571dc2a4d3b8abee5b44820455e54e59b294e9",
+    "apps/http_event_source/lib/http/event_source/connection.ex": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
     "apps/http_runtime/lib/http/http3.ex": "b691a8f1c780c3b9e920c7148f38a17d82975d2788170579073753bea61df92d",
     "apps/http_runtime/lib/http/http3/stream.ex": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
     "apps/http_runtime/lib/http/http3/pool_key.ex": "6e078977445c6dd0f80c2fbceb86f72002692313d4bfaf37dd4f60054c67f134",
@@ -532,5 +532,34 @@
     "strict_release_total_unresolved": 175,
     "P6_accepted": false
   },
-  "approved_ops_boundary": "User decision 2026-11-02: preserve :ops; audit default Quic and library implementations; external callback bodies excluded; native cleanup restrictions unchanged."
+  "approved_ops_boundary": "User decision 2026-11-02: preserve :ops; audit default Quic and library implementations; external callback bodies excluded; native cleanup restrictions unchanged.",
+  "source_review_amendments": [
+    {
+      "date": "2026-11-05",
+      "baseline_commit": "b3a145956c59824ab7e38e3d708fc3a197c30e90",
+      "source_commit": "5050bfcfd82c7a650d7d87113d30ca8360d91edf",
+      "changed_source_inputs": {
+        "apps/http_event_source/lib/http/event_source/connection.ex": {
+          "previous_sha256": "1f279f60ba0aca8c035ff3ad1b571dc2a4d3b8abee5b44820455e54e59b294e9",
+          "sha256": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e"
+        }
+      },
+      "active_production_source_census": {
+        "files": 244,
+        "sorted_path_sha256_json": "2cb64b208594fddba09c99682b60169a61210afb88d410dd184dbf5e94dcc2e1",
+        "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
+      },
+      "compiled_inventory": {
+        "checked_beams": 350,
+        "raw_dispatches": 175,
+        "original_inventory_ids_preserved": 175,
+        "added_dispatches": 0,
+        "missing_dispatches": 0,
+        "changed_owning_mfas": 0
+      },
+      "occurrence_rebindings": [],
+      "historical_artifact_covers_amended_source": false,
+      "compiled_acceptance": "REQUIRED_BY_STRICT_CANDIDATE_AND_PUBLISHED_RELEASE_GATES"
+    }
+  ]
 }

@@ -106,3 +106,21 @@ review is ready for the directed release gate to bind it to actual BEAMs;
 it does not by itself accept P6. The other package proofs and the two OTP 28
 manual-ticket reference failures
 remain open. The 70 passing no-OTP traffic cases remain supporting evidence.
+
+## 2026-11-05 source review amendment: RC2 static checks
+
+Production commit `5050bfcfd82c7a650d7d87113d30ca8360d91edf` extracts only the
+existing address-validation conjunction and closing encryption-level selection
+from `Quic.Connection`. The address helper retains the server role and validated
+TLS fact conditions, literal Endpoint/TLSDriver operations and their exact data.
+The closing helper retains application, handshake, initial, then nil precedence.
+Adapter construction, retained adapter fields, timer calls and error transitions
+are unchanged, so Q2 still establishes every connection dispatch's callable origin.
+
+Fresh BEAM abstract forms locate all 19 original connection occurrences. Thirteen
+line numbers move; all owning MFAs, expressions and inventory IDs remain unchanged.
+The JSON amendment records each old-to-new line and the new source binding while
+preserving historical artifact/check/census/BEAM metadata. The complete fresh
+inventory remains 175 sites in 350 BEAMs, with a one-to-one mapping to IDs 1–175.
+Collection traffic passed all 35 TLS1.3 scenarios; its raw static failure remains
+visible. Strict release gates must independently bind the current source/BEAMs.

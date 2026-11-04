@@ -113,3 +113,18 @@ findings or replace their constructor and retention proof. P6 still requires
 the directed release gate, complete real traffic and the release regressions.
 H3 completion receipts and unsupported application capabilities retain their
 previous boundaries.
+
+## 2026-11-05 source review amendment: RC2 static checks
+
+Production commit `5050bfcfd82c7a650d7d87113d30ca8360d91edf` changes the pinned
+EventSource acknowledgment body from an unused comprehension to `Enum.each/2`.
+Both traverse the same reversed references, acknowledge through the same literal
+H2/H3 selector and retain the original state. No H3 connector, `:ops` constructor,
+callback assignment or retained producer changes. No H3 occurrence line or MFA
+changes. The fresh compiled inventory has exactly the original 175 dispatches;
+the changed closure adds no raw unresolved finding.
+
+The JSON amendment records the new selected-input hash and current full-source
+census, keeping historical artifact/check/census/BEAM evidence intact. The 35
+TLS1.3 collection scenarios passed with the generic static failure retained;
+strict candidate and published gates must still bind current source and BEAMs.

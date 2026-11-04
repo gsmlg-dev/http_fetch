@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-11-05
+
+### Fixed
+- Preserve opaque TLS socket types across construction and nested-carrier
+  operations, and reject malformed private carrier handles without stranding
+  pending writes or their lifecycle permits.
+- Resolve the configured Credo and Dialyzer findings while preserving TLS/QUIC
+  validation, HTTP/2 delivery acknowledgments and primary connection errors.
+
 ## [1.0.0-rc.1] - 2026-11-05
 
 ### Fixed

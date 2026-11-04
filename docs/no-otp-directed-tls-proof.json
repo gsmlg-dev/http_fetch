@@ -6,10 +6,10 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/ex_ssl/lib/ssl.ex": "bc7d80e1e7e44b6d4b01257fc4cf2304e221274fefe38b9df625ed568fead6e8",
+    "apps/ex_ssl/lib/ssl.ex": "1ed9e0d52e0f38be0422553acd66ae0b14ef7cd67372220acf500baddb8c48ee",
     "apps/ex_ssl/lib/ssl/options.ex": "a1682b39e33811cf230dd4b6f91552d5f7dbf698c1760ff8ff85e3930c312151",
     "apps/ex_ssl/lib/ssl/tcp_options.ex": "b007fe9db46cedb98867797b368d999dd0dbb773d938f11e057eb9cb88f47d75",
-    "apps/ex_ssl/lib/ssl/connection.ex": "2af9faca2ddcbd0da6464a0df312b70a0f51c3518c43c0107e6330a38fb16dfd",
+    "apps/ex_ssl/lib/ssl/connection.ex": "f5cdeea8158c200996cd66e554be14f8c7f22ae7200826f1241104486890761b",
     "apps/ex_ssl/lib/ssl/prepared_upgrade.ex": "c62b7433f5848289a58df30bde1cdf18155a0dcd8a3dff0da49546aac3a74461",
     "apps/ex_ssl/lib/ssl/client_identity.ex": "bbda9af456f8c6a182e7d30c1b97cbd4502e6d7fca9058b45a31f30a1cbef053",
     "apps/ex_ssl/lib/ssl/client_hello/materializer.ex": "77fefe616a1f03a075be13dc5e689443c85c75878d59b4ea82833fb36b94518b",
@@ -29,7 +29,7 @@
     "apps/ex_ssl/lib/ssl/quic.ex": "d8575ea864739830c9b52185ad09aa3af03cf8a61d8164ebce5473b4cbdfddf3",
     "apps/ex_ssl/lib/ssl/quic/config.ex": "a523334dc65a9e82f39943cf9a9bcc7144546cb3ac3f9d0389bd937aee2e01b1",
     "apps/ex_ssl/lib/ssl/resumption_context.ex": "5770e0b4b47d32932fc2d99dd00f6a568b1084eb1f2b5a0623ca6d789136571e",
-    "apps/ex_ssl/lib/ssl/tls12_resumption_context.ex": "f788f4265884c47e2b17acd9de353312b5dbed8583839ac2b76714c2d0e7eaca",
+    "apps/ex_ssl/lib/ssl/tls12_resumption_context.ex": "c7dd29ea5fa6d67992f8fad5eeb5edc4e67c159197a01c1542603ec5df65dd43",
     "apps/elixir_quic/lib/quic/profile.ex": "2365ab1370f40fba20ff0df0cf9d91721bee6b3eb4c25b79820cd6ab74b706e0",
     "apps/http_core/lib/http/transport/ex_ssl.ex": "20cda2e3507a1fa52ec8a5baf7259ceab9c407d434dda8e9601cfaadb514893f"
   },
@@ -185,5 +185,42 @@
     "strict_release_static_status": "FAIL",
     "strict_release_total_unresolved": 175,
     "P6_accepted": false
-  }
+  },
+  "source_review_amendments": [
+    {
+      "date": "2026-11-05",
+      "baseline_commit": "b3a145956c59824ab7e38e3d708fc3a197c30e90",
+      "source_commit": "5050bfcfd82c7a650d7d87113d30ca8360d91edf",
+      "changed_source_inputs": {
+        "apps/ex_ssl/lib/ssl/connection.ex": {
+          "previous_sha256": "2af9faca2ddcbd0da6464a0df312b70a0f51c3518c43c0107e6330a38fb16dfd",
+          "sha256": "f5cdeea8158c200996cd66e554be14f8c7f22ae7200826f1241104486890761b"
+        },
+        "apps/ex_ssl/lib/ssl/tls12_resumption_context.ex": {
+          "previous_sha256": "f788f4265884c47e2b17acd9de353312b5dbed8583839ac2b76714c2d0e7eaca",
+          "sha256": "c7dd29ea5fa6d67992f8fad5eeb5edc4e67c159197a01c1542603ec5df65dd43"
+        },
+        "apps/ex_ssl/lib/ssl.ex": {
+          "previous_sha256": "bc7d80e1e7e44b6d4b01257fc4cf2304e221274fefe38b9df625ed568fead6e8",
+          "sha256": "1ed9e0d52e0f38be0422553acd66ae0b14ef7cd67372220acf500baddb8c48ee"
+        }
+      },
+      "active_production_source_census": {
+        "files": 244,
+        "sorted_path_sha256_json": "2cb64b208594fddba09c99682b60169a61210afb88d410dd184dbf5e94dcc2e1",
+        "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
+      },
+      "compiled_inventory": {
+        "checked_beams": 350,
+        "raw_dispatches": 175,
+        "original_inventory_ids_preserved": 175,
+        "added_dispatches": 0,
+        "missing_dispatches": 0,
+        "changed_owning_mfas": 0
+      },
+      "occurrence_rebindings": [],
+      "historical_artifact_covers_amended_source": false,
+      "compiled_acceptance": "REQUIRED_BY_STRICT_CANDIDATE_AND_PUBLISHED_RELEASE_GATES"
+    }
+  ]
 }

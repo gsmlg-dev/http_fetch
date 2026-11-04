@@ -196,3 +196,31 @@ meaning: artifact `13119243608` does not cover the amended source. No new generi
 dispatch findings are expected from this delta. Compiled source/BEAM binding,
 the exact 175-finding reconciliation and release acceptance remain pending the
 new candidate's compiled no-OTP release gate.
+
+## 2026-11-05 source review amendment: RC2 static checks
+
+Production commit `5050bfcfd82c7a650d7d87113d30ca8360d91edf` changes three reviewed
+HTTP inputs. Proxy's single-clause `with` becomes a `case` with the same timeout
+mapping and result; origin failure cleanup retains its literal ExSSL close and
+primary error. Its legacy upgrade's retained transport is unchanged (HTTP-1).
+
+The H2 acknowledgment helper moves the same byte acknowledgment, queue update,
+less-than-64 flush, response flush, error notification and terminal reply. It
+does not assign transport or callable fields (HTTP-7). EventSource now uses
+`Enum.each/2` for the same reversed acknowledgment references and returns the
+same state. Its stream selector still returns only the fixed H2/H3 stream modules,
+and its dial/reconnect transport producers are unchanged (HTTP-3).
+
+Fresh BEAM abstract forms preserve all 20 original occurrences in these modules.
+The Proxy call and ten H2 calls move lines; every owning MFA is unchanged. The
+EventSource acknowledgment change adds no raw unresolved occurrence, and its
+nine original occurrence dictionaries remain unchanged. The JSON amendment lists
+the 11 exact old-to-new line bindings. All 175 original inventory IDs remain in
+one-to-one correspondence with the fresh raw audit; no finding is exempted.
+
+Historical artifacts, checks, source commits, census and BEAM hashes are retained.
+The current selected inputs and full 244-file census are recorded separately.
+Collection's 35 TLS1.3 scenarios passed while its raw static failure stayed
+visible; strict candidate and published gates must bind the current BEAMs.
+The source-pinned transport and buffered-close tests retain their driver/option
+and plaintext-buffer assertions with the newly reviewed `SSL.Connection` hash.

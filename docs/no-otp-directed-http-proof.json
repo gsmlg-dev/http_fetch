@@ -13,7 +13,7 @@
     "apps/http_fetch/lib/http/http1/idle_timeout.ex": "af2b917e837503e3f84c9e1e5c3a7cb9a2e1c34efc9a61ff19e82547f0f7180d",
     "apps/http_fetch/lib/http/http1/upload.ex": "883b0768562703422acaac33cff16fc86165ff393a6e16c420e8251aa1b27c56",
     "apps/http_core/lib/http/tls_backend.ex": "83f3f446e37f913312b2be044825fadeb5f02730df1608d1cbab54970f11548c",
-    "apps/http_core/lib/http/proxy.ex": "851216b2352d2e89c0b34300cd280df851e8e4d47b10b20be4c1381dd70a673d",
+    "apps/http_core/lib/http/proxy.ex": "09f61efed26f3495aa84a069f587eaa1bd229e9fd4453f92d430c8d216934f98",
     "apps/http_core/lib/http/request_lifecycle.ex": "979a086365ae7f09486d8f5f322f569b6f8bb1fb297238ce8640b3c32aeb5f62",
     "apps/http_core/lib/http/transport/tcp.ex": "488a125fc494d681fcd1a079b0e0424be3eca8f1bfdd2b5984f7e66dc277eed0",
     "apps/http_core/lib/http/transport/unix.ex": "9d6601dc791cc0704e8a40ee74d79f0e85c8241bcdcde96c380f0b0d7ec0f084",
@@ -23,7 +23,7 @@
     "apps/http_runtime/lib/http/runtime/stream.ex": "fcad24e0dbc826c2caac89acbd09942c043fe2f608d075a1b996dffc35fdb35e",
     "apps/http_runtime/lib/http/http1/pool.ex": "326c9924bd7a2067c0f031e7b09f17bda8e9d13ca4a4c9169cceb326385d430c",
     "apps/http_runtime/lib/http/http2/pool.ex": "4ced263161512e0480e681975ba1d5f40a7576ac3d7baf008dfa60376dcd9588",
-    "apps/http_runtime/lib/http/http2/connection_owner.ex": "f5250c2b7c82bd56e5d7f8f6f6d62033313666546039b07971a7935942c0d5f9",
+    "apps/http_runtime/lib/http/http2/connection_owner.ex": "02a5913c26d27b7b42fcdb0497a2754761ec432722eb62dd50c928ed5b8454b7",
     "apps/http_runtime/lib/http/http2/connection_supervisor.ex": "6624225a4b82240eed4315fa12bb1a61c9b103aa1b09ffab66ebc56ba142f3e0",
     "apps/http_runtime/lib/http/protocol_client/session.ex": "53db8f26b74a84ba5f7980334bbbb21d4d1f9ef24dba03f2fc842018a03d8711",
     "apps/http_runtime/lib/http/managed_transport.ex": "d3b3eeb9fea115aaeab8cd6ec4780665164ccabee79ba437c44973852119af16",
@@ -32,7 +32,7 @@
     "apps/http_runtime/lib/http/http3/connection_owner.ex": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
     "apps/http_runtime/lib/http/http3/stream.ex": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
     "apps/http_event_source/lib/http/event_source/options.ex": "d1c36a500c8f5f86b6c5334d8e34b355451d9367487f5d1f4b37df0a31b44202",
-    "apps/http_event_source/lib/http/event_source/connection.ex": "1f279f60ba0aca8c035ff3ad1b571dc2a4d3b8abee5b44820455e54e59b294e9",
+    "apps/http_event_source/lib/http/event_source/connection.ex": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
     "apps/http_web_socket/lib/http/web_socket/options.ex": "195b79883dc1a24a19ce3edad9577689720ea4418d0d0945e973819e881473b6",
     "apps/http_web_socket/lib/http/web_socket/connection.ex": "434e0718b79e0cd304ce3de3ef2a2de49710f3c220931b48d30870eb69f3d1d5",
     "apps/http_web_transport/lib/http/web_transport.ex": "38751209dffad6dd099a61e4038874ef66d8c57303f42c565483f12904c0346d",
@@ -57,7 +57,7 @@
       "inventory_occurrence": 75,
       "module": "HTTP.Proxy",
       "mfa": "upgrade_tunnel/3",
-      "line": 216,
+      "line": 214,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_core/lib/http/proxy.ex",
       "proof": "HTTP-1",
@@ -467,7 +467,7 @@
       "inventory_occurrence": 131,
       "module": "HTTP.HTTP2.ConnectionOwner",
       "mfa": "activate_socket/1",
-      "line": 1712,
+      "line": 1715,
       "kind": "unresolved_fun_invocation",
       "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
       "proof": "HTTP-7",
@@ -477,7 +477,7 @@
       "inventory_occurrence": 132,
       "module": "HTTP.HTTP2.ConnectionOwner",
       "mfa": "activate_socket/1",
-      "line": 1715,
+      "line": 1718,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
       "proof": "HTTP-7",
@@ -487,7 +487,7 @@
       "inventory_occurrence": 133,
       "module": "HTTP.HTTP2.ConnectionOwner",
       "mfa": "close_transport/1",
-      "line": 1967,
+      "line": 1970,
       "kind": "unresolved_fun_invocation",
       "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
       "proof": "HTTP-7",
@@ -497,7 +497,7 @@
       "inventory_occurrence": 134,
       "module": "HTTP.HTTP2.ConnectionOwner",
       "mfa": "close_transport/1",
-      "line": 1968,
+      "line": 1971,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
       "proof": "HTTP-7",
@@ -507,7 +507,7 @@
       "inventory_occurrence": 135,
       "module": "HTTP.HTTP2.ConnectionOwner",
       "mfa": "normalize_transport/2",
-      "line": 1732,
+      "line": 1735,
       "kind": "unresolved_fun_invocation",
       "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
       "proof": "HTTP-7",
@@ -517,7 +517,7 @@
       "inventory_occurrence": 136,
       "module": "HTTP.HTTP2.ConnectionOwner",
       "mfa": "normalize_transport/2",
-      "line": 1735,
+      "line": 1738,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
       "proof": "HTTP-7",
@@ -527,7 +527,7 @@
       "inventory_occurrence": 137,
       "module": "HTTP.HTTP2.ConnectionOwner",
       "mfa": "set_transport_options/2",
-      "line": 1697,
+      "line": 1700,
       "kind": "unresolved_fun_invocation",
       "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
       "proof": "HTTP-7",
@@ -537,7 +537,7 @@
       "inventory_occurrence": 138,
       "module": "HTTP.HTTP2.ConnectionOwner",
       "mfa": "set_transport_options/2",
-      "line": 1700,
+      "line": 1703,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
       "proof": "HTTP-7",
@@ -547,7 +547,7 @@
       "inventory_occurrence": 139,
       "module": "HTTP.HTTP2.ConnectionOwner",
       "mfa": "transport_send/2",
-      "line": 1959,
+      "line": 1962,
       "kind": "unresolved_fun_invocation",
       "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
       "proof": "HTTP-7",
@@ -557,7 +557,7 @@
       "inventory_occurrence": 140,
       "module": "HTTP.HTTP2.ConnectionOwner",
       "mfa": "transport_send/2",
-      "line": 1960,
+      "line": 1963,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_runtime/lib/http/http2/connection_owner.ex",
       "proof": "HTTP-7",
@@ -819,5 +819,109 @@
     "strict_release_static_status": "FAIL",
     "strict_release_total_unresolved": 175,
     "P6_accepted": false
-  }
+  },
+  "source_review_amendments": [
+    {
+      "date": "2026-11-05",
+      "baseline_commit": "b3a145956c59824ab7e38e3d708fc3a197c30e90",
+      "source_commit": "5050bfcfd82c7a650d7d87113d30ca8360d91edf",
+      "changed_source_inputs": {
+        "apps/http_core/lib/http/proxy.ex": {
+          "previous_sha256": "851216b2352d2e89c0b34300cd280df851e8e4d47b10b20be4c1381dd70a673d",
+          "sha256": "09f61efed26f3495aa84a069f587eaa1bd229e9fd4453f92d430c8d216934f98"
+        },
+        "apps/http_runtime/lib/http/http2/connection_owner.ex": {
+          "previous_sha256": "f5250c2b7c82bd56e5d7f8f6f6d62033313666546039b07971a7935942c0d5f9",
+          "sha256": "02a5913c26d27b7b42fcdb0497a2754761ec432722eb62dd50c928ed5b8454b7"
+        },
+        "apps/http_event_source/lib/http/event_source/connection.ex": {
+          "previous_sha256": "1f279f60ba0aca8c035ff3ad1b571dc2a4d3b8abee5b44820455e54e59b294e9",
+          "sha256": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e"
+        }
+      },
+      "active_production_source_census": {
+        "files": 244,
+        "sorted_path_sha256_json": "2cb64b208594fddba09c99682b60169a61210afb88d410dd184dbf5e94dcc2e1",
+        "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
+      },
+      "compiled_inventory": {
+        "checked_beams": 350,
+        "raw_dispatches": 175,
+        "original_inventory_ids_preserved": 175,
+        "added_dispatches": 0,
+        "missing_dispatches": 0,
+        "changed_owning_mfas": 0
+      },
+      "occurrence_rebindings": [
+        {
+          "inventory_occurrence": 75,
+          "mfa": "upgrade_tunnel/3",
+          "previous_line": 216,
+          "line": 214
+        },
+        {
+          "inventory_occurrence": 131,
+          "mfa": "activate_socket/1",
+          "previous_line": 1712,
+          "line": 1715
+        },
+        {
+          "inventory_occurrence": 132,
+          "mfa": "activate_socket/1",
+          "previous_line": 1715,
+          "line": 1718
+        },
+        {
+          "inventory_occurrence": 133,
+          "mfa": "close_transport/1",
+          "previous_line": 1967,
+          "line": 1970
+        },
+        {
+          "inventory_occurrence": 134,
+          "mfa": "close_transport/1",
+          "previous_line": 1968,
+          "line": 1971
+        },
+        {
+          "inventory_occurrence": 135,
+          "mfa": "normalize_transport/2",
+          "previous_line": 1732,
+          "line": 1735
+        },
+        {
+          "inventory_occurrence": 136,
+          "mfa": "normalize_transport/2",
+          "previous_line": 1735,
+          "line": 1738
+        },
+        {
+          "inventory_occurrence": 137,
+          "mfa": "set_transport_options/2",
+          "previous_line": 1697,
+          "line": 1700
+        },
+        {
+          "inventory_occurrence": 138,
+          "mfa": "set_transport_options/2",
+          "previous_line": 1700,
+          "line": 1703
+        },
+        {
+          "inventory_occurrence": 139,
+          "mfa": "transport_send/2",
+          "previous_line": 1959,
+          "line": 1962
+        },
+        {
+          "inventory_occurrence": 140,
+          "mfa": "transport_send/2",
+          "previous_line": 1960,
+          "line": 1963
+        }
+      ],
+      "historical_artifact_covers_amended_source": false,
+      "compiled_acceptance": "REQUIRED_BY_STRICT_CANDIDATE_AND_PUBLISHED_RELEASE_GATES"
+    }
+  ]
 }
