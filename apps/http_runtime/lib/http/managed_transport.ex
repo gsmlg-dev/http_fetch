@@ -328,10 +328,13 @@ defmodule HTTP.ManagedTransport do
 
       id =
         Enum.find(1..scope.max_requests, fn id ->
+          free = {id, nil, nil, :free, nil}
           replacement = {id, token, self(), :preparing, nil}
 
-          replace_claim(scope.ingress, {id, nil, nil, :free, nil}, replacement) or
-            reclaim_completed(scope.ingress, id, replacement)
+          # Scope may free the row during the completion lookup or reclaim CAS.
+          replace_claim(scope.ingress, free, replacement) or
+            reclaim_completed(scope.ingress, id, replacement) or
+            replace_claim(scope.ingress, free, replacement)
         end)
 
       if id, do: {:ok, {id, token}}, else: {:error, {:transport_scope_capacity, :requests}}

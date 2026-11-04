@@ -1,3 +1,46 @@
+defmodule HTTP.ManagedTransportAdmissionGate do
+  @moduledoc false
+
+  def lookup(table, key) do
+    result = :ets.lookup(table, key)
+
+    case result do
+      [{_, _, {_, _}, :active, _}] -> checkpoint(:active_read)
+      _ -> :ok
+    end
+
+    result
+  end
+
+  def select_replace(table, spec) do
+    result = :ets.select_replace(table, spec)
+
+    case {spec, result} do
+      {[{{_, nil, nil, :free, nil}, [], _}], 0} -> checkpoint(:free_missed)
+      _ -> :ok
+    end
+
+    result
+  end
+
+  defp checkpoint(boundary) do
+    case Process.get(__MODULE__) do
+      {parent, ^boundary, tag} ->
+        Process.delete(__MODULE__)
+        send(parent, {tag, :paused})
+
+        receive do
+          {^tag, :continue} -> :ok
+        after
+          5_000 -> raise "admission boundary was not resumed"
+        end
+
+      _ ->
+        :ok
+    end
+  end
+end
+
 defmodule HTTP.ManagedTransportAdmissionTest do
   use ExUnit.Case, async: false
 
@@ -5,6 +48,107 @@ defmodule HTTP.ManagedTransportAdmissionTest do
   alias HTTP.ManagedTransport
   alias HTTP.Request
   alias HTTP.RequestLifecycle
+
+  setup_all do
+    # Async call tracing cannot stop the caller before its next ETS operation.
+    # Compile the actual source under a test name and gate only its ETS boundaries.
+    source = Path.expand("../../lib/http/managed_transport.ex", __DIR__)
+    {:defmodule, meta, [_name, body]} = source |> File.read!() |> Code.string_to_quoted!()
+
+    body =
+      Macro.prewalk(body, fn
+        {{:., dot, [:ets, operation]}, call, arguments}
+        when operation in [:lookup, :select_replace] ->
+          {{:., dot, [HTTP.ManagedTransportAdmissionGate, operation]}, call, arguments}
+
+        node ->
+          node
+      end)
+
+    modules =
+      Code.compile_quoted(
+        {:defmodule, meta, [__MODULE__.ScheduledTransport, body]},
+        source
+      )
+
+    on_exit(fn ->
+      for {module, _binary} <- modules do
+        :code.delete(module)
+        :code.purge(module)
+      end
+    end)
+
+    :ok
+  end
+
+  for boundary <- [:free_missed, :active_read] do
+    test "Scope releases completed capacity after admission's #{boundary} boundary" do
+      {scope, request} = scope()
+      {owner, tracker, completion, prepared} = admitted(request)
+      {id, old_token} = prepared.transport_options[:managed_admission_lease]
+      :ok = :sys.suspend(scope.coordinator)
+      parent = self()
+      tag = make_ref()
+
+      scheduled_transport = __MODULE__.ScheduledTransport
+      scheduled_scope = struct!(scheduled_transport, Map.from_struct(scope))
+
+      scheduled_request = %{
+        request
+        | transport_options:
+            Keyword.put(request.transport_options, :transport_scope, scheduled_scope)
+      }
+
+      contender =
+        Task.async(fn ->
+          receive do: ({^tag, :start} -> :ok)
+          Process.put(HTTP.ManagedTransportAdmissionGate, {parent, unquote(boundary), tag})
+          result = apply(scheduled_transport, :prepare, [scheduled_request, []])
+          send(parent, {tag, :result, result})
+          receive do: ({^tag, :finish} -> :ok)
+        end)
+
+      try do
+        finish(owner, completion)
+        assert [{^id, ^old_token, _, :active, ^tracker}] = :ets.lookup(scope.ingress, id)
+        assert {:messages, messages} = Process.info(scope.coordinator, :messages)
+        assert Enum.any?(messages, &match?({:DOWN, _, :process, ^tracker, :normal}, &1))
+
+        send(contender.pid, {tag, :start})
+        assert_receive {^tag, :paused}, 1_000
+        :ok = :sys.resume(scope.coordinator)
+
+        assert {:ok, %{active_requests: 0, preparing_requests: 0}} =
+                 ManagedTransport.snapshot(scope, 1_000)
+
+        assert [{^id, nil, nil, :free, nil}] = :ets.lookup(scope.ingress, id)
+        send(contender.pid, {tag, :continue})
+        assert_receive {^tag, :result, result}, 1_000
+        assert {:ok, replacement} = result
+        assert {^id, new_token} = replacement.transport_options[:managed_admission_lease]
+        refute new_token == old_token
+
+        assert [{^id, ^new_token, contender_pid, :preparing, nil}] =
+                 :ets.lookup(scope.ingress, id)
+
+        assert contender_pid == contender.pid
+
+        assert {:error, {:transport_scope_capacity, :requests}} =
+                 ManagedTransport.prepare(request, [])
+      after
+        send(contender.pid, {tag, :start})
+        send(contender.pid, {tag, :continue})
+        send(contender.pid, {tag, :finish})
+        resume(scope)
+
+        try do
+          assert :ok = Task.await(contender, 1_000)
+        after
+          if Process.alive?(contender.pid), do: Task.shutdown(contender, :brutal_kill)
+        end
+      end
+    end
+  end
 
   test "original bind_scope/3 retains its reply and original deadline" do
     {scope, _request} = scope()
