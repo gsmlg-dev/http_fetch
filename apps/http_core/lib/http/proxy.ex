@@ -137,13 +137,10 @@ defmodule HTTP.Proxy do
 
     proxy_opts = opts |> Keyword.put(:ssl, ssl) |> Keyword.put(:cancellable, true)
 
-    with {:ok, outer} <-
-           ExSSL.connect(proxy.host, proxy.port, proxy_opts, remaining(deadline)) do
-      {:ok, outer}
-    else
+    case ExSSL.connect(proxy.host, proxy.port, proxy_opts, remaining(deadline)) do
       # The outer TLS result can arrive before the dialer's connect timer.
       {:error, :timeout} -> {:error, :connect_timeout}
-      error -> error
+      result -> result
     end
   end
 
@@ -197,7 +194,8 @@ defmodule HTTP.Proxy do
              ),
            do: ExSSL.upgrade_nested(outer, attempt, :inner, opts)
 
-    if match?({:error, _}, result), do: ExSSL.close(outer)
+    # Preserve the origin failure while closing the proxy TLS layer.
+    _ = if match?({:error, _}, result), do: ExSSL.close(outer)
     result
   end
 

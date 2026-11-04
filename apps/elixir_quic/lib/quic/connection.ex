@@ -787,13 +787,7 @@ defmodule Quic.Connection do
       {:ok, scheduler, events} ->
         {:ok, budget} = Endpoint.receive_bytes(data.budget, byte_size(bytes))
 
-        {scheduler, budget} =
-          if data.role == :server and scheduler.tls.facts.address_validated do
-            {:ok, validated} = Endpoint.validate_address(budget)
-            {%{scheduler | tls: TLSDriver.mark_address_validated(scheduler.tls)}, validated}
-          else
-            {scheduler, budget}
-          end
+        {scheduler, budget} = validate_received_address(data.role, scheduler, budget)
 
         pending =
           if Enum.any?(events, &(&1.type == :retry)),
@@ -860,6 +854,15 @@ defmodule Quic.Connection do
 
       {:error, reason, _scheduler} ->
         stop_with_replies(data, reason, [{:reply, from, {:error, reason}}])
+    end
+  end
+
+  defp validate_received_address(role, scheduler, budget) do
+    if role == :server and scheduler.tls.facts.address_validated do
+      {:ok, validated} = Endpoint.validate_address(budget)
+      {%{scheduler | tls: TLSDriver.mark_address_validated(scheduler.tls)}, validated}
+    else
+      {scheduler, budget}
     end
   end
 
@@ -1109,13 +1112,7 @@ defmodule Quic.Connection do
     closing_timeout = lifecycle_timeout(data, :closing)
     draining_timeout = lifecycle_timeout(data, :draining)
 
-    level =
-      cond do
-        Map.has_key?(scheduler.keys, :application) -> :application
-        Map.has_key?(scheduler.keys, :handshake) -> :handshake
-        Map.has_key?(scheduler.keys, :initial) -> :initial
-        true -> nil
-      end
+    level = closing_level(scheduler.keys)
 
     if level == nil do
       now = data.adapter.monotonic_time()
@@ -1187,6 +1184,15 @@ defmodule Quic.Connection do
         {:error, schedule_reason, scheduler} ->
           {:error, schedule_reason, %{data | scheduler: scheduler, reason: reason}}
       end
+    end
+  end
+
+  defp closing_level(keys) do
+    cond do
+      Map.has_key?(keys, :application) -> :application
+      Map.has_key?(keys, :handshake) -> :handshake
+      Map.has_key?(keys, :initial) -> :initial
+      true -> nil
     end
   end
 

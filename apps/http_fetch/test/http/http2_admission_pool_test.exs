@@ -221,8 +221,9 @@ defmodule HTTP.HTTP2AdmissionPoolTest do
 
   defp await_pending(pool, count, deadline \\ nil) do
     deadline = deadline || System.monotonic_time(:millisecond) + 5_000
+    pending = get_in(Pool.stats(pool), [:key, :pending]) || 0
 
-    if (get_in(Pool.stats(pool), [:key, :pending]) || 0) != count do
+    if pending != count do
       assert System.monotonic_time(:millisecond) < deadline,
              "pending count did not reach #{count}: #{inspect(Pool.stats(pool))}"
 

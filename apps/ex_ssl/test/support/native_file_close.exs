@@ -162,13 +162,7 @@ defmodule ExSSL.TestSupport.NativeFileClose do
 
             graph =
               for {role, %{identity: {_, type, object}}} <- state.resources do
-                monitor =
-                  case type do
-                    :process -> Process.monitor(object)
-                    :socket -> :socket.monitor(object)
-                  end
-
-                {role, type, object, monitor}
+                {role, type, object, monitor_resource(type, object)}
               end
 
             assert Enum.sort(Enum.map(graph, &elem(&1, 0))) ==
@@ -182,6 +176,13 @@ defmodule ExSSL.TestSupport.NativeFileClose do
 
       _ ->
         retry_native(observer, deadline)
+    end
+  end
+
+  defp monitor_resource(type, object) do
+    case type do
+      :process -> Process.monitor(object)
+      :socket -> :socket.monitor(object)
     end
   end
 

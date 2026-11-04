@@ -392,7 +392,7 @@ defmodule SSL.Lifecycle.Setup do
 
   defp connection_started(connection, state) do
     {_owner, ref, status, _options, _deadline} = state.context.classic
-    socket = %Socket{pid: connection, ref: ref, status: status}
+    socket = Socket.new(connection, ref, status)
     state = watch(%{state | connection: connection, socket: socket}, :connection, connection)
     # Retain a late birth identity before the next deadline/liveness gate.
     if live?(state) do

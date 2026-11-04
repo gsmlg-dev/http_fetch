@@ -182,7 +182,7 @@ defmodule SSL.Connection do
         control = if deadline == :infinity, do: control, else: min(control, deadline)
 
         state = %State{
-          socket: %Socket{pid: self(), ref: ref, status: status},
+          socket: Socket.new(self(), ref, status),
           owner: owner,
           owner_monitor: Process.monitor(owner),
           options: options,
@@ -219,7 +219,7 @@ defmodule SSL.Connection do
     {writer, writer_monitor} = ConnectionWriter.start(self())
 
     state = %State{
-      socket: %Socket{pid: self(), ref: ref, status: status},
+      socket: Socket.new(self(), ref, status),
       owner: owner,
       owner_monitor: Process.monitor(owner),
       options: options,
@@ -1547,7 +1547,9 @@ defmodule SSL.Connection do
   end
 
   defp arm_input(phase, %{tcp: %Socket{} = carrier} = state, actions) do
-    case SSL.setopts(carrier, active: :once) do
+    result = with {:ok, socket} <- Socket.fetch(carrier), do: SSL.setopts(socket, active: :once)
+
+    case result do
       :ok -> {:next_state, phase, %{state | armed: true}, actions}
       {:error, reason} -> fail(state, reason)
     end
@@ -1704,12 +1706,19 @@ defmodule SSL.Connection do
     end
   end
 
-  defp enable_carrier_duplex(%Socket{} = carrier), do: SSL.enable_duplex_reads(carrier)
+  defp enable_carrier_duplex(%Socket{} = carrier) do
+    with {:ok, socket} <- Socket.fetch(carrier), do: SSL.enable_duplex_reads(socket)
+  end
+
   defp enable_carrier_duplex(_tcp), do: :ok
 
   defp apply_tcp_options(_tcp, []), do: :ok
   defp apply_tcp_options(nil, _options), do: {:error, :closed}
-  defp apply_tcp_options(%Socket{} = carrier, options), do: SSL.setopts(carrier, options)
+
+  defp apply_tcp_options(%Socket{} = carrier, options) do
+    with {:ok, socket} <- Socket.fetch(carrier), do: SSL.setopts(socket, options)
+  end
+
   defp apply_tcp_options(tcp, options) when is_port(tcp), do: :inet.setopts(tcp, options)
   defp apply_tcp_options(tcp, options), do: NativeSocket.setopts(tcp, options)
 
@@ -1953,7 +1962,7 @@ defmodule SSL.Connection do
     if state.lifecycle && state.lifecycle.public,
       do: Observer.logical_closed(state.lifecycle.receipt)
 
-    _ = SSL.close(carrier)
+    _ = with {:ok, socket} <- Socket.fetch(carrier), do: SSL.close(socket)
     if state.carrier_monitor, do: Process.demonitor(state.carrier_monitor, [:flush])
 
     %{
@@ -2029,11 +2038,17 @@ defmodule SSL.Connection do
   defp native_abort_policy(%{tcp: tcp}) when is_port(tcp), do: :ok
   defp native_abort_policy(%{tcp: tcp}), do: NativeSocket.abort_on_close(tcp)
 
-  defp transport_peername(%Socket{} = carrier), do: SSL.peername(carrier)
+  defp transport_peername(%Socket{} = carrier) do
+    with {:ok, socket} <- Socket.fetch(carrier), do: SSL.peername(socket)
+  end
+
   defp transport_peername(tcp) when is_port(tcp), do: :inet.peername(tcp)
   defp transport_peername(tcp), do: NativeSocket.peername(tcp)
 
-  defp transport_sockname(%Socket{} = carrier), do: SSL.sockname(carrier)
+  defp transport_sockname(%Socket{} = carrier) do
+    with {:ok, socket} <- Socket.fetch(carrier), do: SSL.sockname(socket)
+  end
+
   defp transport_sockname(tcp) when is_port(tcp), do: :inet.sockname(tcp)
   defp transport_sockname(tcp), do: NativeSocket.sockname(tcp)
 
@@ -2362,8 +2377,10 @@ defmodule SSL.Connection do
     )
   end
 
-  defp prepare_transport(%Socket{} = carrier, state),
-    do: SSL.setopts(carrier, [active: false] ++ TCPOptions.mutable(state.options.tcp_options))
+  defp prepare_transport(%Socket{} = carrier, state) do
+    with {:ok, socket} <- Socket.fetch(carrier),
+         do: SSL.setopts(socket, [active: false] ++ TCPOptions.mutable(state.options.tcp_options))
+  end
 
   defp prepare_transport(tcp, state), do: NativeSocket.prepare(tcp, state.options)
 

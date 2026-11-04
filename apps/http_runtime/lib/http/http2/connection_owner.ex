@@ -488,23 +488,7 @@ defmodule HTTP.HTTP2.ConnectionOwner do
       deliveries ->
         case :queue.out(deliveries) do
           {{:value, bytes}, rest} ->
-            case acknowledge_bytes(state, id, bytes) do
-              {:ok, state} ->
-                state = put_in(state.streams[id].deliveries, rest)
-
-                state =
-                  if :queue.len(rest) < 64,
-                    do: flush_pending_data(state, id),
-                    else: state
-
-                {:reply, :ok, flush_response_events(state)}
-
-              {:error, reason, state} ->
-                notify_transport_error(state, reason)
-
-                {:stop, :normal, {:error, reason},
-                 %{state | lifecycle: :closed, close_reason: reason}}
-            end
+            acknowledge_delivery(state, id, bytes, rest)
 
           {:empty, _} ->
             {:reply, {:error, :unknown_delivery}, state}
@@ -1294,6 +1278,25 @@ defmodule HTTP.HTTP2.ConnectionOwner do
         |> put_in([:streams, id, :pending_data], nil)
         |> update_in([:streams, id, :deliveries], &:queue.in(bytes, &1))
         |> Map.update!(:response_events, &[{id, {:http2, :data, payload, flags}} | &1])
+    end
+  end
+
+  defp acknowledge_delivery(state, id, bytes, rest) do
+    case acknowledge_bytes(state, id, bytes) do
+      {:ok, state} ->
+        state = put_in(state.streams[id].deliveries, rest)
+
+        state =
+          if :queue.len(rest) < 64,
+            do: flush_pending_data(state, id),
+            else: state
+
+        {:reply, :ok, flush_response_events(state)}
+
+      {:error, reason, state} ->
+        notify_transport_error(state, reason)
+
+        {:stop, :normal, {:error, reason}, %{state | lifecycle: :closed, close_reason: reason}}
     end
   end
 

@@ -100,7 +100,7 @@ defmodule SSL.TLS12ResumptionContext do
     if TLS12Session.validate(session) == :ok and
          session.expires_at > System.monotonic_time(:millisecond) do
       session = %{session | auto: session.auto or mode == true}
-      if mode in [true, :save], do: SessionCache.put(key, session)
+      _ = if mode in [true, :save], do: SessionCache.put(key, session)
       session
     end
   end
@@ -121,7 +121,7 @@ defmodule SSL.TLS12ResumptionContext do
       }
 
     if TLS12Session.validate(session) == :ok do
-      if mode in [true, :save], do: SessionCache.put(key, session)
+      _ = if mode in [true, :save], do: SessionCache.put(key, session)
       session
     end
   end

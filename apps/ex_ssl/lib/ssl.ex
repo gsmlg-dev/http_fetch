@@ -330,7 +330,7 @@ defmodule SSL do
              {Connection, {self(), ref, status, options, deadline}}
            ) do
         {:ok, pid} ->
-          socket = %Socket{pid: pid, ref: ref, status: status}
+          socket = Socket.new(pid, ref, status)
 
           case transfer_carrier(tcp, pid) do
             :ok ->
@@ -350,7 +350,10 @@ defmodule SSL do
     end
   end
 
-  defp transfer_carrier(%Socket{} = socket, owner), do: controlling_process(socket, owner)
+  defp transfer_carrier(%Socket{} = carrier, owner) do
+    with {:ok, socket} <- Socket.fetch(carrier), do: controlling_process(socket, owner)
+  end
+
   defp transfer_carrier(tcp, owner), do: :gen_tcp.controlling_process(tcp, owner)
 
   defp owned_socket(%Socket{} = socket), do: call(socket, :carrier_owned)
@@ -411,8 +414,8 @@ defmodule SSL do
     end)
   end
 
-  defp close_on_error({:error, _} = error, %Socket{} = socket) do
-    close(socket)
+  defp close_on_error({:error, _} = error, %Socket{} = carrier) do
+    _ = with {:ok, socket} <- Socket.fetch(carrier), do: close(socket)
     error
   end
 

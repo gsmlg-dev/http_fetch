@@ -3,6 +3,8 @@ defmodule SSL.ConnectionWriter do
 
   alias SSL.Lifecycle.{Observer, Receipt}
 
+  defguardp is_write_data(bytes) when is_binary(bytes) or is_list(bytes)
+
   @typep birth_context :: %{
            receipt: Receipt.t(),
            permit: reference(),
@@ -101,13 +103,10 @@ defmodule SSL.ConnectionWriter do
     receive do
       {:lifecycle_carrier_send, ^nonce, token, %SSL.Socket{} = carrier, bytes, _shutdown?,
        deadline}
-      when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
+      when is_reference(token) and is_write_data(bytes) and
              (is_integer(deadline) or deadline == :infinity) ->
         if live?(connection, observer) do
-          result =
-            if deadline == :infinity,
-              do: SSL.send(carrier, bytes),
-              else: SSL.send(carrier, bytes, {:abs_ms, deadline})
+          result = write_carrier(carrier, bytes, deadline)
 
           send(connection, {:writer_result, self(), token, result})
 
@@ -122,7 +121,7 @@ defmodule SSL.ConnectionWriter do
         end
 
       {:lifecycle_socket_send, ^nonce, token, tcp, bytes, shutdown?, deadline}
-      when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
+      when is_reference(token) and is_write_data(bytes) and
              is_boolean(shutdown?) and (is_integer(deadline) or deadline == :infinity) ->
         if live?(connection, observer) do
           result = SSL.Lifecycle.NativeSocket.send_bytes(tcp, bytes, shutdown?, deadline)
@@ -139,7 +138,7 @@ defmodule SSL.ConnectionWriter do
         end
 
       {:lifecycle_send, ^nonce, token, tcp, bytes, shutdown?}
-      when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
+      when is_reference(token) and is_write_data(bytes) and
              is_boolean(shutdown?) ->
         if live?(connection, observer) do
           send(connection, {:writer_result, self(), token, write(tcp, bytes, shutdown?)})
@@ -194,23 +193,28 @@ defmodule SSL.ConnectionWriter do
          do: if(shutdown?, do: :gen_tcp.shutdown(tcp, :write), else: :ok)
   end
 
+  defp write_carrier(carrier, bytes, deadline) do
+    with {:ok, socket} <- SSL.Socket.fetch(carrier) do
+      if deadline == :infinity,
+        do: SSL.send(socket, bytes),
+        else: SSL.send(socket, bytes, {:abs_ms, deadline})
+    end
+  end
+
   defp loop(connection, connection_monitor) do
     receive do
       {:carrier_send, token, %SSL.Socket{} = carrier, bytes, _shutdown?, deadline}
-      when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
+      when is_reference(token) and is_write_data(bytes) and
              (is_integer(deadline) or deadline == :infinity) ->
         # The controller closes the carrier only after this record is acknowledged.
         # Half-closing its underlying TCP would bypass the outer TLS close_notify.
-        result =
-          if deadline == :infinity,
-            do: SSL.send(carrier, bytes),
-            else: SSL.send(carrier, bytes, {:abs_ms, deadline})
+        result = write_carrier(carrier, bytes, deadline)
 
         send(connection, {:writer_result, self(), token, result})
         loop(connection, connection_monitor)
 
       {:send, token, tcp, bytes, shutdown?}
-      when is_reference(token) and (is_binary(bytes) or is_list(bytes)) and
+      when is_reference(token) and is_write_data(bytes) and
              is_boolean(shutdown?) ->
         result = write(tcp, bytes, shutdown?)
 

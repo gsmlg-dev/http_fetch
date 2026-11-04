@@ -367,6 +367,37 @@ defmodule SSL.InertLifecycleBirthTest do
              Reader.await(attempt.receipt, attempt.budget)
   end
 
+  test "an enrolled writer settles malformed TLS carriers without losing its lifecycle permit" do
+    attempt = attempt()
+    {connection, permit} = writer_constructor(attempt)
+    nonce = make_ref()
+    send(connection, {:start_writer, writer_context(attempt, permit, nonce)})
+    assert_receive {:writer_born, writer}, 1_000
+    observer = attempt.observer
+    assert_receive {:lifecycle_writer_ready, ^writer, ^nonce, ^observer}, 1_000
+    send(writer, {:lifecycle_writer_release, connection, nonce, observer})
+    socket = SSL.Socket.new(self(), make_ref(), :atomics.new(1, []))
+
+    malformed = [
+      %{socket | pid: nil},
+      %{socket | ref: nil},
+      %{socket | status: nil},
+      %{socket | status: make_ref()}
+    ]
+
+    for deadline <- [:infinity, System.monotonic_time(:millisecond) + 1_000],
+        carrier <- malformed do
+      token = make_ref()
+
+      send(writer, {:lifecycle_carrier_send, nonce, token, carrier, "invalid", false, deadline})
+
+      assert_receive {:writer_result, ^writer, ^token, {:error, :badarg}}, 1_000
+    end
+
+    assert Process.alive?(writer)
+    cancel(attempt)
+  end
+
   test "a writer with a missing permit cannot become ready or consume the legitimate permit" do
     attempt = attempt()
     {connection, permit} = writer_constructor(attempt)

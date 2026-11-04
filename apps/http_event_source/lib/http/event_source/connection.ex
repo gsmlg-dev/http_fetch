@@ -1053,8 +1053,9 @@ defmodule HTTP.EventSource.Connection do
     if ref do
       {stream, refs} = ref
 
-      for delivery_ref <- Enum.reverse(List.wrap(refs)),
-          do: stream_module(state).acknowledge(stream, delivery_ref)
+      Enum.each(Enum.reverse(List.wrap(refs)), fn delivery_ref ->
+        stream_module(state).acknowledge(stream, delivery_ref)
+      end)
     end
 
     state
