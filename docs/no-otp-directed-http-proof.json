@@ -26,7 +26,7 @@
     "apps/http_runtime/lib/http/http2/connection_owner.ex": "f5250c2b7c82bd56e5d7f8f6f6d62033313666546039b07971a7935942c0d5f9",
     "apps/http_runtime/lib/http/http2/connection_supervisor.ex": "6624225a4b82240eed4315fa12bb1a61c9b103aa1b09ffab66ebc56ba142f3e0",
     "apps/http_runtime/lib/http/protocol_client/session.ex": "53db8f26b74a84ba5f7980334bbbb21d4d1f9ef24dba03f2fc842018a03d8711",
-    "apps/http_runtime/lib/http/managed_transport.ex": "74b17c5450acd6834647b3fc305c0246120dae8bbbdd495de92a6f71f1d8d95f",
+    "apps/http_runtime/lib/http/managed_transport.ex": "d3b3eeb9fea115aaeab8cd6ec4780665164ccabee79ba437c44973852119af16",
     "apps/http_runtime/lib/http/managed_transport/scope.ex": "c822312d48110046a5c0fede5e6768236a1e3d8e3ed077eaede961bc5f30f0e5",
     "apps/http_runtime/lib/http/managed_transport/policy.ex": "b283eba84c5b438eb53f35ab548682a0f83f3a7b675082f56c4a01d6767cfbd0",
     "apps/http_runtime/lib/http/http3/connection_owner.ex": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
@@ -43,6 +43,14 @@
   "production_source_census": {
     "files": 244,
     "sorted_path_sha256_json": "097ad232bd57e7dcf49f79ea829eb9e43ad6b155a42487a4ee1dae66983505b5"
+  },
+  "source_review_amendment": {
+    "date": "2026-11-05",
+    "source_commit": "7b2c7c1153b884ade1b7adb027c7387f234422d5",
+    "changed_source": "apps/http_runtime/lib/http/managed_transport.ex",
+    "previous_sha256": "74b17c5450acd6834647b3fc305c0246120dae8bbbdd495de92a6f71f1d8d95f",
+    "historical_artifact_covers_amended_source": false,
+    "compiled_acceptance": "PENDING_RELEASE_GATE"
   },
   "occurrences": [
     {

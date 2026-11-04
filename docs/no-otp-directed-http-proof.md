@@ -163,3 +163,36 @@ and actual built-in bodies supply the proof; hashes only bind it to a revision.
 The 76 original compiled findings remain visible until directed gate validation.
 The independent 70-case traffic result does not substitute for these derivations.
 P6 and publication still require all package proofs and release regressions.
+
+## 2026-11-05 source review amendment: managed admission retry
+
+This amendment reviews the runtime source at commit
+`7b2c7c1153b884ade1b7adb027c7387f234422d5` against the previously pinned inputs.
+The complete 244-file production-source census has one changed file:
+`apps/http_runtime/lib/http/managed_transport.ex`, from SHA-256
+`74b17c5450acd6834647b3fc305c0246120dae8bbbdd495de92a6f71f1d8d95f` to
+`d3b3eeb9fea115aaeab8cd6ec4780665164ccabee79ba437c44973852119af16`.
+The other 243 files match. All 175 original occurrence dictionaries across the
+five package proofs remain byte-for-byte unchanged; this module has none.
+
+The `claim/1` delta names the existing free-row tuple and retries its exact
+compare-and-swap after the initial claim and completed-row reclamation fail.
+Both claim attempts call the existing local `replace_claim/3`, whose only
+operation is literal `:ets.select_replace/2`. The replacement still contains
+only the slot ID, fresh reference, caller PID, `:preparing` and `nil`. No module
+or function value is introduced, invoked or copied into a producer field.
+
+`open/1` still freezes policy through `Policy.freeze/1`; `prepare/2` still
+merges that policy and the scope-owned pool/coordinator injection after claiming
+a lease. The policy's ExSSL-only TLS validation, the TCP/Unix/ExSSL dialer
+selection, private pool construction, transport retention and callback producers
+reviewed above are unchanged. The retry therefore adds no dynamic module or
+function dispatch and no route to OTP SSL from supported construction.
+
+The binding's `source_inputs_sha256` and release source manifest now identify
+these current reviewed inputs. Its original `source_commit`, `artifact`,
+`production_source_census`, `occurrences` and `checks` retain their historical
+meaning: artifact `13119243608` does not cover the amended source. No new generic
+dispatch findings are expected from this delta. Compiled source/BEAM binding,
+the exact 175-finding reconciliation and release acceptance remain pending the
+new candidate's compiled no-OTP release gate.

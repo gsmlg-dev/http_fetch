@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-11-05
+
+### Fixed
+- Reclaim managed request slots released during completion checks, preventing
+  false request-capacity errors after confirmed cleanup (#151).
+- Run current TLS benchmarks through ExSSL and keep OTP comparisons in an
+  explicit historical runtime with separate source and build identities.
+
+### Documentation
+- Align TLS guides with the ExSSL-only runtime and identify historical results,
+  required performance coverage and remaining validation limits explicitly.
+
 ## [1.0.0-rc.0] - 2026-11-02
 
 The initial coordinated TLS migration release candidate is `1.0.0-rc.0`.
