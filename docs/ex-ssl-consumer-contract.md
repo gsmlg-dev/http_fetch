@@ -15,22 +15,24 @@ Current source selects ExSSL for TCP TLS by default and rejects legacy
 `tls_backend: :ssl` explicitly. QUIC consumes public `SSL.QUIC` APIs independently
 of that backend setting. The historical phase records below retain their original
 versions and counts. Current migration checks are tracked in
-[migration validation](migration-validation.md). This inventory does not claim
+[TLS migration validation](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/tls-migration-validation.md). This inventory does not claim
 full OTP compatibility or completed independent human security review.
 
-## Complete provider migration (2026-10-21)
+## Complete provider migration (accepted 2026-11-02)
 
 The original migration review baseline was umbrella `main@6b69bde` (`0.21.14`).
 The [migration design and compatibility table](tls-migration-design.md) and
-[staged checklist](tls-migration-plan.md) track the remaining work to make
-ExSSL the sole production TLS provider. [Execution evidence](tls-migration-validation.md)
+[staged checklist](tls-migration-plan.md) record the completed migration to
+ExSSL as the sole production TLS provider. [Execution evidence](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/tls-migration-validation.md)
 records checks separately from the historical standalone release evidence below.
 P1–P5 compatibility, public lifecycle, completion, managed H1/H2 and default
-promotion have accepted source/candidate results. The P6 source slice removes
-the OTP transport and five unconditional application dependencies. Its isolated
-production-release dynamic-dispatch/traffic gate remains open, as does P7
-next-major publication and cold published-consumer acceptance. These source
-changes do not establish that the coordinated migration has been released.
+promotion have accepted source/candidate results. P6 removed the OTP transport
+and five unconditional application dependencies; isolated production releases
+passed the directed dispatch review and actual traffic with OTP SSL unavailable.
+P7 published all nine `1.0.0-rc.0` packages and verified cold published consumers;
+see the [RC acceptance record](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/tls-migration-validation.md#p7-coordinated-rc-publication--2026-11-02).
+Formal `1.0.0` still requires a later release decision. Performance and
+Credo/Dialyzer retain their recorded deferrals.
 
 [`SSL.Lifecycle`](../apps/ex_ssl/lib/ssl/lifecycle.ex) exposes the v1 attempt Handle,
 revocable Lease and acknowledged Transfer. Create the handle before I/O; cancellation
@@ -67,8 +69,8 @@ The P1 HTTP ExSSL adapter now offers TLS1.3 plus bounded TLS1.2 for ordinary
 calls. Explicit versions and concrete profile order remain authoritative;
 auto tickets and explicit cipher policies retain the prior TLS1.3 context when
 versions are omitted. Independent policy scenarios are recorded in the execution
-ledger. The remaining isolated-release and publication gates prevent a completed
-sole-provider migration claim.
+ledger. The later P6/P7 acceptance above establishes the released RC's
+sole-provider migration; these earlier policy checks retain their own scope.
 
 | Requirement | Status | Production boundary | Executable coverage |
 | --- | --- | --- | --- |
@@ -95,8 +97,9 @@ sole-provider migration claim.
 
 The production `HTTP.Transport.SSL` adapter has been removed from this source
 slice. TLS listen, accept, handshake, and peer traffic using OTP `:ssl` in test
-support are reference-server operations. The final P6 gate must still prove
-dynamic dispatch and supported traffic in a release with OTP SSL unavailable.
+support are reference-server operations. The accepted P6/P7 gates prove directed
+dispatch and supported traffic in the recorded releases with OTP SSL unavailable;
+new source changes still require their own applicable release verification.
 QUIC calls in HTTP/3/WebTransport are outside this TCP adapter contract. The
 imported QUIC stack uses ex_ssl's separate TLS API. Fetch and EventSource support
 explicit HTTPS HTTP/3 beta; WebTransport remains unsupported. See the

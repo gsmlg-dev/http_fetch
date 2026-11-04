@@ -179,8 +179,8 @@ That historical limitation does not describe the synchronized `0.17.0` graph.
 ## Preserved boundaries
 
 - `ex_ssl` implements TLS through its own `SSL` engine and OTP cryptographic
-  primitives. Production TLS handshakes do not fall back to OTP `:ssl`; TCP
-  `:ssl` remains the existing default backend in `http_core`.
+  primitives. Production TLS handshakes use ExSSL without falling back to OTP
+  `:ssl`; `http_core` rejects legacy OTP backend selections before connecting.
 - TLS parsing and handshake inputs remain bounded. The QUIC integration uses
   public `SSL.QUIC` and `SSL.Fingerprint` APIs, preserves TLS action order, and
   does not copy private TLS orchestration or PKIX internals.

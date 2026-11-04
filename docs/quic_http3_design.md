@@ -22,7 +22,8 @@ TLS returns ordered actions; QUIC processes them in order and retains emitted
 CRYPTO bytes for retransmission without another TLS call. TLS authentication,
 transcript, and secret derivation remain owned by `ex_ssl`; QUIC Initial and
 packet/header protection remain owned by `elixir_quic`. TLS protocol work does
-not call OTP `:ssl`; the existing OTP backend remains the default for TCP TLS.
+not call OTP `:ssl`. TCP TLS also uses ExSSL; legacy OTP backend selections
+are rejected before connecting.
 See the imported [QUIC architecture](quic/architecture.md),
 [TLS contract](quic/ex-ssl-quic-contract.md), and
 [consumer contract](ex-quic-consumer-contract.md) for detailed limits and

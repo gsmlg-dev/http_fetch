@@ -341,6 +341,10 @@ configuration. The backend is captured when the request/client is created and
 retained through redirects and EventSource reconnects; runtime configuration
 changes affect new operations. Invalid selections fail explicitly.
 
+Current benchmarks use ExSSL by default. See the
+[TLS tooling guide](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/tls-migration-design.md#running-current-tls-tooling) for
+bounded functional smoke checks and explicitly isolated historical OTP comparisons.
+
 `http_core` declares `ex_ssl` and `elixir_quic` as transitive runtime dependencies
 at the exact coordinated package version. Current artifact and publication
 evidence is recorded in the implementation audit. Consumers do not need to add

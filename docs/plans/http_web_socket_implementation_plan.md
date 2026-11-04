@@ -18,6 +18,11 @@ verification:
 
 # Superpowers Plan: `http_web_socket`
 
+> Historical design or validation record (status notice: 2026-11-04). Backend
+> defaults, transport names and dependency examples below describe its stated
+> baseline. For current TLS behavior and migration acceptance, see the
+> [README](../../README.md) and [TLS migration ledger](../tls-migration-validation.md).
+
 ## Objective
 
 Implement a sibling Mix child app named `:http_web_socket` that exposes

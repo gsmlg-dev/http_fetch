@@ -35,6 +35,35 @@ def expected_output(apps, manual=False, candidate=False):
 
 
 class SelectionTest(unittest.TestCase):
+    def test_tls_tooling_changes_select_shared_consumers_and_candidate_tls(self):
+        for path in ("scripts/tls_migration_performance.py",
+                     "scripts/tls_migration_performance.exs",
+                     "scripts/tls_migration_performance_test.py",
+                     "scripts/tls_migration_performance_peer.py",
+                     "scripts/tls_migration_benchmark.exs",
+                     "scripts/tls_migration_benchmark_peer.py"):
+            with self.subTest(path=path):
+                self.assertTrue(changed_apps.candidate_tls_required([path]))
+                for workflow in WORKFLOWS:
+                    self.assertEqual(select_apps([path], workflow),
+                                     ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS])
+        self.assertFalse(changed_apps.candidate_tls_required(["docs/tls-migration-plan.md"]))
+        self.assertEqual(select_apps(["docs/tls-migration-plan.md"], "ci.yml"), [])
+
+    def test_tls_tooling_ci_checks_are_automatic_for_selected_candidates(self):
+        ci = (SCRIPT.parents[2] / ".github/workflows/ci.yml").read_text()
+        for event in ("push", "pull_request"):
+            block = re.search(rf"(?m)^  {event}:\n((?:    .*\n)+)", ci).group(1)
+            self.assertIn("'scripts/tls_migration_*'", block)
+        candidate = ci.split("  candidate-consumer:", 1)[1].split("  no-otp-release:", 1)[0]
+        steps = candidate.split("      - name: ")[1:]
+        check = next((step for step in steps if step.startswith("Check TLS tooling regressions\n")), "")
+        self.assertTrue(check, "missing automatic TLS tooling regression step")
+        self.assertNotIn("full_gate", check)
+        self.assertNotIn("continue-on-error", check)
+        self.assertIn("python3 scripts/tls_migration_performance_test.py", check)
+        self.assertIn("python3 -m unittest discover -s scripts/ci -p 'test_tls_benchmark_routing.py' -v", check)
+
     def test_actual_graph_selects_shared_h2_consumers(self):
         graph = dependency_graph()
         self.assertEqual(graph["http_fetch"], {"http_core", "http_runtime"})

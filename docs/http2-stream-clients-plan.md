@@ -1,5 +1,10 @@
 # HTTP/2 stream clients implementation plan
 
+> Historical design or validation record (status notice: 2026-11-04). Backend
+> defaults, transport names and dependency examples below describe its stated
+> baseline. For current TLS behavior and migration acceptance, see the
+> [README](../README.md) and [TLS migration ledger](tls-migration-validation.md).
+
 Baseline: `b5d17bfe3a6be9fbb20a3f3c185dc36773b9f367` (v0.15.1).
 The task is `CODEX_HTTP2_EVENTSOURCE_WEBSOCKET_PROMPT.md`, phases P0–P5.
 The user's current instruction authorizes per-step commits/pushes and a release

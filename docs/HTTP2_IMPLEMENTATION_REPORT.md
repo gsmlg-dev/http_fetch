@@ -1,5 +1,10 @@
 # HTTP/2 Implementation Report
 
+> Historical design or validation record (status notice: 2026-11-04). Backend
+> defaults, transport names and dependency examples below describe its stated
+> baseline. For current TLS behavior and migration acceptance, see the
+> [README](../README.md) and [TLS migration ledger](tls-migration-validation.md).
+
 ## Baseline
 
 Review baseline: `b4ad2f5ef003415941b97f5e0cc78c21dcc94296` (v0.13.0).

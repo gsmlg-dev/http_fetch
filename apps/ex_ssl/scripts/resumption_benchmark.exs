@@ -1,4 +1,8 @@
-# Run with MIX_ENV=test mix run scripts/resumption_benchmark.exs.
+# Run from the umbrella root:
+# MIX_ENV=prod mix run apps/ex_ssl/scripts/resumption_benchmark.exs
+# MIX_ENV=prod mix run apps/ex_ssl/scripts/resumption_benchmark.exs --otp-reference
+# --otp-reference adds an explicit differential reference, not a production HTTP
+# backend or proof that an OTP-free release has passed its separate consumer gate.
 for support <- ["signature_fixtures.ex", "client_auth_fixtures.ex", "openssl_peer.ex"] do
   module =
     case support do
@@ -15,15 +19,31 @@ end
 defmodule SSL.ResumptionBenchmark do
   alias ExSSL.TestSupport.{ClientAuthFixtures, OpenSSLPeer}
 
+  # Mix prunes undeclared OTP paths; only the explicit reference arm restores :ssl.
+  @compile {:no_warn_undefined, :ssl}
+
   @host {127, 0, 0, 1}
   @body :binary.copy(<<0x5A>>, 1_048_576)
   @count 6
   @timeout 10_000
   @cipher %{key_exchange: :any, cipher: :aes_128_gcm, mac: :aead, prf: :sha256}
 
-  def run do
+  def run(args) do
+    backends =
+      case args do
+        [] -> [:ex_ssl]
+        ["--otp-reference"] -> [:ex_ssl, :otp]
+        _ -> raise ArgumentError, "usage: resumption_benchmark.exs [--otp-reference]"
+      end
+
+    otp_ssl_before = otp_ssl_state()
     {:ok, _} = Application.ensure_all_started(:ex_ssl)
-    :ok = :ssl.start()
+
+    if :otp in backends do
+      :ok = Mix.ensure_application!(:ssl)
+      :ok = :ssl.start()
+    end
+
     directory = Path.join(System.tmp_dir!(), "exssl-bench-#{System.unique_integer([:positive])}")
 
     try do
@@ -38,9 +58,29 @@ defmodule SSL.ResumptionBenchmark do
         "payload_bytes=#{byte_size(@body)} warmup=1 measured=#{@count - 1} cipher=TLS_AES_128_GCM_SHA256 alpn=http/1.1"
       )
 
-      for backend <- [:otp, :ex_ssl], mode <- [:full, :resumed] do
+      IO.puts("otp_reference=#{:otp in backends} otp_ssl_before=#{inspect(otp_ssl_before)}")
+      IO.puts("default_client_api=SSL no_otp_release_proof=false")
+
+      IO.puts(
+        "application_state_scope=inherited_source_vm Mix/Hex may prestart OTP SSL; default measurements must leave its application state unchanged."
+      )
+
+      if :otp in backends do
+        IO.puts(
+          "otp_role=differential_reference production_http_backend=false no_otp_release_proof=false"
+        )
+      end
+
+      for backend <- backends, mode <- [:full, :resumed] do
         measure(fixtures, backend, mode)
       end
+
+      otp_ssl_after = otp_ssl_state()
+      if backends == [:ex_ssl], do: ^otp_ssl_before = otp_ssl_after
+
+      IO.puts(
+        "otp_ssl_after=#{inspect(otp_ssl_after)} otp_ssl_state_unchanged=#{otp_ssl_before == otp_ssl_after}"
+      )
     after
       File.rm_rf!(directory)
     end
@@ -154,6 +194,13 @@ defmodule SSL.ResumptionBenchmark do
   defp receive_chunk(:otp, socket, size), do: :ssl.recv(socket, size, @timeout)
   defp receive_chunk(:ex_ssl, socket, size), do: SSL.recv(socket, size, @timeout)
 
+  defp otp_ssl_state do
+    %{
+      loaded: List.keymember?(Application.loaded_applications(), :ssl, 0),
+      started: List.keymember?(Application.started_applications(), :ssl, 0)
+    }
+  end
+
   defp summary(values) do
     sorted = Enum.sort(values)
     median = Enum.at(sorted, div(length(sorted), 2))
@@ -161,4 +208,4 @@ defmodule SSL.ResumptionBenchmark do
   end
 end
 
-SSL.ResumptionBenchmark.run()
+SSL.ResumptionBenchmark.run(System.argv())

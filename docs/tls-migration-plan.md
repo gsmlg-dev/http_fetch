@@ -65,6 +65,11 @@ from functional gate results. No performance or deferred-quality pass is claimed
 Cancellation deadlines, resource cleanup, security and functional release gates
 remain required. Historical evidence and failed invocations remain in the ledger.
 
+Current-source benchmark and smoke tooling uses ExSSL. The
+[tooling guide](tls-migration-design.md#running-current-tls-tooling) describes bounded
+functional checks and the isolated pinned OTP reference; completing those checks
+does not close the deferred comparative load/soak gate.
+
 ## P0 — Baseline and contract
 
 - [x] Record HEAD, versions, initial clean worktree and runtime.
@@ -114,8 +119,9 @@ remain required. Historical evidence and failed invocations remain in the ledger
       earlier failures remain in the execution ledger; source-tier acceptance does
       not establish the complete P4 compatibility or production-release matrix.
 
-Exit: every blocker has an owner and acceptance test; current implementation,
-executed evidence and required work are distinguishable. OTP remains default.
+Historical P0 exit: every blocker had an owner and acceptance test; implementation,
+executed evidence and required work were distinguishable. OTP remained the default
+at that baseline; the later accepted P5/P6 stages promoted ExSSL and removed OTP.
 
 ## P1 — TLS policy and compatibility (after P0)
 
@@ -424,7 +430,8 @@ gates. P5 may proceed; deferred performance and quality checks are not passes.
       QUIC test synchronization preserves exact cleanup counts and original waits.
       Earlier local timing failures remain recorded; no performance pass is claimed.
 
-Release boundary A is P0–P4 compatibility completion with OTP still default. Select
+Historical release boundary A was P0–P4 compatibility completion with OTP still
+default; P5 promoted ExSSL, and P6 removed the OTP implementation. Select
 actual versions with repository tooling; no guessed reserved versions.
 
 ## P6 — Remove production OTP SSL (after P5)

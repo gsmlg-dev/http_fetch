@@ -24,7 +24,8 @@ defmodule TLSMigrationPerformance do
   defp execute(config) do
     cell = config["cell"]
     protocol = if cell["protocol"] == "h2", do: :http2, else: :http1
-    backend = if config["backend"] == "ex_ssl", do: :ex_ssl, else: :ssl
+    if config["backend"] != "ex_ssl", do: raise("current-source backend must be ex_ssl")
+    backend = :ex_ssl
     count = cell["concurrency"]
     origin = "https://localhost:#{config["peer"]["port"]}"
     effective = effective(config, count)

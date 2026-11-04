@@ -9,8 +9,9 @@ historical acceptance remains historical.
 
 Start beta rollout with known HTTPS H2 origins, `http_version: :http2`,
 `http2_profile: :native_v1`, verified certificates, finite request deadlines,
-and application concurrency bounded to the origin's capacity. OTP `:ssl`
-remains the default; `tls_backend: :ex_ssl` is explicit. h2c is for cleartext
+and application concurrency bounded to the origin's capacity. ExSSL is the TLS
+default; `tls_backend: :ex_ssl` may be supplied explicitly. Legacy `:ssl` selections
+fail before connecting. h2c is for cleartext
 origins that explicitly support it. Sent requests and consumed upload producers
 are not transparently replayed on resets or connection loss.
 

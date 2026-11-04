@@ -14,6 +14,23 @@ PAYLOAD = b"Z" * 1_048_576
 MAX_REQUESTS = 2000
 
 
+def parse_path(path):
+    """Return the current benchmark route, rejecting every other request target."""
+    routes = {
+        "cold": ("small",),
+        "upload": ("upload", "close"),
+        "download": ("download", "close"),
+        "reuse": ("small", "close"),
+    }
+    components = path.split("/")
+    if len(components) != 4:
+        raise ValueError("invalid benchmark path")
+    root, backend, workload, operation = components
+    if root or backend != "ex_ssl" or operation not in routes.get(workload, ()):
+        raise ValueError("unknown benchmark route")
+    return backend, workload, operation
+
+
 class Peer:
     def __init__(self, cert, key):
         self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -106,9 +123,7 @@ class Peer:
                     body = stream.read(length)
                     if len(body) != length:
                         raise ValueError("truncated upload")
-                    _, backend, workload, operation = path.split("/")
-                    if backend not in ("ssl", "ex_ssl") or workload not in ("cold", "upload", "download", "reuse"):
-                        raise ValueError("unknown workload")
+                    backend, workload, operation = parse_path(path)
                     if operation == "upload" and method == "POST" and body == PAYLOAD:
                         response = hashlib.sha256(body).hexdigest().encode("ascii")
                     elif operation == "download" and method == "GET" and not body:

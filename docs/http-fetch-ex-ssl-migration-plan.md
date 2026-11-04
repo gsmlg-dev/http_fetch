@@ -1,5 +1,10 @@
 # HTTP Fetch: Complete the ex_ssl Migration and Remove Production OTP SSL
 
+> Historical design or validation record (status notice: 2026-11-04). Backend
+> defaults, transport names and dependency examples below describe its stated
+> baseline. For current TLS behavior and migration acceptance, see the
+> [README](../README.md) and [TLS migration ledger](tls-migration-validation.md).
+
 ## 1. Goal and review baseline
 
 Make `ex_ssl` the sole production TLS implementation used by the HTTP Fetch umbrella. Preserve the supported HTTP client contracts, including cancellation, streaming, pooling, managed transports, and cleanup completion. After migration, the published production dependency graph and a minimal release must operate without the OTP `:ssl` application or its modules.

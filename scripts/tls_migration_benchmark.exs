@@ -1,5 +1,5 @@
-# Run from the umbrella root (lead owns execution):
-# MIX_ENV=test MIX_BUILD_PATH=/tmp/http-fetch-tls-migration-p0-build mix run --no-compile scripts/tls_migration_benchmark.exs
+# Run from the umbrella root:
+# MIX_ENV=prod mix run scripts/tls_migration_benchmark.exs
 # Optional bounded env: TLS_BENCH_WARMUP=3 TLS_BENCH_SAMPLES=30 TLS_BENCH_REUSE_MS=1000
 # TLS_BENCH_TIMEOUT_MS=3000 TLS_BENCH_CLEANUP_MS=300 TLS_BENCH_PYTHON=python3
 # Output: one JSON object prefixed TLS_MIGRATION_BENCHMARK= (Mix/logger may also print).
@@ -9,6 +9,8 @@ defmodule TLSMigrationBenchmark do
   @fixtures Path.join(@root, "apps/http_web_socket/test/support/fixtures")
 
   def run do
+    otp_ssl_before = otp_ssl_state()
+
     settings = %{
       warmup: setting("WARMUP", 3, 1, 10),
       samples: setting("SAMPLES", 30, 10, 100),
@@ -43,16 +45,18 @@ defmodule TLSMigrationBenchmark do
       ready = peer_read(peer)
       "ready" = ready["event"]
       true = ready["payload_sha256"] == sha(@payload)
-      # Both backend baselines and all observer snapshots retain this same peer port.
-      results = Enum.map([:ssl, :ex_ssl], &backend(&1, peer, ready["port"], settings))
+      # All workloads and observer snapshots retain this same independent peer port.
+      results = [backend(:ex_ssl, peer, ready["port"], settings)]
       final = peer_call(peer, "stats")
       [] = final["errors"]
-      expected = 2 * (4 * (settings.warmup + settings.samples) + 3)
+      expected = 4 * (settings.warmup + settings.samples) + 3
       ^expected = final["requests"]
       validate_counts!(final, settings)
+      otp_ssl_after = otp_ssl_state()
+      ^otp_ssl_before = otp_ssl_after
 
       report = %{
-        schema: "http-fetch-tls-p0-v1",
+        schema: "http-fetch-tls-benchmark-v2",
         recorded_at: DateTime.to_iso8601(DateTime.utc_now()),
         source: source(),
         runtime: %{
@@ -61,6 +65,10 @@ defmodule TLSMigrationBenchmark do
           erts: List.to_string(:erlang.system_info(:version)),
           architecture: List.to_string(:erlang.system_info(:system_architecture)),
           schedulers: :erlang.system_info(:schedulers_online),
+          otp_ssl_before: otp_ssl_before,
+          otp_ssl_after: otp_ssl_after,
+          otp_ssl_state_unchanged: true,
+          no_otp_release_proof: false,
           applications:
             Enum.into([:http_fetch, :http_core, :http_runtime, :ex_ssl], %{}, fn app ->
               {app, to_string(Application.spec(app, :vsn))}
@@ -73,7 +81,8 @@ defmodule TLSMigrationBenchmark do
             verify: "verify_peer",
             alpn: "http/1.1",
             session_tickets: "disabled at peer",
-            order: ["ssl", "ex_ssl"],
+            order: ["ex_ssl"],
+            selected_transport: inspect(HTTP.TLSBackend.transport(:ex_ssl)),
             concurrency: 1,
             idle_timeout_ms: 10_000
           }),
@@ -81,11 +90,12 @@ defmodule TLSMigrationBenchmark do
         results: results,
         final_peer_counters: final,
         caveats: [
+          "Mix/Hex may load and start OTP SSL before this script runs. The ExSSL client workload must leave that inherited application state unchanged; this source-VM observation is not the separate no-OTP release gate.",
           "Cold request timing includes connect, TLS, HTTP and body verification; it is not isolated client handshake latency.",
           "Peer handshake timing is server wrap_socket duration, including client scheduling; warmup excluded in summary.",
           "Throughput is sequential 1MiB application goodput over reused H1, including response acknowledgement and body verification; not raw TLS bandwidth.",
           "VM memory is BEAM allocation, not RSS; global process/port snapshots are noisy observations, not provider cleanup receipts. No forced global GC.",
-          "ExSSL public completion is unsupported at this baseline; observer deltas cannot establish public cleanup. Completion wait summaries include the time to return unsupported/pending results and are not uniformly cleanup latency.",
+          "Every request must return :ok from the public RequestCompletion wait; samples record that result and its measured wait. VM observations, peer counts and sleeps do not establish public cleanup or retirement of a reused connection.",
           "Small bounded sample p99 is a nearest-rank order statistic, not a confidence estimate. No promotion budget or pass threshold is inferred."
         ]
       }
@@ -118,6 +128,7 @@ defmodule TLSMigrationBenchmark do
         verify: :verify_peer,
         cacertfile: Path.join(@fixtures, "localhost-ca.pem"),
         versions: [:"tlsv1.3"],
+        ciphers: ["TLS_AES_128_GCM_SHA256"],
         alpn_advertised_protocols: ["http/1.1"]
       ],
       socket_opts: [nodelay: true]
@@ -190,11 +201,14 @@ defmodule TLSMigrationBenchmark do
     handshakes = peer_after["handshakes"] |> Enum.drop(length(peer_before["handshakes"]))
     expected_handshakes = if reuse?, do: 1, else: count
     ^expected_handshakes = length(handshakes)
+    true = Enum.sort(Enum.map(handshakes, & &1["connection"])) == Enum.sort(Enum.uniq(ids))
 
     true =
       Enum.all?(
         handshakes,
-        &(&1["tls"] == "TLSv1.3" and &1["alpn"] == "http/1.1" and &1["resumed"] == false)
+        &(&1["backend"] == "ex_ssl" and &1["workload"] == name and
+            &1["tls"] == "TLSv1.3" and &1["cipher"] == "TLS_AES_128_GCM_SHA256" and
+            &1["alpn"] == "http/1.1" and &1["resumed"] == false)
       )
 
     handshake_measurements =
@@ -267,6 +281,8 @@ defmodule TLSMigrationBenchmark do
     completion =
       HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), settings.cleanup_ms)
 
+    :ok = completion
+
     %{
       elapsed_us: elapsed,
       connection: connection,
@@ -309,19 +325,39 @@ defmodule TLSMigrationBenchmark do
   defp validate_counts!(stats, settings) do
     count = settings.warmup + settings.samples
 
-    for backend <- ["ssl", "ex_ssl"],
-        {workload, operation} <- [
-          {"cold", "small"},
-          {"upload", "upload"},
-          {"download", "download"},
-          {"reuse", "small"}
-        ] do
-      ^count = stats["exchanges"]["/#{backend}/#{workload}/#{operation}"]
-      if workload != "cold", do: 1 = stats["exchanges"]["/#{backend}/#{workload}/close"]
-    end
+    exchanges =
+      for {workload, operation} <- [
+            {"cold", "small"},
+            {"upload", "upload"},
+            {"download", "download"},
+            {"reuse", "small"}
+          ],
+          into: %{},
+          do: {"/ex_ssl/#{workload}/#{operation}", count}
 
-    expected_upload = 2 * count * byte_size(@payload)
+    expected_exchanges =
+      Map.merge(exchanges, %{
+        "/ex_ssl/upload/close" => 1,
+        "/ex_ssl/download/close" => 1,
+        "/ex_ssl/reuse/close" => 1
+      })
+
+    ^expected_exchanges = stats["exchanges"]
+    expected_connections = count + 3
+    ^expected_connections = stats["accepted"]
+    ^expected_connections = stats["closed"]
+    0 = stats["active"]
+    expected_upload = count * byte_size(@payload)
     ^expected_upload = stats["upload_bytes"]
+    expected_download = count * (byte_size(@payload) + 64 + 2 + 2) + 3 * 2
+    ^expected_download = stats["download_bytes"]
+  end
+
+  defp otp_ssl_state do
+    %{
+      loaded: List.keymember?(Application.loaded_applications(), :ssl, 0),
+      started: List.keymember?(Application.started_applications(), :ssl, 0)
+    }
   end
 
   defp source do

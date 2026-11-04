@@ -40,10 +40,11 @@ end
 The scope and receipt are opaque. A scope accepts only its normalized origin
 (scheme, hostname and port) and numeric IPv4/IPv6 destination. `:http1` supports
 HTTP or HTTPS; `:http2` requires HTTPS; `:h2c` requires cleartext HTTP. Only direct
-TCP and the OTP `:ssl` backend are supported. Automatic protocol selection,
-HTTP/3, proxy/Unix routes, ExSSL, followed redirects, decoded or automatically
-buffered responses are rejected. Request headers, raw bodies and ordered duplicate
-request/response trailers retain the ordinary Fetch contract. No request is
+TCP and ExSSL are supported; legacy `tls_backend: :ssl` selections fail before
+dialing. Automatic protocol selection, HTTP/3, proxy/Unix routes, followed
+redirects, decoded or automatically buffered responses are rejected. Request
+headers, raw bodies and ordered duplicate request/response trailers retain the
+ordinary Fetch contract. No request is
 retried or replayed, including when an idle HTTP/1 peer has become stale.
 
 ## Capacity and retained state
@@ -55,8 +56,9 @@ the prepared request or contacting transport processes. Preparing requests and
 requests with unread response streams occupy slots. A request slot is released
 only after its lifecycle tracker terminates. Connection slots include connecting,
 checked-out and idle connections, and remain occupied until every independently
-tracked resource for the connection (including OTP TLS/protocol owners and their
-retained buffers) has terminated. Raw socket closure alone cannot free capacity.
+tracked resource for the connection (including ExSSL provider resources, protocol
+owners and their retained buffers) has terminated. Raw socket closure alone
+cannot free capacity.
 The HTTP/1 idle pool keeps at most
 `min(max_connections, 16)` sockets.
 
@@ -196,9 +198,9 @@ settings must match the entire frozen policy, including the ALPN choice.
 `open/1` freezes authority/SNI, dial destination, TLS verification/CA/client
 credentials, socket settings and the HTTP/2 `:native_v1` profile. TLS defaults
 are peer verification, TLS 1.2/1.3, depth 4, system CAs and SNI from the original
-hostname. `cacertfile`, `certfile` and `keyfile` are read once into OTP TLS values;
-later file changes cannot change an existing generation. File reads and final
-policy size are bounded. Unencrypted RSA, EC and PKCS8 private keys are accepted.
+hostname. `cacertfile`, `certfile` and `keyfile` are materialized once into frozen
+ExSSL policy; later file changes cannot change an existing generation. File reads
+and final policy size are bounded. Unencrypted RSA, EC and PKCS8 private keys are accepted.
 Unsupported TLS callbacks/options, encrypted/malformed files, conflicting SNI
 and invalid socket options reject at open. Use a new scope for rotated policy.
 
@@ -216,8 +218,8 @@ configuration, request and connection references can share ref-counted payload.
 Conservative reservations must account for each retained representation and its
 bounded list/tuple structures rather than assume physical sharing. Caller-owned
 source backing, file/PEM processing and freeze/preparation copy overlap are
-transients outside the retained-policy payload bound. This does not bound OTP
-TLS's internal parsed credential state or the whole VM heap.
+transients outside the retained-policy payload bound. This does not bound the
+TLS provider's internal parsed credential state or the whole VM heap.
 
 TLS/socket overrides that conflict with the frozen policy reject before dialing.
 The supported socket policy uses finite `send_timeout` and
@@ -244,8 +246,8 @@ Creator death initiates abort retirement. Opening a new route generation does
 not interfere with the old generation's live siblings.
 
 `await_retired/2` accepts a finite nonnegative millisecond timeout. `:ok` requires
-all generation request trackers, connectors, raw socket ports, OTP TLS handler
-processes, connection owners, private pools, connection supervisor and coordinator
+all generation request trackers, connectors, raw socket ports, ExSSL provider
+resources, connection owners, private pools, connection supervisor and coordinator
 to have terminated. A timeout leaves cleanup running and returns
 `:cleanup_pending`. Lost coordinator evidence returns `:cleanup_unconfirmed`;
 unexpected coordinator death never manufactures success. Receipts survive normal

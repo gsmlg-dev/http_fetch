@@ -58,6 +58,7 @@ def shared_h2_path(path):
         path in SHARED_FILES or path.startswith(("config/", "scripts/ci/",
             ".github/workflows/", "scripts/http2_", "scripts/http_runtime_",
             "scripts/requirements-http2", "scripts/release/", "scripts/ex_ssl_",
+            "scripts/tls_migration_",
             "scripts/external_consumer_smoke.", "scripts/http3/")))
 
 

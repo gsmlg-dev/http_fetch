@@ -1,11 +1,14 @@
 # TLS migration design and compatibility contract
 
-Status (2026-10-28): integrated P0–P4 acceptance is complete at `3c561646`,
+Status (2026-11-02): integrated P0–P4 acceptance is complete at `3c561646`,
 including advanced policies, resumption, nested proxies, lifecycle and managed
 H1/H2. P5 default promotion is accepted at `0f4b3dd` after source, candidate and
-configured runtime gates. P6 removes the production OTP adapter, selectors and
-five unconditional dependencies; isolated release and dynamic-dispatch
-acceptance remain pending before publication.
+configured runtime gates. P6 removed the production OTP adapter, selectors and
+five unconditional dependencies. P6/P7 isolated releases, directed dispatch
+review, publication of all nine `1.0.0-rc.0` packages and cold published consumers
+are accepted in the [RC evidence](tls-migration-validation.md#p7-coordinated-rc-publication--2026-11-02).
+Performance and Credo/Dialyzer remain deferred; formal `1.0.0` requires a later
+release decision.
 See the [current execution checklist](tls-migration-plan.md#current-accepted-evidence-and-remaining-gates)
 for exact source/package boundaries, executed results and pending runtime checks.
 Historical foundation sections retain their original implementation boundaries.
@@ -28,11 +31,15 @@ SSL absent from its code path. `:crypto`, `:public_key`, the public `SSL` facade
 | Fetch / EventSource / WebSocket | Existing public request, streaming, cancellation and protocol APIs |
 | QUIC / HTTP3 | Separate public `SSL.QUIC` integration; preserve supported explicit H3 beta |
 
-No server/DTLS expansion, TLS-over-TLS proxy support, new H3/WebTransport support,
+No server/DTLS expansion, new H3/WebTransport support,
 0-RTT, hidden provider fallback or uncertain request replay is part of this work.
 The historical standalone ex_ssl repository is provenance, not the implementation.
 
 ## Compatibility inventory
+
+This table preserves the historical migration inventory and its staged blockers.
+Current TCP TLS uses ExSSL exclusively; the execution checklist and RC evidence
+above record the later completion of those stages.
 
 Classification: **supported** means source and authored coverage exist, not that this
 execution has validated the whole operation. **required** needs implementation.
@@ -158,7 +165,7 @@ unrestricted OTP parity. Prepared reuse must not reload files or callbacks.
 
 ### Effective configuration facts
 
-`HTTP.Transport.SSL` supplies mixed TLS versions and default trust. The ExSSL
+At the P0 baseline, `HTTP.Transport.SSL` supplied mixed TLS versions and default trust. The ExSSL
 adapter now supplies mixed versions for ordinary calls and lets the engine resolve
 trust. Explicit versions win; a concrete profile supplies its own version order.
 Auto tickets and explicit cipher policies retain the previous TLS1.3 context when
@@ -167,14 +174,15 @@ versions from cipher spellings; broader OTP cipher-policy parity still needs a
 separate acceptance decision. The raw SSL facade default remains TLS1.3. The runtime also
 injects send timeout/close behavior and ALPN; comparisons must use these effective
 options, not raw engine defaults. Managed policy freezes CA/client identity
-snapshots, policy hash and generation pools and currently freezes OTP backend.
+snapshots, policy hash and generation pools. It froze the OTP backend at the
+P0 baseline; current managed HTTPS H1/H2 uses ExSSL exclusively.
 It injects send_timeout, buffer, recbuf, sndbuf and send_timeout_close.
 
-Changing only the ExSSL version default also changes explicit profile and auto-ticket
-interactions. The adapter test currently expects unspecified ExSSL versions to reject
-a TLS1.2-only peer: replace that expectation deliberately while preserving an explicit
-TLS1.3-only negative. Existing candidate TLS1.2 tests supply versions explicitly and
-do not establish unspecified-default or managed behavior.
+The current adapter version-policy tests cover omitted versions against independent
+TLS1.2-only and TLS1.3-only peers, explicit versions, concrete profiles and auto-ticket
+interactions. They preserve the explicit TLS1.3-only rejection of a TLS1.2 peer.
+The P0 expectation that omitted versions reject TLS1.2 is historical; current managed
+policy and lifecycle coverage is recorded separately in the execution ledger.
 
 ## Public routes and effective policy (source-reviewed)
 
@@ -192,7 +200,7 @@ an immutable managed policy.
 | HTTP via HTTP proxy | TCP to proxy, absolute-form HTTP request, origin Host; no TLS or CONNECT | [proxy](../apps/http_core/lib/http/proxy.ex#L112); core; no origin fallback |
 | HTTPS via HTTP proxy | ExSSL prepares origin TLS policy → TCP to proxy → CONNECT origin → strict plaintext boundary → prepared TLS upgrade → H1/H2 | [CONNECT](../apps/http_core/lib/http/proxy.ex); raw phase joins provider lifecycle; invalid effective ExSSL configuration rejects before proxy or origin accepts |
 | HTTP via HTTPS proxy | TLS to proxy identity, forced http/1.1 → absolute-form HTTP | [HTTPS proxy](../apps/http_core/lib/http/proxy.ex); core/runtime; trust/client identity belong to proxy. |
-| HTTPS via HTTPS proxy | Prepare independent origin/proxy policies → TLS to proxy with http/1.1 → CONNECT → inner origin TLS → H1/H2 | OTP and ExSSL; ExSSL reserves a lifecycle pair before TCP allocation and transfers both obligations to H1/H2 pools. Local source coverage includes all four TLS1.2/TLS1.3 combinations; integrated candidate/platform evidence remains required. Managed proxy exclusion is unchanged. |
+| HTTPS via HTTPS proxy | Prepare independent origin/proxy policies → TLS to proxy with http/1.1 → CONNECT → inner origin TLS → H1/H2 | ExSSL reserves a lifecycle pair before TCP allocation and transfers both obligations to H1/H2 pools. Local source coverage includes all four TLS1.2/TLS1.3 combinations; integrated candidate/platform evidence remains required. Managed proxy exclusion is unchanged. |
 | Unix Fetch/SSE/WS H1 | Shared runtime validation rejects secure schemes before [Unix](../apps/http_core/lib/http/transport/unix.ex#L7); plain HTTP/Upgrade uses gen_tcp local-domain connections | HTTP/ws Unix supported; https/wss reject with tls_over_unix_socket_not_supported, including Fetch/SSE secure redirects; H2/H3/proxy combinations retain their rejection boundaries |
 | EventSource | [Connection](../apps/http_event_source/lib/http/event_source/connection.ex#L265) → H1 adapter worker or runtime H2/H3 relay | Backend/raw options retained across reconnect; cross-origin credentials stripped, HTTPS downgrade and client-identity redirects rejected; protocol-only H1 fallback; no supported forward-proxy plumbing |
 | WebSocket | [H1](../apps/http_web_socket/lib/http/web_socket/connection.ex#L463) connects/validates Upgrade before acknowledged transfer; [H2](../apps/http_web_socket/lib/http/web_socket/connection.ex#L420) uses runtime extended CONNECT | Provider/options/deadline retained; one capability-only H1 fallback; no authentication fallback, redirect/reconnect or H3; mode:proxy means frame forwarding, not HTTP proxy routing |
@@ -873,6 +881,77 @@ remain historical targets for that TODO; they do not block the current migration
 and have not passed. Functional cancellation deadlines, bounded buffers, and
 truthful resource cleanup remain mandatory throughout migration and release.
 
+### Running current TLS tooling
+
+Run these bounded benchmarks from the umbrella root. Default client workloads use
+ExSSL; `ssl:` options and public `SSL` calls remain valid:
+
+```bash
+MIX_ENV=prod mix run scripts/tls_migration_benchmark.exs
+MIX_ENV=prod mix run apps/ex_ssl/scripts/resumption_benchmark.exs
+MIX_ENV=prod mix run apps/ex_ssl/scripts/resumption_benchmark.exs --otp-reference
+```
+
+The last command explicitly adds the raw OTP differential reference. It reports
+both implementations' full and resumed handshakes against the independent peer;
+it does not restore OTP as an HTTP backend. H1 output uses
+`http-fetch-tls-benchmark-v2`; committed P0 measurements retain their original
+`http-fetch-tls-p0-v1` schema and historical source identities.
+
+The performance driver uses `http-fetch-tls-p4-v2` and preserves per-arm source,
+build and compiled-module identities. Prepare its independent peers and obtain
+the current source digest immediately before running:
+
+```bash
+uv venv /tmp/http-fetch-tls-peer-python
+uv pip install --python /tmp/http-fetch-tls-peer-python/bin/python \
+  --requirement scripts/requirements-http2-stream-clients.txt
+TLS_PERF_SHA=$(python3 scripts/tls_migration_performance.py fingerprint | \
+  python3 -c 'import json, sys; print(json.load(sys.stdin)["sha256"])')
+python3 scripts/tls_migration_performance.py run --smoke \
+  --candidate-sha256 "$TLS_PERF_SHA" \
+  --python /tmp/http-fetch-tls-peer-python/bin/python \
+  --output /tmp/http-fetch-tls-candidate-smoke
+```
+
+Each output directory must be new. Candidate smoke runs 24 bounded cells: H1/H2
+and TLS1.2/TLS1.3 across cold, reused, upload, download and blocked-output
+cancellation workloads, plus four five-second reuse soaks. Ten measured exchanges
+follow three warmups in each measurement cell. Peer observations, payloads,
+completion, retirement and artifact identities must validate before the driver
+returns diagnostic `INCOMPLETE` with exit 2. Missing or failed functional evidence
+returns `FAIL` with exit 1. Smoke does not create a promotion acceptance artifact
+or establish latency, throughput or long-soak budgets.
+
+To check the separate reference route, add
+`--otp-reference-sha 1ef7a51721138d533ea30b3237da1fd96e8a8712` and use another new
+output directory. The driver exports that pre-removal source into an owned
+directory and builds it separately. OTP-before and OTP-after run only its archived
+runner in separate BEAM processes; candidate arms run the current ExSSL-only
+source. Successful reference smoke requires all 24 cells and all 72 diagnostic arms
+to validate.
+No checkout switch, branch or worktree is required. Source/build hashes differ
+between implementations and are checked against their own build receipts;
+host/runtime, peer, effective verification, cipher policy and payload must match.
+Current-source workloads never select the retired OTP HTTP adapter.
+
+The pinned archive retains the admission race tracked in
+[#151](https://github.com/gsmlg-dev/http_fetch/issues/151). Fixing the current
+candidate does not modify that historical source. Reference smoke remains
+unverified until every arm passes; preserve any failure rather than patching the
+archive, retrying requests or adding admission waits. Actual run outcomes are
+recorded in the [tooling execution results](superpowers/plans/2026-11-04-otp-ssl-tooling-docs-cleanup.md#follow-up--2026-11-05).
+
+The full comparative command requires `--otp-reference-sha` and omits `--smoke`.
+Its sample counts, trials, 30-minute soaks, reference drift checks and budgets
+below remain mandatory for performance acceptance. Those full measurements are
+still deferred. Mix/Hex may start OTP SSL before the script runs; default
+workloads record its loaded/started state and require that state to stay unchanged.
+These source VM observations are separate from the isolated release gate proving
+OTP SSL modules are unavailable.
+
+### Historical comparative budgets
+
 The measured H1 diagnostic baseline and full samples are recorded in
 [tls-migration-validation.md](tls-migration-validation.md) and
 [tls-migration-p0-http-baseline.json](tls-migration-p0-http-baseline.json). They do not
@@ -907,5 +986,6 @@ unconfirmed; they are separate negative tests, not samples relabeled as successf
 cleanup. Global VM counts and memory observations complement provider receipts;
 they cannot replace them. No forced global GC may manufacture an ordinary cleanup
 pass. TLS1.2/resumption/H2/managed/other supported runtimes, soak measurements and
-stable tails remain unexecuted. The current 30-sample H1 script is a diagnostic
-baseline, not the full P5 load/soak validator. No performance acceptance is claimed.
+stable tails remain unexecuted. The bounded 30-sample H1 benchmark and functional
+smoke are diagnostics; neither completes the full comparative load/soak validator.
+No performance acceptance is claimed.

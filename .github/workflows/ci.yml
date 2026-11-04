@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches: ["**"]
-    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
+    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/tls_migration_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
   pull_request:
     branches: [main]
-    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
+    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/tls_migration_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
 
   workflow_dispatch:
     inputs:
@@ -102,6 +102,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Check TLS tooling regressions
+        run: |
+          python3 scripts/tls_migration_performance_test.py
+          python3 -m unittest discover -s scripts/ci -p 'test_tls_benchmark_routing.py' -v
       - name: Check root formatting and automation regressions
         if: needs.changes.outputs.full_gate == 'true'
         run: |

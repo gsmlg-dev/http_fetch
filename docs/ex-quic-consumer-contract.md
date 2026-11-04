@@ -47,9 +47,9 @@ and [testing requirements](quic/testing.md).
 
 `ex_ssl` implements TLS through its own engine with OTP crypto and public-key
 primitives. It does not use OTP `:ssl` to perform production TLS handshakes.
-The shared TCP clients still default to OTP `:ssl`; selecting ex_ssl for TCP
-does not change the QUIC TLS path. A non-`nil` TCP `tls_backend` supplied to
-the QUIC API is rejected explicitly.
+The shared TCP clients use ExSSL by default and reject legacy `:ssl` selections.
+Selecting ExSSL for TCP does not change the QUIC TLS path. A non-`nil` TCP
+`tls_backend` supplied to the QUIC API is rejected explicitly.
 
 ## Application and selector boundary
 
