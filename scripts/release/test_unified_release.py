@@ -73,6 +73,9 @@ class UnifiedReleaseTests(unittest.TestCase):
                 self.assertEqual(rebuild.call_count, 3)
                 self.assertEqual([call.args[0] for call in remote.call_args_list], [
                     ["mix", "deps.get", "--only", "prod"], ["mix", "hex.publish", "package", "--yes"]])
+                self.assertTrue(all(call.kwargs["env"]["MIX_ENV"] == "prod"
+                                    for call in remote.call_args_list))
+                self.assertEqual(rebuild.call_args.kwargs["env"]["MIX_ENV"], "prod")
 
     def test_native_identity_uses_exact_unified_tag_and_clean_checkout(self):
         with patch.object(server_packages.subprocess, "check_output", side_effect=["a" * 40, "a" * 40, ""]) as git, \

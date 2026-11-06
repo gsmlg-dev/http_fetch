@@ -121,11 +121,14 @@ def publish(group, stage, archives, versions):
     verify_rebuild(stage, version, archives, tuple(versions))
     statuses = {package: release_status(package, value, archives / f"{package}-{value}.tar")
                 for package, value in versions.items()}
+    publication_env = {**os.environ, "MIX_ENV": "prod"}
     for package, value in versions.items():
         if statuses[package] == "missing":
-            subprocess.run(["mix", "deps.get", "--only", "prod"], cwd=stage / package, check=True)
-            verify_rebuild(stage, value, archives, (package,))
-            subprocess.run(["mix", "hex.publish", "package", "--yes"], cwd=stage / package, check=True)
+            subprocess.run(["mix", "deps.get", "--only", "prod"], cwd=stage / package,
+                           env=publication_env, check=True)
+            verify_rebuild(stage, value, archives, (package,), env=publication_env)
+            subprocess.run(["mix", "hex.publish", "package", "--yes"], cwd=stage / package,
+                           env=publication_env, check=True)
         if release_status(package, value, archives / f"{package}-{value}.tar") != "matching":
             raise RuntimeError(f"published package verification failed: {package}")
 

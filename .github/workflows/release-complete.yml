@@ -159,6 +159,7 @@ jobs:
       - name: Publish native package after verified Abyss publication
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+          MIX_ENV: prod
         run: python3 scripts/release/server_packages.py publish native --version "$RELEASE_VERSION" --stage "$RUNNER_TEMP/stage" --archives "$RUNNER_TEMP/archives"
       - name: Verify published native Hex consumer and loaded NIF
         run: python3 scripts/release/native_consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
