@@ -71,7 +71,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {app: abyss, elixir: '1.13', otp: '24', mode: udp}
+          - {app: abyss, elixir: '1.18', otp: '27', mode: udp}
           - {app: hell, elixir: '1.18', otp: '26', mode: hell}
     steps:
       - uses: actions/checkout@v4
@@ -137,14 +137,14 @@ jobs:
       - run: python3 apps/abyss/scripts/udp/network_fixture.py
 
   raw:
-    name: Optional abyss_raw Linux native package
+    name: Optional abyss_raw Linux native package / minimum OTP 27
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.18'
-          otp-version: '28'
+          otp-version: '27'
       - uses: dtolnay/rust-toolchain@stable
       - name: Build and check native package independently
         working-directory: packages/abyss_raw

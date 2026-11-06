@@ -1,19 +1,21 @@
-# Abyss Raw 0.10.0
+# Abyss Raw
 
 This independent OTP package owns the Rustler build and native artifact for interface-bound DHCP client UDP and raw ARP. It does not depend on Abyss or start a socket/poll thread at application startup. `AbyssDhcpSocket.Native` implements the five native operations; existing callers use the pure Elixir `Abyss.DhcpSocket.Native` facade supplied by Abyss.
+
+Requires Elixir 1.18 or later and Erlang/OTP 27 or later.
 
 DHCP users must explicitly install the optional Hex package when upgrading Abyss:
 
 ```elixir
 defp deps do
   [
-    {:abyss, "~> 0.10.0"},
-    {:abyss_raw, "~> 0.10.0"}
+    {:abyss, "== 1.0.0-rc.4"},
+    {:abyss_raw, "== 1.0.0-rc.4"}
   ]
 end
 ```
 
-The package is also usable independently with only `{:abyss_raw, "~> 0.10.0"}` and direct calls to `AbyssDhcpSocket.Native`. It has no dependency on Abyss. The implementation module `AbyssDhcpSocket.Native`, Rust crate `dhcp_socket`, and NIF registration retain their existing names for compatibility, including with the facade in Abyss 0.8.1. No `abyss_dhcp_socket` Hex dependency is needed.
+The package is also usable independently with only `{:abyss_raw, "== 1.0.0-rc.4"}` and direct calls to `AbyssDhcpSocket.Native`. It has no dependency on Abyss. The implementation module `AbyssDhcpSocket.Native`, Rust crate `dhcp_socket`, and NIF registration retain their existing names for compatibility, including with the facade in Abyss 0.8.1. No `abyss_dhcp_socket` Hex dependency is needed.
 
 Build from source with Elixir/Mix, Cargo/Rust, and a native linker. There are no precompiled NIF downloads; installing the package requires the native toolchain. The crate and Cargo.lock are preserved from Abyss. Its shared library belongs to `:abyss_raw` under `priv/native/dhcp_socket`, never the core application. The package does not ship `Abyss.DhcpSocket.Native` or require a dependency cycle.
 

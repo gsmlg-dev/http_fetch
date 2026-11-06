@@ -236,12 +236,14 @@ afterward. Remote platform verification remains necessary.
 
 ## Remaining limitations
 
-`abyss` and `abyss_raw` retain Elixir `~> 1.13`; Hell retains `>= 1.18.0`.
-Only Elixir 1.18.5 / OTP 28 was available locally. The raw source lock already
-selects Rustler 0.38.0, whose manifest requires Elixir `~> 1.15`. Thus the locked
-native build does not establish raw's advertised 1.13 minimum. No minimum was
-silently raised; this pre-existing constraint requires a separate version-policy
-choice or actual compatible Rustler validation.
+For the unified 1.0 RC, the approved minimum for `abyss` and `abyss_raw` is
+Elixir `~> 1.18` with Erlang/OTP 27 or later; Hell retains `>= 1.18.0`.
+The first remote minimum-version consumer reached actual UDP traffic after the
+rebar3 repair, but OTP 24 rejected the default socket options. The imported raw
+lock also selects Rustler 0.38.0, which already requires Elixir `~> 1.15`.
+The former 1.13 declaration is therefore retired explicitly. CI checks the
+Abyss consumer and native package at Elixir 1.18 / OTP 27. The independent UDP
+macOS job uses macOS 26 because GitHub retired macOS 14 on 2026-11-02.
 
 Current-engine QUIC gates pass, but worker teardown can log
 `event_poll_failed` with `:closed`/unknown references or `read_failed` with

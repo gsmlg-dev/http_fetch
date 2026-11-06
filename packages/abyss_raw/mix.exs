@@ -8,7 +8,7 @@ defmodule AbyssRaw.MixProject do
       app: :abyss_raw,
       version: @version,
       name: "Abyss Raw",
-      elixir: "~> 1.13",
+      elixir: "~> 1.18",
       description: "Optional interface-bound DHCP and raw ARP sockets for Abyss",
       deps: [
         {:rustler, "~> 0.34", runtime: false},

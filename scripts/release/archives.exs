@@ -39,7 +39,7 @@ defmodule ReleaseArchives do
         unless Enum.sort(Map.keys(requirements)) == expected,
           do: raise("unexpected server dependencies in #{package}")
 
-        minimum = if package == "abyss", do: "~> 1.13", else: ">= 1.18.0"
+        minimum = if package == "abyss", do: "~> 1.18", else: ">= 1.18.0"
 
         unless metadata["elixir"] == minimum,
           do: raise("changed Elixir minimum for #{package}")

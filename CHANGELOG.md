@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timeout directly, and preserve legacy rebar3 installations in cold consumers.
 
 ### Changed
+- Require Elixir 1.18 and Erlang/OTP 27 or later for Abyss and abyss_raw;
+  retire their unsupported imported minimum and validate both at the new floor.
 - Coordinate Abyss, Hell and abyss_raw with the HTTP family at one RC/stable
   version. Publish eleven portable packages through the unified release and
   publish abyss_raw asynchronously after verified Abyss publication, with

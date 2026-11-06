@@ -23,7 +23,7 @@ for {package, %{"version" => version, "archive" => archive}} <- packages do
   unless requirements == expected,
     do: raise("unexpected #{package} dependencies: #{inspect(requirements)}")
 
-  minimum = if package == "hell", do: ">= 1.18.0", else: "~> 1.13"
+  minimum = if package == "hell", do: ">= 1.18.0", else: "~> 1.18"
   unless metadata["elixir"] == minimum, do: raise("changed Elixir minimum for #{package}")
 end
 

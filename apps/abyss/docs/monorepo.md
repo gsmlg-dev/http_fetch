@@ -8,11 +8,11 @@ copyright remain in `LICENSE`. The raw package from the same commit is now at
 Runtime source and supervision semantics are unchanged. The manifest shares the
 umbrella build/dependency/lock paths and uses Hex development helpers rather than
 probing sibling repository paths. ExDoc is limited to development and test to
-match shared tooling; runtime dependencies are unchanged. Both packages retain
-Elixir `~> 1.13`. The source raw lock already selected Rustler `0.38.0`, whose
-manifest requires Elixir `~> 1.15`; the locked native build therefore does not
-establish the advertised 1.13 minimum. This migration preserves that existing
-dependency constraint and reports the limitation. QUIC examples require Elixir `~> 1.18`, as before. Socket/host
+match shared tooling; runtime dependencies are unchanged. Starting with the
+unified 1.0 RC, Abyss and abyss_raw require Elixir `~> 1.18` and Erlang/OTP 27 or
+later. This replaces the imported 1.13 declaration, which the native dependency
+and default UDP socket options did not support. QUIC examples require Elixir
+`~> 1.18`, as before. Socket/host
 test suites carry integration tags to match the monorepo's separate CI gate.
 
 Run all imported tests from the umbrella root:
