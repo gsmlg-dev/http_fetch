@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0-rc.3] - 2026-11-06
 
 ### Fixed
+- Add request-local WebSocket connection addresses without changing Host or TLS
+  identity, bounded handshake metadata on Open/Error, and independent frame and
+  read-buffer receive limits across HTTP/1 and HTTP/2 (#152).
 - Return the documented timeout tuple when a finite Promise wait expires,
   preserving the active request, its eventual result and explicit cleanup
   handle (#153).

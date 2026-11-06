@@ -4,7 +4,6 @@ defmodule HTTP.WebSocket.Connection do
   use GenServer
 
   alias HTTP.ClientCompletion
-  alias HTTP.HTTP2.WireProfile
   alias HTTP.RequestLifecycle
   alias HTTP.WebSocket
   alias HTTP.WebSocket.ArrayBuffer
@@ -46,6 +45,7 @@ defmodule HTTP.WebSocket.Connection do
             parser: nil,
             protocol: "",
             extensions: "",
+            handshake: nil,
             binary_type: :blob,
             delivery: nil,
             raw_queue: :queue.new(),
@@ -108,6 +108,7 @@ defmodule HTTP.WebSocket.Connection do
       parser:
         Frame.new_parser(
           max_message_size: options.max_message_size,
+          max_frame_bytes: options.max_frame_bytes,
           max_frame_parts: options.max_frame_parts
         )
     }
@@ -344,6 +345,15 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   def handle_info(
+        {:http1_handshake, generation, worker, metadata},
+        %{generation: generation, worker: worker} = state
+      ),
+      do: {:noreply, %{state | handshake: metadata}}
+
+  def handle_info({:http1_handshake, _generation, _worker, _metadata}, state),
+    do: {:noreply, state}
+
+  def handle_info(
         {:http1_connected, generation, worker, result},
         %{generation: generation, worker: worker} = state
       ) do
@@ -500,7 +510,7 @@ defmodule HTTP.WebSocket.Connection do
            request
            | transport_options:
                Keyword.put(
-                 HTTP.Runtime.Options.transport_options(state.options),
+                 Options.transport_options(state.options),
                  :request_lifecycle,
                  state.attempt_tracker
                )
@@ -554,17 +564,17 @@ defmodule HTTP.WebSocket.Connection do
              transport,
              host,
              port,
-             [
-               ssl: http1_ssl(state),
-               socket_opts: state.options.socket_opts,
-               request_lifecycle: state.attempt_tracker
-             ],
+             state.options
+             |> Options.transport_options()
+             |> Keyword.put(:ssl, http1_ssl(state))
+             |> Keyword.put(:request_lifecycle, state.attempt_tracker),
              bounded_timeout(state.options.connect_timeout, remaining(state.opening_deadline))
            ) do
       result =
         with :ok <- transport.send(socket, request),
              {:ok, status, headers, extra} <-
                recv_handshake(transport, socket, <<>>, state.opening_deadline),
+             :ok <- report_handshake(state, parent, status, headers),
              {:ok, negotiated} <-
                Handshake.validate_response(status, headers, key, state.options.protocols) do
           send(parent, {:http1_ready, state.generation, self(), transport, socket})
@@ -605,6 +615,15 @@ defmodule HTTP.WebSocket.Connection do
        }),
        do: {:ok, HTTP.TLSBackend.transport(backend), host, port || 443}
 
+  defp report_handshake(state, parent, status, headers) do
+    send(
+      parent,
+      {:http1_handshake, state.generation, self(), Handshake.response_metadata(status, headers)}
+    )
+
+    :ok
+  end
+
   defp http1_ssl(%{uri: %{scheme: "wss"}, options: options}),
     do: Keyword.put(options.ssl, :alpn_advertised_protocols, ["http/1.1"])
 
@@ -629,13 +648,15 @@ defmodule HTTP.WebSocket.Connection do
 
     with [{":status", text}] <- pseudo,
          {status, ""} <- Integer.parse(text),
-         true <- status >= 200 or {:informational, status},
-         {:ok, negotiated} <-
-           Handshake.validate_extended_response(status, ordinary, state.options.protocols) do
-      advance(established(state, negotiated, :http2))
+         true <- status >= 200 or {:informational, status} do
+      state = %{state | handshake: Handshake.response_metadata(status, ordinary)}
+
+      case Handshake.validate_extended_response(status, ordinary, state.options.protocols) do
+        {:ok, negotiated} -> advance(established(state, negotiated, :http2))
+        {:error, reason} -> fail(state, reason)
+      end
     else
       {:informational, status} when status != 101 -> {:noreply, state}
-      {:error, reason} -> fail(state, reason)
       _ -> fail(state, :invalid_http2_status)
     end
   end
@@ -686,7 +707,7 @@ defmodule HTTP.WebSocket.Connection do
       state.fallback?
     )
 
-    emit(state, %Open{target: state.target})
+    emit(state, %Open{target: state.target, handshake: state.handshake})
 
     state = %{
       state
@@ -926,30 +947,38 @@ defmodule HTTP.WebSocket.Connection do
   defp admit_raw(state, <<>>, ref, _position), do: settle_raw(state, <<>>, ref)
 
   defp admit_raw(state, data, ref, position) do
-    if state.raw_bytes + byte_size(data) > raw_limit(state) do
-      park_terminal(state, :consumer_overloaded, 1006, "", false)
-    else
-      ref =
-        if ref && state.raw_bytes + byte_size(data) <= 1_048_576 do
-          Stream.acknowledge(elem(ref, 0), elem(ref, 1))
-          nil
-        else
-          ref
-        end
+    read_limit =
+      state.options.max_read_bytes || Options.default_read_limit(Map.from_struct(state.options))
 
-      state = %{
-        state
-        | raw_queue:
-            if(position == :front,
-              do: :queue.in_r({:binary.copy(data), ref}, state.raw_queue),
-              else: pack_raw(state.raw_queue, :binary.copy(data), ref)
-            ),
-          raw_bytes: state.raw_bytes + byte_size(data)
-      }
+    cond do
+      state.raw_bytes + byte_size(state.parser.buffer) + byte_size(data) > read_limit ->
+        state |> discard_raw(ref) |> protocol_error(1009, :read_buffer_too_big)
 
-      if :queue.len(state.raw_queue) > 128,
-        do: park_terminal(state, :consumer_overloaded, 1006, "", false),
-        else: drain_raw(state)
+      state.raw_bytes + byte_size(data) > Options.raw_limit(Map.from_struct(state.options)) ->
+        park_terminal(state, :consumer_overloaded, 1006, "", false)
+
+      true ->
+        ref =
+          if ref && state.raw_bytes + byte_size(data) <= 1_048_576 do
+            Stream.acknowledge(elem(ref, 0), elem(ref, 1))
+            nil
+          else
+            ref
+          end
+
+        state = %{
+          state
+          | raw_queue:
+              if(position == :front,
+                do: :queue.in_r({:binary.copy(data), ref}, state.raw_queue),
+                else: pack_raw(state.raw_queue, :binary.copy(data), ref)
+              ),
+            raw_bytes: state.raw_bytes + byte_size(data)
+        }
+
+        if :queue.len(state.raw_queue) > 128,
+          do: park_terminal(state, :consumer_overloaded, 1006, "", false),
+          else: drain_raw(state)
     end
   end
 
@@ -964,12 +993,6 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   defp pack_raw(queue, data, ref), do: :queue.in({data, ref}, queue)
-
-  defp raw_limit(state) do
-    profile = state.options.http2_profile || WireProfile.native_v1()
-    settings = Map.new(profile.settings)
-    1_048_576 + Map.get(settings, :initial_window_size, Map.get(settings, 4, 65_535))
-  end
 
   defp parser_capacity?(%{options: %{delivery: :legacy}}), do: true
 
@@ -1205,7 +1228,9 @@ defmodule HTTP.WebSocket.Connection do
     if require_write? and not state.close_sent? do
       {:noreply, state}
     else
-      if reason, do: emit(state, %Error{target: state.target, reason: reason})
+      if reason,
+        do: emit(state, %Error{target: state.target, reason: reason, handshake: state.handshake})
+
       {:stop, :normal, finish(state, code, text, false)}
     end
   end
@@ -1264,7 +1289,7 @@ defmodule HTTP.WebSocket.Connection do
   defp fail(state, reason) do
     stream_telemetry(state, :error, :rejected)
     Telemetry.connect_exception(state.telemetry_uri, reason, now() - state.connect_started_at)
-    emit(state, %Error{target: state.target, reason: reason})
+    emit(state, %Error{target: state.target, reason: reason, handshake: state.handshake})
     {:stop, :normal, finish(state, 1006, "", false)}
   end
 

@@ -22,6 +22,44 @@ defmodule HTTP.WebSocket do
   and fragmented messages have finite configurable limits. Established sessions
   default to `idle_timeout: :infinity`; opening and close deadlines are separate.
 
+  `connect_address: {127, 0, 0, 1}` (or an IPv6 tuple) pins this connection's
+  literal dial address. The URL still supplies Host, HTTP/2 authority, SNI and
+  certificate reference identity. DNS and alternate-address retries are disabled
+  for a pinned dial; connection failures and upgrades are never replayed. Pins
+  cannot be combined with Unix sockets or conflicting TLS identities. Protocol
+  selection with `http_version: :auto` retains its explicit H2/H1 negotiation
+  policy, with every dial using the same pin.
+
+  Open and Error events have `handshake: %{status: status, headers: headers,
+  truncated?: boolean}` once a final response head has been parsed, or nil before
+  that point. `headers` is an `HTTP.Headers` containing only `retry-after` and
+  `x-codex-websocket-max-unfragmented-message-bytes`. Each is retained only when
+  it occurs exactly once and its value is at most 1024 bytes; otherwise it is
+  omitted and `truncated?` is true. Values are copied, so this metadata retains
+  at most 2048 value bytes and no other response headers. Failed upgrades retain
+  their original Error reason. This applies to HTTP/1 and HTTP/2.
+
+  Receive limits are independent: `max_message_size` bounds each reassembled
+  message (16 MiB by default); `max_frame_bytes` bounds each frame payload
+  (defaults to the larger of the message limit and 125). Declared lengths are
+  checked before awaiting payload bytes, including continuations. A message may
+  span many bounded frames. `max_read_bytes` bounds queued raw bytes plus the
+  parser's incomplete frame and each incoming transport chunk, including bytes
+  coalesced with the upgrade. Its default is the existing raw queue allowance
+  (1 MiB plus the H2 profile's initial stream window) plus the larger of the
+  message limit and 125, plus ten header bytes. It excludes reassembled fragments
+  and delivered events, which have their own message and delivery bounds. It
+  does not bound kernel or VM transport allocations. All three options require
+  positive integers. Choose a read limit that accommodates a full frame header
+  and payload, and any coalesced frames you intend to accept.
+
+  Limit failures emit Error reasons `:frame_too_big`, `:message_too_big`, or
+  `:read_buffer_too_big`, followed by an abnormal Close with code 1009. An
+  individually declared payload above the message limit keeps the existing
+  `:message_too_big` reason; otherwise the frame bound is checked before the
+  accumulated message bound. Read admission precedes parsing. These receive
+  options do not fragment outgoing sends; send queues keep their existing bounds.
+
   Telemetry URLs omit query, userinfo, authority, and fragment by default.
   Pass `telemetry_url: nil` to omit all URL-derived telemetry metadata, or a
   URI/string containing only caller-approved fields to replace the telemetry
@@ -102,6 +140,12 @@ defmodule HTTP.WebSocket do
           ref: reference() | nil,
           url: String.t() | nil,
           completion: HTTP.ClientCompletion.t() | nil
+        }
+
+  @type handshake :: %{
+          status: non_neg_integer(),
+          headers: HTTP.Headers.t(),
+          truncated?: boolean()
         }
 
   @spec connecting() :: 0

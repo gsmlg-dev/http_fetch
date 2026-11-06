@@ -5,6 +5,24 @@ defmodule HTTP.WebSocket.FrameTest do
 
   alias HTTP.WebSocket.Frame
 
+  test "rejects an advertised oversized frame before receiving its payload" do
+    parser = Frame.new_parser(max_message_size: 1000, max_frame_bytes: 128)
+    assert {:error, {1009, :frame_too_big}} = Frame.parse(parser, <<0x81, 126, 129::16>>)
+
+    parser = Frame.new_parser(max_message_size: 100_000, max_frame_bytes: 65_536)
+    assert {:error, {1009, :frame_too_big}} = Frame.parse(parser, <<0x82, 127, 65_537::64>>)
+  end
+
+  test "frame and accumulated message limits are independent across continuations" do
+    parser = Frame.new_parser(max_message_size: 6, max_frame_bytes: 3)
+    assert {:ok, parser, []} = Frame.parse(parser, <<0x01, 3, "abc">>)
+    assert {:ok, _, [{:message, :text, "abcdef"}]} = Frame.parse(parser, <<0x80, 3, "def">>)
+    assert {:error, {1009, :frame_too_big}} = Frame.parse(parser, <<0x80, 4>>)
+
+    assert {:ok, parser, []} = Frame.parse(parser, <<0x00, 3, "def">>)
+    assert {:error, {1009, :message_too_big}} = Frame.parse(parser, <<0x80, 1>>)
+  end
+
   test "encodes masked client text frames" do
     assert {:ok, frame} = Frame.encode(:text, "hello")
     <<first, second, rest::binary>> = frame

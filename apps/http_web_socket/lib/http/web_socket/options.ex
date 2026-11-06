@@ -23,7 +23,13 @@ defmodule HTTP.WebSocket.Options do
     "ssl" => :ssl,
     "socket_opts" => :socket_opts,
     "unix_socket" => :unix_socket,
+    "connect_address" => :connect_address,
+    "connectAddress" => :connect_address,
     "max_message_size" => :max_message_size,
+    "max_frame_bytes" => :max_frame_bytes,
+    "maxFrameBytes" => :max_frame_bytes,
+    "max_read_bytes" => :max_read_bytes,
+    "maxReadBytes" => :max_read_bytes,
     "max_send_queue" => :max_send_queue,
     "max_send_frames" => :max_send_frames,
     "max_control_frames" => :max_control_frames,
@@ -56,12 +62,15 @@ defmodule HTTP.WebSocket.Options do
             socket_opts: [],
             tls_backend: :ex_ssl,
             max_message_size: @default_max_message_size,
+            max_frame_bytes: @default_max_message_size,
+            max_read_bytes: nil,
             max_send_queue: @default_max_send_queue,
             http_version: :http1,
             http2_profile: nil,
             http2_scope: nil,
             http2_reuse: true,
             unix_socket: nil,
+            connect_address: nil,
             delivery: :legacy,
             max_queue_bytes: 2 * @default_max_message_size + 7,
             max_queue_events: 64,
@@ -90,12 +99,15 @@ defmodule HTTP.WebSocket.Options do
           socket_opts: keyword(),
           tls_backend: HTTP.TLSBackend.t(),
           max_message_size: pos_integer(),
+          max_frame_bytes: pos_integer(),
+          max_read_bytes: pos_integer() | nil,
           max_send_queue: pos_integer(),
           http_version: :http1 | :http2 | :h2c | :auto,
           http2_profile: HTTP.HTTP2.WireProfile.t() | nil,
           http2_scope: atom() | binary() | nil,
           http2_reuse: boolean(),
           unix_socket: binary() | nil,
+          connect_address: :inet.ip_address() | nil,
           delivery: :legacy | :ack,
           max_queue_bytes: pos_integer(),
           max_queue_events: pos_integer(),
@@ -117,6 +129,7 @@ defmodule HTTP.WebSocket.Options do
          {:ok, init} <- normalize_init(init),
          :ok <- validate_mode(init),
          {:ok, init} <- HTTP.Runtime.Options.validate(uri, init),
+         :ok <- validate_connect_address(uri, init),
          :ok <- validate_limits(init),
          :ok <- validate_delivery_capacity(init) do
       {:ok,
@@ -136,12 +149,16 @@ defmodule HTTP.WebSocket.Options do
          socket_opts: Keyword.get(init, :socket_opts, []),
          tls_backend: Keyword.fetch!(init, :tls_backend),
          max_message_size: Keyword.get(init, :max_message_size, @default_max_message_size),
+         max_frame_bytes:
+           Keyword.get(init, :max_frame_bytes, max(valid_message_limit(init), 125)),
+         max_read_bytes: Keyword.get(init, :max_read_bytes, default_read_limit(Map.new(init))),
          max_send_queue: Keyword.get(init, :max_send_queue, @default_max_send_queue),
          http_version: Keyword.fetch!(init, :http_version),
          http2_profile: Keyword.get(init, :http2_profile),
          http2_scope: Keyword.get(init, :http2_scope),
          http2_reuse: Keyword.get(init, :http2_reuse, true),
          unix_socket: Keyword.get(init, :unix_socket),
+         connect_address: Keyword.get(init, :connect_address),
          delivery: Keyword.fetch!(init, :delivery),
          max_queue_bytes: Keyword.fetch!(init, :max_queue_bytes),
          max_queue_events: Keyword.get(init, :max_queue_events, 64),
@@ -156,6 +173,41 @@ defmodule HTTP.WebSocket.Options do
          ref: Keyword.get(init, :ref, make_ref())
        }}
     end
+  end
+
+  def transport_options(options) do
+    values = if is_struct(options), do: Map.from_struct(options), else: Map.new(options)
+    transport = HTTP.Runtime.Options.transport_options(values)
+
+    case Map.get(values, :connect_address) do
+      nil ->
+        transport
+
+      address ->
+        transport |> Keyword.put(:connect_address, address) |> Keyword.put(:redirect, :manual)
+    end
+  end
+
+  def raw_limit(options) do
+    profile = options[:http2_profile] || HTTP.HTTP2.WireProfile.native_v1()
+    settings = Map.new(profile.settings)
+    1_048_576 + Map.get(settings, :initial_window_size, Map.get(settings, 4, 65_535))
+  end
+
+  def default_read_limit(options),
+    do:
+      raw_limit(options) +
+        max(Map.get(options, :max_message_size, @default_max_message_size), 125) + 10
+
+  defp validate_connect_address(uri, init) do
+    request = %HTTP.Request{
+      url: HTTP.Runtime.Options.origin_uri(uri),
+      transport_options: transport_options(init)
+    }
+
+    with {:ok, _transport, _host, _port} <-
+           HTTP.Runtime.Dialer.select_transport(request, init[:unix_socket]),
+         do: :ok
   end
 
   defp normalize_url(%URI{} = uri), do: normalize_uri(uri)
@@ -277,6 +329,7 @@ defmodule HTTP.WebSocket.Options do
        |> Keyword.put(:ssl, ssl)
        |> Keyword.put(:socket_opts, socket_opts)
        |> Keyword.put(:tls_backend, tls_backend)
+       |> Keyword.put(:connect_address, Keyword.get(init, :connect_address))
        |> Keyword.put(:telemetry_url, telemetry_url)
        |> Keyword.put_new(:max_queue_bytes, 2 * delivery_message_limit(init) + 7)}
     end
@@ -350,6 +403,8 @@ defmodule HTTP.WebSocket.Options do
   defp validate_limits(init) do
     limits = [
       max_message_size: @default_max_message_size,
+      max_frame_bytes: @default_max_message_size,
+      max_read_bytes: 1,
       max_send_queue: @default_max_send_queue,
       max_send_frames: 64,
       write_timeout: 5_000,

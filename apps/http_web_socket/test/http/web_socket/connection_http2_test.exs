@@ -6,6 +6,84 @@ defmodule HTTP.WebSocket.ConnectionHTTP2Test do
   alias HTTP.WebSocket.Event.{Open, Message, Close, Error}
   @preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
+  test "a pinned extended CONNECT exposes bounded response metadata and frame limits" do
+    {url, _peer} =
+      peer(fn socket ->
+        {id, 4} = request(socket)
+
+        headers =
+          HTTP.HTTP2.HPACK.encode_headers([
+            {":status", "200"},
+            {"x-codex-websocket-max-unfragmented-message-bytes", "4"},
+            {"set-cookie", "secret"}
+          ])
+          |> IO.iodata_to_binary()
+
+        :ok = :gen_tcp.send(socket, [frame(1, 4, id, headers), frame(0, 0, id, <<0x81, 5>>)])
+        assert {8, <<1009::16, "frame_too_big">>} = websocket_frame(socket, id)
+      end)
+
+    uri = %{URI.parse(url) | host: "unresolvable.invalid"}
+
+    ws =
+      websocket(uri,
+        connect_address: {127, 0, 0, 1},
+        max_message_size: 64,
+        max_frame_bytes: 4
+      )
+
+    assert_receive {WebSocket, ^ws, %Open{} = event}, 5_000
+    assert %{handshake: %{status: 200, headers: headers, truncated?: false}} = event
+    assert headers.headers == [{"x-codex-websocket-max-unfragmented-message-bytes", "4"}]
+    assert_receive {WebSocket, ^ws, %Error{reason: :frame_too_big}}, 5_000
+    assert_receive {WebSocket, ^ws, %Close{code: 1009}}, 5_000
+    assert :ok = HTTP.ClientCompletion.await(WebSocket.completion(ws), 5_000)
+  end
+
+  test "a rejected extended CONNECT retains selected failure metadata" do
+    {url, _peer} =
+      peer(fn socket ->
+        {id, 4} = request(socket)
+
+        headers =
+          HTTP.HTTP2.HPACK.encode_headers([
+            {":status", "429"},
+            {"retry-after", "10"},
+            {"set-cookie", "secret"}
+          ])
+          |> IO.iodata_to_binary()
+
+        :ok = :gen_tcp.send(socket, frame(1, 5, id, headers))
+      end)
+
+    ws = websocket(url)
+    assert_receive {WebSocket, ^ws, %Error{reason: {:unexpected_status, 429}} = event}, 5_000
+    assert %{handshake: %{status: 429, headers: headers, truncated?: false}} = event
+    assert headers.headers == [{"retry-after", "10"}]
+    assert :ok = HTTP.ClientCompletion.await(WebSocket.completion(ws), 5_000)
+  end
+
+  test "extended CONNECT applies the independent read limit to DATA and settles cleanup" do
+    {url, _peer} =
+      peer(fn socket ->
+        {id, 4} = request(socket)
+
+        :ok =
+          :gen_tcp.send(socket, [
+            frame(1, 4, id, <<0x88>>),
+            frame(0, 0, id, <<0x81, 8, "12345678">>)
+          ])
+
+        assert {8, <<1009::16, "read_buffer_too_big">>} = websocket_frame(socket, id)
+      end)
+
+    ws = websocket(url, max_message_size: 64, max_frame_bytes: 64, max_read_bytes: 8)
+    assert_receive {WebSocket, ^ws, %Open{}}, 5_000
+    assert_receive {WebSocket, ^ws, %Error{reason: :read_buffer_too_big}}, 5_000
+    assert_receive {WebSocket, ^ws, %Close{code: 1009}}, 5_000
+    assert :ok = HTTP.ClientCompletion.await(WebSocket.completion(ws), 5_000)
+  end
+
   test "2xx opens a duplex masked WebSocket, ACK delivery and close half-close are ordered" do
     parent = self()
 

@@ -4,6 +4,30 @@ defmodule HTTP.WebSocket.Handshake do
   @guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
   @max_head_bytes 64 * 1024
   @required_headers ~w(host upgrade connection sec-websocket-key sec-websocket-version)
+  @metadata_headers ~w(retry-after x-codex-websocket-max-unfragmented-message-bytes)
+  @max_metadata_value_bytes 1024
+
+  @spec response_metadata(non_neg_integer(), HTTP.Headers.t() | list()) ::
+          HTTP.WebSocket.handshake()
+  def response_metadata(status, headers) do
+    headers = to_headers(headers)
+
+    {selected, truncated?} =
+      Enum.reduce(@metadata_headers, {[], false}, fn name, {selected, truncated?} ->
+        case HTTP.Headers.get_all(headers, name) do
+          [] ->
+            {selected, truncated?}
+
+          [value] when byte_size(value) <= @max_metadata_value_bytes ->
+            {[{name, :binary.copy(value)} | selected], truncated?}
+
+          _ ->
+            {selected, true}
+        end
+      end)
+
+    %{status: status, headers: HTTP.Headers.new(Enum.reverse(selected)), truncated?: truncated?}
+  end
 
   @spec build_request(URI.t(), [String.t()], [{String.t(), String.t()}], String.t()) ::
           {:ok, binary()}

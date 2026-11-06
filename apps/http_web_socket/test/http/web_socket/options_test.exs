@@ -3,6 +3,62 @@ defmodule HTTP.WebSocket.OptionsTest do
 
   alias HTTP.WebSocket.Options
 
+  test "normalizes literal connection addresses and independent receive limits" do
+    assert {:ok, options} =
+             Options.new("ws://example.test/socket", [], %{
+               "connectAddress" => {127, 0, 0, 1},
+               "maxFrameBytes" => 128,
+               "maxReadBytes" => 256,
+               "maxMessageSize" => 1024
+             })
+
+    assert %{connect_address: {127, 0, 0, 1}, max_frame_bytes: 128, max_read_bytes: 256} =
+             options
+
+    for key <- [:max_frame_bytes, :max_read_bytes], value <- [0, -1, :infinity, nil] do
+      assert {:error, {:invalid_option, ^key}} =
+               Options.new("ws://example.test/socket", [], [{key, value}])
+    end
+  end
+
+  test "connection address validation retains the URL TLS identity and route contract" do
+    assert {:error, :invalid_connect_address} =
+             Options.new("ws://example.test/socket", [], connect_address: "127.0.0.1")
+
+    assert {:error, :connect_address_unsupported_route} =
+             Options.new("ws://example.test/socket", [],
+               connect_address: {127, 0, 0, 1},
+               unix_socket: "/unused-websocket.sock"
+             )
+
+    assert {:error, :connect_address_sni_conflict} =
+             Options.new("wss://example.test/socket", [],
+               connect_address: {127, 0, 0, 1},
+               ssl: [server_name_indication: ~c"other.test"]
+             )
+
+    assert {:error, :connect_address_identity_conflict} =
+             Options.new("wss://example.test/socket", [],
+               connect_address: {127, 0, 0, 1},
+               ssl: [ex_ssl: [reference_identity: {:dns_id, "other.test"}]]
+             )
+  end
+
+  test "pin validation uses the same first keyword values captured by the connection" do
+    assert {:error, :connect_address_sni_conflict} =
+             Options.new("wss://example.test/socket", [], [
+               {:connect_address, {127, 0, 0, 1}},
+               {:ssl, [server_name_indication: ~c"other.test"]},
+               {:ssl, []}
+             ])
+
+    assert {:error, :invalid_connect_address} =
+             Options.new("ws://example.test/socket", [], [
+               {:connect_address, "127.0.0.1"},
+               {:connect_address, {127, 0, 0, 1}}
+             ])
+  end
+
   test "proxy endpoints reject independently of frame-forwarding mode" do
     for mode <- [:browser, :proxy],
         init <- [

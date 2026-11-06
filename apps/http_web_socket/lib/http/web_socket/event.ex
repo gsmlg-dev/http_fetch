@@ -3,9 +3,13 @@ defmodule HTTP.WebSocket.Event.Open do
   Browser-compatible WebSocket open event.
   """
 
-  defstruct target: nil, type: "open"
+  defstruct target: nil, type: "open", handshake: nil
 
-  @type t :: %__MODULE__{target: HTTP.WebSocket.t() | nil, type: String.t()}
+  @type t :: %__MODULE__{
+          target: HTTP.WebSocket.t() | nil,
+          type: String.t(),
+          handshake: HTTP.WebSocket.handshake() | nil
+        }
 end
 
 defmodule HTTP.WebSocket.Event.Message do
@@ -28,12 +32,13 @@ defmodule HTTP.WebSocket.Event.Error do
   Browser-compatible WebSocket error event.
   """
 
-  defstruct target: nil, type: "error", reason: nil
+  defstruct target: nil, type: "error", reason: nil, handshake: nil
 
   @type t :: %__MODULE__{
           target: HTTP.WebSocket.t() | nil,
           type: String.t(),
-          reason: term()
+          reason: term(),
+          handshake: HTTP.WebSocket.handshake() | nil
         }
 end
 

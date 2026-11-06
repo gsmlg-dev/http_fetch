@@ -18,6 +18,7 @@ defmodule HTTP.WebSocket.Frame do
             fragmented_size: 0,
             fragmented_parts: 0,
             max_frame_parts: 16_384,
+            max_frame_bytes: @default_max_message_size,
             max_message_size: @default_max_message_size
 
   @type opcode :: :text | :binary | :close | :ping | :pong
@@ -32,6 +33,12 @@ defmodule HTTP.WebSocket.Frame do
   def new_parser(opts \\ []) do
     %__MODULE__{
       max_message_size: Keyword.get(opts, :max_message_size, @default_max_message_size),
+      max_frame_bytes:
+        Keyword.get(
+          opts,
+          :max_frame_bytes,
+          max(Keyword.get(opts, :max_message_size, @default_max_message_size), 125)
+        ),
       max_frame_parts: Keyword.get(opts, :max_frame_parts, 16_384)
     }
   end
@@ -208,14 +215,24 @@ defmodule HTTP.WebSocket.Frame do
 
   defp validate_frame_sequence(_parser, _opcode, _fin?), do: :ok
 
-  defp validate_declared_size(_parser, opcode, length) when opcode in [@close, @ping, @pong] do
-    if length <= 125, do: :ok, else: {:error, {1002, :control_payload_too_large}}
+  defp validate_declared_size(parser, opcode, length) when opcode in [@close, @ping, @pong] do
+    if length <= 125,
+      do: validate_frame_size(parser, length),
+      else: {:error, {1002, :control_payload_too_large}}
   end
 
-  defp validate_declared_size(parser, @continuation, length),
-    do: validate_size(parser, parser.fragmented_size + length)
+  defp validate_declared_size(parser, @continuation, length) do
+    with :ok <- validate_declared_size(parser, @binary, length),
+         do: validate_size(parser, parser.fragmented_size + length)
+  end
 
-  defp validate_declared_size(parser, _opcode, length), do: validate_size(parser, length)
+  defp validate_declared_size(parser, _opcode, length) do
+    with :ok <- validate_size(parser, length), do: validate_frame_size(parser, length)
+  end
+
+  defp validate_frame_size(parser, length) do
+    if length <= parser.max_frame_bytes, do: :ok, else: {:error, {1009, :frame_too_big}}
+  end
 
   defp take_length(length, rest) when length <= 125, do: {:ok, length, rest}
 
