@@ -74,11 +74,22 @@ defmodule HTTP.Promise do
     - `%HTTP.Response{}` on successful completion.
     - `{:error, reason}` if the request fails or is aborted.
     - `{:error, :timeout}` if the timeout is reached.
+
+  The wait timeout is independent of the request's `timeout:` option. Expiring
+  a wait does not cancel the request or confirm cleanup, and the same promise
+  can be awaited again. To cancel and confirm supported request cleanup, retain
+  the original handle from `completion/1` and use
+  `HTTP.RequestCompletion.abort_and_await/2`. Other task exits still exit the
+  caller.
   """
   @spec await(t(), timeout :: non_neg_integer() | :infinity) ::
           HTTP.Response.t() | {:error, term()}
   def await(%__MODULE__{task: task}, timeout \\ :infinity) do
-    Task.await(task, timeout)
+    case Task.yield(task, timeout) do
+      {:ok, result} -> result
+      nil -> {:error, :timeout}
+      {:exit, reason} -> exit({reason, {Task, :await, [task, timeout]}})
+    end
   end
 
   @doc """

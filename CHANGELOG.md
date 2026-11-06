@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.3] - 2026-11-06
+
+### Fixed
+- Return the documented timeout tuple when a finite Promise wait expires,
+  preserving the active request, its eventual result and explicit cleanup
+  handle (#153).
+
 ## [1.0.0-rc.2] - 2026-11-05
 
 ### Fixed
