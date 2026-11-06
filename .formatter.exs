@@ -1,5 +1,10 @@
 # Used by "mix format"
 [
-  inputs: ["{mix,.formatter}.exs", "config/**/*.exs", "scripts/*.exs"],
-  subdirectories: ["apps/*"]
+  inputs: [
+    "{mix,.formatter}.exs",
+    "config/**/*.exs",
+    "scripts/*.exs",
+    "scripts/release/server_archives.exs"
+  ],
+  subdirectories: ["apps/*", "packages/abyss_raw"]
 ]

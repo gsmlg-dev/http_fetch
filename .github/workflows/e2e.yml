@@ -3,10 +3,10 @@ name: E2E
 on:
   push:
     branches: [main]
-    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
+    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
   pull_request:
     branches: [main]
-    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
+    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
   workflow_dispatch: {}
 
 permissions:
@@ -75,6 +75,25 @@ jobs:
           uv venv --clear _build/ex_ssl-quic-py --python 3.12
           uv pip install --python _build/ex_ssl-quic-py/bin/python -r apps/ex_ssl/e2e/quic_tls/requirements.txt
           QUIC_TLS_PYTHON="$PWD/_build/ex_ssl-quic-py/bin/python" mix run apps/ex_ssl/e2e/quic_tls/run.exs
+
+      - name: Prepare packaged server E2E consumers
+        if: matrix.app == 'abyss' || matrix.app == 'hell'
+        uses: astral-sh/setup-uv@v5
+
+      - name: Verify independent server Hex candidates
+        if: matrix.app == 'abyss' || matrix.app == 'hell'
+        run: |
+          python3 scripts/release/server_packages.py build "$HTTP_FETCH_CI_APP" --stage "$RUNNER_TEMP/server-stage" --archives "$RUNNER_TEMP/server-archives"
+          if [[ "$HTTP_FETCH_CI_APP" == abyss ]]; then
+            version=$(python3 -c 'import sys; sys.path.insert(0, "scripts/release"); from stage import source_version; print(source_version("apps/elixir_quic"))')
+            for package in ex_ssl elixir_quic; do
+              python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/server-stage" "$RUNNER_TEMP/server-archives" --package "$package"
+            done
+            python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/server-archives" --mode udp
+            python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/server-archives" --mode quic
+          else
+            python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/server-archives" --mode hell
+          fi
 
       - name: Build pinned Caddy fingerprint fixture
         if: matrix.app == 'ex_ssl'

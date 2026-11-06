@@ -46,7 +46,7 @@ class SelectionTest(unittest.TestCase):
                 self.assertTrue(changed_apps.candidate_tls_required([path]))
                 for workflow in WORKFLOWS:
                     self.assertEqual(select_apps([path], workflow),
-                                     ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS])
+                                     ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"])
         self.assertFalse(changed_apps.candidate_tls_required(["docs/tls-migration-plan.md"]))
         self.assertEqual(select_apps(["docs/tls-migration-plan.md"], "ci.yml"), [])
 
@@ -68,8 +68,8 @@ class SelectionTest(unittest.TestCase):
         graph = dependency_graph()
         self.assertEqual(graph["http_fetch"], {"http_core", "http_runtime"})
         affected = {
-            "ex_ssl": ["ex_ssl", "elixir_quic", "elixir_quic_http3", *H2_CONSUMERS],
-            "elixir_quic": ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS],
+            "ex_ssl": ["ex_ssl", "elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss"],
+            "elixir_quic": ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss"],
             "http_core": ["http_core", "elixir_quic_http3", *H2_CONSUMERS],
             "http_runtime": ["http_runtime", *H2_CONSUMERS],
             "elixir_quic_http3": ["elixir_quic_http3", *H2_CONSUMERS],
@@ -89,10 +89,10 @@ class SelectionTest(unittest.TestCase):
                      "scripts/ex_ssl_source_smoke.sh", ".github/workflows/changes.yml"):
             for workflow in WORKFLOWS:
                 self.assertEqual(select_apps([path], workflow),
-                                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS])
+                                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"])
         for workflow in WORKFLOWS:
             self.assertEqual(select_apps([f".github/workflows/{workflow}"], workflow),
-                             ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS])
+                             ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"])
 
     def test_candidate_tls_covers_app_code_tests_manifests_and_direct_harnesses(self):
         for app in ALL:
@@ -219,14 +219,14 @@ class SelectionTest(unittest.TestCase):
             check(base, "HEAD", ["ex_ssl"])
             for path, expected in (
                 ("apps/ex_ssl/test/policy_test.exs",
-                 ["ex_ssl", "elixir_quic", "elixir_quic_http3", *H2_CONSUMERS]),
+                 ["ex_ssl", "elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss"]),
                 ("apps/http_fetch/mix.exs", ["http_fetch"]),
                 ("scripts/ex_ssl_options_test.exs",
-                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS]),
+                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"]),
                 ("scripts/external_consumer_smoke.exs",
-                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS]),
+                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"]),
                 ("scripts/http3/public_gate.py",
-                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS]),
+                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"]),
             ):
                 base = git("rev-parse", "HEAD")
                 write(path, "candidate harness or app source")

@@ -7,6 +7,8 @@ defmodule AppClosuresTest do
   use ExUnit.Case
 
   @closures %{
+    "abyss" => [:abyss],
+    "hell" => [:hell],
     "ex_ssl" => ~w(ex_ssl)a,
     "elixir_quic" => ~w(ex_ssl elixir_quic)a,
     "http_core" => ~w(ex_ssl elixir_quic http_core)a,

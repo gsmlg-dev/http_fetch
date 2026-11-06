@@ -7,7 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is an Elixir umbrella providing a browser-like HTTP fetch API, shared HTTP
 protocol clients, and experimental TLS/QUIC packages. TCP sockets use Erlang's
 `:gen_tcp`; TCP TLS and the imported QUIC stack use the independent `ex_ssl`
-TLS engine. Legacy OTP `:ssl` backend selections are rejected.
+TLS engine. Legacy OTP `:ssl` backend selections are rejected for HTTP clients.
+Hell's server TLS transport retains OTP `:ssl`. Abyss supplies UDP and explicit
+QUIC servers; the optional `packages/abyss_raw` native package is independently
+built and is not part of the umbrella.
 
 ## Core Architecture
 
@@ -31,12 +34,16 @@ TLS engine. Legacy OTP `:ssl` backend selections are rejected.
 - Shared HTTP primitives live in `apps/http_core`; pooled HTTP/2 and HTTP/3 connection
   ownership and stream I/O live in `apps/http_runtime`. Fetch, EventSource and
   WebSocket depend on both shared applications instead of each other.
-- The umbrella contains nine packages: `ex_ssl`, `elixir_quic`, `http_core`,
+- The original coordinated group contains nine packages: `ex_ssl`, `elixir_quic`, `http_core`,
   `http_runtime`, `elixir_quic_http3`, `http_fetch`, `http_web_socket`,
   `http_event_source`, and `http_web_transport`. The three TLS/QUIC sources were
   imported from `gsmlg-dev/ex_quic@14974913390e12d03a78a2903d18e55a04fa89d6`;
   see [migration provenance](docs/migration-provenance.md).
-- Package dependencies retain exact coordinated version requirements with
+- The umbrella also contains `apps/abyss` and `apps/hell`, preserving their own
+  versions and APIs. `abyss_raw` remains an independent package outside `apps/`.
+  Server migration provenance and current validation are in
+  [the server report](docs/server-migration.md).
+- The original nine package dependencies retain exact coordinated version requirements with
   `in_umbrella: true` and their Hex identities. The original `0.16.1` inventory
   is a historical migration snapshot; current candidate and publication
   evidence is recorded in [the implementation audit](docs/http3-implementation-audit.md).
@@ -165,4 +172,4 @@ Current known issues to address:
 ## Requirements
 - Elixir 1.18+ (for built-in `JSON` module support)
 - Erlang OTP with `:crypto` and `:public_key` applications; OTP `:ssl` is required
-  only by test/reference peers
+  by Hell TLS servers and test/reference peers

@@ -1,0 +1,8 @@
+/_build/
+/deps/
+/doc/
+/cover/
+/priv/plts/
+/abyss-*.tar
+/examples/*/_build/
+/examples/*/deps/

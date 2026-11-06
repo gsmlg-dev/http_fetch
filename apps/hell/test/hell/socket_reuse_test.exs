@@ -1,0 +1,161 @@
+defmodule Hell.SocketReuseTest do
+  use ExUnit.Case, async: true
+
+  @moduletag :integration
+  use Machete
+
+  # Simple echo handler for testing
+  defmodule EchoHandler do
+    use Hell.Handler
+
+    @impl Hell.Handler
+    def handle_data(data, socket, state) do
+      Hell.Socket.send(socket, data)
+      {:continue, state}
+    end
+  end
+
+  # Note: This test may fail on systems without SO_REUSEPORT support
+  describe "socket reuse functionality" do
+    test "port zero binds every listener socket to the advertised port" do
+      config = %Hell.ServerConfig{
+        port: 0,
+        handler_module: EchoHandler,
+        num_listen_sockets: 3,
+        transport_options: [reuseport: true]
+      }
+
+      case Hell.Listener.init(config) do
+        {:ok, %{listener_sockets: sockets, local_info: local_info}} ->
+          for {_, socket} <- sockets do
+            assert {:ok, ^local_info} = :inet.sockname(socket)
+            :gen_tcp.close(socket)
+          end
+
+        {:stop, reason} when reason in [:eaddrinuse, :enotsup] ->
+          :ok
+      end
+    end
+
+    test "unix domain sockets with multiple listeners still fail cleanly" do
+      path = Path.join(System.tmp_dir!(), "ti_uds_#{System.unique_integer([:positive])}.sock")
+
+      config = %Hell.ServerConfig{
+        port: 0,
+        handler_module: EchoHandler,
+        num_listen_sockets: 2,
+        transport_options: [ip: {:local, path}, reuseport: true]
+      }
+
+      assert {:stop, :eaddrinuse} = Hell.Listener.init(config)
+
+      File.rm(path)
+    end
+
+    test "creates multiple sockets when reuseport is enabled" do
+      config = %Hell.ServerConfig{
+        port: 5004,
+        handler_module: EchoHandler,
+        num_listen_sockets: 3,
+        transport_options: [reuseport: true]
+      }
+
+      case Hell.Listener.init(config) do
+        {:ok, %{listener_sockets: sockets, local_info: {ip, port}}} ->
+          assert [{1, socket1}, {2, socket2}, {3, socket3}] = sockets
+          sockets = [socket1, socket2, socket3]
+
+          # Verify all sockets are different
+          assert 3 == sockets |> Enum.uniq() |> length()
+
+          # Verify all sockets bind to the same port
+          assert {:ok, {^ip, ^port}} = :inet.sockname(socket1)
+          assert {:ok, {^ip, ^port}} = :inet.sockname(socket2)
+          assert {:ok, {^ip, ^port}} = :inet.sockname(socket3)
+
+          # Close all sockets
+          for socket <- sockets, do: :gen_tcp.close(socket)
+
+        {:stop, :eaddrinuse} ->
+          # Skip test on systems without SO_REUSEPORT support
+          :ok
+
+        {:stop, :enotsup} ->
+          # Skip test on systems without SO_REUSEPORT support
+          :ok
+      end
+    end
+
+    test "multiple sockets with reuseport (if supported)" do
+      # This test will be skipped on systems without SO_REUSEPORT support
+      config = [
+        port: 0,
+        handler_module: EchoHandler,
+        num_listen_sockets: 3,
+        num_acceptors: 6,
+        transport_options: [reuseport: true]
+      ]
+
+      case Hell.start_link(config) do
+        {:ok, server} ->
+          assert {:ok, {_ip, port}} = Hell.listener_info(server)
+          assert port > 0
+
+          # Test that multiple connections work
+          clients =
+            for _ <- 1..5 do
+              assert {:ok, client} =
+                       :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
+
+              client
+            end
+
+          # Send data through each client
+          for {client, i} <- Enum.with_index(clients, 1) do
+            message = "hello#{i}"
+            assert :ok = :gen_tcp.send(client, message)
+            assert {:ok, ^message} = :gen_tcp.recv(client, 0, 1000)
+          end
+
+          # Clean up
+          Enum.each(clients, &:gen_tcp.close/1)
+          Hell.stop(server)
+
+        {:error, reason} when reason in [:eaddrinuse, :enotsup] ->
+          # Skip test on systems without SO_REUSEPORT support
+          :ok
+      end
+    end
+
+    test "acceptor distribution across multiple sockets" do
+      # Test that we can start a server with socket reuse configuration
+      # even if the actual socket creation might fail on some systems
+      config = [
+        port: 0,
+        handler_module: EchoHandler,
+        num_listen_sockets: 2,
+        num_acceptors: 8,
+        transport_options: [reuseport: true]
+      ]
+
+      case Hell.start_link(config) do
+        {:ok, server} ->
+          # If it starts successfully, verify basic functionality
+          assert {:ok, {_ip, port}} = Hell.listener_info(server)
+          assert port > 0
+
+          # Test basic connectivity
+          assert {:ok, client} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
+          assert :ok = :gen_tcp.send(client, "test")
+          assert {:ok, "test"} = :gen_tcp.recv(client, 0, 1000)
+          :gen_tcp.close(client)
+
+          Hell.stop(server)
+
+        {:error, reason} when reason in [:eaddrinuse, :enotsup] ->
+          # Expected on systems without SO_REUSEPORT support
+          :ok
+      end
+    end
+  end
+end

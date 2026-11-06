@@ -208,3 +208,10 @@ and successful published-consumer evidence. Before any future retirement,
 coordinate downstream maintainers, retain repository history and tags, and
 preserve licensed fixtures and their provenance. Until those conditions are
 met, keep standalone repositories and their histories intact.
+
+## UDP and TCP/TLS server imports
+
+The subsequent Abyss, Hell and optional `abyss_raw` source import is recorded in
+[server migration provenance and validation](server-migration.md). Those packages
+retain independent versions; this document's earlier nine-package snapshots and
+TLS client behavior do not redefine Hell's OTP `:ssl` server transport.

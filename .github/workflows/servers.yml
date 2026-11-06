@@ -1,0 +1,266 @@
+name: Server packages
+
+on:
+  push:
+    paths: ['apps/abyss/**', 'apps/hell/**', 'packages/abyss_raw/**', 'apps/elixir_quic/**', 'apps/ex_ssl/**', 'mix.exs', 'mix.lock', '.formatter.exs', 'scripts/release/**', '.github/workflows/**']
+  pull_request:
+    paths: ['apps/abyss/**', 'apps/hell/**', 'packages/abyss_raw/**', 'apps/elixir_quic/**', 'apps/ex_ssl/**', 'mix.exs', 'mix.lock', '.formatter.exs', 'scripts/release/**', '.github/workflows/**']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+concurrency:
+  group: servers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  abyss-suite:
+    name: Complete Abyss suite and original coverage gate / OTP ${{ matrix.otp }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ['27', '28']
+    env:
+      MIX_ENV: test
+      HTTP_FETCH_CI_APP: abyss
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: ${{ matrix.otp }}
+      - run: mix deps.get --check-locked
+      - run: mix compile --warnings-as-errors
+      - name: Run every imported case with the unchanged coverage threshold
+        run: mix test apps/abyss/test --include integration --include slow --cover
+
+  candidates:
+    name: Server and current-engine Hex consumers / OTP ${{ matrix.otp }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ['27', '28']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: ${{ matrix.otp }}
+      - uses: astral-sh/setup-uv@v5
+      - name: Build independent version groups and current engine candidates
+        run: |
+          python3 scripts/release/server_packages.py build all --stage "$RUNNER_TEMP/stage" --archives "$RUNNER_TEMP/archives"
+          version=$(python3 -c 'import sys; sys.path.insert(0, "scripts/release"); from stage import source_version; print(source_version("apps/elixir_quic"))')
+          for package in ex_ssl elixir_quic; do
+            python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives" --package "$package"
+          done
+      - name: Verify signed Hex consumers, UDP, TCP/TLS, QUIC examples and idle policy
+        run: python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/archives" --mode all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-candidates-otp${{ matrix.otp }}
+          path: ${{ runner.temp }}/archives/*.tar
+          if-no-files-found: error
+
+  minimum-elixir:
+    name: Standalone ${{ matrix.app }} / Elixir ${{ matrix.elixir }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {app: abyss, elixir: '1.13', otp: '24', mode: udp}
+          - {app: hell, elixir: '1.18', otp: '26', mode: hell}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+      - name: Build only the standalone package at its declared minimum
+        env:
+          SERVER_APP: ${{ matrix.app }}
+        run: |
+          version=$(python3 -c 'import sys, os; sys.path.insert(0, "scripts/release"); from stage import source_version; print(source_version("apps/" + os.environ["SERVER_APP"]))')
+          python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives" --package "$SERVER_APP"
+      - name: Verify a fresh Hex-only consumer without the umbrella
+        run: python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/archives" --mode '${{ matrix.mode }}'
+
+  hell-platforms:
+    name: Hell / ${{ matrix.os }} / OTP ${{ matrix.otp }} / Elixir ${{ matrix.elixir }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+        elixir: ['1.18.x', '1.19.0']
+        otp: ['26.x', '27.x', '28.x']
+    env:
+      MIX_ENV: test
+      HTTP_FETCH_CI_APP: hell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+      - run: mix deps.get --check-locked
+      - run: mix compile --warnings-as-errors
+      - name: Run all original Hell tests
+        run: mix test apps/hell/test --include integration --max-cases 1
+
+  udp-network:
+    name: Isolated UDP / OTP ${{ matrix.otp }} / ${{ matrix.backend }} / ${{ matrix.execution }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ['27', '28']
+        backend: [inet, socket, native]
+        execution: [per_datagram, endpoint, keyed]
+    env:
+      CI: 'true'
+      HTTP_FETCH_CI_APP: abyss
+      ABYSS_UDP_BACKEND: ${{ matrix.backend }}
+      ABYSS_UDP_API: datagram
+      ABYSS_UDP_EXECUTION: ${{ matrix.execution }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: ${{ matrix.otp }}
+      - run: sudo apt-get update && sudo apt-get install -y iproute2 util-linux python3
+      - run: mix deps.get --check-locked && mix compile --warnings-as-errors
+      - run: python3 apps/abyss/scripts/udp/network_fixture.py
+
+  raw:
+    name: Optional abyss_raw Linux native package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build and check native package independently
+        working-directory: packages/abyss_raw
+        run: |
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+          mix test
+          bash scripts/test_arp.sh
+          cargo clippy --locked --manifest-path native/dhcp_socket/Cargo.toml --all-targets -- -D warnings
+      - name: Install isolated network fixture tools
+        run: sudo apt-get update && sudo apt-get install -y iproute2 util-linux python3
+      - name: Candidate core/native boundaries and actual DHCP/ARP traffic
+        run: python3 apps/abyss/scripts/udp/p5_consumers.py
+
+  udp-regressions:
+    name: ${{ matrix.os }} / OTP ${{ matrix.otp }} / Elixir ${{ matrix.elixir }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            otp: '27'
+            elixir: '1.18'
+          - os: ubuntu-latest
+            otp: '28'
+            elixir: '1.18'
+          - os: macos-14
+            otp: '28'
+            elixir: '1.18'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      CI: 'true'
+      MIX_ENV: test
+      HTTP_FETCH_CI_APP: abyss
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+      - name: Cache dependencies by operating system and runtime
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: udp-${{ runner.os }}-${{ runner.arch }}-otp${{ matrix.otp }}-elixir${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+      - name: Fetch locked dependencies
+        run: mix deps.get
+      - name: Create macOS wrong-peer loopback fixture
+        if: runner.os == 'macOS'
+        id: macos_loopback_fixture
+        run: |
+          loopback_state="$(ifconfig lo0)"
+          if awk '$1 == "inet" && $2 == "127.0.0.2" { found = 1 } END { exit !found }' <<< "$loopback_state"; then
+            echo '::error::127.0.0.2 already exists on lo0; refusing to adopt a pre-existing alias'
+            exit 1
+          fi
+          sudo ifconfig lo0 inet 127.0.0.2 netmask 255.0.0.0 alias
+          echo 'created=true' >> "$GITHUB_OUTPUT"
+          loopback_state="$(ifconfig lo0)"
+          awk '$1 == "inet" && $2 == "127.0.0.2" { found = 1 } END { exit !found }' <<< "$loopback_state"
+      - name: Portable handler, admission, client and option regressions
+        run: |
+          mix test \
+            apps/abyss/test/abyss/datagram_test.exs \
+            apps/abyss/test/abyss/datagram_config_test.exs \
+            apps/abyss/test/abyss/endpoint_contract_test.exs \
+            apps/abyss/test/abyss/datagram_runtime_test.exs \
+            apps/abyss/test/abyss/datagram_watchdog_test.exs \
+            apps/abyss/test/abyss/datagram_lifetime_test.exs \
+            apps/abyss/test/abyss/datagram_send_accounting_test.exs \
+            apps/abyss/test/abyss/datagram_drop_accounting_test.exs \
+            apps/abyss/test/abyss/metadata_requirements_test.exs \
+            apps/abyss/test/abyss/udp_peer_validation_test.exs \
+            apps/abyss/test/abyss/udp_backend_resolution_test.exs \
+            apps/abyss/test/abyss/handler_test.exs \
+            apps/abyss/test/abyss/handler_hardening_test.exs \
+            apps/abyss/test/abyss/connection_test.exs \
+            apps/abyss/test/abyss/connection_admission_test.exs \
+            apps/abyss/test/abyss/telemetry_test.exs \
+            apps/abyss/test/abyss/telemetry_metrics_test.exs \
+            apps/abyss/test/abyss/telemetry_endpoint_test.exs \
+            apps/abyss/test/abyss/table_owner_scope_test.exs \
+            apps/abyss/test/abyss/client_test.exs \
+            apps/abyss/test/abyss/transport/udp/options_regression_test.exs \
+            apps/abyss/test/abyss/transport/udp/core_test.exs \
+            --include integration --include slow --cover --export-coverage udp-portable
+      - name: Remove owned macOS loopback fixture
+        if: always() && runner.os == 'macOS' && steps.macos_loopback_fixture.outputs.created == 'true'
+        run: sudo ifconfig lo0 inet 127.0.0.2 -alias
+      - name: Linux multicast, packet integrity and host lifecycle regressions
+        if: runner.os == 'Linux'
+        run: |
+          mix test \
+            apps/abyss/test/abyss/transport/native_test.exs \
+            apps/abyss/test/abyss/datagram_native_send_accounting_test.exs \
+            apps/abyss/test/abyss/datagram_native_drop_accounting_test.exs \
+            apps/abyss/test/abyss/client_regression_test.exs \
+            apps/abyss/test/abyss/transport/udp/multicast_regression_test.exs \
+            apps/abyss/test/abyss/transport/udp_test.exs \
+            apps/abyss/test/abyss/udp_host_hardening_test.exs \
+            apps/abyss/test/abyss/udp_membership_host_test.exs \
+            apps/abyss/test/abyss/udp_admission_test.exs \
+            --include integration --include slow --cover --export-coverage udp-linux
+      - name: Effective backend in fresh booted VMs
+        if: runner.os == 'Linux'
+        run: cd apps/abyss && bash scripts/udp/backend_boot.sh
+      - name: Linux bounded admission stress
+        if: runner.os == 'Linux'
+        run: mix run apps/abyss/scripts/udp/stress.exs
+      - name: Retain scoped coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: udp-${{ runner.os }}-${{ runner.arch }}-otp${{ matrix.otp }}
+          path: cover/*.coverdata
+          if-no-files-found: ignore

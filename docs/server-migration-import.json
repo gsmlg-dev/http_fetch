@@ -1,0 +1,1871 @@
+{
+  "schema": 1,
+  "imported_on": "2026-11-06",
+  "packages": [
+    {
+      "package": "abyss",
+      "source_url": "https://github.com/gsmlg-dev/abyss",
+      "source_commit": "89f6879edd163ff023d8bcb44b9686175dca0109",
+      "source_version": "0.10.0",
+      "destination": "apps/abyss",
+      "files": [
+        {
+          "source": ".formatter.exs",
+          "destination": "apps/abyss/.formatter.exs",
+          "source_sha256": "5e610e90993efae1b89c8c5a9ee45c181bcf6b405966171892098ba140186f21",
+          "import_sha256": "fd73934e106f62c69e6c85134e3782b8ba25f163da6576825a693b442b567ea9",
+          "modified": true
+        },
+        {
+          "source": ".gitignore",
+          "destination": "apps/abyss/.gitignore",
+          "source_sha256": "bc1fb1748eaf0550f6d26078349d78d628d92008c21764f6235347e5bea43b02",
+          "import_sha256": "3c04920f073f66e62043e27d9109c56e3525184b33d82aec53f04a792bb7b228",
+          "modified": true
+        },
+        {
+          "source": "CHANGELOG.md",
+          "destination": "apps/abyss/CHANGELOG.md",
+          "source_sha256": "54f0faf0ba409720ee700d11943b6abb29746a9daf25778a694b5d685524920b",
+          "import_sha256": "54f0faf0ba409720ee700d11943b6abb29746a9daf25778a694b5d685524920b",
+          "modified": false
+        },
+        {
+          "source": "LICENSE",
+          "destination": "apps/abyss/LICENSE",
+          "source_sha256": "e55700b73c35aa16a9c6e1fe93fe59e09bf0226547aef0d6f9b76662bd3a1baa",
+          "import_sha256": "e55700b73c35aa16a9c6e1fe93fe59e09bf0226547aef0d6f9b76662bd3a1baa",
+          "modified": false
+        },
+        {
+          "source": "README.md",
+          "destination": "apps/abyss/README.md",
+          "source_sha256": "68c2febf3d3631e85bd9ced68f8fc21e392d3a6ed97c3ff3f87be16863e265ef",
+          "import_sha256": "0bef61d8446866a1ae5c877c3a824aec886aed4983f4127d233a6563759d54b6",
+          "modified": true
+        },
+        {
+          "source": "docs/README.md",
+          "destination": "apps/abyss/docs/README.md",
+          "source_sha256": "c20671408f841a043d735f5b8babd670e7ad53f814d04551c42622e4de3956e8",
+          "import_sha256": "cf92d299c365a1ceba17083e9c74421969d9aace42f2edb9e64d311a13dc2f81",
+          "modified": true
+        },
+        {
+          "source": "docs/architecture.md",
+          "destination": "apps/abyss/docs/architecture.md",
+          "source_sha256": "553103e051444e9f883ac35c5cf4bd62846002c7b1b8a47ace7b3be5aa0918f7",
+          "import_sha256": "553103e051444e9f883ac35c5cf4bd62846002c7b1b8a47ace7b3be5aa0918f7",
+          "modified": false
+        },
+        {
+          "source": "docs/dispatcher.md",
+          "destination": "apps/abyss/docs/dispatcher.md",
+          "source_sha256": "79d0358baaaf8a67729035907fe62187bd75b9cead96a82eb7e8fb463d7c89d9",
+          "import_sha256": "79d0358baaaf8a67729035907fe62187bd75b9cead96a82eb7e8fb463d7c89d9",
+          "modified": false
+        },
+        {
+          "source": "docs/operations.md",
+          "destination": "apps/abyss/docs/operations.md",
+          "source_sha256": "f7c7cb1eb5d31a88cd4be6ff940cdbd1eeeb3aae0d6e2f21fcac2175a01f9c2d",
+          "import_sha256": "9d2449ad273d50091ca25844c5079eecb9660983cb125538ab32c6bb1b2f7ab7",
+          "modified": true
+        },
+        {
+          "source": "docs/quic-service.md",
+          "destination": "apps/abyss/docs/quic-service.md",
+          "source_sha256": "7db1d3e20912d46740a0128c475f0a8f09b8e7dedb940af03bca12aeb83dd030",
+          "import_sha256": "7db1d3e20912d46740a0128c475f0a8f09b8e7dedb940af03bca12aeb83dd030",
+          "modified": false
+        },
+        {
+          "source": "docs/releases.md",
+          "destination": "apps/abyss/docs/releases.md",
+          "source_sha256": "7b144d146c08363982a93a8380936adcf9d46a4bddb76e4fa45849cf7246b2d7",
+          "import_sha256": "9920e9b930623bcc24cb3e027ee413215581377f9265b7e6cb5bb417634f6337",
+          "modified": true
+        },
+        {
+          "source": "docs/releases/0.10.0.md",
+          "destination": "apps/abyss/docs/releases/0.10.0.md",
+          "source_sha256": "96abca6dd5b3413986d2c76f48983572599bedc07703cc6e79f7ab64ecbed68e",
+          "import_sha256": "96abca6dd5b3413986d2c76f48983572599bedc07703cc6e79f7ab64ecbed68e",
+          "modified": false
+        },
+        {
+          "source": "docs/releases/0.9.0-progress.md",
+          "destination": "apps/abyss/docs/releases/0.9.0-progress.md",
+          "source_sha256": "9c4b6434f4167405add539a4ee251efc69e4294ef3f82af8e7e9f3f8c6adaa05",
+          "import_sha256": "7970e50db8e233c7fdc1b4a92a983a0b340f2c9b60e7e24571654d77b3d4d48f",
+          "modified": true
+        },
+        {
+          "source": "docs/releases/0.9.0.md",
+          "destination": "apps/abyss/docs/releases/0.9.0.md",
+          "source_sha256": "71cf5ad8ac8c76644d1ef5cb18233dde3203e6b4a23121fa7f8fd9375ec311d2",
+          "import_sha256": "71cf5ad8ac8c76644d1ef5cb18233dde3203e6b4a23121fa7f8fd9375ec311d2",
+          "modified": false
+        },
+        {
+          "source": "docs/udp-broadcast-multicast.md",
+          "destination": "apps/abyss/docs/udp-broadcast-multicast.md",
+          "source_sha256": "9cc6b9bc24841af7e32a444b5eb21b17e98daee88d803ecf7a6ba91502aeda8e",
+          "import_sha256": "9cc6b9bc24841af7e32a444b5eb21b17e98daee88d803ecf7a6ba91502aeda8e",
+          "modified": false
+        },
+        {
+          "source": "docs/udp-runtime/acceptance.md",
+          "destination": "apps/abyss/docs/udp-runtime/acceptance.md",
+          "source_sha256": "4a86b5b5048c6688e35e5894828707f17af1eceaac79ba2b90e373e61672fc9d",
+          "import_sha256": "ed0f829f39125d365ca8d976cd6e123816c73ea9a6bc00c0ef343e8eab9da7e8",
+          "modified": true
+        },
+        {
+          "source": "docs/udp-runtime/design.md",
+          "destination": "apps/abyss/docs/udp-runtime/design.md",
+          "source_sha256": "0e7706f7350d3a9bdd6d3ecfb9b05381e47b261e4854927746da1df1b774d3a9",
+          "import_sha256": "0e7706f7350d3a9bdd6d3ecfb9b05381e47b261e4854927746da1df1b774d3a9",
+          "modified": false
+        },
+        {
+          "source": "docs/udp-runtime/migration.md",
+          "destination": "apps/abyss/docs/udp-runtime/migration.md",
+          "source_sha256": "a951f812564864912950b41d3b34842f7790521998000083774ae2c9ce93ec5f",
+          "import_sha256": "a92ac8128ab530bff41a54b2276045604882896af576309881cc39671cd78c15",
+          "modified": true
+        },
+        {
+          "source": "docs/udp-runtime/post-release-fixes.md",
+          "destination": "apps/abyss/docs/udp-runtime/post-release-fixes.md",
+          "source_sha256": "4921b17735700e1fba3c4af099f31e7ffaebed4ce1df889623b1b93ed3f9a1b4",
+          "import_sha256": "4a4b3f7ea498195134d22a6409779628457ea8f43cfca7fc3743fe8be68bc4be",
+          "modified": true
+        },
+        {
+          "source": "docs/udp-runtime/progress.md",
+          "destination": "apps/abyss/docs/udp-runtime/progress.md",
+          "source_sha256": "2e6fa5a8a252cd193d40145114c7cc0f601098562a6845b01dc689e55760a00e",
+          "import_sha256": "7c9893db91907687b46ada0c2b0f82e17094721f4c7965ef81110855284fae18",
+          "modified": true
+        },
+        {
+          "source": "example/datagram_echo.exs",
+          "destination": "apps/abyss/example/datagram_echo.exs",
+          "source_sha256": "d89ddab0b52a4080537f83063aaff8e8f1cb470db94f160e5ef5ef3b83a34651",
+          "import_sha256": "d89ddab0b52a4080537f83063aaff8e8f1cb470db94f160e5ef5ef3b83a34651",
+          "modified": false
+        },
+        {
+          "source": "example/dns_forwarder.ex",
+          "destination": "apps/abyss/example/dns_forwarder.ex",
+          "source_sha256": "2f3a195db960e4aaf4ab6a83083a66305cbd22b1c0998f4e8c3c13e697f5a25d",
+          "import_sha256": "2f3a195db960e4aaf4ab6a83083a66305cbd22b1c0998f4e8c3c13e697f5a25d",
+          "modified": false
+        },
+        {
+          "source": "example/dns_recursive.ex",
+          "destination": "apps/abyss/example/dns_recursive.ex",
+          "source_sha256": "ddbdbd91691574ff2b83a25d45e83af658e362b8e6df08eaa2c23c0bfefd9b2a",
+          "import_sha256": "ddbdbd91691574ff2b83a25d45e83af658e362b8e6df08eaa2c23c0bfefd9b2a",
+          "modified": false
+        },
+        {
+          "source": "example/dump.ex",
+          "destination": "apps/abyss/example/dump.ex",
+          "source_sha256": "364f1cafb0c2b615453817cb1f4fcd5c20368ef16d2f845e70a86b95e9c5ee93",
+          "import_sha256": "364f1cafb0c2b615453817cb1f4fcd5c20368ef16d2f845e70a86b95e9c5ee93",
+          "modified": false
+        },
+        {
+          "source": "example/dump_dhcp.ex",
+          "destination": "apps/abyss/example/dump_dhcp.ex",
+          "source_sha256": "14697a1b16f7019eaa33273727e2e476ab1825773865eff3d26954e6507ef867",
+          "import_sha256": "14697a1b16f7019eaa33273727e2e476ab1825773865eff3d26954e6507ef867",
+          "modified": false
+        },
+        {
+          "source": "example/dump_mdns.ex",
+          "destination": "apps/abyss/example/dump_mdns.ex",
+          "source_sha256": "148999ab1ed299d81dcc06f994ae55aca52778147d8dd269827f59357cbf57b5",
+          "import_sha256": "148999ab1ed299d81dcc06f994ae55aca52778147d8dd269827f59357cbf57b5",
+          "modified": false
+        },
+        {
+          "source": "example/echo.ex",
+          "destination": "apps/abyss/example/echo.ex",
+          "source_sha256": "5af41f0154783d0086cf7b344c827cb78fe2727c82846ada090c3de52d6db7fa",
+          "import_sha256": "5af41f0154783d0086cf7b344c827cb78fe2727c82846ada090c3de52d6db7fa",
+          "modified": false
+        },
+        {
+          "source": "example/udp_multicast.ex",
+          "destination": "apps/abyss/example/udp_multicast.ex",
+          "source_sha256": "cb01a3c7b1b509a082d4fce0cdd837239f6aaac019d49e7e2244987fc58a6fe6",
+          "import_sha256": "cb01a3c7b1b509a082d4fce0cdd837239f6aaac019d49e7e2244987fc58a6fe6",
+          "modified": false
+        },
+        {
+          "source": "example/udp_one_to_many.exs",
+          "destination": "apps/abyss/example/udp_one_to_many.exs",
+          "source_sha256": "039316f95d96106e30c6d0374a971f7b917d8aac85babbf9aaa8cdbb60a694d3",
+          "import_sha256": "039316f95d96106e30c6d0374a971f7b917d8aac85babbf9aaa8cdbb60a694d3",
+          "modified": false
+        },
+        {
+          "source": "examples/quic_collect/.gitignore",
+          "destination": "apps/abyss/examples/quic_collect/.gitignore",
+          "source_sha256": "bf433adea60fb5a2307f71e3f858e45ab01f192c97a30543f04cb1b35d7b9afc",
+          "import_sha256": "bf433adea60fb5a2307f71e3f858e45ab01f192c97a30543f04cb1b35d7b9afc",
+          "modified": false
+        },
+        {
+          "source": "examples/quic_collect/lib/application.ex",
+          "destination": "apps/abyss/examples/quic_collect/lib/application.ex",
+          "source_sha256": "18185dd380ae88eb2f6e1eab888531a6b3ef0902455893e502e49200df76b8ad",
+          "import_sha256": "18185dd380ae88eb2f6e1eab888531a6b3ef0902455893e502e49200df76b8ad",
+          "modified": false
+        },
+        {
+          "source": "examples/quic_collect/lib/handler.ex",
+          "destination": "apps/abyss/examples/quic_collect/lib/handler.ex",
+          "source_sha256": "3a44e0b43bcc347b2de561e828ad8099a60ac24550f1e3b211d18d79cd8587d9",
+          "import_sha256": "3a44e0b43bcc347b2de561e828ad8099a60ac24550f1e3b211d18d79cd8587d9",
+          "modified": false
+        },
+        {
+          "source": "examples/quic_collect/mix.exs",
+          "destination": "apps/abyss/examples/quic_collect/mix.exs",
+          "source_sha256": "d59185f974122f42188382929a47b1863a37d1ded25936f64acbd41d737fe0a5",
+          "import_sha256": "abda21a7ebced06dc2b723c02a6b7690a560d97d22a729716d015b5a7751b2b7",
+          "modified": true
+        },
+        {
+          "source": "examples/quic_collect/mix.lock",
+          "destination": "apps/abyss/examples/quic_collect/mix.lock",
+          "source_sha256": "7b1800e4e069fa11709c56c938ea4e76762724789fc6b9a22a4c17ebdae1581b",
+          "import_sha256": "7b1800e4e069fa11709c56c938ea4e76762724789fc6b9a22a4c17ebdae1581b",
+          "modified": false
+        },
+        {
+          "source": "examples/quic_echo/.gitignore",
+          "destination": "apps/abyss/examples/quic_echo/.gitignore",
+          "source_sha256": "bf433adea60fb5a2307f71e3f858e45ab01f192c97a30543f04cb1b35d7b9afc",
+          "import_sha256": "bf433adea60fb5a2307f71e3f858e45ab01f192c97a30543f04cb1b35d7b9afc",
+          "modified": false
+        },
+        {
+          "source": "examples/quic_echo/lib/application.ex",
+          "destination": "apps/abyss/examples/quic_echo/lib/application.ex",
+          "source_sha256": "ca1acdc6d706c9e4ee36350155e0a7ab564eb0a8043d8f32b9c7f6468d26809c",
+          "import_sha256": "ca1acdc6d706c9e4ee36350155e0a7ab564eb0a8043d8f32b9c7f6468d26809c",
+          "modified": false
+        },
+        {
+          "source": "examples/quic_echo/lib/handler.ex",
+          "destination": "apps/abyss/examples/quic_echo/lib/handler.ex",
+          "source_sha256": "e2994b7c3033b34a522251d6e3d329c9afa1512d741e87c5b19c0a6a2174577e",
+          "import_sha256": "e2994b7c3033b34a522251d6e3d329c9afa1512d741e87c5b19c0a6a2174577e",
+          "modified": false
+        },
+        {
+          "source": "examples/quic_echo/mix.exs",
+          "destination": "apps/abyss/examples/quic_echo/mix.exs",
+          "source_sha256": "70e7f2307dfa702ce48af64f63174aaed130ea62fad0710c751b775d1eb13afa",
+          "import_sha256": "409136bf8c789d4d3cdc637f52b73c3294c18c08f26a8cc5fc5d9320eb34986c",
+          "modified": true
+        },
+        {
+          "source": "examples/quic_echo/mix.lock",
+          "destination": "apps/abyss/examples/quic_echo/mix.lock",
+          "source_sha256": "7b1800e4e069fa11709c56c938ea4e76762724789fc6b9a22a4c17ebdae1581b",
+          "import_sha256": "7b1800e4e069fa11709c56c938ea4e76762724789fc6b9a22a4c17ebdae1581b",
+          "modified": false
+        },
+        {
+          "source": "examples/udp_echo/.gitignore",
+          "destination": "apps/abyss/examples/udp_echo/.gitignore",
+          "source_sha256": "bf433adea60fb5a2307f71e3f858e45ab01f192c97a30543f04cb1b35d7b9afc",
+          "import_sha256": "bf433adea60fb5a2307f71e3f858e45ab01f192c97a30543f04cb1b35d7b9afc",
+          "modified": false
+        },
+        {
+          "source": "examples/udp_echo/lib/application.ex",
+          "destination": "apps/abyss/examples/udp_echo/lib/application.ex",
+          "source_sha256": "f09a427c7154bdef3258a115b77cca95ec71ad11edb3f1e1d87aba593aaccdbb",
+          "import_sha256": "f09a427c7154bdef3258a115b77cca95ec71ad11edb3f1e1d87aba593aaccdbb",
+          "modified": false
+        },
+        {
+          "source": "examples/udp_echo/mix.exs",
+          "destination": "apps/abyss/examples/udp_echo/mix.exs",
+          "source_sha256": "e1be4f1b2995ab8d23f6409bffa08bd8d3f47b3e888778cc85f659d6672b7240",
+          "import_sha256": "e1be4f1b2995ab8d23f6409bffa08bd8d3f47b3e888778cc85f659d6672b7240",
+          "modified": false
+        },
+        {
+          "source": "examples/udp_echo/mix.lock",
+          "destination": "apps/abyss/examples/udp_echo/mix.lock",
+          "source_sha256": "17fea9c29207cd93f2ce40fb369e045fe7d9c2ddd2d281b03b75228cb221bc52",
+          "import_sha256": "17fea9c29207cd93f2ce40fb369e045fe7d9c2ddd2d281b03b75228cb221bc52",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss.ex",
+          "destination": "apps/abyss/lib/abyss.ex",
+          "source_sha256": "6f040597b676702c8faa7b414624d3d6200ac217684ec226cf0d9594c03fff79",
+          "import_sha256": "6f040597b676702c8faa7b414624d3d6200ac217684ec226cf0d9594c03fff79",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/application.ex",
+          "destination": "apps/abyss/lib/abyss/application.ex",
+          "source_sha256": "a05a5369109945e21330d53dfe0970019e9e51cf53e3de19577b4b4069636629",
+          "import_sha256": "a05a5369109945e21330d53dfe0970019e9e51cf53e3de19577b4b4069636629",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/client.ex",
+          "destination": "apps/abyss/lib/abyss/client.ex",
+          "source_sha256": "5515a3426df2344723a8abbf2b053100f45279b8e6423ba1e11290ff52b0c73e",
+          "import_sha256": "5515a3426df2344723a8abbf2b053100f45279b8e6423ba1e11290ff52b0c73e",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/connection.ex",
+          "destination": "apps/abyss/lib/abyss/connection.ex",
+          "source_sha256": "75991f7efc9593ab6bc5825c4514c3e338853740947c0b44ebab72c8a5e87bb6",
+          "import_sha256": "75991f7efc9593ab6bc5825c4514c3e338853740947c0b44ebab72c8a5e87bb6",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/datagram.ex",
+          "destination": "apps/abyss/lib/abyss/datagram.ex",
+          "source_sha256": "0b586088668bb63b013cf815fd35e001cd51dc1c72c372efb87de01431572d39",
+          "import_sha256": "0b586088668bb63b013cf815fd35e001cd51dc1c72c372efb87de01431572d39",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/datagram_actions.ex",
+          "destination": "apps/abyss/lib/abyss/datagram_actions.ex",
+          "source_sha256": "ee4c6c44214f9bcb2e39f4cd537ac5745d0684417960f589f837d48eaafe2998",
+          "import_sha256": "ee4c6c44214f9bcb2e39f4cd537ac5745d0684417960f589f837d48eaafe2998",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/datagram_dispatcher.ex",
+          "destination": "apps/abyss/lib/abyss/datagram_dispatcher.ex",
+          "source_sha256": "d8defa29e5bf0d388a8b4c14c594662fd4e2836bf99e991d9eb44586ba8d30b8",
+          "import_sha256": "d8defa29e5bf0d388a8b4c14c594662fd4e2836bf99e991d9eb44586ba8d30b8",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/datagram_handler.ex",
+          "destination": "apps/abyss/lib/abyss/datagram_handler.ex",
+          "source_sha256": "21bc9d4ce1bd138d83811f63d5a1b4cb9d3099f763447a599521684b2b4f8ba7",
+          "import_sha256": "21bc9d4ce1bd138d83811f63d5a1b4cb9d3099f763447a599521684b2b4f8ba7",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/datagram_runtime.ex",
+          "destination": "apps/abyss/lib/abyss/datagram_runtime.ex",
+          "source_sha256": "b0404ad7a23ea3a20c4baeb513a9f1602afe3971d59885950805f7a80f83f2a5",
+          "import_sha256": "b0404ad7a23ea3a20c4baeb513a9f1602afe3971d59885950805f7a80f83f2a5",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/datagram_worker.ex",
+          "destination": "apps/abyss/lib/abyss/datagram_worker.ex",
+          "source_sha256": "8ab4272c285733f4752d796e9fec73d4e9f9a01598bc47d0b73b9fe2cb85adcc",
+          "import_sha256": "8ab4272c285733f4752d796e9fec73d4e9f9a01598bc47d0b73b9fe2cb85adcc",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/dhcp_socket/native.ex",
+          "destination": "apps/abyss/lib/abyss/dhcp_socket/native.ex",
+          "source_sha256": "6da69f6620ffd32b7aba68a8ecc640cfc8af93f3a686949d36e8b66911e02da2",
+          "import_sha256": "6da69f6620ffd32b7aba68a8ecc640cfc8af93f3a686949d36e8b66911e02da2",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/endpoint.ex",
+          "destination": "apps/abyss/lib/abyss/endpoint.ex",
+          "source_sha256": "18677499f2fab40fae3a86652d0ffc9c51d0f56cc0881b78e0e0fa05b3bdc3ab",
+          "import_sha256": "18677499f2fab40fae3a86652d0ffc9c51d0f56cc0881b78e0e0fa05b3bdc3ab",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/handler.ex",
+          "destination": "apps/abyss/lib/abyss/handler.ex",
+          "source_sha256": "0af0763385283f6465a7ecfe0e8b89c1754336a1b2d87e9101e88eac5a7b0ef5",
+          "import_sha256": "0af0763385283f6465a7ecfe0e8b89c1754336a1b2d87e9101e88eac5a7b0ef5",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/listener.ex",
+          "destination": "apps/abyss/lib/abyss/listener.ex",
+          "source_sha256": "daabd8aa70616987ed1289d6af1de26e3bd1afcb0081db59d6cf303136ef1f04",
+          "import_sha256": "daabd8aa70616987ed1289d6af1de26e3bd1afcb0081db59d6cf303136ef1f04",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/listener_pool.ex",
+          "destination": "apps/abyss/lib/abyss/listener_pool.ex",
+          "source_sha256": "122eea5656bb9f9e7ade0046b8ff5b751f1099293cadc1528302f86256cb932e",
+          "import_sha256": "122eea5656bb9f9e7ade0046b8ff5b751f1099293cadc1528302f86256cb932e",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/listener_pool_scaler.ex",
+          "destination": "apps/abyss/lib/abyss/listener_pool_scaler.ex",
+          "source_sha256": "7b95b946528141362dcc0298671b5a8a0eb73eae576680e1cadd4025fc232bdf",
+          "import_sha256": "7b95b946528141362dcc0298671b5a8a0eb73eae576680e1cadd4025fc232bdf",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/listener_starter.ex",
+          "destination": "apps/abyss/lib/abyss/listener_starter.ex",
+          "source_sha256": "50c1219e3c35b5aa374fe9244206aa31ecf881701aab17dc905d4f3eac45fe1b",
+          "import_sha256": "50c1219e3c35b5aa374fe9244206aa31ecf881701aab17dc905d4f3eac45fe1b",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/logger.ex",
+          "destination": "apps/abyss/lib/abyss/logger.ex",
+          "source_sha256": "ee0f45b8b65c63e8ef9e7347079db2e4a2d6228f9b19f59491a612c483842fb8",
+          "import_sha256": "ee0f45b8b65c63e8ef9e7347079db2e4a2d6228f9b19f59491a612c483842fb8",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/quic.ex",
+          "destination": "apps/abyss/lib/abyss/quic.ex",
+          "source_sha256": "aa01be425d760185911b6ed0ea2120991cef2f74a72276f251e7a6b505a4b5e2",
+          "import_sha256": "aa01be425d760185911b6ed0ea2120991cef2f74a72276f251e7a6b505a4b5e2",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/quic/handler.ex",
+          "destination": "apps/abyss/lib/abyss/quic/handler.ex",
+          "source_sha256": "a0e1bc27356c3144db0b3651a524d9712b30a5890a3383be78d7bf78e0b762ed",
+          "import_sha256": "a0e1bc27356c3144db0b3651a524d9712b30a5890a3383be78d7bf78e0b762ed",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/quic/service.ex",
+          "destination": "apps/abyss/lib/abyss/quic/service.ex",
+          "source_sha256": "0121378ad15b1046fcd6828ea6989d5947f0de54eab91c916992eb97dfd14def",
+          "import_sha256": "0121378ad15b1046fcd6828ea6989d5947f0de54eab91c916992eb97dfd14def",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/server.ex",
+          "destination": "apps/abyss/lib/abyss/server.ex",
+          "source_sha256": "c6ea5524f98e81582eb0020d49e3dd5fd8f669ac855ffc71a69f711d5d4b75bb",
+          "import_sha256": "c6ea5524f98e81582eb0020d49e3dd5fd8f669ac855ffc71a69f711d5d4b75bb",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/server_config.ex",
+          "destination": "apps/abyss/lib/abyss/server_config.ex",
+          "source_sha256": "5c55bbea9191d52a0a75cab1aba60659e956fe873d54c594b34b963ff50f0ab9",
+          "import_sha256": "5c55bbea9191d52a0a75cab1aba60659e956fe873d54c594b34b963ff50f0ab9",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/shutdown_listener.ex",
+          "destination": "apps/abyss/lib/abyss/shutdown_listener.ex",
+          "source_sha256": "87f1aa84a51af504d272af95ea634d8e17f9d87d9d16ba3df418836709e8b5fc",
+          "import_sha256": "87f1aa84a51af504d272af95ea634d8e17f9d87d9d16ba3df418836709e8b5fc",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/table_owner.ex",
+          "destination": "apps/abyss/lib/abyss/table_owner.ex",
+          "source_sha256": "55688ac9af73e6ce71e283855e211f3b512159666f97e59d83bd5fc431c63814",
+          "import_sha256": "55688ac9af73e6ce71e283855e211f3b512159666f97e59d83bd5fc431c63814",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/telemetry.ex",
+          "destination": "apps/abyss/lib/abyss/telemetry.ex",
+          "source_sha256": "5224da94291128de5f839adfb98e76a795c04381105b6d5b9e83dbaa34bc3860",
+          "import_sha256": "5224da94291128de5f839adfb98e76a795c04381105b6d5b9e83dbaa34bc3860",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/transport.ex",
+          "destination": "apps/abyss/lib/abyss/transport.ex",
+          "source_sha256": "10fc757776b2a65aedba3580bef6b85f4afe13b4b2c0ea4bb77bde4ef0dfb6f6",
+          "import_sha256": "10fc757776b2a65aedba3580bef6b85f4afe13b4b2c0ea4bb77bde4ef0dfb6f6",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/transport/udp.ex",
+          "destination": "apps/abyss/lib/abyss/transport/udp.ex",
+          "source_sha256": "2f889cc2f32f250d67f2fbdacbc1a0ab632ddd03f9ae5ea54fbd6a2e677de9e0",
+          "import_sha256": "2f889cc2f32f250d67f2fbdacbc1a0ab632ddd03f9ae5ea54fbd6a2e677de9e0",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/transport/udp/broadcast.ex",
+          "destination": "apps/abyss/lib/abyss/transport/udp/broadcast.ex",
+          "source_sha256": "f1ad057fa576afccb837a6d8a6885319b41ba660f24feaa46abdbb746bf3c1ab",
+          "import_sha256": "f1ad057fa576afccb837a6d8a6885319b41ba660f24feaa46abdbb746bf3c1ab",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/transport/udp/core.ex",
+          "destination": "apps/abyss/lib/abyss/transport/udp/core.ex",
+          "source_sha256": "b650bad39f030ff6280cc66b3ddbf54d4dc20f9b9636f397e692700ae5ad2aa8",
+          "import_sha256": "b650bad39f030ff6280cc66b3ddbf54d4dc20f9b9636f397e692700ae5ad2aa8",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/transport/udp/multicast.ex",
+          "destination": "apps/abyss/lib/abyss/transport/udp/multicast.ex",
+          "source_sha256": "f6ffba3d638d89efd4f5259bc179fb20f46cbd20eb62b4100b845103908eb21a",
+          "import_sha256": "f6ffba3d638d89efd4f5259bc179fb20f46cbd20eb62b4100b845103908eb21a",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/transport/udp/native.ex",
+          "destination": "apps/abyss/lib/abyss/transport/udp/native.ex",
+          "source_sha256": "e87cb0ef1bcf4fa80485f89bed298677d5cd8aeaa9aa4dd9112c19c5414d54bf",
+          "import_sha256": "e87cb0ef1bcf4fa80485f89bed298677d5cd8aeaa9aa4dd9112c19c5414d54bf",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/transport/udp/unicast.ex",
+          "destination": "apps/abyss/lib/abyss/transport/udp/unicast.ex",
+          "source_sha256": "d72b568868750280a623c82670eac90c0a27b3e2010facf9d70b881c9ee19c36",
+          "import_sha256": "d72b568868750280a623c82670eac90c0a27b3e2010facf9d70b881c9ee19c36",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/udp_admission.ex",
+          "destination": "apps/abyss/lib/abyss/udp_admission.ex",
+          "source_sha256": "0c956ad44c526f3cc305f357d73df8a74ec955dcfd9184faf87b0fe6c8f69233",
+          "import_sha256": "0c956ad44c526f3cc305f357d73df8a74ec955dcfd9184faf87b0fe6c8f69233",
+          "modified": false
+        },
+        {
+          "source": "lib/abyss/utils.ex",
+          "destination": "apps/abyss/lib/abyss/utils.ex",
+          "source_sha256": "408052a43ecdb62edb68c9b0d35eabb6d081488b108522e9b0417a9cb1ce7637",
+          "import_sha256": "408052a43ecdb62edb68c9b0d35eabb6d081488b108522e9b0417a9cb1ce7637",
+          "modified": false
+        },
+        {
+          "source": "mix.exs",
+          "destination": "apps/abyss/mix.exs",
+          "source_sha256": "c81b75fd6b87567867aa62e3b27dcbd281ad6ae0bbce931a4cc344ae19fdf155",
+          "import_sha256": "c1a745236ac8dfbee282f6c89a5d3205cffe6ac4f11742d250b9faa10995d75f",
+          "modified": true
+        },
+        {
+          "source": "scripts/phase1/ack_range_repro.exs",
+          "destination": "apps/abyss/scripts/phase1/ack_range_repro.exs",
+          "source_sha256": "f6b3fea735b2d2870efb98351e2e527165ea08c5c6d4be020060f8861e3ef9d0",
+          "import_sha256": "f6b3fea735b2d2870efb98351e2e527165ea08c5c6d4be020060f8861e3ef9d0",
+          "modified": false
+        },
+        {
+          "source": "scripts/phase1/check.sh",
+          "destination": "apps/abyss/scripts/phase1/check.sh",
+          "source_sha256": "21f3dc3d45dba531ecfb3603bdd381b4f20a5071c89e48096190c599e4f6074e",
+          "import_sha256": "21f3dc3d45dba531ecfb3603bdd381b4f20a5071c89e48096190c599e4f6074e",
+          "modified": false
+        },
+        {
+          "source": "scripts/phase1/config.exs",
+          "destination": "apps/abyss/scripts/phase1/config.exs",
+          "source_sha256": "6cdd9e61452e46ee13f0b149c65900c62dbc9ac5511bc66836d271f6de8b0bc4",
+          "import_sha256": "6cdd9e61452e46ee13f0b149c65900c62dbc9ac5511bc66836d271f6de8b0bc4",
+          "modified": false
+        },
+        {
+          "source": "scripts/phase1/controls.exs",
+          "destination": "apps/abyss/scripts/phase1/controls.exs",
+          "source_sha256": "a9d3ce451be0559033a578928b6ae7d7cbbeea91563dd08d462f230554df9559",
+          "import_sha256": "a9d3ce451be0559033a578928b6ae7d7cbbeea91563dd08d462f230554df9559",
+          "modified": false
+        },
+        {
+          "source": "scripts/phase1/faults.exs",
+          "destination": "apps/abyss/scripts/phase1/faults.exs",
+          "source_sha256": "7b950a80de9af4be7a386f0b5b12d09bfaf50cbeeb3d0b2eca28fddc177fbc98",
+          "import_sha256": "7b950a80de9af4be7a386f0b5b12d09bfaf50cbeeb3d0b2eca28fddc177fbc98",
+          "modified": false
+        },
+        {
+          "source": "scripts/phase1/idle_policy.exs",
+          "destination": "apps/abyss/scripts/phase1/idle_policy.exs",
+          "source_sha256": "36b805fcb4de0c82c98c2873c845035d34bffcaf00c3cc9ab2751bf8c369779e",
+          "import_sha256": "dea4b32433477389656395a54624e43c7f24f71174d300f6a3ef457dc4737ef7",
+          "modified": true
+        },
+        {
+          "source": "scripts/phase1/independent_check.sh",
+          "destination": "apps/abyss/scripts/phase1/independent_check.sh",
+          "source_sha256": "a344019be78ab11e7f437d79b334e0c59e0607a0e0031a818c6419f9a2528df7",
+          "import_sha256": "a344019be78ab11e7f437d79b334e0c59e0607a0e0031a818c6419f9a2528df7",
+          "modified": false
+        },
+        {
+          "source": "scripts/phase1/lifecycle.exs",
+          "destination": "apps/abyss/scripts/phase1/lifecycle.exs",
+          "source_sha256": "acd609a624c7bf38c6ef328e36b651c739f5e658268b838255437009dcfd84e4",
+          "import_sha256": "acd609a624c7bf38c6ef328e36b651c739f5e658268b838255437009dcfd84e4",
+          "modified": false
+        },
+        {
+          "source": "scripts/phase1/network.exs",
+          "destination": "apps/abyss/scripts/phase1/network.exs",
+          "source_sha256": "a58775d6b13458354602372845b85d2c6f7e4228a1f656c059d35f51999ba0d2",
+          "import_sha256": "a58775d6b13458354602372845b85d2c6f7e4228a1f656c059d35f51999ba0d2",
+          "modified": false
+        },
+        {
+          "source": "scripts/phase1/peer.py",
+          "destination": "apps/abyss/scripts/phase1/peer.py",
+          "source_sha256": "5abfa79d009e3436a5202ae3b6318c17606a60739e93c394df24bd72effdb776",
+          "import_sha256": "5abfa79d009e3436a5202ae3b6318c17606a60739e93c394df24bd72effdb776",
+          "modified": false
+        },
+        {
+          "source": "scripts/phase1/published_provenance.exs",
+          "destination": "apps/abyss/scripts/phase1/published_provenance.exs",
+          "source_sha256": "006c68ad23f2dce2f23fd98334d11e40537fb8cfec366d305f4e48ea65671085",
+          "import_sha256": "006c68ad23f2dce2f23fd98334d11e40537fb8cfec366d305f4e48ea65671085",
+          "modified": false
+        },
+        {
+          "source": "scripts/phase1/release_check.sh",
+          "destination": "apps/abyss/scripts/phase1/release_check.sh",
+          "source_sha256": "a8fed48494ca811f4314831b00486e5d81d6dcc5dade1d4e6c44c5b2cc5ed597",
+          "import_sha256": "a8fed48494ca811f4314831b00486e5d81d6dcc5dade1d4e6c44c5b2cc5ed597",
+          "modified": false
+        },
+        {
+          "source": "scripts/release/native_smoke.exs",
+          "destination": "apps/abyss/scripts/release/native_smoke.exs",
+          "source_sha256": "43a451aa3db31302e0d759ca3f2151546e35dae4efa5626ff9adaea809a1faa1",
+          "import_sha256": "43a451aa3db31302e0d759ca3f2151546e35dae4efa5626ff9adaea809a1faa1",
+          "modified": false
+        },
+        {
+          "source": "scripts/release/verify_consumers.py",
+          "destination": "apps/abyss/scripts/release/verify_consumers.py",
+          "source_sha256": "2e3287cc7f108b02312c3cebf08e5ab35851842ef6038dfb2ee7960fc539cbd7",
+          "import_sha256": "2e3287cc7f108b02312c3cebf08e5ab35851842ef6038dfb2ee7960fc539cbd7",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/README.md",
+          "destination": "apps/abyss/scripts/udp/README.md",
+          "source_sha256": "bde9bac6361ed7c4061f5481ee7b1011ea9124a0f9fa694ec886ea0fb8f4b49b",
+          "import_sha256": "69e8c2139e9de7879484c7447476542390ec3ee83dbab7e481a4a94a922df56c",
+          "modified": true
+        },
+        {
+          "source": "scripts/udp/backend_boot.exs",
+          "destination": "apps/abyss/scripts/udp/backend_boot.exs",
+          "source_sha256": "885c25fac11f5c0bf0dfe98810a1cc2fb770c8acec14fbeedc4686fe71b0f802",
+          "import_sha256": "885c25fac11f5c0bf0dfe98810a1cc2fb770c8acec14fbeedc4686fe71b0f802",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/backend_boot.sh",
+          "destination": "apps/abyss/scripts/udp/backend_boot.sh",
+          "source_sha256": "698b2c0c80395ef5a1e480719d7d0e0fd4289597dec5e6a52b37aae3bfe67e9a",
+          "import_sha256": "698b2c0c80395ef5a1e480719d7d0e0fd4289597dec5e6a52b37aae3bfe67e9a",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/compare_steady.py",
+          "destination": "apps/abyss/scripts/udp/compare_steady.py",
+          "source_sha256": "d09fdc47e006180bf4ec5c59032e2e299027735b0c746efd831cb53d1ae824ca",
+          "import_sha256": "d09fdc47e006180bf4ec5c59032e2e299027735b0c746efd831cb53d1ae824ca",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/dhcp_fixture.py",
+          "destination": "apps/abyss/scripts/udp/dhcp_fixture.py",
+          "source_sha256": "eea5899d54551dc940750798ff01921a4dc0b54f39290eec7202faa57fd2d52f",
+          "import_sha256": "eea5899d54551dc940750798ff01921a4dc0b54f39290eec7202faa57fd2d52f",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/network_fixture.py",
+          "destination": "apps/abyss/scripts/udp/network_fixture.py",
+          "source_sha256": "19f16fcf57b98f3b817db8e387d0de9e303f20c94f6fc50c89e89db2f3476d51",
+          "import_sha256": "19f16fcf57b98f3b817db8e387d0de9e303f20c94f6fc50c89e89db2f3476d51",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/p5_consumers.py",
+          "destination": "apps/abyss/scripts/udp/p5_consumers.py",
+          "source_sha256": "dc6af909c3c3ff5243a55405bad962e01bc8d56b67dffcefc3fc04cf306a9f14",
+          "import_sha256": "b0d3451631e6ae36100f66a453bada107f1f823e7ec172180cfe893fe30b3596",
+          "modified": true
+        },
+        {
+          "source": "scripts/udp/p5_core_consumer.exs",
+          "destination": "apps/abyss/scripts/udp/p5_core_consumer.exs",
+          "source_sha256": "6cbafe353fff2d319ee85504992f60f30ba90914e20dbc81a2150af80e4d7d24",
+          "import_sha256": "6cbafe353fff2d319ee85504992f60f30ba90914e20dbc81a2150af80e4d7d24",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/p5_native_consumer.exs",
+          "destination": "apps/abyss/scripts/udp/p5_native_consumer.exs",
+          "source_sha256": "0b53dfce0c3d366537a8d2154af659cb570ab26aa4879dc9c83882c2dedccccc",
+          "import_sha256": "0b53dfce0c3d366537a8d2154af659cb570ab26aa4879dc9c83882c2dedccccc",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/runtime_smoke.exs",
+          "destination": "apps/abyss/scripts/udp/runtime_smoke.exs",
+          "source_sha256": "4f28a858a67e2e35bd7916f43bd091517bedc84eeb60a6d2deea8ec9e06f2996",
+          "import_sha256": "4f28a858a67e2e35bd7916f43bd091517bedc84eeb60a6d2deea8ec9e06f2996",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/runtime_stress.exs",
+          "destination": "apps/abyss/scripts/udp/runtime_stress.exs",
+          "source_sha256": "4e185d2e3185e79ec238f40087193e713f2e922d92a88fec42d68b22f90b0ac0",
+          "import_sha256": "4e185d2e3185e79ec238f40087193e713f2e922d92a88fec42d68b22f90b0ac0",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/server.exs",
+          "destination": "apps/abyss/scripts/udp/server.exs",
+          "source_sha256": "9a3d82f470dd3f8aef71b69b734823ce84c18e52ed1fade40e3247c71b83fdf1",
+          "import_sha256": "9a3d82f470dd3f8aef71b69b734823ce84c18e52ed1fade40e3247c71b83fdf1",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/steady.exs",
+          "destination": "apps/abyss/scripts/udp/steady.exs",
+          "source_sha256": "b0bd01919a3e419c7125922af731b8b296f2b231a52d23b8bcf724f51f3f76ab",
+          "import_sha256": "b0bd01919a3e419c7125922af731b8b296f2b231a52d23b8bcf724f51f3f76ab",
+          "modified": false
+        },
+        {
+          "source": "scripts/udp/stress.exs",
+          "destination": "apps/abyss/scripts/udp/stress.exs",
+          "source_sha256": "0c6f9d6d50e3e9bbe232abd25ed6142332e06270fca8f9c64b1f2a24146de204",
+          "import_sha256": "0c6f9d6d50e3e9bbe232abd25ed6142332e06270fca8f9c64b1f2a24146de204",
+          "modified": false
+        },
+        {
+          "source": "test/abyss/client_regression_test.exs",
+          "destination": "apps/abyss/test/abyss/client_regression_test.exs",
+          "source_sha256": "08fcacc638cb99d2afb17c43de4c25d11fd10706a5c9baa0511cb38c0f2949d6",
+          "import_sha256": "dcaf84098e2eb52f6aa8df085779b379bb92b3a4ae1b9bcde1a59c2c05ffe769",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/client_test.exs",
+          "destination": "apps/abyss/test/abyss/client_test.exs",
+          "source_sha256": "bb797de03631d65c5942d510a490467a793a29f97784f64a7e166f85301b69fe",
+          "import_sha256": "aac3a08cc87b7b49638e52c9d9fdfc4c011790c8c18d5e06229386cd5682ae4b",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/connection_admission_test.exs",
+          "destination": "apps/abyss/test/abyss/connection_admission_test.exs",
+          "source_sha256": "9e8b12d9d7790390f26d4e68bb593de498ab7538b2184c7edbfd78f349b3369e",
+          "import_sha256": "09e1f1182e8bc9a51bbc06ae17474a410f09c8a944a10165682a9a486d1ff082",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/connection_test.exs",
+          "destination": "apps/abyss/test/abyss/connection_test.exs",
+          "source_sha256": "42b322a0c6dfb260a7bbe5155dcfa2c031bf94a934dd4b130f81fda34fdcc84f",
+          "import_sha256": "c99b70cc5c5234c8beb125acddd2f2d504233172aa953729683e49020eecbf2c",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/datagram_config_test.exs",
+          "destination": "apps/abyss/test/abyss/datagram_config_test.exs",
+          "source_sha256": "722fa3abbbfc3a2f90eca499ebb73ac020276c881d471b16199506ebf0299e51",
+          "import_sha256": "c7b69c0fac783a99c95f8f5eb2ee2a71f337cb7fd82b518a107bf0a67dd2602f",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/datagram_drop_accounting_test.exs",
+          "destination": "apps/abyss/test/abyss/datagram_drop_accounting_test.exs",
+          "source_sha256": "5d713fcc9112bdde56ce546d403e774a75f719faa1b658f0c815c5894afdba08",
+          "import_sha256": "35541cb6d43bf751094e62e2a652233d5946b6214564a06fe38000464eafa8e9",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/datagram_lifetime_test.exs",
+          "destination": "apps/abyss/test/abyss/datagram_lifetime_test.exs",
+          "source_sha256": "945b39a28f0098468deda0af10bd481d8cee3c287705f98e76c28cbd6dcb3d4b",
+          "import_sha256": "3f1fa9e6b72f6aa900457470f491da6d8222d57cc27df7824863796c572bfa8d",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/datagram_native_drop_accounting_test.exs",
+          "destination": "apps/abyss/test/abyss/datagram_native_drop_accounting_test.exs",
+          "source_sha256": "1190f5d9338baf9585d6d7236cdb5b8d0437ebb18bcbce8eca8d85f24c4a556d",
+          "import_sha256": "c8b11604a3f613bbe8abe5c149975a10d32dcb6315c759dd172f7c33489b65ed",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/datagram_native_send_accounting_test.exs",
+          "destination": "apps/abyss/test/abyss/datagram_native_send_accounting_test.exs",
+          "source_sha256": "985703ec749f0662377030b5f872e0ca99b91af3d77e586549bbe009aa7baa37",
+          "import_sha256": "a514009dfb0d79740d8eafac758b86d49efe9bd74f0f61438a92222ce9203acd",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/datagram_runtime_test.exs",
+          "destination": "apps/abyss/test/abyss/datagram_runtime_test.exs",
+          "source_sha256": "d3d82c0d6dd7737a1ca4c9bff4aaa8d026d20f43a49a529a39cd24dabb1583c0",
+          "import_sha256": "e027725c1dd9755bee4729649643d99f46a70685a6aac5e99ac202d2a4c904ca",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/datagram_send_accounting_test.exs",
+          "destination": "apps/abyss/test/abyss/datagram_send_accounting_test.exs",
+          "source_sha256": "ab695453559dc552b7c64d405a8e8ff7e86fcd8310da4016504cac8589712985",
+          "import_sha256": "bcba3b4697e487d0f8cf1eeaedf709f63912a17ad15035cefddae1322e51ce6d",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/datagram_test.exs",
+          "destination": "apps/abyss/test/abyss/datagram_test.exs",
+          "source_sha256": "0528839948fa5bc86cd45387cb5f2519e42c0f953c22ecd531ff2e2e5e42dbf7",
+          "import_sha256": "0528839948fa5bc86cd45387cb5f2519e42c0f953c22ecd531ff2e2e5e42dbf7",
+          "modified": false
+        },
+        {
+          "source": "test/abyss/datagram_watchdog_test.exs",
+          "destination": "apps/abyss/test/abyss/datagram_watchdog_test.exs",
+          "source_sha256": "b4e458b750bfddeef62420bd5d9653798bc1ca090d1e4db66df4856cd4b442d9",
+          "import_sha256": "05c8bedbc56df86343b516f37cad466ae02fa4f8b3efdb6ae474607d9c3698c2",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/dhcp_socket_native_test.exs",
+          "destination": "apps/abyss/test/abyss/dhcp_socket_native_test.exs",
+          "source_sha256": "d2afa328a555a7aedc8e49b3147bc0f831eca03f6fa9200b3eea80d7e53a5cfd",
+          "import_sha256": "1baf711ec2a77f44979deac2bdc209fa821384018e50916f3c3e8535d3325062",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/dispatcher_test.exs",
+          "destination": "apps/abyss/test/abyss/dispatcher_test.exs",
+          "source_sha256": "b3be5a500a3769e6935394dd94a21eebc1eb564277e69dc7ddd9077633a7a098",
+          "import_sha256": "b3be5a500a3769e6935394dd94a21eebc1eb564277e69dc7ddd9077633a7a098",
+          "modified": false
+        },
+        {
+          "source": "test/abyss/endpoint_contract_test.exs",
+          "destination": "apps/abyss/test/abyss/endpoint_contract_test.exs",
+          "source_sha256": "7c10aac359670e6faf0d2e5de32aff48012763121ce029ada458564f57c72226",
+          "import_sha256": "2d31d88778d79c1b036eeb44d62f5e0ff52b5bf605ba0bba5e4e83b3ec44ca67",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/handler_hardening_test.exs",
+          "destination": "apps/abyss/test/abyss/handler_hardening_test.exs",
+          "source_sha256": "5188cf8abd96f36be5ace96508a14c42677f5fdeb1438aa0efb4d6bbb36f037c",
+          "import_sha256": "1d023cf01117dcea11d910b93475507103cc24ff51b01f31da4cb01e7fa6e9b9",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/handler_test.exs",
+          "destination": "apps/abyss/test/abyss/handler_test.exs",
+          "source_sha256": "8c263ee5c109aad594531a30661caf7760bad7aefb5f9e14ae1ee809d0d8e4f1",
+          "import_sha256": "97b95a7412b24cf0b19614728f3df076abb988b97da1f1e55162091ca878b337",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/listener_comprehensive_test.exs",
+          "destination": "apps/abyss/test/abyss/listener_comprehensive_test.exs",
+          "source_sha256": "6ca11ae0479dcbb0ec15ed755fd265a20b69b70798c8d218fbc72feee5898636",
+          "import_sha256": "3b584b39fba06705a771ff622a5390fc9e9b5512571e7325f1282a8aef4e1946",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/listener_pool_scaler_test.exs",
+          "destination": "apps/abyss/test/abyss/listener_pool_scaler_test.exs",
+          "source_sha256": "ff79d58a2c171943684333192481a8a601030d6895ed0a29adfa63e7e31442d4",
+          "import_sha256": "f1c7adb693b7acfd597377b2598581adf60a195a7b200bad684804f78f1ead4f",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/listener_pool_test.exs",
+          "destination": "apps/abyss/test/abyss/listener_pool_test.exs",
+          "source_sha256": "552259ba9bc21f951f35f4f09d3ae25b9a53163f8e9378c2f450c00f6f61aea0",
+          "import_sha256": "0852db1a178d77f257009f11961789d3438300cabbca8755a8558a73952ebfc0",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/listener_test.exs",
+          "destination": "apps/abyss/test/abyss/listener_test.exs",
+          "source_sha256": "1033507cc81d6c803a5e4875b18f85a2ebb0bb48e1c03456ac7ce493d4a9e8ab",
+          "import_sha256": "5a3e38c742dfa9ba64e6f557897f0490300c092d63e312b4724a0480e8165159",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/logger_test.exs",
+          "destination": "apps/abyss/test/abyss/logger_test.exs",
+          "source_sha256": "46a959ee2a7e4fa0515672c520d67e3e8a40c2ca34b9129a4a7bf2a1040824b9",
+          "import_sha256": "46a959ee2a7e4fa0515672c520d67e3e8a40c2ca34b9129a4a7bf2a1040824b9",
+          "modified": false
+        },
+        {
+          "source": "test/abyss/metadata_requirements_test.exs",
+          "destination": "apps/abyss/test/abyss/metadata_requirements_test.exs",
+          "source_sha256": "f727b06e8a00846598bead560f0a4491119968d5b7c35877379874f123d1019f",
+          "import_sha256": "d93735aaa3df9d15cce5c867fb1e9b4aefd35ddeefe472f4243e45b8cd5473a5",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/quic_test.exs",
+          "destination": "apps/abyss/test/abyss/quic_test.exs",
+          "source_sha256": "4b9919d213900fb87bbf12e2f29620d3577c02159cab0b8d4df9f0100be86cd7",
+          "import_sha256": "c887776365c6619b4afce8b5c1643aa803f902cf91cc1a4a4f7ef3c48e38112d",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/server_config_test.exs",
+          "destination": "apps/abyss/test/abyss/server_config_test.exs",
+          "source_sha256": "71e52d48cb60a2da9c79666ebe38c32cd260dc1d2e0fe9c0d39aba81dcdc7525",
+          "import_sha256": "71e52d48cb60a2da9c79666ebe38c32cd260dc1d2e0fe9c0d39aba81dcdc7525",
+          "modified": false
+        },
+        {
+          "source": "test/abyss/server_test.exs",
+          "destination": "apps/abyss/test/abyss/server_test.exs",
+          "source_sha256": "49e4044de55c3c8ab2eff2f69315af7d8b8f4588dbcc066d75f9baa53ca6a472",
+          "import_sha256": "0a3a812d6484ae1e799a7f385377fc3156df4fc708d40b99fa0866282320eff2",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/table_owner_scope_test.exs",
+          "destination": "apps/abyss/test/abyss/table_owner_scope_test.exs",
+          "source_sha256": "2c891860bbf0dea189ce06d7750ad387958ccf108d48829d6cc1824ede16950a",
+          "import_sha256": "2c891860bbf0dea189ce06d7750ad387958ccf108d48829d6cc1824ede16950a",
+          "modified": false
+        },
+        {
+          "source": "test/abyss/table_owner_test.exs",
+          "destination": "apps/abyss/test/abyss/table_owner_test.exs",
+          "source_sha256": "15717764a8ff6799c3d2452ee85d7452f4c7d46636c5a7fea3b5612db19fdca1",
+          "import_sha256": "15717764a8ff6799c3d2452ee85d7452f4c7d46636c5a7fea3b5612db19fdca1",
+          "modified": false
+        },
+        {
+          "source": "test/abyss/telemetry_endpoint_test.exs",
+          "destination": "apps/abyss/test/abyss/telemetry_endpoint_test.exs",
+          "source_sha256": "5d9629ffe51e2a1ededa999e8f16fe2d6ff24745a53e9e1615f91e02a454224c",
+          "import_sha256": "60cd5e29cc1565f1d8eb576ecda66e7efbaf1e5fb1d278611815c867b7efc5e9",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/telemetry_integration_test.exs",
+          "destination": "apps/abyss/test/abyss/telemetry_integration_test.exs",
+          "source_sha256": "563cccaf108eedf588439205309f04dafa013b3a14cece22c7edfcc31ca03448",
+          "import_sha256": "a5756a203eb439e58691ede362f41ba68eeb028cc685aca090acf2fb8aa39363",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/telemetry_metrics_test.exs",
+          "destination": "apps/abyss/test/abyss/telemetry_metrics_test.exs",
+          "source_sha256": "e4c96374171671665ec8deec507174d88d42872f146b2d5dac6e7193feed49a5",
+          "import_sha256": "e4c96374171671665ec8deec507174d88d42872f146b2d5dac6e7193feed49a5",
+          "modified": false
+        },
+        {
+          "source": "test/abyss/telemetry_test.exs",
+          "destination": "apps/abyss/test/abyss/telemetry_test.exs",
+          "source_sha256": "1b9e40309e698564cb710fa7f3d4c8d08b911d7230f28450a6e3e284e3e5e054",
+          "import_sha256": "1b9e40309e698564cb710fa7f3d4c8d08b911d7230f28450a6e3e284e3e5e054",
+          "modified": false
+        },
+        {
+          "source": "test/abyss/transport/native_abi_probe.c",
+          "destination": "apps/abyss/test/abyss/transport/native_abi_probe.c",
+          "source_sha256": "bd17c429c3769df513edb93c786679285d60fb254ae97997f414e119ad5714d6",
+          "import_sha256": "bd17c429c3769df513edb93c786679285d60fb254ae97997f414e119ad5714d6",
+          "modified": false
+        },
+        {
+          "source": "test/abyss/transport/native_test.exs",
+          "destination": "apps/abyss/test/abyss/transport/native_test.exs",
+          "source_sha256": "7f144fe8c662500a53f046591fec9368506642b95e794b2536870bc6ea442b9f",
+          "import_sha256": "9207d17e0c32ec87ede9989d090ecdb5c9c3562e1fac58b0f2d31a1efa3ba75d",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/transport/udp/broadcast_test.exs",
+          "destination": "apps/abyss/test/abyss/transport/udp/broadcast_test.exs",
+          "source_sha256": "eced74a2a1edf61652b9b5da169acd608ad5cdbc2849b45971713411f6a99fd8",
+          "import_sha256": "27c1254cbd8aa65d30bfc38f1ead007b3263bf385ab34de991ffe9e95d4e944c",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/transport/udp/core_test.exs",
+          "destination": "apps/abyss/test/abyss/transport/udp/core_test.exs",
+          "source_sha256": "d4c0a60383c758d466b83e24881b37cfc857a656b8afe611901e27e43e73a6c4",
+          "import_sha256": "5d8eb26dcd5198efcb9a2e5cdfb54c8d8634b828410a3f000290f91728cb7361",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/transport/udp/multicast_regression_test.exs",
+          "destination": "apps/abyss/test/abyss/transport/udp/multicast_regression_test.exs",
+          "source_sha256": "2694ae4c2bb14b7bec6d9e38bec191c4e9bfda50191071a380bda2e67702f788",
+          "import_sha256": "c91d167af00ffe21f874203ea1b0238450a6d884525e07d87911e6fabfcde8ca",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/transport/udp/options_regression_test.exs",
+          "destination": "apps/abyss/test/abyss/transport/udp/options_regression_test.exs",
+          "source_sha256": "40c50e8b1d195ad6f96027d41c84c1109a2a100e3b7490b9ebf380c06ea97a4f",
+          "import_sha256": "396be11da4b5fdd4dfb7ca8e26d6baafe349bad55c4e138a79ecb198e3cf7cfb",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/transport/udp/unicast_test.exs",
+          "destination": "apps/abyss/test/abyss/transport/udp/unicast_test.exs",
+          "source_sha256": "e302aaa8ca9ef946f22f7faca7b4f032af995e6ee680c0024aa49d9c6e0a0b9b",
+          "import_sha256": "939a713dcee133ef5beb8402d8bebbcdf730545f4c1112720f3bc74866051b45",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/transport/udp_test.exs",
+          "destination": "apps/abyss/test/abyss/transport/udp_test.exs",
+          "source_sha256": "9bc5ebbdc604c8d71bced6704b1165766be04d40ba1a3d68bab5ff882252f119",
+          "import_sha256": "54b0a4ce4f2441a0ca903885c3c6cb5a93435fcfa96e734a5b87fbef7b0e9755",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/transport_udp_comprehensive_test.exs",
+          "destination": "apps/abyss/test/abyss/transport_udp_comprehensive_test.exs",
+          "source_sha256": "45d29490d7712a048a97716d0944f5e838ab3bd2bf0959de9ff50f288c1e2aa4",
+          "import_sha256": "150bc63a456ee14535ce0ea32cb0928a9332e06325aeac9285b3e936d680de58",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/udp_admission_test.exs",
+          "destination": "apps/abyss/test/abyss/udp_admission_test.exs",
+          "source_sha256": "f05c84d429cb0aa99c59f5fbbdaba4bb2f7f0c2d256de41fe0b6dd81a73972f9",
+          "import_sha256": "ae83750373626d032f5fd41144954fe27ae0049a64b59c272f35fd2e4288afb7",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/udp_backend_resolution_test.exs",
+          "destination": "apps/abyss/test/abyss/udp_backend_resolution_test.exs",
+          "source_sha256": "493c8520a123c26eb21b1eae0031c3e07db1fb7aaca1eba4b4bd86e50a5fcf85",
+          "import_sha256": "4d092c24ca5d958fe22ec812e1acf23aead75c0911e16ff1ae38738a091621db",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/udp_host_hardening_test.exs",
+          "destination": "apps/abyss/test/abyss/udp_host_hardening_test.exs",
+          "source_sha256": "02656128d72137bd1b30c307570e1c10543c2e6bad6900dc139d976036ec4ae5",
+          "import_sha256": "f3db2ceac12ea9809c5e22abf726c3a1c437e781abae55e1373a9449b61303e5",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/udp_membership_host_test.exs",
+          "destination": "apps/abyss/test/abyss/udp_membership_host_test.exs",
+          "source_sha256": "5dc493cf4fa111c8607a76e60eab4c38322759963084978e052f76315b9eaedc",
+          "import_sha256": "78b0b1cfcceedc89412b01991e482ff75cb4547c61e5119ccff067f6d03c5361",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/udp_peer_validation_test.exs",
+          "destination": "apps/abyss/test/abyss/udp_peer_validation_test.exs",
+          "source_sha256": "97ace6ceec877794f8237d0c4b6b4441de7d80ff3af38acefaa2eac01e4af8b5",
+          "import_sha256": "acac981c736104e8342a379efbfc36d941fb822a639a83a22478f8ebfda27c32",
+          "modified": true
+        },
+        {
+          "source": "test/abyss/utils_test.exs",
+          "destination": "apps/abyss/test/abyss/utils_test.exs",
+          "source_sha256": "655f06bd95e72c03d491000e7604e39e777686a5a6699fdc56efc3f680312555",
+          "import_sha256": "655f06bd95e72c03d491000e7604e39e777686a5a6699fdc56efc3f680312555",
+          "modified": false
+        },
+        {
+          "source": "test/abyss_test.exs",
+          "destination": "apps/abyss/test/abyss_test.exs",
+          "source_sha256": "d79352af2b37a0539baf7ab18382e7030d5cb9303da2d5da87e24777c23ba21d",
+          "import_sha256": "40b7fe78db4722bcbffa288b4882467120ce99af8cd444e726e9d9dd384763f3",
+          "modified": true
+        },
+        {
+          "source": "test/fixtures/quic/server_flight/README.md",
+          "destination": "apps/abyss/test/fixtures/quic/server_flight/README.md",
+          "source_sha256": "5fd910086bf9fde7332ed9a8b0715b4ffa664fb7a7697cb594848f0e82ecea71",
+          "import_sha256": "5fd910086bf9fde7332ed9a8b0715b4ffa664fb7a7697cb594848f0e82ecea71",
+          "modified": false
+        },
+        {
+          "source": "test/fixtures/quic/server_flight/leaf-key.pem",
+          "destination": "apps/abyss/test/fixtures/quic/server_flight/leaf-key.pem",
+          "source_sha256": "0d06b9f348dd4a9744085e730e907f4bd459a88cccf726fb42fba9c897ab56e1",
+          "import_sha256": "0d06b9f348dd4a9744085e730e907f4bd459a88cccf726fb42fba9c897ab56e1",
+          "modified": false
+        },
+        {
+          "source": "test/fixtures/quic/server_flight/leaf-rsa.pem",
+          "destination": "apps/abyss/test/fixtures/quic/server_flight/leaf-rsa.pem",
+          "source_sha256": "d2eaac781e5d6a7a74ccfa35120738d46c49ce4a1602806fcd763f82eaff3579",
+          "import_sha256": "d2eaac781e5d6a7a74ccfa35120738d46c49ce4a1602806fcd763f82eaff3579",
+          "modified": false
+        },
+        {
+          "source": "test/fixtures/quic/server_flight/leaf.pem",
+          "destination": "apps/abyss/test/fixtures/quic/server_flight/leaf.pem",
+          "source_sha256": "af218bb28763f8301e21c8ce0c1c878472aefbba8f1370f2d6f0d9013b603d76",
+          "import_sha256": "af218bb28763f8301e21c8ce0c1c878472aefbba8f1370f2d6f0d9013b603d76",
+          "modified": false
+        },
+        {
+          "source": "test/fixtures/quic/server_flight/root.pem",
+          "destination": "apps/abyss/test/fixtures/quic/server_flight/root.pem",
+          "source_sha256": "e7fd4d3785727195ba69f287094c756cb523348884720a04ee2562a44b35e109",
+          "import_sha256": "e7fd4d3785727195ba69f287094c756cb523348884720a04ee2562a44b35e109",
+          "modified": false
+        },
+        {
+          "source": "test/integration/client_test.exs",
+          "destination": "apps/abyss/test/integration/client_test.exs",
+          "source_sha256": "9a4a112dc97a3874dd721511281ccf7549520ea128c08059c5cb1768e3859536",
+          "import_sha256": "9a4a112dc97a3874dd721511281ccf7549520ea128c08059c5cb1768e3859536",
+          "modified": false
+        },
+        {
+          "source": "test/integration/echo_test.exs",
+          "destination": "apps/abyss/test/integration/echo_test.exs",
+          "source_sha256": "b59af69eb084adc6708f5959826c4c027b9ce3f6ce356c1ca36c1da60152f7ba",
+          "import_sha256": "b59af69eb084adc6708f5959826c4c027b9ce3f6ce356c1ca36c1da60152f7ba",
+          "modified": false
+        },
+        {
+          "source": "test/shutdown_listener_test.exs",
+          "destination": "apps/abyss/test/shutdown_listener_test.exs",
+          "source_sha256": "6dd0884ac4ccfb9bd139bb6123b61aed9a0a8e920fbebb30f9b875cf71935764",
+          "import_sha256": "6dd0884ac4ccfb9bd139bb6123b61aed9a0a8e920fbebb30f9b875cf71935764",
+          "modified": false
+        },
+        {
+          "source": "test/support/datagram_drop_accounting_fixture.ex",
+          "destination": "apps/abyss/test/support/datagram_drop_accounting_fixture.ex",
+          "source_sha256": "242942651200eed2ff85cf72ac5aaf291a8ddc576c77dc57816fb33d295e1cf7",
+          "import_sha256": "242942651200eed2ff85cf72ac5aaf291a8ddc576c77dc57816fb33d295e1cf7",
+          "modified": false
+        },
+        {
+          "source": "test/support/datagram_send_accounting_fixture.ex",
+          "destination": "apps/abyss/test/support/datagram_send_accounting_fixture.ex",
+          "source_sha256": "165d593b9cfe4c65e4db8c764c58a1ba93bc4b82f4a1d2c8014a0f60e663d29a",
+          "import_sha256": "165d593b9cfe4c65e4db8c764c58a1ba93bc4b82f4a1d2c8014a0f60e663d29a",
+          "modified": false
+        },
+        {
+          "source": "test/support/test_handler.ex",
+          "destination": "apps/abyss/test/support/test_handler.ex",
+          "source_sha256": "425e5f4862cf5af796c532fa367a714dcd784e1d58a9ea0da880a48e9ec7d586",
+          "import_sha256": "425e5f4862cf5af796c532fa367a714dcd784e1d58a9ea0da880a48e9ec7d586",
+          "modified": false
+        },
+        {
+          "source": "test/support/test_helper.ex",
+          "destination": "apps/abyss/test/support/test_helper.ex",
+          "source_sha256": "122a53c29fe4c86e61329079843c74723c2d97345ef70b271b4c29f19c3aeec7",
+          "import_sha256": "122a53c29fe4c86e61329079843c74723c2d97345ef70b271b4c29f19c3aeec7",
+          "modified": false
+        },
+        {
+          "source": "test/support/test_transport.ex",
+          "destination": "apps/abyss/test/support/test_transport.ex",
+          "source_sha256": "ccaa8f94f3a359ea41525b89ef558916d4ec5930714b46261bdcea8b0e7bd5ea",
+          "import_sha256": "ccaa8f94f3a359ea41525b89ef558916d4ec5930714b46261bdcea8b0e7bd5ea",
+          "modified": false
+        },
+        {
+          "source": "test/test_helper.exs",
+          "destination": "apps/abyss/test/test_helper.exs",
+          "source_sha256": "e4c0dc55c45f802e14ef275def917688766ab2354e9c1d0434898eed5c94db6f",
+          "import_sha256": "b09c3bab023b9e23c8e11d90a455ac0d1d001df02962a04ca275ababb5543234",
+          "modified": true
+        }
+      ],
+      "local_differences": [
+        "apps/abyss/.formatter.exs",
+        "apps/abyss/.gitignore",
+        "apps/abyss/README.md",
+        "apps/abyss/docs/README.md",
+        "apps/abyss/docs/operations.md",
+        "apps/abyss/docs/releases.md",
+        "apps/abyss/docs/releases/0.9.0-progress.md",
+        "apps/abyss/docs/udp-runtime/acceptance.md",
+        "apps/abyss/docs/udp-runtime/migration.md",
+        "apps/abyss/docs/udp-runtime/post-release-fixes.md",
+        "apps/abyss/docs/udp-runtime/progress.md",
+        "apps/abyss/examples/quic_collect/mix.exs",
+        "apps/abyss/examples/quic_echo/mix.exs",
+        "apps/abyss/mix.exs",
+        "apps/abyss/scripts/phase1/idle_policy.exs",
+        "apps/abyss/scripts/udp/README.md",
+        "apps/abyss/scripts/udp/p5_consumers.py",
+        "apps/abyss/test/abyss/client_regression_test.exs",
+        "apps/abyss/test/abyss/client_test.exs",
+        "apps/abyss/test/abyss/connection_admission_test.exs",
+        "apps/abyss/test/abyss/connection_test.exs",
+        "apps/abyss/test/abyss/datagram_config_test.exs",
+        "apps/abyss/test/abyss/datagram_drop_accounting_test.exs",
+        "apps/abyss/test/abyss/datagram_lifetime_test.exs",
+        "apps/abyss/test/abyss/datagram_native_drop_accounting_test.exs",
+        "apps/abyss/test/abyss/datagram_native_send_accounting_test.exs",
+        "apps/abyss/test/abyss/datagram_runtime_test.exs",
+        "apps/abyss/test/abyss/datagram_send_accounting_test.exs",
+        "apps/abyss/test/abyss/datagram_watchdog_test.exs",
+        "apps/abyss/test/abyss/dhcp_socket_native_test.exs",
+        "apps/abyss/test/abyss/endpoint_contract_test.exs",
+        "apps/abyss/test/abyss/handler_hardening_test.exs",
+        "apps/abyss/test/abyss/handler_test.exs",
+        "apps/abyss/test/abyss/listener_comprehensive_test.exs",
+        "apps/abyss/test/abyss/listener_pool_scaler_test.exs",
+        "apps/abyss/test/abyss/listener_pool_test.exs",
+        "apps/abyss/test/abyss/listener_test.exs",
+        "apps/abyss/test/abyss/metadata_requirements_test.exs",
+        "apps/abyss/test/abyss/quic_test.exs",
+        "apps/abyss/test/abyss/server_test.exs",
+        "apps/abyss/test/abyss/telemetry_endpoint_test.exs",
+        "apps/abyss/test/abyss/telemetry_integration_test.exs",
+        "apps/abyss/test/abyss/transport/native_test.exs",
+        "apps/abyss/test/abyss/transport/udp/broadcast_test.exs",
+        "apps/abyss/test/abyss/transport/udp/core_test.exs",
+        "apps/abyss/test/abyss/transport/udp/multicast_regression_test.exs",
+        "apps/abyss/test/abyss/transport/udp/options_regression_test.exs",
+        "apps/abyss/test/abyss/transport/udp/unicast_test.exs",
+        "apps/abyss/test/abyss/transport/udp_test.exs",
+        "apps/abyss/test/abyss/transport_udp_comprehensive_test.exs",
+        "apps/abyss/test/abyss/udp_admission_test.exs",
+        "apps/abyss/test/abyss/udp_backend_resolution_test.exs",
+        "apps/abyss/test/abyss/udp_host_hardening_test.exs",
+        "apps/abyss/test/abyss/udp_membership_host_test.exs",
+        "apps/abyss/test/abyss/udp_peer_validation_test.exs",
+        "apps/abyss/test/abyss_test.exs",
+        "apps/abyss/test/test_helper.exs"
+      ],
+      "added_files": [
+        {
+          "destination": "apps/abyss/docs/monorepo.md",
+          "sha256": "ce9c0f56b8c8e0e069fa3ea42ae9062a1a8b1fb0c7683bc52e16ea94f268101c"
+        },
+        {
+          "destination": "apps/abyss/scripts/phase1/candidate_provenance.exs",
+          "sha256": "a044919d8baf04739e071dff94416d43d3b10f67ce9d5d97bc3398e3250f4eef"
+        },
+        {
+          "destination": "apps/abyss/scripts/phase1/current_provenance.exs",
+          "sha256": "e4f0fcc69e76e78191e26eeffc9628661466a54c6f6ca23ccef3397a80a5a303"
+        }
+      ]
+    },
+    {
+      "package": "abyss_raw",
+      "source_url": "https://github.com/gsmlg-dev/abyss",
+      "source_commit": "89f6879edd163ff023d8bcb44b9686175dca0109",
+      "source_version": "0.10.0",
+      "destination": "packages/abyss_raw",
+      "files": [
+        {
+          "source": "packages/abyss_raw/.formatter.exs",
+          "destination": "packages/abyss_raw/.formatter.exs",
+          "source_sha256": "42bf753df3dbf8bd44556472867ca7c2691fe6a33551ed464e00380c064ffb02",
+          "import_sha256": "42bf753df3dbf8bd44556472867ca7c2691fe6a33551ed464e00380c064ffb02",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/.gitignore",
+          "destination": "packages/abyss_raw/.gitignore",
+          "source_sha256": "b7efbc1891bbe9f93ecda3af7be4c2ac1d25ae9090b0719d82a1610a54b85bfe",
+          "import_sha256": "b7efbc1891bbe9f93ecda3af7be4c2ac1d25ae9090b0719d82a1610a54b85bfe",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/LICENSE",
+          "destination": "packages/abyss_raw/LICENSE",
+          "source_sha256": "e55700b73c35aa16a9c6e1fe93fe59e09bf0226547aef0d6f9b76662bd3a1baa",
+          "import_sha256": "e55700b73c35aa16a9c6e1fe93fe59e09bf0226547aef0d6f9b76662bd3a1baa",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/README.md",
+          "destination": "packages/abyss_raw/README.md",
+          "source_sha256": "161f2ab82ceac2becbaa53699cb82628d768b2c69373dfe570dc52b844a0b205",
+          "import_sha256": "411663f191bb69a440577b6187b8b1ee9da034627a005a037a2d61575c409525",
+          "modified": true
+        },
+        {
+          "source": "packages/abyss_raw/lib/abyss_dhcp_socket/native.ex",
+          "destination": "packages/abyss_raw/lib/abyss_dhcp_socket/native.ex",
+          "source_sha256": "b939d3b6f03acdb3e51a39dc28a39656e01e4eeef8dbf4896faebbf076737570",
+          "import_sha256": "b939d3b6f03acdb3e51a39dc28a39656e01e4eeef8dbf4896faebbf076737570",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/mix.exs",
+          "destination": "packages/abyss_raw/mix.exs",
+          "source_sha256": "1cd031181593e5a4b3a78888f96b34666a5aa262c83e52ebefac764f57834e9e",
+          "import_sha256": "c09963bb3ad3e2de274a8deb3607290ea9ef03ea7013fbf8138f951fd40a32c2",
+          "modified": true
+        },
+        {
+          "source": "packages/abyss_raw/mix.lock",
+          "destination": "packages/abyss_raw/mix.lock",
+          "source_sha256": "0cbcb816ce91e289996834c4034d1f0f7e1b7f7007b954f4c732909b381e83a1",
+          "import_sha256": "0cbcb816ce91e289996834c4034d1f0f7e1b7f7007b954f4c732909b381e83a1",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/native/dhcp_socket/.cargo/config.toml",
+          "destination": "packages/abyss_raw/native/dhcp_socket/.cargo/config.toml",
+          "source_sha256": "6e0e8b51d7095af55613571b826653168084208f0b91279e3fec4b59b7f86d90",
+          "import_sha256": "6e0e8b51d7095af55613571b826653168084208f0b91279e3fec4b59b7f86d90",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/native/dhcp_socket/Cargo.lock",
+          "destination": "packages/abyss_raw/native/dhcp_socket/Cargo.lock",
+          "source_sha256": "a51616d6c0dbd8540d60ec5e2348a58e7c3224b4c29a2baf0dbb79fa03f90392",
+          "import_sha256": "a51616d6c0dbd8540d60ec5e2348a58e7c3224b4c29a2baf0dbb79fa03f90392",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/native/dhcp_socket/Cargo.toml",
+          "destination": "packages/abyss_raw/native/dhcp_socket/Cargo.toml",
+          "source_sha256": "500ddbd65ad7697a86fe720875f6b9502367c114857c1256fae0f14c9972290f",
+          "import_sha256": "500ddbd65ad7697a86fe720875f6b9502367c114857c1256fae0f14c9972290f",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/native/dhcp_socket/src/arp.rs",
+          "destination": "packages/abyss_raw/native/dhcp_socket/src/arp.rs",
+          "source_sha256": "8e71907ee739b0fb3a58b5c8955f784e823c031308d5fa8537605fb21e5c3226",
+          "import_sha256": "8e71907ee739b0fb3a58b5c8955f784e823c031308d5fa8537605fb21e5c3226",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/native/dhcp_socket/src/lib.rs",
+          "destination": "packages/abyss_raw/native/dhcp_socket/src/lib.rs",
+          "source_sha256": "fe3166c88be21b8aca7917e4fce09390fceb77ff758da48dcba5b73294d8e612",
+          "import_sha256": "fe3166c88be21b8aca7917e4fce09390fceb77ff758da48dcba5b73294d8e612",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/native/dhcp_socket/src/poll.rs",
+          "destination": "packages/abyss_raw/native/dhcp_socket/src/poll.rs",
+          "source_sha256": "02dd8c962c42719eb3c5964527e949f407a67ae27feb6af15ece1b9ec7c9d81d",
+          "import_sha256": "02dd8c962c42719eb3c5964527e949f407a67ae27feb6af15ece1b9ec7c9d81d",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/native/dhcp_socket/src/socket.rs",
+          "destination": "packages/abyss_raw/native/dhcp_socket/src/socket.rs",
+          "source_sha256": "1134526ee038125dc549747dd6b3a7cf6ec6c44dfa01d362ce1aadd0bacc24cc",
+          "import_sha256": "1134526ee038125dc549747dd6b3a7cf6ec6c44dfa01d362ce1aadd0bacc24cc",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/scripts/test_arp.sh",
+          "destination": "packages/abyss_raw/scripts/test_arp.sh",
+          "source_sha256": "f83746cb4520dc19b82ffcd949e02ac07f853528b771a9e79e7788a4e8d092e1",
+          "import_sha256": "f83746cb4520dc19b82ffcd949e02ac07f853528b771a9e79e7788a4e8d092e1",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/test/native_test.exs",
+          "destination": "packages/abyss_raw/test/native_test.exs",
+          "source_sha256": "b55f05c1af52bc5cd3d61b7b71c3ba669953e71ce026e66b12d3de875cda2895",
+          "import_sha256": "b55f05c1af52bc5cd3d61b7b71c3ba669953e71ce026e66b12d3de875cda2895",
+          "modified": false
+        },
+        {
+          "source": "packages/abyss_raw/test/test_helper.exs",
+          "destination": "packages/abyss_raw/test/test_helper.exs",
+          "source_sha256": "b086ec47f0c6c7aaeb4cffca5ae5243dd05e0dc96ab761ced93325d5315f4b12",
+          "import_sha256": "b086ec47f0c6c7aaeb4cffca5ae5243dd05e0dc96ab761ced93325d5315f4b12",
+          "modified": false
+        }
+      ],
+      "local_differences": [
+        "packages/abyss_raw/README.md",
+        "packages/abyss_raw/mix.exs"
+      ],
+      "added_files": []
+    },
+    {
+      "package": "hell",
+      "source_url": "https://github.com/gsmlg-dev/hell",
+      "source_commit": "4fb5d53a1b2acfb5afc9b1ceba65fdc52d61ef83",
+      "source_version": "0.1.3",
+      "destination": "apps/hell",
+      "files": [
+        {
+          "source": ".credo.exs",
+          "destination": "apps/hell/.credo.exs",
+          "source_sha256": "b7461d2605efdfa6cb14ec888f854fd6abdd3d2fa4e02a485c0730adeeefc808",
+          "import_sha256": "b7461d2605efdfa6cb14ec888f854fd6abdd3d2fa4e02a485c0730adeeefc808",
+          "modified": false
+        },
+        {
+          "source": ".dialyzer_ignore.exs",
+          "destination": "apps/hell/.dialyzer_ignore.exs",
+          "source_sha256": "ab37bffdd76bba1afc43495fe498c00e5a7ad85b26a02ec87f339023f24cc954",
+          "import_sha256": "ab37bffdd76bba1afc43495fe498c00e5a7ad85b26a02ec87f339023f24cc954",
+          "modified": false
+        },
+        {
+          "source": ".formatter.exs",
+          "destination": "apps/hell/.formatter.exs",
+          "source_sha256": "a46ecd2cb12fd54c0cf0928c72fb10bef329b3f72b49df9bef621c3370734bc5",
+          "import_sha256": "4482f86a0302bca63acf698b872badf56c0e9249db0bc18edceaf11b8740366d",
+          "modified": true
+        },
+        {
+          "source": "CHANGELOG.md",
+          "destination": "apps/hell/CHANGELOG.md",
+          "source_sha256": "268beaed127ad3c212a112f320276feb74394bdaadc58058bbb02032b5473a39",
+          "import_sha256": "268beaed127ad3c212a112f320276feb74394bdaadc58058bbb02032b5473a39",
+          "modified": false
+        },
+        {
+          "source": "CODE_OF_CONDUCT.md",
+          "destination": "apps/hell/CODE_OF_CONDUCT.md",
+          "source_sha256": "554ffa1b318a99eb4ba0b57875491a6e2b4c67cc6a991b445d3ec9971f78e08a",
+          "import_sha256": "554ffa1b318a99eb4ba0b57875491a6e2b4c67cc6a991b445d3ec9971f78e08a",
+          "modified": false
+        },
+        {
+          "source": "LICENSE",
+          "destination": "apps/hell/LICENSE",
+          "source_sha256": "83057ddebffe5f363948716f6713b738a428f18e323f93cf094d9f654eb8fdc2",
+          "import_sha256": "83057ddebffe5f363948716f6713b738a428f18e323f93cf094d9f654eb8fdc2",
+          "modified": false
+        },
+        {
+          "source": "MIGRATION.md",
+          "destination": "apps/hell/MIGRATION.md",
+          "source_sha256": "15789751c2f852dcbaebf2448268bef06452e4764d12ee771bbf5e3c41bfa108",
+          "import_sha256": "a43bab6e1acca358202e2784b3e4effcb50c8fa69e0c694685ed722f8f3e99f8",
+          "modified": true
+        },
+        {
+          "source": "README.md",
+          "destination": "apps/hell/README.md",
+          "source_sha256": "0defe53acfaad60baf88b4665343cddfbc88a96394cee66366ee9ebef7d4e927",
+          "import_sha256": "ed7f5924c9633ab452999331196ec74dde334ebc0743de3d91b89069dcf46471",
+          "modified": true
+        },
+        {
+          "source": "RELEASE.md",
+          "destination": "apps/hell/RELEASE.md",
+          "source_sha256": "6c945e03584864a03ad28c560d5fbfaa922dc430ab40eeb62426d5b10da160ce",
+          "import_sha256": "8bcf841bb9668e89956ee2ac0801a4ea7d3ef640bf7029c34b18520ed253c1fc",
+          "modified": true
+        },
+        {
+          "source": "SECURITY.md",
+          "destination": "apps/hell/SECURITY.md",
+          "source_sha256": "86a2c8be8c21931ba5520e22915a05c7340a3016f5e6c3107f0db4a16f3b6fb3",
+          "import_sha256": "86a2c8be8c21931ba5520e22915a05c7340a3016f5e6c3107f0db4a16f3b6fb3",
+          "modified": false
+        },
+        {
+          "source": "VERIFICATION.md",
+          "destination": "apps/hell/VERIFICATION.md",
+          "source_sha256": "3f18dbfc500596ca598ea53cbb26cdf86bac84db81636d6a1fd648101bd31020",
+          "import_sha256": "2ccfac214764bb2743a0c54eaad41922720c440b2705ddebceeb8557e89f057e",
+          "modified": true
+        },
+        {
+          "source": "assets/ex_doc_logo.png",
+          "destination": "apps/hell/assets/ex_doc_logo.png",
+          "source_sha256": "4752a2d52713888e41ab4d7d93a08d3e769b8399f1223755f7065a6e27a16eae",
+          "import_sha256": "4752a2d52713888e41ab4d7d93a08d3e769b8399f1223755f7065a6e27a16eae",
+          "modified": false
+        },
+        {
+          "source": "assets/readme_logo-white.png",
+          "destination": "apps/hell/assets/readme_logo-white.png",
+          "source_sha256": "9518cf6f1f45e82e995bbfd0a1dbcf5586158cedd33c6bf52f24fa3bcefc5ded",
+          "import_sha256": "9518cf6f1f45e82e995bbfd0a1dbcf5586158cedd33c6bf52f24fa3bcefc5ded",
+          "modified": false
+        },
+        {
+          "source": "assets/readme_logo.png",
+          "destination": "apps/hell/assets/readme_logo.png",
+          "source_sha256": "c195ef295f84cb4de5012cf7ece50d1d765e278b42753ea2f03c3d9bab45a343",
+          "import_sha256": "c195ef295f84cb4de5012cf7ece50d1d765e278b42753ea2f03c3d9bab45a343",
+          "modified": false
+        },
+        {
+          "source": "examples/daytime.ex",
+          "destination": "apps/hell/examples/daytime.ex",
+          "source_sha256": "b2af074445dcab1108aa7ca63c6003d0cd36760cd4b96229745722b5065f2ef4",
+          "import_sha256": "b2af074445dcab1108aa7ca63c6003d0cd36760cd4b96229745722b5065f2ef4",
+          "modified": false
+        },
+        {
+          "source": "examples/echo.ex",
+          "destination": "apps/hell/examples/echo.ex",
+          "source_sha256": "dcc522dad4e1016512e2f6fe82c6335f8127754ee09049c452a826c8d994c810",
+          "import_sha256": "dcc522dad4e1016512e2f6fe82c6335f8127754ee09049c452a826c8d994c810",
+          "modified": false
+        },
+        {
+          "source": "examples/http_hello_world.ex",
+          "destination": "apps/hell/examples/http_hello_world.ex",
+          "source_sha256": "67a649b7e7008bd7f744d092572c0ea3c0e7de2ec4d5823e368814d034f39c6d",
+          "import_sha256": "67a649b7e7008bd7f744d092572c0ea3c0e7de2ec4d5823e368814d034f39c6d",
+          "modified": false
+        },
+        {
+          "source": "examples/messenger.ex",
+          "destination": "apps/hell/examples/messenger.ex",
+          "source_sha256": "9729a213f3cc0caf0c39b780789461c35f70f908cc8ea7b7fd0f1b82e71e1235",
+          "import_sha256": "9729a213f3cc0caf0c39b780789461c35f70f908cc8ea7b7fd0f1b82e71e1235",
+          "modified": false
+        },
+        {
+          "source": "lib/hell.ex",
+          "destination": "apps/hell/lib/hell.ex",
+          "source_sha256": "b81eb885210385f37e7226c1d45008679077d40e71e2a01b0090dc384dc9cc78",
+          "import_sha256": "b81eb885210385f37e7226c1d45008679077d40e71e2a01b0090dc384dc9cc78",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/acceptor.ex",
+          "destination": "apps/hell/lib/hell/acceptor.ex",
+          "source_sha256": "dbc5c2f0619456f82bd2d49d20182a380819dac7ddd5f93b2a6190a32da192f8",
+          "import_sha256": "dbc5c2f0619456f82bd2d49d20182a380819dac7ddd5f93b2a6190a32da192f8",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/acceptor_pool_supervisor.ex",
+          "destination": "apps/hell/lib/hell/acceptor_pool_supervisor.ex",
+          "source_sha256": "b332de3092a65c042ddcba8486553c4c6154fb65827f9eeb92202f388ad34cda",
+          "import_sha256": "b332de3092a65c042ddcba8486553c4c6154fb65827f9eeb92202f388ad34cda",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/acceptor_supervisor.ex",
+          "destination": "apps/hell/lib/hell/acceptor_supervisor.ex",
+          "source_sha256": "57f4787aa257b1e9d2a2fa06a192321050d2256cf91af0d079e9f689a641f7aa",
+          "import_sha256": "57f4787aa257b1e9d2a2fa06a192321050d2256cf91af0d079e9f689a641f7aa",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/connection.ex",
+          "destination": "apps/hell/lib/hell/connection.ex",
+          "source_sha256": "f3673b6c8da15951543fd037a2a0600bf85e58580b94ddc82960ffa4e4d32693",
+          "import_sha256": "f3673b6c8da15951543fd037a2a0600bf85e58580b94ddc82960ffa4e4d32693",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/handler.ex",
+          "destination": "apps/hell/lib/hell/handler.ex",
+          "source_sha256": "085673883e964b5143a39bc9559861f61e59e087aa9078e82971a9e77d06a05c",
+          "import_sha256": "085673883e964b5143a39bc9559861f61e59e087aa9078e82971a9e77d06a05c",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/handler_config.ex",
+          "destination": "apps/hell/lib/hell/handler_config.ex",
+          "source_sha256": "366744ebcc0d96d8b5597380569f5bebd4754a3b712a739c896b8dd3ca1175f1",
+          "import_sha256": "366744ebcc0d96d8b5597380569f5bebd4754a3b712a739c896b8dd3ca1175f1",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/listener.ex",
+          "destination": "apps/hell/lib/hell/listener.ex",
+          "source_sha256": "fac4486168b4d4766819fbe2d24b31f9b565228f34bd111ce7cf3fe406edc74e",
+          "import_sha256": "fac4486168b4d4766819fbe2d24b31f9b565228f34bd111ce7cf3fe406edc74e",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/logger.ex",
+          "destination": "apps/hell/lib/hell/logger.ex",
+          "source_sha256": "e338085cef0f5ef15208413111de9c2c893ad8d00919f4f50fe59df84f5bf9c3",
+          "import_sha256": "e338085cef0f5ef15208413111de9c2c893ad8d00919f4f50fe59df84f5bf9c3",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/process_label.ex",
+          "destination": "apps/hell/lib/hell/process_label.ex",
+          "source_sha256": "722e3b629074d8f44f3c9487c974f1a84284f85b9df58086672e16578e0d73a0",
+          "import_sha256": "722e3b629074d8f44f3c9487c974f1a84284f85b9df58086672e16578e0d73a0",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/server.ex",
+          "destination": "apps/hell/lib/hell/server.ex",
+          "source_sha256": "43bd9dd61e451928ab8f9e0716943899c266ba6c78d749f645a52284147dd6f0",
+          "import_sha256": "43bd9dd61e451928ab8f9e0716943899c266ba6c78d749f645a52284147dd6f0",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/server_config.ex",
+          "destination": "apps/hell/lib/hell/server_config.ex",
+          "source_sha256": "35c1eb1a38ffcc9f4427bbbb5ebf45834a3c71857be564ae83d2e051c3471a0a",
+          "import_sha256": "35c1eb1a38ffcc9f4427bbbb5ebf45834a3c71857be564ae83d2e051c3471a0a",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/shutdown_listener.ex",
+          "destination": "apps/hell/lib/hell/shutdown_listener.ex",
+          "source_sha256": "154f3c4611c1d66215f92828b8b1e98f2ad89c25be5aebc49d78efe51660d955",
+          "import_sha256": "154f3c4611c1d66215f92828b8b1e98f2ad89c25be5aebc49d78efe51660d955",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/socket.ex",
+          "destination": "apps/hell/lib/hell/socket.ex",
+          "source_sha256": "65d13c435fd7d3d9c872e47d1a61c94df0dd24053aa7c3c42b252d2bb46b765e",
+          "import_sha256": "65d13c435fd7d3d9c872e47d1a61c94df0dd24053aa7c3c42b252d2bb46b765e",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/telemetry.ex",
+          "destination": "apps/hell/lib/hell/telemetry.ex",
+          "source_sha256": "a63a6b74e13a61e21c60e7d52dcf0549e5d0a3ea2c51ac7ff066c61ca6d7ba11",
+          "import_sha256": "a63a6b74e13a61e21c60e7d52dcf0549e5d0a3ea2c51ac7ff066c61ca6d7ba11",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/transport.ex",
+          "destination": "apps/hell/lib/hell/transport.ex",
+          "source_sha256": "24b26ce4b9d3d9104296e9727874c9dbd3b4a56f75d5228ba5601fb531a2d7dd",
+          "import_sha256": "24b26ce4b9d3d9104296e9727874c9dbd3b4a56f75d5228ba5601fb531a2d7dd",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/transports/ssl.ex",
+          "destination": "apps/hell/lib/hell/transports/ssl.ex",
+          "source_sha256": "2357e06a492bdf25afa657839bb8f133f0a5925ea9858f4b067f879fc867422f",
+          "import_sha256": "2357e06a492bdf25afa657839bb8f133f0a5925ea9858f4b067f879fc867422f",
+          "modified": false
+        },
+        {
+          "source": "lib/hell/transports/tcp.ex",
+          "destination": "apps/hell/lib/hell/transports/tcp.ex",
+          "source_sha256": "b7bda9268a2fc9b779a768fe5bf68bb5cc248cbebedb3a44c1cf11e3944e56b3",
+          "import_sha256": "b7bda9268a2fc9b779a768fe5bf68bb5cc248cbebedb3a44c1cf11e3944e56b3",
+          "modified": false
+        },
+        {
+          "source": "mix.exs",
+          "destination": "apps/hell/mix.exs",
+          "source_sha256": "378d2a1e8d35d3f84601fb90caba953cfb727a468c51cf45ff6e755280920c1c",
+          "import_sha256": "82a85763c2247c9a503a1a36c0f254854f1608f94cf821d774f421cf23dff247",
+          "modified": true
+        },
+        {
+          "source": "scripts/artifact_smoke.exs",
+          "destination": "apps/hell/scripts/artifact_smoke.exs",
+          "source_sha256": "7b92cfeaa4d6820b174704a982dca09a58342cca28703fa779d1120c8e9a29df",
+          "import_sha256": "b14da85c6fb5f7b24ea2eec4264bdc549266d4fa4e8285e4fe6e8087956b104e",
+          "modified": true
+        },
+        {
+          "source": "scripts/artifact_smoke.sh",
+          "destination": "apps/hell/scripts/artifact_smoke.sh",
+          "source_sha256": "abc45969ecf25e46e0cc3ece528e819b074c9685628715167f4d0bee89cd0123",
+          "import_sha256": "a0b24a85e51f04b0684260499445c27b6369ca49c9d26b79aa2269e1a93070c0",
+          "modified": true
+        },
+        {
+          "source": "scripts/check_package.exs",
+          "destination": "apps/hell/scripts/check_package.exs",
+          "source_sha256": "e5835698c6bea874c2760fcdd1f97d06d6e13a0ecf32956f5e9e40f15bf9f487",
+          "import_sha256": "e5835698c6bea874c2760fcdd1f97d06d6e13a0ecf32956f5e9e40f15bf9f487",
+          "modified": false
+        },
+        {
+          "source": "test/hell/acceptor_test.exs",
+          "destination": "apps/hell/test/hell/acceptor_test.exs",
+          "source_sha256": "aad7fded1a365c0a343c608e2f88826f92ffc103677995965c1633224f853c6b",
+          "import_sha256": "67a06333b8af9a0a376e1e35d5e9d14945ff20fdba065c9b3795252ba17d5cbc",
+          "modified": true
+        },
+        {
+          "source": "test/hell/config_test.exs",
+          "destination": "apps/hell/test/hell/config_test.exs",
+          "source_sha256": "765ecca25c25344aacf68a63aa2176d32b424d19645726ad0c437d2fefad0871",
+          "import_sha256": "765ecca25c25344aacf68a63aa2176d32b424d19645726ad0c437d2fefad0871",
+          "modified": false
+        },
+        {
+          "source": "test/hell/connection_test.exs",
+          "destination": "apps/hell/test/hell/connection_test.exs",
+          "source_sha256": "7222f3e1ef1708c28be7416eddeaddf5f4c02af1348bd089329493dd2f0654f6",
+          "import_sha256": "7222f3e1ef1708c28be7416eddeaddf5f4c02af1348bd089329493dd2f0654f6",
+          "modified": false
+        },
+        {
+          "source": "test/hell/handler_test.exs",
+          "destination": "apps/hell/test/hell/handler_test.exs",
+          "source_sha256": "60bf5f13e11170a9348c6dbe097a1eb3ccef5128422ce93250fc9f76ccaea4ed",
+          "import_sha256": "dc6fad814cafdf10564ef7d9e949e9227b34dbf99d1a878ccfa9c6d602c84168",
+          "modified": true
+        },
+        {
+          "source": "test/hell/lifecycle_regression_test.exs",
+          "destination": "apps/hell/test/hell/lifecycle_regression_test.exs",
+          "source_sha256": "b16628b76d1f497221623e10fe4975625fae1d5b1c4d0ad2d2a7ec98710eaded",
+          "import_sha256": "f2e1147cf75dcfecb14224287c5d90927f61a4acfda5b8cc2b079edfda8f87fa",
+          "modified": true
+        },
+        {
+          "source": "test/hell/listener_test.exs",
+          "destination": "apps/hell/test/hell/listener_test.exs",
+          "source_sha256": "ca247c41a4989f9ccd84b48b5ffcd8be342ce31c93fb630a9e2306fd92ca1606",
+          "import_sha256": "3feb593948a2ee1bfde58525a2d18e6682b267073e66b384fee20f1589a810fb",
+          "modified": true
+        },
+        {
+          "source": "test/hell/process_label_test.exs",
+          "destination": "apps/hell/test/hell/process_label_test.exs",
+          "source_sha256": "4cabb9737fcfd8b8a43bab1f014961fba246411e02ed48813ed1cc4a2d883c3f",
+          "import_sha256": "bcae4d8ae4279389b24572bc880245f17c196f11954b7b54bdd2794934a6a693",
+          "modified": true
+        },
+        {
+          "source": "test/hell/read_timeout_transition_test.exs",
+          "destination": "apps/hell/test/hell/read_timeout_transition_test.exs",
+          "source_sha256": "76ffc9871efa7636ddb7b2c93751dc0fa92e8577fdae3e3c8ce2a37840e32f03",
+          "import_sha256": "ddada0337e814c638e3a14a41211b3018a71eef25e822bc544f0398637ccaee4",
+          "modified": true
+        },
+        {
+          "source": "test/hell/server_test.exs",
+          "destination": "apps/hell/test/hell/server_test.exs",
+          "source_sha256": "8195d733e6f1fe2bac7469940693155af98349617aeaa7a5a9640f52d8d71299",
+          "import_sha256": "2c35e3a2d92febb4ed43bc293029a35f442b9b8529fd8e4bd3988ae525523d42",
+          "modified": true
+        },
+        {
+          "source": "test/hell/shutdown_listener_test.exs",
+          "destination": "apps/hell/test/hell/shutdown_listener_test.exs",
+          "source_sha256": "dcc3d4ee1886d4b1685fcf811b6c47b9d620a6e9e1d21b8745b015ea8153d20f",
+          "import_sha256": "dcc3d4ee1886d4b1685fcf811b6c47b9d620a6e9e1d21b8745b015ea8153d20f",
+          "modified": false
+        },
+        {
+          "source": "test/hell/socket_reuse_test.exs",
+          "destination": "apps/hell/test/hell/socket_reuse_test.exs",
+          "source_sha256": "8024447620fc698e47cd2b152006b91483057789d64e7e7def32eb69fffd16a5",
+          "import_sha256": "6d64cd2628ec87ce0e9d32fd6e35df53a6d24dfca2760db85e993ca3c4545f04",
+          "modified": true
+        },
+        {
+          "source": "test/hell/socket_test.exs",
+          "destination": "apps/hell/test/hell/socket_test.exs",
+          "source_sha256": "771ea8f1e2174cdf1e4f7b357ff474355625a07fb8d213d30e2248ac65da3427",
+          "import_sha256": "0353f5ef2c590352012d67a09a8fb5af7ae1c0c0119e9dc6360df114851836d1",
+          "modified": true
+        },
+        {
+          "source": "test/hell/telemetry_test.exs",
+          "destination": "apps/hell/test/hell/telemetry_test.exs",
+          "source_sha256": "c338ed30f0d45516b48dd0e2b1e40a1c4501632522cdd8f570138d7ff0af91c7",
+          "import_sha256": "c338ed30f0d45516b48dd0e2b1e40a1c4501632522cdd8f570138d7ff0af91c7",
+          "modified": false
+        },
+        {
+          "source": "test/hell/transport_options_test.exs",
+          "destination": "apps/hell/test/hell/transport_options_test.exs",
+          "source_sha256": "ed160d4e2c1e1b9ca646c1d872d4790a4faf1cfbc23f9043219b70fd02cc82d0",
+          "import_sha256": "5fb258d675b247f5a1f2f44231154b4796e6d04063f3eae6d46f41074177cbdd",
+          "modified": true
+        },
+        {
+          "source": "test/hell/upgrade_regression_test.exs",
+          "destination": "apps/hell/test/hell/upgrade_regression_test.exs",
+          "source_sha256": "9fcd5d7bc5c657539c12733823c1c8463ec771f605feeb779060ec73858bf33f",
+          "import_sha256": "8e0f12feacc93dd11edb4679c705f891b5b8a3fa53fb2b7f1579c15d0fca3c0e",
+          "modified": true
+        },
+        {
+          "source": "test/support/ca.pem",
+          "destination": "apps/hell/test/support/ca.pem",
+          "source_sha256": "56ad46776653ec973e7bc06f62f0505d1a48e2aeca0e315f30b6e77fdcff048e",
+          "import_sha256": "56ad46776653ec973e7bc06f62f0505d1a48e2aeca0e315f30b6e77fdcff048e",
+          "modified": false
+        },
+        {
+          "source": "test/support/cert.pem",
+          "destination": "apps/hell/test/support/cert.pem",
+          "source_sha256": "fc57fd867543b9daf992f5bea602bb96fe1993c664e2589e7d59e43dc9784483",
+          "import_sha256": "fc57fd867543b9daf992f5bea602bb96fe1993c664e2589e7d59e43dc9784483",
+          "modified": false
+        },
+        {
+          "source": "test/support/key.pem",
+          "destination": "apps/hell/test/support/key.pem",
+          "source_sha256": "26e2d5eb7095de4ba1eb54ce68e9acbd53acee2d4f58b35fc9ab59a349884f16",
+          "import_sha256": "26e2d5eb7095de4ba1eb54ce68e9acbd53acee2d4f58b35fc9ab59a349884f16",
+          "modified": false
+        },
+        {
+          "source": "test/support/sendfile",
+          "destination": "apps/hell/test/support/sendfile",
+          "source_sha256": "e9c0f8b575cbfcb42ab3b78ecc87efa3b011d9a5d10b09fa4e96f240bf6a82f5",
+          "import_sha256": "e9c0f8b575cbfcb42ab3b78ecc87efa3b011d9a5d10b09fa4e96f240bf6a82f5",
+          "modified": false
+        },
+        {
+          "source": "test/support/telemetry_helpers.ex",
+          "destination": "apps/hell/test/support/telemetry_helpers.ex",
+          "source_sha256": "9718e7af273f4fac044393c27d1f2b5cc4cafdcee3537cc106a98c908ee01156",
+          "import_sha256": "9718e7af273f4fac044393c27d1f2b5cc4cafdcee3537cc106a98c908ee01156",
+          "modified": false
+        },
+        {
+          "source": "test/test_helper.exs",
+          "destination": "apps/hell/test/test_helper.exs",
+          "source_sha256": "b086ec47f0c6c7aaeb4cffca5ae5243dd05e0dc96ab761ced93325d5315f4b12",
+          "import_sha256": "b2777d1b91582de3d37cfb72052ddd5173ebc7fbde5f03831c4b379ebe768bd5",
+          "modified": true
+        }
+      ],
+      "local_differences": [
+        "apps/hell/.formatter.exs",
+        "apps/hell/MIGRATION.md",
+        "apps/hell/README.md",
+        "apps/hell/RELEASE.md",
+        "apps/hell/VERIFICATION.md",
+        "apps/hell/mix.exs",
+        "apps/hell/scripts/artifact_smoke.exs",
+        "apps/hell/scripts/artifact_smoke.sh",
+        "apps/hell/test/hell/acceptor_test.exs",
+        "apps/hell/test/hell/handler_test.exs",
+        "apps/hell/test/hell/lifecycle_regression_test.exs",
+        "apps/hell/test/hell/listener_test.exs",
+        "apps/hell/test/hell/process_label_test.exs",
+        "apps/hell/test/hell/read_timeout_transition_test.exs",
+        "apps/hell/test/hell/server_test.exs",
+        "apps/hell/test/hell/socket_reuse_test.exs",
+        "apps/hell/test/hell/socket_test.exs",
+        "apps/hell/test/hell/transport_options_test.exs",
+        "apps/hell/test/hell/upgrade_regression_test.exs",
+        "apps/hell/test/test_helper.exs"
+      ],
+      "added_files": []
+    }
+  ],
+  "excluded": "Repository/CI/devenv/editor metadata, caches, generated output, historical evidence logs and obsolete standalone publishers; current CI/release tools are integrated at the monorepo root."
+}

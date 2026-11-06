@@ -15,8 +15,24 @@ followed by `MIX_ENV=test mix test apps/http_fetch/test`. Running the test from
 the root keeps runtime applications of `in_umbrella` dependencies, including
 `ex_ssl`, on the code path without adding duplicate child dependencies.
 
-The umbrella contains nine independently packaged applications with coordinated
-versions and exact internal dependencies. The imported TLS/QUIC source inventory
+The monorepo contains eleven OTP applications and the optional native package
+`abyss_raw`. The original nine client/engine packages retain coordinated versions
+and exact internal dependencies. `abyss`/`abyss_raw` and `hell` have independent
+version groups. See the [server migration report](docs/server-migration.md) for
+provenance, package boundaries, commands and verification results.
+
+| Responsibility | Packages | Runtime boundary |
+| --- | --- | --- |
+| HTTP clients and pooled connections | `http_fetch`, `http_event_source`, `http_web_socket`, `http_web_transport`, `http_core`, `http_runtime`, `elixir_quic_http3` | Client-side HTTP protocol support |
+| TCP/TLS servers | [`hell`](apps/hell/README.md) | Existing TCP and OTP `:ssl` TLS behavior |
+| UDP/QUIC servers | [`abyss`](apps/abyss/README.md) | Plain UDP; QUIC consumers explicitly install and start `elixir_quic` |
+| Protocol engines | `ex_ssl`, `elixir_quic` | `SSL` TLS and `Quic` QUIC APIs |
+| Optional Linux raw networking | [`abyss_raw`](packages/abyss_raw/README.md) | Separate package under `packages/`; Rust builds only on explicit installation |
+
+The server imports preserve public names, defaults and supervision semantics.
+They do not add HTTP/3 serving, DATAGRAM, 0-RTT, migration or a new transport API.
+
+The imported TLS/QUIC source inventory
 is recorded in [migration provenance](docs/migration-provenance.md); its original
 validation snapshot is [preserved separately](docs/migration-validation.md).
 Current HTTP/3 beta acceptance and publication evidence are tracked in the

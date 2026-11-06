@@ -52,3 +52,11 @@ http_fetch-*.tar
 __pycache__/
 *.pyc
 *.pyo
+
+# Optional native package builds remain outside the umbrella.
+/packages/*/_build/
+/packages/*/deps/
+/packages/*/doc/
+/packages/*/native/*/target/
+/packages/*/priv/native/
+/packages/*/*.tar

@@ -15,7 +15,7 @@
   },
   "configuration": {
     "config/config.exs": "e60e900b482ccfaa9e857c80ad460b39d0d5c4e1fa5779c46ca0a8947d429079",
-    "mix.lock": "bdd442327fc473164843ed3eaa471c6851e99bfe15461f0d0630cae2d5f5b217"
+    "mix.lock": "bb8a547f99a31557b98b96a0553f6157f56b71a133d1661809aa3c9346cde0cc"
   },
   "sources": {
     "ex_ssl/lib/ssl/application.ex": "d503415e2f9a45aa8f46a6902a1055b1f10e390f4aa519291a59ce34e5bfed43",

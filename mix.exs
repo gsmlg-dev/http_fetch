@@ -25,6 +25,7 @@ defmodule HttpFetch.Umbrella.MixProject do
           "docs/managed-h1-control-accounting.md",
           "docs/migration-provenance.md",
           "docs/migration-validation.md",
+          "docs/server-migration.md",
           "docs/ex-ssl-consumer-contract.md",
           "docs/ex-quic-consumer-contract.md",
           "docs/quic_http3_design.md",
@@ -48,7 +49,7 @@ defmodule HttpFetch.Umbrella.MixProject do
 
   defp deps do
     [
-      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
+      {:ex_doc, ">= 0.0.0", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
@@ -63,6 +64,12 @@ defmodule HttpFetch.Umbrella.MixProject do
 
       "ex_ssl" ->
         [:ex_ssl]
+
+      "abyss" ->
+        [:abyss]
+
+      "hell" ->
+        [:hell]
 
       "elixir_quic" ->
         [:ex_ssl, :elixir_quic]

@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches: ["**"]
-    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/tls_migration_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
+    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/tls_migration_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
   pull_request:
     branches: [main]
-    paths: ['apps/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/tls_migration_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
+    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/tls_migration_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
 
   workflow_dispatch:
     inputs:
@@ -81,7 +81,7 @@ jobs:
         run: mix dialyzer --force-check --format github
       - name: Build selected portable Hex package
         run: |
-          version=$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' mix.exs)
+          version=$(python3 -c 'import sys; sys.path.insert(0, "scripts/release"); from stage import source_version; import os; print(source_version("apps/" + os.environ["HTTP_FETCH_CI_APP"]))')
           python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives" --package "$HTTP_FETCH_CI_APP"
       - name: Check git diff
         run: git diff --check
@@ -109,7 +109,7 @@ jobs:
       - name: Check root formatting and automation regressions
         if: needs.changes.outputs.full_gate == 'true'
         run: |
-          mix format --check-formatted mix.exs .formatter.exs config/config.exs scripts/ci/test_app_closures.exs
+          mix format --check-formatted mix.exs .formatter.exs config/config.exs scripts/ci/test_app_closures.exs scripts/release/server_archives.exs
           elixir scripts/ci/test_app_closures.exs
           python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
           python3 -m unittest discover -s scripts/release -p 'test_*.py' -v

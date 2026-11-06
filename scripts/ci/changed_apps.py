@@ -12,6 +12,7 @@ from pathlib import Path
 APPS = (
     "ex_ssl", "elixir_quic", "http_core", "http_runtime", "elixir_quic_http3",
     "http_fetch", "http_web_socket", "http_event_source", "http_web_transport",
+    "abyss", "hell",
 )
 ALL = list(APPS)
 
@@ -90,6 +91,12 @@ def select_apps(paths, workflow):
     graph = dependency_graph()
     selected = owners | set(affected_h2_consumers(paths, graph)) | set(
         affected_quic_consumers(paths, graph))
+    # Abyss deliberately has no permanent engine dependency. Its independent
+    # QUIC candidate gate still consumes changes to the current engine pair.
+    if source_owners(paths) & {"ex_ssl", "elixir_quic"}:
+        selected.add("abyss")
+    if any(shared_h2_path(path) for path in paths):
+        selected.update(("abyss", "hell"))
     return [app for app in APPS if app in selected]
 
 
