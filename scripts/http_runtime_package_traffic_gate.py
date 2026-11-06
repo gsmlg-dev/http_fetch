@@ -127,7 +127,7 @@ def candidate_environment(root):
                    HTTP_FETCH_ARCHIVE_DIR=str(Path(directory) / 'archives'))
         process = subprocess.Popen(
             [sys.executable, str(root / 'scripts/release/stage.py'), 'build', version,
-             str(Path(directory) / 'stage'), env['HTTP_FETCH_ARCHIVE_DIR']],
+             str(Path(directory) / 'stage'), env['HTTP_FETCH_ARCHIVE_DIR'], '--group', 'core'],
             cwd=root, env=env, start_new_session=True)
         try:
             assert process.wait(timeout=1800) == 0, 'candidate package build failed'

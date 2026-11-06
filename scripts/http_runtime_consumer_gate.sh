@@ -9,7 +9,7 @@ else
   work_dir=$(mktemp -d "${TMPDIR:-/tmp}/http-fetch-runtime-candidate.XXXXXXXX")
   trap 'rm -rf "$work_dir"' EXIT
   archive_dir=$work_dir/archives
-  python3 "$repo_root/scripts/release/stage.py" build "$version" "$work_dir/stage" "$archive_dir"
+  python3 "$repo_root/scripts/release/stage.py" build "$version" "$work_dir/stage" "$archive_dir" --group core
 fi
-elixir "$repo_root/scripts/release/archives.exs" "$version" "$archive_dir"
+elixir "$repo_root/scripts/release/archives.exs" "$version" "$archive_dir" --group core
 python3 "$repo_root/scripts/release/consumer_gate.py" "$version" "$archive_dir" --mode runtime
