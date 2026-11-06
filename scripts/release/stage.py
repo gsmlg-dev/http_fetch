@@ -1,4 +1,4 @@
-"""Build portable Hex archives; the default coordinated group remains nine apps."""
+"""Build coordinated portable Hex archives and the separately published native package."""
 
 import argparse
 import hashlib
@@ -11,8 +11,12 @@ PACKAGES = (
     "ex_ssl", "elixir_quic", "http_core", "elixir_quic_http3", "http_runtime",
     "http_fetch", "http_web_socket", "http_event_source", "http_web_transport",
 )
-GROUPS = {"core": PACKAGES, "abyss": ("abyss", "abyss_raw"), "hell": ("hell",)}
-ALL_PACKAGES = (*PACKAGES, "abyss", "hell", "abyss_raw")
+# PACKAGES is the original client/engine proof boundary, including no-OTP SSL.
+RELEASE_PACKAGES = (*PACKAGES, "abyss", "hell")
+NATIVE_PACKAGES = ("abyss_raw",)
+ALL_PACKAGES = (*RELEASE_PACKAGES, *NATIVE_PACKAGES)
+GROUPS = {"core": PACKAGES, "release": RELEASE_PACKAGES, "native": NATIVE_PACKAGES,
+          "abyss": ("abyss", "abyss_raw"), "hell": ("hell",)}
 ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_OPTIONS = ("build_path", "config_path", "deps_path", "lockfile")
 
@@ -95,7 +99,7 @@ def main():
     parser.add_argument("stage_dir", type=Path)
     parser.add_argument("archive_dir", type=Path)
     parser.add_argument("--package", choices=ALL_PACKAGES)
-    parser.add_argument("--group", choices=GROUPS, default="core")
+    parser.add_argument("--group", choices=GROUPS, default="release")
     args = parser.parse_args()
     if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?", args.version):
         parser.error("stable or rc.N release version required")

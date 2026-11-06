@@ -31,7 +31,7 @@ class VersionTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for relative in ("mix.exs", "mix.lock", *(f"apps/{app}/mix.exs" for app in stage.PACKAGES)):
+        for relative in ("mix.exs", "mix.lock", *(str(stage.package_path(app) / "mix.exs") for app in stage.ALL_PACKAGES)):
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, target)
@@ -43,11 +43,11 @@ class VersionTests(unittest.TestCase):
         return subprocess.run(["elixir", str(SCRIPT_DIR / "versions.exs"), mode, version],
                               cwd=self.root, capture_output=True, text=True)
 
-    def test_prepare_and_validate_all_nine(self):
+    def test_prepare_and_validate_all_twelve(self):
         result = self.command("prepare", "1.0.0")
         self.assertEqual(result.returncode, 0, result.stderr)
-        for app in stage.PACKAGES:
-            text = (self.root / "apps" / app / "mix.exs").read_text()
+        for app in stage.ALL_PACKAGES:
+            text = (self.root / stage.package_path(app) / "mix.exs").read_text()
             self.assertIn('1.0.0', text)
             self.assertNotIn(self.fixture_version, text)
         self.assertEqual(self.command("validate", "1.0.0").returncode, 0)
@@ -82,15 +82,15 @@ class ArchiveTests(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temp.name)
         cls.version = source_version(ROOT)
-        cls.stage = stage.stage_sources(cls.root / "stage")
-        cls.archives = stage.build(cls.stage, cls.version, cls.root / "archives")
+        cls.stage = stage.stage_sources(cls.root / "stage", stage.RELEASE_PACKAGES)
+        cls.archives = stage.build(cls.stage, cls.version, cls.root / "archives", stage.RELEASE_PACKAGES)
 
     @classmethod
     def tearDownClass(cls):
         cls.temp.cleanup()
 
     def test_portable_manifests_and_all_archive_metadata(self):
-        for package in stage.PACKAGES:
+        for package in stage.RELEASE_PACKAGES:
             text = (self.stage / package / "mix.exs").read_text()
             self.assertNotIn("in_umbrella:", text)
             self.assertNotIn("build_path: \"../../", text)
@@ -98,12 +98,12 @@ class ArchiveTests(unittest.TestCase):
         result = subprocess.run(["elixir", str(SCRIPT_DIR / "archives.exs"), self.version, str(self.archives)],
                                 cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        for package in stage.PACKAGES:
+        for package in stage.RELEASE_PACKAGES:
             archive_audit.audit_package(package, self.version, self.stage, self.archives)
 
     def test_documentation_staging_adds_ex_doc_only_when_missing(self):
         with tempfile.TemporaryDirectory() as directory:
-            for package in stage.PACKAGES:
+            for package in stage.RELEASE_PACKAGES:
                 target = Path(directory) / package
                 docs.prepare_docs_source(self.stage / package, target, self.version)
                 text = (target / "mix.exs").read_text()
@@ -112,13 +112,13 @@ class ArchiveTests(unittest.TestCase):
                 self.assertEqual(text.count(f'source_url_pattern: "{pattern}"'), 1, package)
 
     def test_rebuild_match_and_mismatch_rejection(self):
-        stage.verify_rebuild(self.stage, self.version, self.archives)
+        stage.verify_rebuild(self.stage, self.version, self.archives, stage.RELEASE_PACKAGES)
         manifest = self.stage / "http_core/mix.exs"
         original = manifest.read_text()
         try:
             manifest.write_text(original + "\n# divergent staged source\n")
             with self.assertRaisesRegex(RuntimeError, "rebuild differs"):
-                stage.verify_rebuild(self.stage, self.version, self.archives)
+                stage.verify_rebuild(self.stage, self.version, self.archives, stage.RELEASE_PACKAGES)
         finally:
             manifest.write_text(original)
 
@@ -162,7 +162,7 @@ class RemotePreflightTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.archives = Path(self.temp.name)
-        for package in stage.PACKAGES:
+        for package in stage.RELEASE_PACKAGES:
             (self.archives / f"{package}-1.0.0.tar").write_bytes(package.encode())
 
     def test_hex_mismatch_blocks_all_publication(self):
@@ -176,20 +176,20 @@ class RemotePreflightTests(unittest.TestCase):
         calls = []
         def status(package, *_args):
             calls.append(package)
-            return "matching" if package == "ex_ssl" else "missing" if len(calls) <= len(stage.PACKAGES) else "matching"
+            return "matching" if package == "ex_ssl" else "missing" if len(calls) <= len(stage.RELEASE_PACKAGES) else "matching"
         with patch.object(hex_packages, "release_status", side_effect=status), patch.object(
             hex_packages, "verify_rebuild") as rebuild, patch.object(hex_packages.subprocess, "run") as publish, patch.dict(
             "os.environ", {"HEX_API_KEY": "test"}):
             hex_packages.run("publish", "1.0.0", self.archives, self.archives)
-        self.assertEqual(rebuild.call_count, len(stage.PACKAGES))
+        self.assertEqual(rebuild.call_count, len(stage.RELEASE_PACKAGES))
         commands = publish.call_args_list
         self.assertEqual([call.args[0] for call in commands],
                          [["mix", "deps.get", "--only", "prod"],
-                          ["mix", "hex.publish", "package", "--yes"]] * (len(stage.PACKAGES) - 1))
+                          ["mix", "hex.publish", "package", "--yes"]] * (len(stage.RELEASE_PACKAGES) - 1))
         self.assertEqual([str(call.kwargs["cwd"]) for call in commands],
-                         [str(self.archives / package) for package in stage.PACKAGES[1:] for _ in range(2)])
+                         [str(self.archives / package) for package in stage.RELEASE_PACKAGES[1:] for _ in range(2)])
         self.assertTrue(all(call.kwargs["env"]["MIX_ENV"] == "prod" for call in commands))
-        self.assertEqual(calls[:len(stage.PACKAGES)], list(stage.PACKAGES))
+        self.assertEqual(calls[:len(stage.RELEASE_PACKAGES)], list(stage.RELEASE_PACKAGES))
 
     def test_dependency_failure_blocks_package_publication(self):
         with patch.object(hex_packages, "release_status", return_value="missing"), patch.object(
@@ -205,7 +205,7 @@ class RemotePreflightTests(unittest.TestCase):
         events = []
         def rebuild(*_args, **kwargs):
             events.append("verify")
-            if kwargs.get("packages"):
+            if kwargs.get("packages") and len(kwargs["packages"]) == 1:
                 raise RuntimeError("staged package rebuild differs")
         with patch.object(hex_packages, "release_status", return_value="missing"), patch.object(
             hex_packages, "verify_rebuild", side_effect=rebuild), patch.object(

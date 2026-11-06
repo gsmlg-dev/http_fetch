@@ -60,7 +60,7 @@ class PublishedNoOTPTests(unittest.TestCase):
         build.assert_called_once()
         commands = [item.args[0] for item in runner.command.call_args_list]
         self.assertEqual(commands[3], [sys.executable, "/source/scripts/release/hex_packages.py",
-                                      "preflight", "1.2.3", "/archives"])
+                                      "preflight", "1.2.3", "/archives", "--group", "core"])
         self.assertEqual(commands[-1], ["/fresh/release/bin/no_otp_consumer", "eval", "NoOTP.Consumer.run()"])
         self.assertEqual(report["published_archives"], {package: "matching" for package in gate.PACKAGES})
         peers.assert_called_once()

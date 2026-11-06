@@ -91,6 +91,25 @@ class ServerConsumerGateTests(unittest.TestCase):
             self.assertFalse((destination / "mix/old.plt").exists())
             self.assertEqual(env["MIX_HOME"], str(destination / "mix"))
 
+    def test_isolated_toolchain_preserves_legacy_and_versioned_rebar_executables(self):
+        for relative in ("rebar3", "elixir/1-18-otp-28/rebar3"):
+            with self.subTest(path=relative), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                source = directory / "source-mix"
+                (source / "archives/hex-2.4.0").mkdir(parents=True)
+                executable = source / relative
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                executable.write_bytes(b"rebar build tooling")
+                executable.chmod(0o755)
+                destination = directory / "isolated"
+                env = {}
+                with patch.dict(os.environ, {"MIX_HOME": str(source),
+                                             "MIX_ARCHIVES": str(source / "archives")}):
+                    gate.prepare_mix_toolchain(destination, env)
+                copied = destination / "mix" / relative
+                self.assertEqual(copied.read_bytes(), executable.read_bytes())
+                self.assertTrue(os.access(copied, os.X_OK))
+
     def test_hell_only_registry_does_not_require_abyss_or_metrics(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

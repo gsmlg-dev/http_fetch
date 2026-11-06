@@ -61,8 +61,9 @@ depends on `:elixir_quic`. `:elixir_quic` depends on `:ex_ssl`.
 Server applications are `apps/abyss` (UDP/explicit QUIC) and `apps/hell`
 (TCP/OTP `:ssl` TLS). `packages/abyss_raw` stays outside the umbrella so ordinary
 builds do not require Rust. Abyss has no runtime dependency on the engines or
-native package. Server versions and publication groups are independent of the
-original nine; see [`docs/server-migration.md`](docs/server-migration.md).
+native package. All twelve packages share a release version: the unified workflow
+publishes eleven portable packages, then `abyss_raw` asynchronously after Abyss.
+The original nine-package no-OTP-SSL proof excludes Hell; see [`docs/server-migration.md`](docs/server-migration.md).
 
 The imported engine applications are `apps/ex_ssl` (`SSL`), `apps/elixir_quic`
 (`Quic`), and `apps/elixir_quic_http3` (`QuicHttp3`). Their source provenance,

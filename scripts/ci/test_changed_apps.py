@@ -250,7 +250,7 @@ class WorkflowContractTest(unittest.TestCase):
               "Build selected portable Hex package", "Check git diff")),
             ("release.yml", ("Check source with Credo", "Check source with Dialyzer"),
              ("Validate all source and automation", "Build and run Go HTTP E2E server",
-              "Build, inspect, and independently consume all nine archives",
+              "Build, inspect, and independently consume all eleven portable archives",
               "Preflight Hex and GitHub immutability before any remote write")),
         ):
             with self.subTest(workflow=filename):

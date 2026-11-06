@@ -967,7 +967,7 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
         runner.command(['unbuffer', 'elixir', str(source / 'scripts/release/versions.exs'),
                         'validate', version], cwd=source, env=env)
         runner.command(['unbuffer', 'elixir', str(source / 'scripts/release/archives.exs'),
-                        version, str(archives)], cwd=source, env=env)
+                        version, str(archives), "--group", "core"], cwd=source, env=env)
         report['staged_source_sha256'] = verify_source(stage, source, archives, version)
         review_bundle = None
         if directed_review:
@@ -979,7 +979,7 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
             (archives / f'{package}-{version}.tar').read_bytes()).hexdigest() for package in PACKAGES}
         if published:
             statuses = runner.command([sys.executable, str(source / 'scripts/release/hex_packages.py'),
-                                       'preflight', version, str(archives)], cwd=source, env=env)
+                                       'preflight', version, str(archives), "--group", "core"], cwd=source, env=env)
             require(statuses.strip().splitlines() == [f'{package}: matching' for package in PACKAGES],
                     'all nine published archives must match before release construction')
             report['published_archives'] = {package: 'matching' for package in PACKAGES}

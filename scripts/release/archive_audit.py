@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import tarfile
 
-from stage import PACKAGES
+from stage import RELEASE_PACKAGES as PACKAGES
 
 
 def audit_package(package, version, stage_dir, archive_dir):
@@ -50,7 +50,7 @@ def main():
     args = parser.parse_args()
     for package in PACKAGES:
         audit_package(package, args.version, args.stage_dir, args.archive_dir)
-    print("all nine archives match staged runtime sources and portable manifests")
+    print("all eleven portable archives match staged runtime sources and portable manifests")
 
 
 if __name__ == "__main__":

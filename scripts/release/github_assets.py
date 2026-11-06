@@ -1,5 +1,6 @@
 """Create or complete a GitHub release without replacing differing assets."""
 
+import argparse
 import hashlib
 import json
 import os
@@ -11,7 +12,7 @@ import tempfile
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from hex_packages import PACKAGES
+from stage import GROUPS, RELEASE_PACKAGES as PACKAGES
 
 
 def existing_release(repository, tag):
@@ -32,24 +33,26 @@ def verify_release_type(release, version):
         raise RuntimeError("GitHub release prerelease flag differs from release version")
 
 
-def run(mode, version, archive_dir):
+def run(mode, version, archive_dir, *, packages=PACKAGES):
     if mode not in ("preflight", "complete"):
         raise ValueError("expected preflight or complete")
     if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?", version):
         raise ValueError("stable or rc.N release version required")
     repository = os.environ["GITHUB_REPOSITORY"]
     tag = f"v{version}"
-    archives = [archive_dir / f"{package}-{version}.tar" for package in PACKAGES]
+    archives = [archive_dir / f"{package}-{version}.tar" for package in packages]
     if any(not archive.is_file() for archive in archives):
         raise RuntimeError("one or more release archives are missing")
     release = existing_release(repository, tag)
     if release is None:
+        if packages == GROUPS["native"]:
+            raise RuntimeError("portable GitHub release must exist before native publication")
         if mode == "preflight":
             return
         command = ["gh", "release", "create", tag, *(str(path) for path in archives),
                    "--verify-tag", "--title", tag, "--generate-notes",
                    "--notes", "Published to Hex.pm: " + ", ".join(
-                       f"https://hex.pm/packages/{package}/{version}" for package in PACKAGES)]
+                       f"https://hex.pm/packages/{package}/{version}" for package in packages)]
         if "-rc." in version:
             command.extend(["--prerelease", "--latest=false"])
         subprocess.run(command, check=True)
@@ -97,9 +100,13 @@ def verify_assets(repository, tag, archives):
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) != 4:
-            raise ValueError("usage: github_assets.py preflight|complete VERSION ARCHIVE_DIR")
-        run(sys.argv[1], sys.argv[2], Path(sys.argv[3]))
+        parser = argparse.ArgumentParser()
+        parser.add_argument("mode", choices=("preflight", "complete"))
+        parser.add_argument("version")
+        parser.add_argument("archive_dir", type=Path)
+        parser.add_argument("--group", choices=("release", "native"), default="release")
+        args = parser.parse_args()
+        run(args.mode, args.version, args.archive_dir, packages=GROUPS[args.group])
     except (KeyError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
         sys.exit(1)

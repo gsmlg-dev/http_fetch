@@ -75,34 +75,51 @@ OTP `:ssl`.
 
 ## Versions, packaging and CI
 
-The root `release.yml`, `versions.exs`, Hex publishing, GitHub assets and consumer
-contracts retain the original nine-package coordinated group. Server versions
-are not rewritten by a core release. `stage.py` defaults to those nine packages;
-`--package` accepts all twelve packages, while `--group abyss` and `--group hell`
-select the independent groups. A requested archive version must equal its source
-manifest. Portable manifests remove umbrella-only paths before Hex packaging.
+The unified `release.yml` now prepares one version for all twelve packages,
+including prereleases such as `1.0.0-rc.N`. Eleven portable packages (the original
+nine plus Abyss and Hell) are validated, archived and published in its main job.
+`abyss_raw` retains its separate Mix/Rustler/Cargo build and publishes in a
+following asynchronous job at the same immutable `vVERSION` source tag. Its
+failure does not undo or gate the completed eleven-package publication. The
+native job verifies that the exact Abyss archive has already been published,
+then runs native tests, Clippy, actual DHCP/ARP consumers, immutable artifact
+checks and a cold published Hex consumer. Its result is reported separately.
 
-`scripts/release/server_packages.py` provides `validate`, `prepare`, `build`,
-`audit`, `docs`, `preflight`, `publish` and `publish-docs` for `abyss`, `hell`, or
-read-only/build `all` selection. `prepare` changes only the selected group's
-manifests and is not run by this migration. Abyss and abyss_raw stay synchronized.
-Future server publication requires a clean checkout at `abyss-vVERSION` or
-`hell-vVERSION`, exact rebuilt archive bytes, registry immutability checks and
-explicit credentials. Documentation publication separately requires verified
-published package bytes. These tools do not commit, tag or push. Existing
-published versions must not be overwritten; this migration preserves their source
-versions for review and candidate validation only.
+`versions.exs prepare|validate VERSION` covers the root and all twelve manifests.
+Existing released tags and package bytes remain immutable: historical RC3 does
+not include the imported servers and cannot be reused as a unified release.
+The source manifests are aligned to the current development version; this is
+not a claim that the new server RC artifacts have been published. Use a new RC
+version and matching changelog section for the next release.
 
-Examples:
+`stage.py` defaults to the eleven-package `release` group; `--group core` retains
+the original nine-client/engine proof boundary, and `--group native` selects
+only `abyss_raw`. `--package` still supports scoped CI builds. The original nine
+retain exact internal requirements. Abyss, Hell and the native package do not
+gain new runtime engine or sibling dependencies merely because their release
+versions are coordinated. Portable manifests remove umbrella-only paths.
+
+Server `build`, `audit`, `validate`, `docs` and `preflight` helpers remain in
+`scripts/release/server_packages.py`. Independent server `prepare` and portable
+server publication are rejected; use the unified workflow. Native publication
+requires the shared tag, a clean checkout, matching published Abyss bytes and
+unchanged native archive rebuilds. Documentation source links use `vVERSION`.
+No helper commits, tags or pushes outside the authorized release workflow.
+
+Examples (candidate validation only):
 
 ```sh
 elixir scripts/release/versions.exs validate 1.0.0-rc.3
-python3 scripts/release/server_packages.py validate all
-python3 scripts/release/server_packages.py build all --stage /tmp/server-stage --archives /tmp/server-archives
-python3 scripts/release/stage.py build 1.0.0-rc.3 /tmp/server-stage /tmp/server-archives --package ex_ssl
-python3 scripts/release/stage.py build 1.0.0-rc.3 /tmp/server-stage /tmp/server-archives --package elixir_quic
-python3 scripts/release/server_consumer_gate.py /tmp/server-archives --mode all
+python3 scripts/release/stage.py build 1.0.0-rc.3 /tmp/release-stage /tmp/release-archives
+elixir scripts/release/archives.exs 1.0.0-rc.3 /tmp/release-archives
+python3 scripts/release/server_consumer_gate.py /tmp/release-archives --mode all
 ```
+
+The no-OTP-SSL validation still selects the original nine clients/engines and
+explicitly excludes Hell. Hell continues to use OTP `:ssl`; TCP ExSSL server
+support is a separate feature request. Explicit HTTP/3 remains beta with finite
+static/literal QPACK support, and WebTransport connection support remains
+unimplemented. A package or ALPN name alone is not application acceptance.
 
 The new consumer gate builds a signed local Hex registry from candidate archives
 and checksum-verified external dependencies. Consumers start with independent
@@ -120,6 +137,9 @@ selected server candidate consumers. Manual existing shared workflows select all
 eleven applications. Remote workflows were not dispatched in this migration.
 
 ## Verification ledger
+
+This ledger records the original import results. The dated follow-up below
+records subsequent CI repairs without replacing that history.
 
 Commands below run from the destination root unless stated otherwise. Source
 baselines were made with `git archive`/tracked-file copies in `/tmp`, without
@@ -156,6 +176,63 @@ finish; `NOT RUN` is not a passing gate.
 | Source and user-change preservation | Git status/HEAD plus import hashes and unchanged runtime-source comparison | PASS; both sources clean at original SHAs, target remains on original `main` HEAD; no initial user changes |
 | Remote CI, platform/minimum-version matrices | GitHub CI/Test/Integration/E2E/Servers workflows | NOT RUN; no push or workflow dispatch authorized |
 | Privileged DHCP/ARP namespace traffic | Dedicated CI namespace fixture | NOT RUN locally |
+
+## CI and unified-release follow-up (2026-11-07)
+
+Credo's positional path filter now scopes each CI app job correctly. Imported
+Abyss/Hell findings were fixed without adding check exclusions, and Abyss test
+support now satisfies Dialyzer's callback and return-value contracts. Logger
+includes Abyss's structured event metadata; the original nine-package no-OTP
+proof was rebound only for that configuration hash, with its source census and
+review inputs unchanged.
+
+The QUIC regression observes deadline termination before making any query that
+requires a live process. Hell's outgoing-traffic regression observes the actual
+read-timeout callback, termination reason and exact sent/received byte count,
+instead of assuming a platform-specific send rate. Abyss's writer-death test
+installs its monitor before termination. The isolated consumer tool copies both
+legacy and versioned Mix rebar3 installation layouts.
+
+| Gate | Result |
+| --- | --- |
+| Strict root compilation and locked dependencies | PASS; isolated build directory |
+| Root Credo and all eleven scoped app checks | PASS; root inspected 834 files, zero findings |
+| Root test Dialyzer | PASS; only the same two intentional ignores |
+| QUIC complete app tests | PASS; 317 tests |
+| Hell complete tests | PASS; 166 tests |
+| Abyss complete tests and coverage | PASS; 694 tests + 3 doctests, 86.35% coverage against unchanged 40% |
+| CI tooling | PASS; 45 Python tests and 4 app-closure checks |
+| Release tooling | PASS; 280 Python tests, including 10 unified-release cases |
+| Eleven portable archives | PASS; actual builds, metadata/source audit and byte-identical rebuilds |
+| Independent candidate server consumers | PASS; UDP, 24 Hell cases, 5 QUIC idle cases and real 1 MiB network scenarios |
+| Native candidate consumers | PASS; extracted Rust build/NIF load, UDP without Rust, combined native consumer and packaged Mix release |
+| Workflow syntax, formatting and twelve-package version validation | PASS |
+| Complete root integration/slow regression | FAIL / INCOMPLETE; prerequisite failures and one Runtime assertion, stopped during WebSocket |
+| Remote CI, macOS/minimum-Elixir matrices, published RC consumers | NOT RUN; no push, dispatch or publication performed |
+| Privileged DHCP/ARP namespace traffic | NOT RUN locally; retained as a native workflow gate |
+
+Evidence is under `/tmp/http-fetch-ci-20261107.DKNLBG`. Verification uses an
+isolated build directory because the checkout's existing build metadata still
+contains version 0.18.0. Neither lockfile was changed. Source version alignment
+to 1.0.0-rc.3 is preparation only; the historical published RC3 is immutable.
+
+The complete regression finished Hell, Abyss, QUIC, Core and HTTP/3 with zero
+failures. ExSSL finished 3,547 tests plus 20 properties with nine failures and
+77 invalid cases: the same missing `/usr/bin/python3`, `/usr/bin/id` and
+`pkg-config openssl` prerequisites recorded at import. Fetch finished 1,595 tests
+plus 20 doctests with zero assertion failures and 63 invalid cases, including
+the missing native peer setup. Runtime finished 290 tests with one failure at
+`apps/http_runtime/test/http/http1/pool_test.exs:70`: contextual checkout returned
+`:handoff_expired` instead of `:handoff_unconfirmed`. That distinction remains
+undiagnosed; neither the test nor production code was changed or suppressed.
+
+The run was stopped after these confirmed blockers, during WebSocket, at
+`2026-11-07 01:00:56` (Asia/Shanghai). WebSocket, EventSource and WebTransport
+therefore have no completed result from this run. A WebSocket process-liveness
+failure logged after SIGTERM is an interruption artifact. The process returned
+zero during shutdown; this does not make the incomplete regression a pass.
+Only the owned test process group was stopped, and its processes were checked
+afterward. Remote platform verification remains necessary.
 
 ## Remaining limitations
 

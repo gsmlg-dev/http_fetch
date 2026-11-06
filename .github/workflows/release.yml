@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Shared nine-package version (major.minor.patch or major.minor.patch-rc.N)
+        description: Shared twelve-package version (major.minor.patch or major.minor.patch-rc.N)
         required: true
         type: string
       git_ref:
@@ -13,7 +13,7 @@ on:
         default: main
         type: string
       publish_docs:
-        description: Publish package documentation after all packages are verified
+        description: Publish documentation after each publication group is verified
         required: false
         default: false
         type: boolean
@@ -26,18 +26,19 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: release-all-http-fetch-packages
-  cancel-in-progress: false
-
 jobs:
   release:
-    name: Validate and release all nine packages
+    name: Validate and release eleven portable packages
+    concurrency:
+      group: release-portable-http-fetch-packages
+      cancel-in-progress: false
     runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.identity.outputs.source_sha }}
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_BRANCH: ${{ inputs.git_ref }}
-      RELEASE_APPS: ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport
+      RELEASE_APPS: ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport abyss hell
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,8 +54,8 @@ jobs:
           test "$(git branch --show-current)" = "$RELEASE_BRANCH"
           if git rev-parse --verify --quiet "refs/tags/v$RELEASE_VERSION"; then
             git merge-base --is-ancestor "refs/tags/v$RELEASE_VERSION" HEAD
-            if ! git cat-file -e "refs/tags/v$RELEASE_VERSION:scripts/release/consumer_gate.py" 2>/dev/null; then
-              echo "Existing tag lacks the nine-package release contract; it cannot be reused." >&2
+            if ! git grep -Fq 'RELEASE_PACKAGES = (*PACKAGES, "abyss", "hell")' "refs/tags/v$RELEASE_VERSION" -- scripts/release/stage.py; then
+              echo "Existing tag lacks the unified portable/native release contract; it cannot be reused." >&2
               exit 1
             fi
             git checkout --detach "refs/tags/v$RELEASE_VERSION"
@@ -115,7 +116,8 @@ jobs:
           mix format --check-formatted scripts/http3/session_gate.exs scripts/http3/public_gate.exs scripts/http3/canary.exs
           mix compile --warnings-as-errors
           mix run scripts/phase1/admission_test.exs
-          mix test --seed 28092026 --include integration
+          mix test --seed 28092026 --include integration --include slow
+          mix test apps/abyss/test --include integration --include slow --cover --seed 28092026
           mix test apps/ex_ssl/test --include integration --seed 743209
           python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
           python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
@@ -215,7 +217,7 @@ jobs:
           uv run --python 3.12 --with aioquic==1.2.0 python -m unittest discover -s scripts/http3 -p 'caddy_*_test.py' -v
           uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/public_gate.py
 
-      - name: Build, inspect, and independently consume all nine archives
+      - name: Build, inspect, and independently consume all eleven portable archives
         run: |
           python3 scripts/release/stage.py build "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
           elixir scripts/release/archives.exs "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
@@ -223,6 +225,7 @@ jobs:
           python3 scripts/release/stage.py verify "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
           python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
           python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode external
+          python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/archives" --mode all
 
       - name: Require isolated candidate HTTP3 traffic
         env:
@@ -280,17 +283,21 @@ jobs:
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
         run: |
-          test -n "$HEX_API_KEY" || { echo "HEX_API_KEY is required to publish all nine packages" >&2; exit 1; }
+          test -n "$HEX_API_KEY" || { echo "HEX_API_KEY is required to publish all eleven portable packages" >&2; exit 1; }
 
       - name: Commit version and create immutable tag
         if: steps.revision.outputs.existing == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add mix.exs apps/*/mix.exs
+          git add mix.exs apps/*/mix.exs packages/abyss_raw/mix.exs
           if ! git diff --cached --quiet; then git commit -m "chore(release): v$RELEASE_VERSION"; fi
           git tag "v$RELEASE_VERSION"
           git push --atomic origin "HEAD:refs/heads/$RELEASE_BRANCH" "refs/tags/v$RELEASE_VERSION"
+
+      - name: Record immutable release source
+        id: identity
+        run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Publish and verify packages in dependency order
         env:
@@ -313,6 +320,9 @@ jobs:
             python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode "$mode" --published
           done
 
+      - name: Verify published server consumers
+        run: python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/archives" --mode all --published
+
       - name: Require isolated published release without OTP SSL
         run: |
           set -euo pipefail
@@ -328,6 +338,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release/github_assets.py complete "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
+
+      - name: Preserve verified portable archives for asynchronous native publication
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-release-${{ inputs.version }}
+          path: ${{ runner.temp }}/archives/*.tar
+          if-no-files-found: error
+          overwrite: true
 
       - name: Publish package documentation separately
         if: inputs.publish_docs
@@ -364,3 +382,74 @@ jobs:
             ${{ runner.temp }}/no-otp-release/**/peer-*.log
             ${{ runner.temp }}/no-otp-release/**/peer-*.json
           if-no-files-found: warn
+
+
+  native-release:
+    name: Publish optional abyss_raw after the portable release
+    concurrency:
+      group: release-abyss-raw-${{ inputs.version }}
+      cancel-in-progress: false
+    needs: release
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.source_sha }}
+          fetch-depth: 0
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify shared immutable tag and native version
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/v$RELEASE_VERSION^{commit}")"
+          elixir scripts/release/versions.exs validate "$RELEASE_VERSION"
+      - name: Download verified portable publication artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: portable-release-${{ inputs.version }}
+          path: ${{ runner.temp }}/archives
+      - name: Verify native implementation and package consumers
+        working-directory: packages/abyss_raw
+        run: |
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+          mix test
+          bash scripts/test_arp.sh
+          cargo clippy --locked --manifest-path native/dhcp_socket/Cargo.toml --all-targets -- -D warnings
+      - name: Install isolated DHCP and ARP fixture tools
+        run: sudo apt-get update && sudo apt-get install --yes iproute2 util-linux python3
+      - name: Verify candidate native boundaries and actual DHCP and ARP traffic
+        run: python3 apps/abyss/scripts/udp/p5_consumers.py
+      - name: Build and audit the native archive from the shared tag
+        run: python3 scripts/release/server_packages.py build native --version "$RELEASE_VERSION" --stage "$RUNNER_TEMP/stage" --archives "$RUNNER_TEMP/archives"
+      - name: Preflight immutable native Hex and GitHub artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/release/hex_packages.py preflight "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --group native
+          python3 scripts/release/github_assets.py preflight "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --group native
+      - name: Publish native package after verified Abyss publication
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: python3 scripts/release/server_packages.py publish native --version "$RELEASE_VERSION" --stage "$RUNNER_TEMP/stage" --archives "$RUNNER_TEMP/archives"
+      - name: Verify published native Hex consumer and loaded NIF
+        run: python3 scripts/release/native_consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
+      - name: Attach and verify immutable native GitHub archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release/github_assets.py complete "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --group native
+      - name: Publish verified native documentation
+        if: inputs.publish_docs
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: python3 scripts/release/server_packages.py publish-docs native --version "$RELEASE_VERSION" --stage "$RUNNER_TEMP/stage" --archives "$RUNNER_TEMP/archives"
+      - name: Report asynchronous native publication result
+        if: always()
+        env:
+          NATIVE_JOB_STATUS: ${{ job.status }}
+        run: |
+          printf 'abyss_raw %s: %s (independent of the completed eleven-package release)\n' "$RELEASE_VERSION" "$NATIVE_JOB_STATUS" >> "$GITHUB_STEP_SUMMARY"

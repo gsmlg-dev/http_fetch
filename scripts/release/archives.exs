@@ -1,5 +1,5 @@
 defmodule ReleaseArchives do
-  @order ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
+  @order ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport abyss hell)
   @deps %{
     "elixir_quic" => ~w(ex_ssl),
     "http_core" => ~w(ex_ssl elixir_quic),
@@ -11,11 +11,19 @@ defmodule ReleaseArchives do
     "http_web_transport" => ~w(http_core)
   }
 
-  def run([version, directory]) do
+  def run([version, directory]), do: validate(version, directory, @order)
+
+  def run([version, directory, "--group", "core"]),
+    do: validate(version, directory, @order -- ~w(abyss hell))
+
+  def run(_),
+    do: raise("usage: elixir scripts/release/archives.exs VERSION ARCHIVE_DIR [--group core]")
+
+  defp validate(version, directory, order) do
     Mix.start()
     Mix.Hex.start()
 
-    for package <- @order do
+    for package <- order do
       archive = Path.join(directory, "#{package}-#{version}.tar")
       {:ok, result} = :mix_hex_tarball.unpack(File.read!(archive), :memory)
       metadata = result.metadata
@@ -24,6 +32,18 @@ defmodule ReleaseArchives do
         do: raise("incorrect Hex archive identity: #{archive}")
 
       requirements = metadata["requirements"] || %{}
+
+      if package in ~w(abyss hell) do
+        expected = if package == "abyss", do: ~w(telemetry telemetry_metrics), else: ~w(telemetry)
+
+        unless Enum.sort(Map.keys(requirements)) == expected,
+          do: raise("unexpected server dependencies in #{package}")
+
+        minimum = if package == "abyss", do: "~> 1.13", else: ">= 1.18.0"
+
+        unless metadata["elixir"] == minimum,
+          do: raise("changed Elixir minimum for #{package}")
+      end
 
       for dependency <- Map.get(@deps, package, []) do
         entry = requirements[dependency]
@@ -39,10 +59,8 @@ defmodule ReleaseArchives do
       end
     end
 
-    IO.puts("all nine Hex archive identities and internal requirements validated")
+    IO.puts("selected Hex archive identities and internal requirements validated")
   end
-
-  def run(_), do: raise("usage: elixir scripts/release/archives.exs VERSION ARCHIVE_DIR")
 end
 
 ReleaseArchives.run(System.argv())

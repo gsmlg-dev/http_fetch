@@ -1,5 +1,5 @@
 defmodule ReleaseVersions do
-  @apps ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
+  @apps ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport abyss hell abyss_raw)
   @internal MapSet.new(@apps)
   @graph %{
     "ex_ssl" => [],
@@ -10,7 +10,10 @@ defmodule ReleaseVersions do
     "http_fetch" => ~w(http_core http_runtime),
     "http_web_socket" => ~w(http_core http_runtime),
     "http_event_source" => ~w(http_core http_runtime),
-    "http_web_transport" => ~w(http_core)
+    "http_web_transport" => ~w(http_core),
+    "abyss" => [],
+    "hell" => [],
+    "abyss_raw" => []
   }
 
   def run([mode, version]) when mode in ["prepare", "validate"] do
@@ -20,7 +23,7 @@ defmodule ReleaseVersions do
            ),
            do: raise("release version must be major.minor.patch or major.minor.patch-rc.N")
 
-    paths = ["mix.exs" | Enum.map(@apps, &"apps/#{&1}/mix.exs")]
+    paths = ["mix.exs" | Enum.map(@apps, &package_manifest/1)]
 
     contents =
       Map.new(paths, fn path ->
@@ -80,6 +83,9 @@ defmodule ReleaseVersions do
   end
 
   def run(_), do: raise("usage: elixir scripts/release/versions.exs prepare|validate VERSION")
+
+  defp package_manifest("abyss_raw"), do: "packages/abyss_raw/mix.exs"
+  defp package_manifest(app), do: "apps/#{app}/mix.exs"
 
   defp replace_one!(source, regex, wanted, mode, path) do
     matches = Regex.scan(regex, source)

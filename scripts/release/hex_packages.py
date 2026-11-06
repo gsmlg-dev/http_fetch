@@ -1,5 +1,6 @@
-"""Preflight and publish nine immutable Hex archives in dependency order."""
+"""Preflight and publish immutable coordinated Hex archives in dependency order."""
 
+import argparse
 import hashlib
 import json
 import os
@@ -9,7 +10,7 @@ import subprocess
 import sys
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
-from stage import PACKAGES, verify_rebuild
+from stage import GROUPS, RELEASE_PACKAGES as PACKAGES, verify_rebuild
 
 
 def release_status(package, version, archive):
@@ -30,20 +31,22 @@ def release_status(package, version, archive):
     return "matching"
 
 
-def run(mode, version, archive_dir, stage_dir=None):
+def run(mode, version, archive_dir, stage_dir=None, *, packages=PACKAGES):
     if mode not in ("preflight", "publish"):
         raise ValueError("expected preflight or publish")
+    if mode == "publish" and tuple(packages) != PACKAGES:
+        raise ValueError("portable packages publish as one group; native publication uses server_packages.py")
     if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?", version):
         raise ValueError("invalid release version")
 
-    archives = {package: archive_dir / f"{package}-{version}.tar" for package in PACKAGES}
+    archives = {package: archive_dir / f"{package}-{version}.tar" for package in packages}
     for package, archive in archives.items():
         if not archive.is_file():
             raise RuntimeError(f"missing Hex archive: {archive}")
 
     # Inspect every package before the first registry write, even on a retry.
     statuses = {
-        package: release_status(package, version, archives[package]) for package in PACKAGES
+        package: release_status(package, version, archives[package]) for package in packages
     }
     if mode == "preflight":
         for package, status in statuses.items():
@@ -54,11 +57,11 @@ def run(mode, version, archive_dir, stage_dir=None):
         raise RuntimeError("staged source directory is required for publication")
     # Hex does not accept an existing tarball. Prove its rebuild is byte-identical
     # before the first registry write, then publish from that exact staged tree.
-    verify_rebuild(stage_dir, version, archive_dir)
+    verify_rebuild(stage_dir, version, archive_dir, packages=packages)
     if not os.environ.get("HEX_API_KEY"):
-        raise RuntimeError("HEX_API_KEY must publish all nine packages")
+        raise RuntimeError("HEX_API_KEY required to publish the selected packages")
     publication_env = {**os.environ, "MIX_ENV": "prod"}
-    for package in PACKAGES:
+    for package in packages:
         if statuses[package] == "missing":
             subprocess.run(
                 ["mix", "deps.get", "--only", "prod"],
@@ -83,9 +86,14 @@ def run(mode, version, archive_dir, stage_dir=None):
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) not in (4, 5):
-            raise ValueError("usage: hex_packages.py preflight|publish VERSION ARCHIVE_DIR [STAGE_DIR]")
-        run(sys.argv[1], sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4]) if len(sys.argv) == 5 else None)
+        parser = argparse.ArgumentParser()
+        parser.add_argument("mode", choices=("preflight", "publish"))
+        parser.add_argument("version")
+        parser.add_argument("archive_dir", type=Path)
+        parser.add_argument("stage_dir", type=Path, nargs="?")
+        parser.add_argument("--group", choices=("core", "release", "native"), default="release")
+        args = parser.parse_args()
+        run(args.mode, args.version, args.archive_dir, args.stage_dir, packages=GROUPS[args.group])
     except (RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
         sys.exit(1)

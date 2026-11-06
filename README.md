@@ -16,9 +16,12 @@ the root keeps runtime applications of `in_umbrella` dependencies, including
 `ex_ssl`, on the code path without adding duplicate child dependencies.
 
 The monorepo contains eleven OTP applications and the optional native package
-`abyss_raw`. The original nine client/engine packages retain coordinated versions
-and exact internal dependencies. `abyss`/`abyss_raw` and `hell` have independent
-version groups. See the [server migration report](docs/server-migration.md) for
+`abyss_raw`. All twelve packages share the same release version. The unified
+workflow publishes the eleven portable packages first, then publishes `abyss_raw`
+asynchronously after Abyss, using the same immutable source tag. Native checks
+and publication do not block the portable release. The original nine client/engine
+packages retain exact internal dependencies; their no-OTP-SSL proof excludes Hell,
+whose TLS server still uses OTP `:ssl`. See the [server migration report](docs/server-migration.md) for
 provenance, package boundaries, commands and verification results.
 
 | Responsibility | Packages | Runtime boundary |
@@ -1357,7 +1360,7 @@ Each app job prepares its dependency closure; WebSocket and EventSource test
 closures include Fetch for their existing cross-client tests.
 
 Shared changes still require manual full regression. Dispatching any of these
-workflows forces all nine app jobs on the selected branch. Manual CI additionally
+workflows forces all eleven app jobs on the selected branch. Manual CI additionally
 runs full shared checks and historical TLS compatibility checks:
 
 ```bash
@@ -1443,7 +1446,7 @@ local Hex registry. It requires the pinned fixture checkout specified by
 [migration validation](docs/migration-validation.md).
 
 ```bash
-# From the umbrella root; this builds nine portable archives without publishing.
+# From the umbrella root; this builds eleven portable archives without publishing.
 python3 scripts/release/stage.py build VERSION /tmp/http-fetch-stage /tmp/http-fetch-archives
 EX_SSL_DEP_MODE=candidate EX_SSL_CANDIDATE_ARCHIVE_DIR=/tmp/http-fetch-archives \
   EX_SSL_RESULTS_DIR=/tmp/http-fetch-candidate bash scripts/ex_ssl_source_smoke.sh

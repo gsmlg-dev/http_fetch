@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.4] - 2026-11-07
+
+### Fixed
+- Scope CI Credo checks to their selected application and resolve imported
+  server lint/type findings. Observe QUIC handshake expiry and Hell read
+  timeout directly, and preserve legacy rebar3 installations in cold consumers.
+
+### Changed
+- Coordinate Abyss, Hell and abyss_raw with the HTTP family at one RC/stable
+  version. Publish eleven portable packages through the unified release and
+  publish abyss_raw asynchronously after verified Abyss publication, with
+  separate native acceptance and status.
+- Keep the original nine-client/engine no-OTP-SSL verification scoped explicitly;
+  Hell retains its OTP TLS transport and server ExSSL remains a future feature.
+
 ## [1.0.0-rc.3] - 2026-11-06
 
 ### Fixed

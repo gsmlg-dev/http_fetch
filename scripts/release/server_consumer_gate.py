@@ -1,6 +1,7 @@
-"""Build server consumers using only signed local-registry Hex candidates."""
+"""Verify isolated candidate or published Hex server packages with real traffic."""
 
 import argparse
+from contextlib import nullcontext
 import hashlib
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import tempfile
 from urllib.request import urlopen
 
 from consumer_gate import command, local_registry, telemetry_archive
+from hex_packages import release_status
 from stage import ROOT
 
 
@@ -69,8 +71,11 @@ def prepare_mix_toolchain(directory, env):
     destination = directory / "mix"
     target = destination / "archives" / candidates[-1].name
     shutil.copytree(candidates[-1], target)
-    if (mix_home / "elixir").exists():
-        for executable in (mix_home / "elixir").glob("*/rebar3"):
+    # Older Mix releases install rebar3 directly in MIX_HOME; newer releases
+    # put it under an Elixir/OTP-specific directory. Preserve both layouts.
+    executables = [mix_home / "rebar3", *(mix_home / "elixir").glob("*/rebar3")]
+    for executable in executables:
+        if executable.is_file():
             target = destination / executable.relative_to(mix_home)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(executable, target)
@@ -212,7 +217,7 @@ def verify_project(directory, package, versions, env):
         command(["mix", "run", "traffic.exs"], cwd=project, env=env)
 
 
-def run(archive_dir, mode="all", keep=False):
+def run(archive_dir, mode="all", keep=False, *, published=False):
     consumers = {"all": ("abyss", "hell", "quic"), "udp": ("abyss",),
                  "hell": ("hell",), "quic": ("quic",)}[mode]
     packages = tuple(dict.fromkeys(name for consumer in consumers for name in
@@ -222,13 +227,23 @@ def run(archive_dir, mode="all", keep=False):
     versions = source_versions(packages)
     try:
         prepare_mix_toolchain(directory, env)
-        public = setup_registry(Path(archive_dir).resolve(), packages, versions, directory, env)
-        with local_registry(public) as url:
-            command(["mix", "hex.repo", "set", "hexpm", "--url", url,
-                     "--public-key", str(public / "public_key")], cwd=directory, env=env)
+        archives = Path(archive_dir).resolve()
+        if published:
+            for package in packages:
+                archive = archives / f"{package}-{versions[package]}.tar"
+                if not archive.is_file() or release_status(package, versions[package], archive) != "matching":
+                    raise RuntimeError(f"published server package differs or is missing: {package}")
+            registry = nullcontext(None)
+        else:
+            public = setup_registry(archives, packages, versions, directory, env)
+            registry = local_registry(public)
+        with registry as url:
+            if url is not None:
+                command(["mix", "hex.repo", "set", "hexpm", "--url", url,
+                         "--public-key", str(public / "public_key")], cwd=directory, env=env)
             for package in consumers:
                 verify_project(directory, package, versions, env)
-        print(f"PASS server Hex candidates: {', '.join(packages)}")
+        print(f"PASS server Hex {'published packages' if published else 'candidates'}: {', '.join(packages)}")
     except BaseException:
         print(f"server_consumer_failure_directory={directory}")
         raise
@@ -243,5 +258,6 @@ if __name__ == "__main__":
     parser.add_argument("archive_dir", type=Path)
     parser.add_argument("--mode", choices=("all", "udp", "hell", "quic"), default="all")
     parser.add_argument("--keep", action="store_true")
+    parser.add_argument("--published", action="store_true")
     args = parser.parse_args()
-    run(args.archive_dir, args.mode, args.keep)
+    run(args.archive_dir, args.mode, args.keep, published=args.published)

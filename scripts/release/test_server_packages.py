@@ -1,4 +1,4 @@
-"""Independent versions and native archive boundaries cannot leak into core releases."""
+"""Unified versions preserve portable and asynchronous native release boundaries."""
 import json
 from pathlib import Path
 import shutil
@@ -16,23 +16,25 @@ ROOT = stage.ROOT
 
 class ServerPackagesTest(unittest.TestCase):
     def fixture(self, root):
+        shutil.copyfile(ROOT / "mix.exs", root / "mix.exs")
         for package in ("abyss", "abyss_raw", "hell", "http_fetch"):
             source = ROOT / stage.package_path(package) / "mix.exs"
             target = root / stage.package_path(package) / "mix.exs"
             target.parent.mkdir(parents=True)
             shutil.copyfile(source, target)
 
-    def test_prepare_abyss_changes_both_packages_and_preserves_other_versions(self):
+    def test_independent_server_prepare_is_rejected_without_source_changes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.fixture(root)
-            untouched = {package: (root / stage.package_path(package) / "mix.exs").read_bytes()
-                         for package in ("hell", "http_fetch")}
+            before = {path: path.read_bytes() for path in root.rglob("mix.exs")}
             with patch.object(server_packages, "ROOT", root):
-                server_packages.prepare("abyss", "0.10.1")
-                self.assertEqual(server_packages.inventory("abyss"), {"abyss": "0.10.1", "abyss_raw": "0.10.1"})
-            for package, source in untouched.items():
-                self.assertEqual((root / stage.package_path(package) / "mix.exs").read_bytes(), source)
+                with self.assertRaisesRegex(ValueError, "versions.exs prepare"):
+                    server_packages.prepare("abyss", "1.0.0-rc.4")
+                server_packages.prepare("all", stage.source_version(root), validate=True)
+                with self.assertRaisesRegex(ValueError, "unified root version"):
+                    server_packages.prepare("native", "1.0.0-rc.4", validate=True)
+            self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def test_invalid_version_and_ambiguous_field_reject_before_writes(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -61,7 +63,7 @@ class ServerPackagesTest(unittest.TestCase):
     def test_publication_cannot_select_all_groups_or_write_before_identity(self):
         with patch.object(server_packages.subprocess, "run") as command, \
                 patch.object(server_packages, "release_status") as registry:
-            with self.assertRaisesRegex(ValueError, "exactly one"):
+            with self.assertRaisesRegex(ValueError, "unified release"):
                 server_packages.publish("all", Path("/stage"), Path("/archives"), {"hell": "0.1.3"})
             command.assert_not_called()
             registry.assert_not_called()
@@ -71,6 +73,8 @@ class ServerPackagesTest(unittest.TestCase):
         self.assertFalse(set(stage.PACKAGES) & {"abyss", "hell", "abyss_raw"})
         self.assertEqual(stage.package_path("abyss_raw"), Path("packages/abyss_raw"))
         self.assertEqual(len(stage.ALL_PACKAGES), 12)
+        self.assertEqual(stage.RELEASE_PACKAGES, (*stage.PACKAGES, "abyss", "hell"))
+        self.assertEqual(stage.NATIVE_PACKAGES, ("abyss_raw",))
 
     def test_wrong_requested_archive_version_stops_before_build(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -87,15 +91,14 @@ class ServerPackagesTest(unittest.TestCase):
             versions = server_packages.inventory("all")
             staged = stage.stage_sources(directory / "stage", tuple(versions))
             for package, version in versions.items():
-                group = "abyss" if package.startswith("abyss") else "hell"
                 target = directory / "docs" / package
                 docs.prepare_docs_source(staged / package, target, version,
-                                         source_ref=f"{group}-v{version}",
+                                         source_ref=f"v{version}",
                                          source_path=str(stage.package_path(package)))
                 text = (target / "mix.exs").read_text()
-                pattern = f'http_fetch/blob/{group}-v{version}/{stage.package_path(package)}/%{{path}}#L%{{line}}'
+                pattern = f'http_fetch/blob/v{version}/{stage.package_path(package)}/%{{path}}#L%{{line}}'
                 self.assertIn(pattern, text)
-                self.assertIn(f'source_ref: "{group}-v{version}"', text)
+                self.assertIn(f'source_ref: "v{version}"', text)
                 self.assertNotIn('source_ref: "main"', text)
                 self.assertEqual(text.count("source_url_pattern:"), 1)
                 result = subprocess.run(["elixir", "-e", 'Code.string_to_quoted!(File.read!("mix.exs"))'],

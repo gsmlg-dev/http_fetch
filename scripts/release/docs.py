@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tempfile
 
-from stage import PACKAGES
+from stage import RELEASE_PACKAGES as PACKAGES
 
 
 def prepare_docs_source(source, target, version, *, source_ref=None, source_path=None):
@@ -50,7 +50,7 @@ def run(version, stage_dir, publish=False):
     with tempfile.TemporaryDirectory(prefix="http-fetch-docs-") as directory:
         for package in PACKAGES:
             target = Path(directory) / package
-            prepare_docs_source(Path(stage_dir) / package, target, version)
+            prepare_docs_source(Path(stage_dir) / package, target, version, source_ref=f"v{version}")
             subprocess.run(["mix", "deps.get"], cwd=target, check=True)
             subprocess.run(["mix", "docs"], cwd=target, check=True)
             if publish:

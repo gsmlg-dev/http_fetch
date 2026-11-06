@@ -1,7 +1,7 @@
-"""Independent server release groups; never bump the coordinated client packages.
+"""Server archive/consumer helpers for the unified version and native release.
 
-No mode commits, tags, or pushes. Publication requires the matching immutable
-<group>-v<version> tag and an explicit `publish` command.
+All versions are prepared through versions.exs. Only the asynchronous native
+package may publish here, at the shared immutable vVERSION tag after Abyss.
 """
 import argparse
 import io
@@ -18,7 +18,7 @@ from archive_audit import audit_package
 from hex_packages import release_status
 from stage import GROUPS, ROOT, build, package_path, source_version, stage_sources, verify_rebuild
 
-SERVER_GROUPS = {name: GROUPS[name] for name in ("abyss", "hell")}
+SERVER_GROUPS = {name: GROUPS[name] for name in ("abyss", "hell", "native")}
 VERSION = re.compile(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?")
 
 
@@ -32,27 +32,22 @@ def inventory(group):
         version = versions.pop()
         if not VERSION.fullmatch(version):
             raise ValueError(f"invalid {name} version: {version}")
+        if version != source_version(ROOT):
+            raise ValueError(f"{name} version differs from the unified root version")
         result.update({package: version for package in packages})
     return result
 
 
 def prepare(group, version, validate=False):
-    if group == "all" or not version or not VERSION.fullmatch(version):
-        raise ValueError("prepare/validate --version requires one group and a canonical version")
-    changes = {}
-    for package in SERVER_GROUPS[group]:
-        path = ROOT / package_path(package) / "mix.exs"
-        text = path.read_text()
-        expression = r'(?<=@version ")[^\"]+(?=")' if '@version "' in text else r'(?<=version: ")[^\"]+(?=")'
-        matches = re.findall(expression, text)
-        if len(matches) != 1:
-            raise ValueError(f"ambiguous version in {path}")
-        if validate and matches != [version]:
-            raise ValueError(f"{package} version {matches[0]} differs from {version}")
-        changes[path] = re.sub(expression, version, text)
     if not validate:
-        for path, text in changes.items():
-            path.write_text(text)
+        raise ValueError("server versions are unified; use versions.exs prepare VERSION")
+    if not version or not VERSION.fullmatch(version):
+        raise ValueError("canonical version required")
+    if source_version(ROOT) != version:
+        raise ValueError("server version must equal the unified root version")
+    for package, actual in inventory(group).items():
+        if actual != version:
+            raise ValueError(f"{package} version {actual} differs from unified {version}")
 
 
 def audit(stage, archives, versions):
@@ -82,9 +77,8 @@ def docs(stage, packages, publish=False):
     with tempfile.TemporaryDirectory(prefix="server-docs-") as temporary:
         for package, version in packages.items():
             target = Path(temporary) / package
-            group = "abyss" if package.startswith("abyss") else "hell"
             prepare_docs_source(stage / package, target, version,
-                                source_ref=f"{group}-v{version}", source_path=str(package_path(package)))
+                                source_ref=f"v{version}", source_path=str(package_path(package)))
             # Documentation is repository tooling, so retain its reviewed dev
             # pins rather than floating unrelated helpers during each build.
             lock = ROOT / package_path(package) / "mix.lock" if package == "abyss_raw" else ROOT / "mix.lock"
@@ -96,10 +90,10 @@ def docs(stage, packages, publish=False):
 
 
 def publication_identity(group, versions):
-    if group == "all":
-        raise ValueError("publish exactly one version group")
+    if group != "native" or set(versions) != {"abyss_raw"}:
+        raise ValueError("portable servers publish through the unified release; only native may publish here")
     version = next(iter(versions.values()))
-    tag = f"{group}-v{version}"
+    tag = f"v{version}"
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     tagged = subprocess.check_output(["git", "rev-parse", f"refs/tags/{tag}^{{commit}}"], cwd=ROOT, text=True).strip()
     if head != tagged:
@@ -114,6 +108,11 @@ def publication_identity(group, versions):
 def publish(group, stage, archives, versions):
     publication_identity(group, versions)
     version = next(iter(versions.values()))
+    if source_version(ROOT) != version:
+        raise ValueError("native version must equal the unified root version")
+    abyss_archive = archives / f"abyss-{version}.tar"
+    if not abyss_archive.is_file() or release_status("abyss", version, abyss_archive) != "matching":
+        raise ValueError("verified published Abyss required before native publication")
     # Re-stage from the tagged checkout and compare with the supplied candidate,
     # including its portable manifest, before allowing any remote write.
     with tempfile.TemporaryDirectory(prefix="server-tagged-") as temporary:

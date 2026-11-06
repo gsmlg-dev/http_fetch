@@ -26,10 +26,10 @@ VERSION = "1.0.0-rc.0"
 
 
 class ReleaseCandidateTests(unittest.TestCase):
-    def test_prepare_and_validate_keep_all_nine_exact_rc_dependencies(self):
+    def test_prepare_and_validate_keep_all_twelve_versions_and_exact_rc_dependencies(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            paths = ["mix.exs", "mix.lock", *(f"apps/{app}/mix.exs" for app in stage.PACKAGES)]
+            paths = ["mix.exs", "mix.lock", *(str(stage.package_path(app) / "mix.exs") for app in stage.ALL_PACKAGES)]
             for name in paths:
                 target = root / name
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -55,7 +55,7 @@ class ReleaseCandidateTests(unittest.TestCase):
                 patch.object(stage, "stage_sources", return_value=Path("/stage")), \
                 patch.object(stage, "build") as build:
             stage.main()
-        build.assert_called_once_with(Path("/stage"), VERSION, Path("/archives"), stage.PACKAGES)
+        build.assert_called_once_with(Path("/stage"), VERSION, Path("/archives"), stage.RELEASE_PACKAGES)
 
     def test_no_otp_rc_keeps_exact_hex_dependencies_and_required_plan(self):
         source = no_otp_consumer_gate.project_source(VERSION)
@@ -71,7 +71,7 @@ class ReleaseCandidateTests(unittest.TestCase):
     def test_rc_hex_preflight_checks_every_matching_archive(self):
         with tempfile.TemporaryDirectory() as directory:
             archives = Path(directory)
-            for package in stage.PACKAGES:
+            for package in stage.RELEASE_PACKAGES:
                 (archives / f"{package}-{VERSION}.tar").write_bytes(package.encode())
             with patch.object(hex_packages, "release_status", return_value="matching") as status, \
                     patch.object(hex_packages.subprocess, "run") as publication, \
@@ -79,7 +79,7 @@ class ReleaseCandidateTests(unittest.TestCase):
                 hex_packages.run("preflight", VERSION, archives)
             self.assertEqual(status.call_args_list, [
                 call(package, VERSION, archives / f"{package}-{VERSION}.tar")
-                for package in stage.PACKAGES])
+                for package in stage.RELEASE_PACKAGES])
             publication.assert_not_called()
 
     def test_rc_published_consumer_retains_checksum_and_cold_registry_boundary(self):
@@ -102,10 +102,10 @@ class ReleaseCandidateTests(unittest.TestCase):
         with patch.object(docs, "prepare_docs_source") as prepare, \
                 patch.object(docs.subprocess, "run") as commands, redirect_stdout(io.StringIO()):
             docs.run(VERSION, Path("/stage"))
-        self.assertEqual(prepare.call_count, len(stage.PACKAGES))
+        self.assertEqual(prepare.call_count, len(stage.RELEASE_PACKAGES))
         self.assertTrue(all(item.args[2] == VERSION for item in prepare.call_args_list))
         self.assertEqual([item.args[0] for item in commands.call_args_list],
-                         [["mix", "deps.get"], ["mix", "docs"]] * len(stage.PACKAGES))
+                         [["mix", "deps.get"], ["mix", "docs"]] * len(stage.RELEASE_PACKAGES))
 
     def test_workflow_accepts_rc_and_rejects_noncanonical_or_injected_versions(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
@@ -142,10 +142,10 @@ class ReleaseCandidateGitHubTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.archives = Path(directory.name)
-        for package in stage.PACKAGES:
+        for package in stage.RELEASE_PACKAGES:
             (self.archives / f"{package}-{VERSION}.tar").write_bytes(package.encode())
         self.release = {"prerelease": True, "assets": [
-            {"name": f"{package}-{VERSION}.tar"} for package in stage.PACKAGES]}
+            {"name": f"{package}-{VERSION}.tar"} for package in stage.RELEASE_PACKAGES]}
         environment = patch.dict(os.environ, {"GITHUB_REPOSITORY": "example/repo"})
         environment.start()
         self.addCleanup(environment.stop)
@@ -164,7 +164,7 @@ class ReleaseCandidateGitHubTests(unittest.TestCase):
         self.assertEqual(create[:4], ["gh", "release", "create", "v" + VERSION])
         self.assertIn("--prerelease", create)
         self.assertIn("--latest=false", create)
-        self.assertEqual(commands.call_count, 1 + len(stage.PACKAGES))
+        self.assertEqual(commands.call_count, 1 + len(stage.RELEASE_PACKAGES))
 
     def test_existing_stable_marked_rc_blocks_before_any_remote_write(self):
         wrong = {**self.release, "prerelease": False}
