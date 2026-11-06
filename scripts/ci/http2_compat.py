@@ -113,7 +113,7 @@ def main():
         version = re.search(r'@version "([^"]+)"', (root / 'mix.exs').read_text()).group(1)
         archives = args.evidence / 'archives'
         run('candidate-packages', [sys.executable, 'scripts/release/stage.py', 'build', version,
-                                  str(args.evidence / 'stage'), str(archives)])
+                                  str(args.evidence / 'stage'), str(archives), '--group', 'core'])
         report['packages'] = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                               for path in sorted(archives.glob('*.tar'))}
         if len(report['packages']) != 9:

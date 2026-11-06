@@ -63,6 +63,8 @@ class CurrentH2MatrixTests(unittest.TestCase):
                                    for route in ('h2c', 'ex_ssl')])
         self.assertEqual(sum('scripts/http_runtime_package_traffic_gate.py' in command
                              for command in commands), 1)
+        packages = next(command for command in commands if 'scripts/release/stage.py' in command)
+        self.assertEqual(option(packages, '--group'), 'core')
         consumers = next(command for command in commands if command[:2] == ['mix', 'test'])
         self.assertIn('--include', consumers)
         self.assertEqual(option(consumers, '--include'), 'integration')
