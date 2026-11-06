@@ -137,17 +137,22 @@ defmodule HTTP.HTTP2.ProviderHandoffTest do
       ]
     }
 
+    :erlang.trace(pool, true, [:receive])
     assert {:ok, stream, generation} = Stream.start(request, self(), opening_timeout: 1_000)
     down = Process.monitor(stream)
-    wait_pending(pool, System.monotonic_time(:millisecond) + 200)
-    :sys.suspend(tracker)
 
     try do
+      # Observe the actual reservation before suspending its tracker. Startup
+      # scheduling is separate from the completion bound asserted below.
+      assert_receive {:trace, ^pool, :receive, {:"$gen_call", _, {:reserve, _, _}}}, 1_000
+      assert Enum.any?(Pool.stats(pool), fn {_, entry} -> entry.pending == 1 end)
+      :sys.suspend(tracker)
       Stream.close(stream)
       assert_receive {:http_runtime, ^generation, ^stream, {:error, :aborted}}, 200
       assert_receive {:DOWN, ^down, :process, ^stream, :normal}, 200
       assert :atomics.get(latch, 1) == 1
     after
+      :erlang.trace(pool, false, [:receive])
       if Process.alive?(stream), do: Process.exit(stream, :kill)
       :sys.resume(tracker)
     end
@@ -196,17 +201,6 @@ defmodule HTTP.HTTP2.ProviderHandoffTest do
     tracker_down = Process.monitor(tracker)
     assert_receive {:DOWN, ^tracker_down, :process, ^tracker, _}, 1_000
     assert :atomics.get(latch, 1) == 2
-  end
-
-  defp wait_pending(pool, deadline) do
-    unless Enum.any?(Pool.stats(pool), fn {_, entry} -> entry.pending == 1 end) do
-      assert System.monotonic_time(:millisecond) < deadline
-
-      receive do
-      after
-        1 -> wait_pending(pool, deadline)
-      end
-    end
   end
 
   defp inert_owner do
