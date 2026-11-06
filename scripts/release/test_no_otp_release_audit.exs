@@ -3885,7 +3885,7 @@ defmodule NoOTP.ReleaseAuditTest do
     result = v_actual_slice(context, true)
 
     assert Enum.map(result.unresolved_dispatch, &{&1.line, &1.kind}) ==
-             [{594, "unresolved_module_dispatch"}]
+             [{604, "unresolved_module_dispatch"}]
   end
 
   defp v_body do
@@ -4155,7 +4155,7 @@ defmodule NoOTP.ReleaseAuditTest do
     result = w_actual_slice(context, :original)
 
     assert Enum.map(result.unconfigured.unresolved_dispatch, &{&1.line, &1.kind}) ==
-             [{616, "unresolved_module_dispatch"}]
+             [{635, "unresolved_module_dispatch"}]
 
     assert result.configured.unresolved_dispatch == []
     assert result.configured.parameter_invariant_derivation.status == "checked"
