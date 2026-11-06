@@ -138,7 +138,11 @@ defmodule Hell.HandlerTest do
 
       @impl Hell.Handler
       def handle_connection(_socket, state) do
-        {:error, :nope, state}
+        send(state, {:handler_ready, self()})
+
+        receive do
+          :terminate -> {:error, :nope, state}
+        end
       end
 
       @impl Hell.Handler
@@ -148,13 +152,11 @@ defmodule Hell.HandlerTest do
     end
 
     test "it should close the connection and call handle_error if {:error, reason, state} is returned" do
-      {:ok, port} = start_handler(HandleConnection.Error)
+      {:ok, port} = start_handler(HandleConnection.Error, handler_options: self())
 
       messages =
         capture_log(fn ->
-          {:ok, client} = :gen_tcp.connect(:localhost, port, active: false)
-          assert :gen_tcp.recv(client, 0) == {:error, :closed}
-          Process.sleep(100)
+          assert await_handler_termination(port) == :nope
         end)
 
       # Ensure that we saw the message dispalyed by the runtime
@@ -164,13 +166,15 @@ defmodule Hell.HandlerTest do
     end
 
     test "it should terminate silently if {:error, reason, state} is returned and the server is so configured" do
-      {:ok, port} = start_handler(HandleConnection.Error, silent_terminate_on_error: true)
+      {:ok, port} =
+        start_handler(HandleConnection.Error,
+          silent_terminate_on_error: true,
+          handler_options: self()
+        )
 
       messages =
         capture_log(fn ->
-          {:ok, client} = :gen_tcp.connect(:localhost, port, active: false)
-          assert :gen_tcp.recv(client, 0) == {:error, :closed}
-          Process.sleep(100)
+          assert await_handler_termination(port) == {:shutdown, {:silent_termination, :nope}}
         end)
 
       # Ensure that we did not see the message dispalyed by the runtime
@@ -185,8 +189,12 @@ defmodule Hell.HandlerTest do
       require Logger
 
       @impl Hell.Handler
-      def handle_connection(_socket, _state) do
-        raise "nope"
+      def handle_connection(_socket, state) do
+        send(state, {:handler_ready, self()})
+
+        receive do
+          :terminate -> raise "nope"
+        end
       end
 
       @impl Hell.Handler
@@ -196,13 +204,11 @@ defmodule Hell.HandlerTest do
     end
 
     test "it should close the connection and call handle_error if an error is raised" do
-      {:ok, port} = start_handler(HandleConnection.Exploding)
+      {:ok, port} = start_handler(HandleConnection.Exploding, handler_options: self())
 
       messages =
         capture_log(fn ->
-          {:ok, client} = :gen_tcp.connect(:localhost, port, active: false)
-          assert :gen_tcp.recv(client, 0) == {:error, :closed}
-          Process.sleep(100)
+          assert {%RuntimeError{message: "nope"}, _stacktrace} = await_handler_termination(port)
         end)
 
       # Ensure that we saw the message dispalyed by the runtime
@@ -212,13 +218,15 @@ defmodule Hell.HandlerTest do
     end
 
     test "it should NOT terminate silently if an error is raised even if the server is so configured" do
-      {:ok, port} = start_handler(HandleConnection.Exploding, silent_terminate_on_error: true)
+      {:ok, port} =
+        start_handler(HandleConnection.Exploding,
+          silent_terminate_on_error: true,
+          handler_options: self()
+        )
 
       messages =
         capture_log(fn ->
-          {:ok, client} = :gen_tcp.connect(:localhost, port, active: false)
-          assert :gen_tcp.recv(client, 0) == {:error, :closed}
-          Process.sleep(100)
+          assert {%RuntimeError{message: "nope"}, _stacktrace} = await_handler_termination(port)
         end)
 
       # Ensure that we saw the message dispalyed by the runtime
@@ -1516,6 +1524,18 @@ defmodule Hell.HandlerTest do
 
   defp assert_exception_reason(kind, reason) when kind in [:throw, :exit],
     do: assert(reason == "nope")
+
+  defp await_handler_termination(port) do
+    {:ok, client} = :gen_tcp.connect(:localhost, port, active: false)
+    assert_receive {:handler_ready, handler}, 1_000
+    monitor = Process.monitor(handler)
+    send(handler, :terminate)
+    assert :gen_tcp.recv(client, 0) == {:error, :closed}
+    # The runtime logs termination after the socket closes. Keep log capture
+    # active until the handler exits and has emitted that report.
+    assert_receive {:DOWN, ^monitor, :process, ^handler, reason}, 1_000
+    reason
+  end
 
   defp start_handler(handler, server_args \\ []) do
     resolved_args = [port: 0, handler_module: handler, num_acceptors: 1] ++ server_args
