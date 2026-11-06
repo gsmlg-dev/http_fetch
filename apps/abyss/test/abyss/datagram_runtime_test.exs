@@ -500,8 +500,11 @@ defmodule Abyss.DatagramRuntimeTest do
 
       assert_receive {:trace, ^runtime, :receive, {:DOWN, ^monitor, :process, ^helper, :normal}}
 
+      # Observe the real watchdog expiry with a separate scheduling budget;
+      # the fixture keeps the production send deadline and exact trace match.
       assert_receive {:trace, ^runtime, :receive,
-                      {:work_expired, ^key, ^token, _, :effects, _, _}}
+                      {:work_expired, ^key, ^token, _, :effects, _, _}},
+                     1000
 
       fixture
     after
