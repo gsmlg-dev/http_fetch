@@ -24,17 +24,24 @@ class ServerPackagesTest(unittest.TestCase):
             shutil.copyfile(source, target)
 
     def test_independent_server_prepare_is_rejected_without_source_changes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            self.fixture(root)
-            before = {path: path.read_bytes() for path in root.rglob("mix.exs")}
-            with patch.object(server_packages, "ROOT", root):
-                with self.assertRaisesRegex(ValueError, "versions.exs prepare"):
-                    server_packages.prepare("abyss", "1.0.0-rc.4")
-                server_packages.prepare("all", stage.source_version(root), validate=True)
-                with self.assertRaisesRegex(ValueError, "unified root version"):
-                    server_packages.prepare("native", "1.0.0-rc.4", validate=True)
-            self.assertEqual({path: path.read_bytes() for path in before}, before)
+        # The workflow prepares the release version before running this suite.
+        # Exercise both sides of that transition and a stable release fixture.
+        for version in ("1.0.0-rc.3", "1.0.0-rc.4", "1.0.0"):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self.fixture(root)
+                for path in root.rglob("mix.exs"):
+                    original = stage.source_version(path.parent)
+                    path.write_text(path.read_text().replace(original, version))
+                before = {path: path.read_bytes() for path in root.rglob("mix.exs")}
+                different_version = f"{int(version.split('.')[0]) + 1}.0.0"
+                with patch.object(server_packages, "ROOT", root):
+                    with self.assertRaisesRegex(ValueError, "versions.exs prepare"):
+                        server_packages.prepare("abyss", different_version)
+                    server_packages.prepare("all", version, validate=True)
+                    with self.assertRaisesRegex(ValueError, "unified root version"):
+                        server_packages.prepare("native", different_version, validate=True)
+                self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def test_invalid_version_and_ambiguous_field_reject_before_writes(self):
         with tempfile.TemporaryDirectory() as temporary:
