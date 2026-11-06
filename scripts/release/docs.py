@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tempfile
 
-from stage import RELEASE_PACKAGES as PACKAGES
+from stage import RELEASE_PACKAGES as PACKAGES, ROOT
 
 
 def prepare_docs_source(source, target, version, *, source_ref=None, source_path=None):
@@ -51,6 +51,9 @@ def run(version, stage_dir, publish=False):
         for package in PACKAGES:
             target = Path(directory) / package
             prepare_docs_source(Path(stage_dir) / package, target, version, source_ref=f"v{version}")
+            # Keep reviewed external tooling pins; deps.get only adds the
+            # coordinated packages that were umbrella dependencies in source.
+            shutil.copyfile(ROOT / "mix.lock", target / "mix.lock")
             subprocess.run(["mix", "deps.get"], cwd=target, check=True)
             subprocess.run(["mix", "docs"], cwd=target, check=True)
             if publish:

@@ -106,6 +106,18 @@ requires the shared tag, a clean checkout, matching published Abyss bytes and
 unchanged native archive rebuilds. Documentation source links use `vVERSION`.
 No helper commits, tags or pushes outside the authorized release workflow.
 
+If an immutable release has passed every portable validation and publication
+gate but failed only while publishing documentation, `release-complete.yml`
+can finish documentation and the native lane without republishing portable
+packages. Supply `version` and `source_run`, the failed `release.yml` run at the
+exact tag SHA. The completion workflow rejects missing or deferred gates and
+unrelated failures, then checks all eleven published Hex/GitHub archives against
+the tagged sources and checksums. It uses current documentation tooling with
+the tagged lockfile; release package sources and tags remain immutable. Portable
+docs and the unchanged native publication lane run independently after that
+verification. Their results must both be checked before calling the full
+twelve-package release complete.
+
 Examples (candidate validation only):
 
 ```sh

@@ -1,0 +1,179 @@
+name: Complete verified release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing immutable portable release version
+        required: true
+        type: string
+      source_run:
+        description: Release run at the tag that failed only during documentation publication
+        required: true
+        type: string
+      publish_docs:
+        description: Publish portable and native documentation
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  complete:
+    name: Revalidate already published portable release
+    concurrency:
+      group: release-portable-http-fetch-packages
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.origin.outputs.source_sha }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      SOURCE_RUN: ${{ inputs.source_run }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preserve current recovery tooling before checking out release source
+        run: cp scripts/release/resume_release.py "$RUNNER_TEMP/resume_release.py"
+      - name: Require complete validation and publication before the documentation failure
+        id: origin
+        env:
+          PYTHONPATH: ${{ github.workspace }}/scripts/release
+        run: python3 "$RUNNER_TEMP/resume_release.py" provenance "$RELEASE_VERSION" "$SOURCE_RUN" "$RUNNER_TEMP/release-origin.json"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.origin.outputs.source_sha }}
+          fetch-depth: 0
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - name: Download prior verified portable publication artifacts
+        run: gh run download "$SOURCE_RUN" --name "portable-release-$RELEASE_VERSION" --dir "$RUNNER_TEMP/archives"
+      - name: Revalidate tagged source and every published Hex and GitHub archive
+        env:
+          PYTHONPATH: ${{ github.workspace }}/scripts/release
+          SOURCE_SHA: ${{ steps.origin.outputs.source_sha }}
+        run: python3 "$RUNNER_TEMP/resume_release.py" artifacts "$RELEASE_VERSION" "$RUNNER_TEMP/archives" "$RUNNER_TEMP/stage" "$SOURCE_SHA"
+      - name: Preserve reverified portable archives for asynchronous native publication
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-release-${{ inputs.version }}
+          path: ${{ runner.temp }}/archives/*.tar
+          if-no-files-found: error
+          overwrite: true
+      - name: Preserve original release provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: completion-release-origin
+          path: ${{ runner.temp }}/release-origin.json
+          if-no-files-found: warn
+          overwrite: true
+
+  docs:
+    name: Complete documentation from verified tagged portable sources
+    needs: complete
+    if: inputs.publish_docs
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preserve corrected documentation tooling
+        run: cp scripts/release/docs.py "$RUNNER_TEMP/release_docs.py"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.complete.outputs.source_sha }}
+          fetch-depth: 0
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - name: Stage exact immutable portable sources
+        run: |
+          python3 - <<'PYCODE'
+          import os, sys
+          sys.path.insert(0, "scripts/release")
+          from stage import RELEASE_PACKAGES, stage_sources
+          stage_sources(os.path.join(os.environ["RUNNER_TEMP"], "stage"), RELEASE_PACKAGES)
+          PYCODE
+      - name: Publish documentation with reviewed locked tooling
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}/scripts/release
+        run: python3 "$RUNNER_TEMP/release_docs.py" "$RELEASE_VERSION" "$RUNNER_TEMP/stage" --publish
+
+  native-release:
+    name: Publish optional abyss_raw after the portable release
+    concurrency:
+      group: release-abyss-raw-${{ inputs.version }}
+      cancel-in-progress: false
+    needs: complete
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.complete.outputs.source_sha }}
+          fetch-depth: 0
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify shared immutable tag and native version
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/v$RELEASE_VERSION^{commit}")"
+          elixir scripts/release/versions.exs validate "$RELEASE_VERSION"
+      - name: Download verified portable publication artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: portable-release-${{ inputs.version }}
+          path: ${{ runner.temp }}/archives
+      - name: Verify native implementation and package consumers
+        working-directory: packages/abyss_raw
+        run: |
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+          mix test
+          bash scripts/test_arp.sh
+          cargo clippy --locked --manifest-path native/dhcp_socket/Cargo.toml --all-targets -- -D warnings
+      - name: Install isolated DHCP and ARP fixture tools
+        run: sudo apt-get update && sudo apt-get install --yes iproute2 util-linux python3
+      - name: Verify candidate native boundaries and actual DHCP and ARP traffic
+        run: python3 apps/abyss/scripts/udp/p5_consumers.py
+      - name: Build and audit the native archive from the shared tag
+        run: python3 scripts/release/server_packages.py build native --version "$RELEASE_VERSION" --stage "$RUNNER_TEMP/stage" --archives "$RUNNER_TEMP/archives"
+      - name: Preflight immutable native Hex and GitHub artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/release/hex_packages.py preflight "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --group native
+          python3 scripts/release/github_assets.py preflight "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --group native
+      - name: Publish native package after verified Abyss publication
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: python3 scripts/release/server_packages.py publish native --version "$RELEASE_VERSION" --stage "$RUNNER_TEMP/stage" --archives "$RUNNER_TEMP/archives"
+      - name: Verify published native Hex consumer and loaded NIF
+        run: python3 scripts/release/native_consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
+      - name: Attach and verify immutable native GitHub archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release/github_assets.py complete "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --group native
+      - name: Publish verified native documentation
+        if: inputs.publish_docs
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: python3 scripts/release/server_packages.py publish-docs native --version "$RELEASE_VERSION" --stage "$RUNNER_TEMP/stage" --archives "$RUNNER_TEMP/archives"
+      - name: Report asynchronous native publication result
+        if: always()
+        env:
+          NATIVE_JOB_STATUS: ${{ job.status }}
+        run: |
+          printf 'abyss_raw %s: %s (independent of the completed eleven-package release)\n' "$RELEASE_VERSION" "$NATIVE_JOB_STATUS" >> "$GITHUB_STEP_SUMMARY"

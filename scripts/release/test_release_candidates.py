@@ -99,7 +99,7 @@ class ReleaseCandidateTests(unittest.TestCase):
             server.assert_not_called()
 
     def test_docs_keep_rc_source_tag_without_publishing_by_default(self):
-        with patch.object(docs, "prepare_docs_source") as prepare, \
+        with patch.object(docs, "prepare_docs_source", side_effect=lambda _source, target, *_args, **_kwargs: target.mkdir()) as prepare, \
                 patch.object(docs.subprocess, "run") as commands, redirect_stdout(io.StringIO()):
             docs.run(VERSION, Path("/stage"))
         self.assertEqual(prepare.call_count, len(stage.RELEASE_PACKAGES))
