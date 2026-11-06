@@ -797,45 +797,60 @@ defmodule Hell.HandlerTest do
     defmodule SendDoesNotAffectTimeout do
       use Hell.Handler
 
-      require Logger
-
-      # Enum.join/1 below renders each received A as "65", so 250 bytes in
-      # 500ms is the midpoint of the existing 400..600 character assertion.
       @send_interval 2
 
       @impl Hell.Handler
-      def handle_connection(_socket, _state) do
-        started_at = System.monotonic_time(:millisecond)
-        Process.send_after(self(), :send_bytes, started_at + @send_interval, abs: true)
-        {:continue, {started_at, 0}}
+      def handle_connection(_socket, owner) do
+        send(owner, {:sender_ready, self()})
+
+        receive do
+          {:start_sending, ^owner} -> :ok
+        after
+          5_000 -> raise "sender was not started"
+        end
+
+        send(self(), :send_bytes)
+        {:continue, {owner, 0}}
       end
 
-      def handle_info(:send_bytes, {socket, {started_at, sent}}) do
-        # Catch up to elapsed time instead of accumulating scheduler delays on
-        # each send. Keep sending without a cap so a late timeout still fails.
-        due = div(System.monotonic_time(:millisecond) - started_at, @send_interval)
-        Hell.Socket.send(socket, :binary.copy("A", due - sent))
-        next_send_at = started_at + (due + 1) * @send_interval
-        Process.send_after(self(), :send_bytes, next_send_at, abs: true)
-        {:noreply, {socket, {started_at, due}}}
+      def handle_info(:send_bytes, {socket, {owner, sent}}) do
+        :ok = Hell.Socket.send(socket, "A")
+        Process.send_after(self(), :send_bytes, @send_interval)
+        {:noreply, {socket, {owner, sent + 1}}}
+      end
+
+      @impl Hell.Handler
+      def handle_timeout(_socket, {owner, sent}) do
+        send(owner, {:sender_read_timeout, self(), sent})
       end
     end
 
     test "it should still timeout after read_timeout even though the server is sending bytes" do
-      {:ok, port} = start_handler(SendDoesNotAffectTimeout, read_timeout: 500)
+      {:ok, port} =
+        start_handler(SendDoesNotAffectTimeout, read_timeout: 500, handler_options: self())
 
       {:ok, client} = :gen_tcp.connect(:localhost, port, active: false)
+      assert_receive {:sender_ready, handler}, 1_000
+      monitor = Process.monitor(handler)
+      send(handler, {:start_sending, self()})
 
-      # recv will see a bunch of separate reads, so reduce until we see a closed
-      assert Stream.unfold(client, fn client ->
-               case :gen_tcp.recv(client, 0, 1000) do
-                 {:ok, data} -> {data, client}
-                 {:error, :closed} -> nil
-               end
-             end)
-             |> Enum.flat_map(& &1)
-             |> Enum.join()
-             ~> string(min: 400, max: 600)
+      assert_receive {:sender_read_timeout, ^handler, sent}, 1_000
+      assert sent > 1
+      assert_receive {:DOWN, ^monitor, :process, ^handler, {:shutdown, :read_timeout}}, 1_000
+
+      # Verify the timeout cause and every byte actually sent, independent of
+      # platform scheduling and TCP read boundaries.
+      received =
+        Stream.unfold(client, fn client ->
+          case :gen_tcp.recv(client, 0, 1000) do
+            {:ok, data} -> {data, client}
+            {:error, :closed} -> nil
+          end
+        end)
+        |> Enum.to_list()
+        |> IO.iodata_to_binary()
+
+      assert received == :binary.copy("A", sent)
 
       :gen_tcp.close(client)
     end

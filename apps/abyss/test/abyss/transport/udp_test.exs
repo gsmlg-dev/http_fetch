@@ -113,7 +113,7 @@ defmodule Abyss.Transport.UDPTest do
       assert {:ok, opts} = UDP.getopts(socket, [:recbuf, :sndbuf])
       assert is_list(opts)
 
-      assert :ok = UDP.setopts(socket, recbuf: 16384)
+      assert :ok = UDP.setopts(socket, recbuf: 16_384)
       assert {:ok, [recbuf: recbuf]} = UDP.getopts(socket, [:recbuf])
       assert recbuf > 0
     end

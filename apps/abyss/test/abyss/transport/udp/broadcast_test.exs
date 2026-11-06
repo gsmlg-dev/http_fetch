@@ -473,7 +473,7 @@ defmodule Abyss.Transport.UDP.BroadcastTest do
     test "sets socket options" do
       {:ok, socket} = Broadcast.listen(0, [])
 
-      assert :ok = Broadcast.setopts(socket, sndbuf: 65536)
+      assert :ok = Broadcast.setopts(socket, sndbuf: 65_536)
 
       {:ok, opts} = Broadcast.getopts(socket, [:sndbuf])
       assert is_integer(opts[:sndbuf])

@@ -25,7 +25,7 @@ defmodule Abyss.TestEchoHandler do
 
   @impl true
   def handle_data({ip, port, data}, state) do
-    Abyss.Transport.UDP.send(state.socket, ip, port, data)
+    :ok = Abyss.Transport.UDP.send(state.socket, ip, port, data)
     {:continue, state}
   end
 end

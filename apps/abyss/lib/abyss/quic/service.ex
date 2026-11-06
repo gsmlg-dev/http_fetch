@@ -299,6 +299,16 @@ defmodule Abyss.QUIC.Service do
       :writer_max_bytes
     ]
 
+    with :ok <- validate_handlers(backend, module),
+         :ok <- validate_protocol_options(config),
+         :ok <- validate_bind(config),
+         :ok <- validate_limits(config, positive),
+         :ok <- validate_option_keys(opts, defaults) do
+      {:ok, Map.merge(config, %{backend: backend, handler: module, handler_opts: handler_opts})}
+    end
+  end
+
+  defp validate_handlers(backend, module) do
     cond do
       not is_atom(backend) or not Code.ensure_loaded?(backend) or
           not function_exported?(backend, :listen, 1) ->
@@ -309,6 +319,13 @@ defmodule Abyss.QUIC.Service do
           not function_exported?(module, :handle_event, 2) ->
         {:error, :invalid_handler}
 
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_protocol_options(config) do
+    cond do
       not valid_alpn?(config[:alpn]) ->
         {:error, :invalid_alpn}
 
@@ -329,27 +346,44 @@ defmodule Abyss.QUIC.Service do
       not valid_engine_options?(config.quic_options) ->
         {:error, :invalid_quic_options}
 
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_bind(config) do
+    cond do
       not valid_ip?(config.ip) ->
         {:error, :invalid_ip}
 
       config.ip in [{0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}] ->
         {:error, :wildcard_bind_unsupported}
 
-      not is_integer(config.port) or config.port not in 0..65535 ->
+      not is_integer(config.port) or config.port not in 0..65_535 ->
         {:error, :invalid_port}
 
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_limits(config, positive) do
+    cond do
       Enum.any?(positive, &(not is_integer(config[&1]) or config[&1] <= 0)) ->
         {:error, :invalid_limit}
 
       not is_integer(config.event_batch) or config.event_batch not in 1..128 ->
         {:error, :invalid_limit}
 
-      Keyword.keys(opts) -- (Keyword.keys(defaults) ++ [:_backend, :handler, :alpn, :name]) != [] ->
-        {:error, :unknown_option}
-
       true ->
-        {:ok, Map.merge(config, %{backend: backend, handler: module, handler_opts: handler_opts})}
+        :ok
     end
+  end
+
+  defp validate_option_keys(opts, defaults) do
+    if Keyword.keys(opts) -- (Keyword.keys(defaults) ++ [:_backend, :handler, :alpn, :name]) == [],
+      do: :ok,
+      else: {:error, :unknown_option}
   end
 
   defp valid_engine_options?(options) do
@@ -419,7 +453,7 @@ defmodule Abyss.QUIC.Service do
   defp valid_alpn?(_), do: false
 
   defp valid_ip?(ip) when is_tuple(ip) and tuple_size(ip) in [4, 8] do
-    max = if tuple_size(ip) == 4, do: 255, else: 65535
+    max = if tuple_size(ip) == 4, do: 255, else: 65_535
     ip |> Tuple.to_list() |> Enum.all?(&(is_integer(&1) and &1 >= 0 and &1 <= max))
   end
 
@@ -480,13 +514,7 @@ defmodule Abyss.QUIC.Worker do
              [timeout: state.config.callback_timeout]
            ]) do
         {:ok, events} ->
-          case Enum.reduce_while(events ++ [:tick], {:ok, state.app_state}, fn event,
-                                                                               {:ok, app_state} ->
-                 case state.config.handler.handle_event(event, app_state) do
-                   {:ok, next} -> {:cont, {:ok, next}}
-                   {:stop, reason, next} -> {:halt, {:stop, reason, next}}
-                 end
-               end) do
+          case reduce_events(events, state) do
             {:ok, next} ->
               Process.send_after(self(), :poll, state.config.poll_interval)
               {:noreply, %{state | app_state: next}}
@@ -541,6 +569,15 @@ defmodule Abyss.QUIC.Worker do
     watched(state, state.config.callback_timeout, fn ->
       if state.initialized and function_exported?(state.config.handler, :terminate, 2),
         do: state.config.handler.terminate(reason, state.app_state)
+    end)
+  end
+
+  defp reduce_events(events, state) do
+    Enum.reduce_while(events ++ [:tick], {:ok, state.app_state}, fn event, {:ok, app_state} ->
+      case state.config.handler.handle_event(event, app_state) do
+        {:ok, next} -> {:cont, {:ok, next}}
+        {:stop, reason, next} -> {:halt, {:stop, reason, next}}
+      end
     end)
   end
 

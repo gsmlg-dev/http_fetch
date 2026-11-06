@@ -83,7 +83,7 @@ defmodule Abyss.ServerConfigTest do
     test "rejects invalid ports, limits, and timeouts" do
       for opts <- [
             [port: -1],
-            [port: 99999],
+            [port: 99_999],
             [num_listeners: 0],
             [num_listeners: -5],
             [num_connections: -1],
@@ -160,7 +160,7 @@ defmodule Abyss.ServerConfigTest do
       # base=50, factor=1, result=50
       assert Abyss.ServerConfig.calculate_optimal_listeners(5000, 100.0) == 50
       # base=100, factor=1, result=100
-      assert Abyss.ServerConfig.calculate_optimal_listeners(10000, 100.0) == 100
+      assert Abyss.ServerConfig.calculate_optimal_listeners(10_000, 100.0) == 100
     end
 
     test "adjusts for processing time" do
@@ -194,7 +194,7 @@ defmodule Abyss.ServerConfigTest do
 
       # Very high processing time
       # base=1, factor=max(10000/100, 0.5)=100, 1*100=100
-      assert Abyss.ServerConfig.calculate_optimal_listeners(100, 10000.0) == 100
+      assert Abyss.ServerConfig.calculate_optimal_listeners(100, 10_000.0) == 100
 
       # Large connection count
       result = Abyss.ServerConfig.calculate_optimal_listeners(100_000, 100.0)
@@ -202,7 +202,7 @@ defmodule Abyss.ServerConfigTest do
       assert result == 1000
 
       # Combined high connections and slow processing
-      result = Abyss.ServerConfig.calculate_optimal_listeners(10000, 500.0)
+      result = Abyss.ServerConfig.calculate_optimal_listeners(10_000, 500.0)
       # base=100, factor=5, 100*5=500
       assert result == 500
     end

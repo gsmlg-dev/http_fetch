@@ -15,7 +15,7 @@ defmodule Abyss.UtilsTest do
 
       assert is_list(interfaces)
       # Should have at least loopback
-      assert length(interfaces) > 0
+      assert interfaces != []
       # All elements should be strings
       assert Enum.all?(interfaces, &is_binary/1)
     end
@@ -33,7 +33,7 @@ defmodule Abyss.UtilsTest do
 
       assert is_list(up_interfaces)
       # At least loopback should be up
-      assert length(up_interfaces) > 0
+      assert up_interfaces != []
     end
 
     test "filters by :loopback flag" do
@@ -41,7 +41,7 @@ defmodule Abyss.UtilsTest do
 
       assert is_list(loopback_interfaces)
       # Should have exactly one loopback (typically)
-      assert length(loopback_interfaces) >= 1
+      assert loopback_interfaces != []
 
       assert @loopback in loopback_interfaces or
                Enum.any?(loopback_interfaces, &String.contains?(&1, "loop"))
@@ -74,7 +74,7 @@ defmodule Abyss.UtilsTest do
       addresses = Utils.list_addresses()
 
       assert is_list(addresses)
-      assert length(addresses) > 0
+      assert addresses != []
 
       # Each entry should have required keys
       Enum.each(addresses, fn addr ->
@@ -108,7 +108,7 @@ defmodule Abyss.UtilsTest do
       ipv4_addresses = Utils.list_addresses(family: :inet)
 
       assert is_list(ipv4_addresses)
-      assert length(ipv4_addresses) > 0
+      assert ipv4_addresses != []
 
       Enum.each(ipv4_addresses, fn addr ->
         assert addr.family == :inet
@@ -141,14 +141,14 @@ defmodule Abyss.UtilsTest do
       addresses = Utils.list_addresses(only: :up)
 
       assert is_list(addresses)
-      assert length(addresses) > 0
+      assert addresses != []
     end
 
     test "combines filters" do
       addresses = Utils.list_addresses(family: :inet, interface: @loopback)
 
       assert is_list(addresses)
-      assert length(addresses) >= 1
+      assert addresses != []
 
       Enum.each(addresses, fn addr ->
         assert addr.interface == @loopback
@@ -166,7 +166,7 @@ defmodule Abyss.UtilsTest do
       assert :up in info.flags
       assert :loopback in info.flags
       assert is_list(info.addresses)
-      assert length(info.addresses) > 0
+      assert info.addresses != []
     end
 
     test "returns error for non-existent interface" do
@@ -190,7 +190,7 @@ defmodule Abyss.UtilsTest do
       assert {:ok, addresses} = Utils.get_interface_addresses(@loopback)
 
       assert is_list(addresses)
-      assert length(addresses) > 0
+      assert addresses != []
 
       Enum.each(addresses, fn addr ->
         refute Map.has_key?(addr, :interface)

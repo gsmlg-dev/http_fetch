@@ -202,18 +202,38 @@ defmodule Quic.ConnectionTest do
   end
 
   @tag :integration
-  test "stale datagrams cannot change credit and a handshake deadline terminates" do
+  test "stale datagrams cannot change credit" do
     {:ok, writer} = GenUDP.open()
 
     {:ok, conn} =
-      Connection.start_link(options({GenUDP, writer}, role: :server, handshake_timeout: 100))
+      Connection.start_link(
+        options({GenUDP, writer}, role: :server, closing_timeout: 40, draining_timeout: 40)
+      )
 
     monitor = Process.monitor(conn)
     generation = Connection.status(conn).generation
     assert {:error, :stale_generation} = Connection.deliver(conn, make_ref(), <<0::9600>>, 0)
     assert Connection.status(conn).bytes_received == 0
-    assert_receive {:quic_closed, ^conn, ^generation, :handshake_timeout}, 1_000
+    :ok = Connection.close(conn)
+    assert_receive {:quic_closed, ^conn, ^generation, _reason}, 1_000
     assert_receive {:DOWN, ^monitor, :process, ^conn, :normal}, 1_000
+    assert Process.alive?(writer)
+    :ok = GenUDP.close(writer)
+  end
+
+  @tag :integration
+  test "a handshake deadline terminates without requiring a live status query" do
+    # Install exit observation before starting the deadline. Even if this test
+    # process is descheduled, both notifications remain observable after exit.
+    Process.flag(:trap_exit, true)
+    {:ok, writer} = GenUDP.open()
+
+    {:ok, conn} =
+      Connection.start_link(options({GenUDP, writer}, role: :server, handshake_timeout: 100))
+
+    assert_receive {:quic_closed, ^conn, generation, :handshake_timeout}, 1_000
+    assert is_reference(generation)
+    assert_receive {:EXIT, ^conn, :normal}, 1_000
     assert Process.alive?(writer)
     :ok = GenUDP.close(writer)
   end

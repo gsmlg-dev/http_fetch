@@ -48,7 +48,7 @@ defmodule Abyss.Utils do
 
   @typedoc "IPv6 address tuple"
   @type ipv6_address ::
-          {0..65535, 0..65535, 0..65535, 0..65535, 0..65535, 0..65535, 0..65535, 0..65535}
+          {0..65_535, 0..65_535, 0..65_535, 0..65_535, 0..65_535, 0..65_535, 0..65_535, 0..65_535}
 
   @typedoc "IP address (IPv4 or IPv6)"
   @type ip_address :: ipv4_address() | ipv6_address()

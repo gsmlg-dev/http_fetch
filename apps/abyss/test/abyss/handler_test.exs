@@ -194,7 +194,7 @@ defmodule Abyss.HandlerTest do
       {:ok, handler_pid} = TestAdaptiveHandler.start_link({span, config, self(), make_ref()})
 
       # Send new connection data
-      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12345, "test data"}})
+      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12_345, "test data"}})
 
       # Allow some time for processing
       Process.sleep(50)
@@ -219,7 +219,7 @@ defmodule Abyss.HandlerTest do
       {:ok, handler_pid} = TestAdaptiveHandler.start_link({span, config, self(), make_ref()})
 
       # Send connection data
-      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12345, "test data"}})
+      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12_345, "test data"}})
 
       # Allow processing
       Process.sleep(100)
@@ -245,7 +245,7 @@ defmodule Abyss.HandlerTest do
       {:ok, handler_pid} = TestAdaptiveHandler.start_link({span, config, self(), make_ref()})
 
       # Send connection data to start memory monitoring
-      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12345, "test data"}})
+      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12_345, "test data"}})
 
       # Wait for memory check to be scheduled
       Process.sleep(50)
@@ -271,7 +271,7 @@ defmodule Abyss.HandlerTest do
       {:ok, handler_pid} = TestAdaptiveHandler.start_link({span, config, self(), make_ref()})
 
       # Send connection data
-      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12345, "test data"}})
+      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12_345, "test data"}})
 
       # Since we can't easily force high memory usage in testing,
       # we just verify the handler starts correctly
@@ -294,7 +294,7 @@ defmodule Abyss.HandlerTest do
 
       # Send multiple data packets to increase memory usage
       for i <- 1..10 do
-        send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12345, "data#{i}"}})
+        send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12_345, "data#{i}"}})
         Process.sleep(10)
       end
 
@@ -481,7 +481,7 @@ defmodule Abyss.HandlerTest do
       {:ok, handler_pid} = TestAdaptiveHandler.start_link({span, config, self(), make_ref()})
 
       # Send connection data and close
-      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12345, "test data"}})
+      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12_345, "test data"}})
 
       Process.sleep(50)
 
@@ -507,7 +507,7 @@ defmodule Abyss.HandlerTest do
       {:ok, handler_pid} = TestAdaptiveHandler.start_link({span, config, self(), make_ref()})
 
       # Send connection data
-      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12345, "test data"}})
+      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12_345, "test data"}})
 
       # Allow memory checks to run
       Process.sleep(100)
@@ -531,7 +531,7 @@ defmodule Abyss.HandlerTest do
       {:ok, handler_pid} = TestAdaptiveHandler.start_link({span, config, self(), make_ref()})
 
       # Send connection data
-      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12345, "test data"}})
+      send(handler_pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 12_345, "test data"}})
 
       # Allow memory monitoring cycle
       Process.sleep(200)

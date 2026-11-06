@@ -51,7 +51,7 @@ defmodule Abyss.ListenerPoolTest do
 
       listener_pids = ListenerPool.listener_pids(pid)
       assert is_list(listener_pids)
-      assert length(listener_pids) > 0
+      assert listener_pids != []
       assert Enum.all?(listener_pids, &Process.alive?/1)
 
       :ok = Supervisor.stop(pid)

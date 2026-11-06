@@ -268,6 +268,12 @@ defmodule Abyss.Handler do
         end
       end
 
+      unquote(termination_impl())
+    end
+  end
+
+  defp termination_impl do
+    quote do
       # Called by GenServer if we hit our read_timeout. Socket is still open
       def terminate({:shutdown, :timeout}, state) do
         out = __MODULE__.handle_timeout(state)

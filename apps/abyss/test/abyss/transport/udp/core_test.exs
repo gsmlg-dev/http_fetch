@@ -137,21 +137,21 @@ defmodule Abyss.Transport.UDP.CoreTest do
       defaults = [
         active: false,
         binary: true,
-        buffer: 65536,
+        buffer: 65_536,
         recbuf: 131_072,
         sndbuf: 131_072
       ]
 
       user_opts = [
         active: true,
-        buffer: 32768,
+        buffer: 32_768,
         reuseaddr: true
       ]
 
       result = Core.merge_options(defaults, user_opts)
 
       assert Keyword.get(result, :active) == true
-      assert Keyword.get(result, :buffer) == 32768
+      assert Keyword.get(result, :buffer) == 32_768
       assert Keyword.get(result, :binary) == true
       assert Keyword.get(result, :recbuf) == 131_072
       assert Keyword.get(result, :reuseaddr) == true

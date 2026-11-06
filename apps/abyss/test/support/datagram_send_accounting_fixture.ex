@@ -78,17 +78,17 @@ defmodule Abyss.Test.SendAccountingFixture do
   end
 
   def successful_send(server, capability, peer, destination, payload) do
-    assert {:ok, ref} = Endpoint.send(capability, destination, payload)
-    assert {:ok, at} = Endpoint.await(capability, ref, 1000)
+    _ = assert {:ok, ref} = Endpoint.send(capability, destination, payload)
+    _ = assert {:ok, at} = Endpoint.await(capability, ref, 1000)
     assert is_integer(at)
     {:ok, {source, port}} = Endpoint.local_endpoint(server)
-    assert {:ok, {^source, ^port, ^payload}} = :gen_udp.recv(peer, 0, 1000)
+    _ = assert {:ok, {^source, ^port, ^payload}} = :gen_udp.recv(peer, 0, 1000)
     assert_event(server, :ok, byte_size(payload))
     assert {:ok, ^at} = Endpoint.await(capability, ref, 1000)
   end
 
   def assert_event(server, result, bytes) do
-    assert_receive {:socket_send_event, ^server, %{bytes: ^bytes}, metadata}, 1000
+    _ = assert_receive {:socket_send_event, ^server, %{bytes: ^bytes}, metadata}, 1000
     assert metadata.result == result
     assert Telemetry.socket_scope(metadata.socket) == server
   end

@@ -42,8 +42,8 @@ defmodule Abyss.TestTransport do
   ## Transport callbacks
 
   @impl true
-  def listen(_port, _opts) do
-    {:ok, make_ref()}
+  def listen(port, opts) do
+    :gen_udp.open(port, opts)
   end
 
   @impl true
@@ -53,7 +53,7 @@ defmodule Abyss.TestTransport do
 
   @impl true
   def recv(_socket, _bytes, _timeout) do
-    {:ok, {"127.0.0.1", 12345, "test data"}}
+    {:ok, {{127, 0, 0, 1}, 12_345, "test data"}}
   end
 
   @impl true
@@ -73,8 +73,8 @@ defmodule Abyss.TestTransport do
   end
 
   @impl true
-  def close(_socket) do
-    :ok
+  def close(socket) do
+    :gen_udp.close(socket)
   end
 
   @impl true
@@ -84,7 +84,7 @@ defmodule Abyss.TestTransport do
 
   @impl true
   def peername(_socket) do
-    {:ok, {{127, 0, 0, 1}, 12345}}
+    {:ok, {{127, 0, 0, 1}, 12_345}}
   end
 
   @impl true

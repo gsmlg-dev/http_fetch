@@ -398,6 +398,46 @@ defmodule Hell.Handler do
     end
   end
 
+  @doc false
+  def handle_ready(raw_socket, handler_config, acceptor_span, start_time, state) do
+    {ip, port} =
+      case handler_config.transport_module.peername(raw_socket) do
+        {:ok, remote_info} ->
+          remote_info
+
+        {:error, reason} ->
+          # the socket has been prematurely closed by the client, we can't do anything with it
+          # so we just close the socket, stop the GenServer with the error reason and move on.
+          _ = handler_config.transport_module.close(raw_socket)
+          throw({:stop, {:shutdown, {:premature_conn_closing, reason}}, {raw_socket, state}})
+      end
+
+    Hell.ProcessLabel.set(:connection, handler_config, {ip, port})
+
+    span_meta = %{remote_address: ip, remote_port: port}
+
+    connection_span =
+      Hell.Telemetry.start_child_span(
+        acceptor_span,
+        :connection,
+        %{monotonic_time: start_time},
+        span_meta
+      )
+
+    socket = Hell.Socket.new(raw_socket, handler_config, connection_span)
+
+    case Hell.Socket.handshake(socket) do
+      {:ok, socket} ->
+        Hell.Telemetry.span_event(connection_span, :ready)
+        {:noreply, {socket, state}, {:continue, :handle_connection}}
+
+      {:error, reason} ->
+        {:stop, {:shutdown, {:handshake, reason}}, {socket, state}}
+    end
+  catch
+    {:stop, _, _} = stop -> stop
+  end
+
   # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   def genserver_impl do
     quote do
@@ -412,42 +452,7 @@ defmodule Hell.Handler do
             {:hell_ready, raw_socket, handler_config, acceptor_span, start_time},
             {nil, state}
           ) do
-        {ip, port} =
-          case handler_config.transport_module.peername(raw_socket) do
-            {:ok, remote_info} ->
-              remote_info
-
-            {:error, reason} ->
-              # the socket has been prematurely closed by the client, we can't do anything with it
-              # so we just close the socket, stop the GenServer with the error reason and move on.
-              _ = handler_config.transport_module.close(raw_socket)
-              throw({:stop, {:shutdown, {:premature_conn_closing, reason}}, {raw_socket, state}})
-          end
-
-        Hell.ProcessLabel.set(:connection, handler_config, {ip, port})
-
-        span_meta = %{remote_address: ip, remote_port: port}
-
-        connection_span =
-          Hell.Telemetry.start_child_span(
-            acceptor_span,
-            :connection,
-            %{monotonic_time: start_time},
-            span_meta
-          )
-
-        socket = Hell.Socket.new(raw_socket, handler_config, connection_span)
-
-        case Hell.Socket.handshake(socket) do
-          {:ok, socket} ->
-            Hell.Telemetry.span_event(connection_span, :ready)
-            {:noreply, {socket, state}, {:continue, :handle_connection}}
-
-          {:error, reason} ->
-            {:stop, {:shutdown, {:handshake, reason}}, {socket, state}}
-        end
-      catch
-        {:stop, _, _} = stop -> stop
+        Hell.Handler.handle_ready(raw_socket, handler_config, acceptor_span, start_time, state)
       end
 
       def handle_info(

@@ -117,7 +117,7 @@ defmodule Abyss.Transport.UDP.UnicastTest do
     test "allows user options to override defaults" do
       # Note: active and broadcast are hardcoded, so user can't override them
       # But other options like buffer sizes can be customized
-      assert {:ok, socket} = Unicast.listen(0, recbuf: 32768)
+      assert {:ok, socket} = Unicast.listen(0, recbuf: 32_768)
 
       {:ok, opts} = Unicast.getopts(socket, [:recbuf, :active, :broadcast])
       # System may adjust buffer size, so just verify it was set to something
@@ -385,7 +385,7 @@ defmodule Abyss.Transport.UDP.UnicastTest do
 
     test "returns timeout error when no response" do
       # No server listening
-      result = Unicast.send_recv({{127, 0, 0, 1}, 59999}, "Hello", 50)
+      result = Unicast.send_recv({{127, 0, 0, 1}, 59_999}, "Hello", 50)
       assert result == {:error, :timeout}
     end
 
@@ -452,7 +452,7 @@ defmodule Abyss.Transport.UDP.UnicastTest do
 
       # Note: can't change hardcoded options like active/broadcast
       # But can adjust other options
-      assert :ok = Unicast.setopts(socket, sndbuf: 65536)
+      assert :ok = Unicast.setopts(socket, sndbuf: 65_536)
 
       {:ok, opts} = Unicast.getopts(socket, [:sndbuf])
       # System may adjust the value

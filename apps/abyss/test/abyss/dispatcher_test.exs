@@ -293,9 +293,11 @@ defmodule Abyss.DispatcherTest do
       )
 
     state = :sys.get_state(dispatcher)
+    monitor = Process.monitor(dispatcher)
     Process.exit(state.writer, :kill)
 
-    assert_receive {:EXIT, ^dispatcher, {:writer_exit, :killed}}
+    assert_receive {:DOWN, ^monitor, :process, ^dispatcher, {:writer_exit, :killed}}, 1_000
+    assert_receive {:EXIT, ^dispatcher, {:writer_exit, :killed}}, 1_000
     assert {:error, :writer_down} = Dispatcher.send(state.send, {{127, 0, 0, 1}, 1000}, <<1>>)
   end
 

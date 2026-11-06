@@ -65,7 +65,7 @@ defmodule AbyssTest do
     test "respects timeout parameter" do
       assert {:ok, pid} = Abyss.start_link(handler_module: Abyss.TestHandler, port: 0)
       # Use a longer timeout and handle potential timeout gracefully
-      case Abyss.stop(pid, 10000) do
+      case Abyss.stop(pid, 10_000) do
         :ok ->
           refute Process.alive?(pid)
 
@@ -109,7 +109,7 @@ defmodule AbyssTest do
       # Get listener pids and verify server is running
       listener_pids = Abyss.ListenerPool.listener_pids(listener_pool_pid)
       assert is_list(listener_pids)
-      assert length(listener_pids) > 0
+      assert listener_pids != []
 
       # Check that listeners are alive
       assert Enum.all?(listener_pids, &Process.alive?/1)

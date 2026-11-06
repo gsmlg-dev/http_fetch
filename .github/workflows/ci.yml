@@ -75,7 +75,7 @@ jobs:
           echo '::notice::Credo and Dialyzer deferred by explicit manual input; other gates remain required.'
       - name: Check selected app with Credo
         if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis) }}
-        run: mix credo --files-included "apps/${HTTP_FETCH_CI_APP}/**/*.{ex,exs}"
+        run: mix credo "apps/${HTTP_FETCH_CI_APP}/{lib,src,test,web}/**/*.{ex,exs}"
       - name: Check selected app with Dialyzer
         if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis) }}
         run: mix dialyzer --force-check --format github

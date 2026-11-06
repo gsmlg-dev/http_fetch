@@ -38,6 +38,7 @@ defmodule Abyss.Dispatcher do
   use GenServer
 
   defmodule SendCapability do
+    @moduledoc false
     @enforce_keys [:writer, :generation]
     defstruct [:writer, :generation, :admission, io_backend: :gen_udp]
   end
@@ -399,6 +400,7 @@ defmodule Abyss.Dispatcher do
   end
 
   defmodule Writer do
+    @moduledoc false
     use GenServer
 
     def start_link(opts) do

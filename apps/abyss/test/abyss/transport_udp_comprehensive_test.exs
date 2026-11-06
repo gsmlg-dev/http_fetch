@@ -175,7 +175,7 @@ defmodule Abyss.Transport.UDPComprehensiveTest do
   describe "send_recv/3" do
     test "send and receive with timeout" do
       data = "test message"
-      target = {{127, 0, 0, 1}, 12345}
+      target = {{127, 0, 0, 1}, 12_345}
       timeout = 1000
 
       # This will likely timeout since there's no server at the target
@@ -185,7 +185,7 @@ defmodule Abyss.Transport.UDPComprehensiveTest do
 
     test "send and receive with default timeout" do
       data = "test message"
-      target = {{127, 0, 0, 1}, 12345}
+      target = {{127, 0, 0, 1}, 12_345}
 
       result = UDP.send_recv(target, data)
       assert match?({:error, _}, result) or match?({:ok, _}, result)

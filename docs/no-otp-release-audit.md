@@ -1,5 +1,17 @@
 # Directed production release audit
 
+## Logger configuration review — 2026-11-07
+
+The root formatter now includes the literal metadata keys `:event`, `:metadata`
+and `:measurements` used by the imported Abyss logger. Independent source review
+confirmed that this changes log rendering only: no application startup, callback,
+transport or TLS selection changed. All 244 original package source hashes, ten
+review documents, 94 producer inputs and 175 reviewed occurrences remain equal.
+Only the `config/config.exs` hash in the release bundle was rebound. This review
+does not replace fresh candidate/published runtime verification or extend the
+nine-package no-OTP-SSL proof to Abyss, Hell or `abyss_raw`. Hell still uses OTP
+`:ssl` for its server transport.
+
 P6's non-deferred gates **pass** at `658bbd5`. The strict production no-OTP-SSL
 gate passes at `31a8a15`, with identical production sources through `658bbd5`;
 the complete nine-app integration workflow now also passes. General

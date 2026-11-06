@@ -14,7 +14,7 @@
     "docs/no-otp-directed-telemetry-proof.json": "ecfc46b575f481f536655a96b79f8cba01ea6741bc9614a1631b574d1eecd7eb"
   },
   "configuration": {
-    "config/config.exs": "e60e900b482ccfaa9e857c80ad460b39d0d5c4e1fa5779c46ca0a8947d429079",
+    "config/config.exs": "25b6cb2e3010d3c92a732eee4fff58dc1fb1623eed51fedbdc6c9efb9d8985e6",
     "mix.lock": "bb8a547f99a31557b98b96a0553f6157f56b71a133d1661809aa3c9346cde0cc"
   },
   "sources": {
