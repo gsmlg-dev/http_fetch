@@ -4,7 +4,7 @@ defmodule Hell.MixProject do
   def project do
     [
       app: :hell,
-      version: "1.0.0-rc.3",
+      version: "1.0.0-rc.4",
       build_path: "../../_build",
       deps_path: "../../deps",
       lockfile: "../../mix.lock",

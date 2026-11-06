@@ -1,7 +1,7 @@
 defmodule QuicHttp3.MixProject do
   use Mix.Project
 
-  @version "1.0.0-rc.3"
+  @version "1.0.0-rc.4"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
 
   def project do
@@ -40,8 +40,8 @@ defmodule QuicHttp3.MixProject do
   defp deps do
     [
       # TODO(upstream): gsmlg-dev/http_fetch#16
-      {:http_core, "== 1.0.0-rc.3", in_umbrella: true, hex: :http_core},
-      {:elixir_quic, "== 1.0.0-rc.3", in_umbrella: true, hex: :elixir_quic},
+      {:http_core, "== 1.0.0-rc.4", in_umbrella: true, hex: :http_core},
+      {:elixir_quic, "== 1.0.0-rc.4", in_umbrella: true, hex: :elixir_quic},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
   end

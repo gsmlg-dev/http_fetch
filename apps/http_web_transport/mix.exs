@@ -1,7 +1,7 @@
 defmodule HttpWebTransport.MixProject do
   use Mix.Project
 
-  @version "1.0.0-rc.3"
+  @version "1.0.0-rc.4"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
 
   def project do
@@ -49,7 +49,7 @@ defmodule HttpWebTransport.MixProject do
 
   defp deps do
     [
-      {:http_core, "== 1.0.0-rc.3", in_umbrella: true, hex: :http_core},
+      {:http_core, "== 1.0.0-rc.4", in_umbrella: true, hex: :http_core},
       {:telemetry, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
