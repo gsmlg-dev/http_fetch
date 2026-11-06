@@ -224,3 +224,56 @@ Collection's 35 TLS1.3 scenarios passed while its raw static failure stayed
 visible; strict candidate and published gates must bind the current BEAMs.
 The source-pinned transport and buffered-close tests retain their driver/option
 and plaintext-buffer assertions with the newly reviewed `SSL.Connection` hash.
+
+## 2026-11-06 source review amendment: finite waits and WebSocket controls
+
+This amendment reviews production commit `27e5fe617d31b0eaa8dd4e36487c89e1b0258ab2`
+against RC2 (`df99a0325a8c7769a9abc4a336359beb8d5e4e9d`). Seven of the 244 production
+library files change; the other 237 match. The JSON amendment records every
+old/new source digest, adds the four newly selected WebSocket codec/event/API
+inputs, and preserves the historical artifact, checks, source commit and BEAM
+hashes. Those historical results do not certify these amended sources.
+
+`Promise.await/2` now invokes literal `Task.yield/2` and returns the task's data,
+a timeout tuple, or the existing task-exit shape. It acquires no callable field
+and does not invoke a returned value. `then/2,3`, retained success/error callbacks
+and the arity-checked `apply_callback/2` sink keep the HTTP-5 derivation above.
+
+WebSocket construction still normalizes Options before starting Connection.
+Address normalization retains the first keyword value, consistently with the
+constructed Options structure. Its projection forwards only the literal address
+plus manual redirect policy beyond the existing transport option whitelist.
+`Options.new/3` validates the IPv4/IPv6 tuple, unsupported routes and TLS identity
+through the existing `Dialer.select_transport/2` before
+constructing the retained structure. HTTP1's finite selector still chooses TCP,
+Unix, or the validated ExSSL backend; HTTP2 retains the runtime dialer and
+address-qualified pool key. A pin changes a dial address, never the selected
+module, Host/authority or certificate identity. Built-in address/TLS transport
+bodies remain those reviewed in HTTP-1.
+
+The dial worker retains that selected module through request writes, handshake
+reads, ownership transfer and failed-upgrade cleanup. Generation/worker-qualified
+metadata messages assign only `state.handshake`; they never assign transport or
+a callback. `response_metadata/2` uses literal Headers/Enum/binary operations over
+two fixed names, copies at most one 1024-byte value per name, and returns only a
+status, header data and truncation flag. Open/Error add that map as data. Neither
+response values nor the new frame/read/message limits become callable origins.
+
+The frame parser's new positive-integer bound is checked against declared
+payload lengths before awaiting payload. Read admission compares integer raw
+and parser-buffer sizes before copying input. Error, ACK-credit settlement,
+queue clearing, protocol Close and completion paths retain the existing selected
+transport or clear it to nil. The sole non-nil transport assignment still comes
+from the current dial worker's qualified `http1_ready` reply. The existing send
+worker capture, rearm, deferred EOF, abort and detachment therefore retain HTTP-9.
+
+A diagnostic snapshot copied current production BEAMs into an owned clone of the
+prior release runtime, excluding test-support modules by their compiled source
+paths. The unchanged generic auditor and consumer origin requests inspected
+350 BEAMs, found no direct OTP SSL imports or missing abstract code, and retained
+all 175 raw findings. Raw abstract forms reconcile every original inventory ID
+one-to-one with its exact MFA, line and kind. Eight line bindings move: Promise
+ID 106 and WebSocket IDs 152-158; no owning MFA or finding is added or removed.
+This inventory check does not certify a rebuilt candidate or publication. The
+strict candidate and published gates must bind the current packaged source and
+BEAM bytes independently; no generic finding is hidden by this amendment.

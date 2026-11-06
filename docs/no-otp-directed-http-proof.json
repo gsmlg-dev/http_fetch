@@ -9,7 +9,7 @@
     "apps/http_fetch/lib/http.ex": "1a7ad0e36ccb4798d977428807270c96033376af6fc0a1da264fab7eaf51df8f",
     "apps/http_fetch/lib/http/fetch_options.ex": "a04c342787355fd33358d573b1b1ebd5a7d280aff48c6c0035840dd7e6c73a08",
     "apps/http_fetch/lib/http/socket_client.ex": "9f0c86be61a71a0d7a91a62d0500bf35739b95d3f15567842457f2c3520b3e04",
-    "apps/http_fetch/lib/http/promise.ex": "d49110cfae54440fd16568391a3a2c1a90ef0c7831ee458185e0e361e9c74064",
+    "apps/http_fetch/lib/http/promise.ex": "59989eb7acf11e11e7dc62bab51c847fe7aa12afe104d38012dee2195d9edb29",
     "apps/http_fetch/lib/http/http1/idle_timeout.ex": "af2b917e837503e3f84c9e1e5c3a7cb9a2e1c34efc9a61ff19e82547f0f7180d",
     "apps/http_fetch/lib/http/http1/upload.ex": "883b0768562703422acaac33cff16fc86165ff393a6e16c420e8251aa1b27c56",
     "apps/http_core/lib/http/tls_backend.ex": "83f3f446e37f913312b2be044825fadeb5f02730df1608d1cbab54970f11548c",
@@ -33,12 +33,16 @@
     "apps/http_runtime/lib/http/http3/stream.ex": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
     "apps/http_event_source/lib/http/event_source/options.ex": "d1c36a500c8f5f86b6c5334d8e34b355451d9367487f5d1f4b37df0a31b44202",
     "apps/http_event_source/lib/http/event_source/connection.ex": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
-    "apps/http_web_socket/lib/http/web_socket/options.ex": "195b79883dc1a24a19ce3edad9577689720ea4418d0d0945e973819e881473b6",
-    "apps/http_web_socket/lib/http/web_socket/connection.ex": "434e0718b79e0cd304ce3de3ef2a2de49710f3c220931b48d30870eb69f3d1d5",
+    "apps/http_web_socket/lib/http/web_socket/options.ex": "7c35aed5864213f90e9d954c8e78799981c01f1ba5526ab56683f6ea2e4e8177",
+    "apps/http_web_socket/lib/http/web_socket/connection.ex": "322737d98276d94fb450985ce8620d05afeb8e3c6d7943c9cac70077e9ebcb9f",
     "apps/http_web_transport/lib/http/web_transport.ex": "38751209dffad6dd099a61e4038874ef66d8c57303f42c565483f12904c0346d",
     "apps/http_web_transport/lib/http/web_transport/options.ex": "ce28ffe039cd91eb32ddbf1365bd60c2a16fea71fc6a1badc598827527f90145",
     "apps/http_web_transport/lib/http/web_transport/session.ex": "295d1da9978afbedd308080261d9a7a9f1fadaa504e16183299b64b3979e83e3",
-    "apps/http_web_transport/lib/http/web_transport/transport/quic.ex": "e9b14e849bbffffd2e1f2740611623885c4bb236b481bb6fb0425206d9da5e1b"
+    "apps/http_web_transport/lib/http/web_transport/transport/quic.ex": "e9b14e849bbffffd2e1f2740611623885c4bb236b481bb6fb0425206d9da5e1b",
+    "apps/http_web_socket/lib/http/web_socket/handshake.ex": "99b178e112dc90c47f96e64c50ac2e2535fcc3169b9137bc19ca68744f7ce978",
+    "apps/http_web_socket/lib/http/web_socket/event.ex": "63ae8265fde1872a944ac5dadfd6fb4bd02376751985e10ed0cbe8a3ef653634",
+    "apps/http_web_socket/lib/http/web_socket/frame.ex": "8f813646db68b69f4531f49472d9bde48bca21877e237af54eac462fb0b4ea33",
+    "apps/http_web_socket/lib/http/web_socket.ex": "685c7d0b6f1b4b32f1534cd2faf055bfbd24c8f4e46de1857540f763fd63a593"
   },
   "production_source_census": {
     "files": 244,
@@ -217,7 +221,7 @@
       "inventory_occurrence": 106,
       "module": "HTTP.Promise",
       "mfa": "apply_callback/2",
-      "line": 124,
+      "line": 135,
       "kind": "unresolved_apply",
       "source": "apps/http_fetch/lib/http/promise.ex",
       "proof": "HTTP-5",
@@ -647,7 +651,7 @@
       "inventory_occurrence": 152,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "abort_transport/2",
-      "line": 1360,
+      "line": 1385,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -657,7 +661,7 @@
       "inventory_occurrence": 153,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "abort_transport/2",
-      "line": 1361,
+      "line": 1386,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -667,7 +671,7 @@
       "inventory_occurrence": 154,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "detach/1",
-      "line": 1340,
+      "line": 1365,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -677,7 +681,7 @@
       "inventory_occurrence": 155,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "handle_info/2",
-      "line": 342,
+      "line": 343,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -687,7 +691,7 @@
       "inventory_occurrence": 156,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "handle_info/2",
-      "line": 426,
+      "line": 436,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -697,7 +701,7 @@
       "inventory_occurrence": 157,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "rearm/1",
-      "line": 1227,
+      "line": 1252,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -707,7 +711,7 @@
       "inventory_occurrence": 158,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "submit/2",
-      "line": 789,
+      "line": 810,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -918,6 +922,113 @@
           "mfa": "transport_send/2",
           "previous_line": 1960,
           "line": 1963
+        }
+      ],
+      "historical_artifact_covers_amended_source": false,
+      "compiled_acceptance": "REQUIRED_BY_STRICT_CANDIDATE_AND_PUBLISHED_RELEASE_GATES"
+    },
+    {
+      "date": "2026-11-06",
+      "baseline_commit": "df99a0325a8c7769a9abc4a336359beb8d5e4e9d",
+      "source_commit": "27e5fe617d31b0eaa8dd4e36487c89e1b0258ab2",
+      "changed_source_inputs": {
+        "apps/http_fetch/lib/http/promise.ex": {
+          "previous_sha256": "d49110cfae54440fd16568391a3a2c1a90ef0c7831ee458185e0e361e9c74064",
+          "sha256": "59989eb7acf11e11e7dc62bab51c847fe7aa12afe104d38012dee2195d9edb29"
+        },
+        "apps/http_web_socket/lib/http/web_socket/connection.ex": {
+          "previous_sha256": "434e0718b79e0cd304ce3de3ef2a2de49710f3c220931b48d30870eb69f3d1d5",
+          "sha256": "322737d98276d94fb450985ce8620d05afeb8e3c6d7943c9cac70077e9ebcb9f"
+        },
+        "apps/http_web_socket/lib/http/web_socket/event.ex": {
+          "previous_sha256": "21717126574a6c613beb57724e9ff1c7618de40cc6debcf2c655b185551e13bc",
+          "sha256": "63ae8265fde1872a944ac5dadfd6fb4bd02376751985e10ed0cbe8a3ef653634"
+        },
+        "apps/http_web_socket/lib/http/web_socket/frame.ex": {
+          "previous_sha256": "dc3842630c60e9f4497bf2fc599a2c9b7fe06b4596765267966f2c0e90ddff6b",
+          "sha256": "8f813646db68b69f4531f49472d9bde48bca21877e237af54eac462fb0b4ea33"
+        },
+        "apps/http_web_socket/lib/http/web_socket/handshake.ex": {
+          "previous_sha256": "b6b7bb4f6aa68fd235bf3550e4d8796f269265f30d83b2c6981c326fb768cc3e",
+          "sha256": "99b178e112dc90c47f96e64c50ac2e2535fcc3169b9137bc19ca68744f7ce978"
+        },
+        "apps/http_web_socket/lib/http/web_socket/options.ex": {
+          "previous_sha256": "195b79883dc1a24a19ce3edad9577689720ea4418d0d0945e973819e881473b6",
+          "sha256": "7c35aed5864213f90e9d954c8e78799981c01f1ba5526ab56683f6ea2e4e8177"
+        },
+        "apps/http_web_socket/lib/http/web_socket.ex": {
+          "previous_sha256": "1aa67eb8d397b4bd98f7b92fd73250fe87dddc8315b234b7cde9d9b1881e7020",
+          "sha256": "685c7d0b6f1b4b32f1534cd2faf055bfbd24c8f4e46de1857540f763fd63a593"
+        }
+      },
+      "added_selected_inputs": [
+        "apps/http_web_socket/lib/http/web_socket.ex",
+        "apps/http_web_socket/lib/http/web_socket/event.ex",
+        "apps/http_web_socket/lib/http/web_socket/frame.ex",
+        "apps/http_web_socket/lib/http/web_socket/handshake.ex"
+      ],
+      "active_production_source_census": {
+        "files": 244,
+        "sorted_path_sha256_json": "0f41826b959770528921aa727be1c0d52260c0d728a713fcf0742b04d370ff71",
+        "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
+      },
+      "compiled_inventory": {
+        "checked_beams": 350,
+        "raw_dispatches": 175,
+        "original_inventory_ids_preserved": 175,
+        "added_dispatches": 0,
+        "missing_dispatches": 0,
+        "changed_owning_mfas": 0,
+        "evidence": "DIAGNOSTIC_OWNED_PRIOR_RELEASE_RUNTIME_WITH_CURRENT_PRODUCTION_BEAMS"
+      },
+      "occurrence_rebindings": [
+        {
+          "inventory_occurrence": 106,
+          "mfa": "apply_callback/2",
+          "previous_line": 124,
+          "line": 135
+        },
+        {
+          "inventory_occurrence": 152,
+          "mfa": "abort_transport/2",
+          "previous_line": 1360,
+          "line": 1385
+        },
+        {
+          "inventory_occurrence": 153,
+          "mfa": "abort_transport/2",
+          "previous_line": 1361,
+          "line": 1386
+        },
+        {
+          "inventory_occurrence": 154,
+          "mfa": "detach/1",
+          "previous_line": 1340,
+          "line": 1365
+        },
+        {
+          "inventory_occurrence": 155,
+          "mfa": "handle_info/2",
+          "previous_line": 342,
+          "line": 343
+        },
+        {
+          "inventory_occurrence": 156,
+          "mfa": "handle_info/2",
+          "previous_line": 426,
+          "line": 436
+        },
+        {
+          "inventory_occurrence": 157,
+          "mfa": "rearm/1",
+          "previous_line": 1227,
+          "line": 1252
+        },
+        {
+          "inventory_occurrence": 158,
+          "mfa": "submit/2",
+          "previous_line": 789,
+          "line": 810
         }
       ],
       "historical_artifact_covers_amended_source": false,
