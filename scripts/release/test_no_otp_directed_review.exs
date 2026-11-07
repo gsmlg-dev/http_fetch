@@ -100,6 +100,56 @@ defmodule NoOTP.DirectedReviewTest do
     assert_failed(context, "source census changed")
   end
 
+  test "the extracted H2 activation proof binds its actual compiled helper", context do
+    root = Path.expand("../..", __DIR__)
+
+    occurrence =
+      root
+      |> Path.join("docs/no-otp-directed-http-proof.json")
+      |> File.read!()
+      |> JSON.decode!()
+      |> Map.fetch!("occurrences")
+      |> Enum.find(&(&1["inventory_occurrence"] == 178))
+
+    source =
+      root
+      |> Path.join(occurrence["source"])
+      |> File.read!()
+      |> String.replace("HTTP.HTTP2.Pool", inspect(context.module))
+
+    File.write!(context.source, source)
+    :code.purge(context.module)
+    :code.delete(context.module)
+    [{_module, bytes}] = Code.compile_file(context.source)
+    File.write!(context.beam, bytes)
+    File.write!(context.built, bytes)
+    finding = %{beam: context.beam, line: occurrence["line"], kind: occurrence["kind"]}
+    [inspection] = context.artifacts.beam_inspections
+
+    artifacts = %{
+      context.artifacts
+      | beam_inspections: [
+          %{inspection | sha256: digest(context.beam), unresolved_dispatch: [finding]}
+        ],
+        unresolved_dispatch: [finding]
+    }
+
+    [fixture] = context.bundle["occurrences"]
+    fixture = Map.merge(fixture, Map.take(occurrence, ["line", "kind", "mfa", "proof"]))
+
+    bundle = %{
+      context.bundle
+      | "sources" => %{"http_fetch/lib/reviewed.ex" => digest(context.source)},
+        "occurrences" => [fixture]
+    }
+
+    actual = %{context | artifacts: artifacts, bundle: bundle}
+    assert bind(actual).status == "PASS"
+
+    wrong = Map.put(bundle, "occurrences", [Map.put(fixture, "mfa", "register_provider/4")])
+    assert_failed(%{actual | bundle: wrong}, "dispatch owning function changed")
+  end
+
   test "an extra production source cannot escape a selected-source review", context do
     File.write!(Path.join(Path.dirname(context.source), "extra.ex"), "# unreviewed source\n")
     assert_failed(context, "source census changed")

@@ -111,6 +111,18 @@ class ArchiveTests(unittest.TestCase):
                 pattern = f'https://github.com/gsmlg-dev/http_fetch/blob/v{self.version}/apps/{package}/%{{path}}#L%{{line}}'
                 self.assertEqual(text.count(f'source_url_pattern: "{pattern}"'), 1, package)
 
+    def test_production_archive_group_needs_no_test_or_server_archives(self):
+        with tempfile.TemporaryDirectory() as directory:
+            production = Path(directory)
+            for package in stage.PACKAGES:
+                name = f"{package}-{self.version}.tar"
+                shutil.copyfile(self.archives / name, production / name)
+            result = subprocess.run([
+                "elixir", str(SCRIPT_DIR / "archives.exs"), self.version,
+                str(production), "--group", "core",
+            ], cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_rebuild_match_and_mismatch_rejection(self):
         stage.verify_rebuild(self.stage, self.version, self.archives, stage.RELEASE_PACKAGES)
         manifest = self.stage / "http_core/mix.exs"

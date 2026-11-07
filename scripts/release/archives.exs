@@ -16,7 +16,7 @@ defmodule ReleaseArchives do
   def run([version, directory]), do: validate(version, directory, @order)
 
   def run([version, directory, "--group", "core"]),
-    do: validate(version, directory, @order -- ~w(abyss hell))
+    do: validate(version, directory, @order -- ~w(http_test abyss hell))
 
   def run(_),
     do: raise("usage: elixir scripts/release/archives.exs VERSION ARCHIVE_DIR [--group core]")

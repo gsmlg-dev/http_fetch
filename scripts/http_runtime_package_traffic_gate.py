@@ -94,7 +94,7 @@ def aggregate_modes(results):
         assert result.get('consumers') == 4 and result.get('connections') == 4
         assert result.get('completed') is True and result.get('mixed_shared_connection') is True
     return dict(result='PASS', completed=True, gate='isolated_package_http2_traffic',
-                packages=9, consumers=8, connections=8, mixed_shared_connection=True,
+                packages=10, consumers=8, connections=8, mixed_shared_connection=True,
                 verified_tls=True, modes=results)
 
 

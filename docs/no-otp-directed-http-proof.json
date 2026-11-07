@@ -825,7 +825,7 @@
     {
       "inventory_occurrence": 178,
       "module": "HTTP.HTTP2.Pool",
-      "mfa": "register_provider/4",
+      "mfa": "activate_owner/3",
       "line": 112,
       "kind": "unresolved_fun_invocation",
       "source": "apps/http_pool/lib/http/http2/pool.ex",

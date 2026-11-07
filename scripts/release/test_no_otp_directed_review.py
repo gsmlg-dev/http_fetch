@@ -42,7 +42,7 @@ class DirectedReviewTests(unittest.TestCase):
         amendment = http['source_review_amendments'][-1]
         self.assertEqual(amendment['added_occurrences'], [178, 179, 180])
         sites = {site['inventory_occurrence']: site for site in http['occurrences']}
-        self.assertEqual(sites[178]['mfa'], 'register_provider/4')
+        self.assertEqual(sites[178]['mfa'], 'activate_owner/3')
         self.assertEqual(sites[178]['source'], 'apps/http_pool/lib/http/http2/pool.ex')
         self.assertEqual({sites[i]['mfa'] for i in (179, 180)}, {'prepare/2', 'execute/3'})
         for number in amendment['added_occurrences']:
@@ -196,7 +196,7 @@ class DirectedReviewTests(unittest.TestCase):
                                 env=dict(os.environ), stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertRegex(result.stdout, r'(?:9 tests, 0 failures|Result: 9 passed)')
+        self.assertRegex(result.stdout, r'(?:10 tests, 0 failures|Result: 10 passed)')
 
     def fixture(self):
         site = dict(module='HTTP', mfa='run/1', line=2, kind='unresolved_fun_invocation',

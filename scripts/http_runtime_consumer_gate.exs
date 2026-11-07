@@ -1,5 +1,5 @@
 defmodule HTTPRuntimeConsumerGate do
-  @apps ~w(http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
+  @apps ~w(http_core http_pool elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
   @clients ~w(http_fetch http_event_source http_web_socket)a
 
   def prepare do
@@ -44,6 +44,16 @@ defmodule HTTPRuntimeConsumerGate do
       assert!(
         not Map.has_key?(requirements(metadata[app]), "elixir_quic_http3"),
         "#{app} must reach the HTTP/3 companion only through the runtime boundary"
+      )
+    end
+
+    assert_requirement!(metadata["http_runtime"], "http_pool", version)
+    assert_requirement!(metadata["http_fetch"], "http_pool", version)
+
+    for dependency <- ~w(http_runtime http_fetch http_test) do
+      assert!(
+        not Map.has_key?(requirements(metadata["http_pool"]), dependency),
+        "pool must not depend on #{dependency}"
       )
     end
 
@@ -109,7 +119,14 @@ defmodule HTTPRuntimeConsumerGate do
     resolved = Enum.map(Mix.Dep.cached(), & &1.app)
 
     if release = System.get_env("HTTP_RUNTIME_CONSUMER_RELEASE") do
-      for app <- [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime | selected] do
+      for app <- [
+            :ex_ssl,
+            :elixir_quic,
+            :http_core,
+            :http_pool,
+            :elixir_quic_http3,
+            :http_runtime | selected
+          ] do
         dep = Enum.find(Mix.Dep.cached(), &(&1.app == app))
 
         assert!(
@@ -125,7 +142,7 @@ defmodule HTTPRuntimeConsumerGate do
       end
     end
 
-    for app <- [:http_core, :elixir_quic_http3, :elixir_quic, :http_runtime, :ex_ssl] do
+    for app <- [:http_core, :http_pool, :elixir_quic_http3, :elixir_quic, :http_runtime, :ex_ssl] do
       assert!(app in resolved, "missing transitive dependency #{app}")
       assert!(List.keymember?(Application.started_applications(), app, 0), "#{app} did not start")
     end
@@ -167,18 +184,22 @@ defmodule HTTPRuntimeConsumerGate do
     runtime = runtime_processes!()
     children = Supervisor.which_children(HTTPRuntime.Application)
 
+    assert_runtime_children!(children)
+
     assert!(
-      Enum.sort(Enum.map(children, &elem(&1, 0))) ==
-        Enum.sort([
-          :http_managed_transport_supervisor,
-          HTTP.HTTP1.Pool,
-          HTTP.HTTP2.ConnectionSupervisor,
-          HTTP.HTTP2.Pool,
-          HTTP.HTTP3.ConnectionSupervisor,
-          HTTP.HTTP3.Pool
-        ]),
-      "runtime has unexpected supervision owners"
+      Application.spec(:http_pool, :mod) in [nil, []],
+      "pool app starts duplicate supervision"
     )
+
+    for module <- [HTTP.HTTP1.Pool, HTTP.HTTP2.Pool, HTTP.HTTP2.PoolKey] do
+      beam = module |> :code.which() |> List.to_string() |> Path.expand()
+
+      assert!(
+        Application.get_application(module) == :http_pool and
+          String.starts_with?(beam, Path.join(build, "lib/http_pool/ebin/")),
+        "pool implementation loaded outside isolated pool package"
+      )
+    end
 
     assert!(
       Supervisor.which_children(HTTP.Core.Application) == [
@@ -215,6 +236,22 @@ defmodule HTTPRuntimeConsumerGate do
         fetch_visible: :http_fetch in selected,
         pool_keys: map_size(apply(HTTP.HTTP2.Pool, :stats, [runtime[:http_fetch_http2_pool]]))
       })
+    )
+  end
+
+  defp assert_runtime_children!(children) do
+    assert!(
+      Enum.sort(Enum.map(children, &elem(&1, 0))) ==
+        Enum.sort([
+          HTTP.Runtime.Pool.Registry,
+          :http_managed_transport_supervisor,
+          HTTP.HTTP1.Pool,
+          HTTP.HTTP2.ConnectionSupervisor,
+          HTTP.HTTP2.Pool,
+          HTTP.HTTP3.ConnectionSupervisor,
+          HTTP.HTTP3.Pool
+        ]),
+      "runtime has unexpected supervision owners"
     )
   end
 
@@ -375,6 +412,7 @@ defmodule HTTPRuntimeConsumerGate do
     Map.new(
       [
         HTTPRuntime.Application,
+        HTTP.Runtime.Pool.Registry,
         :http_runtime_task_supervisor,
         :http_managed_transport_supervisor,
         HTTP.HTTP1.Pool,
