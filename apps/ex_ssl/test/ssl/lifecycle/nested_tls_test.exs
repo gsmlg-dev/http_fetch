@@ -368,31 +368,48 @@ defmodule SSL.Lifecycle.NestedTLSTest do
     end
   end
 
-  test "pair acceptance preserves the outer carrier owner and recovers both accepted leases" do
-    {_outer, inner, handle, lease, _layers} = pair_connected()
-    recipient = recipient()
+  for cancel_layer <- [:outer, :inner] do
+    @tag cancel_layer: cancel_layer
+    test "pair acceptance preserves the carrier owner and recovers the #{cancel_layer} lease", %{
+      cancel_layer: cancel_layer
+    } do
+      {_outer, inner, handle, lease, _layers} = pair_connected()
+      recipient = recipient()
 
-    assert {:ok, transfer} =
-             Lifecycle.offer(lease, %{controller: recipient, owner: recipient}, deadline(1_000))
+      assert {:ok, transfer} =
+               Lifecycle.offer(lease, %{controller: recipient, owner: recipient}, deadline(1_000))
 
-    assert {:error, {:outer, :not_recipient}} = Lifecycle.accept(transfer, deadline(1_000))
-    send(recipient, {:accept, transfer, deadline(1_000)})
-    assert_receive {^recipient, :accept, {:ok, accepted}}, 1_000
-    send(recipient, {:accept, transfer, deadline(1_000)})
-    assert_receive {^recipient, :accept, {:ok, ^accepted}}, 1_000
+      assert {:error, {:outer, :not_recipient}} = Lifecycle.accept(transfer, deadline(1_000))
+      send(recipient, {:accept, transfer, deadline(1_000)})
+      assert_receive {^recipient, :accept, {:ok, accepted}}, 1_000
+      send(recipient, {:accept, transfer, deadline(1_000)})
+      assert_receive {^recipient, :accept, {:ok, ^accepted}}, 1_000
 
-    assert {:pending,
-            %{
-              epoch: {1, 1},
-              transfer: :accepted,
-              layers: %{outer: %{epoch: 1}, inner: %{epoch: 1}}
-            }} = Lifecycle.status(handle)
+      assert {:pending,
+              %{
+                epoch: {1, 1},
+                transfer: :accepted,
+                layers: %{outer: %{epoch: 1}, inner: %{epoch: 1}}
+              }} = Lifecycle.status(handle)
 
-    assert {:error, {:outer, :stale_lease}} = Lifecycle.cancel(lease, deadline(1_000))
-    send(recipient, {:exchange, inner})
-    assert_receive {^recipient, :exchange, {:ok, <<42, 255, 0>>}}, 2_000
-    assert :ok = Lifecycle.cancel(accepted, deadline(1_000))
-    assert {:ok, %{cleanup: :confirmed}} = Lifecycle.await(handle, deadline(2_000))
+      assert {:error, {:outer, :stale_lease}} = Lifecycle.cancel(lease, deadline(1_000))
+      send(recipient, {:exchange, inner})
+      assert_receive {^recipient, :exchange, {:ok, <<42, 255, 0>>}}, 2_000
+
+      # Check each recovered authority while its own observer is live. Retiring
+      # one layer can terminate the other before a second cancel is admitted.
+      assert :ok = Lifecycle.cancel(Map.fetch!(accepted, cancel_layer), deadline(1_000))
+
+      assert {:ok,
+              %{
+                cleanup: :confirmed,
+                epoch: {1, 1},
+                layers: %{
+                  outer: %{roles: 31, observed_down: 31},
+                  inner: %{roles: 14, observed_down: 14}
+                }
+              }} = Lifecycle.await(handle, deadline(2_000))
+    end
   end
 
   test "partial pair acceptance keeps the source inner lease able to retire both layers" do

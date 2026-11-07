@@ -38,9 +38,12 @@ defmodule SSL.CRLCacheIntegrationTest do
   test "a blocked native file open returns an error without killing the public caller", %{
     directory: directory
   } do
-    # Load the external release path before deliberately occupying the sole
-    # dirty-I/O scheduler; code loading and filesystem cleanup use it too.
-    assert {"", 0} = System.cmd("python3", ["-c", "pass"])
+    # Resolve and load the exact external release path before deliberately
+    # occupying the sole dirty-I/O scheduler; filesystem discovery uses it too.
+    python =
+      System.find_executable("python3") || raise "python3 is required for the CRL FIFO test"
+
+    assert {"", 0} = System.cmd(python, ["-c", "pass"])
     path = Path.join(directory, "cache-fifo-#{System.unique_integer([:positive])}")
     {output, 0} = System.cmd("mkfifo", [path], stderr_to_stdout: true)
     assert output == ""
@@ -62,14 +65,14 @@ defmodule SSL.CRLCacheIntegrationTest do
     try do
       assert_receive {^reference, :result, result}, 6_500
       # Release before assertions or filesystem cleanup, including on failure.
-      assert {"", 0} = release_fifo(path)
+      assert {"", 0} = release_fifo(path, python)
       assert {:error, reason} = result
       assert reason in [:acceptance_unconfirmed, :deadline_exceeded, :resources_pending]
       send(caller, :survival_check)
       assert_receive {^reference, :survived}, 500
       assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}, 500
     after
-      _ = release_fifo(path)
+      _ = release_fifo(path, python)
       File.rm(path)
       if Process.alive?(caller), do: Process.exit(caller, :kill)
     end
@@ -156,12 +159,12 @@ defmodule SSL.CRLCacheIntegrationTest do
     end
   end
 
-  defp release_fifo(path) do
+  defp release_fifo(path, python) do
     code = "import os,sys; fd=os.open(sys.argv[1], os.O_WRONLY|os.O_NONBLOCK); os.close(fd)"
 
     port =
       Port.open(
-        {:spawn_executable, "/usr/bin/python3"},
+        {:spawn_executable, python},
         [:binary, :exit_status, :stderr_to_stdout, args: ["-c", code, path]]
       )
 

@@ -138,14 +138,20 @@ defmodule Abyss.DatagramLifetimeTest do
     assert_receive {:lifetime_initialized, worker, generation}
     assert %{timer_count: 1, retained_bytes: 0} = settled(endpoint)
     assert :ok = Endpoint.pause(endpoint)
-    elapsed_barrier(90)
 
-    assert {:ok, %{mode: :suspended, generation: ^generation, input_count: 0}} =
-             Endpoint.info(endpoint)
-
+    # The timer's actual callback and UDP reply establish progress beyond the
+    # idle interval; its input credit may still be live while that work runs.
     assert_receive {:lifetime_timer, ^worker, ^generation, 2}, 1000
     response(client, port, 2)
-    assert %{timer_count: 0, retained_bytes: 0} = settled(endpoint)
+
+    assert %{
+             mode: :suspended,
+             generation: ^generation,
+             input_count: 0,
+             timer_count: 0,
+             retained_bytes: 0
+           } = settled(endpoint)
+
     assert :ok = Endpoint.resume(endpoint)
     :ok = packet(client, port, "resumed")
     response(client, port, 3)

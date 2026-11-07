@@ -55,6 +55,21 @@ defmodule SSL.Lifecycle.PairTest do
     assert {:ok, %{cleanup: :confirmed}} = Lifecycle.await(handle, deadline(0))
   end
 
+  for completed <- [:outer, :inner] do
+    test "pair cancellation preserves unknown acceptance after the #{completed} observer exits" do
+      {handle, lease, layers} = pair()
+      {completed_handle, completed_lease} = Map.fetch!(layers, unquote(completed))
+      assert :ok = Lifecycle.cancel(completed_lease, deadline(1_000))
+      assert {:ok, %{cleanup: :confirmed}} = Lifecycle.await(completed_handle, deadline(2_000))
+
+      assert {:error, {unquote(completed), :acceptance_unconfirmed}} =
+               Lifecycle.cancel(lease, deadline(1_000))
+
+      assert {:ok, %{scope: :pair, cleanup: :confirmed}} =
+               Lifecycle.await(handle, deadline(2_000))
+    end
+  end
+
   for missing <- [:outer, :inner] do
     test "loss of the #{missing} observer remains unconfirmed in the pair" do
       {handle, _lease, layers} = pair()

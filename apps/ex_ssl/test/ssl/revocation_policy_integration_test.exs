@@ -3566,7 +3566,8 @@ defmodule SSL.CRLUnreadableFileIntegrationTest do
       denied <- [false, true] do
     test "#{version} #{route} new public regular CRL permission denied=#{denied}" do
       base = RevocationFixtures.directory!()
-      {uid_output, 0} = System.cmd("/usr/bin/id", ["-u"])
+      id = System.find_executable("id") || raise "id is required for CRL file permission tests"
+      {uid_output, 0} = System.cmd(id, ["-u"])
       {uid, ""} = Integer.parse(String.trim(uid_output))
       assert uid > 0
       bytes = File.read!(Path.join(base, "leaf-good.crl.pem"))
