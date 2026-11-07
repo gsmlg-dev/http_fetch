@@ -183,8 +183,11 @@ defmodule Abyss.UDPHostHardeningTest do
     assert %{connections_active: 0, accepts_total: 0, responses_total: 0} =
              Abyss.Telemetry.get_metrics(second)
 
+    monitor = Process.monitor(handler)
     send(handler, :reply)
     assert {:ok, {_, ^port, "isolation"}} = :gen_udp.recv(socket, 0, 1000)
+    # Wire arrival can precede send accounting; handler completion orders it.
+    assert_receive {:DOWN, ^monitor, :process, ^handler, _}
     assert %{responses_total: 1, bytes_sent: 9} = Abyss.Telemetry.get_metrics(first)
   end
 
