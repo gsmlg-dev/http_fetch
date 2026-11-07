@@ -300,11 +300,13 @@ A matching TLS ClientHello does not guarantee that a remote service will see a c
 Version 0.4 accepts explicit TLS1.2-only or mixed version lists while
 keeping TLS1.3 as the default. Generated default profiles advertise mixed versions
 highest first for either public list order; explicit WireProfiles retain their
-ordered version contract. TLS1.2 requires ECDHE, AES-GCM, Extended Master
-Secret and secure-renegotiation indication; renegotiation is disabled. Peers
-without EMS, including the observed local OTP28 TLS1.2 server, fail explicitly.
-OpenSSL full/mTLS exchanges validate the bounded subset. See the compatibility
-matrix and progress ledger for evidence and remaining gates.
+ordered version contract. TLS1.2 requires ECDHE, AES-GCM and secure-renegotiation
+indication. EMS is always offered and used when acknowledged. Legacy peers
+without EMS can complete an authenticated full handshake, but their sessions
+cannot be retained, cached or exported as `session_data`. This mode lacks EMS's
+handshake-context binding; renegotiation, key exporters and channel bindings
+remain unsupported. OTP full/mTLS and OpenSSL EMS exchanges validate these
+boundaries. See the compatibility matrix and progress ledger for evidence.
 
 ### BEAM secret zeroization
 

@@ -555,14 +555,21 @@ RSA-PSS, RSA-PKCS1 SHA256/384/512 and P256/P384 ECDSA. SHA1 and EdDSA cipher
 authentication are not offered by the TLS1.2-only generated profile. Supplied
 signature order is preserved; TLS1.3-only policies reject PKCS1 handshake schemes.
 
-Extended Master Secret and a valid initial secure-renegotiation indication are
-mandatory. Missing EMS fails explicitly. The repository's observed OTP28/OTP29
-TLS1.2 reference-server configurations omit extension23; their rejection is
-fixture-specific evidence, not a claim about every OTP server configuration.
-Positive full/mTLS interoperability uses capable independent OpenSSL peers;
-the [current ledger](EX_SSL_HTTP_FETCH_PROGRESS.md) records actual runtime and
-provider versions separately from configured CI. Missing capable peers fail
-the mandatory gate rather than weakening EMS or skipping positive scenarios.
+Clients always offer Extended Master Secret (EMS) and use it when acknowledged.
+A peer that omits EMS may complete a full ECDHE/AES-GCM handshake using RFC5246
+master-secret derivation, as permitted by RFC7627 section5.2. Both ordinary TLS
+and in-memory RSA mTLS are covered against the configured OTP reference server.
+Certificate/hostname, signed ECDHE, Finished and AEAD verification remain required,
+as does a valid initial secure-renegotiation indication. Existing independent
+OpenSSL full/mTLS and EMS-resumption coverage remains applicable.
+
+A legacy master secret lacks EMS's handshake-context binding. Non-EMS connections
+never retain or cache resumable material and `session_data` returns
+`{:error, :no_session}`, even when reuse/save was requested. Resuming an EMS
+session without EMS is rejected. A server declining the saved ID may start a new
+non-EMS full handshake; the saved material is discarded. Application-level key
+exporters, channel bindings and renegotiation remain unsupported, following the
+RFC7627 section5.4 restrictions.
 Static RSA, CBC, RC4, compression, TLS1.0/1.1,
 renegotiation and TLS1.2 session tickets remain unsupported. Generated TLS1.2-only
 hellos use an empty session ID until an authenticated cached EMS session is selected;
@@ -679,8 +686,10 @@ Explicit `reuse_sessions: true | false | :save` and `reuse_session: session_id`
 or `reuse_session: {session_id, session_data}`
 require TLS1.2 in the configured offer. The raw engine retains its previous
 full-handshake default (`reuse_sessions: false`); enabling reuse is explicit.
-`true` selects a compatible automatic session if available and saves newly
-completed sessions. `false` neither selects automatically nor caches a newly
+`true` selects a compatible automatic EMS session if available and saves newly
+completed EMS sessions. Non-EMS connections never retain session material,
+independently of reuse/save mode, and return `{:error, :no_session}` for
+`:session_data`. `false` neither selects automatically nor caches a newly
 completed session until the caller explicitly requests `:session_data`. `:save`
 starts a new full handshake and saves its session without selecting automatically.
 An explicit saved ID selects that session independently of automatic selection,

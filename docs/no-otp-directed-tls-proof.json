@@ -25,13 +25,14 @@
     "apps/ex_ssl/lib/ssl/protocol/handshake_machine.ex": "ebbbbe2cac633bc228063357c752a570f13434aa32f865deba0515c0471f785f",
     "apps/ex_ssl/lib/ssl/protocol/server_flight_verifier.ex": "a6876ac59a2829e2874d01554719c2be899666bd1ad52cad9c0151e978a70857",
     "apps/ex_ssl/lib/ssl/protocol/handshake_core.ex": "d9e3aa94a02997e33443de0e29cf804f62f9e9b72529e048317a4ed5d3a52d2c",
-    "apps/ex_ssl/lib/ssl/protocol/tls12.ex": "13d7708785642ba545908484f8979dc8cbd162d18f7b3fc0827a654885a2307b",
+    "apps/ex_ssl/lib/ssl/protocol/tls12.ex": "e60e625beb7320a64eac6f2f1df57b1cdee671e12e484ea3baeeb0a227d0b5dd",
     "apps/ex_ssl/lib/ssl/quic.ex": "d8575ea864739830c9b52185ad09aa3af03cf8a61d8164ebce5473b4cbdfddf3",
     "apps/ex_ssl/lib/ssl/quic/config.ex": "a523334dc65a9e82f39943cf9a9bcc7144546cb3ac3f9d0389bd937aee2e01b1",
     "apps/ex_ssl/lib/ssl/resumption_context.ex": "5770e0b4b47d32932fc2d99dd00f6a568b1084eb1f2b5a0623ca6d789136571e",
     "apps/ex_ssl/lib/ssl/tls12_resumption_context.ex": "c7dd29ea5fa6d67992f8fad5eeb5edc4e67c159197a01c1542603ec5df65dd43",
     "apps/elixir_quic/lib/quic/profile.ex": "2365ab1370f40fba20ff0df0cf9d91721bee6b3eb4c25b79820cd6ab74b706e0",
-    "apps/http_core/lib/http/transport/ex_ssl.ex": "20cda2e3507a1fa52ec8a5baf7259ceab9c407d434dda8e9601cfaadb514893f"
+    "apps/http_core/lib/http/transport/ex_ssl.ex": "20cda2e3507a1fa52ec8a5baf7259ceab9c407d434dda8e9601cfaadb514893f",
+    "apps/ex_ssl/lib/ssl/crypto/tls12_key_schedule.ex": "0f21ece4467f13d1ac0acca8dd5c23d04b450b2b47063f403866126860552667"
   },
   "production_source_census": {
     "files": 244,
@@ -173,7 +174,7 @@
       "proof": "TLS-6",
       "module": "SSL.Protocol.TLS12",
       "mfa": "verify_certificate/3",
-      "line": 390,
+      "line": 396,
       "kind": "unresolved_fun_invocation",
       "source": "apps/ex_ssl/lib/ssl/protocol/tls12.ex",
       "beam_sha256": "d8ac4ce3717b8e687455d1ba502b1d14435ba47d9e1dd15cd0146df8c13e1bf8"
@@ -242,6 +243,54 @@
       "occurrence_review": "No reviewed occurrence is owned by SSL.Options; all 14 TLS occurrence sources and coordinates are unchanged.",
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "REQUIRED_BY_STRICT_CANDIDATE_AND_PUBLISHED_RELEASE_GATES"
+    },
+    {
+      "date": "2026-11-07",
+      "baseline_commit": "9d26b090c13e26e6f0512eab364d488c9ca06876",
+      "change": "RC8 issue #157 legacy TLS 1.2 full handshakes; exact current source bytes bound below",
+      "changed_source_inputs": {
+        "apps/ex_ssl/lib/ssl/protocol/tls12.ex": {
+          "previous_sha256": "13d7708785642ba545908484f8979dc8cbd162d18f7b3fc0827a654885a2307b",
+          "sha256": "e60e625beb7320a64eac6f2f1df57b1cdee671e12e484ea3baeeb0a227d0b5dd"
+        },
+        "apps/ex_ssl/lib/ssl/crypto/tls12_key_schedule.ex": {
+          "previous_sha256": "ed8129a1bc029bc5725b123c66fc05d905297eb7fcb4b00b3a01969f0f2ab1a4",
+          "sha256": "0f21ece4467f13d1ac0acca8dd5c23d04b450b2b47063f403866126860552667"
+        }
+      },
+      "added_selected_inputs": [
+        "apps/ex_ssl/lib/ssl/crypto/tls12_key_schedule.ex"
+      ],
+      "active_production_source_census": {
+        "files": 246,
+        "sorted_path_sha256_json": "7d7f6c86d66462f0ca890e63eac0f020e3a9f9a9dbe27dbe851d19c28737ff23",
+        "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
+      },
+      "reviewed_change": "A negotiated EMS boolean selects only literal TLS12KeySchedule.derive/5 or derive_legacy/4 calls. The legacy path uses bounded SHA-256/SHA-384 HMAC PRF and TLS12Record constructors; it introduces no OTP SSL calls or callback/module selectors. TLS-6 still invokes only the retained certificate-policy closure or SSL.PKIX.peer/6. Non-EMS full handshakes do not emit reusable session material; accepted session reuse still requires EMS.",
+      "occurrence_rebindings": [
+        {
+          "inventory_occurrence": 74,
+          "mfa": "verify_certificate/3",
+          "previous_line": 390,
+          "line": 396
+        }
+      ],
+      "historical_artifact_covers_amended_source": false,
+      "compiled_certification": "NOT_RUN_FOR_THIS_SOURCE_AMENDMENT",
+      "publication_gate_effect": "NONE; source/test evidence is separate from package publication",
+      "reviewed_inventory_reconciliation": {
+        "status": "SOURCE_IDENTITIES_ONLY_COMPILED_CERTIFICATION_NOT_RUN",
+        "sites": 177,
+        "duplicates": 0,
+        "identity": [
+          "module",
+          "line",
+          "kind"
+        ],
+        "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
+        "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
+        "sha256": "b01ea4b0a8d80ce7dddc18d7de754d35301efd1d0ee5a8bf16cec939b14795ec"
+      }
     }
   ]
 }

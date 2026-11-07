@@ -3,9 +3,8 @@ defmodule SSL.Protocol.TLS12NegativeTest do
   alias SSL.Protocol.{ClientOffer, HandshakeFramer, TLS12, TLS12Record, Transcript}
   alias SSL.Crypto.TLS12KeySchedule
 
-  test "EMS, secure renegotiation, offered suites and extension response bounds fail closed" do
+  test "malformed EMS, secure renegotiation, offered suites and extension bounds fail closed" do
     for {extensions, suite, alert} <- [
-          {[{0xFF01, <<0>>}], 0xC02F, :handshake_failure},
           {[{23, <<>>}], 0xC02F, :handshake_failure},
           {[{23, <<1>>}, {0xFF01, <<0>>}], 0xC02F, :illegal_parameter},
           {[{23, <<>>}, {0xFF01, <<1, 0>>}], 0xC02F, :handshake_failure},
@@ -17,6 +16,37 @@ defmodule SSL.Protocol.TLS12NegativeTest do
       assert {:error, {:fatal_alert, ^alert, _}} =
                TLS12.feed(state, server_hello(extensions, suite))
     end
+  end
+
+  test "a legacy full handshake records absent EMS without bypassing secure renegotiation" do
+    assert {:ok, next, [], []} =
+             TLS12.feed(state([0x0303]), server_hello([{0xFF01, <<0>>}], 0xC02F))
+
+    assert next.phase == :await_certificate
+    refute next.extended_master_secret
+
+    assert {:error, {:fatal_alert, :handshake_failure, :secure_renegotiation_required}} =
+             TLS12.feed(state([0x0303]), server_hello([], 0xC02F))
+  end
+
+  test "legacy Finished cannot emit reusable session material and clears secrets" do
+    initial = %{finished_state() | save_session: true, session_id: <<1, 2, 3>>}
+
+    {:ok, expected} =
+      TLS12KeySchedule.finished(
+        initial.suite.id,
+        initial.master_secret,
+        :server,
+        "transcript"
+      )
+
+    {:ok, wire, _} =
+      TLS12Record.encrypt(initial.read_state, :handshake, <<20, 12::24, expected::binary>>)
+
+    assert {:ok, connected, [], [{:connected, nil}]} = TLS12.feed(initial, wire)
+    assert connected.master_secret == nil
+    assert connected.session == nil
+    assert connected.transcript == nil
   end
 
   test "a nonempty echoed session ID cannot select unsupported TLS12 resumption" do

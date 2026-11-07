@@ -67,6 +67,61 @@ defmodule SSL.Crypto.TLS12KeyScheduleTest do
     refute changed.master_secret == master
   end
 
+  test "RFC 5246 legacy master, key block and Finished match independent HMAC vectors" do
+    # Computed independently with Python hashlib/hmac using RFC 5246 P_hash.
+    for {suite, expected_master, expected_block, expected_client, expected_server} <- [
+          {0xC02F,
+           "1558f81526261ccdd21b5a75eaa62dffd6d35b2d08025e2cd4553282093c0cb5fbc0fd0599d257a4804a4322e0ccc6fb",
+           "640e8c5ce6178c5e8553b7d8bb0305504c5908f5f7f22200688d36658911d99e0899d22ea494b4bb",
+           "ca17b152ba1add72fe86b245", "46d4f1f79593e22dbf8e6a97"},
+          {0xC030,
+           "39e12e7924dda99905dd1fa8a1d5bcef6c29283c19dadd57548db50950aa0abb1975f805b796b3518d708c5efde4a414",
+           "0a139f44f10c3fb1fce464dc0dcf4f4b3b901173a523d4315c570cf0ba92534d70b523c2a8088ae6b58a6a50594b8254e30e74c796877833a593c4f6c6bf3552d58f378af96b6be8",
+           "fd73b506c2955f715e9bb696", "bf22198bd4a7b54afff788fe"}
+        ] do
+      assert {:ok, %{master_secret: master, read_state: read, write_state: write}} =
+               Schedule.derive_legacy(suite, @premaster, @client_random, @server_random)
+
+      assert Base.encode16(master, case: :lower) == expected_master
+
+      assert Base.encode16(write.key <> read.key <> write.iv <> read.iv, case: :lower) ==
+               expected_block
+
+      assert write.sequence == 0
+      assert read.sequence == 0
+
+      assert {:ok, client} = Schedule.finished(suite, master, :client, @transcript)
+      assert {:ok, server} = Schedule.finished(suite, master, :server, @transcript)
+      assert Base.encode16(client, case: :lower) == expected_client
+      assert Base.encode16(server, case: :lower) == expected_server
+
+      assert {:ok, ems} =
+               Schedule.derive(suite, @premaster, @transcript, @client_random, @server_random)
+
+      refute ems.master_secret == master
+    end
+  end
+
+  test "legacy derivation enforces the same premaster, random and suite bounds" do
+    for premaster <- [<<>>, nil, :binary.copy(<<0>>, 4097)] do
+      assert {:error, :invalid_premaster_secret} =
+               Schedule.derive_legacy(0xC02F, premaster, @client_random, @server_random)
+    end
+
+    for random <- [<<>>, <<0::248>>, <<0::264>>, nil] do
+      assert {:error, {:invalid_random, :client_random}} =
+               Schedule.derive_legacy(0xC02F, @premaster, random, @server_random)
+
+      assert {:error, {:invalid_random, :server_random}} =
+               Schedule.derive_legacy(0xC02F, @premaster, @client_random, random)
+    end
+
+    for suite <- [0x002F, 0x1301, nil] do
+      assert {:error, {:unsupported_cipher_suite, ^suite}} =
+               Schedule.derive_legacy(suite, @premaster, @client_random, @server_random)
+    end
+  end
+
   test "only the four bounded ECDHE GCM suites are offered" do
     for {id, key_exchange, key_length} <- [
           {0xC02F, :rsa, 16},

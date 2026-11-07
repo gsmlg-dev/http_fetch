@@ -191,3 +191,28 @@ The JSON binding pins the new options source hash and records the current
 and prior acceptance results remain historical evidence. Strict candidate and
 published release gates must independently bind and inspect the current BEAMs;
 this source review does not claim that compiled acceptance has already passed.
+
+
+## 2026-11-07 source review amendment: RC8 legacy TLS 1.2 full handshakes
+
+The reviewed production diff in `SSL.Protocol.TLS12` records the ServerHello EMS
+extension as a boolean. Full-handshake key derivation selects only the literal
+`TLS12KeySchedule.derive/5` or `derive_legacy/4` calls. The latter validates bounded
+premaster/random inputs and derives the RFC 5246 master with the existing bounded
+SHA-256/SHA-384 HMAC PRF, then constructs the same TLS 1.2 record states. Neither
+path invokes OTP SSL or introduces a callback or module selector.
+
+TLS-6 retains the same six-argument certificate-policy closure or
+`SSL.PKIX.peer/6` selector and its existing trust, identity and verification
+options. Its `verify_certificate/3` invocation moves from source line 390 to 396;
+no other reviewed TLS invocation moves. Legacy full handshakes retain certificate,
+ECDHE signature, Finished and AEAD verification. An accepted session echo still
+requires EMS, and only an EMS full handshake emits reusable session material;
+completion clears the legacy master and policy state as before.
+
+The JSON binding records both changed source hashes, adds the key-schedule source
+to the selected inputs, and rebinds only occurrence 74. Original source commits,
+artifacts, checks and BEAM hashes remain historical evidence. This amendment is
+source review only: it supplies no new compiled certification and adds no
+automatic publication gate. Source tests and any future compiled audit remain
+separate evidence from publishing packages and documentation.

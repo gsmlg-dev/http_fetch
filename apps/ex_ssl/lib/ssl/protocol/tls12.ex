@@ -1,5 +1,5 @@
 defmodule SSL.Protocol.TLS12 do
-  @moduledoc "Pure, bounded TLS 1.2 ECDHE/EMS client protocol engine."
+  @moduledoc "Pure, bounded TLS 1.2 ECDHE client engine with EMS-only session reuse."
 
   alias SSL.Crypto.{KeyExchange, Signature, TLS12KeySchedule}
   alias SSL.Protocol.{ClientAuthentication, HandshakeFramer, TLS12Codec, TLS12Record, Transcript}
@@ -30,6 +30,7 @@ defmodule SSL.Protocol.TLS12 do
     :negotiated_protocol,
     :transcript,
     :framer,
+    extended_master_secret: false,
     resumed: false,
     save_session: false,
     phase: :await_server_hello,
@@ -190,6 +191,7 @@ defmodule SSL.Protocol.TLS12 do
         | suite: suite,
           server_random: hello.random,
           negotiated_protocol: alpn,
+          extended_master_secret: {23, <<>>} in hello.extensions,
           status_negotiated: {5, <<>>} in hello.extensions,
           session_id: hello.session_id,
           transcript: %{state.transcript | hash: suite.hash},
@@ -287,8 +289,11 @@ defmodule SSL.Protocol.TLS12 do
 
   defp select_session(state, hello) do
     if hello.session_id != <<>> and hello.session_id == state.offer.legacy_session_id do
-      case state.session do
-        %SSL.TLS12Session{id: id, suite: suite} = session
+      case {state.extended_master_secret, state.session} do
+        {false, _} ->
+          fatal(:handshake_failure, :extended_master_secret_required)
+
+        {true, %SSL.TLS12Session{id: id, suite: suite} = session}
         when id == hello.session_id and suite == hello.cipher_suite ->
           with :ok <- SSL.TLS12Session.validate(session),
                {:ok, keys} <-
@@ -341,7 +346,8 @@ defmodule SSL.Protocol.TLS12 do
 
   defp finish_connection(state, _server_finished) do
     events =
-      if state.save_session and is_binary(state.session_id) and state.session_id != <<>> do
+      if state.extended_master_secret and state.save_session and is_binary(state.session_id) and
+           state.session_id != <<>> do
         [
           {:tls12_session,
            %{
@@ -412,14 +418,7 @@ defmodule SSL.Protocol.TLS12 do
            state.transcript.length + byte_size(certificate) + byte_size(exchange) + 16_408 <=
              @maximum_transcript,
          state = state |> append(certificate) |> append(exchange),
-         {:ok, secrets} <-
-           TLS12KeySchedule.derive(
-             state.suite.id,
-             state.premaster,
-             bytes(state),
-             state.client_random,
-             state.server_random
-           ),
+         {:ok, secrets} <- derive_secrets(state),
          {:ok, verify} <- client_verify(selection, state),
          state = append(state, verify),
          {:ok, finished} <-
@@ -446,6 +445,25 @@ defmodule SSL.Protocol.TLS12 do
       false -> fatal(:handshake_failure, :tls12_transcript_limit)
       {:error, reason} -> fatal(:handshake_failure, reason)
     end
+  end
+
+  defp derive_secrets(%{extended_master_secret: true} = state) do
+    TLS12KeySchedule.derive(
+      state.suite.id,
+      state.premaster,
+      bytes(state),
+      state.client_random,
+      state.server_random
+    )
+  end
+
+  defp derive_secrets(state) do
+    TLS12KeySchedule.derive_legacy(
+      state.suite.id,
+      state.premaster,
+      state.client_random,
+      state.server_random
+    )
   end
 
   defp select_identity(%{request: nil}), do: {:ok, nil}
@@ -518,9 +536,6 @@ defmodule SSL.Protocol.TLS12 do
 
   defp server_extensions(offer, extensions) do
     cond do
-      not List.keymember?(extensions, 23, 0) ->
-        fatal(:handshake_failure, :extended_master_secret_required)
-
       {0xFF01, <<0>>} not in extensions ->
         fatal(:handshake_failure, :secure_renegotiation_required)
 

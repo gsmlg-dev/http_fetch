@@ -162,6 +162,18 @@ defmodule SSL.Protocol.TLS12SessionTest do
     assert full.master_secret == nil
   end
 
+  test "a declined EMS session may start a non-EMS full handshake without retaining old material" do
+    for id <- [<<>>, <<1>>] do
+      hello = server_hello(0xC02F, id, [{0xFF01, <<0>>}])
+      assert {:ok, full, [], []} = TLS12.feed(state(0xC02F), plain(hello))
+      assert full.phase == :await_certificate
+      assert full.session == nil
+      assert full.master_secret == nil
+      refute full.extended_master_secret
+      refute full.resumed
+    end
+  end
+
   test "bad Finished, AEAD, early data, CCS and epoch fragments cannot release client Finished" do
     {:ok, selected, [], []} = TLS12.feed(state(0xC02F), plain(server_hello(0xC02F)))
     {:ok, encrypted, [], []} = TLS12.feed(selected, @ccs)

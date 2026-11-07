@@ -3,7 +3,7 @@ defmodule SSL.TLS12MachineTest do
   alias SSL.Protocol.{ClientOffer, TLS12}
 
   @tag :integration
-  test "configured OTP TLS 1.2 reference peer without EMS is rejected explicitly" do
+  test "configured OTP TLS 1.2 peer without EMS begins a legacy full handshake" do
     dir = Path.join(System.tmp_dir!(), "tls12-machine-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(dir) end)
     fixtures = ExSSL.TestSupport.ClientAuthFixtures.create(dir)
@@ -37,8 +37,11 @@ defmodule SSL.TLS12MachineTest do
     assert {:ok, %{extensions: extensions}} = SSL.Protocol.TLS12Codec.decode(payload)
     refute {23, <<>>} in extensions
 
-    assert {:error, {:fatal_alert, :handshake_failure, :extended_master_secret_required}} =
+    assert {:ok, next, [], []} =
              TLS12.feed(state, <<type, major, minor, len::16, payload::binary>>)
+
+    assert next.phase == :await_certificate
+    refute next.extended_master_secret
 
     :gen_tcp.close(tcp)
     Task.await(peer, 5_000)

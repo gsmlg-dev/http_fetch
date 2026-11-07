@@ -1,5 +1,5 @@
 defmodule SSL.Crypto.TLS12KeySchedule do
-  @moduledoc "Pure TLS 1.2 PRF and Extended Master Secret derivation for the bounded ECDHE-GCM subset."
+  @moduledoc "Pure TLS 1.2 PRF and master secret derivation for the bounded ECDHE-GCM subset."
 
   alias SSL.Protocol.TLS12Record
 
@@ -64,7 +64,28 @@ defmodule SSL.Crypto.TLS12KeySchedule do
     end
   end
 
-  @doc "Derives fresh record states from a saved EMS master and this connection's randoms."
+  @doc """
+  Derives the RFC 5246 master and record states for a full handshake without EMS.
+
+  The caller must prevent session reuse and application authentication exports
+  from the resulting legacy master secret.
+  """
+  @spec derive_legacy(term(), binary(), binary(), binary()) ::
+          {:ok,
+           %{master_secret: binary(), read_state: TLS12Record.t(), write_state: TLS12Record.t()}}
+          | {:error, term()}
+  def derive_legacy(id, premaster, client_random, server_random) do
+    with {:ok, suite} <- suite(id),
+         :ok <- validate_premaster(premaster),
+         :ok <- validate_random(client_random, :client_random),
+         :ok <- validate_random(server_random, :server_random),
+         {:ok, master} <-
+           prf(suite.hash, premaster, "master secret", client_random <> server_random, 48) do
+      resume(id, master, client_random, server_random)
+    end
+  end
+
+  @doc "Derives fresh record states from a master and this connection's randoms."
   @spec resume(term(), binary(), binary(), binary()) ::
           {:ok,
            %{master_secret: binary(), read_state: TLS12Record.t(), write_state: TLS12Record.t()}}

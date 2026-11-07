@@ -22,7 +22,8 @@ messages. Both engines reject cross-epoch message fragments and illegal ordering
 ## Independent TLS1.2 core
 
 Separate pure key-schedule and record modules implement the RFC5246 PRF using
-OTP HMAC, RFC7627 Extended Master Secret, client/server key-block partitioning,
+OTP HMAC, RFC7627 Extended Master Secret or RFC5246 full-handshake master
+derivation, client/server key-block partitioning,
 and RFC5288 AES-GCM records using OTP AEAD. TLS1.2 has a four-byte fixed IV and
 eight-byte explicit nonce, sequence/type/version/plaintext-length AAD, and no
 TLS1.3 inner content type. Read and write sequences begin at zero at their own
@@ -49,9 +50,24 @@ handshake completion; retain only required traffic keys and non-secret metadata.
 ## Policy and negotiation
 
 Only ECDHE_RSA / ECDHE_ECDSA AES128-GCM-SHA256 and AES256-GCM-SHA384 are in scope.
-Require negotiated EMS and valid initial secure-renegotiation indication
-(RFC5746); renegotiation itself is disabled. Compression, static RSA, CBC,
-RC4, anonymous suites, TLS1.0/1.1 and TLS1.2 session resumption remain unsupported.
+Always offer EMS and use it when the server acknowledges it. A legacy server
+that omits EMS may complete a full handshake using the RFC5246 master-secret
+PRF over client_random || server_random, as permitted by RFC7627 section5.2.
+Record negotiated EMS explicitly in the handshake state. Legacy full handshakes
+retain certificate/hostname, signed ECDHE, Finished and AEAD authentication, but
+do not obtain EMS's handshake-context binding and must not be described as
+providing equivalent master-secret security.
+
+Only EMS connections may produce retained or cached session material. A legacy
+connection never exports `session_data`, including with `reuse_sessions: true`
+or `:save`; requesting it returns `{:error, :no_session}`. Accepting an offered
+EMS session ID without EMS aborts. A declined ID may start a new legacy full
+handshake, discarding all saved material. No legacy resumption, master-derived
+application authentication exporters or channel bindings are supported (RFC7627
+sections5.3-5.4). Require valid initial secure-renegotiation indication (RFC5746);
+renegotiation itself remains disabled. Compression, static RSA, CBC,
+RC4, anonymous suites and TLS1.0/1.1 remain unsupported. TLS1.2 session resumption
+is limited to the separate EMS-only session contract.
 Signature policy is version aware: TLS1.2 raw signatures cannot silently extend
 TLS1.3 CertificateVerify. Existing modern PSS/ECDSA primitives may be reused with
 validated raw data; unsupported combinations must reject explicitly.

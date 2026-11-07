@@ -72,7 +72,9 @@ class DirectedReviewTests(unittest.TestCase):
         bundle = review.load(ROOT, '1.0.0-rc.0', PACKAGES)
         proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
         amendment = proof['source_review_amendments'][-1]
-        evidence = amendment['reviewed_inventory_reconciliation']
+        tls = json.loads((ROOT / 'docs/no-otp-directed-tls-proof.json').read_text())
+        tls_amendment = tls['source_review_amendments'][-1]
+        evidence = tls_amendment['reviewed_inventory_reconciliation']
         identities = sorted((site['module'].removeprefix(':'), site['line'], site['kind'])
                             for site in bundle['occurrences'])
         digest = hashlib.sha256(json.dumps(identities, separators=(',', ':')).encode()).hexdigest()
@@ -80,8 +82,27 @@ class DirectedReviewTests(unittest.TestCase):
         self.assertEqual(len(set(identities)), 177)
         self.assertEqual(digest, evidence['sha256'])
         self.assertEqual(evidence['duplicates'], 0)
+        self.assertEqual(evidence['status'], 'SOURCE_IDENTITIES_ONLY_COMPILED_CERTIFICATION_NOT_RUN')
+        self.assertEqual(tls_amendment['occurrence_rebindings'], [dict(
+            inventory_occurrence=74, mfa='verify_certificate/3', previous_line=390, line=396)])
+        tls_sites = {site['inventory_occurrence']: site for site in tls['occurrences']}
+        for item in tls_amendment['occurrence_rebindings']:
+            site = tls_sites[item['inventory_occurrence']]
+            self.assertEqual((site['mfa'], site['line']), (item['mfa'], item['line']))
+            self.assertIn('case verifier.(', (ROOT / site['source']).read_text().splitlines()[site['line'] - 1])
         old_lines = {item['inventory_occurrence']: item['previous_line']
-                     for item in amendment['occurrence_rebindings']}
+                     for item in tls_amendment['occurrence_rebindings']}
+        prior_identities = []
+        for group in review.GROUPS:
+            group_proof = json.loads((ROOT / f'docs/no-otp-directed-{group}-proof.json').read_text())
+            for site in group_proof['occurrences']:
+                prior_identities.append((site['module'].removeprefix(':'),
+                                         old_lines.get(site['inventory_occurrence'], site['line']),
+                                         site['kind']))
+        prior_digest = hashlib.sha256(json.dumps(sorted(prior_identities), separators=(',', ':')).encode()).hexdigest()
+        self.assertEqual(prior_digest, amendment['reviewed_inventory_reconciliation']['sha256'])
+        old_lines.update({item['inventory_occurrence']: item['previous_line']
+                          for item in amendment['occurrence_rebindings']})
         old_identities = []
         for group in review.GROUPS:
             group_proof = json.loads((ROOT / f'docs/no-otp-directed-{group}-proof.json').read_text())

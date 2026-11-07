@@ -84,8 +84,8 @@ Keep protocol choice in http_fetch: `h2` selects HTTP/2; an absent or
 HTTP framing.
 
 Keep `versions: [:"tlsv1.3"]` as the ex_ssl adapter default. The source candidate
-also accepts caller-selected TLS1.2-only or mixed lists under its mandatory EMS
-policy; the released0.3.0 dependency still rejects them. Preserve `depth: 4`, peer
+also accepts caller-selected TLS1.2-only or mixed lists with EMS-only session
+reuse and legacy full-handshake interoperability; the released0.3.0 dependency still rejects them. Preserve `depth: 4`, peer
 verification, CA overrides, SNI, and hostname checking.
 
 The consumer currently places `send_timeout` and `send_timeout_close` in its
@@ -275,8 +275,9 @@ same shared adapter, retaining TLS 1.3-only as the library default and OTP as th
 consumer default. Independent OpenSSL package tests cover required mTLS HTTP/1.1,
 HTTP/2 ALPN with a 262,144-byte response crossing both flow-control windows, WSS
 and pinned EventSource reconnects. A capable mixed-version peer selects TLS 1.3.
-The safe TLS 1.2 subset requires EMS and secure-renegotiation indication; see the
-compatibility matrix for its four ECDHE AES-GCM suites and exclusions.
+The TLS 1.2 subset requires secure-renegotiation indication and permits legacy
+full handshakes without EMS, while session reuse requires EMS. See the
+compatibility matrix for its four ECDHE AES-GCM suites and legacy restrictions.
 
 `ssl: [versions: [:"tlsv1.3"], session_tickets: :auto]` enables the optional bounded
 TLS 1.3 cache without client credentials. Two fresh packaged HTTP/1.1 fetches

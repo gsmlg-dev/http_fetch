@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.8] - 2026-11-07
+
+### Fixed
+- Complete authenticated TLS 1.2 full handshakes with legacy OTP servers that
+  omit EMS, using the RFC 5246 master-secret derivation while preserving server
+  trust, hostname, ECDHE signature, Finished, AEAD and downgrade checks (#157).
+- Keep TLS 1.2 session retention, caching and `session_data` export restricted
+  to EMS connections. Reject an accepted EMS resumption without EMS; a declined
+  session may take one fresh full handshake. Renegotiation and application key
+  exporters remain unsupported.
+
 ## [1.0.0-rc.7] - 2026-11-07
 
 ### Fixed
