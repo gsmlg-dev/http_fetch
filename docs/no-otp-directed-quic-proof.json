@@ -48,7 +48,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "begin_closing/2",
-      "line": 1548,
+      "line": 1549,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -58,7 +58,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "begin_closing/2",
-      "line": 1504,
+      "line": 1505,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -68,7 +68,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "closing_timer/1",
-      "line": 1434,
+      "line": 1435,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -78,7 +78,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "draining_timer/1",
-      "line": 1439,
+      "line": 1440,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -88,7 +88,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "expired?/1",
-      "line": 1886,
+      "line": 1887,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -98,7 +98,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "eligible_send/1",
-      "line": 1379,
+      "line": 1380,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -108,7 +108,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 337,
+      "line": 338,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -118,7 +118,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 713,
+      "line": 714,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -128,7 +128,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 724,
+      "line": 725,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -138,7 +138,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 736,
+      "line": 737,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -148,7 +148,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 746,
+      "line": 747,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -158,7 +158,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handshake_deadline/3",
-      "line": 127,
+      "line": 128,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -168,7 +168,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "idle_timer/1",
-      "line": 1426,
+      "line": 1427,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -178,7 +178,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "local_send/3",
-      "line": 1601,
+      "line": 1602,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -188,7 +188,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "local_send/3",
-      "line": 1603,
+      "line": 1604,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -198,7 +198,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "local_send/3",
-      "line": 1606,
+      "line": 1607,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -208,7 +208,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "receive_authenticated/6",
-      "line": 948,
+      "line": 949,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -218,7 +218,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "recovery_timer/1",
-      "line": 1408,
+      "line": 1409,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -228,7 +228,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "refresh_idle/1",
-      "line": 1458,
+      "line": 1459,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -318,7 +318,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 767,
+      "line": 768,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -328,7 +328,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "path_timer/1",
-      "line": 1419,
+      "line": 1420,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -703,6 +703,414 @@
         "strict_final_compiled_acceptance": "REQUIRED_BY_PARENT_FINAL_COMPILE_DIALYZER_AND_RELEASE_GATES",
         "mix_format_check": "PASS, both owned IO/Recovery sources"
       }
+    },
+    {
+      "date": "2026-11-07",
+      "purpose": "Correct stale M1 Connection BEAM snapshot line bindings after failed strict candidate audit",
+      "source_commit": "a966c2360bc7f57eb0b5456c9087bf78a2b50210",
+      "production_source_census": {
+        "files": 246,
+        "sorted_path_sha256_json": "48eb2b9f42bdaf87a6f39891d89ae3c42852ecff9a9bf85efa64129651a9996d",
+        "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
+      },
+      "root_cause": "The preceding M1 amendment used a stale Connection BEAM snapshot whose21 dynamic call lines were each one below the current source. Fresh root test and quality BEAMs agree with CI; this is not compiler-dependent line variability.",
+      "failed_strict_candidate": {
+        "artifact": 13572580831,
+        "candidate": "TLSv1.3",
+        "report_sha256": "d89a2349e41c8ce7c0fd8a8fce31f17e137e7c96cdc5e813880e36a62c50b2a3",
+        "runtime": {
+          "otp": "28",
+          "elixir": "1.18.6",
+          "erts": "16.4.0.7"
+        },
+        "checked_beams": 352,
+        "raw_dispatches": 177,
+        "direct_otp_ssl_imports": 0,
+        "directed_status": "FAIL",
+        "directed_error": "directed release proof: unreviewed or missing compiled dispatch",
+        "remote_connection_beam_sha256": "9c7f55e9e4fd363e7ab03c24f70d1fd53e8ff9dea819bf362b9cdb3a0e1a535f",
+        "failed_evidence_preserved": true
+      },
+      "current_connection_beam_observations": [
+        {
+          "module": "Quic.Connection",
+          "source": "/home/gao/Workspace/gsmlg-dev/http_fetch/apps/elixir_quic/lib/quic/connection.ex",
+          "beam": "/tmp/http-fetch-quic-next-9g02lf9z/build/lib/elixir_quic/ebin/Elixir.Quic.Connection.beam",
+          "sha256": "3f10dfebb19a4bcd8d63c548b72be914cc9831c956203c74023bc44113b09364",
+          "occurrences": [
+            {
+              "line": 128,
+              "mfa": "handshake_deadline/3",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 338,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 714,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 725,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 737,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 747,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 768,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 949,
+              "mfa": "receive_authenticated/6",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1380,
+              "mfa": "eligible_send/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1409,
+              "mfa": "recovery_timer/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1420,
+              "mfa": "path_timer/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1427,
+              "mfa": "idle_timer/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1435,
+              "mfa": "closing_timer/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1440,
+              "mfa": "draining_timer/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1459,
+              "mfa": "refresh_idle/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1505,
+              "mfa": "begin_closing/2",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1549,
+              "mfa": "begin_closing/2",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1602,
+              "mfa": "local_send/3",
+              "callee": "send/3"
+            },
+            {
+              "line": 1604,
+              "mfa": "local_send/3",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1607,
+              "mfa": "local_send/3",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1887,
+              "mfa": "expired?/1",
+              "callee": "monotonic_time/0"
+            }
+          ]
+        },
+        {
+          "module": "Quic.Connection",
+          "source": "/home/gao/Workspace/gsmlg-dev/http_fetch/apps/elixir_quic/lib/quic/connection.ex",
+          "beam": "/tmp/http-fetch-quic-m1-barBLX/quality-build/lib/elixir_quic/ebin/Elixir.Quic.Connection.beam",
+          "sha256": "12d04635e0a5842d32bc9d08b8aa7782fbd9fa9d42b8c110738fd1b624474a5b",
+          "occurrences": [
+            {
+              "line": 128,
+              "mfa": "handshake_deadline/3",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 338,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 714,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 725,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 737,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 747,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 768,
+              "mfa": "handle_event/4",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 949,
+              "mfa": "receive_authenticated/6",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1380,
+              "mfa": "eligible_send/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1409,
+              "mfa": "recovery_timer/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1420,
+              "mfa": "path_timer/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1427,
+              "mfa": "idle_timer/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1435,
+              "mfa": "closing_timer/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1440,
+              "mfa": "draining_timer/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1459,
+              "mfa": "refresh_idle/1",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1505,
+              "mfa": "begin_closing/2",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1549,
+              "mfa": "begin_closing/2",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1602,
+              "mfa": "local_send/3",
+              "callee": "send/3"
+            },
+            {
+              "line": 1604,
+              "mfa": "local_send/3",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1607,
+              "mfa": "local_send/3",
+              "callee": "monotonic_time/0"
+            },
+            {
+              "line": 1887,
+              "mfa": "expired?/1",
+              "callee": "monotonic_time/0"
+            }
+          ]
+        }
+      ],
+      "occurrence_rebindings": [
+        {
+          "inventory_occurrence": 2,
+          "mfa": "begin_closing/2",
+          "previous_line": 1548,
+          "line": 1549
+        },
+        {
+          "inventory_occurrence": 3,
+          "mfa": "begin_closing/2",
+          "previous_line": 1504,
+          "line": 1505
+        },
+        {
+          "inventory_occurrence": 4,
+          "mfa": "closing_timer/1",
+          "previous_line": 1434,
+          "line": 1435
+        },
+        {
+          "inventory_occurrence": 5,
+          "mfa": "draining_timer/1",
+          "previous_line": 1439,
+          "line": 1440
+        },
+        {
+          "inventory_occurrence": 6,
+          "mfa": "expired?/1",
+          "previous_line": 1886,
+          "line": 1887
+        },
+        {
+          "inventory_occurrence": 7,
+          "mfa": "eligible_send/1",
+          "previous_line": 1379,
+          "line": 1380
+        },
+        {
+          "inventory_occurrence": 8,
+          "mfa": "handle_event/4",
+          "previous_line": 337,
+          "line": 338
+        },
+        {
+          "inventory_occurrence": 9,
+          "mfa": "handle_event/4",
+          "previous_line": 713,
+          "line": 714
+        },
+        {
+          "inventory_occurrence": 10,
+          "mfa": "handle_event/4",
+          "previous_line": 724,
+          "line": 725
+        },
+        {
+          "inventory_occurrence": 11,
+          "mfa": "handle_event/4",
+          "previous_line": 736,
+          "line": 737
+        },
+        {
+          "inventory_occurrence": 12,
+          "mfa": "handle_event/4",
+          "previous_line": 746,
+          "line": 747
+        },
+        {
+          "inventory_occurrence": 13,
+          "mfa": "handshake_deadline/3",
+          "previous_line": 127,
+          "line": 128
+        },
+        {
+          "inventory_occurrence": 14,
+          "mfa": "idle_timer/1",
+          "previous_line": 1426,
+          "line": 1427
+        },
+        {
+          "inventory_occurrence": 15,
+          "mfa": "local_send/3",
+          "previous_line": 1601,
+          "line": 1602
+        },
+        {
+          "inventory_occurrence": 16,
+          "mfa": "local_send/3",
+          "previous_line": 1603,
+          "line": 1604
+        },
+        {
+          "inventory_occurrence": 17,
+          "mfa": "local_send/3",
+          "previous_line": 1606,
+          "line": 1607
+        },
+        {
+          "inventory_occurrence": 18,
+          "mfa": "receive_authenticated/6",
+          "previous_line": 948,
+          "line": 949
+        },
+        {
+          "inventory_occurrence": 19,
+          "mfa": "recovery_timer/1",
+          "previous_line": 1408,
+          "line": 1409
+        },
+        {
+          "inventory_occurrence": 20,
+          "mfa": "refresh_idle/1",
+          "previous_line": 1458,
+          "line": 1459
+        },
+        {
+          "inventory_occurrence": 176,
+          "mfa": "handle_event/4",
+          "previous_line": 767,
+          "line": 768
+        },
+        {
+          "inventory_occurrence": 177,
+          "mfa": "path_timer/1",
+          "previous_line": 1419,
+          "line": 1420
+        }
+      ],
+      "all_other_occurrence_bindings_unchanged": 156,
+      "exact_remote_raw_set_reconciliation": {
+        "status": "PASS",
+        "sites": 177,
+        "missing": 0,
+        "extra": 0,
+        "duplicates": 0,
+        "identity": [
+          "module",
+          "line",
+          "kind"
+        ],
+        "module_normalization": "Remove only a leading colon from inspected Erlang atom module names in both compared sets. Elixir module names remain unchanged.",
+        "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
+        "sha256": "0be25a9804b151af463d4992c998b20374809be07ff3a6db2357ae12b3b0ce91"
+      },
+      "prior_m1_compiled_snapshot": "STALE_FOR_CONNECTION_LINE_BINDINGS; historical observation and BEAM hashes retained, superseded by this amendment.",
+      "runtime_source_changes": 0,
+      "original_inventory_ids_preserved": 175,
+      "new_inventory_ids_preserved": [
+        176,
+        177
+      ],
+      "compiled_acceptance": "STRICT_CANDIDATE_RERUN_AND_PUBLISHED_RELEASE_GATES_STILL_REQUIRED"
     }
   ]
 }

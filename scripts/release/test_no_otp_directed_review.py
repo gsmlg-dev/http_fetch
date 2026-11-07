@@ -1,5 +1,6 @@
 """Specific reviewed source and release binding, with adversarial receipt controls."""
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -26,13 +27,56 @@ class DirectedReviewTests(unittest.TestCase):
         proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
         sites = {site['inventory_occurrence']: site for site in proof['occurrences']}
         self.assertEqual(set(sites), set(range(1, 29)) | {176, 177})
-        for number, mfa, line in ((176, 'handle_event/4', 767), (177, 'path_timer/1', 1419)):
+        for number, mfa, line in ((176, 'handle_event/4', 768), (177, 'path_timer/1', 1420)):
             with self.subTest(occurrence=number):
                 self.assertEqual({key: sites[number][key] for key in
                                   ('module', 'mfa', 'line', 'kind', 'source', 'proof')},
                                  dict(module='Quic.Connection', mfa=mfa, line=line,
                                       kind='unresolved_module_dispatch',
                                       source='apps/elixir_quic/lib/quic/connection.ex', proof='Q2'))
+
+    def test_all_connection_bindings_match_current_calls_and_preserve_failed_history(self):
+        proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
+        sites = {site['inventory_occurrence']: (site['mfa'], site['line'])
+                 for site in proof['occurrences'] if site['module'] == 'Quic.Connection'}
+        self.assertEqual(sites, {
+            2: ('begin_closing/2', 1549), 3: ('begin_closing/2', 1505),
+            4: ('closing_timer/1', 1435), 5: ('draining_timer/1', 1440),
+            6: ('expired?/1', 1887), 7: ('eligible_send/1', 1380),
+            8: ('handle_event/4', 338), 9: ('handle_event/4', 714),
+            10: ('handle_event/4', 725), 11: ('handle_event/4', 737),
+            12: ('handle_event/4', 747), 13: ('handshake_deadline/3', 128),
+            14: ('idle_timer/1', 1427), 15: ('local_send/3', 1602),
+            16: ('local_send/3', 1604), 17: ('local_send/3', 1607),
+            18: ('receive_authenticated/6', 949), 19: ('recovery_timer/1', 1409),
+            20: ('refresh_idle/1', 1459), 176: ('handle_event/4', 768),
+            177: ('path_timer/1', 1420),
+        })
+        source = (ROOT / 'apps/elixir_quic/lib/quic/connection.ex').read_text().splitlines()
+        for number, (_, line) in sites.items():
+            with self.subTest(occurrence=number):
+                self.assertIn('adapter.', source[line - 1])
+        amendment = proof['source_review_amendments'][-1]
+        self.assertEqual(amendment['failed_strict_candidate']['artifact'], 13572580831)
+        self.assertEqual(amendment['failed_strict_candidate']['directed_status'], 'FAIL')
+        self.assertEqual(len(amendment['occurrence_rebindings']), 21)
+        for item in amendment['occurrence_rebindings']:
+            self.assertEqual(item['line'], item['previous_line'] + 1)
+            self.assertEqual(sites[item['inventory_occurrence']], (item['mfa'], item['line']))
+
+    def test_complete_normalized_occurrence_set_matches_remote_failure_evidence(self):
+        bundle = review.load(ROOT, '1.0.0-rc.0', PACKAGES)
+        proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
+        evidence = proof['source_review_amendments'][-1]['exact_remote_raw_set_reconciliation']
+        identities = sorted((site['module'].removeprefix(':'), site['line'], site['kind'])
+                            for site in bundle['occurrences'])
+        digest = hashlib.sha256(json.dumps(identities, separators=(',', ':')).encode()).hexdigest()
+        self.assertEqual(len(identities), 177)
+        self.assertEqual(len(set(identities)), 177)
+        self.assertEqual(digest, evidence['sha256'])
+        self.assertEqual(evidence['missing'], 0)
+        self.assertEqual(evidence['extra'], 0)
+        self.assertEqual(evidence['duplicates'], 0)
 
     def test_missing_original_or_m1_ids_duplicate_and_unreviewed_ids_fail(self):
         parse = json.loads

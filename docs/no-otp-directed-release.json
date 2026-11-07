@@ -4,8 +4,8 @@
   "reviews": {
     "docs/no-otp-directed-tls-proof.md": "61fcabecab78e039294e61e276c195aac0d8be19b87eeb7925bbc45a818eac2f",
     "docs/no-otp-directed-tls-proof.json": "915b7e068f688672fb1506650e58602c31be4fc7cfe8806046b7fc7cc7bea8ff",
-    "docs/no-otp-directed-quic-proof.md": "46e335c74a773780cb7500b5c5770a9e45750240aae2f9e8c184663fd90ca220",
-    "docs/no-otp-directed-quic-proof.json": "aa8f5bacec56202cc4b8ee69ff1d4e94c8704d2182e587b717f54e4cb44a0c19",
+    "docs/no-otp-directed-quic-proof.md": "796f86c4012ba453ab162b8c01567794625de60f87bb35090b686da4c586d82c",
+    "docs/no-otp-directed-quic-proof.json": "ba392f0f3897f16c86a896c55c11d0d5c7eaf15bc8d94536d7de01ef66f6136a",
     "docs/no-otp-directed-http-proof.md": "e28e37cf225804a35e4677e8575c784f1f24e9d8c1f96ad77e5e5ae602573706",
     "docs/no-otp-directed-http-proof.json": "ddf81df62ff465559e48689146db9ab7e9b374094fbf660afe7f31d2c09fefe9",
     "docs/no-otp-directed-h3-proof.md": "04dda28a9f9ef6c1bf1567da34783036435137e39bc14cedef93d507abc4449e",

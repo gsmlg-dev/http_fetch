@@ -177,3 +177,29 @@ zero warnings. The final capability-type adjustment is also behavior preserving.
 Current source hashes include these type edits. The root-build observation
 above predates the final type-only edits; final whole-release compilation and
 strict candidate/published binding remain required.
+
+## 2026-11-07 corrective amendment: current Connection call lines
+
+Strict candidate artifact `13572580831` failed directed binding with
+`unreviewed or missing compiled dispatch`. Its full report retains all 177 raw
+sites across 352 production BEAMs and reports zero direct OTP SSL imports.
+The preceding M1 review used a stale `Quic.Connection` BEAM snapshot: all 21
+Connection call lines were one below the current source. Fresh root test and
+quality BEAM abstract forms agree with CI Elixir 1.18.6 on every owning MFA and
+call line. This was stale evidence, not compiler-dependent annotation behavior.
+The earlier observations and failure remain recorded in the JSON history.
+
+The active proof now binds all 21 current Connection lines, including ID 176
+at `handle_event/4:768` and ID 177 at `path_timer/1:1420`. It preserves every
+inventory ID, MFA and callable-origin argument; all 156 other occurrence
+bindings remain unchanged. The current call statements were also checked
+against the source bound at `a966c2360bc7f57eb0b5456c9087bf78a2b50210`.
+
+The corrected complete proof matches the failed remote report's exact multiset
+of `(module, line, kind)` identities: 177 matches, zero missing, extra or duplicate
+sites. Comparison removes only the leading colon on inspected Erlang atom module
+names; it preserves all lines and findings. The JSON amendment records the
+report hash, normalized multiset hash, current local BEAM hashes and all 21
+old-to-current bindings. Production source hashes and census are unchanged.
+This reconciliation does not turn the failed artifact into an accepted release;
+a fresh strict candidate run and published-release gates remain required.
