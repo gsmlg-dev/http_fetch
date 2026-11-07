@@ -1,7 +1,7 @@
 defmodule HttpFetch.Umbrella.MixProject do
   use Mix.Project
 
-  @version "1.0.0-rc.8"
+  @version "1.0.0-rc.9"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
   @e2e_apps ~w(http_fetch http_event_source http_web_transport http_web_socket)
 
@@ -21,6 +21,7 @@ defmodule HttpFetch.Umbrella.MixProject do
         extras: [
           "README.md",
           "CHANGELOG.md",
+          "docs/http-pool-and-test.md",
           "docs/managed-transports.md",
           "docs/managed-h1-control-accounting.md",
           "docs/migration-provenance.md",
@@ -80,13 +81,44 @@ defmodule HttpFetch.Umbrella.MixProject do
       "elixir_quic_http3" ->
         [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3]
 
+      "http_pool" ->
+        [:ex_ssl, :elixir_quic, :http_core, :http_pool]
+
+      "http_test" ->
+        [
+          :ex_ssl,
+          :elixir_quic,
+          :http_core,
+          :http_pool,
+          :elixir_quic_http3,
+          :http_runtime,
+          :http_fetch,
+          :http_test
+        ]
+
       "http_runtime" ->
         # Runtime's lifecycle tests exercise Fetch completion receipts.
-        runtime = [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime]
+        runtime = [
+          :ex_ssl,
+          :elixir_quic,
+          :http_core,
+          :http_pool,
+          :elixir_quic_http3,
+          :http_runtime
+        ]
+
         if Mix.env() == :test, do: runtime ++ [:http_fetch], else: runtime
 
       "http_fetch" ->
-        [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime, :http_fetch]
+        [
+          :ex_ssl,
+          :elixir_quic,
+          :http_core,
+          :http_pool,
+          :elixir_quic_http3,
+          :http_runtime,
+          :http_fetch
+        ]
 
       "http_event_source" ->
         test_consumer_apps(:http_event_source)
@@ -104,7 +136,7 @@ defmodule HttpFetch.Umbrella.MixProject do
 
   # Shared-connection tests call HTTP.fetch/2; this is not a production dependency.
   defp test_consumer_apps(app) do
-    runtime = [:ex_ssl, :elixir_quic, :http_core, :elixir_quic_http3, :http_runtime]
+    runtime = [:ex_ssl, :elixir_quic, :http_core, :http_pool, :elixir_quic_http3, :http_runtime]
     runtime ++ if(Mix.env() == :test, do: [:http_fetch, app], else: [app])
   end
 

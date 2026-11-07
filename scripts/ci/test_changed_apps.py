@@ -41,7 +41,7 @@ class SelectionTest(unittest.TestCase):
             self.assertTrue(changed_apps.candidate_tls_required(paths))
             for workflow in WORKFLOWS:
                 self.assertEqual(select_apps(paths, workflow),
-                                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"])
+                                 ALL)
 
     def test_tls_tooling_changes_select_shared_consumers_and_candidate_tls(self):
         for path in ("scripts/tls_migration_performance.py",
@@ -54,7 +54,7 @@ class SelectionTest(unittest.TestCase):
                 self.assertTrue(changed_apps.candidate_tls_required([path]))
                 for workflow in WORKFLOWS:
                     self.assertEqual(select_apps([path], workflow),
-                                     ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"])
+                                     ALL)
         self.assertFalse(changed_apps.candidate_tls_required(["docs/tls-migration-plan.md"]))
         self.assertEqual(select_apps(["docs/tls-migration-plan.md"], "ci.yml"), [])
 
@@ -74,19 +74,23 @@ class SelectionTest(unittest.TestCase):
 
     def test_actual_graph_selects_shared_h2_consumers(self):
         graph = dependency_graph()
-        self.assertEqual(graph["http_fetch"], {"http_core", "http_runtime"})
+        self.assertEqual(graph["http_fetch"], {"http_core", "http_pool", "http_runtime"})
         affected = {
-            "ex_ssl": ["ex_ssl", "elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss"],
-            "elixir_quic": ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss"],
-            "http_core": ["http_core", "elixir_quic_http3", *H2_CONSUMERS],
-            "http_runtime": ["http_runtime", *H2_CONSUMERS],
-            "elixir_quic_http3": ["elixir_quic_http3", *H2_CONSUMERS],
+            "ex_ssl": ALL[:-1],
+            "elixir_quic": ALL[1:-1],
+            "http_core": ALL[2:-2],
+            "http_pool": ["http_pool", "http_runtime", "http_fetch", "http_test", "http_web_socket", "http_event_source"],
+            "http_fetch": ["http_fetch", "http_test"],
+            "http_test": ["http_test"],
+            "http_runtime": ["http_runtime", "http_fetch", "http_test", "http_web_socket", "http_event_source"],
+            "elixir_quic_http3": ["http_runtime", "elixir_quic_http3", "http_fetch", "http_test", "http_web_socket", "http_event_source"],
         }
         for owner, expected in affected.items():
             paths = [f"apps/{owner}/lib/module.ex"]
             for workflow in WORKFLOWS:
                 self.assertEqual(select_apps(paths, workflow), expected)
-                self.assertEqual(affected_h2_consumers(paths), list(H2_CONSUMERS))
+                expected_h2 = [app for app in H2_CONSUMERS if app in expected]
+                self.assertEqual(affected_h2_consumers(paths), expected_h2)
 
     def test_shared_manifests_harnesses_and_workflows_select_h2_consumers(self):
         for path in ("mix.exs", "mix.lock", "config/config.exs", ".credo.exs",
@@ -97,10 +101,10 @@ class SelectionTest(unittest.TestCase):
                      "scripts/ex_ssl_source_smoke.sh", ".github/workflows/changes.yml"):
             for workflow in WORKFLOWS:
                 self.assertEqual(select_apps([path], workflow),
-                                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"])
+                                 ALL)
         for workflow in WORKFLOWS:
             self.assertEqual(select_apps([f".github/workflows/{workflow}"], workflow),
-                             ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"])
+                             ALL)
 
     def test_candidate_tls_covers_app_code_tests_manifests_and_direct_harnesses(self):
         for app in ALL:
@@ -213,12 +217,12 @@ class SelectionTest(unittest.TestCase):
             (root / "apps/http_core").mkdir()
             git("mv", "apps/http_event_source/old.ex", "apps/http_core/new.ex")
             git("commit", "-qm", "rename")
-            check(base, "HEAD", ["http_core", "elixir_quic_http3", *H2_CONSUMERS], candidate=True)
+            check(base, "HEAD", ALL[2:-2], candidate=True)
             base = git("rev-parse", "HEAD")
             git("rm", "apps/http_core/new.ex")
             git("commit", "-qm", "delete")
-            check(base, "HEAD", ["http_core", "elixir_quic_http3", *H2_CONSUMERS], candidate=True)
-            check(base, "0" * 40, ["http_core", "elixir_quic_http3", *H2_CONSUMERS], candidate=True)
+            check(base, "HEAD", ALL[2:-2], candidate=True)
+            check(base, "0" * 40, ALL[2:-2], candidate=True)
             check("0" * 40, "HEAD", [])
             base = git("rev-parse", "HEAD")
             write("apps/ex_ssl/README.md", "app docs only")
@@ -227,14 +231,14 @@ class SelectionTest(unittest.TestCase):
             check(base, "HEAD", ["ex_ssl"])
             for path, expected in (
                 ("apps/ex_ssl/test/policy_test.exs",
-                 ["ex_ssl", "elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss"]),
-                ("apps/http_fetch/mix.exs", ["http_fetch"]),
+                 ALL[:-1]),
+                ("apps/http_fetch/mix.exs", ["http_fetch", "http_test"]),
                 ("scripts/ex_ssl_options_test.exs",
-                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"]),
+                 ALL),
                 ("scripts/external_consumer_smoke.exs",
-                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"]),
+                 ALL),
                 ("scripts/http3/public_gate.py",
-                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"]),
+                 ALL),
             ):
                 base = git("rev-parse", "HEAD")
                 write(path, "candidate harness or app source")

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.9] - 2026-11-08
+
+### Added
+- Extract H1 idle ownership and H2 reservation policy into the independent
+  `http_pool` package. Add validated named runtime pool families, stable
+  generation references, explicit Fetch selection and sanitized snapshots.
+- Add caller-prepared Fetch adapters and the independent `http_test` package:
+  owner-isolated expectations, Task/allowance propagation, retained exit
+  verification, acknowledged streams, cancellation and an optional bounded Plug
+  bridge. Unmatched fixtures fail without network fallback.
+- Include both packages in unified versions, dependency-ordered publication,
+  CI impact selection and standalone candidate consumers with and without Plug.
+
 ## [1.0.0-rc.8] - 2026-11-07
 
 ### Fixed

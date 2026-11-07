@@ -170,7 +170,7 @@ defmodule NoOTP.ReleasePathsTest do
       checked_beams: 1,
       package_versions:
         Map.new(
-          ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport),
+          ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport),
           &{&1, "1.0.0"}
         )
     }

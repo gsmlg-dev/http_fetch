@@ -75,12 +75,12 @@ class ServerPackagesTest(unittest.TestCase):
             command.assert_not_called()
             registry.assert_not_called()
 
-    def test_core_inventory_remains_nine_and_native_package_is_outside_umbrella(self):
-        self.assertEqual(len(stage.PACKAGES), 9)
+    def test_production_inventory_excludes_testing_support_and_native_package_is_outside_umbrella(self):
+        self.assertEqual(len(stage.PACKAGES), 10)
         self.assertFalse(set(stage.PACKAGES) & {"abyss", "hell", "abyss_raw"})
         self.assertEqual(stage.package_path("abyss_raw"), Path("packages/abyss_raw"))
-        self.assertEqual(len(stage.ALL_PACKAGES), 12)
-        self.assertEqual(stage.RELEASE_PACKAGES, (*stage.PACKAGES, "abyss", "hell"))
+        self.assertEqual(len(stage.ALL_PACKAGES), 14)
+        self.assertEqual(stage.RELEASE_PACKAGES, (*stage.PACKAGES, "http_test", "abyss", "hell"))
         self.assertEqual(stage.NATIVE_PACKAGES, ("abyss_raw",))
 
     def test_wrong_requested_archive_version_stops_before_build(self):

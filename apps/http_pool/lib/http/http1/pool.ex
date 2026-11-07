@@ -5,7 +5,6 @@ defmodule HTTP.HTTP1.Pool do
   alias HTTP.HTTP2.PoolKey
   alias HTTP.RequestLifecycle
 
-  @max_idle 256
   @expiry_interval 1_000
 
   def start_link(opts) do
@@ -18,7 +17,7 @@ defmodule HTTP.HTTP1.Pool do
   def checkout(request) do
     case key(request) do
       {:ok, key} -> GenServer.call(pool(request), {:checkout, key})
-      _ -> :none
+      result -> unavailable_key(request, result)
     end
   end
 
@@ -38,8 +37,19 @@ defmodule HTTP.HTTP1.Pool do
         if match?({:error, _}, result), do: RequestLifecycle.abort(tracker)
         result
 
-      _ ->
-        :none
+      result ->
+        unavailable_key(request, result)
+    end
+  end
+
+  defp unavailable_key(request, result) do
+    if request.transport_options[:pool_binding] do
+      case result do
+        {:error, _} = error -> error
+        _ -> {:error, {:invalid_pool_option, :identity, :non_reusable}}
+      end
+    else
+      :none
     end
   end
 
@@ -129,9 +139,32 @@ defmodule HTTP.HTTP1.Pool do
   end
 
   @impl true
-  def init(_opts), do: {:ok, %{entries: %{}, retiring?: false, expiry_timer: nil}}
+  def init(opts) do
+    {:ok,
+     %{
+       entries: %{},
+       retiring?: false,
+       expiry_timer: nil,
+       max_idle: Keyword.get(opts, :max_idle, 256),
+       max_idle_per_key: Keyword.get(opts, :max_idle_per_key, 16),
+       idle_timeout: Keyword.get(opts, :idle_timeout, 60_000)
+     }}
+  end
 
   @impl true
+  def handle_call(:stats, _from, state) do
+    idle = Enum.count(state.entries, fn {_, entry} -> entry.status == :idle end)
+
+    {:reply,
+     %{
+       idle: idle,
+       pending: map_size(state.entries) - idle,
+       max_idle: state.max_idle,
+       max_idle_per_key: state.max_idle_per_key,
+       idle_timeout: state.idle_timeout
+     }, state}
+  end
+
   def handle_call({:prepare, key, transport, socket}, {owner, _}, state),
     do: prepare_entry(state, key, transport, socket, owner, nil, now() + 1_000)
 
@@ -265,8 +298,9 @@ defmodule HTTP.HTTP1.Pool do
     {limit, idle_timeout} = key.http1_policy
     count = Enum.count(state.entries, fn {_, entry} -> entry.key == key end)
 
-    if now() < deadline and Process.alive?(owner) and not state.retiring? and count < limit and
-         map_size(state.entries) < @max_idle do
+    if now() < deadline and Process.alive?(owner) and not state.retiring? and
+         count < min(limit, state.max_idle_per_key) and idle_timeout <= state.idle_timeout and
+         map_size(state.entries) < state.max_idle do
       token = make_ref()
 
       entry = %{

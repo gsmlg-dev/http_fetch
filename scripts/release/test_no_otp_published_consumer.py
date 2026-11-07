@@ -76,7 +76,7 @@ class PublishedNoOTPTests(unittest.TestCase):
                 build.assert_not_called()
                 peers.assert_not_called()
                 self.assertEqual(runner.command.call_count, 4)
-                self.assertIn("all nine published archives", report["error"])
+                self.assertIn("all ten published archives", report["error"])
 
     def test_failed_or_timed_out_preflight_never_falls_back(self):
         for code in (1, 124):

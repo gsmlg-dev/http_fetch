@@ -277,3 +277,68 @@ ID 106 and WebSocket IDs 152-158; no owning MFA or finding is added or removed.
 This inventory check does not certify a rebuilt candidate or publication. The
 strict candidate and published gates must bind the current packaged source and
 BEAM bytes independently; no generic finding is hidden by this amendment.
+
+## 2026-11-08 source review amendment: pool extraction and explicit adapters
+
+The Phase 1 candidate declares `1.0.0-rc.9`, based on `main` at `266eb9a`.
+Current source hashes bind this amendment; previous commits, artifacts, BEAM
+hashes and failed diagnostics above remain historical evidence.
+
+H1 pool transport authority (HTTP-6) moves unchanged to `http_pool`. Its entry
+constructor still stores the admitted TCP, Unix or ExSSL transport. Policy limits
+and aggregate snapshots add no transport selector. H2 owner factories (HTTP-8)
+remain monitored asynchronous connectors. Default, named and managed families
+leave `owner_factory` nil; public family configuration rejects factory/provider
+injection and unknown options. Protocol owners remain in runtime.
+
+One new H2 callable site invokes the explicit `activate_owner` function. The
+production registration callers are SocketClient and Runtime.Stream; both provide
+`&ConnectionOwner.activate/2`. The request actor invokes it after provider
+acceptance/release and before pool publication, retaining the original absolute
+deadline and retirement on failure. The Pool GenServer never synchronously calls
+the waiting actor or starts dialing. The callback cannot replace the connection's
+transport. Existing H1/H2 identity hashing, provider authority and cleanup evidence
+are preserved. The extracted pool telemetry emitter uses literal `:telemetry`
+with the established event and opt-outs.
+
+Named family policy accepts bounded capacities, names and existing opaque pool
+references. Runtime captures actual family process identities in the caller.
+The same binding reaches H1 checkout/checkin and H2 reservation/registration;
+stale processes or a subsequently non-reusable identity fail closed. Registry
+names do not create atoms from external strings. These operations neither select
+a TLS implementation nor introduce an unpooled fallback.
+
+### HTTP-10: explicit adapter callbacks
+
+`HTTP.Adapter.prepare/2` has one variable-module `prepare/2` call and
+`execute/3` has one variable-module `execute/3` call. The module originates only
+from the caller's explicit `adapter: Module` or `{Module, configuration}` option.
+The helper checks the two exported callbacks and applies the existing H1
+envelope validation without reading a stream or dialing. File-backed multipart
+parts use empty validation placeholders; the original request reaches the adapter
+unchanged and no file is opened during preparation. The returned context is
+stored with that original module; a callback result cannot replace the module.
+Execution runs in the existing Promise worker with that captured tuple.
+
+These two sites are approved caller extension boundaries, like caller-provided
+Promise callbacks and WebTransport backends. Arbitrary external adapter bodies
+are outside the built-in no-OTP guarantee. Every library implementation remains
+audited. The default nil selection invokes SocketClient directly. The only
+library test adapter belongs to `http_test`, which is absent from the production
+Fetch and no-OTP package closures; Plug and ExUnit are absent as well. Missing or
+invalid adapters fail without network fallback. A test adapter branches before
+ManagedTransport admission, pool checkout, DNS, TCP and TLS.
+
+The source binding adds the three reviewed sites and rebinds moved pool and
+SocketClient lines by unchanged call expression and owning MFA. The local
+production-BEAM diagnostic finds all 180 reviewed identities. It also retains
+nine previously documented host-context findings in ResourceLedger/managed
+resource collectors; that diagnostic is not a strict isolated-release pass.
+Candidate and published release gates must independently reconcile the complete
+raw inventory, source census and actual in-release BEAMs. No finding is removed
+from the generic audit and no pending/unconfirmed cleanup becomes success.
+
+The lock adds optional Test-only Plug and plug_crypto pins. The production
+consumer gate resolves Fetch without Test/Plug/ExUnit and executes named H1 reuse;
+separate candidate Test consumers compile and run with and without Plug. These
+checks do not replace the strict no-OTP release or real protocol acceptance.

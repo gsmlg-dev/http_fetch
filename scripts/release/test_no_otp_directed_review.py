@@ -15,13 +15,48 @@ from stage import PACKAGES
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def historical_sites(proof):
+    """Reconstruct the pre-Phase-1 identities for unchanged historical receipts."""
+    amendment = next((item for item in proof.get('source_review_amendments', [])
+                      if item.get('release_version') == '1.0.0-rc.9'), None)
+    if amendment is None:
+        return proof['occurrences']
+    bindings = {item['inventory_occurrence']: item for item in amendment['occurrence_rebindings']}
+    return [dict(site, line=bindings[site['inventory_occurrence']]['previous_line'])
+            if site['inventory_occurrence'] in bindings else site
+            for site in proof['occurrences']
+            if site['inventory_occurrence'] not in amendment.get('added_occurrences', [])]
+
+
 class DirectedReviewTests(unittest.TestCase):
     def test_review_bundle_covers_all_original_sites_and_all_production_sources(self):
         bundle = review.load(ROOT, '1.0.0-rc.0', PACKAGES)
-        self.assertEqual(len(bundle['occurrences']), 177)
-        self.assertEqual(len([name for name in bundle['sources'] if name.split('/')[0] in PACKAGES]), 246)
+        self.assertEqual(len(bundle['occurrences']), 180)
+        self.assertEqual(len([name for name in bundle['sources'] if name.split('/')[0] in PACKAGES]), 250)
         self.assertEqual(len(bundle['reviews']), 10)
         self.assertEqual(bundle['versions']['http_fetch'], '1.0.0-rc.0')
+
+    def test_phase1_additions_and_moved_sites_match_current_production_inventory(self):
+        bundle = review.load(ROOT, '1.0.0-rc.9', PACKAGES)
+        http = json.loads((ROOT / 'docs/no-otp-directed-http-proof.json').read_text())
+        amendment = http['source_review_amendments'][-1]
+        self.assertEqual(amendment['added_occurrences'], [178, 179, 180])
+        sites = {site['inventory_occurrence']: site for site in http['occurrences']}
+        self.assertEqual(sites[178]['mfa'], 'register_provider/4')
+        self.assertEqual(sites[178]['source'], 'apps/http_pool/lib/http/http2/pool.ex')
+        self.assertEqual({sites[i]['mfa'] for i in (179, 180)}, {'prepare/2', 'execute/3'})
+        for number in amendment['added_occurrences']:
+            site = sites[number]
+            line = (ROOT / site['source']).read_text().splitlines()[site['line'] - 1]
+            self.assertIn('callback.(' if number == 178 else 'module.', line)
+        identities = sorted((site['module'].removeprefix(':'), site['line'], site['kind'])
+                            for site in bundle['occurrences'])
+        digest = hashlib.sha256(json.dumps(identities, separators=(',', ':')).encode()).hexdigest()
+        self.assertEqual(len(identities), 180)
+        self.assertEqual(len(set(identities)), 180)
+        self.assertEqual(digest, amendment['reviewed_inventory_reconciliation']['sha256'])
+        self.assertEqual(amendment['local_compiled_diagnostic']['status'],
+                         'DIAGNOSTIC_ONLY_STRICT_RELEASE_PENDING')
 
     def test_m1_additions_retain_exact_reviewed_q2_origins(self):
         proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
@@ -75,8 +110,10 @@ class DirectedReviewTests(unittest.TestCase):
         tls = json.loads((ROOT / 'docs/no-otp-directed-tls-proof.json').read_text())
         tls_amendment = tls['source_review_amendments'][-1]
         evidence = tls_amendment['reviewed_inventory_reconciliation']
+        original = [site for group in review.GROUPS for site in historical_sites(
+            json.loads((ROOT / f'docs/no-otp-directed-{group}-proof.json').read_text()))]
         identities = sorted((site['module'].removeprefix(':'), site['line'], site['kind'])
-                            for site in bundle['occurrences'])
+                            for site in original)
         digest = hashlib.sha256(json.dumps(identities, separators=(',', ':')).encode()).hexdigest()
         self.assertEqual(len(identities), 177)
         self.assertEqual(len(set(identities)), 177)
@@ -95,7 +132,7 @@ class DirectedReviewTests(unittest.TestCase):
         prior_identities = []
         for group in review.GROUPS:
             group_proof = json.loads((ROOT / f'docs/no-otp-directed-{group}-proof.json').read_text())
-            for site in group_proof['occurrences']:
+            for site in historical_sites(group_proof):
                 prior_identities.append((site['module'].removeprefix(':'),
                                          old_lines.get(site['inventory_occurrence'], site['line']),
                                          site['kind']))
@@ -106,7 +143,7 @@ class DirectedReviewTests(unittest.TestCase):
         old_identities = []
         for group in review.GROUPS:
             group_proof = json.loads((ROOT / f'docs/no-otp-directed-{group}-proof.json').read_text())
-            for site in group_proof['occurrences']:
+            for site in historical_sites(group_proof):
                 old_identities.append((site['module'].removeprefix(':'),
                                        old_lines.get(site['inventory_occurrence'], site['line']),
                                        site['kind']))
@@ -140,7 +177,7 @@ class DirectedReviewTests(unittest.TestCase):
             lambda sites: [site for site in sites if site['inventory_occurrence'] != 176],
             lambda sites: [site for site in sites if site['inventory_occurrence'] != 177],
             lambda sites: sites + [copy.deepcopy(sites[-1])],
-            lambda sites: sites + [dict(sites[-1], inventory_occurrence=178)],
+            lambda sites: sites + [dict(sites[-1], inventory_occurrence=181)],
         ]
         for change in changes:
             def load_with_changed_quic_sites(text):

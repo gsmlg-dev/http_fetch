@@ -9,9 +9,9 @@
     "apps/elixir_quic_http3/lib/quic_http3/session.ex": "c0b460040007aea68cbca830c60a15c5fb2efda12c1c345bd24c095caa63544f",
     "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "e3eceea332cdee69f921bae15452e8b4d41fc76265b8bfff76a2dfbf5c28385a",
     "apps/http_core/lib/http/quic/ex_quic.ex": "0cb045e39b362131a53d5b3a1d7a19f5f5f25c7f192cf64a16b28ed488e0ffc6",
-    "apps/http_fetch/lib/http.ex": "1a7ad0e36ccb4798d977428807270c96033376af6fc0a1da264fab7eaf51df8f",
-    "apps/http_fetch/lib/http/fetch_options.ex": "a04c342787355fd33358d573b1b1ebd5a7d280aff48c6c0035840dd7e6c73a08",
-    "apps/http_fetch/lib/http/socket_client.ex": "9f0c86be61a71a0d7a91a62d0500bf35739b95d3f15567842457f2c3520b3e04",
+    "apps/http_fetch/lib/http.ex": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d",
+    "apps/http_fetch/lib/http/fetch_options.ex": "5e69e37daad48cda62f04c6043b43116383c885cfe809a3089ffad9a3d42d9f1",
+    "apps/http_fetch/lib/http/socket_client.ex": "dd7f464583e6bf9b687aebec9f8a819cdf84bb9311cfc2e8ff7c96edaf58f052",
     "apps/http_event_source/lib/http/event_source/options.ex": "d1c36a500c8f5f86b6c5334d8e34b355451d9367487f5d1f4b37df0a31b44202",
     "apps/http_event_source/lib/http/event_source/connection.ex": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
     "apps/http_runtime/lib/http/http3.ex": "b691a8f1c780c3b9e920c7148f38a17d82975d2788170579073753bea61df92d",
@@ -560,6 +560,30 @@
       "occurrence_rebindings": [],
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "REQUIRED_BY_STRICT_CANDIDATE_AND_PUBLISHED_RELEASE_GATES"
+    },
+    {
+      "date": "2026-11-08",
+      "release_version": "1.0.0-rc.9",
+      "scope": "shared Fetch adapter and named-pool validation entry; H3 construction unchanged",
+      "changed_sources": [
+        {
+          "source": "apps/http_fetch/lib/http.ex",
+          "previous_sha256": "1a7ad0e36ccb4798d977428807270c96033376af6fc0a1da264fab7eaf51df8f",
+          "sha256": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d"
+        },
+        {
+          "source": "apps/http_fetch/lib/http/fetch_options.ex",
+          "previous_sha256": "a04c342787355fd33358d573b1b1ebd5a7d280aff48c6c0035840dd7e6c73a08",
+          "sha256": "5e69e37daad48cda62f04c6043b43116383c885cfe809a3089ffad9a3d42d9f1"
+        },
+        {
+          "source": "apps/http_fetch/lib/http/socket_client.ex",
+          "previous_sha256": "9f0c86be61a71a0d7a91a62d0500bf35739b95d3f15567842457f2c3520b3e04",
+          "sha256": "dd7f464583e6bf9b687aebec9f8a819cdf84bb9311cfc2e8ff7c96edaf58f052"
+        }
+      ],
+      "occurrence_rebindings": [],
+      "compiled_acceptance": "PENDING_STRICT_RELEASE_GATE"
     }
   ]
 }

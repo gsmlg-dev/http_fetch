@@ -169,4 +169,4 @@ jobs:
         env:
           NATIVE_JOB_STATUS: ${{ job.status }}
         run: |
-          printf 'abyss_raw %s: %s (independent of the completed eleven-package release)\n' "$RELEASE_VERSION" "$NATIVE_JOB_STATUS" >> "$GITHUB_STEP_SUMMARY"
+          printf 'abyss_raw %s: %s (independent of the completed thirteen-package release)\n' "$RELEASE_VERSION" "$NATIVE_JOB_STATUS" >> "$GITHUB_STEP_SUMMARY"

@@ -104,7 +104,7 @@ defmodule NoOTP.ReleaseAudit do
   ]
   @dispatches @named_dispatches ++ @node_dispatches ++ @fun_dispatches
 
-  @packages ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
+  @packages ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
   @modules [
     HTTP,
     SSL.Connection,

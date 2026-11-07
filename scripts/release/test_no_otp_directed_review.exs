@@ -5,7 +5,7 @@ defmodule NoOTP.DirectedReviewTest do
   use ExUnit.Case, async: true
   alias NoOTP.DirectedReview
 
-  @packages ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
+  @packages ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
 
   setup do
     root = Path.join(System.tmp_dir!(), "directed-review-#{System.unique_integer([:positive])}")

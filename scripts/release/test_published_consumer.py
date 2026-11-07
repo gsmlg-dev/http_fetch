@@ -28,7 +28,7 @@ class PublishedConsumerTests(unittest.TestCase):
                     for package in consumer_gate.PACKAGES])
                 registry.assert_not_called()
                 server.assert_not_called()
-                expected = {"all": {"verify_project": 9}, "runtime": {"runtime_projects": 1},
+                expected = {"all": {"verify_project": len(consumer_gate.PACKAGES)}, "runtime": {"runtime_projects": 1},
                             "external": {"external_project": 1}, "h2": {"http2_project": 1},
                             "feature": {"feature_project": 1, "migration_project": 1}}[mode]
                 for name, project in projects.items():
@@ -43,7 +43,7 @@ class PublishedConsumerTests(unittest.TestCase):
 
     def test_last_package_mismatch_prevents_all_published_traffic(self):
         with tempfile.TemporaryDirectory() as directory, \
-                patch("hex_packages.release_status", side_effect=["matching"] * 8 + ["missing"]), \
+                patch("hex_packages.release_status", side_effect=["matching"] * (len(consumer_gate.PACKAGES) - 1) + ["missing"]), \
                 patch.object(consumer_gate, "feature_project") as features, \
                 patch.object(consumer_gate, "migration_project") as migration, \
                 patch.object(consumer_gate, "setup_registry") as registry:

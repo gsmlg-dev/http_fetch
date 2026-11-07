@@ -64,6 +64,10 @@ defmodule HTTP.FetchOptions do
     acknowledgement. It does not change network idle, overall request deadlines,
     cancellation or reader-death cleanup. Other protocols and managed
     `transport_scope` reject explicit policies.
+  - `adapter` - a module or `{module, config}` implementing `HTTP.Adapter`.
+    Context is prepared in the caller and executed in the Promise worker.
+  - `pool` - a named `HTTP.Runtime.Pool` family or opaque `HTTP.Pool` reference.
+    Explicit selection binds one generation and rejects incompatible reuse/protocol options.
   - `transport_scope` - opaque `HTTP.ManagedTransport` generation selecting
     private reusable HTTP/1 or HTTP/2 transports. Requires raw streamed responses,
     manual/error redirects, and the origin/policy frozen by `open/1`.
@@ -121,6 +125,8 @@ defmodule HTTP.FetchOptions do
 
   @string_keys %{
     "body" => :body,
+    "adapter" => :adapter,
+    "pool" => :pool,
     "transport_scope" => :transport_scope,
     "transportScope" => :transport_scope,
     "request_mode" => :request_mode,
@@ -190,6 +196,8 @@ defmodule HTTP.FetchOptions do
   }
 
   defstruct method: :get,
+            adapter: nil,
+            pool: nil,
             transport_scope: nil,
             request_mode: :fetch,
             headers: %HTTP.Headers{},
@@ -233,6 +241,8 @@ defmodule HTTP.FetchOptions do
   @type tls_backend :: term()
 
   @type t :: %__MODULE__{
+          adapter: module() | {module(), term()} | nil,
+          pool: term(),
           method: HTTP.Request.method(),
           request_mode: HTTP.Request.request_mode(),
           headers: HTTP.Headers.t(),
@@ -297,6 +307,7 @@ defmodule HTTP.FetchOptions do
   @spec to_transport_options(t()) :: keyword()
   def to_transport_options(%__MODULE__{} = options) do
     []
+    |> maybe_add(:pool, options.pool)
     |> maybe_add(:transport_scope, options.transport_scope)
     |> maybe_add(:telemetry, options.telemetry)
     |> maybe_add(:decode_body, options.decode_body)
@@ -361,6 +372,12 @@ defmodule HTTP.FetchOptions do
 
   defp merge_options(%__MODULE__{} = struct, options) do
     Enum.reduce(options, struct, fn
+      {:adapter, adapter}, acc ->
+        %{acc | adapter: adapter}
+
+      {:pool, pool}, acc ->
+        %{acc | pool: pool}
+
       {:transport_scope, scope}, acc ->
         %{acc | transport_scope: scope}
 

@@ -15,7 +15,8 @@ defmodule HTTP.SocketClient do
 
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
-    with :ok <- validate_response_stream_ack_protocol(request),
+    with :ok <- HTTP.Pool.validate_binding(request),
+         :ok <- validate_response_stream_ack_protocol(request),
          :ok <- validate_response_stream_idle_protocol(request),
          :ok <- validate_idle_protocol(request),
          :ok <- Dialer.validate_connect_address_route(request, unix_socket_path) do
@@ -487,11 +488,18 @@ defmodule HTTP.SocketClient do
             http2_reservation_error(reason, deadline_at, parent_monitor)
         end
       else
-        _ -> {:ok, {:connect, nil}}
+        {:error, reason} -> explicit_pool_failure(request, reason)
+        _ -> explicit_pool_failure(request, {:invalid_pool_option, :identity, :non_reusable})
       end
     else
       {:ok, {:connect, nil}}
     end
+  end
+
+  defp explicit_pool_failure(request, reason) do
+    if request.transport_options[:pool_binding],
+      do: {:error, reason},
+      else: {:ok, {:connect, nil}}
   end
 
   defp http2_reservation_error(reason, deadline_at, parent_monitor) do
@@ -795,6 +803,7 @@ defmodule HTTP.SocketClient do
                      request_lifecycle: HTTP.RequestLifecycle.current(),
                      socket: socket,
                      provider_handoff: provider?,
+                     activate_owner: &ConnectionOwner.activate/2,
                      deadline_at: deadline_at
                    ) do
               reserve_registered_http2_owner(pool, key, deadline_at, owner, parent_monitor)
@@ -840,10 +849,19 @@ defmodule HTTP.SocketClient do
         )
 
       case pool_key_for_registration(request, profile, claim) do
-        {:ok, key} when is_pid(pool) -> {:ok, pool, key}
-        {:ok, :non_reusable, _key} -> :exclusive
-        {:error, _} = error -> error
-        _ -> :exclusive
+        {:ok, key} when is_pid(pool) ->
+          {:ok, pool, key}
+
+        {:ok, :non_reusable, _key} ->
+          if request.transport_options[:pool_binding],
+            do: {:error, {:invalid_pool_option, :identity, :non_reusable}},
+            else: :exclusive
+
+        {:error, _} = error ->
+          error
+
+        _ ->
+          :exclusive
       end
     end
   end

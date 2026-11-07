@@ -142,7 +142,7 @@ end
                                   published=True, source_sha="a" * 40)
         traffic.assert_not_called()
 
-    def test_published_canary_checks_all_nine_archives_without_local_registry(self):
+    def test_published_canary_checks_all_archives_without_local_registry(self):
         sha = "a" * 40
         with patch.object(consumer_gate, "verify_canary_source"), patch(
                 "hex_packages.release_status", return_value="matching") as checksums, patch.object(
@@ -150,7 +150,7 @@ end
                 consumer_gate, "http3_project") as traffic:
             consumer_gate.run("1.2.3", self.directory, mode="http3-canary",
                               published=True, source_sha=sha)
-        self.assertEqual(checksums.call_count, 9)
+        self.assertEqual(checksums.call_count, len(consumer_gate.PACKAGES))
         registry.assert_not_called()
         self.assertEqual(traffic.call_args.kwargs["canary_sha"], sha)
         self.assertEqual(traffic.call_args.args[2]["HTTP3_CONSUMER_SOURCE"], "published")

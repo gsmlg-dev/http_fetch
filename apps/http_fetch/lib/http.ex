@@ -351,7 +351,20 @@ defmodule HTTP do
     if HTTP.Telemetry.enabled?(options.telemetry),
       do: HTTP.Telemetry.request_start(request.method, request.url, request.headers)
 
-    preparation = HTTP.ManagedTransport.prepare(request, init)
+    adapter = HTTP.Adapter.prepare(request, options.adapter)
+
+    preparation =
+      case adapter do
+        {:ok, nil} ->
+          with {:ok, bound} <- HTTP.Runtime.Pool.prepare(request, init),
+               do: HTTP.ManagedTransport.prepare(bound, init)
+
+        {:ok, _context} ->
+          {:ok, request}
+
+        {:error, _} = error ->
+          error
+      end
 
     request =
       case preparation do
@@ -370,8 +383,13 @@ defmodule HTTP do
 
     association =
       case preparation do
-        {:ok, _} -> HTTP.ManagedTransport.associate(request, tracker)
-        error -> error
+        {:ok, _} ->
+          if adapter == {:ok, nil},
+            do: HTTP.ManagedTransport.associate(request, tracker),
+            else: :ok
+
+        error ->
+          error
       end
 
     request = %{
@@ -394,34 +412,14 @@ defmodule HTTP do
                 Process.demonitor(launch_monitor, [:flush])
                 Process.put(HTTP.RequestLifecycle, tracker)
 
-                admission =
-                  with :ok <- association,
-                       :ok <- attach_upload(tracker, request),
-                       do: HTTP.ManagedTransport.admit(request, tracker)
-
-                result =
-                  case admission do
-                    :ok ->
-                      handle_async_request(
-                        request,
-                        self(),
-                        abort_controller_pid,
-                        unix_socket_path
-                      )
-
-                    error ->
-                      error
-                  end
-
-                stop_failed_upload(result, request.body)
-                if match?({:error, _}, result), do: HTTP.RequestLifecycle.abort(tracker)
-
-                HTTP.RequestLifecycle.complete(
-                  tracker,
-                  request.transport_options[:managed_deadline_at]
+                run_prepared_request(
+                  request,
+                  abort_controller_pid,
+                  unix_socket_path,
+                  adapter,
+                  association,
+                  tracker
                 )
-
-                result
 
               {:DOWN, ^launch_monitor, :process, ^calling_pid, _reason} ->
                 exit(:request_launch_abandoned)
@@ -434,6 +432,49 @@ defmodule HTTP do
     HTTP.RequestLifecycle.register(tracker, task.pid, :task)
     send(task.pid, :request_launch)
     %Promise{task: task, completion: completion}
+  end
+
+  defp run_prepared_request(
+         request,
+         abort_controller_pid,
+         unix_socket_path,
+         adapter,
+         association,
+         tracker
+       ) do
+    admission =
+      with :ok <- association,
+           :ok <- attach_upload(tracker, request),
+           do:
+             if(adapter == {:ok, nil},
+               do: HTTP.ManagedTransport.admit(request, tracker),
+               else: :ok
+             )
+
+    result =
+      case admission do
+        :ok ->
+          handle_async_request(
+            request,
+            self(),
+            abort_controller_pid,
+            unix_socket_path,
+            elem(adapter, 1)
+          )
+
+        error ->
+          error
+      end
+
+    stop_failed_upload(result, request.body)
+    if match?({:error, _}, result), do: HTTP.RequestLifecycle.abort(tracker)
+
+    HTTP.RequestLifecycle.complete(
+      tracker,
+      request.transport_options[:managed_deadline_at]
+    )
+
+    result
   end
 
   defp attach_upload(tracker, %{body: body} = request) when is_pid(body),
@@ -452,9 +493,16 @@ defmodule HTTP do
           Request.t(),
           pid(),
           pid() | nil,
-          String.t() | nil
+          String.t() | nil,
+          term()
         ) :: Response.t() | {:error, term()}
-  def handle_async_request(request, _calling_pid, abort_controller_pid, unix_socket_path \\ nil) do
+  def handle_async_request(
+        request,
+        _calling_pid,
+        abort_controller_pid,
+        unix_socket_path \\ nil,
+        adapter_context \\ nil
+      ) do
     start_time = System.monotonic_time(:microsecond)
 
     failure_token =
@@ -469,7 +517,11 @@ defmodule HTTP do
           Keyword.put(request.transport_options, :connect_failure_token, failure_token)
     }
 
-    result = HTTP.SocketClient.request(request, abort_controller_pid, unix_socket_path)
+    result =
+      if adapter_context == nil,
+        do: HTTP.SocketClient.request(request, abort_controller_pid, unix_socket_path),
+        else: HTTP.Adapter.execute(request, adapter_context, abort_controller_pid)
+
     duration = System.monotonic_time(:microsecond) - start_time
 
     case result do
@@ -491,9 +543,10 @@ defmodule HTTP do
           do: HTTP.Telemetry.request_exception(request.url, reason, duration)
 
         error =
-          if Keyword.get(request.transport_options, :error_mode, :raw) == :structured,
-            do: HTTP.RequestError.new(reason, failure_token),
-            else: reason
+          if Keyword.get(request.transport_options, :error_mode, :raw) == :structured and
+               not match?(%HTTP.RequestError{}, reason),
+             do: HTTP.RequestError.new(reason, failure_token),
+             else: reason
 
         {:error, error}
     end

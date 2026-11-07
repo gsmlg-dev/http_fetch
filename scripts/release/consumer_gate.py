@@ -141,16 +141,37 @@ def telemetry_archive(directory):
     (directory / name).write_bytes(data)
 
 
-def setup_registry(archive_dir, version, directory, env):
+def locked_archive(directory, package):
+    """Copy a locked external dependency with its Hex outer checksum verified."""
+    lock = (ROOT / "mix.lock").read_text()
+    match = re.search(r'"' + re.escape(package) + r'": \{:hex, :[^,]+, "([^"]+)",[^\n]+"hexpm", "([a-f0-9]+)"\}', lock)
+    if not match:
+        raise RuntimeError(f"expected locked {package} package")
+    name = f"{package}-{match.group(1)}.tar"
+    cache = Path(os.environ.get("HEX_CACHE_HOME", os.environ.get("HEX_HOME", str(Path.home() / ".hex"))))
+    source = cache / "packages/hexpm" / name
+    if source.is_file():
+        data = source.read_bytes()
+    else:
+        with urlopen(f"https://repo.hex.pm/tarballs/{name}", timeout=30) as response:
+            data = response.read()
+    if hashlib.sha256(data).hexdigest() != match.group(2):
+        raise RuntimeError(f"{package} tarball differs from locked outer checksum")
+    (directory / name).write_bytes(data)
+
+
+def setup_registry(archive_dir, version, directory, env, *, packages=PACKAGES, extras=()):
     public = directory / "public"
     tarballs = public / "tarballs"
     tarballs.mkdir(parents=True)
-    for package in PACKAGES:
+    for package in packages:
         archive = archive_dir / f"{package}-{version}.tar"
         if not archive.is_file():
             raise RuntimeError(f"missing candidate archive: {archive}")
         shutil.copyfile(archive, tarballs / archive.name)
     telemetry_archive(tarballs)
+    for package in extras:
+        locked_archive(tarballs, package)
     private_key = directory / "registry.pem"
     command(["openssl", "genrsa", "-out", str(private_key), "2048"])
     command(["mix", "hex.registry", "build", str(public), "--name=hexpm", f"--private-key={private_key}"], env=env)
@@ -518,13 +539,17 @@ def run(version, archive_dir=None, *, mode="all", keep=False, published=False, s
         if published:
             if archive_dir is not None:
                 from hex_packages import release_status
-                for package in PACKAGES:
+                for package in ((*PACKAGES, "http_test") if mode == "family" else PACKAGES):
                     archive = archive_dir / f"{package}-{version}.tar"
                     if release_status(package, version, archive) != "matching":
                         raise RuntimeError(f"published package is missing: {package} {version}")
             registry = nullcontext(None)
         else:
-            public = setup_registry(archive_dir, version, directory, env)
+            public = (
+                setup_registry(archive_dir, version, directory, env,
+                               packages=(*PACKAGES, "http_test"), extras=("plug", "plug_crypto", "mime"))
+                if mode == "family" else setup_registry(archive_dir, version, directory, env)
+            )
             registry = local_registry(public)
         with registry as url:
             if url is not None:
@@ -535,6 +560,9 @@ def run(version, archive_dir=None, *, mode="all", keep=False, published=False, s
                     project = directory / "consumers" / package
                     project.mkdir(parents=True)
                     verify_project(project, package, version, env)
+            elif mode == "family":
+                from family_consumer import family_projects
+                family_projects(directory, version, env)
             elif mode == "runtime":
                 runtime_projects(directory, version, env)
             elif mode == "external":
@@ -564,7 +592,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("version")
     parser.add_argument("archive_dir", type=Path, nargs="?")
-    parser.add_argument("--mode", choices=("all", "runtime", "external", "h2", "feature", "http3", "http3-canary"), default="all")
+    parser.add_argument("--mode", choices=("all", "family", "runtime", "external", "h2", "feature", "http3", "http3-canary"), default="all")
     parser.add_argument("--source-sha")
     parser.add_argument("--published", action="store_true")
     parser.add_argument("--keep", action="store_true")

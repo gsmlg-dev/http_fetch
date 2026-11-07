@@ -15,18 +15,19 @@ followed by `MIX_ENV=test mix test apps/http_fetch/test`. Running the test from
 the root keeps runtime applications of `in_umbrella` dependencies, including
 `ex_ssl`, on the code path without adding duplicate child dependencies.
 
-The monorepo contains eleven OTP applications and the optional native package
-`abyss_raw`. All twelve packages share the same release version. The unified
-workflow publishes the eleven portable packages first, then publishes `abyss_raw`
+The monorepo contains thirteen OTP applications and the optional native package
+`abyss_raw`. All fourteen packages share the same release version. The unified
+workflow publishes the thirteen portable packages first, then publishes `abyss_raw`
 asynchronously after Abyss, using the same immutable source tag. Native checks
-and publication do not block the portable release. The original nine client/engine
-packages retain exact internal dependencies; their no-OTP-SSL proof excludes Hell,
+and publication do not block the portable release. The ten production client/engine
+packages retain exact internal dependencies; their no-OTP-SSL proof excludes testing support and Hell,
 whose TLS server still uses OTP `:ssl`. See the [server migration report](docs/server-migration.md) for
 provenance, package boundaries, commands and verification results.
 
 | Responsibility | Packages | Runtime boundary |
 | --- | --- | --- |
-| HTTP clients and pooled connections | `http_fetch`, `http_event_source`, `http_web_socket`, `http_web_transport`, `http_core`, `http_runtime`, `elixir_quic_http3` | Client-side HTTP protocol support |
+| HTTP clients and pooled connections | `http_fetch`, `http_event_source`, `http_web_socket`, `http_web_transport`, `http_core`, `http_pool`, `http_runtime`, `elixir_quic_http3` | Client-side HTTP protocol support |
+| Isolated client fixtures | [`http_test`](apps/http_test/README.md) | Explicit adapter; optional Plug bridge; outside production Fetch dependencies |
 | TCP/TLS servers | [`hell`](apps/hell/README.md) | Existing TCP and OTP `:ssl` TLS behavior |
 | UDP/QUIC servers | [`abyss`](apps/abyss/README.md) | Plain UDP; QUIC consumers explicitly install and start `elixir_quic` |
 | Protocol engines | `ex_ssl`, `elixir_quic` | `SSL` TLS and `Quic` QUIC APIs |
@@ -43,6 +44,19 @@ is recorded in [migration provenance](docs/migration-provenance.md); its origina
 validation snapshot is [preserved separately](docs/migration-validation.md).
 Current HTTP/3 beta acceptance and publication evidence are tracked in the
 [implementation audit](docs/http3-implementation-audit.md).
+
+## Pool configuration and isolated tests
+
+`HTTP.Runtime.Pool` supervises named HTTP/1 idle and HTTP/2 reservation pools.
+Requests explicitly select a family with `pool: name_or_reference`; references
+bind one generation and fail if it exits. `HTTP.Pool.snapshot/1` reports idle
+HTTP/1 resources and actual HTTP/2 capacity, without claiming an active HTTP/1 limit.
+
+`HTTP.Test` provides owner-isolated fixtures through
+`adapter: {HTTP.Test, :fixture_name}`. Its `expect`, `stub`, `allow` and verification
+interfaces use the normal Fetch Promise and acknowledged stream contracts. Missing
+fixtures fail without network fallback. See the [pool and test guide](docs/http-pool-and-test.md)
+for configuration, examples, cancellation, redirects and current limits.
 
 ## Features
 
@@ -1363,7 +1377,7 @@ Each app job prepares its dependency closure; WebSocket and EventSource test
 closures include Fetch for their existing cross-client tests.
 
 Shared changes still require manual full regression. Dispatching any of these
-workflows forces all eleven app jobs on the selected branch. Manual CI additionally
+workflows forces all thirteen app jobs on the selected branch. Manual CI additionally
 runs full shared checks and historical TLS compatibility checks:
 
 ```bash
@@ -1407,8 +1421,8 @@ directory) after the same preparation as the unit tests.
 bash scripts/external_consumer_smoke.sh
 ```
 
-This builds all nine portable candidate archives (`ex_ssl`, `elixir_quic`,
-`http_core`, `http_runtime`, `elixir_quic_http3`, `http_fetch`,
+This builds the ten production candidate archives (`ex_ssl`, `elixir_quic`,
+`http_core`, `http_pool`, `http_runtime`, `elixir_quic_http3`, `http_fetch`,
 `http_web_socket`, `http_event_source`, and `http_web_transport`), serves them
 from a signed local Hex registry with the locked `telemetry` tarball, and
 resolves a temporary consumer through Hex without repository paths or overrides.
@@ -1418,7 +1432,8 @@ TCP TLS backends, exact dependency metadata, shared runtime startup, and the
 unsupported WebTransport boundary. The public HTTP/3 artifact gate is tracked
 separately in the acceptance record.
 `python3 scripts/release/consumer_gate.py VERSION /absolute/path/to/archives`
-checks each package independently; set
+checks each production package independently. Add `--mode family` to verify
+standalone pool, production Fetch, and Test consumers with and without Plug; set
 `EX_SSL_DEP_MODE=candidate EX_SSL_CANDIDATE_ARCHIVE_DIR=/absolute/path/to/archives`
 and run `bash scripts/ex_ssl_source_smoke.sh` for the full candidate TLS feature
 suite. The published `ex_ssl` 0.7.2 feature gate is historical compatibility
@@ -1451,7 +1466,7 @@ local Hex registry. It requires the pinned fixture checkout specified by
 [migration validation](docs/migration-validation.md).
 
 ```bash
-# From the umbrella root; this builds eleven portable archives without publishing.
+# From the umbrella root; this builds thirteen portable archives without publishing.
 python3 scripts/release/stage.py build VERSION /tmp/http-fetch-stage /tmp/http-fetch-archives
 EX_SSL_DEP_MODE=candidate EX_SSL_CANDIDATE_ARCHIVE_DIR=/tmp/http-fetch-archives \
   EX_SSL_RESULTS_DIR=/tmp/http-fetch-candidate bash scripts/ex_ssl_source_smoke.sh
@@ -1460,7 +1475,7 @@ EX_SSL_DEP_MODE=candidate EX_SSL_CANDIDATE_ARCHIVE_DIR=/tmp/http-fetch-archives 
 The candidate gate checks `Hex.SCM`, exact package version, startup, and every
 feature group. The published `ex_ssl` 0.7.2 gate remains a historical
 compatibility check run from the pre-migration `v0.16.1` tag in CI; it cannot
-validate this local nine-package graph. The separate scheduled/manual
+validate this local production-package graph. The separate scheduled/manual
 compatibility workflow covers its existing Elixir/OTP matrix.
 See [consumer validation evidence](docs/ex-ssl-consumer-validation.md) for exact
 commands, results, provenance, and limits. Independent human security review is

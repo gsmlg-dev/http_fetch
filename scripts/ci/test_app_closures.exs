@@ -12,13 +12,17 @@ defmodule AppClosuresTest do
     "ex_ssl" => ~w(ex_ssl)a,
     "elixir_quic" => ~w(ex_ssl elixir_quic)a,
     "http_core" => ~w(ex_ssl elixir_quic http_core)a,
-    "http_runtime" => ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime)a,
+    "http_pool" => ~w(ex_ssl elixir_quic http_core http_pool)a,
+    "http_test" =>
+      ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_fetch http_test)a,
+    "http_runtime" => ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime)a,
     "elixir_quic_http3" => ~w(ex_ssl elixir_quic http_core elixir_quic_http3)a,
-    "http_fetch" => ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch)a,
+    "http_fetch" =>
+      ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_fetch)a,
     "http_web_socket" =>
-      ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_web_socket)a,
+      ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_web_socket)a,
     "http_event_source" =>
-      ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_event_source)a,
+      ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_event_source)a,
     "http_web_transport" => ~w(ex_ssl elixir_quic http_core http_web_transport)a
   }
 

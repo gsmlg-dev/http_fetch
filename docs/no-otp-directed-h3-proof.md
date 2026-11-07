@@ -128,3 +128,16 @@ The JSON amendment records the new selected-input hash and current full-source
 census, keeping historical artifact/check/census/BEAM evidence intact. The 35
 TLS1.3 collection scenarios passed with the generic static failure retained;
 strict candidate and published gates must still bind current source and BEAMs.
+
+## 2026-11-08 source review amendment: shared Fetch adapter entry
+
+Phase 1 changes the shared Fetch entry, option projection and SocketClient
+validation. With no explicit adapter or pool selection, the same request reaches
+ManagedTransport and the existing SocketClient/H3 branch. Explicit named pools
+reject HTTP/3 before I/O. Adapter contexts take a separate explicit extension
+path; they cannot alter the retained built-in H3 connector or operation callbacks.
+The H3 engines, owner construction and all 50 bound H3 occurrences are unchanged.
+The HTTP review covers the two new caller adapter dispatches and the H2 provider
+activation callback. This amendment refreshes the three shared source hashes;
+historical artifacts remain historical, and strict candidate/published compiled
+reconciliation is still required.

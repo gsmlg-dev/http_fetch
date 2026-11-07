@@ -7,7 +7,7 @@ Usage: python3 no_otp_consumer_gate.py VERSION ARCHIVES STAGE --source-root ROOT
        --source-sha SHA --peer-plan PLAN.json --output NEW_DIRECTORY
        [--published]
 
-Published mode requires all nine Hex archives to match the source-bound release
+Published mode requires all ten Hex archives to match the source-bound release
 archives, then resolves packages with fresh Hex configuration and cache paths.
 
 PLAN schema 1 contains pinned external peers and all REQUIRED scenarios. Peers
@@ -51,7 +51,7 @@ MODULES = ('HTTP', 'SSL.Connection', 'Quic', 'QuicHttp3.Session',
            'HTTP.ManagedTransport', 'HTTP.WebSocket', 'HTTP.EventSource')
 PROVENANCE = '''expected = System.fetch_env!("NO_OTP_VERSION")
 project = System.fetch_env!("NO_OTP_PROJECT")
-packages = ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)a
+packages = ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)a
 for app <- packages do
   dep = Enum.find(Mix.Dep.cached(), &(&1.app == app)) || raise("missing candidate #{app}")
   unless dep.scm == Hex.SCM and dep.opts[:hex] == Atom.to_string(app) and
@@ -712,7 +712,7 @@ def validate_artifacts(report, version, *, allow_unresolved=False, directed_revi
             continue
         require(report.get(field) == [], f'{field}: forbidden or unconfirmed production evidence')
     require(report.get('package_versions') == {package: version for package in PACKAGES},
-            'all nine release package versions must match candidate archives')
+            'all ten release package versions must match candidate archives')
     if directed_review is not None:
         try:
             directed_proof.validate(report, directed_review)
@@ -981,7 +981,7 @@ def run(version, archives, stage, source, source_sha, plan, output, max_seconds=
             statuses = runner.command([sys.executable, str(source / 'scripts/release/hex_packages.py'),
                                        'preflight', version, str(archives), "--group", "core"], cwd=source, env=env)
             require(statuses.strip().splitlines() == [f'{package}: matching' for package in PACKAGES],
-                    'all nine published archives must match before release construction')
+                    'all ten published archives must match before release construction')
             report['published_archives'] = {package: 'matching' for package in PACKAGES}
         project.joinpath('lib').mkdir(parents=True)
         project.joinpath('mix.exs').write_text(project_source(version))

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Shared twelve-package version (major.minor.patch or major.minor.patch-rc.N)
+        description: Shared fourteen-package version (major.minor.patch or major.minor.patch-rc.N)
         required: true
         type: string
       git_ref:
@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   release:
-    name: Publish eleven portable packages
+    name: Publish thirteen portable packages
     concurrency:
       group: release-portable-http-fetch-packages
       cancel-in-progress: false
@@ -48,7 +48,7 @@ jobs:
           test "$(git branch --show-current)" = "$RELEASE_BRANCH"
           if git rev-parse --verify --quiet "refs/tags/v$RELEASE_VERSION"; then
             git merge-base --is-ancestor "refs/tags/v$RELEASE_VERSION" HEAD
-            if ! git grep -Fq 'RELEASE_PACKAGES = (*PACKAGES, "abyss", "hell")' "refs/tags/v$RELEASE_VERSION" -- scripts/release/stage.py; then
+            if ! git grep -Fq 'RELEASE_PACKAGES = (*PACKAGES, "http_test", "abyss", "hell")' "refs/tags/v$RELEASE_VERSION" -- scripts/release/stage.py; then
               echo "Existing tag lacks the unified portable/native release contract; it cannot be reused." >&2
               exit 1
             fi
@@ -84,7 +84,7 @@ jobs:
       - name: Compile applications
         run: mix compile
 
-      - name: Build eleven portable archives
+      - name: Build thirteen portable archives
         run: python3 scripts/release/stage.py build "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
 
       - name: Preflight Hex and GitHub immutability before any remote write
@@ -98,7 +98,7 @@ jobs:
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
         run: |
-          test -n "$HEX_API_KEY" || { echo "HEX_API_KEY is required to publish all eleven portable packages" >&2; exit 1; }
+          test -n "$HEX_API_KEY" || { echo "HEX_API_KEY is required to publish all thirteen portable packages" >&2; exit 1; }
 
       - name: Commit version and create immutable tag
         if: steps.revision.outputs.existing == 'false'
@@ -199,4 +199,4 @@ jobs:
         env:
           NATIVE_JOB_STATUS: ${{ job.status }}
         run: |
-          printf 'abyss_raw %s: %s (independent of the completed eleven-package release)\n' "$RELEASE_VERSION" "$NATIVE_JOB_STATUS" >> "$GITHUB_STEP_SUMMARY"
+          printf 'abyss_raw %s: %s (independent of the completed thirteen-package release)\n' "$RELEASE_VERSION" "$NATIVE_JOB_STATUS" >> "$GITHUB_STEP_SUMMARY"

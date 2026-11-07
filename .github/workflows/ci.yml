@@ -124,7 +124,9 @@ jobs:
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
           python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
           elixir scripts/release/archives.exs "$version" "$RUNNER_TEMP/archives"
-      - name: Resolve all nine and run external TLS and HTTP/2 smoke
+      - name: Verify standalone pools and test adapters with and without Plug
+        run: python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode family
+      - name: Resolve production packages and run external TLS and HTTP/2 smoke
         run: |
           python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
           python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode external

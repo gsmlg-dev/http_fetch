@@ -1,13 +1,15 @@
 defmodule ReleaseVersions do
-  @apps ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport abyss hell abyss_raw)
+  @apps ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_fetch http_test http_web_socket http_event_source http_web_transport abyss hell abyss_raw)
   @internal MapSet.new(@apps)
   @graph %{
     "ex_ssl" => [],
     "elixir_quic" => ~w(ex_ssl),
     "http_core" => ~w(ex_ssl elixir_quic),
-    "http_runtime" => ~w(http_core elixir_quic_http3),
+    "http_pool" => ~w(http_core),
+    "http_runtime" => ~w(http_core http_pool elixir_quic_http3),
+    "http_test" => ~w(http_fetch),
     "elixir_quic_http3" => ~w(http_core elixir_quic),
-    "http_fetch" => ~w(http_core http_runtime),
+    "http_fetch" => ~w(http_core http_pool http_runtime),
     "http_web_socket" => ~w(http_core http_runtime),
     "http_event_source" => ~w(http_core http_runtime),
     "http_web_transport" => ~w(http_core),

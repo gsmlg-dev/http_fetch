@@ -17,7 +17,7 @@ from hex_packages import release_status
 from stage import RELEASE_PACKAGES, ROOT, source_version, stage_sources
 
 
-PORTABLE_JOB = "Publish eleven portable packages"
+PORTABLE_JOB = "Publish thirteen portable packages"
 DOCS_STEP = "Publish package documentation separately"
 REQUIRED_STEPS = (
     "Validate immutable tag and branch",
@@ -25,7 +25,7 @@ REQUIRED_STEPS = (
     "Check release changelog section",
     "Install dependencies",
     "Compile applications",
-    "Build eleven portable archives",
+    "Build thirteen portable archives",
     "Preflight Hex and GitHub immutability before any remote write",
     "Check Hex publication credentials",
     "Record immutable release source",
@@ -43,10 +43,11 @@ def validate_provenance(run, jobs, repository, source_sha):
             or run.get("conclusion") != "failure"
             or run.get("head_sha") != source_sha):
         raise ValueError("source run must be the failed release workflow at the exact immutable tag")
-    portable = [job for job in jobs if job.get("name") == PORTABLE_JOB]
+    portable = [job for job in jobs if job.get("name") in (PORTABLE_JOB, "Publish eleven portable packages")]
     if len(portable) != 1 or portable[0].get("conclusion") != "failure":
         raise ValueError("exactly one failed portable release job required")
-    steps = portable[0]["steps"]
+    steps = [dict(step, name=step["name"].replace("Build eleven portable archives", "Build thirteen portable archives"))
+             for step in portable[0]["steps"]]
     names = [step["name"] for step in steps]
     if len(set(names)) != len(names):
         raise ValueError("ambiguous duplicate release steps")
@@ -102,7 +103,7 @@ def artifacts(version, archives, stage_dir, source_sha):
             raise ValueError(f"verified published portable archive required: {package}")
     verify_assets(os.environ["GITHUB_REPOSITORY"], f"v{version}",
                   [archives / f"{package}-{version}.tar" for package in RELEASE_PACKAGES])
-    print("Verified all eleven published Hex/GitHub archives against the immutable tag")
+    print("Verified all thirteen published Hex/GitHub archives against the immutable tag")
 
 
 def main():

@@ -51,9 +51,11 @@ Use `mix test --include integration` for the full source suite. E2E tests requir
 
 ## Project layout
 
-This is a Mix umbrella with eleven independently packaged apps under `apps/`.
+This is a Mix umbrella with thirteen independently packaged apps under `apps/`.
 `apps/http_core` owns shared HTTP primitives and the TLS/QUIC integration
-boundary; `apps/http_runtime` owns pooled HTTP/2 and HTTP/3 connections. Fetch,
+boundary; `apps/http_pool` owns H1 idle and H2 reservation pools; `apps/http_runtime`
+owns protocol connection processes and composes pool families.
+`apps/http_test` depends on Fetch and provides explicit isolated fixtures. Fetch,
 EventSource, and WebSocket depend on both `:http_core` and `:http_runtime`.
 WebTransport and the HTTP/3 companion depend on `:http_core`; HTTP/3 also
 depends on `:elixir_quic`. `:elixir_quic` depends on `:ex_ssl`.
@@ -61,8 +63,8 @@ depends on `:elixir_quic`. `:elixir_quic` depends on `:ex_ssl`.
 Server applications are `apps/abyss` (UDP/explicit QUIC) and `apps/hell`
 (TCP/OTP `:ssl` TLS). `packages/abyss_raw` stays outside the umbrella so ordinary
 builds do not require Rust. Abyss has no runtime dependency on the engines or
-native package. All twelve packages share a release version: the unified workflow
-publishes eleven portable packages, then `abyss_raw` asynchronously after Abyss.
+native package. All fourteen packages share a release version: the unified workflow
+publishes thirteen portable packages, then `abyss_raw` asynchronously after Abyss.
 The original nine-package no-OTP-SSL proof excludes Hell; see [`docs/server-migration.md`](docs/server-migration.md).
 
 The imported engine applications are `apps/ex_ssl` (`SSL`), `apps/elixir_quic`
@@ -110,7 +112,7 @@ For module-by-module details, see the table in `CLAUDE.md` and read
 ## Style
 
 - `mix format` is authoritative; do not hand-format Elixir.
-- The formatter scope is the umbrella root plus all eleven `apps/*` and the independent `packages/abyss_raw`
+- The formatter scope is the umbrella root plus all thirteen `apps/*` and the independent `packages/abyss_raw`
   (see `.formatter.exs` and each app's `.formatter.exs`).
 - Credo is run in CI; run `mix credo` locally before pushing.
 
@@ -127,7 +129,7 @@ For module-by-module details, see the table in `CLAUDE.md` and read
   and EventSource
   test closures also prepare Fetch for their cross-client tests.
 - Shared configuration, tooling, and workflow changes require manual full
-  regression. `workflow_dispatch` on each workflow forces all eleven apps;
+  regression. `workflow_dispatch` on each workflow forces all thirteen apps;
   manual CI also checks shared formatting, candidate consumers, and historical
   TLS compatibility. Use `gh workflow run ci.yml --ref main` (or `test.yml`,
   `integration.yml` or `e2e.yml`) after shared changes. Release only prepares

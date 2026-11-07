@@ -2,10 +2,9 @@ defmodule HTTP.HTTP2.Pool do
   @moduledoc "Bounded profile-aware HTTP/2 connection pool."
   use GenServer
 
-  alias HTTP.HTTP2.ConnectionOwner
   alias HTTP.RequestLifecycle
 
-  alias HTTP.Runtime.Telemetry
+  alias HTTP.Pool.Telemetry
 
   @type key :: term()
   @type reservation :: reference()
@@ -94,7 +93,7 @@ defmodule HTTP.HTTP2.Pool do
              ),
            :ok <- provider_call(pool, {:accept_provider, owner, carrier, deadline}, deadline),
            :ok <- RequestLifecycle.release_provider(tracker, carrier, deadline),
-           :ok <- ConnectionOwner.activate(owner, deadline) do
+           :ok <- activate_owner(owner, deadline, opts) do
         provider_call(pool, {:publish_provider, owner, deadline}, deadline)
       end
 
@@ -105,6 +104,13 @@ defmodule HTTP.HTTP2.Pool do
       {:error, reason} ->
         GenServer.cast(pool, {:retire_provider, owner})
         {:error, reason, :registered}
+    end
+  end
+
+  defp activate_owner(owner, deadline, opts) do
+    case Keyword.get(opts, :activate_owner) do
+      callback when is_function(callback, 2) -> callback.(owner, deadline)
+      _ -> {:error, :missing_owner_activation}
     end
   end
 
@@ -163,6 +169,7 @@ defmodule HTTP.HTTP2.Pool do
         {key,
          %{
            connections: map_size(entry.connections),
+           draining: Enum.count(entry.connections, fn {_, connection} -> connection.draining end),
            pending: length(entry.pending),
            connecting: entry.connecting,
            provider_pending: provider_capacity(state, key),
@@ -894,7 +901,7 @@ defmodule HTTP.HTTP2.Pool do
       admission_caller: nil,
       streams: 0,
       extended_connect: :unknown,
-      max_streams: max_streams || state.max_streams,
+      max_streams: min(max_streams || state.max_streams, state.max_streams),
       monitor: monitor,
       draining: false,
       idle_timer: idle_timer,

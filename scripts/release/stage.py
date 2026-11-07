@@ -8,11 +8,12 @@ import shutil
 import subprocess
 
 PACKAGES = (
-    "ex_ssl", "elixir_quic", "http_core", "elixir_quic_http3", "http_runtime",
+    "ex_ssl", "elixir_quic", "http_core", "http_pool", "elixir_quic_http3", "http_runtime",
     "http_fetch", "http_web_socket", "http_event_source", "http_web_transport",
 )
-# PACKAGES is the original client/engine proof boundary, including no-OTP SSL.
-RELEASE_PACKAGES = (*PACKAGES, "abyss", "hell")
+# PACKAGES is the production client/engine proof boundary, including no-OTP SSL.
+# Testing support stays outside production and no-OTP release closures.
+RELEASE_PACKAGES = (*PACKAGES, "http_test", "abyss", "hell")
 NATIVE_PACKAGES = ("abyss_raw",)
 ALL_PACKAGES = (*RELEASE_PACKAGES, *NATIVE_PACKAGES)
 GROUPS = {"core": PACKAGES, "release": RELEASE_PACKAGES, "native": NATIVE_PACKAGES,

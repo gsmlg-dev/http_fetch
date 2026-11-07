@@ -4,6 +4,7 @@ defmodule HTTPRuntime.Application do
 
   def start(_type, _args) do
     children = [
+      {Registry, keys: :unique, name: HTTP.Runtime.Pool.Registry},
       {DynamicSupervisor,
        name: :http_managed_transport_supervisor, strategy: :one_for_one, max_children: 2_048},
       {HTTP.HTTP1.Pool, []},

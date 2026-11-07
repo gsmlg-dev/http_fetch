@@ -22,8 +22,8 @@ VERSION = "1.0.0-rc.4"
 
 class UnifiedReleaseTests(unittest.TestCase):
     def test_portable_and_no_otp_proof_boundaries_are_distinct(self):
-        self.assertEqual(len(stage.PACKAGES), 9)
-        self.assertEqual(stage.RELEASE_PACKAGES, (*stage.PACKAGES, "abyss", "hell"))
+        self.assertEqual(len(stage.PACKAGES), 10)
+        self.assertEqual(stage.RELEASE_PACKAGES, (*stage.PACKAGES, "http_test", "abyss", "hell"))
         self.assertEqual(stage.ALL_PACKAGES, (*stage.RELEASE_PACKAGES, "abyss_raw"))
         self.assertEqual(stage.GROUPS["native"], ("abyss_raw",))
         self.assertEqual(hex_packages.PACKAGES, stage.RELEASE_PACKAGES)
@@ -198,7 +198,7 @@ class UnifiedReleaseTests(unittest.TestCase):
     def test_dependencies_and_compilation_are_required_before_packaging(self):
         workflow = (stage.ROOT / ".github/workflows/release.yml").read_text()
         portable, native = workflow.split("\n  native-release:\n", 1)
-        for job, build in ((portable, "Build eleven portable archives"),
+        for job, build in ((portable, "Build thirteen portable archives"),
                            (native, "Build and audit the native archive")):
             steps = re.split(r"(?m)^      - ", job)[1:]
             deps = next(step for step in steps if "run: mix deps.get\n" in step)

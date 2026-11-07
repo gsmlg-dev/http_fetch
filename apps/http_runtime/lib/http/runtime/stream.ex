@@ -21,7 +21,9 @@ defmodule HTTP.Runtime.Stream do
 
   @spec start(Request.t(), pid(), keyword()) :: {:ok, pid(), reference()} | {:error, term()}
   def start(%Request{} = request, subscriber, opts \\ []) when is_pid(subscriber) do
-    with :ok <- validate_writer_limit(Keyword.get(opts, :max_write_bytes, 16_777_230)),
+    with {:ok, request} <- HTTP.Runtime.Pool.prepare(request, request.transport_options),
+         :ok <- HTTP.Pool.validate_binding(request),
+         :ok <- validate_writer_limit(Keyword.get(opts, :max_write_bytes, 16_777_230)),
          :ok <- validate_purpose(Keyword.get(opts, :purpose, :request)) do
       generation = Keyword.get(opts, :generation, make_ref())
       deadline = opening_deadline(Keyword.get(opts, :opening_timeout, 30_000))
@@ -356,6 +358,7 @@ defmodule HTTP.Runtime.Stream do
       connecting?: true,
       max_streams: 0,
       provider_handoff: true,
+      activate_owner: &ConnectionOwner.activate/2,
       request_lifecycle: RequestLifecycle.current(),
       socket: socket,
       deadline_at: finite_deadline(deadline)

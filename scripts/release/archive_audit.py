@@ -50,7 +50,7 @@ def main():
     args = parser.parse_args()
     for package in PACKAGES:
         audit_package(package, args.version, args.stage_dir, args.archive_dir)
-    print("all eleven portable archives match staged runtime sources and portable manifests")
+    print("all thirteen portable archives match staged runtime sources and portable manifests")
 
 
 if __name__ == "__main__":

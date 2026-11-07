@@ -5,7 +5,7 @@ defmodule NoOTP.BlockedTrafficIsolationTest do
   use ExUnit.Case, async: true
   alias NoOTP.ReleaseAudit
 
-  @packages ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
+  @packages ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
   @version System.fetch_env!("NO_OTP_VERSION")
   @path "/owned/release/lib/client-1/ebin/client.beam"
   @artifacts %{

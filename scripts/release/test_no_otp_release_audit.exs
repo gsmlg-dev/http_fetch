@@ -4519,7 +4519,7 @@ defmodule NoOTP.ReleaseAuditTest do
 
     assert Enum.sort(Enum.map(result.unresolved_dispatch, &{&1.line, &1.kind})) ==
              Enum.map(
-               [55, 57, 59, 62, 152, 293, 300, 301, 350, 358, 409, 514],
+               [65, 67, 69, 72, 185, 327, 334, 335, 384, 392, 443, 548],
                &{&1, "unresolved_module_dispatch"}
              )
   end
@@ -4529,7 +4529,7 @@ defmodule NoOTP.ReleaseAuditTest do
 
     assert Enum.any?(
              result.unresolved_dispatch,
-             &(&1.line == 73 and &1.kind == "literal_module_ssl")
+             &(&1.line == 83 and &1.kind == "literal_module_ssl")
            )
   end
 
@@ -4539,7 +4539,7 @@ defmodule NoOTP.ReleaseAuditTest do
 
       assert Enum.any?(
                result.unresolved_dispatch,
-               &(&1.line == 73 and &1.kind == "unresolved_module_dispatch")
+               &(&1.line == 83 and &1.kind == "unresolved_module_dispatch")
              )
     end
   end
@@ -4597,7 +4597,7 @@ defmodule NoOTP.ReleaseAuditTest do
     root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
 
     source =
-      File.read!(Path.join(root, "apps/http_runtime/lib/http/http1/pool.ex"))
+      File.read!(Path.join(root, "apps/http_pool/lib/http/http1/pool.ex"))
       |> String.replace("HTTP.HTTP1.Pool", "NoOTPActualCasePool")
 
     source =
@@ -5189,7 +5189,7 @@ defmodule NoOTP.ReleaseAuditTest do
     assert length(before.unresolved_dispatch) == 18
     assert length(after_result.unresolved_dispatch) == 12
     removed = before.unresolved_dispatch -- after_result.unresolved_dispatch
-    assert Enum.sort(Enum.map(removed, & &1.line)) == [423, 444, 452, 612, 706, 882]
+    assert Enum.sort(Enum.map(removed, & &1.line)) == [424, 445, 453, 620, 714, 900]
     assert Enum.all?(removed, &(&1.kind == "unresolved_module_dispatch"))
     assert after_result.parameter_invariant_derivation.status == "checked"
     assert length(after_result.parameter_invariant_derivation.checked_slots) == 9
