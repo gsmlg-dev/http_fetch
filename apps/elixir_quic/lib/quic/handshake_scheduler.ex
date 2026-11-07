@@ -9,7 +9,17 @@ defmodule Quic.HandshakeScheduler do
 
   import Bitwise
 
-  alias Quic.{Codec, Protection, Recovery, TLSDriver, PeerCIDs, Streams, TransportParameters}
+  alias Quic.{
+    Codec,
+    Protection,
+    Recovery,
+    TLSDriver,
+    PeerCIDs,
+    LocalCIDs,
+    Streams,
+    TransportParameters
+  }
+
   alias SSL.Crypto.HKDF
 
   @levels [:initial, :handshake, :application]
@@ -24,6 +34,13 @@ defmodule Quic.HandshakeScheduler do
             retry_token: <<>>,
             peer_initial_scid: nil,
             peer_cids: nil,
+            local_cids: nil,
+            local_cid_limit: 2,
+            peer_disable_active_migration: false,
+            receive_path: nil,
+            received_dcid: nil,
+            path_events: false,
+            authenticated_error: false,
             tls: nil,
             recovery: nil,
             keys: %{},
@@ -72,6 +89,7 @@ defmodule Quic.HandshakeScheduler do
            ),
          {:ok, tls, tls_effects} <- TLSDriver.new(role, tls_options(opts)) do
       recovery = Keyword.get(opts, :recovery, Recovery.new())
+      {:ok, local_cids} = LocalCIDs.new(scid)
 
       state = %__MODULE__{
         role: role,
@@ -81,6 +99,8 @@ defmodule Quic.HandshakeScheduler do
         retry_scid: Keyword.get(opts, :retry_scid),
         tls: tls,
         recovery: recovery,
+        local_cids: local_cids,
+        local_cid_limit: Keyword.get(opts, :active_connection_id_limit, 2),
         keys: Map.put(Keyword.get(opts, :keys, %{}), :initial, initial),
         read_keys:
           initial_read_keys(
@@ -221,6 +241,83 @@ defmodule Quic.HandshakeScheduler do
 
   def send_datagram(_, _), do: {:error, :invalid_datagram}
 
+  @doc "Bind a migrated destination to an unused peer CID, except same-CID NAT rebinding."
+  def bind_path(state, path, previous, same_incoming_dcid) do
+    cids = state.peer_cids || PeerCIDs.new(state.dcid, state.local_cid_limit)
+
+    with {:ok, cids} <- PeerCIDs.bind_path(cids, path, previous, same_incoming_dcid) do
+      {:ok, %{state | peer_cids: cids}}
+    end
+  end
+
+  @doc "Whether this destination has an available peer CID."
+  def path_available?(state, path), do: is_binary(outgoing_dcid(state, path))
+
+  @doc "Release a path binding and queue retirement of its contiguous spent CID prefix."
+  def drop_path_binding(%{peer_cids: nil} = state, _path), do: state
+
+  def drop_path_binding(state, path) do
+    {cids, retired} = state.peer_cids |> PeerCIDs.drop_path(path) |> PeerCIDs.retire_unused()
+    frames = Enum.map(retired, &%{type: :retire_connection_id, sequence: &1})
+    queue_control(%{state | peer_cids: cids}, :application, frames)
+  end
+
+  @doc "Protect a bounded path probe or response without changing the selected path."
+  def send_path_frames(state, path_id, frames, padded_size) do
+    pn = state.recovery.spaces.application.next
+    pn_len = packet_number_length(pn)
+
+    with dcid when is_binary(dcid) <- outgoing_dcid(state, path_id),
+         overhead <- 1 + byte_size(dcid) + pn_len + 16,
+         true <-
+           length(frames) in 1..3 and
+             Enum.all?(frames, &(&1.type in [:path_challenge, :path_response, :ping])),
+         true <- state.queued < state.max_queue,
+         {:ok, plaintext} <- Codec.encode_frames(frames),
+         plaintext <-
+           plaintext <> :binary.copy(<<0>>, max(0, padded_size - overhead - byte_size(plaintext))),
+         {:ok, packet} <-
+           encrypt_short(state, state.keys.application.write, pn, pn_len, plaintext, path_id),
+         true <- byte_size(packet) <= state.max_packet_size,
+         {:ok, recovery, reserved} <-
+           Recovery.reserve(
+             state.recovery,
+             :application,
+             %{
+               level: :application,
+               crypto: {0, 0},
+               bytes: packet,
+               control: frames,
+               acks: [],
+               ack_eliciting: true,
+               path_id: path_id,
+               dcid: dcid,
+               key_phase: state.key_update.phase
+             },
+             byte_size(packet)
+           ),
+         {:ok, recovery} <- Recovery.transition(recovery, :application, reserved.number, :queued) do
+      metadata = Map.put(reserved.metadata, :packet_number, reserved.number)
+      recovery = put_in(recovery.spaces.application.sent[reserved.number].metadata, metadata)
+
+      {:ok, %{state | recovery: recovery, queued: state.queued + 1},
+       [
+         %{
+           type: :send,
+           space: :application,
+           level: :application,
+           packet_number: reserved.number,
+           bytes: packet,
+           path_id: path_id
+         }
+       ]}
+    else
+      nil -> {:blocked, :no_unused_connection_id}
+      false -> {:blocked, :path_send_limit}
+      {:error, reason} -> {:blocked, reason}
+    end
+  end
+
   @doc "Admit one ack-eliciting application PING through the bounded recovery scheduler."
   def ping(%__MODULE__{} = state) do
     cond do
@@ -245,11 +342,15 @@ defmodule Quic.HandshakeScheduler do
 
   @doc "Install the semantic values of authenticated, validated peer parameters."
   def install_peer_parameters(state, values) do
-    rtt = %{
-      state.recovery.rtt
-      | max_ack_delay: Map.get(values, :max_ack_delay, 25) * 1000,
-        ack_delay_exponent: Map.get(values, :ack_delay_exponent, 3)
-    }
+    {:ok, local_cids} =
+      LocalCIDs.configure(state.local_cids, Map.get(values, :active_connection_id_limit, 2))
+
+    {:ok, recovery} =
+      Recovery.configure_peer_ack(
+        state.recovery,
+        Map.get(values, :max_ack_delay, 25) * 1000,
+        Map.get(values, :ack_delay_exponent, 3)
+      )
 
     %{
       state
@@ -257,8 +358,10 @@ defmodule Quic.HandshakeScheduler do
         peer_max_datagram_frame_size: Map.get(values, :max_datagram_frame_size, 0),
         max_packet_size:
           min(state.max_packet_size, Map.get(values, :max_udp_payload_size, 65_527)),
-        recovery: %{state.recovery | rtt: rtt},
-        peer_idle_timeout: Map.get(values, :max_idle_timeout, 0)
+        recovery: recovery,
+        peer_idle_timeout: Map.get(values, :max_idle_timeout, 0),
+        local_cids: local_cids,
+        peer_disable_active_migration: Map.get(values, :disable_active_migration, false)
     }
   end
 
@@ -390,6 +493,8 @@ defmodule Quic.HandshakeScheduler do
               next
             end
 
+          frames = Map.get(state.recovery.spaces[space].sent[number].metadata, :control, [])
+          next = if result == :ok, do: publish_local_cids(next, frames), else: next
           {:ok, next, statuses}
         end
 
@@ -437,7 +542,9 @@ defmodule Quic.HandshakeScheduler do
 
   @doc "Apply an authenticated peer ACK to Recovery."
   def receive_ack(%__MODULE__{} = state, space, ack, at) when space in @spaces do
-    with {:ok, recovery, result} <- Recovery.receive_ack(state.recovery, space, ack, at) do
+    arrival = state.receive_path || Recovery.selected_path(state.recovery)
+
+    with {:ok, recovery, result} <- Recovery.receive_ack(state.recovery, space, ack, at, arrival) do
       frames =
         Enum.flat_map(result.acked, fn number ->
           Map.get(state.recovery.spaces[space].sent[number].metadata, :control, [])
@@ -547,6 +654,19 @@ defmodule Quic.HandshakeScheduler do
 
     state = put_in(state.recovery.spaces.application.sent, sent)
     %{state | pending_control: pending, queued_bytes: control_data_bytes(control)}
+  end
+
+  @doc "Process datagrams with authenticated arrival-path observations."
+  def receive_datagram(state, bytes, at, path_id) do
+    state = %{state | receive_path: path_id, path_events: true, authenticated_error: false}
+
+    case receive_datagram(state, bytes, at) do
+      {:ok, next, events} ->
+        {:ok, %{next | receive_path: nil, path_events: false, received_dcid: nil}, events}
+
+      {:error, reason, next} ->
+        {:error, reason, %{next | receive_path: nil, path_events: false, received_dcid: nil}}
+    end
   end
 
   @doc "Process bounded coalesced packets in order, preserving an accepted prefix."
@@ -659,31 +779,79 @@ defmodule Quic.HandshakeScheduler do
   end
 
   defp receive_authenticated(state, packet, at) do
-    cond do
-      packet.number < state.recovery.spaces[packet.space].receive_floor ->
-        {:ok, state, []}
+    result =
+      cond do
+        packet.number < state.recovery.spaces[packet.space].receive_floor ->
+          {:ok, state, []}
 
-      Recovery.received?(state.recovery, packet.space, packet.number) ->
-        # Retained valid duplicates are processed for ACK generation without
-        # repeating STREAM, DATAGRAM or control effects. Discards are not activity.
-        with :ok <- validate_packet_frames(packet.plaintext, packet.level),
-             {:ok, frames, <<>>} <- Codec.decode_frames(packet.plaintext) do
-          next = acknowledge_inbound(state, packet.space, frames)
-          {:ok, %{next | authenticated_packets: next.authenticated_packets + 1}, []}
-        else
-          _ -> {:ok, state, []}
-        end
+        Recovery.received?(state.recovery, packet.space, packet.number) ->
+          # Retained valid duplicates are processed for ACK generation without
+          # repeating STREAM, DATAGRAM or control effects. Discards are not activity.
+          with :ok <- validate_packet_frames(packet.plaintext, packet.level),
+               {:ok, frames, <<>>} <- Codec.decode_frames(packet.plaintext) do
+            next = acknowledge_inbound(state, packet.space, frames)
+            {:ok, %{next | authenticated_packets: next.authenticated_packets + 1}, []}
+          else
+            _ -> {:ok, state, []}
+          end
 
-      true ->
-        with :ok <- validate_packet_frames(packet.plaintext, packet.level),
-             {:ok, recovery} <-
-               Recovery.note_received(state.recovery, packet.space, packet.number),
-             {:ok, next, events} <-
-               dispatch_inbound(learn_peer_cid(%{state | recovery: recovery}, packet), packet, at) do
-          {:ok, %{next | authenticated_packets: next.authenticated_packets + 1}, events}
-        end
+        true ->
+          with :ok <- validate_packet_frames(packet.plaintext, packet.level),
+               {:ok, recovery} <-
+                 Recovery.note_received(state.recovery, packet.space, packet.number),
+               {:ok, next, events} <-
+                 dispatch_inbound(
+                   learn_peer_cid(
+                     %{state | recovery: recovery, received_dcid: packet.dcid},
+                     packet
+                   ),
+                   packet,
+                   at
+                 ) do
+            facts =
+              if state.path_events do
+                {:ok, frames, <<>>} = Codec.decode_frames(packet.plaintext)
+
+                [
+                  %{
+                    type: :authenticated_packet,
+                    level: packet.level,
+                    number: packet.number,
+                    dcid: packet.dcid,
+                    path_id: state.receive_path,
+                    probing:
+                      Enum.all?(
+                        frames,
+                        &(&1.type in [
+                            :path_challenge,
+                            :path_response,
+                            :new_connection_id,
+                            :padding
+                          ])
+                      )
+                  }
+                ]
+              else
+                []
+              end
+
+            {:ok,
+             %{
+               next
+               | authenticated_packets: next.authenticated_packets + 1,
+                 received_dcid: state.received_dcid
+             }, events ++ facts}
+          end
+      end
+
+    case result do
+      {:error, reason} when state.path_events -> {:error, {:authenticated_frame, reason}}
+      other -> other
     end
   end
+
+  defp coalesced_error(state, events, count, {:authenticated_frame, reason}),
+    do: coalesced_error(%{state | authenticated_error: true}, events, count, reason)
 
   defp coalesced_error(state, _events, 0, reason), do: {:error, reason, state}
 
@@ -696,16 +864,103 @@ defmodule Quic.HandshakeScheduler do
   @doc "Return the exact retained datagram for retransmission."
   def retransmit(%__MODULE__{} = state, space, number) when space in @spaces do
     case state.recovery.spaces[space].sent[number] do
-      %Recovery.Packet{metadata: %{bytes: bytes, level: level, packet_number: ^number}} ->
+      %Recovery.Packet{path_id: path, metadata: %{bytes: bytes, level: level}}
+      when is_binary(bytes) ->
         {:ok,
-         %{space: space, level: level, packet_number: number, bytes: bytes, retransmit: true}}
-
-      %Recovery.Packet{metadata: %{bytes: bytes, level: level}} when is_binary(bytes) ->
-        {:ok,
-         %{space: space, level: level, packet_number: number, bytes: bytes, retransmit: true}}
+         %{
+           space: space,
+           level: level,
+           packet_number: number,
+           bytes: bytes,
+           retransmit: true,
+           path_id: path
+         }}
 
       _ ->
         {:error, :unknown_packet}
+    end
+  end
+
+  @doc "Whether an unsent effect still carries the retained, current ciphertext."
+  def pending_send_valid?(state, %{space: space, packet_number: number, bytes: bytes})
+      when space in @spaces do
+    case state.recovery.spaces[space].sent[number] do
+      %Recovery.Packet{status: status, metadata: %{bytes: ^bytes}}
+      when status in [:reserved, :queued] ->
+        true
+
+      _ ->
+        false
+    end
+  end
+
+  @doc """
+  Settle a definitely unsent packet and retain its reliable work for scheduling.
+
+  The caller removes the corresponding effect and schedules after selecting a
+  usable path. Sent or uncertain writes cannot be cancelled through this API.
+  """
+  def cancel_unsent(state, space, number) when space in @spaces do
+    case state.recovery.spaces[space].sent[number] do
+      %Recovery.Packet{status: status} = packet when status in [:reserved, :queued] ->
+        with {:ok, next} <- requeue_unsent_crypto(state, packet),
+             {:ok, recovery, [:failed]} <-
+               Recovery.local_send(next.recovery, space, number, {:error, :cancelled}, 0) do
+          frames =
+            packet.metadata
+            |> Map.get(:control, [])
+            |> Enum.reject(&(&1.type in [:datagram, :path_challenge, :path_response]))
+            |> then(&unacknowledged_frames(next, &1))
+
+          next =
+            queue_control(
+              %{next | recovery: recovery, queued: max(0, next.queued - 1)},
+              space,
+              frames
+            )
+
+          next = restore_cancelled_ack(next, space, packet)
+          metadata = Map.drop(packet.metadata, [:bytes, :control, :crypto, :acks])
+          next = put_in(next.recovery.spaces[space].sent[number].metadata, metadata)
+
+          {:ok,
+           %{
+             next
+             | queued_bytes: control_data_bytes(Map.get(next.pending_control, :application, []))
+           }}
+        end
+
+      nil ->
+        {:error, :unknown_packet}
+
+      _ ->
+        {:error, :packet_not_unsent}
+    end
+  end
+
+  defp requeue_unsent_crypto(state, %{metadata: %{level: level, crypto: {offset, length}}})
+       when length > 0 do
+    with {:ok, bytes} <- TLSDriver.retransmit(state.tls, level, offset, length) do
+      emission = %{level: level, offset: offset, bytes: bytes}
+      pending = if emission in state.pending, do: state.pending, else: state.pending ++ [emission]
+      {:ok, %{state | pending: pending}}
+    end
+  end
+
+  defp requeue_unsent_crypto(state, _packet), do: {:ok, state}
+
+  defp restore_cancelled_ack(state, space, packet) do
+    received = state.recovery.spaces[space]
+
+    if Map.get(packet.metadata, :acks, []) != [] and received.largest_received >= 0 do
+      queue_ack(state, space, %{
+        type: :ack,
+        largest: received.largest_received,
+        delay: 0,
+        ranges: Enum.reverse(received.ack_ranges)
+      })
+    else
+      state
     end
   end
 
@@ -732,7 +987,7 @@ defmodule Quic.HandshakeScheduler do
 
       %Recovery.Packet{status: status, metadata: %{control: [_ | _] = frames}}
       when status in [:sent, :lost, :failed] ->
-        reliable = Enum.reject(frames, &(&1.type == :datagram))
+        reliable = Enum.reject(frames, &(&1.type in [:datagram, :path_challenge, :path_response]))
         probe = if reliable == [], do: [%{type: :ping}], else: []
         next = queue_control(state, space, reliable ++ probe)
 
@@ -967,6 +1222,11 @@ defmodule Quic.HandshakeScheduler do
                control: control,
                acks: Map.get(state.pending_acks, level, []),
                key_phase: if(level == :application, do: state.key_update.phase, else: nil),
+               dcid:
+                 if(level == :application,
+                   do: outgoing_dcid(state, Recovery.selected_path(state.recovery)),
+                   else: state.dcid
+                 ),
                ack_eliciting: ack_eliciting
              },
              if(ack_eliciting or level == :initial, do: byte_size(packet), else: 0)
@@ -989,7 +1249,14 @@ defmodule Quic.HandshakeScheduler do
       }
 
       {:ok, next,
-       %{type: :send, space: level, level: level, packet_number: reserved.number, bytes: packet}}
+       %{
+         type: :send,
+         space: level,
+         level: level,
+         packet_number: reserved.number,
+         bytes: packet,
+         path_id: reserved.metadata.path_id
+       }}
     else
       false -> {:error, :packet_size_limit, state}
       {:error, reason} -> {:error, reason, state}
@@ -1227,10 +1494,12 @@ defmodule Quic.HandshakeScheduler do
     end
   end
 
-  defp encrypt_short(state, keys, pn, pn_len, plaintext) do
+  defp encrypt_short(state, keys, pn, pn_len, plaintext, path_id \\ nil) do
     plaintext = sample_padding(plaintext, pn_len)
 
-    with header <- <<0x40 ||| state.key_update.phase <<< 2 ||| pn_len - 1, state.dcid::binary>>,
+    with dcid when is_binary(dcid) <-
+           outgoing_dcid(state, path_id || Recovery.selected_path(state.recovery)),
+         header <- <<0x40 ||| state.key_update.phase <<< 2 ||| pn_len - 1, dcid::binary>>,
          aad <- header <> <<pn::unsigned-big-integer-size(pn_len * 8)>>,
          {:ok, ciphertext} <-
            Protection.aead_encrypt(
@@ -1256,17 +1525,26 @@ defmodule Quic.HandshakeScheduler do
       masked_pn = mask_packet_number(pn_wire, mask, 1)
       {:ok, <<masked_first, prefix::binary, masked_pn::binary, tail::binary>>}
     else
+      nil -> {:error, :no_unused_connection_id}
       {:error, _} = error -> error
       _ -> {:error, :protection_failed}
     end
   end
+
+  defp outgoing_dcid(%{peer_cids: nil} = state, _path), do: state.dcid
+  defp outgoing_dcid(state, path), do: PeerCIDs.current(state.peer_cids, path)
 
   defp sample_padding(bytes, pn_len) do
     bytes <> :binary.copy(<<0>>, max(0, 4 - pn_len - byte_size(bytes)))
   end
 
   defp learn_peer_cid(%{peer_initial_scid: nil} = state, %{level: :initial, scid: scid}),
-    do: %{state | peer_initial_scid: scid, dcid: scid, peer_cids: PeerCIDs.new(scid)}
+    do: %{
+      state
+      | peer_initial_scid: scid,
+        dcid: scid,
+        peer_cids: PeerCIDs.new(scid, state.local_cid_limit)
+    }
 
   defp learn_peer_cid(state, _), do: state
 
@@ -1407,6 +1685,7 @@ defmodule Quic.HandshakeScheduler do
       :max_queue,
       :max_queue_bytes,
       :max_datagram_frame_size,
+      :active_connection_id_limit,
       :streams,
       :initial_read_keys
     ])
@@ -1660,7 +1939,12 @@ defmodule Quic.HandshakeScheduler do
        )
        when level == :application do
     if state.peer_cids do
-      with {:ok, cids, retired} <- PeerCIDs.receive_id(state.peer_cids, frame) do
+      with {:ok, cids, retired} <-
+             PeerCIDs.receive_id(
+               state.peer_cids,
+               frame,
+               Recovery.selected_path(state.recovery)
+             ) do
         frames = Enum.map(retired, &%{type: :retire_connection_id, sequence: &1})
         control = Enum.uniq(Map.get(state.pending_control, :application, []) ++ frames)
 
@@ -1668,11 +1952,11 @@ defmodule Quic.HandshakeScheduler do
           next = %{
             state
             | peer_cids: cids,
-              dcid: PeerCIDs.current(cids),
+              dcid: PeerCIDs.current(cids, Recovery.selected_path(state.recovery)) || state.dcid,
               pending_control: Map.put(state.pending_control, :application, control)
           }
 
-          next = clear_empty_application_control(next, control)
+          next = next |> clear_empty_application_control(control) |> prune_unusable_peer_sends()
 
           dispatch_frames(next, level, space, number, rest, at, [frame | events])
         else
@@ -1698,18 +1982,26 @@ defmodule Quic.HandshakeScheduler do
   end
 
   defp dispatch_frame(
-         _state,
-         _level,
-         _space,
-         _number,
-         %{type: :retire_connection_id},
-         _rest,
-         _at,
-         _events
+         state,
+         :application = level,
+         space,
+         number,
+         %{type: :retire_connection_id, sequence: sequence},
+         rest,
+         at,
+         events
        ) do
-    # Only local sequence zero is currently issued. Its retirement on a
-    # packet addressed to that same CID is forbidden by RFC 9000 19.16.
-    {:error, :invalid_connection_id_retirement}
+    case LocalCIDs.retire(state.local_cids, sequence, state.received_dcid) do
+      {:ok, cids, cid} ->
+        state = prune_retired_issuance(%{state | local_cids: cids}, sequence)
+
+        dispatch_frames(state, level, space, number, rest, at, [
+          %{type: :retire_connection_id, sequence: sequence, cid: cid} | events
+        ])
+
+      {:error, _} ->
+        {:error, {:protocol_violation, 0x0A, 0x19}}
+    end
   end
 
   defp dispatch_frame(state, level, space, number, %{type: :handshake_done}, rest, at, events)
@@ -1972,11 +2264,15 @@ defmodule Quic.HandshakeScheduler do
       (first &&& 0x40) == 0 ->
         {:error, :invalid_header_fixed_bit}
 
+      not LocalCIDs.active?(state.local_cids, binary_part(packet, 1, dcid_len)) ->
+        {:error, :wrong_connection_id}
+
       true ->
         {:ok,
          %{
            level: :application,
            space: :application,
+           dcid: binary_part(packet, 1, dcid_len),
            pn_offset: pn_offset,
            packet_length: byte_size(packet)
          }}
@@ -2074,6 +2370,62 @@ defmodule Quic.HandshakeScheduler do
     end
   end
 
+  defp publish_local_cids(state, frames) do
+    Enum.reduce(frames, state, fn
+      %{type: :new_connection_id, sequence: seq}, state ->
+        {:ok, cids} = LocalCIDs.published(state.local_cids, seq)
+        %{state | local_cids: cids}
+
+      _, state ->
+        state
+    end)
+  end
+
+  defp prune_retired_issuance(state, sequence) do
+    keep = fn frame -> frame.type != :new_connection_id or frame.sequence != sequence end
+    control = Enum.filter(Map.get(state.pending_control, :application, []), keep)
+
+    sent =
+      Map.new(state.recovery.spaces.application.sent, fn {pn, packet} ->
+        original = Map.get(packet.metadata, :control, [])
+        remaining = Enum.filter(original, keep)
+
+        metadata =
+          if remaining == original,
+            do: packet.metadata,
+            else: packet.metadata |> Map.delete(:bytes) |> Map.put(:control, remaining)
+
+        {pn, %{packet | metadata: metadata}}
+      end)
+
+    state = put_in(state.recovery.spaces.application.sent, sent)
+
+    clear_empty_application_control(
+      %{state | pending_control: Map.put(state.pending_control, :application, control)},
+      control
+    )
+  end
+
+  defp prune_unusable_peer_sends(state) do
+    sent =
+      Map.new(state.recovery.spaces.application.sent, fn {number, packet} ->
+        metadata =
+          case packet.metadata do
+            %{dcid: dcid} = metadata ->
+              if dcid == outgoing_dcid(state, packet.path_id),
+                do: metadata,
+                else: Map.delete(metadata, :bytes)
+
+            metadata ->
+              metadata
+          end
+
+        {number, %{packet | metadata: metadata}}
+      end)
+
+    put_in(state.recovery.spaces.application.sent, sent)
+  end
+
   defp schedule_reserved(state, emission, rest, before) do
     case protect_and_reserve(state, emission) do
       {:ok, state, effect} ->
@@ -2090,7 +2442,7 @@ defmodule Quic.HandshakeScheduler do
         end
 
       {:error, reason, state}
-      when reason in [:congestion_limited, :sent_history_limit] ->
+      when reason in [:congestion_limited, :sent_history_limit, :no_unused_connection_id] ->
         {:ok, state, []}
 
       {:error, reason, state} ->

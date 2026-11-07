@@ -3,10 +3,10 @@ name: E2E
 on:
   push:
     branches: [main]
-    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
+    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/migration/**', 'scripts/ex_ssl_*', '.github/workflows/**']
   pull_request:
     branches: [main]
-    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
+    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/migration/**', 'scripts/ex_ssl_*', '.github/workflows/**']
   workflow_dispatch: {}
 
 permissions:
@@ -79,6 +79,9 @@ jobs:
       - name: Prepare packaged server E2E consumers
         if: matrix.app == 'abyss' || matrix.app == 'hell'
         uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.6.17'
+          python-version: '3.12'
 
       - name: Verify independent server Hex candidates
         if: matrix.app == 'abyss' || matrix.app == 'hell'

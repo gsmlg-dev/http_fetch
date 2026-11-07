@@ -223,12 +223,52 @@ application-level CRYPTO bytes. `operation_result_bytes` is encoded result size,
 not total VM heap memory; `tracked_references` counts operation references,
 I/O receipt/timer references, generation and owner/writer/consumer monitors.
 Mailbox values remain samples at observation points, not a global VM profiler. Application CRYPTO tickets can be parsed/ignored, but resumption/0-RTT,
-migration, HTTP/3, QPACK and WebTransport are unsupported. DATAGRAM support is
+explicit local client migration, HTTP/3, QPACK and WebTransport are unsupported. DATAGRAM support is
 described above.
 
 The older PID-oriented `Quic.Connection` and diagnostic `stream_observer` seams
 remain for internal tests. Downstream applications should use the generation
 handles and consumer operations above.
+
+## Server peer migration
+
+`Quic.capabilities().migration` is `%{peer: [:server], local: []}`. An established,
+confirmed server connection accepts authenticated 1-RTT traffic after its client
+changes source port or IP. Both roles process path frames, but a Quic client
+continues to require the original server address. There is no `migrate` API yet.
+The same connection/stream handles, operation references, offsets and packet-number
+spaces survive the address change. Abyss uses the same engine behavior on its
+shared listener.
+
+Only authenticated packets create paths. At most two path records are live; a
+third unknown source is dropped while validation or send settlement is pending.
+The highest non-probing packet number selects the remote, so reordered old-path
+packets cannot redirect output. Each path has independent amplification credit,
+reserved bytes, congestion and RTT. A new path starts conservatively. Pending
+packets retain their original path; a definitely unsent packet can be cancelled
+and its reliable ranges scheduled with fresh packet numbers. DATAGRAM and path
+response frames are never blindly replayed.
+
+The engine probes both paths with fresh eight-byte challenges and a finite
+three-PTO deadline based on the larger old/new PTO. Matching responses validate
+the challenge's send path even when received elsewhere. Short probes establish
+reachability separately from a 1200-byte MTU certificate. Failure falls back to a
+freshly validated path with an available CID, or ends the connection. Address
+and CID exhaustion do not trigger a replacement connection.
+
+`Quic.info/1` exposes `migration.active_path`, `migration.paths` with local/remote,
+`validated` and `mtu_validated`, and `resources.path_records`/`local_cid_records`.
+Initial paths start without a migration MTU certificate. Local CID issuance targets
+`min(4, peer_limit)`, caps storage at `min(8, peer_limit)`, and registers routes
+before advertisement. Each migrated destination gets an unused peer CID unless
+the same incoming DCID permits the RFC 9000 NAT exception. Retained old-path output
+keeps its binding. Used CID history remains bounded; sparse sequence gaps can
+exhaust the finite store and defer another migration until the peer replenishes it.
+
+The [migration acceptance record](peer-migration-validation.md) covers pinned
+aioquic localhost port/IP changes, exact bytes/FIN, concurrent connection isolation,
+wire CID separation and process cleanup. It does not establish arbitrary network
+or multipath interoperability.
 
 
 ## Retained cleanup for one exclusive client endpoint

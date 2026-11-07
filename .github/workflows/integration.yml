@@ -3,10 +3,10 @@ name: Integration
 on:
   push:
     branches: [main, develop]
-    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
+    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/migration/**', 'scripts/ex_ssl_*', '.github/workflows/**']
   pull_request:
     branches: [main]
-    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/ex_ssl_*', '.github/workflows/**']
+    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/migration/**', 'scripts/ex_ssl_*', '.github/workflows/**']
 
   workflow_dispatch: {}
 
@@ -86,3 +86,51 @@ jobs:
         env:
           MIX_ENV: test
         run: mix test apps/${{ matrix.app }}/test --only integration
+
+  migration:
+    name: QUIC migration (${{ matrix.mode }})
+    needs: changes
+    if: needs.changes.outputs.has_changes == 'true' && (contains(fromJSON(needs.changes.outputs.apps), 'elixir_quic') || contains(fromJSON(needs.changes.outputs.apps), 'abyss'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [standalone, abyss]
+    env:
+      MIX_ENV: test
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - name: Set up pinned independent migration peer runner
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.6.17'
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: migration-${{ matrix.mode }}-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs', 'apps/*/mix.exs') }}
+      - name: Check migration harness controls
+        run: python3 -m unittest discover -s scripts/migration -p 'test_*.py' -v
+      - name: Prepare source migration listeners
+        run: |
+          mix deps.get --check-locked
+          mix format --check-formatted scripts/migration/gate.exs
+          mix compile --warnings-as-errors
+      - name: Require independent migration traffic and cleanup receipts
+        shell: bash
+        run: python3 scripts/migration/gate.py --mode "${{ matrix.mode }}" --timeout 30 | tee "$RUNNER_TEMP/migration-${{ matrix.mode }}.jsonl"
+      - name: Preserve migration receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-${{ matrix.mode }}-${{ github.sha }}
+          path: ${{ runner.temp }}/migration-${{ matrix.mode }}.jsonl
+          if-no-files-found: error

@@ -53,7 +53,10 @@ Selecting ExSSL for TCP does not change the QUIC TLS path. A non-`nil` TCP
 
 ## Application and selector boundary
 
-`Quic` provides raw QUIC streams and optional unreliable DATAGRAMs. Application
+`Quic` provides raw QUIC streams, optional unreliable DATAGRAMs and authenticated
+peer migration on established servers (`migration: %{peer: [:server], local: []}`).
+See the [server migration contract](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/quic/consumer-contract.md#server-peer-migration).
+Application
 ALPN is opaque metadata; the transport does not dispatch HTTP/3 from `h3`.
 `QuicHttp3` is a separate HTTP/3 application package with independent
 capability reporting:
@@ -63,7 +66,7 @@ capability reporting:
   `qpack_profile: :static_literal` and Huffman support.
 - Fetch and EventSource support explicit verified HTTPS `http_version: :http3`
   through the supervised runtime, without protocol fallback.
-- Dynamic QPACK, 0-RTT, migration, WebSocket over HTTP/3 and WebTransport remain
+- Dynamic QPACK, 0-RTT, HTTP client migration, WebSocket over HTTP/3 and WebTransport remain
   unsupported. The profile advertises zero dynamic capacity and blocked streams.
 
 The [Fetch contract](http3-fetch-contract.md) defines upload acknowledgements,

@@ -1,7 +1,8 @@
 # QUIC connection migration, resumption, and early data
 
-Status: proposed for user approval. This document records a staged feature design,
-not an implementation or interoperability claim.
+Status: approved by the user on 2026-11-07; M1 implementation authorized.
+This document records a staged feature design, not an implementation or
+interoperability claim.
 
 Baseline: `main` at `1d815a4e0c82f697f7ef689f9b06a1a0e1ef19da`.
 The previous DATAGRAM RC and its test repairs are complete. This work starts from

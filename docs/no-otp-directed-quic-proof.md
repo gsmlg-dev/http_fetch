@@ -1,7 +1,8 @@
 # Directed QUIC callable-origin review
 
-This review covers Q1–Q4, the 28 `elixir_quic` occurrences in the
-[production inventory](no-otp-release-dispatch-inventory.csv). It follows the
+This review covers Q1–Q4: the 28 original `elixir_quic` occurrences in the
+[production inventory](no-otp-release-dispatch-inventory.csv), plus the two
+reviewed M1 path-clock occurrences numbered 176 and 177. It follows the
 actual constructors and state transitions used by the public QUIC operations.
 The [source binding](no-otp-directed-quic-proof.json) identifies the reviewed
 inputs and original compiled occurrences. It does not remove generic findings
@@ -49,10 +50,10 @@ production caller of `Connection.start/1`.
 
 `Connection.init/1` stores the tuple as `adapter` and `writer`. No subsequent
 state update writes `adapter`; timer, recovery, idle, closing, draining and send
-failure paths retain it. All 19 connection dispatches therefore select
+failure paths retain it. All 21 current connection dispatches therefore select
 `GenUDP` or `ExternalWriter`, including the monotonic-time queries used after
 an IO failure. Endpoint retry output uses the retained `io_module`, accounting
-for the twentieth Q2 occurrence.
+for the twenty-second Q2 occurrence.
 
 `GenUDP` uses `:gen_udp`, `:inet`, process messages and the owned cleanup API.
 Its clock is `System.monotonic_time/1`. `ExternalWriter` uses the same clock
@@ -95,11 +96,12 @@ CRYPTO fragments and negotiated metadata do not supply a module selector.
 
 ## Evidence and remaining acceptance
 
-All selected sources match the package sources in CI artifact `13119243608`
+The original selected sources matched the package sources in CI artifact `13119243608`
 at `524edb2`. The full production-source census binds the caller searches and
 the absence of library alternatives to this revision. Hashes detect drift;
 the constructor, retention and built-in-body derivations above supply the
-actual origin proof.
+actual origin proof. The amendments below bind subsequent source revisions;
+the historical artifact does not cover those amended bytes.
 
 The original 28 compiled findings remain in the strict audit. This source
 review is ready for the directed release gate to bind it to actual BEAMs;
@@ -124,3 +126,54 @@ preserving historical artifact/check/census/BEAM metadata. The complete fresh
 inventory remains 175 sites in 350 BEAMs, with a one-to-one mapping to IDs 1–175.
 Collection traffic passed all 35 TLS1.3 scenarios; its raw static failure remains
 visible. Strict release gates must independently bind the current source/BEAMs.
+
+## 2026-11-07 source review amendment: M1 peer migration
+
+The working source based on `91c18288b86b86634890de36fc0ac929eab8b6fd`
+adds authenticated server peer migration. The JSON source hashes and release
+bundle bind the reviewed bytes, including the two new production modules
+`Quic.Paths` and `Quic.LocalCIDs`; no immutable amended source commit or
+published-release acceptance is asserted here. The complete original
+nine-package production-source census is now 246 files. Other package proof
+inputs and the reviewed configuration remain unchanged.
+
+Q2's constructors are unchanged. `Endpoint.open_io/2` still produces only the
+literal `GenUDP` or `ExternalWriter` tuple, and connection initialization still
+retains it without later selector assignment. Both new dispatches query that
+retained adapter's monotonic clock: the path validation timeout in
+`handle_event/4` (inventory ID 176) and deadline calculation in `path_timer/1`
+(ID 177). Path/CID bytes, arrival addresses, packet numbers, validation timers
+and generation messages are data; none writes an adapter or callback field.
+
+The existing send eligibility clock moves from `flush/1` to `eligible_send/1`;
+the receive clock moves from `receive_packet/4` to `receive_authenticated/6`;
+and `local_send/2` gains a path argument as `local_send/3`. Their retained
+selector origins and effects remain covered by Q2. The amendment records exact
+raw BEAM annotation lines and owning MFAs for every moved original occurrence.
+All 175 original global inventory IDs are preserved; the exact reviewed set is
+IDs 1–177, with 30 QUIC sites and no silently discharged raw finding.
+
+The new path/local-CID modules and the changed peer-CID, IO accounting,
+codec, scheduler and recovery bodies introduce no unresolved dispatch or OTP
+SSL import. Recovery's congestion operations still resolve to the finite
+literal `NewReno` implementation. Scheduler TLS option projection preserves the
+existing Q4 constructor. Cleanup and the external writer retain Q1/Q3's
+original capability and callback origins.
+
+Independent inspection of the existing root test build finds 45 QUIC BEAMs,
+30 raw dynamic-call findings, no direct OTP `:ssl` import and no missing
+abstract code. This is a QUIC-only build observation, not a whole-release
+acceptance result. Historical artifact, checks, census and BEAM hashes remain
+available; current observations are separately recorded in the amendment.
+Strict candidate and published-release gates must still independently bind
+the complete production source census and actual release BEAMs to these exact
+reviewed occurrences, retaining all raw static findings and other checks.
+
+Final type-contract verification tightens IO constructor/path-ledger shapes and
+Recovery constructor/default-controller/ACK-space/result shapes. Independent
+comparison confirms that IO and Recovery runtime ASTs are unchanged; their
+five standalone pure suites pass all 59 cases and isolated Dialyzer reports
+zero warnings. The final capability-type adjustment is also behavior preserving.
+Current source hashes include these type edits. The root-build observation
+above predates the final type-only edits; final whole-release compilation and
+strict candidate/published binding remain required.

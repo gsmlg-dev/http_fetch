@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.6] - 2026-11-07
+
+### Added
+- Accept authenticated client NAT rebinding and IP migration on established
+  Quic and Abyss server connections, preserving streams and operation handles.
+  Bound path validation, amplification reservations, congestion/RTT controllers,
+  and local/peer CID issuance and retirement. Report the server-only capability
+  and public path/resource observations; local migration and 0-RTT remain deferred.
+- Require pinned independent UDP port/IP migration, exact STREAM bytes/FIN,
+  DATAGRAM continuity, wire CID separation, concurrent listener isolation and
+  cleanup in source, candidate-package and published-package gates.
+
 ## [1.0.0-rc.5] - 2026-11-07
 
 ### Added

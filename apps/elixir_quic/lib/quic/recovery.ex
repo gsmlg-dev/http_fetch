@@ -11,6 +11,11 @@ defmodule Quic.Recovery do
   space. A monotonic receive floor discards older packet numbers, including
   previously unseen delayed packets; reliable data can be retransmitted under
   a fresh packet number. Discarding an encryption space resets its receive epoch.
+
+  Packet-number spaces stay global across migration. Each reserved packet pins
+  its send path, and at most two independent RTT/congestion controllers remain
+  live. The selected controller occupies `rtt`/`congestion` for compatibility;
+  `paths` stores only its one inactive peer. Cross-path ACKs do not sample RTT.
   """
 
   alias Quic.Congestion.NewReno
@@ -20,6 +25,9 @@ defmodule Quic.Recovery do
   defstruct spaces: %{},
             rtt: nil,
             congestion: nil,
+            active_path: :default,
+            paths: %{},
+            path_defaults: nil,
             max_sent_packets: 4096,
             max_ack_ranges: 256,
             timer_generation: 0,
@@ -27,7 +35,18 @@ defmodule Quic.Recovery do
 
   defmodule Packet do
     @moduledoc false
-    defstruct [:number, :space, :status, :bytes, :sent_at, :metadata, :acked_at, :lost_at]
+    defstruct [
+      :number,
+      :space,
+      :status,
+      :bytes,
+      :sent_at,
+      :metadata,
+      :acked_at,
+      :lost_at,
+      path_id: :default
+    ]
+
     @type t :: %__MODULE__{}
   end
 
@@ -52,9 +71,12 @@ defmodule Quic.Recovery do
               max_ack_delay: 25_000,
               ack_delay_exponent: 3,
               pto_count: 0
+
+    @type t :: %__MODULE__{}
   end
 
   @type initial_state :: %Quic.Recovery{
+          active_path: path_id(),
           congestion: %Quic.Congestion.NewReno{
             acked_bytes: 0,
             bytes_in_flight: 0,
@@ -66,6 +88,8 @@ defmodule Quic.Recovery do
           deadline: nil,
           max_ack_ranges: 1..256,
           max_sent_packets: term(),
+          path_defaults: %{rtt: RTT.t(), congestion: NewReno.initial_state()},
+          paths: %{},
           rtt: %Quic.Recovery.RTT{
             ack_delay_exponent: term(),
             latest: nil,
@@ -93,24 +117,146 @@ defmodule Quic.Recovery do
 
     spaces = Map.new(@spaces, &{&1, %Space{}})
 
+    congestion = NewReno.new(opts)
+
     %__MODULE__{
       spaces: spaces,
       rtt: rtt,
-      congestion: NewReno.new(opts),
+      congestion: congestion,
+      active_path: Keyword.get(opts, :path, :default),
+      path_defaults: %{rtt: rtt, congestion: congestion},
       max_sent_packets: Keyword.get(opts, :max_sent_packets, 4096),
       max_ack_ranges: max_ack_ranges
     }
   end
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{path_defaults: path_controller()}
+  @type path_id :: term()
+  @type packet_space :: :initial | :handshake | :application
+  @type path_controller :: %{rtt: RTT.t(), congestion: NewReno.t()}
+  @type ack_result :: %{
+          acked: [non_neg_integer()],
+          lost: [{packet_space(), non_neg_integer()}],
+          rtt_sample: pos_integer() | nil
+        }
+
+  @doc "The selected send path; packet-number spaces are shared by all paths."
+  @spec selected_path(t()) :: path_id()
+  def selected_path(%__MODULE__{} = state), do: state.active_path
+
+  @doc "An independent path controller, or nil after retirement."
+  @spec path(t(), path_id()) :: path_controller() | nil
+  def path(%__MODULE__{active_path: id} = state, id),
+    do: %{rtt: state.rtt, congestion: state.congestion}
+
+  def path(%__MODULE__{} = state, id), do: Map.get(state.paths, id)
+
+  @doc "Install connection-wide peer ACK parameters without copying RTT estimates."
+  @spec configure_peer_ack(t(), non_neg_integer(), 0..20) ::
+          {:ok, t()} | {:error, :invalid_ack_parameters}
+  def configure_peer_ack(%__MODULE__{} = state, max_delay, exponent)
+      when is_integer(max_delay) and max_delay >= 0 and exponent in 0..20 do
+    configure = fn controller ->
+      %{
+        controller
+        | rtt: %{controller.rtt | max_ack_delay: max_delay, ack_delay_exponent: exponent}
+      }
+    end
+
+    state =
+      Enum.reduce([state.active_path | Map.keys(state.paths)], state, fn id, state ->
+        update_path(state, id, configure)
+      end)
+
+    {:ok, arm(%{state | path_defaults: configure.(state.path_defaults)})}
+  end
+
+  def configure_peer_ack(_state, _max_delay, _exponent), do: {:error, :invalid_ack_parameters}
+
+  @spec add_path(t(), path_id()) :: {:ok, t()} | {:error, :path_limit}
+  def add_path(%__MODULE__{} = state, id) do
+    rtt = %{
+      state.path_defaults.rtt
+      | max_ack_delay: state.rtt.max_ack_delay,
+        ack_delay_exponent: state.rtt.ack_delay_exponent
+    }
+
+    defaults = %{state.path_defaults | rtt: rtt}
+
+    cond do
+      path(state, id) != nil -> {:ok, state}
+      map_size(state.paths) >= 1 -> {:error, :path_limit}
+      true -> {:ok, %{state | paths: Map.put(state.paths, id, defaults)}}
+    end
+  end
+
+  @spec select_path(t(), path_id()) :: {:ok, t()} | {:error, :unknown_path}
+  def select_path(%__MODULE__{active_path: id} = state, id), do: {:ok, state}
+
+  def select_path(%__MODULE__{} = state, id) do
+    case Map.pop(state.paths, id) do
+      {nil, _} ->
+        {:error, :unknown_path}
+
+      {controller, paths} ->
+        paths = Map.put(paths, state.active_path, path(state, state.active_path))
+
+        {:ok,
+         arm(%{
+           state
+           | paths: paths,
+             active_path: id,
+             rtt: controller.rtt,
+             congestion: controller.congestion
+         })}
+    end
+  end
+
+  @spec drop_path(t(), path_id()) ::
+          {:ok, t()} | {:error, :active_path | :unknown_path | :path_busy}
+  def drop_path(%__MODULE__{} = state, id) do
+    cond do
+      id == state.active_path ->
+        {:error, :active_path}
+
+      path(state, id) == nil ->
+        {:error, :unknown_path}
+
+      live_path_packets?(state, id) ->
+        {:error, :path_busy}
+
+      true ->
+        spaces =
+          Map.new(state.spaces, fn {space, s} ->
+            packets =
+              Map.new(s.sent, fn {number, packet} ->
+                {number, retire_path_packet(packet, id)}
+              end)
+
+            {space, %{s | sent: packets}}
+          end)
+
+        {:ok, arm(%{state | paths: Map.delete(state.paths, id), spaces: spaces})}
+    end
+  end
+
+  defp retire_path_packet(%Packet{path_id: id, status: :sent} = packet, id),
+    do: %{packet | status: :discarded, metadata: terminal_metadata(packet.metadata)}
+
+  defp retire_path_packet(packet, _id), do: packet
 
   @doc "Current probe timeout duration in microseconds, before PTO backoff."
   @spec pto_duration(t()) :: pos_integer()
-  def pto_duration(state) do
-    (state.rtt.smoothed || @default_rtt) +
-      max(1000, 4 * (state.rtt.variance || div(@default_rtt, 2))) +
+  def pto_duration(state), do: pto_duration(state, state.active_path)
+
+  @spec pto_duration(t(), path_id()) :: pos_integer()
+  def pto_duration(state, id) do
+    controller = path(state, id)
+
+    (controller.rtt.smoothed || @default_rtt) +
+      max(1000, 4 * (controller.rtt.variance || div(@default_rtt, 2))) +
       if(Enum.any?(state.spaces, fn {space, _} -> space == :application end),
-        do: state.rtt.max_ack_delay,
+        do: controller.rtt.max_ack_delay,
         else: 0
       )
   end
@@ -131,17 +277,24 @@ defmodule Quic.Recovery do
       if map_size(s.sent) >= state.max_sent_packets do
         {:error, :sent_history_limit}
       else
-        with {:ok, congestion} <- NewReno.reserve(state.congestion, bytes) do
+        id = Map.get(metadata, :path_id, state.active_path)
+
+        with %{congestion: congestion} = controller <- path(state, id),
+             {:ok, congestion} <- NewReno.reserve(congestion, bytes) do
           packet = %Packet{
             number: s.next,
             space: space,
             status: :reserved,
             bytes: bytes,
-            metadata: metadata
+            metadata: Map.put(metadata, :path_id, id),
+            path_id: id
           }
 
-          state = %{state | congestion: congestion}
+          state = put_path(state, id, %{controller | congestion: congestion})
           {:ok, put_packet(state, space, packet, %{s | next: s.next + 1}), packet}
+        else
+          nil -> {:error, :unknown_path}
+          error -> error
         end
       end
     end
@@ -163,25 +316,27 @@ defmodule Quic.Recovery do
   @doc false
   def abort_reservations_since(state, before) do
     {spaces, released} =
-      Enum.reduce(@spaces, {%{}, 0}, fn space, {spaces, released} ->
+      Enum.reduce(@spaces, {%{}, %{}}, fn space, {spaces, released} ->
         cutoff = before.spaces[space].next
         current = state.spaces[space]
 
-        {sent, bytes} =
-          Enum.map_reduce(current.sent, 0, fn {number, packet}, bytes ->
+        {sent, {bytes, aborted}} =
+          Enum.map_reduce(current.sent, {%{}, []}, fn {number, packet}, {bytes, aborted} ->
             if number >= cutoff and packet.status in [:reserved, :queued] do
               {{number,
                 %{packet | status: :failed, metadata: terminal_metadata(packet.metadata)}},
-               bytes + packet.bytes}
+               {add_bytes(bytes, packet.path_id, packet.bytes), [number | aborted]}}
             else
-              {{number, packet}, bytes}
+              {{number, packet}, {bytes, aborted}}
             end
           end)
 
-        {Map.put(spaces, space, %{current | sent: Map.new(sent)}), released + bytes}
+        pending = Enum.reduce(aborted, current.pending_acks, &MapSet.delete(&2, &1))
+        next = %{current | sent: Map.new(sent), pending_acks: pending}
+        {Map.put(spaces, space, next), merge_bytes(released, bytes)}
       end)
 
-    arm(%{state | spaces: spaces, congestion: NewReno.release(state.congestion, released)})
+    arm(apply_congestion(%{state | spaces: spaces}, released, :release))
   end
 
   @spec transition(t(), atom(), non_neg_integer(), atom()) :: {:ok, t()} | {:error, atom()}
@@ -233,7 +388,7 @@ defmodule Quic.Recovery do
 
       state =
         if status == :acked,
-          do: %{state | congestion: NewReno.on_ack(state.congestion, packet.bytes)},
+          do: apply_congestion(state, %{packet.path_id => packet.bytes}, :on_ack),
           else: state
 
       {:ok, arm(state), [status]}
@@ -259,21 +414,27 @@ defmodule Quic.Recovery do
       s = state.spaces[space]
       s = %{s | pending_acks: MapSet.delete(s.pending_acks, number)}
       state = put_packet(state, space, %{packet | status: :failed}, s)
-      {:ok, %{state | congestion: NewReno.release(state.congestion, packet.bytes)}, [:failed]}
+      {:ok, apply_congestion(state, %{packet.path_id => packet.bytes}, :release), [:failed]}
     else
       false -> {:error, :invalid_packet_state}
       error -> error
     end
   end
 
-  @spec receive_ack(t(), atom(), map(), integer()) :: {:ok, t(), map()} | {:error, atom()}
-  def receive_ack(%{spaces: %{initial: %{retired: true}}}, :initial, _ack, _at),
+  @spec receive_ack(t(), packet_space(), map(), integer()) ::
+          {:ok, t(), ack_result()} | {:error, atom()}
+  def receive_ack(state, space, ack, at),
+    do: receive_ack(state, space, ack, at, state.active_path)
+
+  @spec receive_ack(t(), packet_space(), map(), integer(), path_id()) ::
+          {:ok, t(), ack_result()} | {:error, atom()}
+  def receive_ack(%{spaces: %{initial: %{retired: true}}}, :initial, _ack, _at, _path),
     do: {:error, :retired_space}
 
-  def receive_ack(%{spaces: %{handshake: %{retired: true}}}, :handshake, _ack, _at),
+  def receive_ack(%{spaces: %{handshake: %{retired: true}}}, :handshake, _ack, _at, _path),
     do: {:error, :retired_space}
 
-  def receive_ack(state, space, ack, at)
+  def receive_ack(state, space, ack, at, receive_path)
       when space in @spaces and is_map(ack) and is_integer(at) do
     with {:ok, ranges} <-
            normalize_ranges(ack[:ranges] || [], state.max_ack_ranges),
@@ -283,8 +444,8 @@ defmodule Quic.Recovery do
 
       space_state = %{space_state | largest_acked: max(space_state.largest_acked, largest)}
       state = %{state | spaces: Map.put(state.spaces, space, space_state)}
-      {state, sample} = update_rtt(state, space, ack, acked, at)
-      state = %{state | congestion: NewReno.on_ack(state.congestion, newly_acked_bytes)}
+      {state, sample} = update_rtt(state, space, ack, acked, at, receive_path)
+      state = apply_congestion(state, newly_acked_bytes, :on_ack)
       {state, threshold_lost} = detect_packet_threshold(state, space, largest)
       {:ok, arm(state), %{acked: acked, lost: threshold_lost, rtt_sample: sample}}
     end
@@ -339,9 +500,10 @@ defmodule Quic.Recovery do
     current = state.spaces[space]
 
     {sent, released} =
-      Enum.reduce(current.sent, {%{}, 0}, fn {number, packet}, {packets, bytes} ->
+      Enum.reduce(current.sent, {%{}, %{}}, fn {number, packet}, {packets, bytes} ->
         if packet.status in [:reserved, :queued, :sent] do
-          {Map.put(packets, number, %{packet | status: :discarded}), bytes + packet.bytes}
+          {Map.put(packets, number, %{packet | status: :discarded}),
+           add_bytes(bytes, packet.path_id, packet.bytes)}
         else
           {Map.put(packets, number, packet), bytes}
         end
@@ -356,12 +518,8 @@ defmodule Quic.Recovery do
         largest_received: -1
     }
 
-    arm(%{
-      state
-      | spaces: Map.put(state.spaces, space, next),
-        congestion: NewReno.release(state.congestion, released),
-        rtt: %{state.rtt | pto_count: 0}
-    })
+    state = %{state | spaces: Map.put(state.spaces, space, next)}
+    state |> apply_congestion(released, :release) |> reset_pto_counts() |> arm()
   end
 
   @doc "Permanently retire Initial/Handshake recovery, preserving the next packet number."
@@ -373,18 +531,16 @@ defmodule Quic.Recovery do
       state
     else
       released =
-        Enum.reduce(current.sent, 0, fn {_number, packet}, acc ->
-          if packet.status in [:reserved, :queued, :sent], do: acc + packet.bytes, else: acc
+        Enum.reduce(current.sent, %{}, fn {_number, packet}, acc ->
+          if packet.status in [:reserved, :queued, :sent],
+            do: add_bytes(acc, packet.path_id, packet.bytes),
+            else: acc
         end)
 
       next = %Space{next: current.next, retired: true}
 
-      arm(%{
-        state
-        | spaces: Map.put(state.spaces, space, next),
-          congestion: NewReno.release(state.congestion, released),
-          rtt: %{state.rtt | pto_count: 0}
-      })
+      state = %{state | spaces: Map.put(state.spaces, space, next)}
+      state |> apply_congestion(released, :release) |> reset_pto_counts() |> arm()
     end
   end
 
@@ -394,7 +550,7 @@ defmodule Quic.Recovery do
       for {_space, s} <- state.spaces,
           {number, p} <- s.sent,
           p.status == :sent and is_integer(p.sent_at) and number <= s.largest_acked,
-          do: p.sent_at + loss_delay(state)
+          do: p.sent_at + loss_delay(state, p.path_id)
 
     deadline =
       case loss_times do
@@ -427,9 +583,16 @@ defmodule Quic.Recovery do
       end
 
     state =
-      if probes == [],
-        do: state,
-        else: %{state | rtt: %{state.rtt | pto_count: min(16, state.rtt.pto_count + 1)}}
+      Enum.reduce(probes, state, fn {space, number}, state ->
+        id = state.spaces[space].sent[number].path_id
+
+        update_path(state, id, fn controller ->
+          %{
+            controller
+            | rtt: %{controller.rtt | pto_count: min(16, controller.rtt.pto_count + 1)}
+          }
+        end)
+      end)
 
     next = arm(state)
 
@@ -530,12 +693,14 @@ defmodule Quic.Recovery do
     # Range widths grow with connection lifetime; work is bounded by retained
     # packet records and the validated range count, never by the numeric span.
     {space, acked, bytes} =
-      Enum.reduce(space.sent, {space, [], 0}, fn {n, packet}, {s, nums, bytes} = acc ->
+      Enum.reduce(space.sent, {space, [], %{}}, fn {n, packet}, {s, nums, bytes} = acc ->
         if Enum.any?(ranges, fn {lo, hi} -> n >= lo and n <= hi end) do
           case packet do
             %Packet{status: :sent} = p ->
               p = %{p | status: :acked, acked_at: at, metadata: terminal_metadata(p.metadata)}
-              {%{s | sent: Map.put(s.sent, n, p)}, [n | nums], bytes + p.bytes}
+
+              {%{s | sent: Map.put(s.sent, n, p)}, [n | nums],
+               add_bytes(bytes, p.path_id, p.bytes)}
 
             %Packet{status: status} = p when status in [:lost, :superseded] ->
               p = %{p | status: :acked, acked_at: at, metadata: terminal_metadata(p.metadata)}
@@ -571,21 +736,26 @@ defmodule Quic.Recovery do
     |> Enum.reverse()
   end
 
-  defp update_rtt(state, space, ack, acked, at) do
+  defp update_rtt(state, space, ack, acked, at, receive_path) do
+    controller = path(state, receive_path)
+
     {latest, sample} =
-      case Enum.find(acked, fn n -> state.spaces[space].sent[n].sent_at end) do
+      case Enum.find(acked, fn n ->
+             packet = state.spaces[space].sent[n]
+             controller != nil and packet.path_id == receive_path and packet.sent_at != nil
+           end) do
         nil ->
           {nil, nil}
 
         n ->
           latest = max(1, at - state.spaces[space].sent[n].sent_at)
-          min_rtt = if state.rtt.min, do: min(state.rtt.min, latest), else: latest
+          min_rtt = if controller.rtt.min, do: min(controller.rtt.min, latest), else: latest
 
           delay =
             if space == :application do
               min(
-                max(0, ack[:delay] || 0) * Integer.pow(2, state.rtt.ack_delay_exponent),
-                state.rtt.max_ack_delay
+                max(0, ack[:delay] || 0) * Integer.pow(2, controller.rtt.ack_delay_exponent),
+                controller.rtt.max_ack_delay
               )
             else
               0
@@ -597,7 +767,11 @@ defmodule Quic.Recovery do
 
     if sample == nil,
       do: {state, nil},
-      else: {%{state | rtt: update_rtt_sample(state.rtt, latest, sample)}, latest}
+      else:
+        {put_path(state, receive_path, %{
+           controller
+           | rtt: update_rtt_sample(controller.rtt, latest, sample)
+         }), latest}
   end
 
   defp update_rtt_sample(rtt, latest, sample) do
@@ -614,27 +788,21 @@ defmodule Quic.Recovery do
   end
 
   defp detect_loss(state, now) do
-    threshold = loss_delay(state)
-
     Enum.reduce(@spaces, {state, []}, fn space, {st, lost} ->
       s = st.spaces[space]
 
       {s, nums, bytes} =
-        Enum.reduce(s.sent, {s, [], 0}, fn {n, p}, {ss, ns, b} ->
+        Enum.reduce(s.sent, {s, [], %{}}, fn {n, p}, {ss, ns, b} ->
           if p.status == :sent and is_integer(p.sent_at) and n <= s.largest_acked and
-               now - p.sent_at >= threshold,
+               now - p.sent_at >= loss_delay(st, p.path_id),
              do:
                {%{ss | sent: Map.put(ss.sent, n, %{p | status: :lost, lost_at: now})}, [n | ns],
-                b + p.bytes},
+                add_bytes(b, p.path_id, p.bytes)},
              else: {ss, ns, b}
         end)
 
-      {%{
-         st
-         | spaces: Map.put(st.spaces, space, s),
-           congestion:
-             if(bytes > 0, do: NewReno.on_loss(st.congestion, bytes), else: st.congestion)
-       }, lost ++ Enum.map(nums, &{space, &1})}
+      st = apply_congestion(%{st | spaces: Map.put(st.spaces, space, s)}, bytes, :on_loss)
+      {st, lost ++ Enum.map(nums, &{space, &1})}
     end)
   end
 
@@ -643,26 +811,26 @@ defmodule Quic.Recovery do
     s = state.spaces[space]
 
     {s, nums, bytes} =
-      Enum.reduce(s.sent, {s, [], 0}, fn {n, p}, {ss, ns, b} ->
+      Enum.reduce(s.sent, {s, [], %{}}, fn {n, p}, {ss, ns, b} ->
         if p.status == :sent and threshold >= 0 and n <= threshold,
-          do: {%{ss | sent: Map.put(ss.sent, n, %{p | status: :lost})}, [n | ns], b + p.bytes},
+          do:
+            {%{ss | sent: Map.put(ss.sent, n, %{p | status: :lost})}, [n | ns],
+             add_bytes(b, p.path_id, p.bytes)},
           else: {ss, ns, b}
       end)
 
-    {%{
-       state
-       | spaces: Map.put(state.spaces, space, s),
-         congestion:
-           if(bytes > 0, do: NewReno.on_loss(state.congestion, bytes), else: state.congestion)
-     }, Enum.map(nums, &{space, &1})}
+    state = apply_congestion(%{state | spaces: Map.put(state.spaces, space, s)}, bytes, :on_loss)
+    {state, Enum.map(nums, &{space, &1})}
   end
 
-  defp loss_delay(state),
-    do:
-      max(
-        1000,
-        div(max(state.rtt.latest || @default_rtt, state.rtt.smoothed || @default_rtt) * 9 + 7, 8)
-      )
+  defp loss_delay(state, id) do
+    rtt = path(state, id).rtt
+
+    max(
+      1000,
+      div(max(rtt.latest || @default_rtt, rtt.smoothed || @default_rtt) * 9 + 7, 8)
+    )
+  end
 
   defp pto_candidates(state) do
     Enum.flat_map(@spaces, fn space ->
@@ -674,20 +842,64 @@ defmodule Quic.Recovery do
               Map.get(&1.metadata, :ack_eliciting, true))
         )
 
-      case sent do
-        [] ->
-          []
+      sent
+      |> Enum.group_by(& &1.path_id)
+      |> Enum.map(fn {id, packets} ->
+        rtt = path(state, id).rtt
 
-        packets ->
-          base =
-            (state.rtt.smoothed || @default_rtt) +
-              max(1000, 4 * (state.rtt.variance || div(@default_rtt, 2))) +
-              if(space == :application, do: state.rtt.max_ack_delay, else: 0)
+        base =
+          (rtt.smoothed || @default_rtt) +
+            max(1000, 4 * (rtt.variance || div(@default_rtt, 2))) +
+            if(space == :application, do: rtt.max_ack_delay, else: 0)
 
-          latest = packets |> Enum.map(& &1.sent_at) |> Enum.max()
-          oldest = Enum.min_by(packets, & &1.sent_at)
-          [{latest + base * Integer.pow(2, state.rtt.pto_count), space, oldest.number}]
-      end
+        latest = packets |> Enum.map(& &1.sent_at) |> Enum.max()
+        oldest = Enum.min_by(packets, & &1.sent_at)
+        {latest + base * Integer.pow(2, rtt.pto_count), space, oldest.number}
+      end)
+    end)
+  end
+
+  defp live_path_packets?(state, id) do
+    Enum.any?(state.spaces, fn {_space, s} ->
+      Enum.any?(s.sent, fn {_number, packet} ->
+        packet.path_id == id and
+          (packet.status in [:reserved, :queued] or
+             (packet.status == :sent and
+                (packet.bytes > 0 or Map.get(packet.metadata, :ack_eliciting, true))))
+      end)
+    end)
+  end
+
+  defp put_path(%{active_path: id} = state, id, controller),
+    do: %{state | rtt: controller.rtt, congestion: controller.congestion}
+
+  defp put_path(state, id, controller),
+    do: %{state | paths: Map.put(state.paths, id, controller)}
+
+  defp update_path(state, id, fun) do
+    case path(state, id) do
+      nil -> state
+      controller -> put_path(state, id, fun.(controller))
+    end
+  end
+
+  defp apply_congestion(state, by_path, operation) do
+    Enum.reduce(by_path, state, fn {id, bytes}, state ->
+      update_path(state, id, fn controller ->
+        %{controller | congestion: apply(NewReno, operation, [controller.congestion, bytes])}
+      end)
+    end)
+  end
+
+  defp add_bytes(by_path, _id, 0), do: by_path
+  defp add_bytes(by_path, id, bytes), do: Map.update(by_path, id, bytes, &(&1 + bytes))
+  defp merge_bytes(left, right), do: Map.merge(left, right, fn _id, a, b -> a + b end)
+
+  defp reset_pto_counts(state) do
+    Enum.reduce([state.active_path | Map.keys(state.paths)], state, fn id, state ->
+      update_path(state, id, fn controller ->
+        %{controller | rtt: %{controller.rtt | pto_count: 0}}
+      end)
     end)
   end
 end

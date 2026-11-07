@@ -284,6 +284,7 @@ defmodule Quic.KeyRetirementTest do
       idle_send_allowed: true,
       budget: budget,
       remote: {{127, 0, 0, 1}, 443},
+      paths: Quic.Paths.new(:server, nil, {{127, 0, 0, 1}, 443}, true),
       adapter: RecordingWriter,
       writer: self(),
       generation: generation,

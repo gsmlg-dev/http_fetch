@@ -35,6 +35,14 @@ def expected_output(apps, manual=False, candidate=False):
 
 
 class SelectionTest(unittest.TestCase):
+    def test_migration_tool_changes_select_engine_server_and_affected_consumers(self):
+        for name in ("peer.py", "gate.py", "gate.exs", "test_peer.py"):
+            paths = [f"scripts/migration/{name}"]
+            self.assertTrue(changed_apps.candidate_tls_required(paths))
+            for workflow in WORKFLOWS:
+                self.assertEqual(select_apps(paths, workflow),
+                                 ["elixir_quic", "elixir_quic_http3", *H2_CONSUMERS, "abyss", "hell"])
+
     def test_tls_tooling_changes_select_shared_consumers_and_candidate_tls(self):
         for path in ("scripts/tls_migration_performance.py",
                      "scripts/tls_migration_performance.exs",
@@ -240,6 +248,37 @@ class SelectionTest(unittest.TestCase):
 
 
 class WorkflowContractTest(unittest.TestCase):
+    def test_migration_gates_are_automatic_required_and_keep_consumer_proof(self):
+        root = SCRIPT.parents[2]
+        for workflow in WORKFLOWS:
+            text = (root / ".github/workflows" / workflow).read_text()
+            for event in ("push", "pull_request"):
+                block = re.search(rf"(?m)^  {event}:\n((?:    .*\n)+)", text).group(1)
+                self.assertIn("'scripts/migration/**'", block)
+        integration = (root / ".github/workflows/integration.yml").read_text().split("\n  migration:\n")[1]
+        self.assertIn("mode: [standalone, abyss]", integration)
+        self.assertIn("contains(fromJSON(needs.changes.outputs.apps), 'elixir_quic')", integration)
+        self.assertIn("contains(fromJSON(needs.changes.outputs.apps), 'abyss')", integration)
+        self.assertIn("version: '0.6.17'", integration)
+        self.assertIn("scripts/migration/gate.py --mode", integration)
+        self.assertIn("scripts/migration/gate.exs", integration)
+        self.assertIn("if-no-files-found: error", integration)
+        self.assertNotIn("HTTP_FETCH_CI_APP", integration)
+        self.assertNotIn("continue-on-error", integration)
+        ci = (root / ".github/workflows/ci.yml").read_text()
+        step = next(step for step in ci.split("      - name: ")
+                    if step.startswith("Check migration harness and consumer routing regressions\n"))
+        self.assertIn("unittest discover -s scripts/migration", step)
+        self.assertNotIn("full_gate", step)
+        release = (root / ".github/workflows/release.yml").read_text()
+        for mode in ("standalone", "abyss"):
+            command = f"python3 scripts/migration/gate.py --mode {mode} --timeout 30"
+            self.assertIn(command, release)
+            self.assertLess(release.index(command), release.index("- name: Publish and verify packages"))
+        self.assertIn("unittest discover -s scripts/migration", release)
+        self.assertIn("scripts/datagram/interop.exs scripts/migration/gate.exs", release)
+        self.assertIn('server_consumer_gate.py "$RUNNER_TEMP/archives" --mode all --published', release)
+
     def test_static_analysis_deferral_is_explicit_manual_and_keeps_other_gates_required(self):
         root = SCRIPT.parents[2]
         strict = "if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis) }}"

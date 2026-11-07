@@ -307,6 +307,12 @@ defmodule Quic.Codec do
          do: encode_frames(rest, [<<0x19, seq::binary>> | acc])
   end
 
+  defp encode_frames([%{type: type, data: data} | rest], acc)
+       when type in [:path_challenge, :path_response] and is_binary(data) and byte_size(data) == 8 do
+    wire = if type == :path_challenge, do: 0x1A, else: 0x1B
+    encode_frames(rest, [<<wire, data::binary>> | acc])
+  end
+
   defp encode_frames([_ | _], _), do: {:error, :unsupported_frame}
 
   @spec decode_frames(binary(), keyword()) :: {:ok, [map()], binary()} | {:error, atom()}
@@ -403,6 +409,17 @@ defmodule Quic.Codec do
              [%{type: :retire_connection_id, sequence: sequence} | acc],
              limit - 1
            )
+  end
+
+  defp decode_frames(<<wire, rest::binary>>, acc, limit) when wire in [0x1A, 0x1B] do
+    case rest do
+      <<data::binary-size(8), tail::binary>> ->
+        type = if wire == 0x1A, do: :path_challenge, else: :path_response
+        decode_frames(tail, [%{type: type, data: data} | acc], limit - 1)
+
+      _ ->
+        {:error, :malformed_path_frame}
+    end
   end
 
   defp decode_frames(<<0x1C, rest::binary>>, acc, limit) do
@@ -593,10 +610,12 @@ defmodule Quic.Codec do
         {:halt, {:wrong_encryption_level, :datagram, level}}
 
       %{type: type}, :ok
-      when type in [:new_connection_id, :retire_connection_id] and level == :application ->
+      when type in [:new_connection_id, :retire_connection_id, :path_challenge, :path_response] and
+             level == :application ->
         {:cont, :ok}
 
-      %{type: type}, :ok when type in [:new_connection_id, :retire_connection_id] ->
+      %{type: type}, :ok
+      when type in [:new_connection_id, :retire_connection_id, :path_challenge, :path_response] ->
         {:halt, {:wrong_encryption_level, type, level}}
 
       %{type: type}, :ok

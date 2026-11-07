@@ -274,8 +274,28 @@ application verifies ordinary UDP integration without a QUIC engine.
 ## Service limits and validation
 
 This service exposes QUIC v1 certificate-based 1-RTT bidi/uni byte streams and
-opt-in RFC 9221 DATAGRAMs. It does not expose external client endpoints,
-resumption/0-RTT, migration, or wildcard/ancillary local-address metadata.
+opt-in RFC 9221 DATAGRAMs. Established connections accept authenticated client
+port rebinding and IP migration. The engine validates new paths, applies separate
+amplification/congestion budgets, and preserves connection and stream handles.
+The handler continues using its existing connection; the shared UDP listener
+stays open. `Abyss.QUIC.info/1` exposes the selected remote and
+`migration: %{active_path: id, paths: paths}` with at most two records, including
+`validated` and `mtu_validated` flags. A short response proves reachability only;
+MTU validation requires a response to a 1200-byte probe. An initial path has no
+migration MTU certificate and reports `mtu_validated: false` until probed.
+
+Validation expires after three times the larger initial old/new PTO. A failed
+attempt restores a freshly validated path with an available peer CID, or ends
+the connection through ordinary cleanup. Pending reliable ranges recover with
+fresh packet numbers; DATAGRAMs remain unreliable. CID issuance and retirement
+are bounded, so a peer that withholds unused CIDs can prevent another migration.
+The independent localhost gate changes source port, then source IP, and retains
+a second active connection: from the umbrella root run
+`python3 scripts/migration/gate.py --mode abyss --timeout 30` after a test build.
+See the [acceptance record](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/quic/peer-migration-validation.md).
+
+This service does not expose external client endpoints, an explicit local
+migration API, resumption/0-RTT, or wildcard/ancillary local-address metadata.
 HTTP/3/QPACK, DoQ and WebTransport remain
 application-layer integrations outside this service. Finite stream tombstones
 can exhaust the lifetime stream-record budget. Recorded acceptance is scoped

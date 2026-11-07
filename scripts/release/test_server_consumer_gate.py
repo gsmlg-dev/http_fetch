@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -59,6 +60,8 @@ class ServerConsumerGateTests(unittest.TestCase):
     def test_consumer_environment_discards_inherited_workspace_and_registry(self):
         inherited = {"MIX_BUILD_PATH": "/umbrella/build", "MIX_DEPS_PATH": "/umbrella/deps",
                      "MIX_HOME": "/umbrella/mix", "ERL_LIBS": "/umbrella/lib",
+                     "ERL_FLAGS": "-pa /umbrella/ebin", "ERL_AFLAGS": "-pa /umbrella/ebin",
+                     "ERL_ZFLAGS": "-pa /umbrella/ebin",
                      "HEX_UNSAFE_REGISTRY": "1", "HEX_MIRROR": "https://wrong.example",
                      "HEX_CACHE_HOME": "/shared/cache", "HTTP_FETCH_CI_APP": "ex_ssl"}
         with patch.dict(os.environ, inherited):
@@ -148,6 +151,35 @@ class ServerConsumerGateTests(unittest.TestCase):
         self.assertIn("AbyssEchoExample.Application", source)
         for forbidden in ("path:", "override:", "in_umbrella:", "abyss_raw", "Rustler"):
             self.assertNotIn(forbidden, source)
+
+    def test_exact_quic_consumer_runs_both_migration_modes_after_hex_provenance(self):
+        versions = {name: "1.0.0-rc.6" for name in ("abyss", "elixir_quic", "ex_ssl")}
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            source = directory / "source"
+            example = source / "apps/abyss/examples/quic_echo/lib"
+            example.mkdir(parents=True)
+            (example / "application.ex").write_text("# consumer application harness")
+            with patch.object(gate, "ROOT", source), \
+                    patch.object(gate, "locked_package", return_value=("1.2.3", "0" * 64)), \
+                    patch.object(gate, "command") as command:
+                gate.verify_project(directory, "quic", versions, {"MIX_ENV": "prod"})
+            commands = [call.args[0] for call in command.call_args_list]
+            project = directory / "quic"
+            provenance = commands.index(["mix", "run", "provenance.exs"])
+            migrations = [(index, call) for index, call in enumerate(command.call_args_list)
+                          if len(call.args[0]) > 1 and call.args[0][1] == str(source / "scripts/migration/gate.py")]
+            self.assertEqual(len(migrations), 2)
+            for (index, call), mode in zip(migrations, ("standalone", "abyss")):
+                self.assertGreater(index, provenance)
+                self.assertEqual(call.args[0], [sys.executable, str(source / "scripts/migration/gate.py"),
+                                               "--project", str(project), "--mode", mode, "--timeout", "30"])
+                self.assertEqual(call.kwargs["cwd"], project)
+            manifest = (project / "mix.exs").read_text()
+            for name, version in versions.items():
+                self.assertIn(f'{{:{name}, "== {version}"}}', manifest)
+            for forbidden in ("path:", "in_umbrella:", "override:"):
+                self.assertNotIn(forbidden, manifest)
 
 
 if __name__ == "__main__":

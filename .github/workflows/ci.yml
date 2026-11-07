@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches: ["**"]
-    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/tls_migration_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
+    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/tls_migration_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/migration/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
   pull_request:
     branches: [main]
-    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/tls_migration_*', 'scripts/requirements-http2*', 'scripts/release/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
+    paths: ['apps/**', 'packages/abyss_raw/**', 'mix.exs', 'mix.lock', 'config/**', '.formatter.exs', '.credo.exs', '.dialyzer_ignore.exs', 'scripts/ci/**', 'scripts/http2_*', 'scripts/http_runtime_*', 'scripts/tls_migration_*', 'scripts/requirements-http2*', 'scripts/release/**', 'scripts/migration/**', 'docs/no-otp-*', 'scripts/ex_ssl_*', 'scripts/external_consumer_smoke.*', 'scripts/http3/**', '.github/workflows/**']
 
   workflow_dispatch:
     inputs:
@@ -63,7 +63,7 @@ jobs:
         run: |
           case "$HTTP_FETCH_CI_APP" in
             ex_ssl) (cd apps/ex_ssl/e2e && mix format --check-formatted) ;;
-            elixir_quic) mix format --check-formatted scripts/phase1/interop.exs scripts/phase1/release_check.exs scripts/datagram/interop.exs ;;
+            elixir_quic) mix format --check-formatted scripts/phase1/interop.exs scripts/phase1/release_check.exs scripts/datagram/interop.exs scripts/migration/gate.exs ;;
             elixir_quic_http3) mix format --check-formatted apps/elixir_quic_http3/e2e/transport_smoke.exs ;;
           esac
       - name: Compile selected closure
@@ -106,6 +106,11 @@ jobs:
         run: |
           python3 scripts/tls_migration_performance_test.py
           python3 -m unittest discover -s scripts/ci -p 'test_tls_benchmark_routing.py' -v
+      - name: Check migration harness and consumer routing regressions
+        run: |
+          python3 -m unittest discover -s scripts/migration -p 'test_*.py' -v
+          python3 -m unittest discover -s scripts/release -p 'test_server_consumer_gate.py' -v
+          PYTHONPATH=scripts/ci python3 -m unittest test_changed_apps.SelectionTest test_changed_apps.WorkflowContractTest -v
       - name: Check root formatting and automation regressions
         if: needs.changes.outputs.full_gate == 'true'
         run: |

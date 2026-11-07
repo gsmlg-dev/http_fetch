@@ -93,6 +93,27 @@ defmodule Quic.RecoveryTest do
              Recovery.receive_ack(state, :initial, %{largest: 4, ranges: [{4, 4}]}, 32)
   end
 
+  test "rollback clears only aborted reservations from deferred acknowledgments" do
+    state = Recovery.new()
+    {:ok, state, retained} = Recovery.reserve(state, :application, %{}, 10)
+
+    {:ok, state, _} =
+      Recovery.receive_ack(state, :application, %{largest: retained.number, ranges: [{0, 0}]}, 1)
+
+    before = state
+    {:ok, state, aborted} = Recovery.reserve(state, :application, %{}, 20)
+
+    {:ok, state, _} =
+      Recovery.receive_ack(state, :application, %{largest: aborted.number, ranges: [{1, 1}]}, 2)
+
+    state = Recovery.abort_reservations_since(state, before)
+    assert state.spaces.application.pending_acks == MapSet.new([retained.number])
+    assert state.spaces.application.sent[aborted.number].status == :failed
+    assert state.spaces.application.sent[retained.number].status == :reserved
+    assert state.spaces.application.next == 2
+    assert state.congestion.bytes_in_flight == 10
+  end
+
   test "PTO probes without declaring unacknowledged flights lost" do
     {state, _} = sent(Recovery.new(), :handshake, 100, 0)
     assert state.deadline == 999_000

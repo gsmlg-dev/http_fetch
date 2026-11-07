@@ -17,10 +17,43 @@ ROOT = Path(__file__).resolve().parents[2]
 class DirectedReviewTests(unittest.TestCase):
     def test_review_bundle_covers_all_original_sites_and_all_production_sources(self):
         bundle = review.load(ROOT, '1.0.0-rc.0', PACKAGES)
-        self.assertEqual(len(bundle['occurrences']), 175)
-        self.assertEqual(len([name for name in bundle['sources'] if name.split('/')[0] in PACKAGES]), 244)
+        self.assertEqual(len(bundle['occurrences']), 177)
+        self.assertEqual(len([name for name in bundle['sources'] if name.split('/')[0] in PACKAGES]), 246)
         self.assertEqual(len(bundle['reviews']), 10)
         self.assertEqual(bundle['versions']['http_fetch'], '1.0.0-rc.0')
+
+    def test_m1_additions_retain_exact_reviewed_q2_origins(self):
+        proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
+        sites = {site['inventory_occurrence']: site for site in proof['occurrences']}
+        self.assertEqual(set(sites), set(range(1, 29)) | {176, 177})
+        for number, mfa, line in ((176, 'handle_event/4', 767), (177, 'path_timer/1', 1419)):
+            with self.subTest(occurrence=number):
+                self.assertEqual({key: sites[number][key] for key in
+                                  ('module', 'mfa', 'line', 'kind', 'source', 'proof')},
+                                 dict(module='Quic.Connection', mfa=mfa, line=line,
+                                      kind='unresolved_module_dispatch',
+                                      source='apps/elixir_quic/lib/quic/connection.ex', proof='Q2'))
+
+    def test_missing_original_or_m1_ids_duplicate_and_unreviewed_ids_fail(self):
+        parse = json.loads
+        changes = [
+            lambda sites: [site for site in sites if site['inventory_occurrence'] != 1],
+            lambda sites: [site for site in sites if site['inventory_occurrence'] != 176],
+            lambda sites: [site for site in sites if site['inventory_occurrence'] != 177],
+            lambda sites: sites + [copy.deepcopy(sites[-1])],
+            lambda sites: sites + [dict(sites[-1], inventory_occurrence=178)],
+        ]
+        for change in changes:
+            def load_with_changed_quic_sites(text):
+                document = parse(text)
+                if document.get('review') == 'no-otp-directed-quic-proof.md':
+                    document['occurrences'] = change(document['occurrences'])
+                return document
+
+            with self.subTest(change=changes.index(change)), \
+                    patch.object(review.json, 'loads', side_effect=load_with_changed_quic_sites), \
+                    self.assertRaisesRegex(ValueError, 'reviewed occurrence coverage'):
+                review.load(ROOT, '1.0.0-rc.0', PACKAGES)
 
     def test_native_source_and_compiled_release_binding(self):
         result = subprocess.run(['elixir', str(Path(__file__).with_suffix('.exs'))],

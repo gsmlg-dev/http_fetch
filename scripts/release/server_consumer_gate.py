@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sys
 import tempfile
 from urllib.request import urlopen
 
@@ -53,7 +54,7 @@ def metrics_archive(directory):
 def isolated_environment(directory):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("MIX_", "HEX_", "HTTP_FETCH_", "HELL_"))
-           and key not in ("ERL_LIBS", "ELIXIR_ERL_OPTIONS")}
+           and key not in ("ERL_LIBS", "ERL_FLAGS", "ERL_AFLAGS", "ERL_ZFLAGS", "ELIXIR_ERL_OPTIONS")}
     env.update(MIX_ENV="prod", HEX_HOME=str(directory / "hex"),
                HEX_CONFIG_HOME=str(directory / "hex-config"),
                HEX_CACHE_HOME=str(directory / "hex-cache"))
@@ -215,6 +216,10 @@ def verify_project(directory, package, versions, env):
         command(["mix", "run", str(source / "scripts/phase1/network.exs")], cwd=project, env=env)
         command(["mix", "run", "--no-start", str(source / "scripts/phase1/datagram_test.exs")], cwd=project, env=env)
         command(["mix", "run", str(source / "scripts/phase1/datagram.exs")], cwd=project, env=env)
+        for mode in ("standalone", "abyss"):
+            command([sys.executable, str(ROOT / "scripts/migration/gate.py"),
+                     "--project", str(project), "--mode", mode, "--timeout", "30"],
+                    cwd=project, env=env)
     else:
         command(["mix", "run", "traffic.exs"], cwd=project, env=env)
 

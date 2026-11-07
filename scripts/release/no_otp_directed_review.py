@@ -46,8 +46,8 @@ def load(source, version, packages):
                     'unreviewed production dependency')
             bundle['sources'].update({f'telemetry/{name}': digest
                                       for name, digest in dependency['source_inputs_sha256'].items()})
-    require(sorted(item['inventory_occurrence'] for item in occurrences) == list(range(1, 176)),
-            'original occurrence coverage is incomplete or duplicated')
+    require(sorted(item['inventory_occurrence'] for item in occurrences) == list(range(1, 178)),
+            'reviewed occurrence coverage is incomplete or duplicated')
     require(all(bundle['dependency_sources'].get(name) == digest
                 for name, digest in bundle['sources'].items() if name.startswith('telemetry/')),
             'dependency source review differs')

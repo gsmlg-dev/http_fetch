@@ -1,9 +1,16 @@
 defmodule Quic.Phase1ParametersTest do
   use ExUnit.Case, async: true
-  alias Quic.{HandshakeScheduler, Recovery, Streams}
+  alias Quic.{HandshakeScheduler, LocalCIDs, Recovery, Streams}
 
   test "authenticated parameters install defaults, zero credit and distinct peer windows" do
-    state = %HandshakeScheduler{streams: Streams.new(:client), recovery: Recovery.new()}
+    {:ok, cids} = LocalCIDs.new(<<1, 2, 3, 4>>)
+
+    state = %HandshakeScheduler{
+      streams: Streams.new(:client),
+      recovery: Recovery.new(),
+      local_cids: cids
+    }
+
     next = HandshakeScheduler.install_peer_parameters(state, %{})
     assert next.streams.peer_max_data == 0
     assert next.streams.peer_max_streams_bidi == 0

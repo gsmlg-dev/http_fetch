@@ -4,8 +4,8 @@ defmodule Quic.Endpoint do
 
   A server owns one shared socket; connections only borrow its send capability.
   Reception has one outstanding credit and is rearmed after synchronous routing.
-  Current paths remain bound to the original peer address; migration is not yet
-  exposed. This internal endpoint is not an independent interoperability claim.
+  Active CID routes can forward changed peer addresses to a server connection;
+  only the connection may authenticate and validate a new path.
   """
   use GenServer
   alias Quic.{Codec, Connection, TransportParameters, Retry, Protection}
@@ -244,6 +244,35 @@ defmodule Quic.Endpoint do
     end
   end
 
+  def handle_info({:quic_register_cid, pid, generation, registration}, data) do
+    case data.connections[pid] do
+      %{generation: ^generation} ->
+        count = Enum.count(data.routes, fn {_, target} -> target == pid end)
+        cid = registration.cid
+
+        if byte_size(cid) == @cid_length and not Map.has_key?(data.routes, cid) and count < 8 do
+          routes = Map.put(data.routes, cid, pid)
+          send(pid, {:quic_cid_registered, generation, registration.registration_id})
+          {:noreply, %{data | routes: routes}}
+        else
+          send(pid, {:quic_cid_registration_failed, generation, registration.registration_id})
+          {:noreply, data}
+        end
+
+      _ ->
+        {:noreply, data}
+    end
+  end
+
+  def handle_info({:quic_retire_cid, pid, generation, cid}, data) do
+    if match?(%{generation: ^generation}, data.connections[pid]) and data.routes[cid] == pid do
+      retired = add_retired(data.retired, [{:cid, cid}], data.retired_limit)
+      {:noreply, %{data | routes: Map.delete(data.routes, cid), retired: retired}}
+    else
+      {:noreply, data}
+    end
+  end
+
   def handle_info({:quic_closing, pid, generation, reason}, data) do
     case data.connections[pid] do
       %{generation: ^generation} ->
@@ -323,8 +352,9 @@ defmodule Quic.Endpoint do
           pid = Map.get(data.routes, dcid) || Map.get(data.provisional, {remote, dcid})
 
           case data.connections[pid] do
-            %{remote: ^remote} = entry -> deliver(data, entry, bytes, at)
+            %{remote: ^remote} = entry -> deliver(data, entry, remote, bytes, at)
             nil -> maybe_admit(data, remote, bytes, at)
+            entry when data.role == :server -> deliver(data, entry, remote, bytes, at)
             _ -> data
           end
         end
@@ -448,6 +478,8 @@ defmodule Quic.Endpoint do
                streams: Keyword.get(data.opts, :streams, []),
                max_datagram_frame_size:
                  Map.get(local_parameters.values, :max_datagram_frame_size, 0),
+               active_connection_id_limit:
+                 Map.get(local_parameters.values, :active_connection_id_limit, 2),
                max_packet_size: profile_packet_size(profile)
              ] ++ tls
          ],
@@ -500,6 +532,8 @@ defmodule Quic.Endpoint do
     entries = [%{id: 0x0F, value: scid}]
     entries = if role == :server, do: [%{id: 0, value: original} | entries], else: entries
     entries = if retry_scid, do: [%{id: 0x10, value: retry_scid} | entries], else: entries
+    {:ok, cid_limit} = Codec.encode_varint(8)
+    entries = entries ++ [%{id: 0x0E, value: cid_limit}]
 
     with {:ok, stream_entries} <- stream_transport_entries(stream_opts),
          {:ok, datagram_entries} <- datagram_transport_entries(datagram_opts),
@@ -608,7 +642,14 @@ defmodule Quic.Endpoint do
   defp profile_packet_size(_), do: 1_350
 
   defp deliver(data, entry, bytes, at) do
-    case Connection.deliver(entry.pid, entry.generation, bytes, at) do
+    deliver(data, entry, entry.remote, bytes, at)
+  end
+
+  defp deliver(data, entry, remote, bytes, at) do
+    case Connection.deliver(entry.pid, entry.generation, bytes, at, %{
+           local: data.local,
+           remote: remote
+         }) do
       :ok -> data
       {:error, reason} -> %{data | last_error: reason}
     end

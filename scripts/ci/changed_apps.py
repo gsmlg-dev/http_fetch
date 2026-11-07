@@ -60,7 +60,7 @@ def shared_h2_path(path):
             ".github/workflows/", "scripts/http2_", "scripts/http_runtime_",
             "scripts/requirements-http2", "scripts/release/", "scripts/ex_ssl_",
             "scripts/tls_migration_",
-            "scripts/external_consumer_smoke.", "scripts/http3/")))
+            "scripts/external_consumer_smoke.", "scripts/http3/", "scripts/migration/")))
 
 
 def affected_h2_consumers(paths, graph=None):

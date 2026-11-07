@@ -37,7 +37,7 @@ defmodule Quic.Phase1PublicTest do
       end)
 
     on_exit(fn -> send(acceptor, :stop) end)
-    assert_receive {:endpoint, endpoint}
+    assert_receive {:endpoint, endpoint}, 1_000
     monitor = Process.monitor(endpoint)
     assert Process.alive?(endpoint)
     send(acceptor, :stop)

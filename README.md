@@ -33,7 +33,10 @@ provenance, package boundaries, commands and verification results.
 | Optional Linux raw networking | [`abyss_raw`](packages/abyss_raw/README.md) | Separate package under `packages/`; Rust builds only on explicit installation |
 
 The server imports preserve public names, defaults and supervision semantics.
-They do not add HTTP/3 serving, DATAGRAM, 0-RTT, migration or a new transport API.
+Abyss supports opt-in QUIC DATAGRAM and authenticated client address changes on
+an established connection. The engine validates each new path while preserving
+streams and the shared listener. See the [migration contract](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/quic/consumer-contract.md#server-peer-migration).
+HTTP/3 serving, resumption/0-RTT and an explicit client migration API remain future work.
 
 The imported TLS/QUIC source inventory
 is recorded in [migration provenance](docs/migration-provenance.md); its original

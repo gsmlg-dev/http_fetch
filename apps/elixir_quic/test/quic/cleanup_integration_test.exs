@@ -200,7 +200,7 @@ defmodule Quic.CleanupIntegrationTest do
     observe_cleanup_down(handle, tag, [io, port])
 
     pause = fn
-      state, {:in, {{:call, _}, {:datagram, _, _, _}}, _}, _ ->
+      state, {:in, {{:call, _}, {:datagram, _, _, _, _}}, _}, _ ->
         send(parent, {:route_paused, tag})
 
         receive do

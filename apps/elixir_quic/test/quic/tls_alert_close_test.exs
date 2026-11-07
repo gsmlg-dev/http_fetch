@@ -70,7 +70,7 @@ defmodule Quic.TLSAlertCloseTest do
     peer_options =
       Keyword.merge(options,
         dcid: options[:scid],
-        scid: <<9, 10, 11, 12>>,
+        scid: options[:dcid],
         original_dcid: options[:dcid]
       )
 

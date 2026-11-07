@@ -70,7 +70,9 @@ The imported engine applications are `apps/ex_ssl` (`SSL`), `apps/elixir_quic`
 licenses, constraints, and current release status are recorded in
 [`docs/migration-provenance.md`](docs/migration-provenance.md). Fetch and
 EventSource support explicit HTTPS HTTP/3 beta with static/literal QPACK.
-Dynamic QPACK, 0-RTT, migration, WebSocket over HTTP/3 and WebTransport remain
+Raw Quic/Abyss servers accept authenticated peer migration with bounded path
+validation; explicit local client migration and resumption/0-RTT remain unsupported.
+Dynamic QPACK, HTTP client migration, WebSocket over HTTP/3 and WebTransport remain
 unsupported; raw `Quic.capabilities().http3` remains false. App presence and
 negotiated ALPN alone do not establish application readiness or acceptance.
 
