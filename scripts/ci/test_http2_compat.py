@@ -1,12 +1,12 @@
 import unittest
 
-from http2_compat import terminal_pass
+from http2_compat import PACKAGES, terminal_pass
 
 
 class TrafficEvidenceTest(unittest.TestCase):
     def test_package_requires_exact_completed_traffic(self):
         complete = dict(result='PASS', gate='isolated_package_http2_traffic',
-                        completed=True, packages=9, consumers=8, connections=8,
+                        completed=True, packages=len(PACKAGES), consumers=8, connections=8,
                         mixed_shared_connection=True, verified_tls=True, modes=[
                             dict(mode='h2c', protocol='h2c', verified_tls=False,
                                  consumers=4, connections=4, completed=True,
@@ -15,6 +15,8 @@ class TrafficEvidenceTest(unittest.TestCase):
                                  consumers=4, connections=4, completed=True,
                                  mixed_shared_connection=True)])
         self.assertTrue(terminal_pass([complete], 'package'))
+        for count in (len(PACKAGES) - 1, len(PACKAGES) + 1):
+            self.assertFalse(terminal_pass([{**complete, 'packages': count}], 'package'))
         self.assertFalse(terminal_pass([dict(result='PASS', gate='original_package_metadata')], 'package'))
         for key in complete:
             partial = {name: value for name, value in complete.items() if name != key}

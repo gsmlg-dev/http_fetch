@@ -11,6 +11,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "release"))
+from stage import PACKAGES
+
 
 def terminal_pass(records, kind):
     for record in records:
@@ -32,7 +35,7 @@ def terminal_pass(records, kind):
                 continue
             if all(record.get(key) == value for key, value in {
                     'gate': 'isolated_package_http2_traffic', 'completed': True,
-                    'packages': 9, 'consumers': 8, 'connections': 8,
+                    'packages': len(PACKAGES), 'consumers': 8, 'connections': 8,
                     'mixed_shared_connection': True, 'verified_tls': True}.items()):
                 return True
         elif (record.get('mode') == 'wire-audit' and record.get('public_client') is True
@@ -116,8 +119,8 @@ def main():
                                   str(args.evidence / 'stage'), str(archives), '--group', 'core'])
         report['packages'] = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                               for path in sorted(archives.glob('*.tar'))}
-        if len(report['packages']) != 9:
-            raise RuntimeError('expected nine candidate package artifacts')
+        if set(report['packages']) != {f'{package}-{version}.tar' for package in PACKAGES}:
+            raise RuntimeError('candidate package artifacts differ from production inventory')
         env.update(HTTP_FETCH_ARCHIVE_DIR=str(archives), HTTP_FETCH_RELEASE_VERSION=version)
         run('candidate-package-traffic', [sys.executable, 'scripts/http_runtime_package_traffic_gate.py'],
             'hyper-h2', 'h2c+ex_ssl', 'package')

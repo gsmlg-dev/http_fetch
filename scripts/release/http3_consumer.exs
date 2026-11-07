@@ -3,7 +3,7 @@ project = System.fetch_env!("HTTP3_CONSUMER_PROJECT") |> Path.expand()
 source = System.fetch_env!("HTTP3_CONSUMER_SOURCE")
 
 packages =
-  ~w(ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)a
+  ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)a
 
 dependencies = Mix.Dep.cached()
 
@@ -43,4 +43,6 @@ for module <- [
   IO.puts("HTTP3 consumer loaded #{inspect(module)}=#{beam}")
 end
 
-IO.puts("HTTP3 consumer provenance: #{source}, nine Hex packages == #{expected}: PASS")
+IO.puts(
+  "HTTP3 consumer provenance: #{source}, #{length(packages)} Hex packages == #{expected}: PASS"
+)

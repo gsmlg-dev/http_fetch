@@ -56,7 +56,7 @@ jobs:
           EX_SSL_RESULTS_DIR: ${{ runner.temp }}/ex-ssl-feature-results
         run: bash scripts/ex_ssl_published_feature_gate.sh
 
-      - name: Build current nine-package Hex candidate
+      - name: Build current production Hex candidate
         id: build_candidate
         if: always() && steps.prepare.outcome == 'success'
         run: |
@@ -65,7 +65,7 @@ jobs:
           python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
           elixir scripts/release/archives.exs "$version" "$RUNNER_TEMP/archives"
 
-      - name: Resolve all nine candidate Hex packages
+      - name: Resolve all production candidate Hex packages
         id: candidate_consumers
         if: always() && steps.build_candidate.outcome == 'success'
         run: python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"

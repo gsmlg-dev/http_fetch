@@ -13,7 +13,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/release"))
-from consumer_gate import verify_canary_source
+from consumer_gate import PACKAGES, verify_canary_source
 
 
 def write_status(directory, status):
@@ -25,7 +25,7 @@ def write_status(directory, status):
 def classify(returncode, output, elapsed, version, source_sha):
     if returncode < 0:
         return "INTERRUPTED"
-    provenance = f"HTTP3 consumer provenance: published, nine Hex packages == {version}: PASS"
+    provenance = f"HTTP3 consumer provenance: published, {len(PACKAGES)} Hex packages == {version}: PASS"
     result = re.search(r"HTTP3 canary result: PASS seconds=(\d+) requests=(\d+) "
                        r"[^\n]*errors=0 commit=([a-f0-9]{40})(?:\s|$)", output)
     if (returncode == 0 and elapsed >= 86400 and provenance in output and result
@@ -45,7 +45,7 @@ def report(args, status):
     body.write_text(
         f"Post-release independent HTTP/3 canary: **{status['result']}**\n\n"
         f"Release: `v{args.version}`; tagged SHA: `{args.source_sha}`.\n"
-        f"{verification}: all nine exact published Hex versions, with GitHub archive checksum checks.\n"
+        f"{verification}: all {len(PACKAGES)} exact published Hex versions, with GitHub archive checksum checks.\n"
         f"Required workload duration: 86400 seconds.\n"
         f"Runner wall time including setup: {status['elapsed_seconds']:.3f} seconds.\n"
         f"Exit code: `{status['returncode']}`.\n\n"
@@ -107,7 +107,7 @@ def worker(args):
     elapsed = time.monotonic() - started
     log = directory / "consumer.log"
     output = log.read_text(errors="replace") if log.is_file() else ""
-    provenance = f"HTTP3 consumer provenance: published, nine Hex packages == {args.version}: PASS"
+    provenance = f"HTTP3 consumer provenance: published, {len(PACKAGES)} Hex packages == {args.version}: PASS"
     measurements = [line for line in output.splitlines() if line.startswith(
         ("HTTP3 canary elapsed_ms=", "HTTP3 canary result:"))]
     status.update(result=classify(returncode, output, elapsed, args.version, args.source_sha),

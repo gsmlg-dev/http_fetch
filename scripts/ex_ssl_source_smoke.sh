@@ -112,7 +112,7 @@ fi
 
 export EX_SSL_DEP_MODE EX_SSL_FIXTURE_DIR="$fixture_dir"
 if [[ "$EX_SSL_DEP_MODE" == candidate ]]; then
-  : "${EX_SSL_CANDIDATE_ARCHIVE_DIR:?Set EX_SSL_CANDIDATE_ARCHIVE_DIR to the nine candidate Hex archives}"
+  : "${EX_SSL_CANDIDATE_ARCHIVE_DIR:?Set EX_SSL_CANDIDATE_ARCHIVE_DIR to the production candidate Hex archives}"
   version=${HTTP_FETCH_RELEASE_VERSION:-$(sed -n 's/.*@version "\([^"]*\)".*/\1/p' "$repo_root/mix.exs")}
   python3 "$repo_root/scripts/release/consumer_gate.py" "$version" "$EX_SSL_CANDIDATE_ARCHIVE_DIR" --mode feature
   exit 0

@@ -51,7 +51,7 @@ class CurrentH2MatrixTests(unittest.TestCase):
              patch.object(Path, 'mkdir'), patch.object(Path, 'open'), \
              patch.object(Path, 'write_text'), patch.object(Path, 'read_bytes', return_value=b'archive'), \
              patch.object(Path, 'read_text', autospec=True, side_effect=read), \
-             patch.object(Path, 'glob', return_value=[Path('/archives') / f'package{i}.tar' for i in range(9)]), \
+             patch.object(Path, 'glob', return_value=[Path('/archives') / f'{package}-0.21.19.tar' for package in gate.PACKAGES]), \
              patch.object(gate.subprocess, 'check_output', return_value='candidate-sha\n'), \
              patch.object(gate.subprocess, 'Popen', side_effect=launch), \
              patch.object(gate, 'terminal_pass', return_value=True), \

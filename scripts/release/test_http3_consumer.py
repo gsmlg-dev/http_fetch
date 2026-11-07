@@ -157,7 +157,7 @@ end
 
     def test_canary_cannot_pass_on_short_interrupted_or_unproven_result(self):
         sha = "a" * 40
-        provenance = "HTTP3 consumer provenance: published, nine Hex packages == 1.2.3: PASS\n"
+        provenance = "HTTP3 consumer provenance: published, 10 Hex packages == 1.2.3: PASS\n"
         result = f"HTTP3 canary result: PASS seconds=86400 requests=1 peak_memory=1 errors=0 commit={sha}\n"
         classify = post_release_canary.classify
         self.assertEqual(classify(0, provenance + result, 86400, "1.2.3", sha), "PASS")
@@ -181,8 +181,8 @@ end
         self.assertTrue(status["followup_issue"].endswith("/43"))
         report = (self.directory / "report.md").read_text()
         self.assertIn("Separate follow-up task", report)
-        self.assertIn("Required: all nine", report)
-        self.assertNotIn("Verified: all nine", report)
+        self.assertIn("Required: all 10", report)
+        self.assertNotIn("Verified: all 10", report)
         self.assertIn("checksum mismatch", report)
         self.assertIn("Existing Hex package differs", report)
         self.assertIn("No workload measurement recorded", report)
@@ -192,7 +192,7 @@ end
         with patch.object(post_release_canary.subprocess, "run"):
             post_release_canary.report(args, status)
         report = (self.directory / "report.md").read_text()
-        self.assertIn("Verified: all nine", report)
+        self.assertIn("Verified: all 10", report)
         self.assertIn("seconds=86400 requests=1024", report)
         self.assertIn("Runner wall time including setup", report)
 
