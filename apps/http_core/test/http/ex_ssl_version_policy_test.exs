@@ -136,7 +136,7 @@ defmodule HTTP.ExSSLVersionPolicyTest do
     )
   end
 
-  test "the OTP TLS 1.2 peer without EMS fails before application traffic" do
+  test "the OTP TLS 1.2 peer without EMS authenticates without retaining a session" do
     {:ok, listener} =
       :ssl.listen(0,
         mode: :binary,
@@ -153,7 +153,11 @@ defmodule HTTP.ExSSLVersionPolicyTest do
     {peer, monitor} =
       spawn_monitor(fn ->
         {:ok, tcp} = :ssl.transport_accept(listener, 5_000)
-        send(parent, {:otp_tls12_handshake, :ssl.handshake(tcp, 5_000)})
+        {:ok, socket} = :ssl.handshake(tcp, 5_000)
+        assert {:ok, "request"} = :ssl.recv(socket, 7, 5_000)
+        assert :ok = :ssl.send(socket, "response")
+        send(parent, :otp_tls12_exchanged)
+        receive do: (:finish -> :ssl.close(socket))
       end)
 
     on_exit(fn ->
@@ -161,11 +165,44 @@ defmodule HTTP.ExSSLVersionPolicyTest do
       if Process.alive?(peer), do: Process.exit(peer, :kill)
     end)
 
-    assert {:error, {:tls_alert, {:handshake_failure, _}}} =
-             ExSSL.connect("localhost", port, [ssl: [cacertfile: @ca]], 5_000)
+    deadline = fn ms -> {:abs_ms, System.monotonic_time(:millisecond) + ms} end
 
-    assert_receive {:otp_tls12_handshake, {:error, {:tls_alert, {:handshake_failure, _}}}}, 5_000
-    assert_receive {:DOWN, ^monitor, :process, ^peer, :normal}, 5_000
+    assert {:ok, handle, lease} =
+             SSL.Lifecycle.new(controller: self(), deadline: deadline.(10_000))
+
+    try do
+      assert {:ok, socket} =
+               ExSSL.connect(
+                 "localhost",
+                 port,
+                 [ssl: [cacertfile: @ca, ex_ssl: [lifecycle: {handle, lease}]]],
+                 5_000
+               )
+
+      try do
+        assert {:ok, [protocol: :"tlsv1.2", session_resumption: false]} =
+                 SSL.connection_information(socket, [:protocol, :session_resumption])
+
+        assert {:error, :no_session} = SSL.connection_information(socket, [:session_data])
+        {:connected, state} = :sys.get_state(socket.pid)
+        refute state.machine.extended_master_secret
+        assert state.machine.master_secret == nil
+        assert state.session_material == nil
+        assert state.session_timer == nil
+        assert :ok = ExSSL.send(socket, "request")
+        assert {:ok, "response"} = ExSSL.recv(socket, 8, 5_000)
+        assert_receive :otp_tls12_exchanged, 5_000
+      after
+        ExSSL.close(socket)
+      end
+
+      assert {:ok, %{cleanup: :confirmed, setup: :connected}} =
+               SSL.Lifecycle.await(handle, deadline.(5_000))
+    after
+      SSL.Lifecycle.cancel(lease, deadline.(1_000))
+      send(peer, :finish)
+      assert_receive {:DOWN, ^monitor, :process, ^peer, :normal}, 5_000
+    end
   end
 
   defp assert_exchange(version, options, route \\ :direct)

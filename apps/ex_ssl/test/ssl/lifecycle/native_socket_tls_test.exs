@@ -41,28 +41,38 @@ defmodule SSL.Lifecycle.NativeSocketTLSTest do
     end
   end
 
-  test "raw Socket rejects the OTP TLS 1.2 peer without required EMS and confirms cleanup" do
-    # TLS12MachineTest independently asserts this peer's missing ServerHello
-    # extension 23 and the exact :extended_master_secret_required rejection.
-    # The supported TLS 1.2 multi-record success case uses OpenSSL below.
+  test "raw Socket authenticates non-EMS OTP TLS 1.2, retains no session and confirms cleanup" do
+    parent = self()
+
     {:ok, peer} =
       Peer.start(
-        fn _socket -> flunk("a peer without EMS must not authenticate") end,
+        fn socket ->
+          assert {:ok, "request"} = :ssl.recv(socket, 7, 2_000)
+          assert :ok = :ssl.send(socket, "response")
+          send(parent, :tls12_exchanged)
+          receive do: (:finish -> :ssl.close(socket))
+        end,
         ssl_options: [versions: [:"tlsv1.2"], ciphers: [@tls12_cipher]]
       )
 
     try do
       a = attempt(peer.port, versions: [:"tlsv1.2"], ciphers: [@tls12_cipher])
       assert :ok = Setup.attach(a.setup, a.nonce, deadline(1_000))
+      success(a)
       assert {:error, :closed} = SSL.recv(a.socket, 0, 100)
-      setup = a.setup
-      monitor = a.setup_monitor
-      assert_receive {:DOWN, ^monitor, :process, ^setup, _}, 5_000
-      refute_receive {:lifecycle_tls_ready, ^setup, _, _, _}, 0
-      cleanup(a, :failed)
-      assert {:sealed, %{setup_failure: :tls}} = Receipt.read(a.receipt)
+      {:connected, state} = :sys.get_state(a.socket.pid)
+      assert %SSL.Protocol.TLS12{extended_master_secret: false, resumed: false} = state.machine
+      assert state.machine.master_secret == nil
+      assert state.session_material == nil
+      assert state.session_timer == nil
+      assert :ok = private_send(a, "request")
+      assert {:ok, "response"} = private_io(a, {:recv, 8, absolute(2_000)})
+      assert_receive :tls12_exchanged, 1_000
+      assert :ok = private_io(a, :close)
+      cleanup(a)
     after
-      assert {:handshake_error, {:tls_alert, {:handshake_failure, _}}} = Peer.stop(peer)
+      send(peer.task.pid, :finish)
+      assert :ok = Peer.stop(peer)
     end
   end
 
