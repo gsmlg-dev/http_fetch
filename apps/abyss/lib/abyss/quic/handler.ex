@@ -3,14 +3,16 @@ defmodule Abyss.QUIC.Handler do
   Application binding for an `Abyss.QUIC` listener.
 
   Callbacks run in a per-connection worker. They receive opaque `elixir_quic`
-  generation handles and byte-stream events; Abyss does not interpret ALPN or
+  generation handles and stream/DATAGRAM events; Abyss does not interpret ALPN or
   application payloads. `init/3` runs after attachment and receives negotiated
   metadata. `handle_event/2` receives public engine events and a `:tick` after
   each batch; the next poll starts after the configured interval. A matching
   engine close notification delivers `{:closed, reason}` once if processed
   before worker termination. Crashes and forced shutdown can prevent delivery.
   Each poll delivers at most `event_batch` engine notifications. Reads remain
-  explicitly controlled by the handler through `Abyss.QUIC.read/3`.
+  explicitly controlled by the handler through `Abyss.QUIC.read/3` and
+  `Abyss.QUIC.read_datagrams/3`. Opt-in DATAGRAM receive support delivers
+  `:datagram_readable`; handlers pull complete messages within their own bounds.
 
   Callbacks must keep their own state bounded. Attachment and initialization
   share `init_timeout`; event draining and all callbacks in a batch share

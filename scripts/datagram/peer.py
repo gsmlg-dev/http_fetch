@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from collections import Counter
 import json
+from functools import partial
 
 from aioquic.asyncio import serve
 from aioquic.asyncio.client import connect
@@ -20,7 +21,6 @@ PEER_DATAGRAM = b"aioquic-datagram-h3"
 PEER_STREAM = b"aioquic-stream-h3"
 ENGINE_DATAGRAM = b"elixir-datagram-h3"
 ENGINE_STREAM = b"elixir-stream-h3"
-PEER_BOUNDARY = bytes([0xBC]) * 1100
 COMPLETE = b"elixir-complete-h3"
 
 
@@ -29,8 +29,9 @@ def emit(event, **fields):
 
 
 class Peer(QuicConnectionProtocol):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, boundary_bytes=1100, **kwargs):
         super().__init__(*args, **kwargs)
+        self.peer_boundary = bytes([0xBC]) * boundary_bytes
         self.handshake = False
         self.datagrams = []
         self.streams = {}
@@ -43,7 +44,7 @@ class Peer(QuicConnectionProtocol):
             self.handshake = event.alpn_protocol == "h3"
             emit("handshake", alpn=event.alpn_protocol)
             if self.handshake:
-                for payload in (b"", PEER_DATAGRAM, PEER_DATAGRAM, PEER_BOUNDARY):
+                for payload in (b"", PEER_DATAGRAM, PEER_DATAGRAM, self.peer_boundary):
                     self._quic.send_datagram_frame(payload)
                 stream_id = self._quic.get_next_available_stream_id(False)
                 self._quic.send_stream_data(stream_id, PEER_STREAM, end_stream=True)
@@ -78,22 +79,25 @@ class Peer(QuicConnectionProtocol):
 
 
 async def client(args):
-    config = QuicConfiguration(is_client=True, alpn_protocols=["h3"], max_datagram_frame_size=1200)
+    config = QuicConfiguration(is_client=True, alpn_protocols=["h3"], max_datagram_frame_size=1200,
+                               max_datagram_size=args.max_datagram_size)
     config.server_name = "example.test"
     config.load_verify_locations(cafile=args.ca)
     async with connect("127.0.0.1", args.port, configuration=config,
-                       create_protocol=Peer, wait_connected=True) as peer:
+                       create_protocol=partial(Peer, boundary_bytes=args.boundary_bytes),
+                       wait_connected=True) as peer:
         await asyncio.wait_for(peer.finished, args.timeout)
         return peer.finished.result()
 
 
 async def server(args):
-    config = QuicConfiguration(is_client=False, alpn_protocols=["h3"], max_datagram_frame_size=1200)
+    config = QuicConfiguration(is_client=False, alpn_protocols=["h3"], max_datagram_frame_size=1200,
+                               max_datagram_size=args.max_datagram_size)
     config.load_cert_chain(args.cert, args.key)
     accepted = asyncio.get_running_loop().create_future()
 
     def create_protocol(*protocol_args, **protocol_kwargs):
-        peer = Peer(*protocol_args, **protocol_kwargs)
+        peer = Peer(*protocol_args, boundary_bytes=args.boundary_bytes, **protocol_kwargs)
         if not accepted.done():
             accepted.set_result(peer)
         return peer
@@ -126,4 +130,6 @@ parser.add_argument("--ca")
 parser.add_argument("--cert")
 parser.add_argument("--key")
 parser.add_argument("--timeout", type=float, default=10)
+parser.add_argument("--boundary-bytes", type=int, default=1100)
+parser.add_argument("--max-datagram-size", type=int, default=1200)
 asyncio.run(main(parser.parse_args()))

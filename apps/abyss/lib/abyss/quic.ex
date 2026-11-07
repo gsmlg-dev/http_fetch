@@ -63,6 +63,30 @@ defmodule Abyss.QUIC do
   """
   def ping(connection, opts \\ []), do: backend_for_handle(connection, :ping, [connection, opts])
 
+  @doc """
+  Admits one unreliable QUIC DATAGRAM using the engine's public operation API.
+
+  The peer must advertise DATAGRAM receive support. Payloads preserve message
+  boundaries, are congestion-controlled and are never retransmitted after loss.
+  `info/1` exposes the negotiated payload limit under `:datagram`. Admission is
+  not peer delivery; references, deadlines, blocked and unknown outcomes follow
+  the same contract as `send_stream/4`.
+  """
+  def send_datagram(connection, bytes, opts \\ []),
+    do: backend_for_handle(connection, :send_datagram, [connection, bytes, opts])
+
+  @doc """
+  Pulls up to `max` complete DATAGRAM payloads from the attached consumer.
+
+  Enable receive support with `quic_options: [datagram: [max_frame_size: 1200]]`.
+  The handler receives coalesced `:datagram_readable` events, which rearm while
+  messages remain unread. Receive queues have finite item and byte limits;
+  overflow drops whole new messages. Destructive pulls retain the engine's
+  operation references, finite deadlines and unknown-outcome semantics.
+  """
+  def read_datagrams(connection, max \\ 32, opts \\ []),
+    do: backend_for_handle(connection, :read_datagrams, [connection, max, opts])
+
   def events(connection, max \\ 32, opts \\ []),
     do: backend_for_handle(connection, :events, [connection, max, opts])
 

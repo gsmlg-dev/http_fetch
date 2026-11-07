@@ -481,6 +481,48 @@ defmodule Abyss.QUICServiceTest do
     end
   end
 
+  test "DATAGRAM receive support stays opt-in and forwards bounded engine options" do
+    assert {:ok, listener} = start_listener()
+    refute Keyword.has_key?(Backend.options(endpoint!()), :datagram)
+    assert :ok = Abyss.QUIC.stop(listener)
+
+    for limits <- [
+          [],
+          [max_frame_size: 1200, max_items: 64, max_buffer_bytes: 65_536],
+          [max_frame_size: 0, max_items: 1024, max_buffer_bytes: 0],
+          [max_frame_size: 65_527, max_buffer_bytes: 1_048_576]
+        ] do
+      assert {:ok, listener} = start_listener(quic_options: [datagram: limits])
+      assert Backend.options(endpoint!())[:datagram] == limits
+      assert :ok = Abyss.QUIC.stop(listener)
+    end
+  end
+
+  test "rejects malformed DATAGRAM configuration before opening the listener" do
+    for limits <- [
+          :enabled,
+          %{},
+          [:invalid],
+          [max_frame_size: -1],
+          [max_frame_size: 65_528],
+          [max_frame_size: 1.5],
+          [max_items: 0],
+          [max_items: 1025],
+          [max_items: :infinity],
+          [max_buffer_bytes: -1],
+          [max_buffer_bytes: 1_048_577],
+          [unknown: 1],
+          [max_items: 1, max_items: 2]
+        ] do
+      assert {:error, :invalid_quic_options} = start_listener(quic_options: [datagram: limits])
+    end
+
+    assert {:error, :invalid_quic_options} =
+             start_listener(quic_options: [datagram: [], datagram: []])
+
+    refute_receive {:endpoint, _}, 0
+  end
+
   test "rejects invalid idle policies and keeps other engine timers finite" do
     for value <- [0, -1, nil, false, "infinity", 1.5] do
       assert {:error, :invalid_quic_options} =

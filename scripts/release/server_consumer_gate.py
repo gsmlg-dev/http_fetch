@@ -213,6 +213,8 @@ def verify_project(directory, package, versions, env):
     if package == "quic":
         command(["mix", "run", "--no-start", str(source / "scripts/phase1/idle_policy.exs")], cwd=project, env=env)
         command(["mix", "run", str(source / "scripts/phase1/network.exs")], cwd=project, env=env)
+        command(["mix", "run", "--no-start", str(source / "scripts/phase1/datagram_test.exs")], cwd=project, env=env)
+        command(["mix", "run", str(source / "scripts/phase1/datagram.exs")], cwd=project, env=env)
     else:
         command(["mix", "run", "traffic.exs"], cwd=project, env=env)
 

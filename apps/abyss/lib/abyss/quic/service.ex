@@ -407,9 +407,22 @@ defmodule Abyss.QUIC.Service do
       {:streams, streams} ->
         valid_stream_options?(streams)
 
+      {:datagram, datagram} ->
+        valid_datagram_options?(datagram)
+
       _ ->
         false
     end) and length(Keyword.keys(options)) == length(Enum.uniq(Keyword.keys(options)))
+  end
+
+  defp valid_datagram_options?(options) do
+    Keyword.keyword?(options) and
+      Enum.all?(options, fn
+        {:max_frame_size, value} -> is_integer(value) and value in 0..65_527
+        {:max_items, value} -> is_integer(value) and value in 1..1024
+        {:max_buffer_bytes, value} -> is_integer(value) and value in 0..1_048_576
+        _ -> false
+      end) and length(Keyword.keys(options)) == length(Enum.uniq(Keyword.keys(options)))
   end
 
   defp valid_stream_options?(options) do

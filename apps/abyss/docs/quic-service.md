@@ -1,8 +1,8 @@
 # QUIC service
 
 Abyss hosts UDP I/O and binds application consumers to `elixir_quic` connections.
-The QUIC engine owns connection IDs, TLS, streams, flow control, recovery and
-packetization. Applications own their protocols. DNS/DoQ and HTTP/3/QPACK are
+The QUIC engine owns connection IDs, TLS, streams, DATAGRAMs, flow control,
+recovery and packetization. Applications own their protocols. DNS/DoQ and HTTP/3/QPACK are
 permanently outside Abyss; raw stream examples do not implement either.
 
 ## Dependencies
@@ -13,20 +13,21 @@ application explicitly adds both Abyss and the engine to its dependencies:
 ```elixir
 def deps do
   [
-    {:abyss, "~> 0.10.0"},
-    {:elixir_quic, "== 0.21.17"}
+    {:abyss, "== 1.0.0-rc.5"},
+    {:elixir_quic, "== 1.0.0-rc.5"}
   ]
 end
 ```
 
 The published engine uses OTP application `:elixir_quic` and facade `Quic`;
-its source is `gsmlg-dev/http_fetch` under `apps/elixir_quic`. It requires Hex `ex_ssl`
-`0.21.17`, whose TLS facade remains `SSL.QUIC`. Abyss does not provide a legacy
-`QUIC` alias or fall back to an older engine. The examples pin these published
-packages and use `ABYSS_PATH` only to select the Abyss checkout under test.
+its source is `gsmlg-dev/http_fetch` under `apps/elixir_quic`. It requires Hex
+`ex_ssl` at the same release version, whose TLS facade remains `SSL.QUIC`. Abyss
+does not provide a legacy `QUIC` alias or fall back to an older engine. The examples
+select their engine dependencies explicitly and use `ABYSS_PATH` only to select
+the Abyss checkout under test.
 Do not set `runtime: false` on these runtime dependencies.
 
-These versions match the repository's independent QUIC examples. The core
+Use the coordinated RC versions above for DATAGRAM support. The core
 Abyss package does not declare either engine or TLS package as a dependency.
 The examples require Elixir 1.18; check the selected engine's runtime requirements
 separately from Abyss's declared Elixir requirement.
@@ -78,8 +79,8 @@ Listener options, besides `name`, `handler`, `alpn` and `tls`, are:
 All host limits/timeouts are finite positive integers. Supported engine options
 are `retry`, `retry_ttl` (microseconds), `retry_limit`, `event_limit`,
 `operation_limit`, `handshake_timeout`, `idle_timeout`, `closing_timeout`,
-`draining_timeout` (engine timers in milliseconds), and `streams`. Stream limits
-are `max_data`, `max_stream_data`, `max_stream_data_bidi_local`,
+`draining_timeout` (engine timers in milliseconds), `streams` and `datagram`.
+Stream limits are `max_data`, `max_stream_data`, `max_stream_data_bidi_local`,
 `max_stream_data_bidi_remote`, `max_stream_data_uni`, `max_streams_bidi`,
 `max_streams_uni`, `max_buffer`, `max_ready_bytes`, `max_stream_records` and
 `max_recv_ranges`. Unknown options and overrides of engine I/O, TLS or ownership
@@ -118,6 +119,53 @@ unknown operation. Keepalive cannot guarantee network or peer availability.
 The listener passes the selected policy unchanged to its endpoint. Newly
 accepted connections and supervised listener replacements use the same
 configuration; existing connections are not resumed after a host restart.
+
+## QUIC DATAGRAM
+
+Starting with `1.0.0-rc.5`, enable RFC 9221 receive support explicitly:
+
+```elixir
+quic_options: [datagram: [max_frame_size: 1200, max_items: 64, max_buffer_bytes: 65_536]]
+```
+
+This is QUIC DATAGRAM inside an established encrypted connection. Ordinary UDP
+uses the separate `Abyss.DatagramHandler` API. These options apply per connection:
+
+| Option | Default | Accepted range |
+| --- | --- | --- |
+| `max_frame_size` | 0 (receive disabled) | 0–65,527 encoded frame bytes |
+| `max_items` | 64 | 1–1,024 queued messages |
+| `max_buffer_bytes` | 65,536 | 0–1,048,576 queued payload bytes |
+
+Unknown keys, duplicate keys and malformed limits fail before listener startup.
+Negotiation is directional: the local option enables receiving; sending requires
+the peer to advertise receive support. `Abyss.QUIC.info/1` returns `{:ok, info}`;
+`info.datagram` exposes `send_max_bytes` and `receive_max_bytes`. Use these payload
+limits rather than assuming the configured frame size is available for application data. Packet and
+frame overhead reduce the limit; the tested 1200-byte frame configuration allows
+1197 payload bytes with the current packet layout.
+
+Call `Abyss.QUIC.send_datagram(connection, payload, opts)` with a binary payload.
+Empty and duplicate messages are valid. DATAGRAMs preserve message boundaries,
+have no ordering or delivery guarantee, share congestion control with streams,
+and are never retransmitted after loss. They are not fragmented to accommodate
+oversized payloads. Errors include `:datagram_unsupported` and `:datagram_too_large`.
+References, deadlines, blocked and unknown outcomes follow the operation contract
+below; an admitted send does not establish peer receipt.
+
+The attached handler receives a coalesced `:datagram_readable` event. Pull complete
+messages with `Abyss.QUIC.read_datagrams(connection, max, opts)`; `max` defaults to
+32. The event rearms while unread messages remain. Only the attached consumer may
+read. Overflow drops whole new messages, preserving already queued messages.
+`info.resources` reports `datagram_ready_items`, `datagram_ready_bytes` and
+`datagram_drops`. Cached read results also consume bounded operation-result memory;
+queue counters exclude those retained replies. Bound handler output independently.
+
+The independent aioquic gate is `mix run apps/abyss/scripts/phase1/datagram.exs`
+from the umbrella root. Candidate and published Hex consumers also run this gate,
+requiring exact empty, duplicate and boundary payloads in both directions, a
+FIN-terminated stream in both directions, peer exit zero and connection termination.
+Its `h3` ALPN exercises transport only and does not establish HTTP/3 support.
 
 ## Application callbacks
 
@@ -225,11 +273,10 @@ application verifies ordinary UDP integration without a QUIC engine.
 
 ## Service limits and validation
 
-This service exposes QUIC v1 certificate-based 1-RTT bidi/uni byte streams.
-It does not expose engine DATAGRAM configuration or operations, external client
-endpoints, resumption/0-RTT, migration, or wildcard/ancillary local-address
-metadata. The pinned engine has its own DATAGRAM API; that does not activate
-DATAGRAM support through `Abyss.QUIC`. HTTP/3/QPACK, DoQ and WebTransport remain
+This service exposes QUIC v1 certificate-based 1-RTT bidi/uni byte streams and
+opt-in RFC 9221 DATAGRAMs. It does not expose external client endpoints,
+resumption/0-RTT, migration, or wildcard/ancillary local-address metadata.
+HTTP/3/QPACK, DoQ and WebTransport remain
 application-layer integrations outside this service. Finite stream tombstones
 can exhaust the lifetime stream-record budget. Recorded acceptance is scoped
 interoperability evidence, not a full conformance or production security audit.

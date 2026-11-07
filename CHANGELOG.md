@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.5] - 2026-11-07
+
+### Added
+- Expose opt-in QUIC DATAGRAM through `Abyss.QUIC.send_datagram/3` and
+  `read_datagrams/3`, with validated per-connection receive limits and handler
+  readability events. Preserve engine negotiation, operation references,
+  unreliable delivery and congestion/resource accounting.
+- Require independent aioquic DATAGRAM and reliable-stream traffic through
+  Abyss in both candidate and published Hex server consumer gates.
+
 ## [1.0.0-rc.4] - 2026-11-07
 
 ### Fixed
