@@ -207,11 +207,19 @@ candidate/published consumers.
 Local acceptance: both independent source migration modes and the fresh isolated
 three-package server consumer pass. Full eleven-app source regression passes
 7,762 tests, 23 doctests and 20 property checks with integration/slow enabled.
-QUIC's closure is 408 tests. Strict compilation, formatting, Credo, Dialyzer and
-docs pass; Python release292/CI47/migration19 controls pass. Earlier failures and
-repairs remain in `/tmp/http-fetch-quic-m1-barBLX/verification.md`. Remote manual
-regression and the complete RC workflow, artifacts and published consumers remain
-required before delivery is complete.
+QUIC's final closure is 427 tests after 19 regressions for a pre-existing PTO
+congestion-credit stall exposed by the server-package gate. The unchanged
+concurrent 1 MiB/FIN UDP gate now passes under the reproducing CPU conditions,
+normal load and deterministic loss. A rebuilt fresh three-package Hex candidate
+passes provenance, idle/network/DATAGRAM and both migration modes. Strict
+compilation, formatting, Credo, Dialyzer and docs pass; Python
+release295/CI47/migration19 controls pass. The final full source rerun retains one
+unchanged Hell 100ms TLS receipt failure; that exact case passes in isolation.
+Core's three environment-gated raw QUIC cases also pass when explicitly enabled.
+Earlier failures and repairs remain in
+`/tmp/http-fetch-quic-m1-barBLX/verification.md`. Updated remote manual regression
+and the complete RC workflow, artifacts and published consumers remain required
+before delivery is complete.
 
 Use a task-owned `MIX_BUILD_PATH`, retaining commands/output under a new `/tmp`
 evidence directory. The existing idle `/tmp/http-fetch-quic-next-9g02lf9z/build`

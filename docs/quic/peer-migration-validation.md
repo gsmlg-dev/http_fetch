@@ -62,7 +62,7 @@ the source acceptance above does not itself establish a published package.
 
 ## Deterministic regressions
 
-The QUIC source closure passed 408 unit/integration cases, including the public
+The QUIC source closure passed 427 unit/integration cases, including the public
 server-only capability assertion. New pure and runtime regressions cover forged
 sources, malformed unauthenticated known-path headers, preconfirmation/third-path
 rejection, every probing frame shape, reordered packet/CID selection, short vs
@@ -72,12 +72,23 @@ ACK/receipts, larger-new-PTO deadlines, congestion-blocked probing, validation
 loss/fallback, unavailable-CID selection, reliable pending-send recovery without
 DATAGRAM replay, CID registration/publication ordering, and bounded CID churn.
 
-The full eleven-app source suite also passed with seed `28092026`, including
-integration and slow cases: 7,762 tests, 23 doctests and 20 property checks, with
+Before the final PTO repair, the full eleven-app source suite passed with seed
+`28092026`, including integration and slow cases: 7,762 tests, 23 doctests and 20 property checks, with
 zero failures. Strict test/default compilation, formatting, Credo and Dialyzer
 passed. Documentation generated successfully; unrelated existing link and
 hidden-module warnings remain recorded. E2E and distributed publication are
 separate workflow gates.
+
+A concurrent network consumer exposed a pre-existing PTO stall, also reproduced
+against the published rc.5 engine: a retained 1350-byte packet could not be
+repacketized with only 742 bytes left in its congestion window. Thirteen Recovery
+and six scheduler regressions now cover a single-use, path-bound probe allowance,
+unchanged congestion windows, both original/probe flight accounting, ordinary-send
+limits, old-path isolation, and reliable-content selection without DATAGRAM replay.
+The unchanged 25-second, concurrent 1 MiB/FIN network gate passes with the patched
+private runtime under the reproducing CPU/one-scheduler conditions, normal load,
+and deterministic packet loss. These traffic runs do not replace the fresh
+candidate and published archive/provenance gates.
 
 The initial pre-feature traffic baseline completed both initial exchanges, then
 timed out after the source-port change. Subsequent failures exposed TLS option

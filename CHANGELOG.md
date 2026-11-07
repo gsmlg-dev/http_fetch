@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DATAGRAM continuity, wire CID separation, concurrent listener isolation and
   cleanup in source, candidate-package and published-package gates.
 
+### Fixed
+- Let a bounded PTO probe retransmit retained reliable data when its path's
+  congestion window is full. Keep original and probe bytes in flight, preserve
+  the congestion window, and prevent queued application data or unreliable
+  DATAGRAM payloads from spending the one-shot probe allowance.
+
 ## [1.0.0-rc.5] - 2026-11-07
 
 ### Added

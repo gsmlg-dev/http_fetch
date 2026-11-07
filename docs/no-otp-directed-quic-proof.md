@@ -203,3 +203,38 @@ report hash, normalized multiset hash, current local BEAM hashes and all 21
 old-to-current bindings. Production source hashes and census are unchanged.
 This reconciliation does not turn the failed artifact into an accepted release;
 a fresh strict candidate run and published-release gates remain required.
+
+## 2026-11-07 source review amendment: bounded PTO probes
+
+The source based on `0a1f6c8958626142d1f44bcf2f9877350a379790` repairs a
+congestion-credit stall: an expired PTO may reserve one path-pinned fresh probe
+without increasing cwnd or prematurely releasing the original flight. The
+scheduler isolates the selected original's reliable frames; queued application
+work cannot spend the grant. DATAGRAM and path-validation frames are filtered
+from replay. Original and probe writes/ACKs retain independent accounting.
+
+The amended Connection, scheduler and Recovery sources retain Q2/Q4's callable
+origins. No new adapter, callback or unresolved dynamic call is introduced.
+The current source hashes bind all three changed bodies and the complete
+246-file production-source census. Fifteen Connection annotation lines move;
+all 177 inventory IDs, modules, owning MFAs, kinds and origin proofs remain.
+Current root test and quality BEAMs agree on all 21 Connection MFA/call lines.
+All 45 current QUIC BEAMs reconcile exactly to the same 30 reviewed raw sites,
+with zero additional sites, OTP SSL imports or missing abstract code.
+
+The complete root production-module diagnostic audit retains 186 raw sites
+across 348 BEAMs: all 177 currently reviewed sites, plus nine generated
+collector invocations in three unchanged `for ... into: MapSet.new()` bodies.
+Those nine remain unresolved because the root build excludes the host Elixir
+Collectable implementation from its release context; the audit deliberately
+refuses to borrow code from outside that context. No local finding is hidden,
+removed or granted an exemption. The JSON records the full audit hash and
+all nine remaining identities. A bundled release must prove its own in-release
+Collectable implementation and reconcile its complete raw multiset.
+
+The earlier strict remote report's full 177-site multiset matches the prior
+review exactly; applying only the 15 source/BEAM-derived line rebindings gives
+the current reviewed multiset. Its history remains intact and does not certify
+the PTO repair. Current source/build observations and independent controls are
+supporting evidence; fresh strict candidate and published-release gates remain
+required for complete release acceptance.

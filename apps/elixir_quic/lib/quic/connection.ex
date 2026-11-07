@@ -750,8 +750,10 @@ defmodule Quic.Connection do
       {:ok, recovery, result} = Recovery.on_time(recovery, now)
       scheduler = %{data.scheduler | recovery: recovery}
 
-      case retry_packets(scheduler, result.lost ++ result.probes, []) do
-        {:ok, scheduler, effects} -> advance(%{data | scheduler: scheduler}, effects, [])
+      with {:ok, scheduler, effects} <- retry_packets(scheduler, result.lost, []),
+           {:ok, scheduler, effects} <- retry_packets(scheduler, result.probes, effects, :probe) do
+        advance(%{data | scheduler: scheduler}, effects, [])
+      else
         {:error, reason} -> stop(data, {:recovery, reason})
       end
     else
@@ -1583,15 +1585,24 @@ defmodule Quic.Connection do
     end
   end
 
-  defp retry_packets(scheduler, [], effects), do: {:ok, scheduler, effects}
+  defp retry_packets(scheduler, packets, effects),
+    do: retry_packets(scheduler, packets, effects, :retry)
 
-  defp retry_packets(scheduler, [{space, number} | rest], effects) do
+  defp retry_packets(scheduler, [], effects, _mode), do: {:ok, scheduler, effects}
+
+  defp retry_packets(scheduler, [{space, number} | rest], effects, mode) do
     if HandshakeScheduler.retired?(scheduler, space) do
-      retry_packets(scheduler, rest, effects)
+      retry_packets(scheduler, rest, effects, mode)
     else
-      case HandshakeScheduler.retry_crypto(scheduler, space, number) do
-        {:ok, next, sends} -> retry_packets(next, rest, effects ++ sends)
-        {:error, :not_retransmittable} -> retry_packets(scheduler, rest, effects)
+      result =
+        case mode do
+          :probe -> HandshakeScheduler.probe(scheduler, space, number)
+          :retry -> HandshakeScheduler.retry_crypto(scheduler, space, number)
+        end
+
+      case result do
+        {:ok, next, sends} -> retry_packets(next, rest, effects ++ sends, mode)
+        {:error, :not_retransmittable} -> retry_packets(scheduler, rest, effects, mode)
         {:error, reason} -> {:error, reason}
         {:error, reason, _} -> {:error, reason}
       end

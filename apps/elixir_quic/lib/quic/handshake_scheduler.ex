@@ -964,6 +964,64 @@ defmodule Quic.HandshakeScheduler do
     end
   end
 
+  @doc "Send one PTO-authorized probe without draining unrelated queued application work."
+  def probe(%__MODULE__{} = state, space, number) when space in @spaces do
+    selected = Recovery.selected_path(state.recovery)
+
+    case state.recovery.spaces[space].sent[number] do
+      %Recovery.Packet{status: :sent, path_id: path_id} = packet ->
+        with true <- state.queued < state.max_queue,
+             {:ok, recovery} <- Recovery.select_path(state.recovery, path_id),
+             {:ok, emission, frames} <- probe_emission(state, space, packet),
+             isolated <- %{
+               state
+               | recovery: recovery,
+                 pending: [],
+                 pending_acks: %{},
+                 pending_control: if(frames == [], do: %{}, else: %{space => frames})
+             },
+             {:ok, emission} <- fit_probe_emission(isolated, emission),
+             {:ok, next, effect} <- protect_and_reserve(isolated, emission),
+             {:ok, recovery} <- Recovery.select_path(next.recovery, selected) do
+          {:ok, %{state | recovery: recovery, queued: state.queued + 1}, [effect]}
+        else
+          false -> {:ok, state, []}
+          {:error, reason, _next} -> {:error, reason}
+          {:error, _reason} = error -> error
+        end
+
+      _ ->
+        {:error, :probe_not_authorized}
+    end
+  end
+
+  defp probe_emission(state, space, %{number: number, metadata: metadata}) do
+    {offset, length} = Map.get(metadata, :crypto, {0, 0})
+
+    if length > 0 do
+      with {:ok, bytes} <- TLSDriver.retransmit(state.tls, space, offset, length) do
+        {:ok, %{level: space, offset: offset, bytes: bytes, probe_for: number}, []}
+      end
+    else
+      frames =
+        metadata
+        |> Map.get(:control, [])
+        |> Enum.reject(&(&1.type in [:datagram, :path_challenge, :path_response]))
+        |> then(&unacknowledged_frames(state, &1))
+
+      frames = if frames == [], do: [%{type: :ping}], else: Enum.take(frames, 1)
+      {:ok, %{level: space, offset: 0, bytes: <<>>, probe_for: number}, frames}
+    end
+  end
+
+  defp fit_probe_emission(state, emission) do
+    case fragment_pending(state, emission) do
+      :ok -> {:ok, emission}
+      {:split, first, _retained_tail} -> fit_probe_emission(state, first)
+      {:error, _reason} = error -> error
+    end
+  end
+
   @doc "Repacketize retained CRYPTO under a fresh packet number without calling TLS."
   def retry_crypto(%__MODULE__{} = state, space, number) when space in @spaces do
     case state.recovery.spaces[space].sent[number] do
@@ -1212,9 +1270,9 @@ defmodule Quic.HandshakeScheduler do
            build_protected(packet_state, level, offset, bytes, Map.get(state.keys, level)),
          true <- byte_size(packet) <= state.max_packet_size,
          {:ok, recovery, reserved} <-
-           Recovery.reserve(
-             state.recovery,
-             level,
+           reserve_protected(
+             state,
+             emission,
              %{
                level: level,
                crypto: {offset, byte_size(bytes)},
@@ -1262,6 +1320,20 @@ defmodule Quic.HandshakeScheduler do
       {:error, reason} -> {:error, reason, state}
     end
   end
+
+  defp reserve_protected(state, %{level: level, probe_for: number}, metadata, bytes) do
+    Recovery.reserve_probe(
+      state.recovery,
+      level,
+      number,
+      Map.put(metadata, :path_id, Recovery.selected_path(state.recovery)),
+      bytes,
+      state.max_packet_size
+    )
+  end
+
+  defp reserve_protected(state, %{level: level}, metadata, bytes),
+    do: Recovery.reserve(state.recovery, level, metadata, bytes)
 
   # Each application packet carries at most one control/STREAM/DATAGRAM frame.
   # Size probes include ACKs, CID, packet number, varints, padding and AEAD tag.

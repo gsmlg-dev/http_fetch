@@ -27,7 +27,7 @@ class DirectedReviewTests(unittest.TestCase):
         proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
         sites = {site['inventory_occurrence']: site for site in proof['occurrences']}
         self.assertEqual(set(sites), set(range(1, 29)) | {176, 177})
-        for number, mfa, line in ((176, 'handle_event/4', 768), (177, 'path_timer/1', 1420)):
+        for number, mfa, line in ((176, 'handle_event/4', 770), (177, 'path_timer/1', 1422)):
             with self.subTest(occurrence=number):
                 self.assertEqual({key: sites[number][key] for key in
                                   ('module', 'mfa', 'line', 'kind', 'source', 'proof')},
@@ -40,43 +40,77 @@ class DirectedReviewTests(unittest.TestCase):
         sites = {site['inventory_occurrence']: (site['mfa'], site['line'])
                  for site in proof['occurrences'] if site['module'] == 'Quic.Connection'}
         self.assertEqual(sites, {
-            2: ('begin_closing/2', 1549), 3: ('begin_closing/2', 1505),
-            4: ('closing_timer/1', 1435), 5: ('draining_timer/1', 1440),
-            6: ('expired?/1', 1887), 7: ('eligible_send/1', 1380),
+            2: ('begin_closing/2', 1551), 3: ('begin_closing/2', 1507),
+            4: ('closing_timer/1', 1437), 5: ('draining_timer/1', 1442),
+            6: ('expired?/1', 1898), 7: ('eligible_send/1', 1382),
             8: ('handle_event/4', 338), 9: ('handle_event/4', 714),
             10: ('handle_event/4', 725), 11: ('handle_event/4', 737),
             12: ('handle_event/4', 747), 13: ('handshake_deadline/3', 128),
-            14: ('idle_timer/1', 1427), 15: ('local_send/3', 1602),
-            16: ('local_send/3', 1604), 17: ('local_send/3', 1607),
-            18: ('receive_authenticated/6', 949), 19: ('recovery_timer/1', 1409),
-            20: ('refresh_idle/1', 1459), 176: ('handle_event/4', 768),
-            177: ('path_timer/1', 1420),
+            14: ('idle_timer/1', 1429), 15: ('local_send/3', 1613),
+            16: ('local_send/3', 1615), 17: ('local_send/3', 1618),
+            18: ('receive_authenticated/6', 951), 19: ('recovery_timer/1', 1411),
+            20: ('refresh_idle/1', 1461), 176: ('handle_event/4', 770),
+            177: ('path_timer/1', 1422),
         })
         source = (ROOT / 'apps/elixir_quic/lib/quic/connection.ex').read_text().splitlines()
         for number, (_, line) in sites.items():
             with self.subTest(occurrence=number):
                 self.assertIn('adapter.', source[line - 1])
-        amendment = proof['source_review_amendments'][-1]
+        amendment = next(item for item in proof['source_review_amendments']
+                         if item.get('failed_strict_candidate', {}).get('artifact') == 13572580831)
         self.assertEqual(amendment['failed_strict_candidate']['artifact'], 13572580831)
         self.assertEqual(amendment['failed_strict_candidate']['directed_status'], 'FAIL')
         self.assertEqual(len(amendment['occurrence_rebindings']), 21)
+        previous_sites = sites | {
+            item['inventory_occurrence']: (item['mfa'], item['previous_line'])
+            for item in proof['source_review_amendments'][-1]['occurrence_rebindings']}
         for item in amendment['occurrence_rebindings']:
             self.assertEqual(item['line'], item['previous_line'] + 1)
-            self.assertEqual(sites[item['inventory_occurrence']], (item['mfa'], item['line']))
+            self.assertEqual(previous_sites[item['inventory_occurrence']], (item['mfa'], item['line']))
 
-    def test_complete_normalized_occurrence_set_matches_remote_failure_evidence(self):
+    def test_current_and_historical_complete_occurrence_multisets_remain_bound(self):
         bundle = review.load(ROOT, '1.0.0-rc.0', PACKAGES)
         proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
-        evidence = proof['source_review_amendments'][-1]['exact_remote_raw_set_reconciliation']
+        amendment = proof['source_review_amendments'][-1]
+        evidence = amendment['reviewed_inventory_reconciliation']
         identities = sorted((site['module'].removeprefix(':'), site['line'], site['kind'])
                             for site in bundle['occurrences'])
         digest = hashlib.sha256(json.dumps(identities, separators=(',', ':')).encode()).hexdigest()
         self.assertEqual(len(identities), 177)
         self.assertEqual(len(set(identities)), 177)
         self.assertEqual(digest, evidence['sha256'])
-        self.assertEqual(evidence['missing'], 0)
-        self.assertEqual(evidence['extra'], 0)
         self.assertEqual(evidence['duplicates'], 0)
+        old_lines = {item['inventory_occurrence']: item['previous_line']
+                     for item in amendment['occurrence_rebindings']}
+        old_identities = []
+        for group in review.GROUPS:
+            group_proof = json.loads((ROOT / f'docs/no-otp-directed-{group}-proof.json').read_text())
+            for site in group_proof['occurrences']:
+                old_identities.append((site['module'].removeprefix(':'),
+                                       old_lines.get(site['inventory_occurrence'], site['line']),
+                                       site['kind']))
+        old_digest = hashlib.sha256(json.dumps(sorted(old_identities), separators=(',', ':')).encode()).hexdigest()
+        historical = next(item['exact_remote_raw_set_reconciliation']
+                          for item in proof['source_review_amendments']
+                          if 'exact_remote_raw_set_reconciliation' in item)
+        self.assertEqual(old_digest, historical['sha256'])
+        self.assertEqual(historical['missing'], 0)
+        self.assertEqual(historical['extra'], 0)
+        self.assertEqual(historical['duplicates'], 0)
+
+    def test_pto_review_preserves_unresolved_root_context_findings(self):
+        proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
+        amendment = proof['source_review_amendments'][-1]
+        quic = amendment['compiled_quic_reconciliation']
+        self.assertEqual((quic['checked_beams'], quic['raw_dispatches']), (45, 30))
+        self.assertEqual((quic['missing'], quic['extra'], quic['changed_owning_mfas']), (0, 0, 0))
+        self.assertTrue(quic['root_test_and_quality_connection_mfa_lines_equal'])
+        root = amendment['whole_root_diagnostic_audit']
+        self.assertEqual((root['raw_dispatches'], root['reviewed_sites_found']), (186, 177))
+        self.assertEqual(root['remaining_site_count'], 9)
+        self.assertEqual(sum(item['count'] for item in root['remaining_unreviewed_local_sites']), 9)
+        self.assertEqual(root['missing_reviewed_sites'], 0)
+        self.assertEqual(root['strict_full_release_status'], 'PENDING_REMOTE_RERUN')
 
     def test_missing_original_or_m1_ids_duplicate_and_unreviewed_ids_fail(self):
         parse = json.loads

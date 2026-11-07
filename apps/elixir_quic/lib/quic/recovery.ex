@@ -28,6 +28,7 @@ defmodule Quic.Recovery do
             active_path: :default,
             paths: %{},
             path_defaults: nil,
+            pto_grants: %{},
             max_sent_packets: 4096,
             max_ack_ranges: 256,
             timer_generation: 0,
@@ -90,6 +91,7 @@ defmodule Quic.Recovery do
           max_sent_packets: term(),
           path_defaults: %{rtt: RTT.t(), congestion: NewReno.initial_state()},
           paths: %{},
+          pto_grants: %{},
           rtt: %Quic.Recovery.RTT{
             ack_delay_exponent: term(),
             latest: nil,
@@ -130,7 +132,10 @@ defmodule Quic.Recovery do
     }
   end
 
-  @type t :: %__MODULE__{path_defaults: path_controller()}
+  @type t :: %__MODULE__{
+          path_defaults: path_controller(),
+          pto_grants: %{optional({packet_space(), non_neg_integer()}) => path_id()}
+        }
   @type path_id :: term()
   @type packet_space :: :initial | :handshake | :application
   @type path_controller :: %{rtt: RTT.t(), congestion: NewReno.t()}
@@ -267,6 +272,54 @@ defmodule Quic.Recovery do
 
   def reserve(state, space, metadata, bytes)
       when space in @spaces and is_map(metadata) and is_integer(bytes) and bytes >= 0 do
+    reserve_packet(state, space, metadata, bytes, nil)
+  end
+
+  def reserve(_, _, _, _), do: {:error, :invalid_reservation}
+
+  @doc """
+  Reserve one fresh packet for an original selected by the latest expired PTO.
+
+  The one-shot grant is tied to the original packet and its send path. Probe
+  bytes count as additional flight without increasing the congestion window;
+  ordinary reservations cannot use this allowance. The caller supplies the
+  actual protected-packet size limit and only the selected retry may use it.
+  """
+  @spec reserve_probe(t(), packet_space(), non_neg_integer(), map(), integer(), integer()) ::
+          {:ok, t(), Packet.t()} | {:error, atom()}
+  def reserve_probe(state, space, original, metadata, bytes, packet_limit)
+      when space in @spaces and is_integer(original) and original >= 0 and is_map(metadata) do
+    grant = {space, original}
+    id = Map.get(metadata, :path_id, state.active_path)
+
+    cond do
+      state.spaces[space].retired ->
+        {:error, :retired_space}
+
+      not (is_integer(bytes) and bytes > 0 and is_integer(packet_limit) and
+             packet_limit > 0 and bytes <= packet_limit) ->
+        {:error, :invalid_probe_size}
+
+      Map.get(metadata, :ack_eliciting, true) != true ->
+        {:error, :invalid_probe_packet}
+
+      not Map.has_key?(state.pto_grants, grant) ->
+        {:error, :probe_not_authorized}
+
+      not valid_probe_grant?(state, grant, state.pto_grants[grant]) ->
+        {:error, :probe_not_authorized}
+
+      state.pto_grants[grant] != id ->
+        {:error, :probe_path_mismatch}
+
+      true ->
+        reserve_packet(state, space, metadata, bytes, grant)
+    end
+  end
+
+  def reserve_probe(_, _, _, _, _, _), do: {:error, :invalid_probe_reservation}
+
+  defp reserve_packet(state, space, metadata, bytes, grant) do
     s = state.spaces[space]
 
     if s.retired do
@@ -280,7 +333,7 @@ defmodule Quic.Recovery do
         id = Map.get(metadata, :path_id, state.active_path)
 
         with %{congestion: congestion} = controller <- path(state, id),
-             {:ok, congestion} <- NewReno.reserve(congestion, bytes) do
+             {:ok, congestion} <- reserve_congestion(congestion, bytes, grant) do
           packet = %Packet{
             number: s.next,
             space: space,
@@ -291,6 +344,7 @@ defmodule Quic.Recovery do
           }
 
           state = put_path(state, id, %{controller | congestion: congestion})
+          state = %{state | pto_grants: Map.delete(state.pto_grants, grant)}
           {:ok, put_packet(state, space, packet, %{s | next: s.next + 1}), packet}
         else
           nil -> {:error, :unknown_path}
@@ -300,7 +354,21 @@ defmodule Quic.Recovery do
     end
   end
 
-  def reserve(_, _, _, _), do: {:error, :invalid_reservation}
+  defp reserve_congestion(congestion, bytes, nil), do: NewReno.reserve(congestion, bytes)
+
+  defp reserve_congestion(congestion, bytes, _grant),
+    do: {:ok, %{congestion | bytes_in_flight: congestion.bytes_in_flight + bytes}}
+
+  defp valid_probe_grant?(state, {space, number}, id) do
+    case state.spaces[space].sent[number] do
+      %Packet{status: :sent, path_id: ^id, metadata: metadata} ->
+        not state.spaces[space].retired and path(state, id) != nil and
+          Map.get(metadata, :ack_eliciting, true) == true
+
+      _ ->
+        false
+    end
+  end
 
   @doc false
   def supersede(state, space, number) when space in @spaces and is_integer(number) do
@@ -564,7 +632,15 @@ defmodule Quic.Recovery do
           Enum.min(times)
       end
 
-    %{state | deadline: deadline, timer_generation: state.timer_generation + 1}
+    grants =
+      Map.filter(state.pto_grants, fn {grant, id} -> valid_probe_grant?(state, grant, id) end)
+
+    %{
+      state
+      | deadline: deadline,
+        timer_generation: state.timer_generation + 1,
+        pto_grants: grants
+    }
   end
 
   @spec on_time(t(), integer()) :: {:ok, t(), map()}
@@ -580,6 +656,20 @@ defmodule Quic.Recovery do
         end
       else
         []
+      end
+
+    state =
+      if expired do
+        grants =
+          probes
+          |> Enum.take(2)
+          |> Map.new(fn {space, number} ->
+            {{space, number}, state.spaces[space].sent[number].path_id}
+          end)
+
+        %{state | pto_grants: grants}
+      else
+        state
       end
 
     state =
