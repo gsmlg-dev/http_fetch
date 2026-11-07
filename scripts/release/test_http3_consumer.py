@@ -68,20 +68,6 @@ class HTTP3ConsumerTests(unittest.TestCase):
         self.assertEqual(project.call_args.args[2]["MIX_ENV"], "prod")
         self.assertEqual(project.call_args.args[2]["HTTP3_CONSUMER_SOURCE"], "published")
 
-    def test_release_requires_source_and_artifact_h3_before_publication(self):
-        workflow = (ROOT / ".github/workflows/release.yml").read_text()
-        source = 'name: Require independent public HTTP3 before publication'
-        candidate = 'name: Require isolated candidate HTTP3 traffic'
-        published = 'name: Verify published isolated HTTP3 traffic'
-        self.assertIn(source, workflow, "source public H3 gate is not required")
-        self.assertIn(candidate, workflow, "candidate artifact H3 gate is not required")
-        publication = workflow.index('name: Publish and verify packages in dependency order')
-        self.assertLess(workflow.index(source), publication)
-        self.assertLess(workflow.index(candidate), publication)
-        self.assertGreater(workflow.index(published), publication)
-        self.assertIn("'caddy_*_test.py'", workflow)
-        self.assertIn('if: always()', workflow[workflow.index('name: Preserve HTTP3 release peer diagnostics'):])
-
     def test_candidate_missing_archive_stops_before_consumer_traffic(self):
         with patch.object(consumer_gate, "http3_project") as traffic:
             with self.assertRaisesRegex(RuntimeError, "missing candidate archive"):

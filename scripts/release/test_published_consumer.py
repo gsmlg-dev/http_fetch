@@ -110,16 +110,6 @@ class PublishedConsumerTests(unittest.TestCase):
             self.assertNotIn("migration-hex-candidate", provenance)
             self.assertIn("migration_fixture_source=umbrella-current/" + "a" * 40, report.read_text())
 
-    def test_release_runs_published_tls_consumers_after_publication(self):
-        workflow = (consumer_gate.ROOT / ".github/workflows/release.yml").read_text()
-        start = workflow.index("name: Verify published isolated TLS migration consumers")
-        self.assertGreater(start, workflow.index("name: Publish and verify packages in dependency order"))
-        end = workflow.index("name: Attach and verify all immutable GitHub release archives")
-        self.assertLess(start, end)
-        step = workflow[start:end]
-        self.assertIn("for mode in all external feature; do", step)
-        self.assertIn('--mode "$mode" --published', step)
-
 
 if __name__ == "__main__":
     unittest.main()

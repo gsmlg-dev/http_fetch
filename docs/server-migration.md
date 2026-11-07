@@ -77,13 +77,17 @@ OTP `:ssl`.
 
 The unified `release.yml` now prepares one version for all twelve packages,
 including prereleases such as `1.0.0-rc.N`. Eleven portable packages (the original
-nine plus Abyss and Hell) are validated, archived and published in its main job.
+nine plus Abyss and Hell) are compiled, archived and published in its main job.
+Before packaging, the workflow runs only `mix deps.get` and `mix compile`;
+tests, static analysis, protocol interop and consumer acceptance belong to
+their dedicated CI workflows or explicit validation commands.
 `abyss_raw` retains its separate Mix/Rustler/Cargo build and publishes in a
 following asynchronous job at the same immutable `vVERSION` source tag. Its
 failure does not undo or gate the completed eleven-package publication. The
 native job verifies that the exact Abyss archive has already been published,
-then runs native tests, Clippy, actual DHCP/ARP consumers, immutable artifact
-checks and a cold published Hex consumer. Its result is reported separately.
+then runs `mix deps.get` and `mix compile` before packaging and publication.
+It retains immutable artifact checks but does not run tests, Clippy or consumer
+acceptance. Its result is reported separately.
 
 `versions.exs prepare|validate VERSION` covers the root and all twelve manifests.
 Existing released tags and package bytes remain immutable: historical RC3 does
@@ -106,7 +110,7 @@ requires the shared tag, a clean checkout, matching published Abyss bytes and
 unchanged native archive rebuilds. Documentation source links use `vVERSION`.
 No helper commits, tags or pushes outside the authorized release workflow.
 
-If an immutable release has passed every portable validation and publication
+If an immutable release has completed every portable build and publication
 gate but failed only while publishing documentation, `release-complete.yml`
 can finish documentation and the native lane without republishing portable
 packages. Supply `version` and `source_run`, the failed `release.yml` run at the

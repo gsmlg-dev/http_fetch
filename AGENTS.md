@@ -130,8 +130,10 @@ For module-by-module details, see the table in `CLAUDE.md` and read
   regression. `workflow_dispatch` on each workflow forces all eleven apps;
   manual CI also checks shared formatting, candidate consumers, and historical
   TLS compatibility. Use `gh workflow run ci.yml --ref main` (or `test.yml`,
-  `integration.yml` or `e2e.yml`) after shared changes. Release validation still covers the full
-  umbrella regardless of app selection.
+  `integration.yml` or `e2e.yml`) after shared changes. Release only prepares
+  dependencies with `mix deps.get`, compiles with `mix compile`, and publishes
+  packages and documentation. Test and analysis suites run in their dedicated
+  workflows, not during publication.
 
 ## Reference
 

@@ -17,18 +17,13 @@ on:
         required: false
         default: false
         type: boolean
-      defer_static_analysis:
-        description: Defer Credo and Dialyzer only; record both as DEFERRED
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: Validate and release eleven portable packages
+    name: Publish eleven portable packages
     concurrency:
       group: release-portable-http-fetch-packages
       cancel-in-progress: false
@@ -38,7 +33,6 @@ jobs:
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_BRANCH: ${{ inputs.git_ref }}
-      RELEASE_APPS: ex_ssl elixir_quic http_core elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport abyss hell
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,15 +63,6 @@ jobs:
           elixir-version: '1.18'
           otp-version: '28'
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
-      - uses: astral-sh/setup-uv@v5
-        with:
-          version: '0.6.17'
-          python-version: '3.12'
-
       - name: Prepare or validate versions and exact internal graph
         run: |
           if [ "${{ steps.revision.outputs.existing }}" = true ]; then
@@ -93,188 +78,14 @@ jobs:
             exit 1
           }
 
-      - name: Install locked dependencies
-        run: |
-          mix deps.get --check-locked
-          MIX_ENV=test mix deps.get --check-locked
+      - name: Install dependencies
+        run: mix deps.get
 
-      - name: Compile all applications in default environment
-        run: mix compile --warnings-as-errors
+      - name: Compile applications
+        run: mix compile
 
-      - name: Prepare independent admission peer before source tests
-        run: uv pip install --python "$(command -v python3)" --requirement scripts/requirements-http2-stream-clients.txt
-
-      - name: Validate all source and automation
-        env:
-          MIX_ENV: test
-          HTTP_QUIC_PHASE1_REAL: "1"
-        run: |
-          unset HTTP_FETCH_CI_APP
-          mix format --check-formatted
-          mix format --check-formatted scripts/phase1/interop.exs scripts/phase1/release_check.exs scripts/datagram/interop.exs scripts/migration/gate.exs
-          mix format --check-formatted scripts/phase1/admission.exs scripts/phase1/admission_test.exs
-          mix format --check-formatted scripts/release/versions.exs scripts/release/archives.exs scripts/release/http3_consumer.exs
-          mix format --check-formatted scripts/http3/session_gate.exs scripts/http3/public_gate.exs scripts/http3/canary.exs
-          mix compile --warnings-as-errors
-          mix run scripts/phase1/admission_test.exs
-          mix test --seed 28092026 --include integration --include slow
-          mix test apps/abyss/test --include integration --include slow --cover --seed 28092026
-          mix test apps/ex_ssl/test --include integration --seed 743209
-          python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
-          python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
-          python3 -m unittest discover -s scripts/migration -p 'test_*.py' -v
-          git diff --check
-          git diff --exit-code -- mix.lock
-
-      - name: Record deferred static analysis
-        if: github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis
-        run: |
-          printf '%s\n' 'Credo: DEFERRED (explicit manual input)' 'Dialyzer: DEFERRED (explicit manual input)' >> "$GITHUB_STEP_SUMMARY"
-          echo '::notice::Credo and Dialyzer deferred by explicit manual input; other gates remain required.'
-
-      - name: Check source with Credo
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis) }}
-        run: mix credo
-
-      - name: Check source with Dialyzer
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.defer_static_analysis) }}
-        run: mix dialyzer --format github
-
-      - name: Build and run Go HTTP E2E server
-        run: |
-          set -euo pipefail
-          (cd apps/http_fetch/priv/test_server && go build -o ../test_server/server .)
-          ./apps/http_fetch/priv/test_server/server > .e2e_port &
-          server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true; rm -f .e2e_port' EXIT
-          for i in {1..50}; do
-            if [ -s .e2e_port ]; then
-              port=$(grep -oE '[0-9]+' .e2e_port | head -n1)
-              if curl -fs "http://127.0.0.1:$port/" >/dev/null 2>&1; then
-                E2E_BASE_URL="http://127.0.0.1:$port" MIX_ENV=test mix test.e2e
-                exit 0
-              fi
-            fi
-            sleep 0.2
-          done
-          exit 1
-
-      - name: Run all local imported transport gates
-        env:
-          MIX_ENV: test
-        run: |
-          mix run apps/elixir_quic_http3/e2e/transport_smoke.exs
-          mix run scripts/interop/run.exs client "$RUNNER_TEMP/quic-client"
-          mix run scripts/interop/run.exs server "$RUNNER_TEMP/quic-server"
-          mix run scripts/interop/stream_interop.exs
-          mix run scripts/datagram/interop.exs client
-          mix run scripts/datagram/interop.exs server
-          python3 scripts/interop/abyss_concurrent.py
-          python3 scripts/migration/gate.py --mode standalone --timeout 30
-          python3 scripts/migration/gate.py --mode abyss --timeout 30
-
-      - name: Verify QUIC reliable streams under impairment
-        env:
-          MIX_ENV: test
-          PHASE1_INTEROP_RUN: '1'
-          PHASE1_SCENARIO: impaired
-        run: |
-          mix run scripts/phase1/interop.exs client
-          mix run scripts/phase1/interop.exs server
-          PHASE1_EXTERNAL=1 mix run scripts/phase1/interop.exs server
-
-      - name: Build pinned Caddy TLS fingerprint fixture
-        run: docker build --tag ex-ssl-e2e:local apps/ex_ssl/e2e
-
-      - name: Verify Caddy JA3 and JA4 observations
-        env:
-          MIX_BUILD_PATH: ${{ runner.temp }}/ex-ssl-e2e-harness
-        run: |
-          set -euo pipefail
-          docker run -d --name ex-ssl-e2e --publish 127.0.0.1:8443:8443 ex-ssl-e2e:local
-          trap 'docker logs ex-ssl-e2e || true; docker rm -f ex-ssl-e2e || true' EXIT
-          for i in {1..30}; do
-            if nc -z 127.0.0.1 8443; then break; fi
-            sleep 1
-          done
-          nc -z 127.0.0.1 8443
-          (cd apps/ex_ssl/e2e && mix deps.get && mix compile --warnings-as-errors && mix test)
-
-      - name: Run pinned aioquic comparison
-        run: |
-          uv run --python 3.12 --with aioquic==1.2.0 python scripts/interop/test_peer.py
-          uv venv --clear "$RUNNER_TEMP/ex-ssl-quic-py" --python 3.12
-          uv pip install --python "$RUNNER_TEMP/ex-ssl-quic-py/bin/python" -r apps/ex_ssl/e2e/quic_tls/requirements.txt
-          QUIC_TLS_PYTHON="$RUNNER_TEMP/ex-ssl-quic-py/bin/python" MIX_ENV=test mix run apps/ex_ssl/e2e/quic_tls/run.exs
-
-      - name: Build documentation
-        run: mix docs
-
-      - name: Verify HTTP/3 companion with pinned independent aioquic
-        run: uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/session_gate.py
-
-      - name: Require independent public HTTP3 before publication
-        env:
-          MIX_ENV: test
-          HTTP3_GATE_LOG_DIR: ${{ runner.temp }}/http3-release-logs/source
-        run: |
-          uv run --python 3.12 --with aioquic==1.2.0 python -m unittest discover -s scripts/http3 -p 'caddy_*_test.py' -v
-          uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/public_gate.py
-
-      - name: Build, inspect, and independently consume all eleven portable archives
-        run: |
-          python3 scripts/release/stage.py build "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
-          elixir scripts/release/archives.exs "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
-          python3 scripts/release/archive_audit.py "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
-          python3 scripts/release/stage.py verify "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
-          python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
-          python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode external
-          python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/archives" --mode all
-
-      - name: Require isolated candidate HTTP3 traffic
-        env:
-          HTTP3_GATE_LOG_DIR: ${{ runner.temp }}/http3-release-logs/candidate
-        run: python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode http3
-
-      - name: Verify real HTTP/2 package traffic and TLS feature groups
-        env:
-          HTTP_FETCH_ARCHIVE_DIR: ${{ runner.temp }}/archives
-          HTTP_FETCH_RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
-          EX_SSL_DEP_MODE: candidate
-          EX_SSL_CANDIDATE_ARCHIVE_DIR: ${{ runner.temp }}/archives
-        run: |
-          uv pip install --python "$(command -v python3)" --requirement scripts/requirements-http2-stream-clients.txt
-          python3 scripts/http_runtime_package_traffic_gate.py
-          bash scripts/ex_ssl_source_smoke.sh
-
-      - name: Prepare independent no-OTP SSL peers
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes expect
-          command -v unbuffer
-          uv venv "$RUNNER_TEMP/no-otp-peer-python" --python 3.12
-          uv pip install --python "$RUNNER_TEMP/no-otp-peer-python/bin/python" \
-            --requirement scripts/requirements-http2-stream-clients.txt aioquic==1.2.0
-          for tls in TLSv1.2 TLSv1.3; do
-            "$RUNNER_TEMP/no-otp-peer-python/bin/python" scripts/release/no_otp_peer.py plan \
-              --tls "$tls" \
-              --cert "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/no-otp-localhost-ecdsa.pem" \
-              --key "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/no-otp-localhost-ecdsa.key" \
-              --ca "$GITHUB_WORKSPACE/apps/http_fetch/test/support/fixtures/no-otp-localhost-ecdsa-ca.pem" \
-              --output "$RUNNER_TEMP/no-otp-plan-$tls.json"
-          done
-
-      - name: Require isolated candidate release without OTP SSL
-        run: |
-          set -euo pipefail
-          for tls in TLSv1.2 TLSv1.3; do
-            "$RUNNER_TEMP/no-otp-peer-python/bin/python" scripts/release/no_otp_consumer_gate.py \
-              "$RELEASE_VERSION" "$RUNNER_TEMP/archives" "$RUNNER_TEMP/stage" \
-              --source-root "$GITHUB_WORKSPACE" --source-sha "$(git rev-parse HEAD)" \
-              --peer-plan "$RUNNER_TEMP/no-otp-plan-$tls.json" \
-              --output "$RUNNER_TEMP/no-otp-release/candidate-$tls" --directed-review
-          done
+      - name: Build eleven portable archives
+        run: python3 scripts/release/stage.py build "$RELEASE_VERSION" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives"
 
       - name: Preflight Hex and GitHub immutability before any remote write
         env:
@@ -308,36 +119,6 @@ jobs:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
         run: python3 scripts/release/hex_packages.py publish "$RELEASE_VERSION" "$RUNNER_TEMP/archives" "$RUNNER_TEMP/stage"
 
-      - name: Verify published isolated HTTP3 traffic
-        env:
-          HTTP3_GATE_LOG_DIR: ${{ runner.temp }}/http3-release-logs/published
-        run: python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode http3 --published
-
-      - name: Verify published isolated TLS migration consumers
-        env:
-          EX_SSL_FIXTURE_DIR: ${{ github.workspace }}/apps/ex_ssl
-          EX_SSL_GROUP_LOG_DIR: ${{ runner.temp }}/tls-release-logs/published/groups
-          EX_SSL_PROVENANCE_LOG: ${{ runner.temp }}/tls-release-logs/published/provenance.log
-        run: |
-          mkdir -p "$RUNNER_TEMP/tls-release-logs/published"
-          for mode in all external feature; do
-            python3 scripts/release/consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives" --mode "$mode" --published
-          done
-
-      - name: Verify published server consumers
-        run: python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/archives" --mode all --published
-
-      - name: Require isolated published release without OTP SSL
-        run: |
-          set -euo pipefail
-          for tls in TLSv1.2 TLSv1.3; do
-            "$RUNNER_TEMP/no-otp-peer-python/bin/python" scripts/release/no_otp_consumer_gate.py \
-              "$RELEASE_VERSION" "$RUNNER_TEMP/archives" "$RUNNER_TEMP/stage" \
-              --source-root "$GITHUB_WORKSPACE" --source-sha "$(git rev-parse HEAD)" \
-              --peer-plan "$RUNNER_TEMP/no-otp-plan-$tls.json" \
-              --output "$RUNNER_TEMP/no-otp-release/published-$tls" --published --directed-review
-          done
-
       - name: Attach and verify all immutable GitHub release archives
         env:
           GH_TOKEN: ${{ github.token }}
@@ -356,37 +137,6 @@ jobs:
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
         run: python3 scripts/release/docs.py "$RELEASE_VERSION" "$RUNNER_TEMP/stage" --publish
-
-      - name: Preserve HTTP3 release peer diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: http3-release-peer-logs
-          path: ${{ runner.temp }}/http3-release-logs
-          if-no-files-found: warn
-
-      - name: Preserve published TLS consumer diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tls-release-published-consumer-logs
-          path: ${{ runner.temp }}/tls-release-logs
-          if-no-files-found: warn
-
-      - name: Preserve no-OTP release diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: no-otp-release-diagnostics
-          path: |
-            ${{ runner.temp }}/no-otp-release/**/gate-report.json
-            ${{ runner.temp }}/no-otp-release/**/release-report.json
-            ${{ runner.temp }}/no-otp-release/**/commands.json
-            ${{ runner.temp }}/no-otp-release/**/command-*.log
-            ${{ runner.temp }}/no-otp-release/**/peer-*.log
-            ${{ runner.temp }}/no-otp-release/**/peer-*.json
-          if-no-files-found: warn
-
 
   native-release:
     name: Publish optional abyss_raw after the portable release
@@ -416,18 +166,12 @@ jobs:
         with:
           name: portable-release-${{ inputs.version }}
           path: ${{ runner.temp }}/archives
-      - name: Verify native implementation and package consumers
+      - name: Install native dependencies
         working-directory: packages/abyss_raw
-        run: |
-          mix deps.get --check-locked
-          mix compile --warnings-as-errors
-          mix test
-          bash scripts/test_arp.sh
-          cargo clippy --locked --manifest-path native/dhcp_socket/Cargo.toml --all-targets -- -D warnings
-      - name: Install isolated DHCP and ARP fixture tools
-        run: sudo apt-get update && sudo apt-get install --yes iproute2 util-linux python3
-      - name: Verify candidate native boundaries and actual DHCP and ARP traffic
-        run: python3 apps/abyss/scripts/udp/p5_consumers.py
+        run: mix deps.get
+      - name: Compile native package
+        working-directory: packages/abyss_raw
+        run: mix compile
       - name: Build and audit the native archive from the shared tag
         run: python3 scripts/release/server_packages.py build native --version "$RELEASE_VERSION" --stage "$RUNNER_TEMP/stage" --archives "$RUNNER_TEMP/archives"
       - name: Preflight immutable native Hex and GitHub artifacts
@@ -441,8 +185,6 @@ jobs:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
           MIX_ENV: prod
         run: python3 scripts/release/server_packages.py publish native --version "$RELEASE_VERSION" --stage "$RUNNER_TEMP/stage" --archives "$RUNNER_TEMP/archives"
-      - name: Verify published native Hex consumer and loaded NIF
-        run: python3 scripts/release/native_consumer_gate.py "$RELEASE_VERSION" "$RUNNER_TEMP/archives"
       - name: Attach and verify immutable native GitHub archive
         env:
           GH_TOKEN: ${{ github.token }}

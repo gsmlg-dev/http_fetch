@@ -1393,8 +1393,10 @@ export E2E_BASE_URL="http://127.0.0.1:$PORT"
 MIX_ENV=test mix test.e2e
 ```
 
-In CI, the `e2e.yml` and `release.yml` workflows run the applicable E2E gates,
+In CI, the `e2e.yml` workflow runs the applicable E2E gates,
 including the pinned Caddy TLS fingerprint fixture on CI runners.
+The `release.yml` workflow runs `mix deps.get` and `mix compile` before packaging
+and publication; it does not run tests, static analysis or consumer acceptance.
 `mix test.e2e` keeps execution at the umbrella root. To run one suite, use
 `MIX_ENV=test mix test apps/http_web_socket/e2e --include e2e` (or another app's `e2e`
 directory) after the same preparation as the unit tests.

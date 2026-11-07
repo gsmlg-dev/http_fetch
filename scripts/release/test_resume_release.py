@@ -1,4 +1,4 @@
-"""A documentation-only recovery must never bypass release gates."""
+"""Documentation recovery requires completed package publication."""
 
 import copy
 from pathlib import Path
@@ -19,7 +19,6 @@ class RecoveryTests(unittest.TestCase):
                     "conclusion": "failure", "head_sha": self.sha}
         self.steps = [{"name": name, "conclusion": "success"} for name in resume_release.REQUIRED_STEPS]
         self.steps.extend([
-            {"name": "Record deferred static analysis", "conclusion": "skipped"},
             {"name": "Commit version and create immutable tag", "conclusion": "skipped"},
             {"name": resume_release.DOCS_STEP, "conclusion": "failure"},
         ])
@@ -59,15 +58,11 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "before docs"):
             self.validate()
 
-    def test_other_failure_or_deferred_analysis_rejected(self):
+    def test_other_failure_rejected(self):
         self.steps[-1]["conclusion"] = "success"
         with self.assertRaisesRegex(ValueError, "only documentation"):
             self.validate()
         self.steps[-1]["conclusion"] = "failure"
-        self.steps[-3]["conclusion"] = "success"
-        with self.assertRaisesRegex(ValueError, "deferred static"):
-            self.validate()
-        self.steps[-3]["conclusion"] = "skipped"
         self.steps.append({"name": "Unexpected failure", "conclusion": "failure"})
         with self.assertRaisesRegex(ValueError, "unrelated release failure"):
             self.validate()
@@ -126,7 +121,7 @@ class LockedDocumentationTests(unittest.TestCase):
             self.assertEqual(commands, [["mix", "deps.get"], ["mix", "docs"],
                                         ["mix", "hex.publish", "docs", "--yes"]])
 
-    def test_recovery_native_lane_reuses_existing_gates_and_starts_independently_of_docs(self):
+    def test_recovery_native_lane_reuses_publication_and_starts_independently_of_docs(self):
         root = Path(__file__).resolve().parents[2]
         existing = (root / ".github/workflows/release.yml").read_text().split("\n  native-release:", 1)[1]
         recovery = (root / ".github/workflows/release-complete.yml").read_text().split("\n  native-release:", 1)[1]

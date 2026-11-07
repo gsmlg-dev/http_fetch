@@ -270,14 +270,6 @@ class WorkflowContractTest(unittest.TestCase):
                     if step.startswith("Check migration harness and consumer routing regressions\n"))
         self.assertIn("unittest discover -s scripts/migration", step)
         self.assertNotIn("full_gate", step)
-        release = (root / ".github/workflows/release.yml").read_text()
-        for mode in ("standalone", "abyss"):
-            command = f"python3 scripts/migration/gate.py --mode {mode} --timeout 30"
-            self.assertIn(command, release)
-            self.assertLess(release.index(command), release.index("- name: Publish and verify packages"))
-        self.assertIn("unittest discover -s scripts/migration", release)
-        self.assertIn("scripts/datagram/interop.exs scripts/migration/gate.exs", release)
-        self.assertIn('server_consumer_gate.py "$RUNNER_TEMP/archives" --mode all --published', release)
 
     def test_static_analysis_deferral_is_explicit_manual_and_keeps_other_gates_required(self):
         root = SCRIPT.parents[2]
@@ -287,10 +279,6 @@ class WorkflowContractTest(unittest.TestCase):
             ("ci.yml", ("Check selected app with Credo", "Check selected app with Dialyzer"),
              ("Check selected app formatting", "Compile selected closure",
               "Build selected portable Hex package", "Check git diff")),
-            ("release.yml", ("Check source with Credo", "Check source with Dialyzer"),
-             ("Validate all source and automation", "Build and run Go HTTP E2E server",
-              "Build, inspect, and independently consume all eleven portable archives",
-              "Preflight Hex and GitHub immutability before any remote write")),
         ):
             with self.subTest(workflow=filename):
                 text = (root / ".github/workflows" / filename).read_text()
@@ -398,10 +386,6 @@ class WorkflowContractTest(unittest.TestCase):
         for app in ALL:
             helper = (root / "apps" / app / "test/test_helper.exs").read_text()
             self.assertIn("exclude: [:integration, :e2e]", helper, app)
-        release = (root / ".github/workflows/release.yml").read_text()
-        self.assertIn("mix test --seed 28092026 --include integration", release)
-        self.assertLess(release.index("--requirement scripts/requirements-http2-stream-clients.txt"),
-                        release.index("mix test --seed"))
 
 
 if __name__ == "__main__":

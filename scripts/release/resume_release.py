@@ -1,4 +1,4 @@
-"""Finish docs/native publication only after a fully verified portable release.
+"""Finish docs/native publication only after a completed portable publication.
 
 The source release must have failed solely at documentation publication. This
 helper never publishes portable packages or changes an existing source tag.
@@ -17,40 +17,19 @@ from hex_packages import release_status
 from stage import RELEASE_PACKAGES, ROOT, source_version, stage_sources
 
 
-PORTABLE_JOB = "Validate and release eleven portable packages"
+PORTABLE_JOB = "Publish eleven portable packages"
 DOCS_STEP = "Publish package documentation separately"
 REQUIRED_STEPS = (
     "Validate immutable tag and branch",
     "Prepare or validate versions and exact internal graph",
     "Check release changelog section",
-    "Install locked dependencies",
-    "Compile all applications in default environment",
-    "Prepare independent admission peer before source tests",
-    "Validate all source and automation",
-    "Check source with Credo",
-    "Check source with Dialyzer",
-    "Build and run Go HTTP E2E server",
-    "Run all local imported transport gates",
-    "Verify QUIC reliable streams under impairment",
-    "Build pinned Caddy TLS fingerprint fixture",
-    "Verify Caddy JA3 and JA4 observations",
-    "Run pinned aioquic comparison",
-    "Build documentation",
-    "Verify HTTP/3 companion with pinned independent aioquic",
-    "Require independent public HTTP3 before publication",
-    "Build, inspect, and independently consume all eleven portable archives",
-    "Require isolated candidate HTTP3 traffic",
-    "Verify real HTTP/2 package traffic and TLS feature groups",
-    "Prepare independent no-OTP SSL peers",
-    "Require isolated candidate release without OTP SSL",
+    "Install dependencies",
+    "Compile applications",
+    "Build eleven portable archives",
     "Preflight Hex and GitHub immutability before any remote write",
     "Check Hex publication credentials",
     "Record immutable release source",
     "Publish and verify packages in dependency order",
-    "Verify published isolated HTTP3 traffic",
-    "Verify published isolated TLS migration consumers",
-    "Verify published server consumers",
-    "Require isolated published release without OTP SSL",
     "Attach and verify all immutable GitHub release archives",
     "Preserve verified portable archives for asynchronous native publication",
 )
@@ -77,8 +56,6 @@ def validate_provenance(run, jobs, repository, source_sha):
     for name in REQUIRED_STEPS:
         if states.get(name) != "success" or names.index(name) >= names.index(DOCS_STEP):
             raise ValueError(f"required release gate not successful before docs: {name}")
-    if states.get("Record deferred static analysis") != "skipped":
-        raise ValueError("deferred static analysis is not eligible for completion")
     for step in steps:
         if step["name"] != DOCS_STEP and step["conclusion"] not in ("success", "skipped"):
             raise ValueError(f"unrelated release failure: {step['name']}")

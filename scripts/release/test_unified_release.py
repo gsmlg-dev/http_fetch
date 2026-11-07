@@ -1,9 +1,10 @@
-"""Unified versions and optional native publication retain independent gates."""
+"""Unified versions and optional native publication retain independent jobs."""
 
 from contextlib import redirect_stdout
 import io
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -174,15 +175,39 @@ class UnifiedReleaseTests(unittest.TestCase):
         self.assertNotIn("rust-toolchain", portable)
         self.assertIn("packages/abyss_raw/mix.exs", portable)
         self.assertIn("Publish and verify packages in dependency order", portable)
-        self.assertIn("--mode all --published", portable)
         artifact_step = portable.split("Preserve verified portable archives", 1)[1].split("\n      - name:", 1)[0]
         self.assertIn("overwrite: true", artifact_step)
         self.assertIn("needs.release.outputs.source_sha", native)
         self.assertIn("refs/tags/v$RELEASE_VERSION^{commit}", native)
-        for requirement in ("cargo clippy --locked", "p5_consumers.py", "publish native",
-                            "native_consumer_gate.py", "--group native", "GITHUB_STEP_SUMMARY"):
+        for requirement in ("publish native", "--group native", "GITHUB_STEP_SUMMARY"):
             self.assertIn(requirement, native)
         self.assertNotIn("continue-on-error", native)
+
+    def test_publication_workflows_do_not_run_validation_suites(self):
+        for filename in ("release.yml", "release-complete.yml"):
+            workflow = (stage.ROOT / ".github/workflows" / filename).read_text()
+            with self.subTest(workflow=filename):
+                for forbidden in ("mix test", "mix format", "mix credo", "mix dialyzer",
+                                  "--warnings-as-errors", "MIX_ENV=test", "unittest",
+                                  "consumer_gate.py", "p5_consumers.py", "cargo clippy",
+                                  "test_arp.sh", "scripts/interop/", "scripts/migration/gate",
+                                  "scripts/http3/", "ex_ssl_source_smoke", "docker",
+                                  "setup-go", "setup-uv", "defer_static_analysis"):
+                    self.assertNotIn(forbidden, workflow)
+
+    def test_dependencies_and_compilation_are_required_before_packaging(self):
+        workflow = (stage.ROOT / ".github/workflows/release.yml").read_text()
+        portable, native = workflow.split("\n  native-release:\n", 1)
+        for job, build in ((portable, "Build eleven portable archives"),
+                           (native, "Build and audit the native archive")):
+            steps = re.split(r"(?m)^      - ", job)[1:]
+            deps = next(step for step in steps if "run: mix deps.get\n" in step)
+            compile_step = next(step for step in steps if "run: mix compile\n" in step)
+            for step in (deps, compile_step):
+                self.assertNotIn("if:", step)
+                self.assertNotIn("continue-on-error", step)
+            self.assertLess(job.index(deps), job.index(compile_step))
+            self.assertLess(job.index(compile_step), job.index(build))
 
 
 if __name__ == "__main__":
