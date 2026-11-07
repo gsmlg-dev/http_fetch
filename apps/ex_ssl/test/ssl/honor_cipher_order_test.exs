@@ -48,10 +48,27 @@ defmodule SSL.HonorCipherOrderTest do
       assert {:ok, ^omitted} =
                Options.normalize("example.test", [honor_cipher_order: :undefined] ++ options)
 
-      assert {:ok, ^omitted} =
+      profile = %{
+        omitted.profile
+        | extensions:
+            List.keyreplace(
+              omitted.profile.extensions,
+              :supported_versions,
+              0,
+              {:supported_versions,
+               Enum.map(versions, fn
+                 :"tlsv1.2" -> 0x0303
+                 :"tlsv1.3" -> 0x0304
+               end)}
+            )
+      }
+
+      concrete = %{omitted | profile: profile}
+
+      assert {:ok, ^concrete} =
                Options.normalize(
                  "example.test",
-                 options ++ [honor_cipher_order: :undefined, ex_ssl: [profile: omitted.profile]]
+                 options ++ [honor_cipher_order: :undefined, ex_ssl: [profile: profile]]
                )
 
       assert {:ok, prepared} = SSL.prepare_upgrade(options)

@@ -48,7 +48,18 @@ defmodule SSL.MiddleboxCompModeOptionsTest do
       assert {:ok, original} = Options.normalize("example.test", options)
 
       for policy <- [:random_32, :empty, {:fixed, <<>>}, {:fixed, <<7::256>>}] do
-        profile = %{original.profile | session_id: policy}
+        profile = %{
+          original.profile
+          | session_id: policy,
+            extensions:
+              List.keyreplace(
+                original.profile.extensions,
+                :supported_versions,
+                0,
+                {:supported_versions, Enum.map(versions, &version_id/1)}
+              )
+        }
+
         concrete = options ++ [ex_ssl: [profile: profile]]
         assert {:ok, %{profile: ^profile}} = Options.normalize("example.test", concrete)
 
@@ -103,7 +114,7 @@ defmodule SSL.MiddleboxCompModeOptionsTest do
       assert {:ok, wire} = Serializer.encode(first.client_hello)
       assert {:ok, offer} = ClientOffer.from_client_hello(wire)
       assert offer.legacy_session_id == first.client_hello.session_id
-      assert offer.offered_versions == Enum.map(versions, &version_id/1)
+      assert offer.offered_versions == Enum.sort(Enum.map(versions, &version_id/1), :desc)
     end
   end
 

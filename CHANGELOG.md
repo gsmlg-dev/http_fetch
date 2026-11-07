@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.7] - 2026-11-07
+
+### Fixed
+- Normalize default ExSSL mixed-version offers to TLS 1.3 first for either public
+  `versions` list order, matching OTP client behavior and avoiding unnecessary
+  downgrade rejection against dual-version OTP servers. Preserve explicit
+  WireProfile ordering, certificate verification and downgrade checks (#157).
+- Add OTP control coverage for ordinary TLS and in-memory RSA mTLS. TLS 1.2
+  still requires EMS; OTP servers that omit EMS remain unsupported, so #157's
+  TLS 1.2-only acceptance remains blocked.
+
 ## [1.0.0-rc.6] - 2026-11-07
 
 ### Added

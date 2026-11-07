@@ -495,6 +495,9 @@ defmodule SSL.Options do
     versions = Enum.map(Keyword.get(options, :versions, [:"tlsv1.3"]), &version_id/1)
     explicit_profile? = Keyword.has_key?(options, :ex_ssl)
     profile = get_in(options, [:ex_ssl, :profile]) || :default
+    # OTP's public versions option enables protocols; the default wire offer
+    # prefers the highest version. Concrete profiles retain their ordered policy.
+    versions = if profile == :default, do: Enum.sort(versions, :desc), else: versions
 
     with {:ok, policy} <- policy_lists(options, versions),
          {:ok, profile} <-

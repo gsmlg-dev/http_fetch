@@ -73,7 +73,7 @@ Supported connection options are:
 - DNS `server_name_indication`;
 - `customize_hostname_check: [match_fun: fun]`;
 - ordinary TCP `verify_fun`, `partial_chain`, `crl_check`, `crl_cache` and OCSP `stapling` (policy boundaries below);
-- `versions: [:"tlsv1.3"]` (default), `[:"tlsv1.2"]`, or either ordered, non-duplicate mixed list;
+- `versions: [:"tlsv1.3"]` (default), `[:"tlsv1.2"]`, or either non-duplicate mixed list; default profiles advertise highest version first;
 - ordered `ciphers`, `signature_algs`, `signature_algs_cert` and `supported_groups` (forms below);
 - validated TCP options from the allowlist below;
 - non-negative integer `depth` (default `10`);
@@ -569,7 +569,9 @@ hellos use an empty session ID until an authenticated cached EMS session is sele
 mixed offers retain TLS1.3 compatibility behavior. An echoed ID without matching
 saved authenticated material still rejects.
 
-Explicit profiles must agree with ordered versions and include typed EMS and
+Default profiles normalize both public mixed-version list orders to TLS1.3 first,
+matching OTP client behavior. Explicit profiles retain caller-specified wire order
+and must agree with ordered versions and include typed EMS and
 renegotiation extensions for TLS1.2. Only TLS1.3 offers require key shares. Mixed
 negotiation validates downgrade sentinels; the TLS1.3 default wire policy remains
 unchanged. HTTP2 uses the permitted ECDHE/AEAD subset with ALPN and no compression

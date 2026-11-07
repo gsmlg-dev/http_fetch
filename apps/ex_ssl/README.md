@@ -298,7 +298,9 @@ A matching TLS ClientHello does not guarantee that a remote service will see a c
 ### Explicit bounded TLS 1.2
 
 Version 0.4 accepts explicit TLS1.2-only or mixed version lists while
-keeping TLS1.3 as the default. TLS1.2 requires ECDHE, AES-GCM, Extended Master
+keeping TLS1.3 as the default. Generated default profiles advertise mixed versions
+highest first for either public list order; explicit WireProfiles retain their
+ordered version contract. TLS1.2 requires ECDHE, AES-GCM, Extended Master
 Secret and secure-renegotiation indication; renegotiation is disabled. Peers
 without EMS, including the observed local OTP28 TLS1.2 server, fail explicitly.
 OpenSSL full/mTLS exchanges validate the bounded subset. See the compatibility

@@ -171,3 +171,23 @@ retained a static FAIL until directed binding. The historical artifact, checks,
 source commit, census and BEAM hashes remain historical evidence. The JSON
 amendment records current selected inputs and a new 244-file source census;
 strict candidate and published release gates must bind the current BEAMs.
+
+
+## 2026-11-07 source review amendment: RC7 default version order
+
+The sole production change in `SSL.Options.profile/2` sorts the already validated
+numeric version list with the literal call `Enum.sort(versions, :desc)` only when
+constructing a generated `:default` profile. Concrete WireProfiles keep their
+ordered policy. This changes protocol preference data; it introduces no callback,
+module selector, verifier or OTP SSL implementation. Identity, trust and callback
+projections reviewed in TLS-1 through TLS-6 are unchanged, as are mandatory EMS
+and downgrade-marker validation.
+
+`SSL.Options` owns none of the 14 reviewed TLS dispatch occurrences. The three
+added source lines therefore require no occurrence-coordinate rebindings; the
+existing occurrence sources, owning functions and coordinates remain unchanged.
+The JSON binding pins the new options source hash and records the current
+246-file production census. Historical source commits, artifacts, BEAM hashes
+and prior acceptance results remain historical evidence. Strict candidate and
+published release gates must independently bind and inspect the current BEAMs;
+this source review does not claim that compiled acceptance has already passed.

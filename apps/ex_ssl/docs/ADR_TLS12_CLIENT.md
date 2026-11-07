@@ -56,10 +56,14 @@ Signature policy is version aware: TLS1.2 raw signatures cannot silently extend
 TLS1.3 CertificateVerify. Existing modern PSS/ECDSA primitives may be reused with
 validated raw data; unsupported combinations must reject explicitly.
 
-Generated profiles reflect requested version/suite order and only implemented
-extensions. Explicit profiles must agree with version and policy exactly; never
-rewrite them. Mixed ClientHello offers TLS1.3 and TLS1.2 once. Validate the TLS1.3
-downgrade sentinel when a TLS1.3 offer receives TLS1.2. A TLS1.2-only offer can
+Generated default profiles normalize the public `versions` list to highest
+version first, matching OTP client API semantics, and retain explicit suite order.
+Both accepted mixed lists therefore advertise TLS1.3 before TLS1.2. This avoids
+selecting TLS1.2 on an OTP peer that negotiates the first shared wire version,
+which would correctly trigger downgrade protection when TLS1.3 is also supported.
+Explicit profiles must agree with the caller's ordered version and policy lists
+exactly; never rewrite them. Mixed ClientHello offers TLS1.3 and TLS1.2 once.
+Validate the TLS1.3 downgrade sentinel when a TLS1.3 offer receives TLS1.2. A TLS1.2-only offer can
 connect to a newer peer without treating its mandated sentinel as an attack.
 Default remains TLS1.3-only. Public version acceptance is the final integration
 step, after pure engine and real-peer evidence; tests may exercise the pure engine

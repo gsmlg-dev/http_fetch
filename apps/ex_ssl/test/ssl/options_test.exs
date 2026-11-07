@@ -195,11 +195,11 @@ defmodule SSL.OptionsTest do
   end
 
   @tag :integration
-  test "TLS 1.2-only and mixed versions generate bounded ordered ClientHello offers" do
+  test "TLS 1.2-only and mixed versions generate bounded highest-version-first offers" do
     for {versions, expected} <- [
           {[:"tlsv1.2"], [0x0303]},
           {[:"tlsv1.3", :"tlsv1.2"], [0x0304, 0x0303]},
-          {[:"tlsv1.2", :"tlsv1.3"], [0x0303, 0x0304]}
+          {[:"tlsv1.2", :"tlsv1.3"], [0x0304, 0x0303]}
         ] do
       assert {:ok, %{profile: profile}} =
                SSL.Options.normalize("mail.example", versions: versions)
@@ -231,6 +231,38 @@ defmodule SSL.OptionsTest do
       assert 23 in offer.extension_ids
       assert 0xFF01 in offer.extension_ids
     end
+  end
+
+  test "explicit profiles retain version order and require matching public policy" do
+    versions = [:"tlsv1.2", :"tlsv1.3"]
+    base = [verify: :verify_none, cacerts: [], versions: versions]
+    assert {:ok, normalized} = SSL.Options.normalize("mail.example", base)
+
+    profile = %{
+      normalized.profile
+      | extensions:
+          List.keyreplace(
+            normalized.profile.extensions,
+            :supported_versions,
+            0,
+            {:supported_versions, [0x0303, 0x0304]}
+          )
+    }
+
+    assert {:ok, %{profile: ^profile}} =
+             SSL.Options.normalize("mail.example", base ++ [ex_ssl: [profile: profile]])
+
+    assert {:error, {:options, {:versions, :profile_conflict}}} =
+             SSL.Options.normalize(
+               "mail.example",
+               Keyword.put(base, :versions, Enum.reverse(versions)) ++
+                 [ex_ssl: [profile: profile]]
+             )
+
+    assert {:ok, explicit_default} =
+             SSL.Options.normalize("mail.example", base ++ [ex_ssl: [profile: :default]])
+
+    assert {:supported_versions, [0x0304, 0x0303]} in explicit_default.profile.extensions
   end
 
   @tag :integration

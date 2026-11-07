@@ -7,7 +7,7 @@
   "original_findings_removed": 0,
   "source_inputs_sha256": {
     "apps/ex_ssl/lib/ssl.ex": "1ed9e0d52e0f38be0422553acd66ae0b14ef7cd67372220acf500baddb8c48ee",
-    "apps/ex_ssl/lib/ssl/options.ex": "a1682b39e33811cf230dd4b6f91552d5f7dbf698c1760ff8ff85e3930c312151",
+    "apps/ex_ssl/lib/ssl/options.ex": "84500c5c63746215284ebb764284eca97657ca00380c2feaf70c18fbc4c9e58c",
     "apps/ex_ssl/lib/ssl/tcp_options.ex": "b007fe9db46cedb98867797b368d999dd0dbb773d938f11e057eb9cb88f47d75",
     "apps/ex_ssl/lib/ssl/connection.ex": "f5cdeea8158c200996cd66e554be14f8c7f22ae7200826f1241104486890761b",
     "apps/ex_ssl/lib/ssl/prepared_upgrade.ex": "c62b7433f5848289a58df30bde1cdf18155a0dcd8a3dff0da49546aac3a74461",
@@ -219,6 +219,27 @@
         "changed_owning_mfas": 0
       },
       "occurrence_rebindings": [],
+      "historical_artifact_covers_amended_source": false,
+      "compiled_acceptance": "REQUIRED_BY_STRICT_CANDIDATE_AND_PUBLISHED_RELEASE_GATES"
+    },
+    {
+      "date": "2026-11-07",
+      "baseline_commit": "08cfff6fad6ce45693fd6647a009760b22d7d5da",
+      "change": "RC7 default mixed-version normalization; current source bytes bound below",
+      "changed_source_inputs": {
+        "apps/ex_ssl/lib/ssl/options.ex": {
+          "previous_sha256": "a1682b39e33811cf230dd4b6f91552d5f7dbf698c1760ff8ff85e3930c312151",
+          "sha256": "84500c5c63746215284ebb764284eca97657ca00380c2feaf70c18fbc4c9e58c"
+        }
+      },
+      "active_production_source_census": {
+        "files": 246,
+        "sorted_path_sha256_json": "388569f2acb10f81c8104b78f2a194753d764ef1b9160b7749e280281815e95c",
+        "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
+      },
+      "reviewed_change": "Only generated default profiles sort validated numeric TLS versions descending with literal Enum.sort/2 and :desc. Concrete profiles retain ordered policy. No user callback, module selector, verifier, or TLS implementation is introduced; EMS and downgrade validation are unchanged.",
+      "occurrence_rebindings": [],
+      "occurrence_review": "No reviewed occurrence is owned by SSL.Options; all 14 TLS occurrence sources and coordinates are unchanged.",
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "REQUIRED_BY_STRICT_CANDIDATE_AND_PUBLISHED_RELEASE_GATES"
     }
