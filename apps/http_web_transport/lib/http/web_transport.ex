@@ -126,6 +126,44 @@ defmodule HTTP.WebTransport do
   def get_stats(transport), do: connection_call(transport, :get_stats, {:error, :closed})
 
   @doc """
+  Migrates the session's exclusive QUIC connection to a new local address (beta).
+
+  Pass `local: {ip, port}` with a concrete (non-wildcard) IP; port `0` selects
+  an ephemeral port. `timeout` (default 5000 ms) is the absolute deadline for
+  admission and path validation. Returns `{:ok, %{local: {ip, port}}}` once the
+  peer validated the new path and traffic moved to it, or `{:error, reason}`,
+  for example `:invalid_state`, `:migration_busy`, `:invalid_local_address`,
+  `:peer_disabled_migration`, `:no_unused_connection_id`, `{:bind_failed,
+  reason}` or `:validation_timeout`; a failed migration keeps the original
+  path. An outcome unknown at the deadline (plus a one-second grace) returns
+  `{:error, {:indeterminate_operation, ref}}` and is never replayed.
+  `Quic.capabilities().migration.local` remains `[]`.
+  """
+  @spec migrate(t(), keyword()) ::
+          {:ok, %{local: {tuple(), :inet.port_number()}}} | {:error, term()}
+  def migrate(%__MODULE__{pid: pid}, opts) when is_pid(pid) and is_list(opts) do
+    timeout = Keyword.get(opts, :timeout, 5_000)
+
+    cond do
+      not is_integer(timeout) or timeout <= 0 ->
+        {:error, :invalid_timeout}
+
+      not match?({ip, port} when is_tuple(ip) and is_integer(port), opts[:local]) ->
+        {:error, :invalid_local_address}
+
+      true ->
+        try do
+          GenServer.call(pid, {:migrate, opts[:local], timeout}, timeout + 2_000)
+        catch
+          :exit, {:timeout, _} -> {:error, :timeout}
+          :exit, _reason -> {:error, :closed}
+        end
+    end
+  end
+
+  def migrate(_transport, _opts), do: {:error, :closed}
+
+  @doc """
   Reads the local callback result for a mutation whose caller timed out.
 
   The last 128 results are retained; eviction or an unavailable session returns

@@ -227,3 +227,12 @@ Red/green lifecycle evidence is retained in
 The local direct analysis driver is `/tmp/http-fetch-quic-A-dialyzer.exs`;
 `mix run --no-start /tmp/http-fetch-quic-A-dialyzer.exs` prepares and checks only
 private PLT/build state under the environment above. No Git delivery was performed.
+
+### Migration without a cleanup scope (2026-11-09)
+
+A standalone client endpoint created without `cleanup:` previously failed every
+`Quic.migrate/2` with `{:bind_failed, :invalid_producer}`: it bound the new
+socket inside a private cleanup scope in which the endpoint was not an enrolled
+producer. It now binds the migration socket exactly like its first socket (no
+scope), and endpoints with a `cleanup:` scope are unchanged. Regression:
+`apps/elixir_quic/test/quic/uncleaned_migration_integration_test.exs`.

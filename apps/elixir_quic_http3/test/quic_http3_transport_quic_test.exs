@@ -21,6 +21,7 @@ defmodule QuicHttp3.Transport.QuicTest do
     def close(handle, code, reason, opts), do: send_call(:close, [handle, code, reason, opts])
     def send_datagram(handle, bytes, opts), do: send_call(:send_datagram, [handle, bytes, opts])
     def read_datagrams(handle, max, opts), do: send_call(:read_datagrams, [handle, max, opts])
+    def migrate(handle, opts), do: send_call(:migrate, [handle, opts])
 
     defp send_call(name, args) do
       send(Process.get(:owner), {name, args})
@@ -73,6 +74,22 @@ defmodule QuicHttp3.Transport.QuicTest do
     assert {:error, :datagram_unsupported} = Adapter.send_datagram(connection, "d", [])
     assert {:ok, ["d"]} = Adapter.read_datagrams(connection, 1, [])
     assert {:error, :closed} = Adapter.close(connection, 1, <<>>, [])
+  end
+
+  test "migration is forwarded only for a connection owning its endpoint", ctx do
+    ref = make_ref()
+    Process.put({:result, :migrate}, {:ok, ref})
+    assert {:ok, connection} = connect({127, 0, 0, 1}, 443, ops: Ops)
+    opts = [local: {{127, 0, 0, 1}, 0}, ref: ref, deadline: {:abs_ms, 1}]
+    assert {:ok, ^ref} = Adapter.migrate(connection, opts)
+    handle = ctx.handle
+    assert_received {:migrate, [^handle, ^opts]}
+
+    assert {:error, :shared_endpoint} =
+             Adapter.migrate(%{connection | endpoint_owned?: false}, opts)
+
+    assert {:error, :not_connected} = Adapter.migrate(%{connection | handle: nil}, opts)
+    refute_received {:migrate, _}
   end
 
   test "rejects invalid bounds before operations" do

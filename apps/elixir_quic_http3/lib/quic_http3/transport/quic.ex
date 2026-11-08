@@ -309,6 +309,15 @@ defmodule QuicHttp3.Transport.Quic do
   def read_datagrams(_, _, _), do: {:error, :invalid_datagram_limit}
 
   @impl true
+  def migrate(%__MODULE__{handle: nil}, _options), do: {:error, :not_connected}
+
+  # Migration moves the endpoint's only UDP socket, so it is admitted only for
+  # an endpoint this connection owns exclusively.
+  def migrate(%__MODULE__{endpoint_owned?: false}, _options), do: {:error, :shared_endpoint}
+
+  def migrate(%__MODULE__{handle: handle, ops: ops}, options), do: ops.migrate(handle, options)
+
+  @impl true
   def stop_endpoint(%Endpoint{pid: endpoint}), do: stop_endpoint(endpoint)
 
   def stop_endpoint(endpoint) when is_pid(endpoint) do

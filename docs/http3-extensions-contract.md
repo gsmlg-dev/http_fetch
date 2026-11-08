@@ -256,3 +256,55 @@ Known gaps: blocked writes hold the session
 process until admission or deadline. The session's terminal-stream ledger caps a
 connection at 1024 retired streams. No keepalive is sent; the QUIC idle timeout
 applies.
+
+## Client migration (beta)
+
+Long-lived exclusive HTTP/3 sessions may move their QUIC connection to a new
+local address: `HTTP.WebSocket.migrate(socket, local: {ip, port}, timeout: ms)`
+for an open `http_version: :http3` WebSocket created with `http3_reuse: false`,
+and `HTTP.WebTransport.migrate(session, local: {ip, port}, timeout: ms)` (a
+WebTransport session always owns its connection). `ip` must be concrete; port
+`0` selects an ephemeral port. `timeout` (default 5000) is one absolute deadline
+for admission and the engine's path validation. Both calls return
+`{:ok, %{local: actual}}` after the engine reports the validated, selected path,
+or `{:error, reason}`. If no outcome is known one second after the deadline the
+call returns `{:error, {:indeterminate_operation, ref}}`; nothing is replayed.
+A failed migration keeps the original path, and the session stays usable.
+
+Chain: the public call reaches the owner's sole CONNECT subscriber (the
+WebSocket relay `HTTP.HTTP3.Stream.migrate/4`, or the WebTransport session
+through `HTTP.WebTransport.Transport.QUIC.migrate/3`), which calls
+`ConnectionOwner.migrate(owner, ref, local, timeout)`. The owner admits only
+when it is `:ready`, `exclusive?`, dialled on its own endpoint (no shared
+resumption endpoint), and the caller is the subscriber of `ref`, the owner's
+only request; at most one migration is outstanding. Refusals are explicit:
+`:not_ready`, `:not_exclusive_owner` (pooled/shared connections, including
+Fetch and EventSource owners and pooled WebSockets), `:shared_endpoint`,
+`:unknown_request`, `:migration_busy`. Admitted calls join the owner's single
+action queue under the watchdog and run `QuicHttp3.Session.migrate/3`, which
+forwards through the optional `QuicHttp3.Transport.migrate/2` callback to
+`Quic.migrate(connection, local: local, ref: ref, deadline: {:abs_ms, d})`. The
+production adapter refuses a connection whose endpoint it does not own with
+`:shared_endpoint`; an unknown admission is reconciled through
+`Quic.operation_status/2` with the same ref (cleanup operation kind
+`:migrate`). The owner, as the sole QUIC event consumer, routes
+`{:migration, ref, outcome}` to that subscriber as
+`{:http3, generation, request_ref, {:migration, ref, outcome}}`; stale or
+foreign outcomes are dropped. Engine refusals (`:invalid_local_address`,
+`:peer_disabled_migration`, `:no_unused_connection_id`,
+`:handshake_not_confirmed`, `:unchanged_local_address`, `{:bind_failed, r}`,
+`:validation_timeout`) are returned unchanged. The WebSocket API refuses
+before forwarding with `:invalid_state`, `:migration_requires_http3` or
+`:not_exclusive_owner` for a pooled tunnel.
+
+Evidence: in-repo Quic server integration tests migrate a WebSocket tunnel and
+a WebTransport session to a new loopback port and then exchange a WebSocket
+message both ways, and a WebTransport bidi stream with FIN plus DATAGRAMs both
+ways; the peer observes the new remote address. Source-IP migration needs a
+loopback alias not present on macOS by default and is covered only by the
+engine's quic-go gate. An independent HTTP-level gate is not run: aioquic
+1.2.0 does not answer a padded probe on the new path (see
+`docs/quic/client-features-validation.md`, M2), so the WebSocket aioquic gate
+cannot accept migration. `Quic.capabilities().migration.local` stays `[]`
+because the engine's negative acceptance matrix is incomplete; this API is beta
+and is not a general capability claim.

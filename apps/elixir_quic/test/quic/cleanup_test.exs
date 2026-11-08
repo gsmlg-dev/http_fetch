@@ -155,6 +155,13 @@ defmodule Quic.CleanupTest do
     assert {:ok, %{cleanup: :confirmed}} = Cleanup.retire(lease, bound())
   end
 
+  test "explicit client migration is an admitted connection operation kind" do
+    {:ok, _handle, lease} = Cleanup.new(owner: self())
+    assert {:ok, operation} = Cleanup.operation(lease, make_ref(), make_ref(), :migrate, bound())
+    assert :ok = Cleanup.resolved(operation)
+    assert {:ok, %{cleanup: :confirmed}} = Cleanup.retire(lease, bound())
+  end
+
   test "expired operation intent grants no admission" do
     {:ok, handle, lease} = Cleanup.new(owner: self())
 

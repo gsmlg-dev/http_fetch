@@ -49,7 +49,8 @@ defmodule HTTP.WebTransport.Session do
             incoming_uni_waiters: [],
             streams: %{},
             stats: %Stats{},
-            connect_started_at: nil
+            connect_started_at: nil,
+            migration: nil
 
   @type waiter :: %{from: GenServer.from(), timer: reference() | nil, monitor: reference()}
 
@@ -180,6 +181,29 @@ defmodule HTTP.WebTransport.Session do
 
       {:rejected, reason} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:migrate, local, timeout}, from, state) do
+    cond do
+      state.state != :connected ->
+        {:reply, {:error, :invalid_state}, state}
+
+      not function_exported?(state.backend, :migrate, 3) ->
+        {:reply, {:error, :migration_unsupported}, state}
+
+      state.migration != nil ->
+        {:reply, {:error, :migration_busy}, state}
+
+      true ->
+        case state.backend.migrate(state.session_ref, local, timeout) do
+          {:ok, ref} ->
+            timer = Process.send_after(self(), {:migration_timeout, ref}, timeout + 1_000)
+            {:noreply, %{state | migration: %{from: from, ref: ref, timer: timer}}}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
     end
   end
 
@@ -314,8 +338,20 @@ defmodule HTTP.WebTransport.Session do
     end
   end
 
+  def handle_info({:migration_timeout, ref}, %{migration: %{ref: ref}} = state),
+    do: {:noreply, settle_migration(state, {:error, {:indeterminate_operation, ref}})}
+
   def handle_info(_message, %{state: status} = state) when status in [:closed, :failed],
     do: {:noreply, state}
+
+  def handle_info({:webtransport_migrated, session_ref, ref, outcome}, state)
+      when session_ref == state.session_ref do
+    case {state.migration, outcome} do
+      {%{ref: ^ref}, {:ok, local}} -> {:noreply, settle_migration(state, {:ok, %{local: local}})}
+      {%{ref: ^ref}, {:error, _} = error} -> {:noreply, settle_migration(state, error)}
+      _ -> {:noreply, state}
+    end
+  end
 
   def handle_info({:webtransport_draining, session_ref}, state)
       when session_ref == state.session_ref do
@@ -687,6 +723,7 @@ defmodule HTTP.WebTransport.Session do
     |> resolve_pending_draining()
     |> reply_all_queue_waiters({:error, :closed})
     |> reply_all_stream_waiters({:error, :closed})
+    |> settle_migration({:error, :closed})
     |> clear_retained()
     |> emit({:state, :closed, close_info})
   end
@@ -717,8 +754,17 @@ defmodule HTTP.WebTransport.Session do
     |> reject_promise(:draining, reason)
     |> reply_all_queue_waiters({:error, reason})
     |> reply_all_stream_waiters({:error, reason})
+    |> settle_migration({:error, reason})
     |> clear_retained()
     |> emit({:error, %WebTransport.Error{source: "session", reason: reason}})
+  end
+
+  defp settle_migration(%{migration: nil} = state, _reply), do: state
+
+  defp settle_migration(%{migration: migration} = state, reply) do
+    Process.cancel_timer(migration.timer)
+    GenServer.reply(migration.from, reply)
+    %{state | migration: nil}
   end
 
   defp flush_outgoing_datagrams(%{outgoing_datagrams: []} = state), do: state

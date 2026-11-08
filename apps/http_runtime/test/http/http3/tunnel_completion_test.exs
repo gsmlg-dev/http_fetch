@@ -19,6 +19,12 @@ defmodule HTTP.HTTP3.TunnelCompletionTest do
 
     def handle_call({:cancel, _}, _, state), do: {:reply, :ok, state}
 
+    def handle_call({:migrate, ref, local, _deadline}, {caller, _}, state) do
+      migration = make_ref()
+      send(state.parent, {:owner_migrate, caller, ref, local, migration})
+      {:reply, {:ok, migration}, state}
+    end
+
     def handle_call({:settle, subscriber, refs}, _, state) do
       send(state.parent, {:settle, subscriber, refs})
 
@@ -118,6 +124,30 @@ defmodule HTTP.HTTP3.TunnelCompletionTest do
     assert :ok = ClientCompletion.await(receipt, 1_000)
   end
 
+  test "relay forwards subscriber migration admission and routes the owner outcome" do
+    owner = start_supervised!({Owner, {self(), :settled}})
+    receipt = ClientCompletion.new()
+    {relay, ref} = start(owner, receipt)
+    tag = make_ref()
+    local = {{127, 0, 0, 1}, 0}
+
+    # Only the subscriber may ask; a foreign request is ignored.
+    Task.await(Task.async(fn -> Stream.migrate(relay, make_ref(), local, now() + 1_000) end))
+    Stream.migrate(relay, tag, local, now() + 1_000)
+    assert_receive {:owner_migrate, ^relay, ^ref, ^local, migration}, 1_000
+    assert_receive {:http_runtime, gen, ^relay, {:migration, ^tag, {:ok, ^migration}}}, 1_000
+    refute_received {:owner_migrate, _, _, _, _}
+
+    send(relay, {:http3, gen, ref, {:migration, migration, {:ok, {{127, 0, 0, 1}, 4001}}}})
+
+    assert_receive {:http_runtime, ^gen, ^relay,
+                    {:migrated, ^migration, {:ok, {{127, 0, 0, 1}, 4001}}}},
+                   1_000
+
+    Stream.close(relay)
+    assert :ok = ClientCompletion.await(receipt, 1_000)
+  end
+
   test "untracked tunnels keep their original relay behaviour" do
     owner = start_supervised!({Owner, {self(), :settled}})
 
@@ -134,4 +164,6 @@ defmodule HTTP.HTTP3.TunnelCompletionTest do
     assert_receive {:DOWN, ^monitor, :process, ^relay, :normal}, 1_000
     refute_received {:settle, _, _}
   end
+
+  defp now, do: System.monotonic_time(:millisecond)
 end

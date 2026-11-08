@@ -84,7 +84,6 @@ defmodule Quic.Endpoint do
             default:
               Map.merge(io, %{
                 generation: if(io.external, do: nil, else: GenUDP.identity(io.socket).generation),
-                cleanup: nil,
                 retiring: false
               })
           },
@@ -311,17 +310,10 @@ defmodule Quic.Endpoint do
     if permitted and System.monotonic_time(:millisecond) < deadline do
       {ip, port} = local
 
-      {lease, owned} =
-        case data.cleanup do
-          nil ->
-            {:ok, _handle, lease} = Quic.Cleanup.new(owner: self())
-            {lease, true}
-
-          lease ->
-            {lease, false}
-        end
-
-      opts = [ip: ip, port: port, cleanup: lease, deadline: {:abs_ms, deadline}]
+      # An endpoint without a cleanup scope binds its migration socket the same
+      # way it bound its first socket. A private scope cannot be used: this
+      # endpoint is not an enrolled producer in it, so every reservation fails.
+      opts = [ip: ip, port: port, cleanup: data.cleanup, deadline: {:abs_ms, deadline}]
 
       case open_udp(opts, :client) do
         {:ok, socket} ->
@@ -332,7 +324,6 @@ defmodule Quic.Endpoint do
             monitor: Process.monitor(socket),
             generation: identity.generation,
             local: identity.local,
-            cleanup: if(owned, do: lease),
             retiring: false
           }
 
@@ -340,7 +331,6 @@ defmodule Quic.Endpoint do
           {:noreply, %{data | ios: Map.put(data.ios, id, io), migration: {pid, generation, ref}}}
 
         {:error, reason} ->
-          if owned, do: request_scope_retirement(lease)
           send(pid, {:quic_path_bound, generation, ref, id, {:error, {:bind_failed, reason}}})
           {:noreply, data}
       end
@@ -366,8 +356,6 @@ defmodule Quic.Endpoint do
       {%{generation: ^generation}, io} when is_map(io) ->
         # IO termination closes its native socket before the monitored DOWN.
         GenUDP.close(io.socket)
-
-        if io.cleanup, do: request_scope_retirement(io.cleanup)
 
         {:noreply, put_in(data.ios[id].retiring, true)}
 
@@ -1018,23 +1006,10 @@ defmodule Quic.Endpoint do
     :exit, _ -> remove(data, entry.pid)
   end
 
-  defp request_scope_retirement(lease) do
-    # Native IO DOWN joins pending retirement. Unconfirmed observation must never
-    # become a successful migration/socket retirement acknowledgment.
-    case Quic.Cleanup.retire(lease, {:abs_ms, System.monotonic_time(:millisecond)}) do
-      {:ok, _receipt} -> :ok
-      {:pending, _receipt} -> :ok
-      {:error, reason, _receipt} -> exit({:cleanup_unconfirmed, reason})
-    end
-  end
-
   defp retire_extra_io(%{socket: socket}, socket), do: :ok
 
   defp retire_extra_io(io, _selected) do
     close_io(%{external: false, socket: io.socket})
-
-    if io.cleanup,
-      do: Quic.Cleanup.retire(io.cleanup, {:abs_ms, System.monotonic_time(:millisecond)})
   end
 
   defp remove(data, pid) do
@@ -1165,9 +1140,6 @@ defmodule Quic.Endpoint do
 
     Enum.each(data.ios, fn {_id, io} ->
       if is_pid(io.socket), do: close_io(%{external: false, socket: io.socket})
-
-      if io.cleanup,
-        do: Quic.Cleanup.retire(io.cleanup, {:abs_ms, System.monotonic_time(:millisecond)})
     end)
 
     if data.external, do: close_io(data)

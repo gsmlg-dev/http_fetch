@@ -111,6 +111,18 @@ defmodule HTTP.HTTP3.Stream do
   def acknowledge(pid, ref), do: send(pid, {:acknowledge, ref})
   def close(pid), do: send(pid, :abort)
 
+  @doc """
+  Asks an extended CONNECT relay to migrate its exclusive connection (beta).
+
+  Only the relay's subscriber may ask. The subscriber receives
+  `{:http_runtime, generation, pid, {:migration, tag, {:ok, migration_ref} |
+  {:error, reason}}}` for admission and, once admitted, `{:migrated,
+  migration_ref, {:ok, actual_local} | {:error, reason}}`. Refusals by the
+  connection owner (pooled or shared connections) arrive as admission errors.
+  """
+  def migrate(pid, tag, local, deadline) when is_reference(tag) and is_integer(deadline),
+    do: send(pid, {:migrate, self(), tag, local, deadline})
+
   defp certified?(opts),
     do: opts[:purpose] == :extended_connect and is_pid(opts[:request_lifecycle])
 
@@ -778,6 +790,15 @@ defmodule HTTP.HTTP3.Stream do
 
   defp receive_messages(state) do
     receive do
+      {:http3, generation, ref, {:migration, migration, outcome}}
+      when generation == state.generation and ref == state.ref ->
+        tunnel_notify(state, {:migrated, migration, outcome})
+        relay(state)
+
+      {:migrate, caller, tag, local, deadline} when caller == state.subscriber ->
+        tunnel_notify(state, {:migration, tag, migrate_owner(state, local, deadline)})
+        relay(state)
+
       {:http3, generation, ref, event} when generation == state.generation and ref == state.ref ->
         state =
           if not state.tunnel? and match?({:headers, _, _}, event),
@@ -860,6 +881,19 @@ defmodule HTTP.HTTP3.Stream do
           expire_request(state)
         end
     end
+  end
+
+  defp migrate_owner(%{tunnel?: false}, _local, _deadline), do: {:error, :not_exclusive_owner}
+
+  defp migrate_owner(state, local, deadline) do
+    if now() >= deadline,
+      do: {:error, :operation_timeout},
+      else: ConnectionOwner.migrate(state.owner, state.ref, local, deadline - now())
+  catch
+    :exit, {:noproc, _} -> {:error, :closed}
+    :exit, {{:shutdown, _}, _} -> {:error, :closed}
+    :exit, {:normal, _} -> {:error, :closed}
+    :exit, _ -> {:error, :indeterminate_admission}
   end
 
   defp complete_write(%{write: {_, :producer}} = state, ref) do

@@ -74,6 +74,22 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   def webtransport(owner, ref, op, timeout) when is_integer(timeout) and timeout > 0,
     do: GenServer.call(owner, {:webtransport, ref, op, now() + timeout}, timeout + 1_000)
 
+  @doc """
+  Migrates the exclusive connection carrying request `ref` to `local` (beta).
+
+  Only the sole subscriber of an exclusive owner whose QUIC endpoint is owned
+  by this connection may call. Shared or pooled owners refuse with
+  `:not_exclusive_owner`, owners dialled through a shared resumption endpoint
+  with `:shared_endpoint`, and an owner that is not ready with `:not_ready`.
+  `timeout` is an absolute deadline from now that also bounds path validation.
+  Returns the engine admission `{:ok, migration_ref}` or `{:error, reason}`;
+  the outcome is later delivered to the subscriber as
+  `{:http3, generation, ref, {:migration, migration_ref, {:ok, actual_local} |
+  {:error, reason}}}`. At most one migration is outstanding per owner.
+  """
+  def migrate(owner, ref, local, timeout) when is_integer(timeout) and timeout > 0,
+    do: GenServer.call(owner, {:migrate, ref, local, now() + timeout}, timeout + 1_000)
+
   @doc "Releases owner delivery credit retained for a WT event receipt."
   def webtransport_ack(owner, ref, receipt),
     do: GenServer.cast(owner, {:webtransport_ack, ref, receipt})
@@ -137,7 +153,8 @@ defmodule HTTP.HTTP3.ConnectionOwner do
       partition: nil,
       remembered: nil,
       early: nil,
-      resumed: false
+      resumed: false,
+      migration: nil
     }
 
     if inert?, do: {:ok, state}, else: {:ok, state, {:continue, :connect}}
@@ -309,6 +326,13 @@ defmodule HTTP.HTTP3.ConnectionOwner do
 
       _ ->
         {:reply, {:error, :unknown_webtransport_session}, state}
+    end
+  end
+
+  def handle_call({:migrate, ref, local, deadline}, {caller, _} = from, state) do
+    case migration_refusal(state, ref, caller) do
+      nil -> {:noreply, enqueue(state, {:migrate, ref, from, local, deadline})}
+      reason -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -685,6 +709,28 @@ defmodule HTTP.HTTP3.ConnectionOwner do
         guarded(state, state.timeout, fn -> Session.reset_send(state.session, ref) end)
       )
 
+  defp perform(state, {:migrate, ref, _from, local, deadline} = action) do
+    cond do
+      now() >= deadline ->
+        reject(state, action, :operation_timeout)
+
+      not Map.has_key?(state.requests, ref) ->
+        reject(state, action, :unknown_request)
+
+      true ->
+        result(
+          state,
+          action,
+          guarded(
+            state,
+            min(state.timeout, max(deadline - now(), 1)),
+            fn -> Session.migrate(state.session, local, deadline: {:abs_ms, deadline}) end,
+            action
+          )
+        )
+    end
+  end
+
   defp webtransport_call(session, {:open, kind}, opts),
     do: Session.webtransport_open(session, kind, opts)
 
@@ -812,6 +858,17 @@ defmodule HTTP.HTTP3.ConnectionOwner do
       else: enqueue(remove_request(next, ref), {:cancel, ref})
   end
 
+  defp apply_result(state, {:migrate, ref, from, _local, deadline}, {:ok, session, migration}) do
+    GenServer.reply(from, {:ok, migration})
+
+    %{
+      state
+      | session: session,
+        pending: nil,
+        migration: %{ref: migration, request: ref, deadline: deadline}
+    }
+  end
+
   defp apply_result(state, {:webtransport, from, _, _, _}, {:ok, session, key}) do
     GenServer.reply(from, {:ok, key})
     %{state | session: session, pending: nil}
@@ -895,6 +952,11 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     tunnel? = match?(%{purpose: :extended_connect}, state.requests[ref]) and status in 200..299
     if tunnel?, do: notify(state, ref, {:headers, status, fields})
     if tunnel?, do: state, else: response_headers(state, ref, status, fields)
+  end
+
+  defp dispatch_event({:migration, migration, outcome}, %{migration: %{ref: migration}} = state) do
+    notify(state, state.migration.request, {:migration, migration, outcome})
+    %{state | migration: nil}
   end
 
   defp dispatch_event({:informational, ref, status, fields}, state),
@@ -1050,6 +1112,11 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     state
   end
 
+  defp reject(state, {:migrate, _ref, from, _local, _deadline}, reason) do
+    GenServer.reply(from, {:error, reason})
+    state
+  end
+
   defp reject(state, {:write, _, _, _, recipient, ref}, reason) do
     send(recipient, {:http3_write, ref, {:error, reason}})
     state
@@ -1072,6 +1139,21 @@ defmodule HTTP.HTTP3.ConnectionOwner do
         if(state.pending, do: [state.pending], else: [])
 
     Enum.reduce(actions, state, &reject(&2, &1, reason))
+  end
+
+  # Migration moves the connection's only UDP path, so it needs explicit
+  # exclusive ownership of both the connection and its endpoint. An outcome the
+  # engine never reported stops blocking new migrations after its deadline.
+  defp migration_refusal(state, ref, caller) do
+    cond do
+      state.lifecycle != :ready -> :not_ready
+      not state.exclusive? -> :not_exclusive_owner
+      state.resumption != nil -> :shared_endpoint
+      not match?(%{subscriber: ^caller}, state.requests[ref]) -> :unknown_request
+      map_size(state.requests) != 1 -> :not_exclusive_owner
+      state.migration != nil and now() < state.migration.deadline + 1_000 -> :migration_busy
+      true -> nil
+    end
   end
 
   defp open_count(state),

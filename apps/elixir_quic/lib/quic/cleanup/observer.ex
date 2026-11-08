@@ -149,7 +149,8 @@ defmodule Quic.Cleanup.Observer do
         :reset_stream_at,
         :stop_stream,
         :send_datagram,
-        :read_datagrams
+        :read_datagrams,
+        :migrate
       ] ->
         reject(state, :invalid_operation_kind)
 

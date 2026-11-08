@@ -239,6 +239,17 @@ defmodule HTTP.WebTransport.Transport.QUIC do
 
   def cancel_receive_stream(_stream_ref, _code), do: {:error, :invalid_stream}
 
+  @impl true
+  def migrate(%Ref{owner: owner, ref: ref}, local, timeout) do
+    ConnectionOwner.migrate(owner, ref, local, timeout)
+  catch
+    :exit, {:noproc, _} -> {:error, :closed}
+    :exit, {:normal, _} -> {:error, :closed}
+    :exit, _ -> {:error, :indeterminate_admission}
+  end
+
+  def migrate(_session_ref, _local, _timeout), do: {:error, :invalid_session}
+
   @doc "Returns owner delivery credit for a receipt carried by a session event."
   def acknowledge(%Ref{owner: owner, ref: ref}, receipt) when is_reference(receipt),
     do: ConnectionOwner.webtransport_ack(owner, ref, receipt)
@@ -293,6 +304,9 @@ defmodule HTTP.WebTransport.Transport.QUIC do
     do: [{:webtransport_closed, session_ref, %CloseInfo{close_code: code, reason: reason}}]
 
   defp owner_event(session_ref, {:wt, :drain}), do: [{:webtransport_draining, session_ref}]
+
+  defp owner_event(session_ref, {:migration, migration, outcome}),
+    do: [{:webtransport_migrated, session_ref, migration, outcome}]
 
   defp owner_event(session_ref, :done),
     do: [{:webtransport_closed, session_ref, %CloseInfo{close_code: 0, reason: ""}}]

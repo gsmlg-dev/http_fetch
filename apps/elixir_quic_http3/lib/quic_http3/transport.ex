@@ -10,6 +10,10 @@ defmodule QuicHttp3.Transport do
   `open_stream/3` options may carry `reliable_prefix: bytes`; transports that
   support reliable reset answer a peer STOP_SENDING on that stream with
   RESET_STREAM_AT retaining the prefix, and others may ignore the option.
+  `migrate/2` (optional) forwards explicit client migration of an exclusive
+  standalone connection; it returns the engine admission `{:ok, ref}` and the
+  outcome later arrives as the `{:migration, ref, outcome}` event. Connections
+  on a shared endpoint refuse with `{:error, :shared_endpoint}`.
   The internal exclusive `cleanup` descriptor is supported only by a Session
   using the production Quic adapter and an owned endpoint. Cleanup acknowledgements
   do not replace the separately retained `Quic.Cleanup` receipt.
@@ -44,6 +48,8 @@ defmodule QuicHttp3.Transport do
   @callback send_datagram(connection(), binary(), options()) :: {:ok, reference()} | failure()
   @callback read_datagrams(connection(), pos_integer(), options()) ::
               {:ok, [binary()]} | failure()
+  @callback migrate(connection(), options()) :: {:ok, reference()} | failure()
   @callback stop_endpoint(pid()) :: :ok | {:error, term()}
   @callback capabilities() :: map()
+  @optional_callbacks migrate: 2
 end

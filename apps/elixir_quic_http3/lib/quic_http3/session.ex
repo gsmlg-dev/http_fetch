@@ -722,6 +722,23 @@ defmodule QuicHttp3.Session do
     )
   end
 
+  @doc """
+  Admits explicit client migration to the concrete `local` `{ip, port}` (beta).
+
+  Returns `{:ok, session, ref}` once the transport admitted migration; the
+  outcome later arrives from `poll/3` as `{:migration, ref, {:ok, actual_local}
+  | {:error, reason}}`. The migration deadline is the operation deadline. A
+  transport without migration returns `:migration_unsupported`.
+  """
+  def migrate(%__MODULE__{connection: nil} = session, _local, _opts),
+    do: {:error, session, :not_connected}
+
+  def migrate(session, local, opts) do
+    if function_exported?(session.transport, :migrate, 2),
+      do: begin(session, :migrate, [{:migrate, local}], opts),
+      else: {:error, session, :migration_unsupported}
+  end
+
   def poll(session, max, opts \\ [])
 
   def poll(session, max, opts) when is_integer(max) and max in 1..128 do
@@ -1061,6 +1078,9 @@ defmodule QuicHttp3.Session do
   defp operation(session, :close, opts),
     do: session.transport.close(session.connection, 0x100, <<>>, opts)
 
+  defp operation(session, {:migrate, local}, opts),
+    do: session.transport.migrate(session.connection, [{:local, local} | opts])
+
   defp operation_kind({:connect, _, _, _}), do: :connect
   defp operation_kind(:open_control), do: :open_stream
   defp operation_kind({:open_qpack, _}), do: :open_stream
@@ -1078,6 +1098,7 @@ defmodule QuicHttp3.Session do
   defp operation_kind({:stop, _}), do: :stop_stream
   defp operation_kind(:close), do: :close
   defp operation_kind(:abort), do: :abort
+  defp operation_kind({:migrate, _}), do: :migrate
 
   defp complete(session, action, result) do
     permit = session.pending && Map.get(session.pending, :cleanup_permit)
@@ -1304,6 +1325,9 @@ defmodule QuicHttp3.Session do
     end
   end
 
+  defp accepted(session, {:migrate, _local}, {:ok, ref}),
+    do: {:ok, put_in(session.work.kind, {:migration, ref})}
+
   defp accepted(session, _action, _success), do: {:ok, session}
 
   defp retain_early(session, ref, headers, method) do
@@ -1338,6 +1362,9 @@ defmodule QuicHttp3.Session do
 
       {:wt_open, key} ->
         {:ok, next, key}
+
+      {:migration, ref} ->
+        {:ok, next, ref}
 
       {:rejected, ref, reason} ->
         {:error, next, {:request_rejected, ref, reason}}
@@ -1457,6 +1484,11 @@ defmodule QuicHttp3.Session do
     do: {:ok, record_events(session, [event])}
 
   defp consume_event(session, {:ready, _} = event), do: {:ok, record_events(session, [event])}
+
+  defp consume_event(session, {:migration, ref, outcome} = event)
+       when is_reference(ref) and tuple_size(outcome) == 2 and elem(outcome, 0) in [:ok, :error],
+       do: {:ok, record_events(session, [event])}
+
   # 0-RTT disposition is resolved from connection info when the session opens.
   defp consume_event(session, {:early_data, _ref, status}) when status in [:accepted, :rejected],
     do: {:ok, session}

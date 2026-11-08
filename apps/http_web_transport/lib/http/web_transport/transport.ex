@@ -29,4 +29,15 @@ defmodule HTTP.WebTransport.Transport do
   @callback close_send_stream(stream_ref()) :: :ok | {:error, term()}
   @callback abort_send_stream(stream_ref(), non_neg_integer()) :: :ok | {:error, term()}
   @callback cancel_receive_stream(stream_ref(), non_neg_integer()) :: :ok | {:error, term()}
+
+  @doc """
+  Admits client migration of the session's exclusive connection to `local`.
+
+  Returns `{:ok, migration_ref}`; the outcome is reported through the backend's
+  push delivery as `{:webtransport_migrated, session_ref, migration_ref,
+  {:ok, actual_local} | {:error, reason}}`.
+  """
+  @callback migrate(session_ref(), {tuple(), :inet.port_number()}, pos_integer()) ::
+              {:ok, reference()} | {:error, term()}
+  @optional_callbacks migrate: 3
 end

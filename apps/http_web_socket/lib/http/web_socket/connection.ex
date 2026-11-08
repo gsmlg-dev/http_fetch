@@ -68,7 +68,8 @@ defmodule HTTP.WebSocket.Connection do
             idle_timer: nil,
             close_timer: nil,
             connect_started_at: nil,
-            opening_deadline: :infinity
+            opening_deadline: :infinity,
+            migration: nil
 
   @spec start_link(Options.t() | {Options.t(), ClientCompletion.t()}) :: GenServer.on_start()
   def start_link(%Options{} = options), do: start_link({options, ClientCompletion.new(:client)})
@@ -260,6 +261,20 @@ defmodule HTTP.WebSocket.Connection do
   def handle_call({:send_frame, _frame, _acknowledged?}, _from, state),
     do: {:reply, {:error, :closed}, state}
 
+  def handle_call({:migrate, local, timeout}, from, state) do
+    case migration_refusal(state) do
+      nil ->
+        tag = make_ref()
+        deadline = System.monotonic_time(:millisecond) + timeout
+        HTTP.HTTP3.Stream.migrate(state.stream, tag, local, deadline)
+        timer = Process.send_after(self(), {:migration_timeout, tag}, timeout + 1_000)
+        {:noreply, %{state | migration: %{from: from, tag: tag, ref: nil, timer: timer}}}
+
+      reason ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call({:close, code, reason, payload}, from, state) do
     validation =
       if state.options.mode == :proxy,
@@ -300,6 +315,11 @@ defmodule HTTP.WebSocket.Connection do
         %{opening_timer: {_timer, token}, ready_state: @connecting} = state
       ),
       do: fail(state, if(state.stream, do: :opening_timeout, else: :timeout))
+
+  def handle_info({:migration_timeout, tag}, %{migration: %{tag: tag} = migration} = state),
+    do:
+      {:noreply,
+       settle_migration(state, {:error, {:indeterminate_operation, migration.ref || tag}})}
 
   def handle_info({:idle_timeout, token}, %{idle_timer: {_timer, token}} = state),
     do: transport_terminal(state, :idle_timeout)
@@ -647,6 +667,26 @@ defmodule HTTP.WebSocket.Connection do
     end
   end
 
+  defp stream_event(%{migration: %{tag: tag}} = state, {:migration, tag, {:ok, ref}}),
+    do: {:noreply, put_in(state.migration.ref, ref)}
+
+  defp stream_event(%{migration: %{tag: tag}} = state, {:migration, tag, {:error, _} = error}),
+    do: {:noreply, settle_migration(state, error)}
+
+  defp stream_event(%{migration: %{ref: ref}} = state, {:migrated, ref, outcome})
+       when is_reference(ref) do
+    reply =
+      case outcome do
+        {:ok, local} -> {:ok, %{local: local}}
+        {:error, _} = error -> error
+      end
+
+    {:noreply, settle_migration(state, reply)}
+  end
+
+  defp stream_event(state, {:migration, _tag, _result}), do: {:noreply, state}
+  defp stream_event(state, {:migrated, _ref, _outcome}), do: {:noreply, state}
+
   defp stream_event(state, {:opened, handle}), do: {:noreply, %{state | stream_handle: handle}}
 
   defp stream_event(%{ready_state: @connecting} = state, {:headers, headers, _flags}) do
@@ -711,6 +751,24 @@ defmodule HTTP.WebSocket.Connection do
 
   defp stream_event(state, {:terminal, reason}), do: transport_terminal(state, reason)
   defp stream_event(state, {:error, reason}), do: transport_terminal(state, reason)
+
+  # Only an open HTTP/3 tunnel on its own exclusive connection may migrate;
+  # the connection owner re-checks exclusivity before reaching the engine.
+  defp migration_refusal(state) do
+    cond do
+      state.ready_state != @open -> :invalid_state
+      state.http_version != :http3 or not is_pid(state.stream) -> :migration_requires_http3
+      state.options.http3_reuse != false -> :not_exclusive_owner
+      state.migration != nil -> :migration_busy
+      true -> nil
+    end
+  end
+
+  defp settle_migration(%{migration: migration} = state, reply) do
+    Process.cancel_timer(migration.timer)
+    GenServer.reply(migration.from, reply)
+    %{state | migration: nil}
+  end
 
   defp established(state, negotiated, version) do
     state = state |> cancel_timer(:opening_timer)

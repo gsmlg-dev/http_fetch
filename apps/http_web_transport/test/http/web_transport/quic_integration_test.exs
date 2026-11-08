@@ -278,6 +278,62 @@ defmodule HTTP.WebTransport.QUICIntegrationTest do
              before
   end
 
+  # Port migration on loopback; IP migration needs a loopback alias (127.0.0.2)
+  # that is not configured by default on macOS.
+  test "client migration moves the session to a new local port with stream and datagram continuity",
+       ctx do
+    {transport, peer} = open(ctx)
+    owner = :sys.get_state(transport.pid).session_ref.owner
+    {:ok, %{local: {_, old_port}}} = Quic.info(:sys.get_state(owner).session.connection.handle)
+
+    assert {:ok, %{local: {{127, 0, 0, 1}, new_port} = local}} =
+             WebTransport.migrate(transport, local: {{127, 0, 0, 1}, 0}, timeout: 5_000)
+
+    assert new_port != old_port
+    assert {:ok, %{remote: ^local}} = Quic.info(peer.conn)
+
+    {:ok, %BidirectionalStream{readable: readable, writable: writable}} =
+      WebTransport.create_bidirectional_stream(transport)
+
+    assert :ok = SendStream.write(writable, "after-migration")
+    assert :ok = SendStream.close(writable)
+    bidi = next_stream(peer.conn, :bidi)
+    {:ok, prefix} = Draft17.prefix(:bidi, 0)
+    assert {wire, :fin} = read_all(bidi)
+    assert wire == prefix <> "after-migration"
+    send!(bidi, "migrated-reply", true)
+    assert {"migrated-reply", :fin} = read_stream(readable)
+
+    writer = DatagramDuplexStream.create_writable(WebTransport.datagrams(transport))
+    assert :ok = DatagramsWritable.write(writer, "dg-after")
+    assert ["dg-after"] = receive_datagrams(peer.conn, 1)
+    {:ok, wire} = Datagram.encode(0, "dg-back", 1200)
+    assert {:ok, _} = Quic.send_datagram(peer.conn, wire)
+    assert "dg-back" == read_datagram(WebTransport.datagrams(transport))
+    assert :ok = WebTransport.close(transport)
+  end
+
+  test "invalid migration requests are refused and leave the session usable", ctx do
+    {transport, peer} = open(ctx)
+
+    assert {:error, :invalid_local_address} =
+             WebTransport.migrate(transport, local: {{0, 0, 0, 0}, 0})
+
+    assert {:error, :invalid_local_address} = WebTransport.migrate(transport, local: :bad)
+
+    assert {:error, :invalid_timeout} =
+             WebTransport.migrate(transport, local: {{127, 0, 0, 1}, 0}, timeout: 0)
+
+    {:ok, out} = WebTransport.create_unidirectional_stream(transport)
+    assert :ok = SendStream.write(out, "still-here")
+    assert :ok = SendStream.close(out)
+    {:ok, prefix} = Draft17.prefix(:uni, 0)
+    assert {wire, :fin} = read_all(next_stream(peer.conn, :uni))
+    assert wire == prefix <> "still-here"
+    assert :ok = WebTransport.close(transport)
+    assert {:error, :invalid_state} = WebTransport.migrate(transport, local: {{127, 0, 0, 1}, 0})
+  end
+
   test "owner death fails the session and rejects later operations", ctx do
     {transport, _peer} = open(ctx)
     owner = :sys.get_state(transport.pid).session_ref.owner
