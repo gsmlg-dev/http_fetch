@@ -64,6 +64,23 @@ defmodule HTTP.EventSource.OptionsTest do
   end
 
   @tag :integration
+  test "HTTP3 threads the opt-in resumption policy to the runtime" do
+    ssl = [cacertfile: @h3_ca, reference_identity: {:dns_id, "example.test"}]
+    url = "https://example.test/events"
+    assert {:ok, default} = Options.new(url, http_version: :http3, ssl: ssl)
+    assert default.http3_resumption == false
+
+    assert {:ok, options} =
+             Options.new(url, %{"httpVersion" => "h3", "http3Resumption" => true, "ssl" => ssl})
+
+    assert options.http3_resumption == true
+    assert HTTP.Runtime.Options.transport_options(options)[:http3_resumption] == true
+
+    assert {:error, :invalid_http3_resumption} =
+             Options.new(url, http_version: :http3, ssl: ssl, http3_resumption: :yes)
+  end
+
+  @tag :integration
   test "HTTP3 rejects contradictory routes, TLS options and connection headers before networking" do
     for {url, init, reason} <- [
           {"http://example.test/events", [], :http3_requires_https},

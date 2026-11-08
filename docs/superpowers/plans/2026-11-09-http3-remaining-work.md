@@ -15,7 +15,7 @@ its independent acceptance gate.
 | 2 | Dynamic QPACK decoder (RFC 9204), bounded table and blocked streams | none | Done; aioquic gate PASS |
 | 3 | WebSocket/H3: native completion receipt, drop experimental label | QUIC cleanup receipt contract | Done; independent gate PASS |
 | 4 | WebTransport live adapter on `HTTP.HTTP3.ConnectionOwner` | WP3 runtime contract; matching draft-17 peer for acceptance | Live adapter done (in-repo peer); independent acceptance BLOCKED: no qualifying peer |
-| 5 | HTTP-layer resumption, 0-RTT for safe requests, migration for exclusive long-lived sessions | WP3, WP4 | Planned; capability flags stay false until engine negative acceptance |
+| 5 | HTTP-layer resumption, 0-RTT for safe requests, migration for exclusive long-lived sessions | WP3, WP4 | 5a resumption + 0-RTT done (aioquic gate PASS); 5b migration in progress; capability flags stay false |
 
 ## WP1: Alt-Svc auto-HTTP/3 (Fetch)
 

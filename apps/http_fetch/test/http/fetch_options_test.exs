@@ -373,6 +373,49 @@ defmodule HTTP.FetchOptionsTest do
     end
   end
 
+  describe "http3_resumption and early_data" do
+    test "default off and map to transport options when enabled" do
+      default = HTTP.FetchOptions.new([])
+      refute default.http3_resumption or default.early_data
+      transport = HTTP.FetchOptions.to_transport_options(default)
+      refute Keyword.has_key?(transport, :http3_resumption)
+      refute Keyword.has_key?(transport, :early_data)
+
+      options = HTTP.FetchOptions.new(%{"http3Resumption" => true, "earlyData" => true})
+      transport = HTTP.FetchOptions.to_transport_options(options)
+      assert transport[:http3_resumption] == true
+      assert transport[:early_data] == true
+    end
+
+    test "early_data is limited to safe methods without a body" do
+      for method <- [:get, "HEAD", "options"] do
+        assert %{early_data: true} = HTTP.FetchOptions.new(method: method, early_data: true)
+      end
+
+      for method <- [:post, "PUT", :delete, :patch, "CONNECT"] do
+        assert_raise ArgumentError, ~r/early_data requires GET, HEAD or OPTIONS/, fn ->
+          HTTP.FetchOptions.new(method: method, early_data: true)
+        end
+      end
+
+      assert_raise ArgumentError, ~r/without a body/, fn ->
+        HTTP.FetchOptions.new(early_data: true, body: "payload")
+      end
+
+      assert %{early_data: false} = HTTP.FetchOptions.new(method: :post, early_data: false)
+    end
+
+    test "rejects non-boolean values" do
+      assert_raise ArgumentError, ~r/invalid http3_resumption/, fn ->
+        HTTP.FetchOptions.new(http3_resumption: "yes")
+      end
+
+      assert_raise ArgumentError, ~r/invalid early_data/, fn ->
+        HTTP.FetchOptions.new(early_data: 1)
+      end
+    end
+  end
+
   describe "edge cases" do
     test "handles empty options" do
       options = HTTP.FetchOptions.new([])

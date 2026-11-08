@@ -1,5 +1,18 @@
 defmodule HTTP.HTTP3.ConnectionOwner do
-  @moduledoc "Serialized native HTTP/3 ownership with bounded operations, demand and continuations."
+  @moduledoc """
+  Serialized native HTTP/3 ownership with bounded operations, demand and continuations.
+
+  With `resumption: %{early: early?}` (beta) the owner dials through the shared
+  `HTTP.HTTP3.Resumption` endpoint of its partition and records the peer
+  SETTINGS it receives there. When `early?` is true, the connection offers
+  0-RTT and SETTINGS are remembered for the partition, `await_ready(owner,
+  timeout, :early)` returns before the handshake completes and opens marked
+  `early_data: true` are admitted as early requests; other opens wait for the
+  handshake. An early open that the session cannot admit is queued for the
+  handshake instead. Opens marked `connection_info: true` receive a
+  `{:connection_info, %{resumed: boolean, early_data: boolean}}` event before
+  their response headers.
+  """
   use GenServer
   alias QuicHttp3.Session
 
@@ -8,6 +21,9 @@ defmodule HTTP.HTTP3.ConnectionOwner do
 
   def activate(owner, token), do: GenServer.call(owner, {:activate, token})
   def await_ready(owner, timeout \\ 5_000), do: GenServer.call(owner, :await_ready, timeout)
+
+  def await_ready(owner, timeout, :early),
+    do: GenServer.call(owner, {:await_ready, :early}, timeout)
 
   def open(owner, fields, body, subscriber, generation, opts \\ []) do
     case GenServer.call(
@@ -116,7 +132,12 @@ defmodule HTTP.HTTP3.ConnectionOwner do
       pool_monitor: nil,
       last_activity: now(),
       idle_timeout: Keyword.get(opts, :idle_timeout, 30_000),
-      opening_deadline: opening_deadline
+      opening_deadline: opening_deadline,
+      resumption: opts[:resumption],
+      partition: nil,
+      remembered: nil,
+      early: nil,
+      resumed: false
     }
 
     if inert?, do: {:ok, state}, else: {:ok, state, {:continue, :connect}}
@@ -135,6 +156,7 @@ defmodule HTTP.HTTP3.ConnectionOwner do
       )
 
     state = %{state | watchdog: watchdog, watchdog_monitor: Process.monitor(watchdog)}
+    {state, endpoint} = checkout_resumption(state)
 
     result =
       guarded(state, state.opening_deadline - now(), fn ->
@@ -156,17 +178,54 @@ defmodule HTTP.HTTP3.ConnectionOwner do
             :creator,
             :request_lifecycle,
             :session_options,
-            :webtransport
+            :webtransport,
+            :resumption
           ])
+          |> Keyword.merge(endpoint)
           |> Keyword.put(:deadline, {:abs_ms, state.opening_deadline})
           |> Keyword.put(:timeout, min(state.timeout, max(state.opening_deadline - now(), 1)))
         )
       end)
 
-    next = result(state, :connect, result)
+    next = state |> result(:connect, result) |> offer_early()
     Process.send_after(self(), :tick, 1)
     {:noreply, next}
   end
+
+  # The shared endpoint is configured exactly as the owned endpoint `connect`
+  # would otherwise create, plus the runtime resumption policy.
+  defp checkout_resumption(%{resumption: %{early: early?}} = state) do
+    client =
+      Keyword.take(state.opts, [:host, :tls, :profile, :streams, :datagram, :socket, :limits])
+
+    case HTTP.HTTP3.Resumption.checkout(client, state.opts[:port], early?) do
+      {:ok, endpoint, partition, remembered} ->
+        {%{state | partition: partition, remembered: remembered}, [endpoint: endpoint]}
+
+      {:error, _reason} ->
+        {%{state | resumption: nil}, []}
+    end
+  end
+
+  defp checkout_resumption(state), do: {state, []}
+
+  defp offer_early(%{resumption: %{early: true}, remembered: remembered} = state)
+       when is_list(remembered) do
+    if state.lifecycle == :connecting and state.pending == nil and
+         Session.early_offered?(state.session),
+       do: %{state | early: :offered},
+       else: state
+  end
+
+  defp offer_early(state), do: state
+
+  defp early_open?(state, {:open, _from, _subscriber, _generation, _fields, body, opts}) do
+    state.early == :offered and state.lifecycle == :connecting and state.pending == nil and
+      state.queue == [] and opts[:early_data] == true and body == "" and
+      opts[:purpose] != :extended_connect
+  end
+
+  defp early_open?(_state, _action), do: false
 
   @impl true
   def handle_call({:activate, token}, {creator, _}, %{lifecycle: :inert} = state) do
@@ -191,6 +250,12 @@ defmodule HTTP.HTTP3.ConnectionOwner do
 
   def handle_call(:await_ready, from, state),
     do: {:noreply, %{state | ready_waiters: [from | state.ready_waiters]}}
+
+  def handle_call({:await_ready, :early}, from, state) do
+    if state.early == :offered and state.lifecycle == :connecting,
+      do: {:reply, :ok, state},
+      else: handle_call(:await_ready, from, state)
+  end
 
   def handle_call(:status, _from, state) do
     endpoint = if state.session.connection, do: state.session.connection.endpoint
@@ -464,12 +529,52 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   defp enqueue(state, action) do
     state = touch(state)
 
-    if state.lifecycle == :ready and state.pending == nil and state.queue == [] do
-      perform(state, action)
+    cond do
+      state.lifecycle == :ready and state.pending == nil and state.queue == [] ->
+        perform(state, action)
+
+      early_open?(state, action) ->
+        perform_early(state, action)
+
+      true ->
+        queue(state, action)
+    end
+  end
+
+  defp queue(state, action) do
+    if length(state.queue) < 128,
+      do: %{state | queue: state.queue ++ [action]},
+      else: reject(state, action, :owner_queue_full)
+  end
+
+  # A definite early admission failure leaves no native work behind, so the
+  # open waits for the handshake like any other.
+  defp perform_early(state, {:open, _from, subscriber, _generation, fields, body, opts} = action) do
+    if Process.alive?(subscriber) do
+      response =
+        guarded(
+          state,
+          min(state.timeout, Keyword.get(opts, :timeout, state.timeout)),
+          fn ->
+            Session.request(
+              state.session,
+              fields,
+              body,
+              Keyword.put(opts, :early_data, state.remembered)
+            )
+          end,
+          action
+        )
+
+      case response do
+        {:error, session, _reason} when session.pending == nil ->
+          queue(%{state | session: session, early: :unavailable}, action)
+
+        response ->
+          result(state, action, response)
+      end
     else
-      if length(state.queue) < 128,
-        do: %{state | queue: state.queue ++ [action]},
-        else: reject(state, action, :owner_queue_full)
+      reject(state, action, :subscriber_down)
     end
   end
 
@@ -655,7 +760,17 @@ defmodule HTTP.HTTP3.ConnectionOwner do
         do: {:abs_ms, state.request_deadline}
 
     session = %{session | deadline: deadline}
-    %{state | session: session, lifecycle: :ready, ready_waiters: [], pending: nil}
+    resumed = state.resumption != nil and Session.resumed?(session)
+
+    %{
+      state
+      | session: session,
+        lifecycle: :ready,
+        ready_waiters: [],
+        pending: nil,
+        early: nil,
+        resumed: resumed
+    }
   end
 
   defp apply_result(state, :poll, {:ok, session, events}) do
@@ -679,7 +794,8 @@ defmodule HTTP.HTTP3.ConnectionOwner do
       monitor: monitor,
       paused: false,
       headers_pending?: false,
-      deferred: []
+      deferred: [],
+      info?: opts[:connection_info] == true
     }
 
     GenServer.reply(from, {:ok, ref})
@@ -761,7 +877,21 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     event({:headers, ref, String.to_integer(value), List.keydelete(fields, ":status", 0)}, state)
   end
 
+  defp dispatch_event({:settings, settings}, state) do
+    if state.partition, do: HTTP.HTTP3.Resumption.remember(state.partition, settings)
+    state
+  end
+
   defp dispatch_event({:headers, ref, status, fields}, state) do
+    if match?(%{info?: true}, state.requests[ref]),
+      do:
+        notify(
+          state,
+          ref,
+          {:connection_info,
+           %{resumed: state.resumed, early_data: Session.early_data?(state.session, ref)}}
+        )
+
     tunnel? = match?(%{purpose: :extended_connect}, state.requests[ref]) and status in 200..299
     if tunnel?, do: notify(state, ref, {:headers, status, fields})
     if tunnel?, do: state, else: response_headers(state, ref, status, fields)

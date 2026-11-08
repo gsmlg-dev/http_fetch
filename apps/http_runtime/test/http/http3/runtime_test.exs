@@ -54,6 +54,36 @@ defmodule HTTP.HTTP3.RuntimeTest do
   end
 
   @tag :unit_tls
+  test "pool identity separates resumption and 0-RTT policy", %{tls: tls} do
+    request = %HTTP.Request{url: URI.parse("https://localhost/"), transport_options: [ssl: tls]}
+    assert {:ok, plain, plain_connect} = PoolKey.build(request)
+    refute Keyword.has_key?(plain_connect, :resumption)
+    assert {:ok, resumed, connect} = PoolKey.build(request, http3_resumption: true)
+    assert connect[:resumption] == %{early: false}
+
+    assert {:ok, early, connect} =
+             PoolKey.build(request, http3_resumption: true, early_data: true)
+
+    assert connect[:resumption] == %{early: true}
+    assert length(Enum.uniq([plain, resumed, early])) == 3
+
+    # early_data without resumption, or on an unsafe/body-bearing request, has no effect.
+    assert {:ok, ^plain, _} = PoolKey.build(request, early_data: true)
+    post = %{request | method: :post}
+
+    assert {:ok, _, connect} =
+             PoolKey.build(post, http3_resumption: true, early_data: true)
+
+    assert connect[:resumption] == %{early: false}
+
+    assert {:ok, _, connect} =
+             PoolKey.build(%{request | body: "x"}, http3_resumption: true, early_data: true)
+
+    assert connect[:resumption] == %{early: false}
+    assert {:error, :invalid_http3_resumption} = PoolKey.build(request, http3_resumption: :yes)
+  end
+
+  @tag :unit_tls
   test "pool identity separates trust, origin, profile and endpoint ownership", %{tls: tls} do
     request = %HTTP.Request{url: URI.parse("https://localhost/"), transport_options: [ssl: tls]}
     assert {:ok, key, _} = PoolKey.build(request)

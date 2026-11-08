@@ -261,6 +261,59 @@ defmodule HTTP.EventSource.HTTP3Test do
     assert :sys.get_state(source.pid).opening_timer == nil
   end
 
+  test "HTTP3 resumption resumes the next connection's TLS session", context do
+    fixture = Path.expand("../../../../elixir_quic/test/fixtures/tls", __DIR__)
+    [{:Certificate, leaf, _}] = :public_key.pem_decode(File.read!(Path.join(fixture, "leaf.pem")))
+
+    [{type, key, :not_encrypted}] =
+      :public_key.pem_decode(File.read!(Path.join(fixture, "leaf-key.pem")))
+
+    {:ok, server} =
+      Quic.listen(
+        tls: [cert: [leaf], key: {type, key}, alpn: ["h3"]],
+        resumption: [enabled: true, application_profile: "event-source-h3-test"]
+      )
+
+    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    {_, port} = Quic.local(server)
+    context = %{context | server: server, url: "https://127.0.0.1:#{port}/events"}
+
+    resumed =
+      for _attempt <- 1..2 do
+        source = source(context, http3_resumption: true, http3_reuse: false)
+        accepted = accept(server)
+        {:ok, info} = Quic.info(accepted)
+        stream = request(accepted, 0)
+        write(stream, headers(200, [{"content-type", "text/event-stream"}]), false)
+        write(stream, Frame.encode!(:data, "data: once\n\n"), true)
+        assert_receive {EventSource, ^source, %Message{data: "once"}}, 5_000
+        assert_receive {EventSource, ^source, %Error{reason: :eof}}, 5_000
+        await_ticket(port, System.monotonic_time(:millisecond) + 5_000)
+        EventSource.close(source)
+        info.resumption.resumed
+      end
+
+    assert resumed == [false, true]
+  end
+
+  defp await_ticket(port, deadline) do
+    assert System.monotonic_time(:millisecond) < deadline
+
+    ready? =
+      Enum.any?(:sys.get_state(HTTP.HTTP3.Resumption).entries, fn {_, entry} ->
+        entry.port == port and
+          match?(
+            %{resumption: %{tickets: count}} when count > 0,
+            Quic.Endpoint.stats(entry.endpoint.pid)
+          )
+      end)
+
+    unless ready? do
+      Process.sleep(10)
+      await_ticket(port, deadline)
+    end
+  end
+
   defp source(context, opts \\ []) do
     source =
       EventSource.new(

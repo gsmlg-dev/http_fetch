@@ -19,6 +19,9 @@ defmodule HTTP.EventSource do
   downgrade. Supply CA trust and optional reference identity through `ssl:`;
   HTTP/3 uses its QUIC TLS engine and rejects `tls_backend:`. `http3_profile`
   selects `:ordered` (default) or `:compact`, and `http3_reuse` controls pooling.
+  `http3_resumption: true` (beta, default `false`) dials new connections through
+  the runtime's bounded session-ticket authority, as for Fetch; EventSource
+  never sends 0-RTT data.
   The same parser, reconnect cursor, idle timeout and delivery limits apply.
   HTTP/3 requires a finite `connect_timeout`; established streams have no total
   request deadline. UNIX sockets, proxies and TCP `socket_opts` are unsupported.

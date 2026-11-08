@@ -26,6 +26,19 @@ defmodule QuicHttp3.Session do
   confirmed. Peer WT streams and datagrams are associated through
   `QuicHttp3.WebTransportRouter`; deliveries are `{:wt, connect_ref, event}`
   poll events whose credit is released by `webtransport_acknowledge/2`.
+
+  Early data (beta): before the handshake completes, `request/4` with
+  `early_data: remembered_settings` admits a GET, HEAD or OPTIONS request
+  without a body as replayable QUIC 0-RTT stream operations, provided the
+  connection offered 0-RTT. `remembered_settings` are the peer SETTINGS the
+  caller remembered for the resumption partition; the request must fit their
+  `SETTINGS_MAX_FIELD_SECTION_SIZE`. Control and QPACK streams are opened only
+  after the handshake. When `open/1` finds 0-RTT rejected, every early request
+  is re-sent once on a fresh stream under the same request reference. When
+  0-RTT was accepted, a peer SETTINGS frame that omits or reduces a remembered
+  non-default value this client understands is an `H3_SETTINGS_ERROR`
+  connection error (RFC 9114 Section 7.2.4.2). At most eight requests are
+  admitted early per connection.
   """
 
   alias HTTP.H3.{Capsule, Datagram}
@@ -67,6 +80,7 @@ defmodule QuicHttp3.Session do
             retired: MapSet.new(),
             aborted_operation: nil,
             wt: nil,
+            early: nil,
             open?: false
 
   defmodule Continuation do
@@ -206,7 +220,8 @@ defmodule QuicHttp3.Session do
                  [:open_control, {:open_qpack, :qpack_encoder}, {:open_qpack, :qpack_decoder}]},
               else: {nil, [:open_control]}
 
-          begin(%{session | control: control, qpack: qpack}, :open, steps, [])
+          {session, resend} = early_disposition(%{session | control: control, qpack: qpack})
+          begin(session, :open, steps ++ resend, [])
 
         :pending ->
           {:blocked, session, :not_ready}
@@ -217,8 +232,15 @@ defmodule QuicHttp3.Session do
     end
   end
 
-  def request(%__MODULE__{open?: false} = session, _fields, _body, _opts),
-    do: {:error, session, :not_open}
+  def request(%__MODULE__{open?: false} = session, fields, body, opts) do
+    case Keyword.get(opts, :early_data) do
+      remembered when is_list(remembered) ->
+        early_request(session, fields, body, opts, remembered)
+
+      _ ->
+        {:error, session, :not_open}
+    end
+  end
 
   def request(session, fields, body, opts)
       when is_list(fields) and (is_binary(body) or body == :stream) do
@@ -237,6 +259,167 @@ defmodule QuicHttp3.Session do
     else
       true -> {:error, session, :protocol_requires_extended_connect}
       {:error, reason} -> {:error, session, reason}
+    end
+  end
+
+  @early_methods ~w(GET HEAD OPTIONS)
+  @max_early_requests 8
+  # Settings whose remembered non-default values bind an accepted 0-RTT
+  # connection: QPACK capacity, field section size, QPACK blocked streams,
+  # extended CONNECT and HTTP Datagrams.
+  @remembered_settings [{1, 0}, {6, nil}, {7, 0}, {8, 0}, {0x33, 0}]
+
+  defp early_request(session, fields, body, opts, remembered) do
+    method =
+      Enum.find_value(fields, "GET", fn {name, value} -> if name == ":method", do: value end)
+
+    early =
+      session.early || %{status: :pending, remembered: [], requests: %{}, accepted: MapSet.new()}
+
+    cond do
+      session.connection == nil ->
+        {:error, session, :not_connected}
+
+      method not in @early_methods or body != <<>> ->
+        {:error, session, :early_data_unsafe_request}
+
+      early.status != :pending ->
+        {:error, session, :early_data_unavailable}
+
+      map_size(early.requests) >= @max_early_requests ->
+        {:error, session, :early_data_capacity}
+
+      not valid_remembered?(remembered) ->
+        {:error, session, :invalid_remembered_settings}
+
+      session.transport.ready(session.connection, session.timeout) != :pending ->
+        {:error, session, :early_data_unavailable}
+
+      true ->
+        admit_early(%{session | early: %{early | remembered: remembered}}, fields, method, opts)
+    end
+  end
+
+  defp admit_early(session, fields, method, opts) do
+    with :ok <- request_admission(session),
+         false <- List.keymember?(fields, ":protocol", 0),
+         :ok <- outgoing_fields(session, fields),
+         {:ok, headers} <- Qpack.encode_header_block(fields, []),
+         :ok <- encoded_headers(session, headers),
+         {:ok, header_frame} <- Frame.encode(:headers, headers) do
+      ref = make_ref()
+
+      begin(
+        session,
+        {:request, ref},
+        [{:open_request, ref, header_frame, <<>>, method}],
+        Keyword.put(opts, :early_work, true)
+      )
+    else
+      true -> {:error, session, :protocol_requires_extended_connect}
+      {:error, reason} -> {:error, session, reason}
+    end
+  end
+
+  defp valid_remembered?(settings) do
+    length(settings) <= 32 and
+      Enum.all?(
+        settings,
+        &match?(
+          {id, value} when is_integer(id) and id >= 0 and is_integer(value) and value >= 0,
+          &1
+        )
+      )
+  end
+
+  @doc "Whether the connection currently offers QUIC 0-RTT for early requests."
+  def early_offered?(%__MODULE__{connection: nil}), do: false
+  def early_offered?(%__MODULE__{pending: pending}) when not is_nil(pending), do: false
+
+  def early_offered?(session) do
+    (session.early == nil or session.early.status == :pending) and
+      match?(
+        {:ok, %{resumption: %{early_data: :pending}}},
+        session.transport.info(session.connection)
+      )
+  catch
+    _, _ -> false
+  end
+
+  @doc "Whether `ref` was carried in QUIC 0-RTT data that the server accepted."
+  def early_data?(%__MODULE__{early: %{accepted: accepted}}, ref),
+    do: MapSet.member?(accepted, ref)
+
+  def early_data?(_session, _ref), do: false
+
+  @doc "Whether the established connection resumed a TLS session."
+  def resumed?(%__MODULE__{connection: nil}), do: false
+
+  def resumed?(session) do
+    match?({:ok, %{resumption: %{resumed: true}}}, session.transport.info(session.connection))
+  catch
+    _, _ -> false
+  end
+
+  # Resolves 0-RTT disposition at readiness: accepted requests keep their
+  # streams; otherwise each early request is re-sent once after the handshake.
+  defp early_disposition(%{early: nil} = session), do: {session, []}
+
+  defp early_disposition(%{early: %{requests: requests}} = session) when map_size(requests) == 0,
+    do: {%{session | early: %{session.early | status: :not_offered}}, []}
+
+  defp early_disposition(%{early: early} = session) do
+    status =
+      case session.transport.info(session.connection) do
+        {:ok, %{resumption: %{early_data: :accepted}}} -> :accepted
+        _ -> :rejected
+      end
+
+    if status == :accepted do
+      accepted = MapSet.new(Map.keys(early.requests))
+      {%{session | early: %{early | status: :accepted, requests: %{}, accepted: accepted}}, []}
+    else
+      refs = Map.keys(early.requests)
+      stale = for ref <- refs, request = session.requests[ref], do: request.stream
+
+      steps =
+        for {ref, {frame, method, _order}} <-
+              Enum.sort_by(early.requests, fn {_ref, {_, _, order}} -> order end),
+            do: {:open_request, ref, frame, <<>>, method}
+
+      next = %{
+        session
+        | early: %{early | status: :rejected, requests: %{}},
+          requests: Map.drop(session.requests, refs),
+          runnable: Enum.reject(session.runnable, &(&1 in stale)),
+          qpack_blocked: session.qpack_blocked -- refs
+      }
+
+      {next, steps}
+    end
+  end
+
+  defp check_remembered_settings(%{early: %{status: :accepted, remembered: old}}, events) do
+    case List.keyfind(events, :settings, 0) do
+      {:settings, fresh} ->
+        if Enum.any?(@remembered_settings, &reduced_setting?(&1, old, fresh)),
+          do: protocol_error(0x109, :remembered_settings_reduced),
+          else: :ok
+
+      nil ->
+        :ok
+    end
+  end
+
+  defp check_remembered_settings(_session, _events), do: :ok
+
+  # A remembered non-default value must be repeated and must not shrink.
+  defp reduced_setting?({id, default}, old, fresh) do
+    case {List.keyfind(old, id, 0), List.keyfind(fresh, id, 0)} do
+      {{^id, ^default}, _} -> false
+      {nil, _} -> false
+      {{^id, _value}, nil} -> true
+      {{^id, value}, {^id, current}} -> current < value
     end
   end
 
@@ -645,7 +828,8 @@ defmodule QuicHttp3.Session do
         acc: [],
         reads: batches,
         paused: paused,
-        bytes: 16_384
+        bytes: 16_384,
+        early: Keyword.get(opts, :early_work, false)
       }
 
       drive(%{session | work: work})
@@ -783,6 +967,7 @@ defmodule QuicHttp3.Session do
 
       deadline = if session.work.absolute?, do: {:abs_ms, pending.deadline}, else: remaining
       opts = [ref: ref, timeout: min(remaining, session.work.call_timeout), deadline: deadline]
+      opts = if session.work.early, do: [{:early_data, :replayable} | opts], else: opts
 
       case retain_intent(session, pending) do
         {:ok, permit, target} ->
@@ -1005,7 +1190,10 @@ defmodule QuicHttp3.Session do
         do: register_webtransport(next, ref, id),
         else: next
 
-    if session.control.goaway_id != nil and id >= session.control.goaway_id do
+    next = if session.work.early, do: retain_early(next, ref, headers, method), else: next
+    goaway_id = if session.control, do: session.control.goaway_id
+
+    if goaway_id != nil and id >= goaway_id do
       steps = [{:reset_code, stream, 0x10B}, {:stop_code, stream, 0x10B}, {:remove_request, ref}]
       {:ok, %{next | work: %{next.work | kind: {:rejected, ref, :goaway}, steps: steps}}}
     else
@@ -1117,6 +1305,12 @@ defmodule QuicHttp3.Session do
   end
 
   defp accepted(session, _action, _success), do: {:ok, session}
+
+  defp retain_early(session, ref, headers, method) do
+    early = session.early
+    entry = {headers, method, map_size(early.requests)}
+    %{session | early: %{early | requests: Map.put(early.requests, ref, entry)}}
+  end
 
   defp data_steps(stream, <<>>, true, _max), do: [{:send, stream, <<>>, true}]
   defp data_steps(_stream, <<>>, false, _max), do: []
@@ -1263,6 +1457,10 @@ defmodule QuicHttp3.Session do
     do: {:ok, record_events(session, [event])}
 
   defp consume_event(session, {:ready, _} = event), do: {:ok, record_events(session, [event])}
+  # 0-RTT disposition is resolved from connection info when the session opens.
+  defp consume_event(session, {:early_data, _ref, status}) when status in [:accepted, :rejected],
+    do: {:ok, session}
+
   defp consume_event(_session, _event), do: {:error, :invalid_transport_event}
 
   defp consume_items(session, stream, items) do
@@ -1531,10 +1729,7 @@ defmodule QuicHttp3.Session do
             acc + byte_size(name) + byte_size(value) + 32
           end)
 
-        peer =
-          if session.control.peer_settings,
-            do: List.keyfind(session.control.peer_settings, 6, 0),
-            else: nil
+        peer = List.keyfind(peer_settings(session), 6, 0)
 
         cond do
           size > session.max_header_bytes -> {:error, :request_header_bytes_limit}
@@ -1543,6 +1738,11 @@ defmodule QuicHttp3.Session do
         end
     end
   end
+
+  # Before the peer SETTINGS arrive, an early request is bound by the remembered values.
+  defp peer_settings(%{control: %{peer_settings: settings}}) when is_list(settings), do: settings
+  defp peer_settings(%{early: %{remembered: settings}}), do: settings
+  defp peer_settings(_session), do: []
 
   defp encoded_headers(session, bytes) do
     if byte_size(bytes) > session.max_encoded_headers,
@@ -1711,9 +1911,15 @@ defmodule QuicHttp3.Session do
 
   defp receive_peer_payload(session, stream, :control, bytes) do
     case Control.receive_peer(session.control, stream, bytes) do
-      {:ok, control, events} -> {:ok, %{session | control: control}, events}
-      {:error, {:http3_error, _, _, _}} = error -> error
-      {:error, reason} -> protocol_error(control_code(reason), reason)
+      {:ok, control, events} ->
+        with :ok <- check_remembered_settings(session, events),
+             do: {:ok, %{session | control: control}, events}
+
+      {:error, {:http3_error, _, _, _}} = error ->
+        error
+
+      {:error, reason} ->
+        protocol_error(control_code(reason), reason)
     end
   end
 

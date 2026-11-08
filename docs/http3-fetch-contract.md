@@ -116,3 +116,93 @@ Alternatives on a different host are ignored.
 On the H3 route a TCP-form `ssl: [ex_ssl: [reference_identity: id]]` is lifted
 to the flat QUIC `reference_identity` when it is the only `ex_ssl` setting; any
 other `ex_ssl` setting keeps the request on TCP.
+
+## Session resumption and 0-RTT (beta)
+
+Both features are opt-in and beta; defaults are unchanged and
+`Quic.capabilities()` keeps reporting `resumption: false`. EventSource accepts
+`http3_resumption` and never sends 0-RTT. WebSocket and WebTransport over
+HTTP/3 do not take these options: their certified exclusive owners retire a
+per-relay `Quic.Cleanup` scope that requires an owned endpoint.
+
+### Resumption (`http3_resumption: true`)
+
+- New connections dial through a shared client endpoint owned by
+  `HTTP.HTTP3.Resumption` (supervised by `:http_runtime`) instead of an
+  endpoint per connection. The engine-local store keeps the tickets (default
+  256 tickets / 1 MiB per endpoint, lifetime <= 600 s, single use).
+- A partition is one endpoint: the exact endpoint configuration (origin host,
+  TLS trust and reference identity, QUIC profile, stream/datagram limits), the
+  dialed UDP port (including an Alt-Svc port) and the 0-RTT policy. The engine
+  additionally binds each ticket to remote address, trust, name, ALPN and
+  application profile (`http3-fetch-r1-v1`, or `http3-fetch-0rtt-v1` for early
+  partitions). The authority holds at most 64 partitions; when full the least
+  recently used partition with no live connection is stopped, and when none is
+  idle the connection proceeds without resumption. Nothing is persisted.
+- The pool identity gains `{:resumption, early?}`, so resumed, early and plain
+  connections never share a pooled connection. Resumption only affects new
+  connections; a pooled connection is reused as before (use
+  `http3_reuse: false` to observe a new handshake per request).
+- A user-supplied `endpoint` together with `http3_resumption` is rejected with
+  `:http3_resumption_endpoint_conflict`.
+- Observability: Fetch HTTP/3 responses carry
+  `response.http3 == %{resumed: boolean, early_data: boolean}` only when
+  `http3_resumption: true`; otherwise `response.http3` is `nil`.
+
+### 0-RTT (`early_data: true`)
+
+- Only GET, HEAD and OPTIONS without a body may set `early_data: true`; any
+  other method or a body raises `ArgumentError` at option normalization.
+  Without `http3_resumption: true`, without a 0-RTT-capable ticket or without
+  remembered SETTINGS the option has no effect and the request is sent after
+  the handshake. Unsafe methods are never sent early.
+- The 0-RTT partition requires that the server's remembered transport
+  parameters fit the engine's immutable early envelope (<= 64 KiB credit, <= 8
+  streams, `active_connection_id_limit` <= 8); otherwise the engine does not
+  offer 0-RTT and requests wait for the handshake.
+- Admission: after `Quic.connect` the owner offers early admission only when the
+  connection reports `early_data: :pending` and SETTINGS are remembered for the
+  partition. Only the request stream (HEADERS with FIN) is sent as replayable
+  early operations; control and QPACK streams open after the handshake. At most
+  eight requests are admitted early per connection. If the session cannot admit
+  an open early, it waits for the handshake like any other open.
+- Remembered SETTINGS contract (RFC 9114 Section 7.2.4.2): the owner records the
+  peer SETTINGS frame received on each connection of a 0-RTT partition (at most
+  32 settings). An early request must fit the remembered
+  `SETTINGS_MAX_FIELD_SECTION_SIZE`. When 0-RTT is accepted, a new SETTINGS
+  frame that omits or reduces a remembered non-default value of
+  `QPACK_MAX_TABLE_CAPACITY`, `MAX_FIELD_SECTION_SIZE`, `QPACK_BLOCKED_STREAMS`,
+  `ENABLE_CONNECT_PROTOCOL` or `H3_DATAGRAM` is an `H3_SETTINGS_ERROR` (0x109)
+  connection error. Remembered settings are the latest received on the
+  partition rather than those of the exact ticket's connection; a server that
+  changes SETTINGS between tickets may therefore fail an accepted 0-RTT
+  connection with this error instead of resuming silently.
+- QPACK: the client encoder is static/literal and never references the dynamic
+  table, so the server's remembered `QPACK_MAX_TABLE_CAPACITY` and
+  `QPACK_BLOCKED_STREAMS` constrain nothing the client sends. The client's own
+  decoder SETTINGS travel on the control stream after the handshake; until the
+  server has them it must encode with the RFC 9204 defaults (no dynamic table),
+  which the decoder accepts.
+- Rejection: if the server rejects 0-RTT (including a full-handshake fallback),
+  the session re-sends each early request once on a fresh stream after the
+  handshake under the same request reference; `response.http3.early_data` is
+  `false`. There is no automatic replay of anything else.
+- 425 Too Early (RFC 8470): a 425 to a request that was carried in accepted
+  0-RTT is retried once after the handshake with `early_data` cleared (on the
+  non-early partition); a 425 to any other request is returned as is.
+- `response.http3.early_data` is `true` when the request was admitted under
+  0-RTT keys and the connection's 0-RTT was accepted.
+- Alt-Svc: the `:connection_ready` invariant is kept — it is still emitted
+  before any request admission. For a 0-RTT partition it is emitted once the
+  resumed connection offers 0-RTT, i.e. before the handshake completes. A
+  handshake failure after an early admission is therefore returned as an error
+  and never falls back to TCP, so a request is never both sent early and
+  replayed over TCP.
+
+Evidence: `apps/http_fetch/test/http/http3_resumption_test.exs` (native QUIC
+server with resumption and 0-RTT), `apps/elixir_quic_http3/test/quic_http3_early_data_test.exs`
+(admission, remembered SETTINGS, rejection re-send) and the independent aioquic
+1.2.0 gate
+`uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/resumption_gate.py`
+(full, resumed, 0-RTT GET/HEAD, 425 retry, 425 passthrough, rejected 0-RTT
+re-send traced to the session).

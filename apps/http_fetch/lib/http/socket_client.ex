@@ -84,6 +84,17 @@ defmodule HTTP.SocketClient do
   defp alt_svc_runtime_opts(%{port: port}),
     do: [http3_connect_port: port, connection_ready_event: true]
 
+  defp http3_runtime_opts(%Request{transport_options: options}, route) do
+    base = if route, do: alt_svc_runtime_opts(route), else: []
+
+    if options[:http3_resumption] == true,
+      do: Keyword.put(base, :connection_info_event, true),
+      else: base
+  end
+
+  defp put_transport_option(%Request{} = request, key, value),
+    do: %{request | transport_options: Keyword.put(request.transport_options, key, value)}
+
   defp http3_request(%Request{} = request) do
     options =
       request.transport_options
@@ -257,17 +268,20 @@ defmodule HTTP.SocketClient do
           response_sent?: false,
           action: nil,
           alt_svc: route,
-          connected?: false
+          connected?: false,
+          http3_info: nil
         }
 
-        state =
-          if route,
-            do: Map.put(state, :http3_runtime_opts, alt_svc_runtime_opts(route)),
-            else: state
+        state = Map.put(state, :http3_runtime_opts, http3_runtime_opts(request, route))
 
         case HTTP.HTTP3.request(request, state, &handle_http3_event/2) do
           {:ok, %{action: {:redirect, response}}} ->
             follow_http3_redirect(response, parent, ref, request, redirects, deadline_at, route)
+
+          {:ok, %{action: :too_early}} ->
+            # RFC 8470: retry a 425 to a request carried in 0-RTT once, after the handshake.
+            request = put_transport_option(request, :early_data, false)
+            http3_owner(parent, ref, request, redirects, redirected?, deadline_at, route)
 
           {:ok, _state} ->
             :ok
@@ -284,6 +298,12 @@ defmodule HTTP.SocketClient do
   end
 
   defp handle_http3_event(state, :connection_ready), do: {:cont, %{state | connected?: true}}
+
+  defp handle_http3_event(state, {:connection_info, info}),
+    do: {:cont, %{state | http3_info: info}}
+
+  defp handle_http3_event(%{http3_info: %{early_data: true}} = state, {:headers, 425, _headers}),
+    do: {:halt, %{state | action: :too_early}}
 
   defp handle_http3_event(state, {:informational, status, headers}) do
     bytes =
@@ -314,7 +334,8 @@ defmodule HTTP.SocketClient do
         url: state.request.url,
         redirected: state.redirected?,
         http_version: :http3,
-        informational: state.informational
+        informational: state.informational,
+        http3: state.http3_info
       )
 
     cond do

@@ -18,6 +18,8 @@ defmodule HTTP.Runtime.Options do
     "http3Profile" => :http3_profile,
     "http3_reuse" => :http3_reuse,
     "http3Reuse" => :http3_reuse,
+    "http3_resumption" => :http3_resumption,
+    "http3Resumption" => :http3_resumption,
     "delivery" => :delivery,
     "max_queue_bytes" => :max_queue_bytes,
     "maxQueueBytes" => :max_queue_bytes,
@@ -36,6 +38,8 @@ defmodule HTTP.Runtime.Options do
          {:ok, profile} <- profile(Keyword.get(init, :http2_profile)),
          :ok <- scope(Keyword.get(init, :http2_scope)),
          :ok <- boolean(Keyword.get(init, :http2_reuse, true), :invalid_http2_reuse),
+         :ok <-
+           boolean(Keyword.get(init, :http3_resumption, false), :invalid_http3_resumption),
          {:ok, delivery} <- delivery(Keyword.get(init, :delivery, :legacy)),
          :ok <-
            positive(Keyword.get(init, :max_queue_bytes, 2_097_152), :invalid_max_queue_bytes),
@@ -69,6 +73,7 @@ defmodule HTTP.Runtime.Options do
           :http2_reuse,
           :http3_profile,
           :http3_reuse,
+          :http3_resumption,
           :tls_backend,
           :ssl,
           :socket_opts,
@@ -77,7 +82,8 @@ defmodule HTTP.Runtime.Options do
         ],
         Map.has_key?(options, key),
         not is_nil(options[key]),
-        key not in [:http3_profile, :http3_reuse] or options[:http_version] == :http3,
+        key not in [:http3_profile, :http3_reuse, :http3_resumption] or
+          options[:http_version] == :http3,
         do: {key, options[key]}
   end
 

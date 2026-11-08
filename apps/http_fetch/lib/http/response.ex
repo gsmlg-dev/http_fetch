@@ -174,7 +174,16 @@ defmodule HTTP.Response do
             http_version: nil,
             response_stream_idle_timeout: nil,
             informational: [],
-            trailers: %HTTP.Headers{}
+            trailers: %HTTP.Headers{},
+            http3: nil
+
+  @typedoc """
+  Beta HTTP/3 connection disposition, present only for `http3_resumption: true`
+  HTTP/3 responses: `resumed` reports TLS session resumption of the carrying
+  connection and `early_data` whether this request was carried in accepted
+  QUIC 0-RTT data.
+  """
+  @type http3_info :: %{resumed: boolean(), early_data: boolean()}
 
   @type response_type :: :basic | :cors | :error | :opaque
 
@@ -192,7 +201,8 @@ defmodule HTTP.Response do
           http_version: :http1 | :http2 | :http3 | nil,
           response_stream_idle_timeout: pos_integer() | :infinity | nil,
           informational: [{integer(), HTTP.Headers.t()}],
-          trailers: HTTP.Headers.t()
+          trailers: HTTP.Headers.t(),
+          http3: http3_info() | nil
         }
 
   @doc """
@@ -264,7 +274,8 @@ defmodule HTTP.Response do
       stream: stream,
       http_version: Keyword.get(opts, :http_version),
       informational: Keyword.get(opts, :informational, []),
-      trailers: Keyword.get(opts, :trailers, %HTTP.Headers{})
+      trailers: Keyword.get(opts, :trailers, %HTTP.Headers{}),
+      http3: Keyword.get(opts, :http3)
     }
   end
 

@@ -133,6 +133,19 @@ defmodule HTTP.FetchOptions do
   - `http2_reuse` - whether an HTTP/2 connection may be reused; defaults to `true`
   - `http3_profile` - QUIC wire profile; defaults to `:ordered`
   - `http3_reuse` - whether an HTTP/3 connection may be reused; defaults to `true`
+  - `http3_resumption` - beta opt-in QUIC session resumption for HTTP/3; defaults
+    to `false`. New connections dial through a runtime-owned endpoint whose
+    bounded ticket store is partitioned by origin, dialed port, TLS trust and
+    reference identity, QUIC profile and 0-RTT policy. HTTP/3 responses then
+    carry `response.http3 == %{resumed: boolean, early_data: boolean}`.
+  - `early_data` - beta per-request QUIC 0-RTT; defaults to `false`. Only GET,
+    HEAD and OPTIONS without a body may set it (others raise `ArgumentError`).
+    It takes effect only with `http3_resumption: true`, a ticket that allows
+    0-RTT and remembered peer HTTP/3 SETTINGS; otherwise the request is sent
+    after the handshake. A request whose 0-RTT is rejected is re-sent once after
+    the handshake, and a `425 Too Early` response to a request carried in 0-RTT
+    is retried once after the handshake (RFC 8470). See
+    `docs/http3-fetch-contract.md`.
   - `http2_scope` - non-sensitive caller isolation scope
   - `http2_priority` - per-request HTTP/2 priority metadata
   """
@@ -187,6 +200,10 @@ defmodule HTTP.FetchOptions do
     "http3Profile" => :http3_profile,
     "http3_reuse" => :http3_reuse,
     "http3Reuse" => :http3_reuse,
+    "http3_resumption" => :http3_resumption,
+    "http3Resumption" => :http3_resumption,
+    "early_data" => :early_data,
+    "earlyData" => :early_data,
     "http2_scope" => :http2_scope,
     "http2Scope" => :http2_scope,
     "http2_priority" => :http2_priority,
@@ -250,6 +267,8 @@ defmodule HTTP.FetchOptions do
             http2_reuse: true,
             http3_profile: nil,
             http3_reuse: true,
+            http3_resumption: false,
+            early_data: false,
             http2_scope: nil,
             http2_priority: nil
 
@@ -296,6 +315,8 @@ defmodule HTTP.FetchOptions do
           http2_reuse: boolean(),
           http3_profile: atom() | map() | nil,
           http3_reuse: boolean(),
+          http3_resumption: boolean(),
+          early_data: boolean(),
           http2_scope: atom() | String.t() | nil,
           http2_priority: map() | keyword() | nil
         }
@@ -355,6 +376,8 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:http2_reuse, if(options.http2_reuse, do: nil, else: false))
     |> maybe_add(:http3_profile, options.http3_profile)
     |> maybe_add(:http3_reuse, if(options.http3_reuse, do: nil, else: false))
+    |> maybe_add(:http3_resumption, if(options.http3_resumption, do: true))
+    |> maybe_add(:early_data, if(options.early_data, do: true))
     |> maybe_add(:http2_scope, options.http2_scope)
     |> maybe_add(:http2_priority, options.http2_priority)
   end
@@ -508,6 +531,12 @@ defmodule HTTP.FetchOptions do
       {:http3_reuse, reuse}, acc ->
         %{acc | http3_reuse: reuse}
 
+      {:http3_resumption, resumption}, acc ->
+        %{acc | http3_resumption: resumption}
+
+      {:early_data, early_data}, acc ->
+        %{acc | early_data: early_data}
+
       {:http2_scope, scope}, acc ->
         %{acc | http2_scope: scope}
 
@@ -575,6 +604,8 @@ defmodule HTTP.FetchOptions do
         http2_profile: normalize_http2_profile(options.http2_profile),
         http2_reuse: normalize_http2_reuse(options.http2_reuse),
         http3_reuse: normalize_http3_reuse(options.http3_reuse),
+        http3_resumption: normalize_boolean(options.http3_resumption, :http3_resumption),
+        early_data: normalize_boolean(options.early_data, :early_data),
         http2_scope: normalize_http2_scope(options.http2_scope),
         http2_priority: normalize_http2_priority(options.http2_priority)
     }
@@ -583,7 +614,31 @@ defmodule HTTP.FetchOptions do
     |> validate_idle_protocol()
     |> validate_response_stream_idle_protocol()
     |> validate_response_stream_ack_protocol()
+    |> validate_early_data()
   end
+
+  defp normalize_boolean(nil, _name), do: false
+  defp normalize_boolean(value, _name) when is_boolean(value), do: value
+
+  defp normalize_boolean(value, name),
+    do: raise(ArgumentError, "invalid #{name}: #{inspect(value)}; expected boolean")
+
+  # 0-RTT data is replayable, so only safe methods without a body may opt in.
+  defp validate_early_data(%{early_data: true} = options) do
+    cond do
+      options.method not in [:get, :head, :options] ->
+        raise ArgumentError,
+              "early_data requires GET, HEAD or OPTIONS, got: #{inspect(options.method)}"
+
+      options.body not in [nil, ""] ->
+        raise ArgumentError, "early_data requires a request without a body"
+
+      true ->
+        options
+    end
+  end
+
+  defp validate_early_data(options), do: options
 
   defp normalize_response_stream_idle_timeout(timeout) when timeout in [nil, :infinity],
     do: timeout

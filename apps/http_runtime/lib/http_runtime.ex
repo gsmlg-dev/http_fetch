@@ -10,6 +10,7 @@ defmodule HTTPRuntime.Application do
       {HTTP.HTTP1.Pool, []},
       {HTTP.HTTP2.ConnectionSupervisor, name: :http_fetch_http2_connection_supervisor},
       {HTTP.HTTP2.Pool, name: :http_fetch_http2_pool},
+      {HTTP.HTTP3.Resumption, []},
       {HTTP.HTTP3.ConnectionSupervisor, name: :http_fetch_http3_connection_supervisor},
       {HTTP.HTTP3.Pool, name: :http_fetch_http3_pool}
     ]

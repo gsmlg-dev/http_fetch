@@ -5,7 +5,15 @@ defmodule HTTP.HTTP3.Stream do
   With `connection_ready_event: true` the subscriber receives
   `{:http_runtime, generation, pid, :connection_ready}` once a QUIC connection is
   established or leased, before request stream admission. Earlier failures
-  prove that no request stream was admitted.
+  prove that no request stream was admitted. For an early-data partition
+  (`http3_resumption: true` with `early_data: true`) the event is sent once the
+  resumed connection offers 0-RTT, before the early request is admitted and
+  before the handshake completes; a later handshake failure is reported as an
+  ordinary error.
+
+  With `connection_info_event: true` the subscriber receives
+  `{:http_runtime, generation, pid, {:connection_info, %{resumed: boolean,
+  early_data: boolean}}}` before the response headers.
 
   An extended CONNECT relay started with `request_lifecycle` is a proof-bearing
   lifecycle worker: it returns normally only after its owner confirms that the
@@ -203,6 +211,11 @@ defmodule HTTP.HTTP3.Stream do
            ),
          connect = relay_cleanup(connect, opts),
          {:ok, fields, body} <- headers(request, opts),
+         opts =
+           Keyword.merge(opts,
+             early_request: match?(%{early: true}, connect[:resumption]),
+             connection_info: opts[:connection_info_event] == true
+           ),
          {:ok, owner, lease, ref} <-
            open_request(
              pool,
@@ -280,7 +293,7 @@ defmodule HTTP.HTTP3.Stream do
   end
 
   defp open_request(pool, key, connect, request, {deadline, monitor, attempts} = context) do
-    with {:ok, owner, lease} <- acquire(pool, key, connect, deadline, monitor) do
+    with {:ok, owner, lease} <- acquire(pool, key, connect, deadline, monitor, elem(request, 4)) do
       notify_ready(elem(request, 4))
       Process.put({__MODULE__, :tunnel}, {owner, nil})
       result = open_leased(pool, owner, lease, request, context)
@@ -321,6 +334,8 @@ defmodule HTTP.HTTP3.Stream do
        [
          purpose: opts[:purpose],
          protocol: opts[:protocol],
+         early_data: opts[:early_request] == true,
+         connection_info: opts[:connection_info] == true,
          timeout: remaining(deadline),
          deadline_at: deadline,
          request_deadline_at: request_deadline,
@@ -335,7 +350,7 @@ defmodule HTTP.HTTP3.Stream do
       :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
-  defp acquire(pool, key, connect, deadline, monitor) do
+  defp acquire(pool, key, connect, deadline, monitor, opts) do
     token = make_ref()
 
     case opening_call(
@@ -360,7 +375,7 @@ defmodule HTTP.HTTP3.Stream do
               if cleanup && Process.get({__MODULE__, :relay_cleanup}),
                 do: Process.put({__MODULE__, :native_cleanup}, cleanup)
 
-              launch_owner(pool, key, lease, connect, cleanup, deadline, monitor)
+              launch_owner(pool, key, lease, connect, cleanup, {deadline, monitor, opts})
 
             error ->
               Pool.release(pool, lease)
@@ -378,7 +393,7 @@ defmodule HTTP.HTTP3.Stream do
     end
   end
 
-  defp launch_owner(pool, key, lease, connect, cleanup, deadline, monitor) do
+  defp launch_owner(pool, key, lease, connect, cleanup, {deadline, monitor, request_opts}) do
     activation = make_ref()
     tracker = if connect[:exclusive?], do: connect[:request_lifecycle]
 
@@ -407,7 +422,7 @@ defmodule HTTP.HTTP3.Stream do
                    monitor
                  ),
                :ok <- opening_call(owner, {:activate, activation}, deadline, monitor),
-               :ok <- ready(owner, deadline, monitor),
+               :ok <- ready(owner, deadline, monitor, request_opts[:early_request] == true),
                :ok <- opening_call(pool, {:ready, owner, lease}, deadline, monitor),
                do: {:ok, owner, lease}
 
@@ -616,8 +631,10 @@ defmodule HTTP.HTTP3.Stream do
 
   defp retire(descriptor), do: Quic.Cleanup.retire_descriptor(descriptor, {:abs_ms, now()})
 
-  defp ready(owner, deadline, monitor) do
-    case opening_call(owner, :await_ready, deadline, monitor) do
+  defp ready(owner, deadline, monitor, early?) do
+    message = if early?, do: {:await_ready, :early}, else: :await_ready
+
+    case opening_call(owner, message, deadline, monitor) do
       :ok ->
         :ok
 
