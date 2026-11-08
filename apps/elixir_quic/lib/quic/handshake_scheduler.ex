@@ -477,6 +477,28 @@ defmodule Quic.HandshakeScheduler do
 
   def open_stream(_, _), do: {:error, :invalid_stream_kind}
 
+  @doc """
+  Open a local stream that declares a reliable send prefix.
+
+  When reliable reset is negotiated, a peer STOP_SENDING on this stream is
+  answered with RESET_STREAM_AT retaining the admitted part of the prefix.
+  """
+  def open_stream(state, kind, 0), do: open_stream(state, kind)
+
+  def open_stream(%__MODULE__{} = state, kind, prefix)
+      when kind in [:bidi, :uni] and is_integer(prefix) and prefix > 0 and
+             prefix < 4_611_686_018_427_387_904 do
+    with {:ok, state, id} <- open_stream(state, kind),
+         {:ok, streams} <- Streams.set_reliable_prefix(state.streams, id, prefix) do
+      {:ok, %{state | streams: streams}, id}
+    end
+  end
+
+  def open_stream(%__MODULE__{}, kind, _) when kind in [:bidi, :uni],
+    do: {:error, :invalid_reliable_prefix}
+
+  def open_stream(_, _, _), do: {:error, :invalid_stream_kind}
+
   @doc "Consume queued stream events for a manual-delivery stream policy."
   def consume_stream(%__MODULE__{streams: streams} = state, id, max_bytes) do
     case Streams.consume(streams, id, max_bytes) do
@@ -558,6 +580,15 @@ defmodule Quic.HandshakeScheduler do
       schedule(queue_control(%{state | streams: streams}, :application, [frame | credit]))
     end
   end
+
+  # A repeated STOP_SENDING already answered needs no further send-state change.
+  defp answer_stop_sending(state, _id, nil), do: state
+
+  defp answer_stop_sending(state, id, %{type: :reset_stream_at, reliable_size: reliable} = reset),
+    do: state |> retain_stream_prefix(id, reliable) |> queue_control(:application, [reset])
+
+  defp answer_stop_sending(state, id, reset),
+    do: state |> discard_stream_send(id) |> queue_control(:application, [reset])
 
   defp discard_stream_send(state, id) do
     keep = fn frame -> not (frame.type == :stream and frame.stream_id == id) end
@@ -2256,10 +2287,11 @@ defmodule Quic.HandshakeScheduler do
          events
        )
        when level in [:application, :early_data] do
-    case Streams.peer_stop_sending(state.streams, frame.stream_id, frame.error_code) do
+    reliable? = state.local_reset_stream_at and state.peer_reset_stream_at
+
+    case Streams.peer_stop_sending(state.streams, frame.stream_id, frame.error_code, reliable?) do
       {:ok, streams, reset} ->
-        next = discard_stream_send(%{state | streams: streams}, frame.stream_id)
-        next = queue_control(next, :application, if(reset, do: [reset], else: []))
+        next = answer_stop_sending(%{state | streams: streams}, frame.stream_id, reset)
         dispatch_frames(next, level, space, number, rest, at, [frame | events])
 
       {:error, reason} ->

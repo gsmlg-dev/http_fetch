@@ -79,4 +79,101 @@ defmodule Quic.ReliableResetTest do
     assert {:error, :reliable_size_increase} = Streams.reset_send_at(state, id, 42, 7)
     assert {:ok, _, %{reliable_size: 3}} = Streams.reset_send_at(state, id, 42, 3)
   end
+
+  describe "peer STOP_SENDING on a stream with a declared reliable prefix" do
+    defp prefixed(prefix, bytes) do
+      {:ok, state, id} = Streams.open(Streams.new(:client), :bidi)
+      {:ok, state} = Streams.set_reliable_prefix(state, id, prefix)
+      {:ok, state, _} = Streams.send(state, id, bytes, false)
+      {state, id}
+    end
+
+    test "negotiated reliable reset answers RESET_STREAM_AT with the echoed code" do
+      {state, id} = prefixed(6, "header-tail")
+
+      assert {:ok, state,
+              %{
+                type: :reset_stream_at,
+                stream_id: ^id,
+                error_code: 9,
+                final_size: 11,
+                reliable_size: 6
+              }} = Streams.peer_stop_sending(state, id, 9, true)
+
+      assert %{send_reset: 9, send_reliable: 6} = state.streams[id]
+      assert {:error, :stopped} = Streams.send(state, id, "more", false)
+      # A repeated STOP_SENDING is idempotent and never downgrades the reset.
+      assert {:ok, ^state, nil} = Streams.peer_stop_sending(state, id, 9, true)
+      # A different code after a reset is ignored (RFC 9000 Section 3.5).
+      assert {:ok, ^state, nil} = Streams.peer_stop_sending(state, id, 10, true)
+      assert {:ok, ^state, nil} = Streams.peer_stop_sending(state, id, 10, false)
+    end
+
+    test "STOP_SENDING after a local RESET_STREAM with another code is ignored" do
+      {state, id} = prefixed(0, "header-tail")
+
+      assert {:ok, state, %{type: :reset_stream, error_code: 3}} =
+               Streams.reset_send(state, id, 3)
+
+      assert {:ok, ^state, nil} = Streams.peer_stop_sending(state, id, 9)
+      assert {:ok, ^state, nil} = Streams.peer_stop_sending(state, id, 9, true)
+      assert %{send_reset: 3} = state.streams[id]
+    end
+
+    test "without negotiation or without a prefix the answer stays RESET_STREAM" do
+      {state, id} = prefixed(6, "header-tail")
+
+      assert {:ok, _, %{type: :reset_stream, final_size: 11}} =
+               Streams.peer_stop_sending(state, id, 9)
+
+      assert {:ok, _, %{type: :reset_stream, final_size: 11}} =
+               Streams.peer_stop_sending(state, id, 9, false)
+
+      {state, id} = prefixed(0, "header-tail")
+
+      assert {:ok, _, %{type: :reset_stream, final_size: 11}} =
+               Streams.peer_stop_sending(state, id, 9, true)
+    end
+
+    test "a prefix beyond the admitted offset retains only the admitted bytes" do
+      {state, id} = prefixed(6, "head")
+
+      assert {:ok, _, %{type: :reset_stream_at, final_size: 4, reliable_size: 4}} =
+               Streams.peer_stop_sending(state, id, 9, true)
+
+      {state, id} = prefixed(6, "")
+
+      assert {:ok, _, %{type: :reset_stream, final_size: 0}} =
+               Streams.peer_stop_sending(state, id, 9, true)
+    end
+
+    test "an earlier application reliable reset is kept or reduced, never enlarged" do
+      {state, id} = prefixed(6, "header-tail")
+      {:ok, state, _} = Streams.reset_send_at(state, id, 9, 8)
+
+      assert {:ok, state, %{type: :reset_stream_at, reliable_size: 6}} =
+               Streams.peer_stop_sending(state, id, 9, true)
+
+      {:ok, state, _} = Streams.reset_send_at(state, id, 9, 3)
+      assert {:ok, ^state, nil} = Streams.peer_stop_sending(state, id, 9, true)
+    end
+
+    test "prefix declaration is validated and limited to sendable streams" do
+      state = Streams.new(:client)
+      {:ok, state, id} = Streams.open(state, :bidi)
+      assert {:error, :unknown_stream} = Streams.set_reliable_prefix(state, 400, 4)
+      assert {:error, :invalid_reliable_prefix} = Streams.set_reliable_prefix(state, id, -1)
+
+      {:ok, state, _} =
+        Streams.receive(Streams.new(:server), %{
+          type: :stream,
+          stream_id: 2,
+          offset: 0,
+          data: "x",
+          fin: false
+        })
+
+      assert {:error, :send_on_receive_only_stream} = Streams.set_reliable_prefix(state, 2, 4)
+    end
+  end
 end

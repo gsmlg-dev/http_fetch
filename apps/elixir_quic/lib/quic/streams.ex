@@ -64,6 +64,7 @@ defmodule Quic.Streams do
               send_reset: nil,
               send_reliable: nil,
               recv_reliable: nil,
+              reliable_prefix: 0,
               stopped: nil
   end
 
@@ -628,11 +629,82 @@ defmodule Quic.Streams do
     end
   end
 
-  @doc "Apply a peer STOP_SENDING to the local send direction."
-  def peer_stop_sending(%__MODULE__{} = state, id, error_code)
-      when is_integer(error_code) and error_code >= 0 do
-    reset_send(state, id, error_code)
+  @doc """
+  Declare the send-side prefix that a peer STOP_SENDING must still deliver.
+
+  The prefix is only used when reliable reset was negotiated; `0` clears it.
+  """
+  def set_reliable_prefix(%__MODULE__{} = state, id, bytes)
+      when is_integer(bytes) and bytes >= 0 and bytes < 4_611_686_018_427_387_904 do
+    with {:ok, stream} <- fetch_stream(state, id), :ok <- can_send?(stream) do
+      stream = %{stream | reliable_prefix: bytes}
+      {:ok, %{state | streams: Map.put(state.streams, id, stream)}}
+    end
   end
+
+  def set_reliable_prefix(_, _, _), do: {:error, :invalid_reliable_prefix}
+
+  @doc """
+  Apply a peer STOP_SENDING to the local send direction.
+
+  With `reliable?` (reliable reset negotiated by both endpoints) and a declared
+  reliable prefix, the answer is RESET_STREAM_AT whose reliable size is the
+  admitted part of that prefix; otherwise it is an ordinary RESET_STREAM.
+  """
+  def peer_stop_sending(state, id, error_code, reliable? \\ false)
+
+  # RFC 9000 Section 3.5: a send side already in "Reset Sent" ignores a later
+  # STOP_SENDING, whatever its code; it never fails the connection.
+  def peer_stop_sending(%__MODULE__{} = state, id, error_code, reliable?)
+      when is_integer(error_code) and error_code >= 0 do
+    case fetch_stream(state, id) do
+      {:ok, %Stream{send_reset: reset}} when reset != nil and reset != error_code ->
+        {:ok, state, nil}
+
+      _ ->
+        answer_stop_sending(state, id, error_code, reliable?)
+    end
+  end
+
+  def peer_stop_sending(_state, _id, _error_code, _reliable?), do: {:error, :invalid_stop_sending}
+
+  defp answer_stop_sending(state, id, error_code, true) do
+    case fetch_stream(state, id) do
+      {:ok, %Stream{} = stream} ->
+        reliable = stop_sending_reliable_size(stream)
+
+        cond do
+          reliable == 0 or not reliable_reset_open?(stream, error_code) ->
+            reset_send(state, id, error_code)
+
+          stream.send_reset == error_code and stream.send_reliable == reliable ->
+            {:ok, state, nil}
+
+          true ->
+            reset_send_at(state, id, error_code, reliable)
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp answer_stop_sending(state, id, error_code, _reliable?),
+    do: reset_send(state, id, error_code)
+
+  # A prefix not yet fully admitted cannot be completed after a reset, so only
+  # its admitted part (never beyond an earlier reliable size) is retained.
+  defp stop_sending_reliable_size(%Stream{reliable_prefix: prefix, send_offset: offset} = stream) do
+    size = min(prefix, offset)
+    if is_integer(stream.send_reliable), do: min(size, stream.send_reliable), else: size
+  end
+
+  defp reliable_reset_open?(%Stream{send_reset: nil}, _code), do: true
+
+  defp reliable_reset_open?(%Stream{send_reset: code, send_reliable: reliable}, code),
+    do: is_integer(reliable)
+
+  defp reliable_reset_open?(_, _), do: false
 
   def update_credit(%__MODULE__{} = state, %{type: :max_data, value: value})
       when is_integer(value) and value >= 0,

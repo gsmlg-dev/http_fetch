@@ -79,6 +79,16 @@ defmodule Quic do
   def ready(%ConnectionHandle{id: pid, generation: generation}),
     do: Connection.ready(pid, generation)
 
+  @doc """
+  Open a locally initiated stream.
+
+  `reliable_prefix: bytes` declares the first `bytes` of the send direction as
+  a reliable prefix. When both endpoints negotiated reliable reset
+  (`reset_stream_at`), a peer STOP_SENDING is answered with RESET_STREAM_AT
+  carrying the STOP_SENDING code and a reliable size equal to the admitted part
+  of that prefix. Without negotiation, or with a zero prefix, the answer is an
+  ordinary RESET_STREAM.
+  """
   @spec open_stream(ConnectionHandle.t(), :bidi | :uni, operation_options()) ::
           {:ok, StreamHandle.t()} | failure()
   def open_stream(%ConnectionHandle{id: pid, generation: generation}, kind, opts \\ []),

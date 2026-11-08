@@ -8,7 +8,8 @@ defmodule QuicHttp3.WebTransportSessionTest do
   defmodule Transport do
     alias QuicHttp3.Transport.Quic.Stream, as: TStream
 
-    def open_stream(_, kind, _) do
+    def open_stream(_, kind, opts) do
+      send(self(), {:open, kind, Keyword.get(opts, :reliable_prefix)})
       {next, ids} = Process.get(:ids, {0, %{bidi: 0, uni: 2}})
       id = ids[kind]
       Process.put(:ids, {next, %{ids | kind => id + 4}})
@@ -137,6 +138,9 @@ defmodule QuicHttp3.WebTransportSessionTest do
 
     assert {:ok, session, 2} = Session.webtransport_open(session, :uni)
     {:ok, prefix} = Draft17.prefix(:uni, 0)
+    uni_size = byte_size(prefix)
+    # The WT prefix is declared reliable so a peer STOP_SENDING keeps it.
+    assert_received {:open, :uni, ^uni_size}
     assert_received {:send, 2, ^prefix, false}
     assert {:ok, session} = Session.webtransport_send(session, 2, "abc", false)
     assert_received {:send, 2, "abc", false}
@@ -148,6 +152,8 @@ defmodule QuicHttp3.WebTransportSessionTest do
 
     assert {:ok, session, 4} = Session.webtransport_open(session, :bidi)
     {:ok, bidi} = Draft17.prefix(:bidi, 0)
+    bidi_size = byte_size(bidi)
+    assert_received {:open, :bidi, ^bidi_size}
     assert_received {:send, 4, ^bidi, false}
     assert {:ok, session} = Session.webtransport_stop(session, 4, 7)
     {:ok, stop} = Draft17.application_error(7)

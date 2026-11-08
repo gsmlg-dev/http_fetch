@@ -43,10 +43,23 @@ Engine findings (apps/elixir_quic, out of scope; reported, not worked around):
    integration suite now asserts the peer receives the WT prefix and then
    RESET_STREAM_AT with the draft-17 code. The H3 layer computes
    `reliable_size` = WT prefix length.
-2. On peer STOP_SENDING the engine automatically sends an ordinary RESET_STREAM
-   (`handshake_scheduler.ex` `peer_stop_sending`). Draft-17 §4.4 prefers a
-   reset that keeps the WT header reliable; the adapter only records the event
-   and closes the local send side.
+2. On peer STOP_SENDING the engine automatically sent an ordinary RESET_STREAM
+   (`handshake_scheduler.ex` `peer_stop_sending`), dropping the WT stream
+   prefix that draft-17 requires to be delivered reliably. **Fixed**: streams
+   opened with `Quic.open_stream(conn, kind, reliable_prefix: bytes)` answer a
+   peer STOP_SENDING with RESET_STREAM_AT (STOP_SENDING code echoed, final size
+   = admitted send offset, reliable size = `min(prefix, admitted offset)`) when
+   reliable reset is negotiated by both endpoints; otherwise, or with no
+   admitted prefix bytes, the answer remains RESET_STREAM. Retained recovery
+   work is trimmed to the reliable prefix and still retransmitted. The H3
+   session declares the draft-17 prefix length on every WT stream it opens.
+   Evidence: `reliable_reset_test.exs` / `reliable_reset_scheduler_test.exs`
+   (negotiated vs not, zero/oversized prefix, idempotent repeat, lost-prefix
+   retransmission), `reliable_prefix_integration_test.exs` (two in-repo
+   endpoints), `quic_http3_web_transport_session_test.exs` (prefix declared on
+   open), and `quic_integration_test.exs` (peer STOP_SENDING on a client WT
+   stream yields RESET_STREAM_AT with the echoed code and reliable size = WT
+   prefix length, observed in the peer engine state).
 
 Other bounds: a blocked write holds the session process until admission or its
 deadline (5 s default); the H3 session's terminal-stream ledger caps one
@@ -113,7 +126,7 @@ python3 scripts/webtransport/probe_peer.py   # pinned source probe; exits 2 (BLO
 | --- | --- | --- |
 | Strict compilation | PASS | `MIX_ENV=test mix compile --warnings-as-errors`. |
 | Scoped suites with integration | PASS | http_core 28, elixir_quic_http3 177, http_runtime/http3 78, http_web_transport 61 tests; 0 failures. |
-| In-repo QUIC peer, live adapter | PASS (5 repeated runs) | `quic_integration_test.exs`, 13 tests: bidi/uni both directions with exact bytes and FIN (40000-byte uni write), empty/duplicate/boundary and foreign-session datagrams, streams and datagrams before CONNECT acceptance, foreign session ID rejected per stream (`WT_BUFFERED_STREAM_REJECTED`), peer reliable reset (code 43) and STOP_SENDING code mapping both ways, local Close capsule + FIN with owner exit, peer Drain then Close, missing draft-17 SETTINGS refused with no CONNECT stream, peer without reliable reset refused, 404 refusal, silent-peer deadline with no owner left, owner kill fails the session. The peer is our own engine: not independent acceptance. |
+| In-repo QUIC peer, live adapter | PASS (5 repeated runs) | `quic_integration_test.exs`, 14 tests: bidi/uni both directions with exact bytes and FIN (40000-byte uni write), empty/duplicate/boundary and foreign-session datagrams, streams and datagrams before CONNECT acceptance, foreign session ID rejected per stream (`WT_BUFFERED_STREAM_REJECTED`), peer reliable reset (code 43) and STOP_SENDING code mapping both ways, peer STOP_SENDING on a client WT stream answered with RESET_STREAM_AT whose reliable size is the WT prefix, local Close capsule + FIN with owner exit, peer Drain then Close, missing draft-17 SETTINGS refused with no CONNECT stream, peer without reliable reset refused, 404 refusal, silent-peer deadline with no owner left, owner kill fails the session. The peer is our own engine: not independent acceptance. |
 | Local reliable reset (cleanup scope) | PASS (in-repo peer) | Peer reads the WT prefix then RESET_STREAM_AT with the mapped draft-17 code. |
 | Unit: H3 session, router, owner, budget | PASS | `quic_http3_web_transport_session_test.exs` (refusal order, single session, prefix, reliable size, receipts, capsules), router local/reset/forget, `webtransport_owner_test.exs` (subscriber-only ops, credit ack, deadline, receive budget). |
 | E2E | PASS | 2 tests; default backend refuses without explicit QUIC trust. |

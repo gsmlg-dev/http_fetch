@@ -103,8 +103,15 @@ defmodule Quic.Connection do
   def close_public(pid, generation, code \\ 0, reason \\ <<>>, opts \\ []),
     do: operation_call(pid, generation, {:close, code, reason}, opts)
 
-  def open_public_stream(pid, generation, kind, opts \\ []),
-    do: operation_call(pid, generation, {:open, kind}, opts)
+  def open_public_stream(pid, generation, kind, opts \\ []) do
+    request =
+      case Keyword.fetch(opts, :reliable_prefix) do
+        {:ok, prefix} -> {:open, kind, prefix}
+        :error -> {:open, kind}
+      end
+
+    operation_call(pid, generation, request, opts)
+  end
 
   def send_public_stream(pid, generation, id, data, fin, opts),
     do: operation_call(pid, generation, {:send, id, data, fin}, opts)
@@ -2373,8 +2380,11 @@ defmodule Quic.Connection do
     advance(next, [], [])
   end
 
-  defp execute_operation(data, from, ref, signature, {:open, kind}) do
-    case HandshakeScheduler.open_stream(data.scheduler, kind) do
+  defp execute_operation(data, from, ref, signature, {:open, kind}),
+    do: execute_operation(data, from, ref, signature, {:open, kind, 0})
+
+  defp execute_operation(data, from, ref, signature, {:open, kind, prefix}) do
+    case HandshakeScheduler.open_stream(data.scheduler, kind, prefix) do
       {:ok, scheduler, id} ->
         result =
           {:ok,
@@ -2437,6 +2447,7 @@ defmodule Quic.Connection do
 
   defp unwrap_stream_epoch(request, _), do: {request, true}
   defp early_request?({:open, kind}), do: kind in [:uni, :bidi]
+  defp early_request?({:open, kind, _prefix}), do: kind in [:uni, :bidi]
   defp early_request?({:send, _, _, _}), do: true
   defp early_request?({:send_datagram, _}), do: true
   defp early_request?(_), do: false

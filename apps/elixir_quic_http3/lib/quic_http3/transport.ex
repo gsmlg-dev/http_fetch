@@ -7,6 +7,9 @@ defmodule QuicHttp3.Transport do
 
   Operation options may carry `deadline: {:abs_ms, monotonic_milliseconds}`.
   Session retains the same absolute deadline across blocked or unknown work.
+  `open_stream/3` options may carry `reliable_prefix: bytes`; transports that
+  support reliable reset answer a peer STOP_SENDING on that stream with
+  RESET_STREAM_AT retaining the prefix, and others may ignore the option.
   The internal exclusive `cleanup` descriptor is supported only by a Session
   using the production Quic adapter and an owned endpoint. Cleanup acknowledgements
   do not replace the separately retained `Quic.Cleanup` receipt.

@@ -170,4 +170,82 @@ defmodule Quic.ReliableResetSchedulerTest do
                120
              )
   end
+
+  # Delivers `delivered` to the receiver, leaves `lost` unacknowledged in flight,
+  # then lets the receiver send STOP_SENDING for the stream.
+  defp stop_sending_from_peer(sender, receiver, prefix, delivered, lost) do
+    {:ok, sender, id} = HandshakeScheduler.open_stream(sender, :uni, prefix)
+
+    {:ok, sender, delivered_packets} =
+      HandshakeScheduler.send_stream(sender, id, delivered, false)
+
+    {:ok, sender, [lost_packet]} = HandshakeScheduler.send_stream(sender, id, lost, false)
+    sender = sent(sender, delivered_packets ++ [lost_packet], 10)
+    receiver = receive_all(receiver, delivered_packets, 20)
+    {:ok, receiver, stops} = HandshakeScheduler.stop_stream(receiver, id, 77)
+    sender = receive_all(sender, stops, 30)
+    {sender, receiver, id, lost_packet}
+  end
+
+  defp receive_all(state, packets, at) do
+    Enum.reduce(packets, state, fn packet, state ->
+      {:ok, state, _} = HandshakeScheduler.receive_datagram(state, packet.bytes, at)
+      state
+    end)
+  end
+
+  test "peer STOP_SENDING on a prefixed stream is answered with RESET_STREAM_AT" do
+    {sender, receiver} = pair()
+    {sender, receiver, id, lost} = stop_sending_from_peer(sender, receiver, 6, "head", "er-tail")
+
+    assert %{send_reset: 77, send_reliable: 6} = sender.streams.streams[id]
+
+    # Retained recovery work for the stream is trimmed to the reliable prefix.
+    original = sender.recovery.spaces.application.sent[lost.packet_number]
+    assert [%{type: :stream, offset: 4, data: "er", fin: false}] = original.metadata.control
+
+    {:ok, sender, reset_packets} = HandshakeScheduler.schedule(sender)
+    sender = sent(sender, reset_packets, 40)
+
+    {:ok, receiver, events} =
+      HandshakeScheduler.receive_datagram(receiver, hd(reset_packets).bytes, 50)
+
+    assert Enum.any?(events, fn
+             %{type: :reset_stream_at, frame: frame} ->
+               frame.error_code == 77 and frame.final_size == 11 and frame.reliable_size == 6
+
+             _ ->
+               false
+           end)
+
+    assert receiver.streams.streams[id].recv_reliable == 6
+
+    # The lost prefix range is still recoverable after the reset.
+    {:ok, _sender, [retry]} =
+      HandshakeScheduler.retry_crypto(sender, :application, lost.packet_number)
+
+    {:ok, receiver, _} = HandshakeScheduler.receive_datagram(receiver, retry.bytes, 60)
+    assert receiver.streams.streams[id].recv_next == 6
+  end
+
+  test "without negotiation a prefixed stream keeps the ordinary RESET_STREAM answer" do
+    {sender, receiver} = pair()
+    sender = %{sender | peer_reset_stream_at: false}
+    {sender, _receiver, id, lost} = stop_sending_from_peer(sender, receiver, 6, "head", "er-tail")
+
+    assert %{send_reset: 77, send_reliable: nil} = sender.streams.streams[id]
+    original = sender.recovery.spaces.application.sent[lost.packet_number]
+    assert Map.get(original.metadata, :control, []) == []
+
+    assert [%{type: :reset_stream, error_code: 77, final_size: 11}] =
+             Map.get(sender.pending_control, :application, [])
+  end
+
+  test "open_stream validates the declared reliable prefix" do
+    {sender, _} = pair()
+    assert {:error, :invalid_reliable_prefix} = HandshakeScheduler.open_stream(sender, :uni, -1)
+    assert {:error, :invalid_stream_kind} = HandshakeScheduler.open_stream(sender, :other, 4)
+    assert {:ok, sender, id} = HandshakeScheduler.open_stream(sender, :bidi, 0)
+    assert sender.streams.streams[id].reliable_prefix == 0
+  end
 end

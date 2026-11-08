@@ -848,8 +848,13 @@ defmodule QuicHttp3.Session do
   defp operation(session, {:reset_at, stream, code, size}, opts),
     do: session.transport.reset_stream_at(stream, code, size, opts)
 
-  defp operation(session, {:open_wt, kind}, opts),
-    do: session.transport.open_stream(session.connection, kind, opts)
+  # The draft-17 prefix is declared reliable so a peer STOP_SENDING is answered
+  # with RESET_STREAM_AT that still delivers the stream's session association.
+  defp operation(session, {:open_wt, kind}, opts) do
+    {:ok, prefix} = Draft17.prefix(kind, session.wt.router.session_id)
+    opts = Keyword.put(opts, :reliable_prefix, byte_size(prefix))
+    session.transport.open_stream(session.connection, kind, opts)
+  end
 
   defp operation(session, {:datagram, bytes}, opts),
     do: session.transport.send_datagram(session.connection, bytes, opts)

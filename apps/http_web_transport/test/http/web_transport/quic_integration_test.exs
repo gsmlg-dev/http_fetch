@@ -163,6 +163,25 @@ defmodule HTTP.WebTransport.QUICIntegrationTest do
     assert :ok = WebTransport.close(transport)
   end
 
+  # Draft-17: a STOP_SENDING answer must still deliver the WT stream prefix, so the
+  # engine answers with RESET_STREAM_AT whose reliable size covers the prefix.
+  test "peer STOP_SENDING on a client stream is answered with a prefix-preserving reset", ctx do
+    {transport, peer} = open(ctx)
+    {:ok, prefix} = Draft17.prefix(:bidi, 0)
+    bidi = next_stream_after(peer.conn, transport)
+    {:ok, stop_code} = Draft17.application_error(12)
+    assert {:ok, _} = Quic.stop_stream(bidi.server, stop_code)
+    assert :ok = await_send_closed(bidi.writable)
+
+    assert %{reset: ^stop_code, recv_reliable: reliable, recv_final: final} =
+             await_peer_reset(peer.conn, bidi.server.id)
+
+    assert reliable == byte_size(prefix)
+    assert final >= reliable
+    assert WebTransport.state(transport) == :connected
+    assert :ok = WebTransport.close(transport)
+  end
+
   test "streams and datagrams sent before CONNECT acceptance are delivered after it", ctx do
     {transport, peer} =
       open(ctx, fn conn ->
@@ -299,6 +318,22 @@ defmodule HTTP.WebTransport.QUICIntegrationTest do
 
     assert :ok = SendStream.write(writable, "y")
     %{server: next_stream(conn, :bidi), writable: writable}
+  end
+
+  # Peer-side engine view of the reset it received; `recv_reliable` is set only
+  # by RESET_STREAM_AT, never by an ordinary RESET_STREAM.
+  defp await_peer_reset(conn, id, deadline \\ now() + 5_000) do
+    assert now() < deadline
+    {_phase, data} = :sys.get_state(conn.id)
+
+    case data.scheduler.streams.streams[id] do
+      %{reset: code} = stream when is_integer(code) ->
+        stream
+
+      _ ->
+        Process.sleep(5)
+        await_peer_reset(conn, id, deadline)
+    end
   end
 
   defp await_send_closed(writable, deadline \\ now() + 5_000) do
