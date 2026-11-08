@@ -11,12 +11,12 @@ defmodule Quic.HandshakeScheduler do
 
   alias Quic.{
     Codec,
+    LocalCIDs,
+    PeerCIDs,
     Protection,
     Recovery,
-    TLSDriver,
-    PeerCIDs,
-    LocalCIDs,
     Streams,
+    TLSDriver,
     TransportParameters
   }
 
@@ -37,11 +37,36 @@ defmodule Quic.HandshakeScheduler do
             local_cids: nil,
             local_cid_limit: 2,
             peer_disable_active_migration: false,
+            local_reset_stream_at: false,
+            peer_reset_stream_at: false,
+            acked_stream_resets: %{},
             receive_path: nil,
             received_dcid: nil,
             path_events: false,
             authenticated_error: false,
             tls: nil,
+            tls_actions: [],
+            early_status: :disabled,
+            early_epoch: 0,
+            early_delivery_ready: false,
+            early_recv_limits: nil,
+            early_recv_offsets: %{},
+            first_one_rtt_received: nil,
+            largest_early_received: -1,
+            early_key_deadline: nil,
+            early_keys_retired: false,
+            early_sent_datagrams: 0,
+            early_sent_datagram_bytes: 0,
+            early_stream_opts: [],
+            ordinary_stream_opts: nil,
+            early_peer_parameters: nil,
+            early_staged: [],
+            early_stage_context: nil,
+            early_staged_bytes: 0,
+            early_staging_limit: 0,
+            early_stream_ids: MapSet.new(),
+            early_datagrams: [],
+            early_datagram_bytes: 0,
             recovery: nil,
             keys: %{},
             read_keys: %{},
@@ -93,6 +118,13 @@ defmodule Quic.HandshakeScheduler do
 
       state = %__MODULE__{
         role: role,
+        early_status:
+          if(get_in(opts, [:resumption, :early_data]) == true, do: :pending, else: :disabled),
+        early_delivery_ready: get_in(opts, [:resumption, :early_data]) != true,
+        early_stream_opts: Keyword.get(opts, :streams, []),
+        ordinary_stream_opts: Keyword.get(opts, :ordinary_streams),
+        early_staging_limit: Keyword.get(opts, :early_staging_limit, 0),
+        local_reset_stream_at: Keyword.get(opts, :reset_stream_at, false),
         dcid: dcid,
         scid: scid,
         original_dcid: Keyword.get(opts, :original_dcid, dcid),
@@ -116,6 +148,38 @@ defmodule Quic.HandshakeScheduler do
         local_max_datagram_frame_size: Keyword.get(opts, :max_datagram_frame_size, 0),
         streams: Streams.new(role, Keyword.get(opts, :streams, []))
       }
+
+      state = %{
+        state
+        | early_recv_limits:
+            Streams.new(role, Quic.EarlyData.cap_streams(Keyword.get(opts, :streams, [])))
+      }
+
+      limits =
+        Enum.reduce(Keyword.get(opts, :early_receive_parameters, %{}), state.early_recv_limits, fn
+          {:initial_max_data, value}, limits ->
+            %{limits | max_data: min(value, limits.max_data)}
+
+          {:initial_max_stream_data_bidi_remote, value}, limits ->
+            %{
+              limits
+              | max_stream_data_bidi_remote: min(value, limits.max_stream_data_bidi_remote)
+            }
+
+          {:initial_max_stream_data_uni, value}, limits ->
+            %{limits | max_stream_data_uni: min(value, limits.max_stream_data_uni)}
+
+          {:initial_max_streams_bidi, value}, limits ->
+            %{limits | max_streams_bidi: min(value, limits.max_streams_bidi)}
+
+          {:initial_max_streams_uni, value}, limits ->
+            %{limits | max_streams_uni: min(value, limits.max_streams_uni)}
+
+          _, limits ->
+            limits
+        end)
+
+      state = remembered_parameters(%{state | early_recv_limits: limits}, opts)
 
       with {:ok, state, sends} <- ingest_tls_effects(state, tls_effects),
            {:ok, state, sends2} <- schedule(state) do
@@ -158,6 +222,23 @@ defmodule Quic.HandshakeScheduler do
 
   def feed(state, _, _, _), do: {:error, :invalid_crypto_input, state, []}
 
+  @doc "Continue a provider request without invoking endpoint IO from this pure scheduler."
+  def continue_tls(state, id, result) do
+    case TLSDriver.continue(state.tls, id, result) do
+      {:ok, tls, effects} ->
+        with {:ok, state, generated} <- ingest_tls_effects(%{state | tls: tls}, effects),
+             {:ok, state, staged} <- drain_early_staging(state),
+             {:ok, state, sends} <- schedule(state) do
+          {:ok, state, generated ++ staged ++ sends}
+        end
+
+      {:error, reason, tls, _effects} ->
+        {:error, reason, %{state | tls: tls}}
+    end
+  end
+
+  def take_tls_actions(state), do: {%{state | tls_actions: []}, state.tls_actions}
+
   @doc "Admit one application stream frame into the bounded scheduler queue."
   @spec send_stream(t(), non_neg_integer(), binary(), boolean()) ::
           {:ok, t(), list()}
@@ -186,7 +267,7 @@ defmodule Quic.HandshakeScheduler do
 
       true ->
         with {:ok, next_streams, frame} <- Streams.send(streams, id, data, fin),
-             true <- Map.has_key?(state.keys, :application) do
+             true <- write_available?(state) do
           state = %{
             state
             | streams: next_streams,
@@ -218,17 +299,32 @@ defmodule Quic.HandshakeScheduler do
       controls = Map.get(state.pending_control, :application, [])
 
       cond do
+        early_writable?(state) and
+            (state.early_sent_datagrams >= 64 or
+               state.early_sent_datagram_bytes + byte_size(data) > 65_536) ->
+          {:blocked, :early_datagram_limit}
+
         length(controls) >= state.max_queue ->
           {:blocked, :send_queue_limit}
 
         state.queued_bytes + byte_size(data) > state.max_queue_bytes ->
           {:blocked, :send_queue_bytes_limit}
 
-        not Map.has_key?(state.keys, :application) ->
+        not write_available?(state) ->
           {:error, :application_unavailable}
 
         true ->
           next = %{state | queued_bytes: state.queued_bytes + byte_size(data)}
+
+          next =
+            if early_writable?(state),
+              do: %{
+                next
+                | early_sent_datagrams: state.early_sent_datagrams + 1,
+                  early_sent_datagram_bytes: state.early_sent_datagram_bytes + byte_size(data)
+              },
+              else: next
+
           pending = Map.put(next.pending_control, :application, controls ++ [frame])
           schedule(%{next | pending_control: pending})
       end
@@ -321,7 +417,7 @@ defmodule Quic.HandshakeScheduler do
   @doc "Admit one ack-eliciting application PING through the bounded recovery scheduler."
   def ping(%__MODULE__{} = state) do
     cond do
-      not Map.has_key?(state.keys, :application) ->
+      not write_available?(state) ->
         {:error, :application_unavailable}
 
       length(Map.get(state.pending_control, :application, [])) >= state.max_queue ->
@@ -361,7 +457,8 @@ defmodule Quic.HandshakeScheduler do
         recovery: recovery,
         peer_idle_timeout: Map.get(values, :max_idle_timeout, 0),
         local_cids: local_cids,
-        peer_disable_active_migration: Map.get(values, :disable_active_migration, false)
+        peer_disable_active_migration: Map.get(values, :disable_active_migration, false),
+        peer_reset_stream_at: Map.get(values, :reset_stream_at, false)
     }
   end
 
@@ -369,7 +466,7 @@ defmodule Quic.HandshakeScheduler do
   @spec open_stream(t(), :bidi | :uni) ::
           {:ok, t(), non_neg_integer()} | {:blocked, map()} | {:error, term()}
   def open_stream(%__MODULE__{streams: streams} = state, kind) when kind in [:bidi, :uni] do
-    with true <- Map.has_key?(state.keys, :application),
+    with true <- write_available?(state),
          {:ok, next_streams, id} <- Streams.open(streams, kind) do
       {:ok, %{state | streams: next_streams}, id}
     else
@@ -398,6 +495,60 @@ defmodule Quic.HandshakeScheduler do
       state = discard_stream_send(%{state | streams: streams}, id)
       schedule(queue_control(state, :application, if(frame, do: [frame], else: [])))
     end
+  end
+
+  @doc "Reset with reliable prefix recovery using negotiated draft-11 RESET_STREAM_AT."
+  def reset_stream_at(state, id, code, reliable) do
+    if state.local_reset_stream_at and state.peer_reset_stream_at do
+      with {:ok, streams, frame} <- Streams.reset_send_at(state.streams, id, code, reliable) do
+        state = retain_stream_prefix(%{state | streams: streams}, id, reliable)
+        schedule(queue_control(state, :application, [frame]))
+      end
+    else
+      {:error, :reliable_reset_not_negotiated}
+    end
+  end
+
+  defp retain_stream_prefix(state, id, reliable) do
+    trim = fn frames ->
+      Enum.flat_map(frames, fn
+        %{type: :stream, stream_id: ^id} = frame ->
+          length = max(0, min(byte_size(frame.data), reliable - frame.offset))
+
+          if length == 0,
+            do: [],
+            else: [%{frame | data: binary_part(frame.data, 0, length), fin: false}]
+
+        %{type: :reset_stream_at, stream_id: ^id} ->
+          []
+
+        frame ->
+          [frame]
+      end)
+    end
+
+    frames = trim.(Map.get(state.pending_control, :application, []))
+
+    pending =
+      if frames == [],
+        do: Map.delete(state.pending_control, :application),
+        else: Map.put(state.pending_control, :application, frames)
+
+    sent =
+      Map.new(state.recovery.spaces.application.sent, fn {number, packet} ->
+        original = Map.get(packet.metadata, :control, [])
+        remaining = trim.(original)
+
+        metadata =
+          if remaining == original,
+            do: packet.metadata,
+            else: packet.metadata |> Map.delete(:bytes) |> Map.put(:control, remaining)
+
+        {number, %{packet | metadata: metadata}}
+      end)
+
+    state = put_in(state.recovery.spaces.application.sent, sent)
+    %{state | pending_control: pending, queued_bytes: control_data_bytes(frames)}
   end
 
   @doc "Request cancellation of the receive direction, preserving the send half."
@@ -504,7 +655,10 @@ defmodule Quic.HandshakeScheduler do
   end
 
   @doc "Whether the packet-number space is permanently retired."
-  @spec retired?(t(), :initial | :handshake | :application) :: boolean()
+  @spec retired?(t(), :initial | :handshake | :application | :early_data) :: boolean()
+  def retired?(state, :early_data),
+    do: state.early_status in [:disabled, :rejected] or state.early_keys_retired
+
   def retired?(state, level), do: state.recovery.spaces[level].retired
 
   @doc "Drop the QUIC keys, retained packets and CRYPTO storage for an obsolete level."
@@ -571,6 +725,16 @@ defmodule Quic.HandshakeScheduler do
     }
   end
 
+  defp acknowledge_stream_frame(%{type: type, stream_id: id} = frame, state)
+       when type in [:reset_stream, :reset_stream_at] do
+    size = Map.get(frame, :reliable_size, 0)
+
+    %{
+      state
+      | acked_stream_resets: Map.update(state.acked_stream_resets, id, size, &min(&1, size))
+    }
+  end
+
   defp acknowledge_stream_frame(_, state), do: state
 
   defp merge_stream_ranges(ranges) do
@@ -617,6 +781,16 @@ defmodule Quic.HandshakeScheduler do
     if fin and not Enum.any?(frames, & &1.fin),
       do: frames ++ [%{frame | offset: finish, data: <<>>}],
       else: frames
+  end
+
+  defp unacknowledged_frame(state, %{type: type, stream_id: id} = frame)
+       when type in [:reset_stream, :reset_stream_at] do
+    size = Map.get(frame, :reliable_size, 0)
+
+    case state.acked_stream_resets[id] do
+      acked when is_integer(acked) and acked <= size -> []
+      _ -> [frame]
+    end
   end
 
   defp unacknowledged_frame(_, frame), do: [frame]
@@ -685,9 +859,16 @@ defmodule Quic.HandshakeScheduler do
 
   def receive_datagram(%__MODULE__{} = state, datagram, at)
       when is_binary(datagram) and is_integer(at) and byte_size(datagram) > 0 do
-    if byte_size(datagram) > 65_527,
-      do: {:error, :datagram_size_limit, state},
-      else: receive_coalesced(state, datagram, at, [], 0)
+    if byte_size(datagram) > 65_527 do
+      {:error, :datagram_size_limit, state}
+    else
+      context = %{bytes: datagram, at: at, staged: false}
+
+      case receive_coalesced(%{state | early_stage_context: context}, datagram, at, [], 0) do
+        {:ok, state, events} -> {:ok, %{state | early_stage_context: nil}, events}
+        {:error, reason, state} -> {:error, reason, %{state | early_stage_context: nil}}
+      end
+    end
   end
 
   def receive_datagram(state, _datagram, _at), do: {:error, :invalid_datagram, state}
@@ -727,6 +908,7 @@ defmodule Quic.HandshakeScheduler do
           queued: 0
       }
 
+      next = retry_early(next)
       schedule(next)
     else
       false -> {:error, :invalid_retry}
@@ -773,6 +955,17 @@ defmodule Quic.HandshakeScheduler do
         <<_packet::binary-size(^length), rest::binary>> = bytes
         receive_coalesced(next, rest, at, events ++ generated, count + 1)
 
+      {:error, :missing_read_key} ->
+        case parse_protected_header(state, bytes) do
+          {:ok, %{level: :early_data, packet_length: length}} when state.role == :server ->
+            <<packet::binary-size(^length), rest::binary>> = bytes
+            state = stage_early(state, packet, at)
+            receive_coalesced(state, rest, at, events, count + 1)
+
+          _ ->
+            coalesced_error(state, events, count, :missing_read_key)
+        end
+
       {:error, reason} ->
         coalesced_error(state, events, count, reason)
     end
@@ -797,12 +990,18 @@ defmodule Quic.HandshakeScheduler do
 
         true ->
           with :ok <- validate_packet_frames(packet.plaintext, packet.level),
+               :ok <- early_number_valid(state, packet),
+               {:ok, accounted} <- early_receive_account(state, packet),
                {:ok, recovery} <-
-                 Recovery.note_received(state.recovery, packet.space, packet.number),
+                 Recovery.note_received(accounted.recovery, packet.space, packet.number),
                {:ok, next, events} <-
                  dispatch_inbound(
                    learn_peer_cid(
-                     %{state | recovery: recovery, received_dcid: packet.dcid},
+                     note_one_rtt(
+                       %{accounted | recovery: recovery, received_dcid: packet.dcid},
+                       packet,
+                       at
+                     ),
                      packet
                    ),
                    packet,
@@ -885,9 +1084,9 @@ defmodule Quic.HandshakeScheduler do
   def pending_send_valid?(state, %{space: space, packet_number: number, bytes: bytes})
       when space in @spaces do
     case state.recovery.spaces[space].sent[number] do
-      %Recovery.Packet{status: status, metadata: %{bytes: ^bytes}}
+      %Recovery.Packet{status: status, metadata: %{bytes: ^bytes} = metadata}
       when status in [:reserved, :queued] ->
-        true
+        not (metadata[:level] == :early_data and state.tls.facts.tls_complete)
 
       _ ->
         false
@@ -1085,7 +1284,13 @@ defmodule Quic.HandshakeScheduler do
   def handshake_done(%{role: :server, tls: %{facts: %{tls_complete: true}}} = state) do
     schedule(%{
       state
-      | pending_control: Map.put(state.pending_control, :application, [%{type: :handshake_done}])
+      | pending_control:
+          Map.update(
+            state.pending_control,
+            :application,
+            [%{type: :handshake_done}],
+            &(&1 ++ [%{type: :handshake_done}])
+          )
     })
   end
 
@@ -1225,6 +1430,20 @@ defmodule Quic.HandshakeScheduler do
         {:negotiated_alpn, _}, acc ->
           {:cont, acc}
 
+        {kind, value}, {:ok, state, generated}
+        when kind in [:session_lookup, :session_commit, :session_store, :session_ticket] ->
+          if length(state.tls_actions) < 8,
+            do:
+              {:cont,
+               {:ok, %{state | tls_actions: state.tls_actions ++ [{kind, value}]}, generated}},
+            else: {:halt, {:error, :tls_action_limit, state}}
+
+        {:early_data, :rejected}, {:ok, state, generated} ->
+          {:cont, {:ok, reject_early(state), generated}}
+
+        {:early_data, :accepted}, {:ok, state, generated} ->
+          {:cont, {:ok, %{state | early_status: :accepted}, generated}}
+
         {:error, error}, _ ->
           {:halt, {:error, error, state}}
 
@@ -1235,6 +1454,9 @@ defmodule Quic.HandshakeScheduler do
   end
 
   defp preflight_authenticated_parameters(state, effects) do
+    state =
+      if {:early_data, :accepted} in effects, do: %{state | early_status: :accepted}, else: state
+
     Enum.reduce_while(effects, :ok, fn
       {:peer_transport_parameters, bytes, :authenticated}, :ok ->
         case validate_peer_transport_parameters(state, bytes) do
@@ -1252,7 +1474,8 @@ defmodule Quic.HandshakeScheduler do
   defp validate_peer_transport_parameters(state, bytes) do
     peer_role = if state.role == :client, do: :server, else: :client
 
-    with {:ok, parameters} <- TransportParameters.decode(bytes) do
+    with {:ok, parameters} <- TransportParameters.decode(bytes),
+         :ok <- validate_early_parameters(state, parameters.values) do
       TransportParameters.validate(parameters,
         role: peer_role,
         initial_source_connection_id: state.peer_initial_scid,
@@ -1274,7 +1497,7 @@ defmodule Quic.HandshakeScheduler do
              state,
              emission,
              %{
-               level: level,
+               level: wire_level(state, level),
                crypto: {offset, byte_size(bytes)},
                bytes: packet,
                control: control,
@@ -1310,7 +1533,7 @@ defmodule Quic.HandshakeScheduler do
        %{
          type: :send,
          space: level,
-         level: level,
+         level: wire_level(state, level),
          packet_number: reserved.number,
          bytes: packet,
          path_id: reserved.metadata.path_id
@@ -1353,7 +1576,7 @@ defmodule Quic.HandshakeScheduler do
                :application,
                emission.offset,
                <<>>,
-               state.keys.application
+               Map.get(state.keys, :application)
              ) do
           {:ok, bytes} when byte_size(bytes) <= state.max_packet_size ->
             {:ok, candidate, rest}
@@ -1413,7 +1636,7 @@ defmodule Quic.HandshakeScheduler do
     first = %{frame | data: binary_part(frame.data, 0, mid), fin: false}
     candidate = %{state | pending_control: Map.put(state.pending_control, :application, [first])}
 
-    case build_protected(candidate, :application, offset, <<>>, state.keys.application) do
+    case build_protected(candidate, :application, offset, <<>>, Map.get(state.keys, :application)) do
       {:ok, bytes} when byte_size(bytes) <= state.max_packet_size ->
         fitting_stream_bytes(state, frame, offset, mid + 1, high, mid)
 
@@ -1432,9 +1655,6 @@ defmodule Quic.HandshakeScheduler do
     end)
   end
 
-  defp build_protected(_state, level, _offset, _bytes, nil),
-    do: {:error, {:unsupported_level, level}}
-
   defp build_protected(state, :initial, offset, bytes, keys) do
     ack_frames = Map.get(state.pending_acks, :initial, [])
     control = Map.get(state.pending_control, :initial, [])
@@ -1449,6 +1669,15 @@ defmodule Quic.HandshakeScheduler do
       pn_len = packet_number_length(pn)
       encrypt_initial(state, keys, pn, pn_len, plaintext)
     end
+  end
+
+  defp build_protected(state, :application, _offset, <<>>, nil) do
+    build_early(state)
+  end
+
+  defp build_protected(state, :application, _offset, <<>>, keys)
+       when is_map(keys) and not is_map_key(keys, :write) do
+    build_early(state)
   end
 
   defp build_protected(state, level, offset, bytes, keys)
@@ -1682,7 +1911,7 @@ defmodule Quic.HandshakeScheduler do
          hkdf: hkdf,
          secret: secret
        })
-       when level in [:handshake, :application] and direction in [:read, :write] do
+       when level in [:early_data, :handshake, :application] and direction in [:read, :write] do
     with false <- retired?(state, level),
          {:ok, derived} <- Protection.packet_keys(level, cipher_suite, aead, hkdf, secret) do
       context = Map.put(derived, :direction, direction)
@@ -1758,6 +1987,10 @@ defmodule Quic.HandshakeScheduler do
       :max_queue_bytes,
       :max_datagram_frame_size,
       :active_connection_id_limit,
+      :reset_stream_at,
+      :early_staging_limit,
+      :early_receive_parameters,
+      :ordinary_streams,
       :streams,
       :initial_read_keys
     ])
@@ -1771,7 +2004,21 @@ defmodule Quic.HandshakeScheduler do
     case Codec.decode_frames(plaintext) do
       {:ok, frames, <<>>} ->
         state = acknowledge_inbound(state, space, frames)
-        dispatch_frames(state, level, space, number, frames, at, [])
+
+        case dispatch_frames(state, level, space, number, frames, at, []) do
+          {:ok, state, events}
+          when level in [:early_data, :application] and not state.early_delivery_ready ->
+            {retained, visible} =
+              Enum.split_with(
+                events,
+                &(&1.type in [:stream, :reset_stream, :reset_stream_at, :datagram])
+              )
+
+            {:ok, retain_early_events(state, retained), visible}
+
+          other ->
+            other
+        end
 
       {:ok, _frames, _tail} ->
         {:error, :trailing_frame_bytes}
@@ -1858,7 +2105,7 @@ defmodule Quic.HandshakeScheduler do
   end
 
   defp dispatch_frame(state, level, space, number, %{type: :stream} = frame, rest, at, events)
-       when level == :application do
+       when level in [:application, :early_data] do
     case Streams.receive(state.streams, frame) do
       {:ok, streams, stream_events} ->
         {streams, credit} = Streams.take_credit(streams)
@@ -1887,7 +2134,7 @@ defmodule Quic.HandshakeScheduler do
          at,
          events
        )
-       when level == :application do
+       when level in [:application, :early_data] do
     if state.local_max_datagram_frame_size > 0 and
          frame.wire_size <= state.local_max_datagram_frame_size do
       dispatch_frames(state, level, space, number, rest, at, [frame | events])
@@ -1905,12 +2152,68 @@ defmodule Quic.HandshakeScheduler do
          level,
          space,
          number,
+         %{type: :reset_stream_at} = frame,
+         rest,
+         at,
+         events
+       )
+       when level in [:application, :early_data] do
+    if state.local_reset_stream_at do
+      case Streams.receive_reset_at(
+             state.streams,
+             frame.stream_id,
+             frame.error_code,
+             frame.final_size,
+             frame.reliable_size
+           ) do
+        {:ok, streams, items} ->
+          {streams, credit} = Streams.take_credit(streams)
+          next = queue_control(%{state | streams: streams}, :application, credit)
+
+          dispatch_frames(next, level, space, number, rest, at, [
+            %{type: :reset_stream_at, frame: frame, events: items} | events
+          ])
+
+        {:error, reason} ->
+          code =
+            case reason do
+              :frame_encoding_error -> 0x07
+              :flow_control -> 0x03
+              :stream_state_error -> 0x05
+              :final_size_error -> 0x06
+              _ -> 0x0A
+            end
+
+          {:error, {:transport_error, code, 0x24, reason}}
+      end
+    else
+      {:error, {:protocol_violation, 0x0A, 0x24}}
+    end
+  end
+
+  defp dispatch_frame(
+         _state,
+         level,
+         _space,
+         _number,
+         %{type: :reset_stream_at},
+         _rest,
+         _at,
+         _events
+       ),
+       do: {:error, {:wrong_encryption_level, :reset_stream_at, level}}
+
+  defp dispatch_frame(
+         state,
+         level,
+         space,
+         number,
          %{type: :reset_stream} = frame,
          rest,
          at,
          events
        )
-       when level == :application do
+       when level in [:application, :early_data] do
     case Streams.receive_reset(
            state.streams,
            frame.stream_id,
@@ -1926,7 +2229,15 @@ defmodule Quic.HandshakeScheduler do
         ])
 
       {:error, reason} ->
-        {:error, {:stream, reason}}
+        code =
+          case reason do
+            :flow_control -> 0x03
+            :stream_state_error -> 0x05
+            :final_size_error -> 0x06
+            _ -> 0x0A
+          end
+
+        {:error, {:transport_error, code, 0x04, reason}}
     end
   end
 
@@ -1944,7 +2255,7 @@ defmodule Quic.HandshakeScheduler do
          at,
          events
        )
-       when level == :application do
+       when level in [:application, :early_data] do
     case Streams.peer_stop_sending(state.streams, frame.stream_id, frame.error_code) do
       {:ok, streams, reset} ->
         next = discard_stream_send(%{state | streams: streams}, frame.stream_id)
@@ -1962,7 +2273,7 @@ defmodule Quic.HandshakeScheduler do
 
   defp dispatch_frame(state, level, space, number, %{type: type} = frame, rest, at, events)
        when type in [:max_data, :max_stream_data, :max_streams_bidi, :max_streams_uni] and
-              level == :application do
+              level in [:application, :early_data] do
     case Streams.update_credit(state.streams, frame) do
       {:ok, streams, _status} ->
         dispatch_frames(%{state | streams: streams}, level, space, number, rest, at, [
@@ -2009,7 +2320,7 @@ defmodule Quic.HandshakeScheduler do
          at,
          events
        )
-       when level == :application do
+       when level in [:application, :early_data] do
     if state.peer_cids do
       with {:ok, cids, retired} <-
              PeerCIDs.receive_id(
@@ -2055,14 +2366,15 @@ defmodule Quic.HandshakeScheduler do
 
   defp dispatch_frame(
          state,
-         :application = level,
+         level,
          space,
          number,
          %{type: :retire_connection_id, sequence: sequence},
          rest,
          at,
          events
-       ) do
+       )
+       when level in [:application, :early_data] do
     case LocalCIDs.retire(state.local_cids, sequence, state.received_dcid) do
       {:ok, cids, cid} ->
         state = prune_retired_issuance(%{state | local_cids: cids}, sequence)
@@ -2142,7 +2454,10 @@ defmodule Quic.HandshakeScheduler do
 
   defp decode_protected_packet(state, datagram, at) do
     with {:ok, parsed} <- parse_protected_header(state, datagram),
-         false <- retired?(state, parsed.level) && {:retired, parsed.packet_length},
+         false <-
+           (retired?(state, parsed.level) or
+              (parsed.level == :early_data and is_integer(state.early_key_deadline) and
+                 at >= state.early_key_deadline)) && {:retired, parsed.packet_length},
          keys when is_map(keys) <- read_key(state, parsed.level),
          packet <- binary_part(datagram, 0, parsed.packet_length),
          {:ok, unprotected, pn_len} <-
@@ -2362,7 +2677,7 @@ defmodule Quic.HandshakeScheduler do
   end
 
   defp validate_unprotected_header(<<first, _rest::binary>>, level)
-       when level in [:initial, :handshake] do
+       when level in [:initial, :handshake, :early_data] do
     cond do
       (first &&& 0x80) == 0 or (first &&& 0x40) == 0 ->
         {:error, :invalid_header_fixed_bit}
@@ -2391,7 +2706,7 @@ defmodule Quic.HandshakeScheduler do
       {:ok,
        %{
          level: level,
-         space: level,
+         space: if(level == :early_data, do: :application, else: level),
          dcid: dcid,
          scid: scid,
          pn_offset: pn_offset,
@@ -2417,9 +2732,11 @@ defmodule Quic.HandshakeScheduler do
     end
   end
 
+  defp maybe_skip_token(1, rest), do: {:ok, rest}
   defp maybe_skip_token(2, rest), do: {:ok, rest}
   defp maybe_skip_token(_, _), do: {:error, :unsupported_packet_type}
 
+  defp long_level(1), do: {:ok, :early_data}
   defp long_level(0), do: {:ok, :initial}
   defp long_level(2), do: {:ok, :handshake}
   defp long_level(_), do: {:error, :unsupported_packet_type}
@@ -2529,6 +2846,298 @@ defmodule Quic.HandshakeScheduler do
         else: {:ok, state, []}
     else
       schedule_reserved(state, emission, rest, before)
+    end
+  end
+
+  def early_writable?(state),
+    do:
+      state.role == :client and state.early_status == :pending and
+        is_map(get_in(state.keys, [:early_data, :write])) and not state.tls.facts.tls_complete
+
+  defp write_available?(state),
+    do: is_map(get_in(state.keys, [:application, :write])) or early_writable?(state)
+
+  defp wire_level(state, :application) do
+    if not is_map(get_in(state.keys, [:application, :write])) and early_writable?(state),
+      do: :early_data,
+      else: :application
+  end
+
+  defp wire_level(_, level), do: level
+
+  defp build_early(state) do
+    frames = Map.get(state.pending_control, :application, [])
+
+    with true <- early_writable?(state),
+         :ok <- Codec.validate_frame_levels(frames, :early_data),
+         {:ok, bytes} <- Codec.encode_frames(frames),
+         pn <- state.recovery.spaces.application.next do
+      encrypt_long(state, state.keys.early_data.write, 1, pn, packet_number_length(pn), bytes)
+    else
+      false -> {:error, :application_unavailable}
+      error -> error
+    end
+  end
+
+  defp remembered_parameters(state, opts) do
+    case get_in(opts, [:resumption, :session]) do
+      %SSL.QUIC.Session{transport_parameters: bytes} ->
+        case TransportParameters.decode(bytes) do
+          {:ok, parameters} ->
+            %{
+              state
+              | streams: Streams.install_peer_parameters(state.streams, parameters.values),
+                peer_max_datagram_frame_size:
+                  Map.get(parameters.values, :max_datagram_frame_size, 0),
+                early_peer_parameters: parameters.values
+            }
+
+          _ ->
+            state
+        end
+
+      _ ->
+        state
+    end
+  end
+
+  defp reject_early(%{early_status: :disabled} = state), do: state
+
+  defp reject_early(state) do
+    %{
+      state
+      | early_status: :rejected,
+        early_epoch: state.early_epoch + 1,
+        streams: Streams.new(state.role, state.early_stream_opts),
+        recovery: Recovery.reject_early(state.recovery),
+        keys: Map.delete(state.keys, :early_data),
+        pending_control: Map.delete(state.pending_control, :application),
+        pending: Enum.reject(state.pending, &(&1.level in [:application, :early_data])),
+        early_staged: [],
+        early_staged_bytes: 0,
+        early_stream_ids: MapSet.new(),
+        early_datagrams: [],
+        early_datagram_bytes: 0,
+        queued_bytes: 0,
+        queued: 0
+    }
+  end
+
+  defp stage_early(state, packet, at) do
+    context = state.early_stage_context || %{bytes: packet, at: at, staged: false}
+    whole = context.bytes
+
+    if not context.staged and state.early_status == :pending and length(state.early_staged) < 16 and
+         state.early_staged_bytes + byte_size(whole) <= state.early_staging_limit do
+      %{
+        state
+        | early_staged: state.early_staged ++ [{whole, context.at}],
+          early_staged_bytes: state.early_staged_bytes + byte_size(whole),
+          early_stage_context: %{context | staged: true}
+      }
+    else
+      %{state | early_stage_context: %{context | staged: true}}
+    end
+  end
+
+  defp drain_early_staging(state) do
+    staged = state.early_staged
+    state = %{state | early_staged: [], early_staged_bytes: 0}
+
+    Enum.reduce_while(staged, {:ok, state, []}, fn {packet, at}, {:ok, state, generated} ->
+      case receive_datagram(state, packet, at) do
+        {:ok, state, events} ->
+          sends = Enum.flat_map(events, &Map.get(&1, :generated, []))
+          {:cont, {:ok, state, generated ++ sends}}
+
+        {:error, reason, state} ->
+          {:halt, {:error, reason, state}}
+      end
+    end)
+  end
+
+  defp retain_early_events(state, events) do
+    Enum.reduce(events, state, fn
+      %{type: type, frame: %{stream_id: id}}, state
+      when type in [:stream, :reset_stream, :reset_stream_at] ->
+        %{state | early_stream_ids: MapSet.put(state.early_stream_ids, id)}
+
+      %{type: :datagram, data: bytes} = frame, state ->
+        if length(state.early_datagrams) < 64 and
+             state.early_datagram_bytes + byte_size(bytes) <= 65_536,
+           do: %{
+             state
+             | early_datagrams: state.early_datagrams ++ [frame],
+               early_datagram_bytes: state.early_datagram_bytes + byte_size(bytes)
+           },
+           else: state
+
+      _, state ->
+        state
+    end)
+  end
+
+  def take_early_events(state) do
+    state =
+      if state.role == :client,
+        do: %{state | keys: Map.delete(state.keys, :early_data)},
+        else: state
+
+    state =
+      if state.early_status == :pending and not Map.has_key?(state.keys, :early_data),
+        do: %{state | early_status: :not_offered},
+        else: state
+
+    state =
+      case state.ordinary_stream_opts do
+        nil ->
+          state
+
+        opts ->
+          {streams, credit} = Streams.grant_ordinary(state.streams, opts)
+
+          queue_control(
+            %{state | streams: streams, ordinary_stream_opts: nil},
+            :application,
+            credit
+          )
+      end
+
+    events =
+      Enum.map(Enum.sort(state.early_stream_ids), fn id ->
+        %{type: :stream, frame: %{stream_id: id}, events: :retained}
+      end) ++ state.early_datagrams
+
+    {%{
+       state
+       | early_delivery_ready: true,
+         early_stream_ids: MapSet.new(),
+         early_datagrams: [],
+         early_datagram_bytes: 0
+     }, events}
+  end
+
+  defp validate_early_parameters(
+         %{role: :client, early_status: :accepted, early_peer_parameters: old},
+         fresh
+       )
+       when is_map(old) do
+    if Quic.EarlyData.compatible(old, fresh) == :ok,
+      do: :ok,
+      else: {:error, :reduced_early_transport_limits}
+  end
+
+  defp validate_early_parameters(_, _), do: :ok
+
+  defp retry_early(%{early_status: :pending} = state) do
+    reliable =
+      for {_number, packet} <- state.recovery.spaces.application.sent,
+          packet.status in [:reserved, :queued, :sent, :lost],
+          packet.metadata[:level] == :early_data,
+          frame <- Map.get(packet.metadata, :control, []),
+          frame.type != :datagram,
+          do: frame
+
+    state = %{state | recovery: Recovery.reject_early(state.recovery)}
+    frames = Enum.uniq(Map.get(state.pending_control, :application, []) ++ reliable)
+
+    %{
+      state
+      | pending_control: Map.put(state.pending_control, :application, frames),
+        queued_bytes: control_data_bytes(frames)
+    }
+  end
+
+  defp retry_early(state), do: state
+
+  defp early_number_valid(%{first_one_rtt_received: first}, %{level: :early_data, number: number})
+       when is_integer(first) and number >= first,
+       do: {:error, {:protocol_violation, 0x0A, 0}}
+
+  defp early_number_valid(%{largest_early_received: largest}, %{
+         level: :application,
+         number: number
+       })
+       when number <= largest,
+       do: {:error, {:protocol_violation, 0x0A, 0}}
+
+  defp early_number_valid(_, _), do: :ok
+
+  defp note_one_rtt(state, %{level: :application, number: number}, at) do
+    first =
+      if is_integer(state.first_one_rtt_received),
+        do: min(number, state.first_one_rtt_received),
+        else: number
+
+    deadline =
+      if state.role == :server and Map.has_key?(state.keys, :early_data),
+        do: state.early_key_deadline || at + 3 * Recovery.pto_duration(state.recovery),
+        else: state.early_key_deadline
+
+    %{state | first_one_rtt_received: first, early_key_deadline: deadline}
+  end
+
+  defp note_one_rtt(state, %{level: :early_data, number: number}, _),
+    do: %{state | largest_early_received: max(state.largest_early_received, number)}
+
+  defp note_one_rtt(state, _, _), do: state
+
+  def retire_early_keys(state),
+    do: %{
+      state
+      | keys: Map.delete(state.keys, :early_data),
+        early_keys_retired: true,
+        early_key_deadline: nil,
+        early_staged: [],
+        early_staged_bytes: 0
+    }
+
+  defp early_receive_account(state, %{level: :early_data, plaintext: bytes}) do
+    {:ok, frames, <<>>} = Codec.decode_frames(bytes)
+
+    Enum.reduce_while(frames, {:ok, state}, fn
+      %{type: :stream, stream_id: id, offset: offset, data: data}, {:ok, state} ->
+        account_early_offset(state, id, offset + byte_size(data), 0x08)
+
+      %{type: type, stream_id: id, final_size: final}, {:ok, state}
+      when type in [:reset_stream, :reset_stream_at] ->
+        account_early_offset(state, id, final, if(type == :reset_stream, do: 0x04, else: 0x24))
+
+      _, acc ->
+        {:cont, acc}
+    end)
+  end
+
+  defp early_receive_account(state, _), do: {:ok, state}
+
+  defp account_early_offset(state, id, offset, frame_type) do
+    limits = state.early_recv_limits
+    bidi = (id &&& 2) == 0
+    count_limit = if bidi, do: limits.max_streams_bidi, else: limits.max_streams_uni
+
+    stream_limit =
+      if bidi, do: limits.max_stream_data_bidi_remote, else: limits.max_stream_data_uni
+
+    previous = Map.get(state.early_recv_offsets, id, 0)
+    used = Enum.sum(Map.values(state.early_recv_offsets))
+
+    cond do
+      state.role != :server or (id &&& 1) != 0 ->
+        {:halt, {:error, {:transport_error, 0x05, frame_type, :early_stream_state}}}
+
+      div(id, 4) >= count_limit ->
+        {:halt, {:error, {:transport_error, 0x04, frame_type, :early_stream_limit}}}
+
+      offset > stream_limit or used + max(0, offset - previous) > limits.max_data ->
+        {:halt, {:error, {:transport_error, 0x03, frame_type, :early_flow_control}}}
+
+      true ->
+        {:cont,
+         {:ok,
+          %{
+            state
+            | early_recv_offsets: Map.put(state.early_recv_offsets, id, max(previous, offset))
+          }}}
     end
   end
 end

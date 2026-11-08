@@ -43,6 +43,7 @@ defmodule Quic.IO.GenUDP do
   def send(pid, bytes, remote), do: GenServer.call(pid, {:send, bytes, remote})
   @impl true
   def close(pid), do: GenServer.call(pid, :close)
+  def identity(pid), do: GenServer.call(pid, :identity)
   def local(pid), do: GenServer.call(pid, :local)
   def consumed(pid, generation, credit), do: GenServer.call(pid, {:consumed, generation, credit})
 
@@ -163,6 +164,10 @@ defmodule Quic.IO.GenUDP do
   end
 
   def handle_call({:consumed, _, _}, _from, state), do: {:reply, {:error, :stale_credit}, state}
+
+  def handle_call(:identity, _from, state),
+    do: {:reply, %{local: state.local, generation: state.generation}, state}
+
   def handle_call(:local, _from, state), do: {:reply, state.local, state}
   def handle_call(:close, _from, state), do: {:stop, :normal, :ok, state}
 

@@ -43,7 +43,7 @@ defmodule Quic.Protection do
   @spec packet_keys(atom(), non_neg_integer(), atom(), atom(), binary()) ::
           {:ok, map()} | {:error, term()}
   def packet_keys(level, cipher_suite, aead, hkdf, secret)
-      when level in [:handshake, :application] and is_integer(cipher_suite) and
+      when level in [:early_data, :handshake, :application] and is_integer(cipher_suite) and
              is_binary(secret) do
     with {:ok, spec} <- packet_cipher_spec(cipher_suite, aead, hkdf),
          :ok <- validate_crypto_support(aead, hkdf, spec.hp_algorithm),

@@ -29,7 +29,8 @@ defmodule Quic.TransportParameters do
     0x0E => {:active_connection_id_limit, :varint},
     0x0F => {:initial_source_connection_id, :cid},
     0x10 => {:retry_source_connection_id, :cid},
-    0x20 => {:max_datagram_frame_size, :varint}
+    0x20 => {:max_datagram_frame_size, :varint},
+    0x1D => {:reset_stream_at, :flag}
   }
 
   @spec encode([map()] | map(), keyword()) :: {:ok, binary()} | {:error, atom()}

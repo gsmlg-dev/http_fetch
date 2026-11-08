@@ -29,6 +29,56 @@ defmodule Quic.Paths do
     end
   end
 
+  @doc "Find a locally selected path without confusing equal remote addresses."
+  def lookup_local(state, local, remote) do
+    case Enum.find(state.paths, fn {_, path} -> path.local == local and path.remote == remote end) do
+      {id, _} -> {:ok, id}
+      nil -> :error
+    end
+  end
+
+  @doc "Reserve a client candidate with unchanged server-address validation."
+  def start_local(state, local, at, pto, deadline) do
+    cond do
+      state.role != :client ->
+        {:blocked, :client_only}
+
+      map_size(state.paths) >= 2 ->
+        {:blocked, :migration_busy}
+
+      true ->
+        id = state.next_id
+        old = %{state.paths[state.active] | validated_in_attempt: true}
+
+        path = %{
+          record(local, old.remote, old.validated)
+          | deadline: min(deadline, at + 3 * pto),
+            retry_at: at
+        }
+
+        {:ok,
+         %{
+           state
+           | paths: state.paths |> Map.put(state.active, old) |> Map.put(id, path),
+             candidate: id,
+             previous: state.active,
+             next_id: id + 1
+         }, id}
+    end
+  end
+
+  @doc "Select a reachable, MTU-validated local candidate and begin old-path settlement."
+  def commit_local(%{role: :client, candidate: id} = state, id) do
+    case state.paths[id] do
+      %{validated_in_attempt: true, mtu_validated: true} ->
+        {:ok, settled, _} = settle(state, id)
+        {:ok, settled}
+
+      _ ->
+        {:error, :unvalidated_path}
+    end
+  end
+
   @spec observe(t(), term(), non_neg_integer(), boolean(), integer(), pos_integer()) ::
           {:ok, t(), id(), boolean()} | {:blocked, atom()}
   def observe(state, remote, number, probing, at, pto) do

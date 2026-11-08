@@ -590,6 +590,32 @@ defmodule Quic.Recovery do
     state |> apply_congestion(released, :release) |> reset_pto_counts() |> arm()
   end
 
+  @doc "Discard rejected early work without resetting application packet numbers or ACK history."
+  def reject_early(state) do
+    current = state.spaces.application
+
+    {sent, released} =
+      Enum.reduce(current.sent, {%{}, %{}}, fn {number, packet}, {packets, bytes} ->
+        if Map.get(packet.metadata, :level) == :early_data do
+          released =
+            if packet.status in [:reserved, :queued, :sent],
+              do: add_bytes(bytes, packet.path_id, packet.bytes),
+              else: bytes
+
+          {Map.put(packets, number, %{
+             packet
+             | status: :discarded,
+               metadata: terminal_metadata(packet.metadata)
+           }), released}
+        else
+          {Map.put(packets, number, packet), bytes}
+        end
+      end)
+
+    state = put_in(state.spaces.application, %{current | sent: sent})
+    state |> apply_congestion(released, :release) |> reset_pto_counts() |> arm()
+  end
+
   @doc "Permanently retire Initial/Handshake recovery, preserving the next packet number."
   @spec retire_space(t(), :initial | :handshake) :: t()
   def retire_space(state, space) when space in [:initial, :handshake] do

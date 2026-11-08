@@ -47,7 +47,7 @@ defmodule Quic.Runtime do
   defmodule StreamHandle do
     @moduledoc false
     @enforce_keys [:connection, :id]
-    defstruct [:connection, :id]
+    defstruct [:connection, :id, epoch: 0]
     @type t :: %__MODULE__{connection: Quic.Runtime.ConnectionHandle.t(), id: non_neg_integer()}
   end
 

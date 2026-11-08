@@ -241,6 +241,30 @@ defmodule Quic.Codec do
     end
   end
 
+  defp encode_frames(
+         [
+           %{
+             type: :reset_stream_at,
+             stream_id: id,
+             error_code: code,
+             final_size: final,
+             reliable_size: reliable
+           }
+           | rest
+         ],
+         acc
+       )
+       when is_integer(id) and id >= 0 and is_integer(code) and code >= 0 and
+              is_integer(final) and final >= 0 and is_integer(reliable) and reliable >= 0 and
+              reliable <= final do
+    with {:ok, stream} <- encode_varint(id),
+         {:ok, error} <- encode_varint(code),
+         {:ok, size} <- encode_varint(final),
+         {:ok, prefix} <- encode_varint(reliable) do
+      encode_frames(rest, [prefix, size, error, stream, <<0x24>> | acc])
+    end
+  end
+
   defp encode_frames([%{type: :stop_sending, stream_id: id, error_code: code} | rest], acc)
        when is_integer(id) and id >= 0 and is_integer(code) and code >= 0 do
     with {:ok, stream} <- encode_varint(id), {:ok, error} <- encode_varint(code) do
@@ -376,6 +400,30 @@ defmodule Quic.Codec do
       decode_frames(tail, [%{type: :crypto, offset: offset, data: data} | acc], limit - 1)
     else
       _ -> {:error, :malformed_crypto_frame}
+    end
+  end
+
+  defp decode_frames(<<0x24, rest::binary>>, acc, limit) do
+    with {:ok, id, rest} <- decode_varint(rest),
+         {:ok, code, rest} <- decode_varint(rest),
+         {:ok, final, rest} <- decode_varint(rest),
+         {:ok, reliable, tail} <- decode_varint(rest) do
+      decode_frames(
+        tail,
+        [
+          %{
+            type: :reset_stream_at,
+            stream_id: id,
+            error_code: code,
+            final_size: final,
+            reliable_size: reliable
+          }
+          | acc
+        ],
+        limit - 1
+      )
+    else
+      _ -> {:error, :malformed_reset_stream_at}
     end
   end
 
@@ -586,8 +634,16 @@ defmodule Quic.Codec do
   end
 
   @doc "Validate encryption-level constraints that cannot be inferred from frame bytes."
-  @spec validate_frame_levels([map()], :initial | :handshake | :application) ::
+  @spec validate_frame_levels([map()], :initial | :handshake | :application | :early_data) ::
           :ok | {:error, term()} | {:wrong_encryption_level, atom(), atom()}
+  def validate_frame_levels(frames, :early_data) when is_list(frames) do
+    Enum.reduce_while(frames, :ok, fn frame, :ok ->
+      if frame.type in [:ack, :crypto, :handshake_done, :new_token, :path_response],
+        do: {:halt, {:wrong_encryption_level, frame.type, :early_data}},
+        else: {:cont, :ok}
+    end)
+  end
+
   def validate_frame_levels(frames, level)
       when is_list(frames) and level in [:initial, :handshake, :application] do
     Enum.reduce_while(frames, :ok, fn
@@ -622,6 +678,7 @@ defmodule Quic.Codec do
       when type in [
              :stream,
              :reset_stream,
+             :reset_stream_at,
              :stop_sending,
              :max_data,
              :max_stream_data,
@@ -638,6 +695,7 @@ defmodule Quic.Codec do
       when type in [
              :stream,
              :reset_stream,
+             :reset_stream_at,
              :stop_sending,
              :max_data,
              :max_stream_data,

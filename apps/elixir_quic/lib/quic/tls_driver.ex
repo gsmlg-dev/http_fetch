@@ -16,6 +16,7 @@ defmodule Quic.TLSDriver do
     :role,
     levels: %{},
     terminal: nil,
+    continuation: nil,
     future_bytes: 0,
     max_future_bytes: 262_144,
     emitted_bytes: 0,
@@ -88,6 +89,30 @@ defmodule Quic.TLSDriver do
 
   def feed_crypto(state, level, offset, bytes), do: feed(state, level, offset, bytes)
 
+  @doc "Resolve the one outstanding pure TLS request and drain retained CRYPTO once."
+  def continue(%{continuation: %{id: id}} = state, id, reply) do
+    case state.adapter.continue(state.tls, id, reply) do
+      {:ok, tls, actions} ->
+        with {:ok, folded, effects} <-
+               fold_actions(%{state | tls: tls, continuation: nil}, actions),
+             {:ok, drained, more} <- drain_pending(folded) do
+          {:ok, drained, effects ++ more}
+        end
+
+      {:error, error, tls, actions} ->
+        case fold_actions(%{state | tls: tls, continuation: nil}, actions) do
+          {:ok, folded, effects} ->
+            {:error, error, %{folded | terminal: :failed}, effects}
+
+          {:error, reason, folded, effects} ->
+            {:error, reason, %{folded | terminal: :failed}, effects}
+        end
+    end
+  end
+
+  def continue(state, _, _),
+    do: {:error, %{kind: :configuration, reason: :invalid_continuation}, state, []}
+
   @spec retransmit(t(), atom(), non_neg_integer(), non_neg_integer()) ::
           {:ok, binary()} | {:error, atom()}
   def retransmit(%__MODULE__{} = state, level, offset, length)
@@ -143,7 +168,7 @@ defmodule Quic.TLSDriver do
   def info(%__MODULE__{} = state), do: state.adapter.info(state.tls)
 
   def abort(%__MODULE__{terminal: nil} = state, reason) do
-    %{state | tls: state.adapter.abort(state.tls, reason), terminal: :aborted}
+    %{state | tls: state.adapter.abort(state.tls, reason), continuation: nil, terminal: :aborted}
   end
 
   def abort(state, _reason), do: state
@@ -183,7 +208,7 @@ defmodule Quic.TLSDriver do
         state = put_in(state.levels[level].recv, recv)
 
         cond do
-          order(level) > order(current) ->
+          order(level) > order(current) or state.continuation != nil ->
             if state.future_bytes + byte_size(contiguous) > state.max_future_bytes do
               {:error, %{kind: :quic, reason: :future_crypto_buffer_limit}, original, []}
             else
@@ -231,6 +256,9 @@ defmodule Quic.TLSDriver do
     end
   end
 
+  defp drain_pending(%{continuation: continuation} = state) when not is_nil(continuation),
+    do: {:ok, state, []}
+
   defp drain_pending(state) do
     current = receive_level(state)
 
@@ -270,34 +298,7 @@ defmodule Quic.TLSDriver do
     Enum.reduce_while(actions, {:ok, state, []}, fn action, {:ok, current, effects} ->
       case action do
         {:emit, level, bytes} when level in @levels and is_binary(bytes) ->
-          cond do
-            current.levels[level].retired ->
-              {:halt, {:error, %{kind: :quic, reason: :retired_level}, current, effects}}
-
-            current.emitted_bytes + byte_size(bytes) > current.max_emitted_bytes ->
-              {:halt, {:error, %{kind: :quic, reason: :tls_output_limit}, current, effects}}
-
-            true ->
-              emission = %Emission{
-                level: level,
-                offset: current.levels[level].next_send,
-                bytes: bytes
-              }
-
-              level_state = current.levels[level]
-
-              next_level = %{
-                level_state
-                | next_send: emission.offset + byte_size(bytes),
-                  sent: level_state.sent ++ [emission]
-              }
-
-              next = put_in(current.levels[level], next_level)
-
-              {:cont,
-               {:ok, %{next | emitted_bytes: current.emitted_bytes + byte_size(bytes)},
-                effects ++ [action]}}
-          end
+          fold_emission(current, level, bytes, action, effects)
 
         :handshake_complete ->
           {:cont, {:ok, put_in(current.facts.tls_complete, true), effects ++ [action]}}
@@ -321,6 +322,19 @@ defmodule Quic.TLSDriver do
         {:negotiated_alpn, _} ->
           {:cont, {:ok, current, effects ++ [action]}}
 
+        {kind, %SSL.QUIC.Request{} = request}
+        when kind in [:session_lookup, :session_commit, :session_store] ->
+          if current.continuation == nil,
+            do: {:cont, {:ok, %{current | continuation: request}, effects ++ [action]}},
+            else:
+              {:halt, {:error, %{kind: :quic, reason: :duplicate_tls_request}, current, effects}}
+
+        {:session_ticket, %SSL.QUIC.Session{}} ->
+          {:cont, {:ok, current, effects ++ [action]}}
+
+        {:early_data, status} when status in [:accepted, :rejected] ->
+          {:cont, {:ok, current, effects ++ [action]}}
+
         {:error, error} ->
           {:halt, {:error, error, current, effects ++ [action]}}
 
@@ -328,6 +342,37 @@ defmodule Quic.TLSDriver do
           {:halt, {:error, %{kind: :quic, reason: :invalid_tls_action}, current, effects}}
       end
     end)
+  end
+
+  defp fold_emission(current, level, bytes, action, effects) do
+    cond do
+      current.levels[level].retired ->
+        {:halt, {:error, %{kind: :quic, reason: :retired_level}, current, effects}}
+
+      current.emitted_bytes + byte_size(bytes) > current.max_emitted_bytes ->
+        {:halt, {:error, %{kind: :quic, reason: :tls_output_limit}, current, effects}}
+
+      true ->
+        emission = %Emission{
+          level: level,
+          offset: current.levels[level].next_send,
+          bytes: bytes
+        }
+
+        level_state = current.levels[level]
+
+        next_level = %{
+          level_state
+          | next_send: emission.offset + byte_size(bytes),
+            sent: level_state.sent ++ [emission]
+        }
+
+        next = put_in(current.levels[level], next_level)
+
+        {:cont,
+         {:ok, %{next | emitted_bytes: current.emitted_bytes + byte_size(bytes)},
+          effects ++ [action]}}
+    end
   end
 
   defp call_new(adapter, role, opts), do: adapter.new(role, opts)

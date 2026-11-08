@@ -87,20 +87,36 @@ defmodule Quic do
   @spec send_stream(StreamHandle.t(), binary(), boolean(), operation_options()) ::
           {:ok, reference()} | failure()
   def send_stream(
-        %StreamHandle{connection: %ConnectionHandle{id: pid, generation: generation}, id: id},
+        %StreamHandle{
+          connection: %ConnectionHandle{id: pid, generation: generation},
+          id: id,
+          epoch: epoch
+        },
         data,
         fin \\ false,
         opts \\ []
       ),
-      do: Connection.send_public_stream(pid, generation, id, data, fin, opts)
+      do:
+        Connection.send_public_stream(
+          pid,
+          generation,
+          id,
+          data,
+          fin,
+          Keyword.put(opts, :stream_epoch, epoch)
+        )
 
   @spec read(StreamHandle.t(), pos_integer(), operation_options()) :: {:ok, list()} | failure()
   def read(
-        %StreamHandle{connection: %ConnectionHandle{id: pid, generation: generation}, id: id},
+        %StreamHandle{
+          connection: %ConnectionHandle{id: pid, generation: generation},
+          id: id,
+          epoch: epoch
+        },
         max,
         opts \\ []
       ),
-      do: Connection.read(pid, generation, id, max, opts)
+      do: Connection.read(pid, generation, id, max, Keyword.put(opts, :stream_epoch, epoch))
 
   @doc """
   Admit one QUIC PING for caller-managed keepalive.
@@ -134,6 +150,11 @@ defmodule Quic do
   def info(%ConnectionHandle{id: pid, generation: generation}),
     do: Connection.info(pid, generation)
 
+  @doc "Admit explicit migration of an exclusive standalone client; reconcile the retained ref."
+  @spec migrate(ConnectionHandle.t(), operation_options()) :: {:ok, reference()} | failure()
+  def migrate(%ConnectionHandle{id: pid, generation: generation}, opts),
+    do: Connection.migrate(pid, generation, opts)
+
   @spec operation_status(ConnectionHandle.t() | pid(), reference()) ::
           map() | :unknown | failure()
   def operation_status(%ConnectionHandle{id: pid, generation: generation}, ref),
@@ -145,20 +166,69 @@ defmodule Quic do
   @spec reset_stream(StreamHandle.t(), non_neg_integer(), operation_options()) ::
           {:ok, reference()} | failure()
   def reset_stream(
-        %StreamHandle{connection: %ConnectionHandle{id: pid, generation: generation}, id: id},
+        %StreamHandle{
+          connection: %ConnectionHandle{id: pid, generation: generation},
+          id: id,
+          epoch: epoch
+        },
         code,
         opts \\ []
       ),
-      do: Connection.reset_public_stream(pid, generation, id, code, opts)
+      do:
+        Connection.reset_public_stream(
+          pid,
+          generation,
+          id,
+          code,
+          Keyword.put(opts, :stream_epoch, epoch)
+        )
+
+  @doc "Reset the send direction while guaranteeing delivery of the admitted prefix."
+  @spec reset_stream_at(
+          StreamHandle.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          operation_options()
+        ) :: {:ok, reference()} | failure()
+  def reset_stream_at(
+        %StreamHandle{
+          connection: %ConnectionHandle{id: pid, generation: generation},
+          id: id,
+          epoch: epoch
+        },
+        code,
+        reliable_size,
+        opts \\ []
+      ),
+      do:
+        Connection.reset_public_stream_at(
+          pid,
+          generation,
+          id,
+          code,
+          reliable_size,
+          Keyword.put(opts, :stream_epoch, epoch)
+        )
 
   @spec stop_stream(StreamHandle.t(), non_neg_integer(), operation_options()) ::
           {:ok, reference()} | failure()
   def stop_stream(
-        %StreamHandle{connection: %ConnectionHandle{id: pid, generation: generation}, id: id},
+        %StreamHandle{
+          connection: %ConnectionHandle{id: pid, generation: generation},
+          id: id,
+          epoch: epoch
+        },
         code,
         opts \\ []
       ),
-      do: Connection.stop_public_stream(pid, generation, id, code, opts)
+      do:
+        Connection.stop_public_stream(
+          pid,
+          generation,
+          id,
+          code,
+          Keyword.put(opts, :stream_epoch, epoch)
+        )
 
   @spec close(ConnectionHandle.t(), non_neg_integer(), binary(), operation_options()) ::
           :ok | failure()

@@ -8,9 +8,8 @@ defmodule Quic.Endpoint do
   only the connection may authenticate and validate a new path.
   """
   use GenServer
-  alias Quic.{Codec, Connection, TransportParameters, Retry, Protection}
-  alias Quic.IO.GenUDP
-  alias Quic.IO.ExternalWriter
+  alias Quic.{Codec, Connection, Protection, ResumptionStore, Retry, TransportParameters}
+  alias Quic.IO.{ExternalWriter, GenUDP}
 
   @cid_length 8
   def start_link(opts) do
@@ -58,9 +57,17 @@ defmodule Quic.Endpoint do
     if role in [:client, :server] and is_integer(max) and max > 0 and
          valid_item_limit?(event_limit) and valid_item_limit?(operation_limit) and
          valid_retry_options?(retry, role, retry_limit, retry_ttl) do
-      with :ok <- enroll_cleanup(opts),
+      with {:ok, resumption} <- resumption_policy(Keyword.get(opts, :resumption)),
+           {:ok, early_policy} <-
+             Quic.EarlyData.policy(Keyword.get(opts, :early_data), resumption),
+           {:ok, store} <- ResumptionStore.new(if(resumption, do: resumption.store, else: [])),
+           :ok <- enroll_cleanup(opts),
            {:ok, io} <- open_io(opts, role) do
         data = %{
+          resumption: resumption,
+          early_policy: early_policy,
+          early_authority: %Quic.EarlyData{},
+          session_store: store,
           cleanup: Keyword.get(opts, :cleanup),
           cleanup_monitor: Quic.Cleanup.monitor(Keyword.get(opts, :cleanup)),
           role: role,
@@ -73,6 +80,16 @@ defmodule Quic.Endpoint do
           retry_sent: 0,
           retry_validated: 0,
           socket: io.socket,
+          ios: %{
+            default:
+              Map.merge(io, %{
+                generation: if(io.external, do: nil, else: GenUDP.identity(io.socket).generation),
+                cleanup: nil,
+                retiring: false
+              })
+          },
+          migration: nil,
+          ingress_local: nil,
           monitor: io.monitor,
           io_module: io.module,
           io_writer: io.writer,
@@ -171,6 +188,10 @@ defmodule Quic.Endpoint do
             {:reply, result, record_operation(data, ref, signature, :rejected, result)}
         end
 
+      match?({:connect, _}, request) and data.migration != nil ->
+        result = {:blocked, :exclusive_migration}
+        {:reply, result, record_operation(data, ref, signature, :rejected, result)}
+
       match?({:connect, _}, request) and data.role == :client ->
         connect_operation(data, ref, signature, request, deadline)
 
@@ -202,16 +223,31 @@ defmodule Quic.Endpoint do
          admission_drops: data.admission_drops,
          retry_sent: data.retry_sent,
          retry_validated: data.retry_validated,
-         last_error: data.last_error
+         last_error: data.last_error,
+         resumption: %{
+           enabled: data.resumption != nil,
+           early_data: data.early_policy != nil,
+           early_capacity: Quic.EarlyData.stats(data.early_authority),
+           tickets: map_size(data.session_store.entries),
+           bytes: data.session_store.bytes
+         }
        }, data}
 
   @impl true
   def handle_info({:quic_udp, generation, credit, remote, bytes, at}, data) do
     case Quic.Cleanup.authorize(data.cleanup) do
       :ok ->
-        next = route(data, remote, bytes, at)
+        io =
+          Enum.find_value(data.ios, fn {_, io} ->
+            if io.generation == generation and not Map.get(io, :retiring, false), do: io
+          end)
 
-        case consume_credit(next, generation, credit) do
+        next = if io, do: route(%{data | ingress_local: io.local}, remote, bytes, at), else: data
+
+        case if(io,
+               do: consume_credit(%{next | socket: io.socket}, generation, credit),
+               else: :ok
+             ) do
           :ok -> {:noreply, next}
           :retired -> {:stop, :normal, next}
           {:error, reason} -> {:stop, {:socket_receive, reason}, next}
@@ -219,6 +255,125 @@ defmodule Quic.Endpoint do
 
       {:error, _reason} ->
         {:stop, :normal, data}
+    end
+  end
+
+  def handle_info({:quic_tls_request, pid, generation, request, deadline}, data) do
+    now = System.monotonic_time(:millisecond)
+
+    case data.connections[pid] do
+      %{generation: ^generation, session_partition: partition}
+      when is_binary(partition) and now < deadline ->
+        {result, store} = authority_request(data.session_store, partition, request, now, deadline)
+        data = %{data | session_store: store}
+        {result, data} = admit_early(data, pid, generation, request, result)
+        send(pid, {:quic_tls_result, generation, request.id, result})
+        {:noreply, data}
+
+      _ ->
+        send(pid, {:quic_tls_result, generation, request.id, :miss})
+        {:noreply, data}
+    end
+  end
+
+  def handle_info({:quic_early_release, pid, generation}, data) do
+    if match?(%{generation: ^generation}, data.connections[pid]),
+      do:
+        {:noreply, %{data | early_authority: Quic.EarlyData.release(data.early_authority, pid)}},
+      else: {:noreply, data}
+  end
+
+  def handle_info({:quic_session_ticket, pid, generation, session}, data) do
+    case data.connections[pid] do
+      %{generation: ^generation, session_partition: partition}
+      when is_binary(partition) and data.role == :client ->
+        case ResumptionStore.store(
+               data.session_store,
+               partition,
+               session,
+               System.monotonic_time(:millisecond)
+             ) do
+          {:ok, store} -> {:noreply, %{data | session_store: store}}
+          {:error, _, store} -> {:noreply, %{data | session_store: store}}
+        end
+
+      _ ->
+        {:noreply, data}
+    end
+  end
+
+  def handle_info({:quic_bind_path, pid, generation, ref, id, local, deadline}, data) do
+    permitted =
+      match?(%{generation: ^generation}, data.connections[pid]) and
+        data.role == :client and not data.external and map_size(data.connections) == 1 and
+        map_size(data.ios) == 1 and data.migration == nil
+
+    if permitted and System.monotonic_time(:millisecond) < deadline do
+      {ip, port} = local
+
+      {lease, owned} =
+        case data.cleanup do
+          nil ->
+            {:ok, _handle, lease} = Quic.Cleanup.new(owner: self())
+            {lease, true}
+
+          lease ->
+            {lease, false}
+        end
+
+      opts = [ip: ip, port: port, cleanup: lease, deadline: {:abs_ms, deadline}]
+
+      case open_udp(opts, :client) do
+        {:ok, socket} ->
+          identity = GenUDP.identity(socket)
+
+          io = %{
+            socket: socket,
+            monitor: Process.monitor(socket),
+            generation: identity.generation,
+            local: identity.local,
+            cleanup: if(owned, do: lease),
+            retiring: false
+          }
+
+          send(pid, {:quic_path_bound, generation, ref, id, {:ok, socket, io.local}})
+          {:noreply, %{data | ios: Map.put(data.ios, id, io), migration: {pid, generation, ref}}}
+
+        {:error, reason} ->
+          if owned, do: request_scope_retirement(lease)
+          send(pid, {:quic_path_bound, generation, ref, id, {:error, {:bind_failed, reason}}})
+          {:noreply, data}
+      end
+    else
+      send(pid, {:quic_path_bound, generation, ref, id, {:error, :endpoint_not_exclusive}})
+      {:noreply, data}
+    end
+  end
+
+  def handle_info({:quic_select_local_path, pid, generation, id}, data) do
+    case {data.connections[pid], data.ios[id]} do
+      {%{generation: ^generation}, io} when is_map(io) ->
+        {:noreply,
+         %{data | socket: io.socket, monitor: io.monitor, io_writer: io.socket, local: io.local}}
+
+      _ ->
+        {:noreply, data}
+    end
+  end
+
+  def handle_info({:quic_retire_local_path, pid, generation, id}, data) do
+    case {data.connections[pid], data.ios[id]} do
+      {%{generation: ^generation}, io} when is_map(io) ->
+        # IO termination closes its native socket before the monitored DOWN.
+        GenUDP.close(io.socket)
+
+        if io.cleanup, do: request_scope_retirement(io.cleanup)
+
+        {:noreply, put_in(data.ios[id].retiring, true)}
+
+      _ ->
+        send(pid, {:quic_path_retired, generation, id})
+        {:noreply, data}
     end
   end
 
@@ -293,12 +448,33 @@ defmodule Quic.Endpoint do
       do: {:stop, :normal, data}
 
   def handle_info({:DOWN, monitor, :process, pid, _reason}, data) do
-    if monitor in [data.monitor, data.acceptor_monitor, data.cleanup_monitor] do
-      {:stop, :normal, data}
+    retiring = Enum.find(data.ios, fn {_, io} -> io.monitor == monitor end)
+
+    if retiring != nil and monitor != data.monitor do
+      {id, io} = retiring
+
+      case data.migration do
+        {connection, generation, _ref} ->
+          message =
+            if Map.get(io, :retiring, false),
+              do: :quic_path_retired,
+              else: :quic_local_path_failed
+
+          send(connection, {message, generation, id})
+
+        _ ->
+          :ok
+      end
+
+      {:noreply, %{data | ios: Map.delete(data.ios, id), migration: nil}}
     else
-      case data.connections[pid] do
-        %{monitor: ^monitor} -> {:noreply, remove(data, pid)}
-        _ -> {:noreply, data}
+      if monitor in [data.monitor, data.acceptor_monitor, data.cleanup_monitor] do
+        {:stop, :normal, data}
+      else
+        case data.connections[pid] do
+          %{monitor: ^monitor} -> {:noreply, remove(data, pid)}
+          _ -> {:noreply, data}
+        end
       end
     end
   end
@@ -439,6 +615,7 @@ defmodule Quic.Endpoint do
     with false <- Map.has_key?(data.routes, scid),
          profile <- Keyword.get(data.opts, :profile),
          tls_opts <- profile_tls_options(Keyword.get(data.opts, :tls, []), profile),
+         {:ok, data, tls_opts} <- configure_resumption(data, tls_opts, remote),
          {:ok, tls, idle_timeout} <-
            materialize(
              tls_opts,
@@ -446,7 +623,7 @@ defmodule Quic.Endpoint do
              original_dcid,
              scid,
              retry_scid,
-             Keyword.get(data.opts, :streams, []),
+             effective_streams(data),
              Keyword.get(data.opts, :datagram, []),
              data.opts
            ),
@@ -460,6 +637,7 @@ defmodule Quic.Endpoint do
            io: {data.io_module, data.io_writer},
            remote: remote,
            local: data.local,
+           exclusive_io: not data.external and data.role == :client,
            public: Keyword.get(data.opts, :public, false),
            event_limit: Keyword.get(data.opts, :event_limit, 128),
            operation_limit: Keyword.get(data.opts, :operation_limit, 256),
@@ -475,18 +653,40 @@ defmodule Quic.Endpoint do
                original_dcid: original_dcid,
                initial_key_dcid: retry_scid || original_dcid,
                retry_scid: retry_scid,
-               streams: Keyword.get(data.opts, :streams, []),
+               streams: effective_streams(data),
+               ordinary_streams: if(data.early_policy, do: Keyword.get(data.opts, :streams, [])),
+               early_receive_parameters: local_parameters.values,
+               early_staging_limit:
+                 if(data.early_policy && MapSet.size(data.early_authority.staging) < 32,
+                   do: 32_768,
+                   else: 0
+                 ),
                max_datagram_frame_size:
                  Map.get(local_parameters.values, :max_datagram_frame_size, 0),
                active_connection_id_limit:
                  Map.get(local_parameters.values, :active_connection_id_limit, 2),
+               reset_stream_at: Map.get(local_parameters.values, :reset_stream_at, false),
                max_packet_size: profile_packet_size(profile)
              ] ++ tls
          ],
          {:ok, birth} <- reserve_connection(data, deadline),
          {:ok, pid} <- start_connection(opts, birth),
          {:ok, generation} <- generation(pid) do
-      entry = %{pid: pid, remote: remote, generation: generation, monitor: Process.monitor(pid)}
+      entry = %{
+        pid: pid,
+        remote: remote,
+        generation: generation,
+        monitor: Process.monitor(pid),
+        session_partition: get_in(tls_opts, [:resumption, :context]),
+        local_parameters: tls[:transport_parameters]
+      }
+
+      {authority, _} =
+        if data.early_policy,
+          do: Quic.EarlyData.reserve_staging(data.early_authority, pid),
+          else: {data.early_authority, 0}
+
+      data = %{data | early_authority: authority}
 
       data = %{
         data
@@ -528,6 +728,163 @@ defmodule Quic.Endpoint do
     :exit, _ -> {:error, :connection_start_failed}
   end
 
+  defp resumption_policy(nil), do: {:ok, nil}
+  defp resumption_policy(false), do: {:ok, nil}
+
+  defp resumption_policy(opts) when is_list(opts) do
+    if Keyword.keyword?(opts),
+      do: valid_resumption_policy(opts),
+      else: {:error, :invalid_resumption_policy}
+  end
+
+  defp resumption_policy(_), do: {:error, :invalid_resumption_policy}
+
+  defp valid_resumption_policy(opts) do
+    profile = Keyword.get(opts, :application_profile)
+    lifetime = Keyword.get(opts, :ticket_lifetime, 600)
+
+    cond do
+      Keyword.get(opts, :enabled) != true ->
+        {:error, :invalid_resumption_policy}
+
+      not is_binary(profile) or byte_size(profile) not in 1..128 ->
+        {:error, :resumption_profile_required}
+
+      not is_integer(lifetime) or lifetime not in 1..600 ->
+        {:error, :invalid_ticket_lifetime}
+
+      Keyword.get(opts, :early_data, false) != false ->
+        {:error, :early_data_unavailable}
+
+      true ->
+        {:ok,
+         %{
+           profile: profile,
+           lifetime: lifetime,
+           store: Keyword.take(opts, [:max_entries, :max_bytes])
+         }}
+    end
+  end
+
+  defp admit_early(
+         data,
+         pid,
+         generation,
+         %{operation: :commit, early_data: true, session: session},
+         {:ok, :resumed}
+       ) do
+    case data.connections[pid] do
+      %{generation: ^generation, local_parameters: parameters}
+      when not is_nil(data.early_policy) ->
+        case Quic.EarlyData.reserve(
+               data.early_authority,
+               pid,
+               session.transport_parameters,
+               parameters
+             ) do
+          {:ok, authority} -> {{:ok, :early_data}, %{data | early_authority: authority}}
+          {:error, _} -> {{:ok, :resumed}, data}
+        end
+
+      _ ->
+        {{:ok, :resumed}, data}
+    end
+  end
+
+  defp admit_early(data, _, _, _, result), do: {result, data}
+
+  defp configure_resumption(data, tls, remote) do
+    cond do
+      Keyword.has_key?(tls, :resumption) ->
+        {:error, :runtime_resumption_policy_required}
+
+      data.resumption == nil ->
+        {:ok, data, tls}
+
+      true ->
+        # Bind immutable endpoint policy, trust, identity, algorithms and profile.
+        # Generated transport parameters, keys and connection IDs never enter this digest.
+        policy =
+          {1, data.role, data.resumption.profile, if(data.role == :client, do: remote),
+           Keyword.drop(tls, [:transport_parameters]), Keyword.get(data.opts, :profile),
+           data.early_policy}
+
+        partition = :crypto.hash(:sha256, :erlang.term_to_binary(policy))
+        now = System.monotonic_time(:millisecond)
+
+        {session, store} =
+          if data.role == :client,
+            do: ResumptionStore.claim_client(data.session_store, partition, now),
+            else: {nil, data.session_store}
+
+        options = [
+          enabled: true,
+          context: partition,
+          now: now,
+          session: session,
+          ticket_lifetime: data.resumption.lifetime,
+          early_data: early_offer?(data, session)
+        ]
+
+        {:ok, %{data | session_store: store}, Keyword.put(tls, :resumption, options)}
+    end
+  end
+
+  defp authority_request(
+         store,
+         partition,
+         %{operation: :lookup, identity: identity, context: partition},
+         now,
+         deadline
+       ) do
+    case ResumptionStore.lookup(store, partition, identity, now, deadline) do
+      {:ok, session, lease, store} -> {{:ok, session, lease, now}, store}
+      {:miss, store} -> {:miss, store}
+    end
+  end
+
+  defp authority_request(
+         store,
+         partition,
+         %{operation: :commit, session: %{context: partition} = session, lease: lease},
+         now,
+         _deadline
+       ) do
+    case ResumptionStore.commit(store, partition, session.identity, lease, now) do
+      {:ok, store} -> {{:ok, :resumed}, store}
+      {:miss, store} -> {:miss, store}
+    end
+  end
+
+  defp authority_request(store, partition, %{operation: :store, session: session}, now, _deadline) do
+    case ResumptionStore.store(store, partition, session, now) do
+      {:ok, store} -> {:ok, store}
+      {:error, _, store} -> {:miss, store}
+    end
+  end
+
+  defp authority_request(store, _, _, _, _), do: {:miss, store}
+
+  defp early_offer?(%{early_policy: nil}, _), do: false
+  defp early_offer?(%{role: :server}, _), do: true
+
+  defp early_offer?(_, %SSL.QUIC.Session{transport_parameters: wire}) do
+    case TransportParameters.decode(wire) do
+      {:ok, parameters} -> Quic.EarlyData.compatible(parameters.values, parameters.values) == :ok
+      _ -> false
+    end
+  end
+
+  defp early_offer?(_, _), do: false
+
+  defp effective_streams(data) do
+    opts = Keyword.get(data.opts, :streams, [])
+
+    if data.early_policy,
+      do: opts |> Quic.EarlyData.cap_streams() |> Keyword.put(:delivery, :manual),
+      else: opts
+  end
+
   defp materialize(tls, role, original, scid, retry_scid, stream_opts, datagram_opts, opts) do
     entries = [%{id: 0x0F, value: scid}]
     entries = if role == :server, do: [%{id: 0, value: original} | entries], else: entries
@@ -535,12 +892,16 @@ defmodule Quic.Endpoint do
     {:ok, cid_limit} = Codec.encode_varint(8)
     entries = entries ++ [%{id: 0x0E, value: cid_limit}]
 
+    reset_entries =
+      if Keyword.get(opts, :reliable_reset, false), do: [%{id: 0x1D, value: <<>>}], else: []
+
     with {:ok, stream_entries} <- stream_transport_entries(stream_opts),
          {:ok, datagram_entries} <- datagram_transport_entries(datagram_opts),
          {:ok, idle_wire} <- idle_timeout_wire(Keyword.get(opts, :idle_timeout, 30_000)),
          {:ok, generated} <-
            TransportParameters.encode(
-             entries ++ stream_entries ++ datagram_entries ++ [%{id: 1, value: idle_wire}],
+             entries ++
+               stream_entries ++ datagram_entries ++ reset_entries ++ [%{id: 1, value: idle_wire}],
              role: role
            ),
          raw <- Keyword.get(tls, :transport_parameters, generated),
@@ -647,7 +1008,7 @@ defmodule Quic.Endpoint do
 
   defp deliver(data, entry, remote, bytes, at) do
     case Connection.deliver(entry.pid, entry.generation, bytes, at, %{
-           local: data.local,
+           local: data.ingress_local || data.local,
            remote: remote
          }) do
       :ok -> data
@@ -657,7 +1018,39 @@ defmodule Quic.Endpoint do
     :exit, _ -> remove(data, entry.pid)
   end
 
+  defp request_scope_retirement(lease) do
+    # Native IO DOWN joins pending retirement. Unconfirmed observation must never
+    # become a successful migration/socket retirement acknowledgment.
+    case Quic.Cleanup.retire(lease, {:abs_ms, System.monotonic_time(:millisecond)}) do
+      {:ok, _receipt} -> :ok
+      {:pending, _receipt} -> :ok
+      {:error, reason, _receipt} -> exit({:cleanup_unconfirmed, reason})
+    end
+  end
+
+  defp retire_extra_io(%{socket: socket}, socket), do: :ok
+
+  defp retire_extra_io(io, _selected) do
+    close_io(%{external: false, socket: io.socket})
+
+    if io.cleanup,
+      do: Quic.Cleanup.retire(io.cleanup, {:abs_ms, System.monotonic_time(:millisecond)})
+  end
+
   defp remove(data, pid) do
+    data = %{data | early_authority: Quic.EarlyData.release(data.early_authority, pid)}
+
+    data =
+      case data.migration do
+        {^pid, _generation, _ref} ->
+          Enum.each(data.ios, fn {_id, io} -> retire_extra_io(io, data.socket) end)
+
+          %{data | migration: nil}
+
+        _ ->
+          data
+      end
+
     case data.connections[pid] do
       %{monitor: monitor} -> Process.demonitor(monitor, [:flush])
       _ -> :ok
@@ -769,7 +1162,15 @@ defmodule Quic.Endpoint do
   @impl true
   def terminate(_, data) do
     Enum.each(data.connections, fn {pid, _} -> Process.exit(pid, :shutdown) end)
-    close_io(data)
+
+    Enum.each(data.ios, fn {_id, io} ->
+      if is_pid(io.socket), do: close_io(%{external: false, socket: io.socket})
+
+      if io.cleanup,
+        do: Quic.Cleanup.retire(io.cleanup, {:abs_ms, System.monotonic_time(:millisecond)})
+    end)
+
+    if data.external, do: close_io(data)
     :ok
   end
 

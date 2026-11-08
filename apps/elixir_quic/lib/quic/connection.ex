@@ -12,7 +12,7 @@ defmodule Quic.Connection do
   See `docs/consumer-contract.md` for readiness, admission outcomes and limits.
   """
   @behaviour :gen_statem
-  alias Quic.{HandshakeScheduler, Recovery, TLSDriver, TransportParameters, Paths, LocalCIDs}
+  alias Quic.{HandshakeScheduler, LocalCIDs, Paths, Recovery, TLSDriver, TransportParameters}
   alias Quic.IO.Endpoint
   alias Quic.Runtime.{ConnectionHandle, StreamHandle}
 
@@ -112,6 +112,9 @@ defmodule Quic.Connection do
   def send_public_datagram(pid, generation, data, opts \\ []),
     do: operation_call(pid, generation, {:send_datagram, data}, opts)
 
+  def migrate(pid, generation, opts),
+    do: operation_call(pid, generation, {:migrate, Keyword.get(opts, :local)}, opts)
+
   def ping(pid, generation, opts \\ []),
     do: operation_call(pid, generation, {:ping}, opts)
 
@@ -120,6 +123,9 @@ defmodule Quic.Connection do
 
   def reset_public_stream(pid, generation, id, code, opts \\ []),
     do: operation_call(pid, generation, {:reset, id, code}, opts)
+
+  def reset_public_stream_at(pid, generation, id, code, reliable, opts),
+    do: operation_call(pid, generation, {:reset_at, id, code, reliable}, opts)
 
   def stop_public_stream(pid, generation, id, code, opts \\ []),
     do: operation_call(pid, generation, {:stop, id, code}, opts)
@@ -171,6 +177,14 @@ defmodule Quic.Connection do
   end
 
   defp operation_call(pid, generation, request, opts) do
+    request =
+      if Keyword.has_key?(opts, :stream_epoch),
+        do: {:stream_epoch, opts[:stream_epoch], request},
+        else: request
+
+    request =
+      if Keyword.get(opts, :early_data) == :replayable, do: {:early, request}, else: request
+
     ref = Keyword.get(opts, :ref, make_ref())
     timeout = Keyword.get(opts, :timeout, 5_000)
     bound = Keyword.get(opts, :deadline, timeout)
@@ -187,6 +201,11 @@ defmodule Quic.Connection do
   end
 
   defp durable_call(pid, request, generation, opts) do
+    request =
+      if Keyword.has_key?(opts, :stream_epoch),
+        do: {:stream_epoch, opts[:stream_epoch], request},
+        else: request
+
     ref = Keyword.get(opts, :ref, make_ref())
     timeout = Keyword.get(opts, :timeout, 5_000)
     bound = Keyword.get(opts, :deadline, timeout)
@@ -260,6 +279,9 @@ defmodule Quic.Connection do
             address_validated: Keyword.get(opts, :address_validated, false),
             adapter: adapter,
             writer: writer,
+            path_writers: %{default: writer},
+            local_migration: nil,
+            exclusive_io: Keyword.get(opts, :exclusive_io, false),
             owner: owner,
             writer_monitor: Process.monitor(writer),
             owner_monitor: Process.monitor(owner),
@@ -273,6 +295,7 @@ defmodule Quic.Connection do
               ),
             scheduler_opts: Keyword.fetch!(opts, :scheduler),
             scheduler: nil,
+            pending_tls: nil,
             budget: budget,
             pending: [],
             ready: false,
@@ -353,6 +376,16 @@ defmodule Quic.Connection do
     status = %{
       phase: phase,
       cipher_suite: TLSDriver.info(data.scheduler.tls)[:cipher_suite],
+      reliable_reset: %{
+        draft: 11,
+        local: data.scheduler.local_reset_stream_at,
+        peer: data.scheduler.peer_reset_stream_at,
+        negotiated: data.scheduler.local_reset_stream_at and data.scheduler.peer_reset_stream_at
+      },
+      resumption: %{
+        resumed: TLSDriver.info(data.scheduler.tls)[:resumed] == true,
+        early_data: data.scheduler.early_status
+      },
       alpn: TLSDriver.info(data.scheduler.tls)[:alpn],
       tls_complete: data.scheduler.tls.facts.tls_complete,
       parameters_valid: data.parameters_valid,
@@ -458,7 +491,7 @@ defmodule Quic.Connection do
            {:reply, from,
             case Map.get(data.operations, ref) do
               nil -> :unknown
-              entry -> Map.take(entry, [:status, :result])
+              entry -> Map.take(entry, [:status, :result, :outcome])
             end}
          ]}
 
@@ -469,8 +502,12 @@ defmodule Quic.Connection do
         data
       ) do
     signature = :crypto.hash(:sha256, :erlang.term_to_binary({:pull, request}))
+    {request, valid_epoch} = unwrap_stream_epoch(request, data.scheduler.early_epoch)
 
     cond do
+      not valid_epoch ->
+        reply(from, {:error, :stale_stream_epoch})
+
       generation != data.generation ->
         reply(from, {:error, :stale_handle})
 
@@ -500,43 +537,27 @@ defmodule Quic.Connection do
         {:keep_state, record_operation(data, ref, signature, :rejected, result),
          [{:reply, from, result}]}
 
-      match?({:events, _}, request) ->
-        {:events, max} = request
-
-        if is_integer(max) and max in 1..128 do
-          {out, rest} = Enum.split(data.events, max)
-          result = {:ok, out}
-          next = record_operation(%{data | events: rest}, ref, signature, :completed, result)
-          {:keep_state, next, [{:reply, from, result}]}
-        else
-          result = {:error, :invalid_operation}
-
-          {:keep_state, record_operation(data, ref, signature, :rejected, result),
-           [{:reply, from, result}]}
-        end
-
-      match?({:read_datagrams, _}, request) and phase == :established ->
-        read_public_datagrams(data, from, ref, signature, request)
-
-      match?({:read, _, _}, request) and phase == :established ->
-        read_public_stream(data, from, ref, signature, request)
-
       true ->
-        result = {:error, :invalid_operation}
-
-        {:keep_state, record_operation(data, ref, signature, :rejected, result),
-         [{:reply, from, result}]}
+        execute_public_pull(data, from, ref, signature, request, phase)
     end
   end
 
   def handle_event({:call, from}, {:operation, generation, ref, deadline, request}, phase, data) do
     signature = :crypto.hash(:sha256, :erlang.term_to_binary(request))
 
+    {early, request} =
+      case request do
+        {:early, request} -> {true, request}
+        request -> {false, request}
+      end
+
+    {request, valid_epoch} = unwrap_stream_epoch(request, data.scheduler.early_epoch)
+
     cond do
       generation != data.generation ->
         reply(from, {:error, :stale_handle})
 
-      not is_reference(ref) or not is_integer(deadline) ->
+      not valid_operation_identity?(ref, deadline) ->
         reply(from, {:error, :invalid_operation})
 
       Map.has_key?(data.operations, ref) ->
@@ -556,17 +577,29 @@ defmodule Quic.Connection do
         {:keep_state, record_operation(data, ref, signature, :rejected, result),
          [{:reply, from, result}]}
 
-      phase in [:closing, :draining] and elem(request, 0) == :close ->
+      closing_request?(phase, request) ->
         result = :ok
 
         {:keep_state, record_operation(data, ref, signature, :admitted, result),
          [{:reply, from, result}]}
+
+      not valid_epoch ->
+        result = {:error, :stale_stream_epoch}
+
+        {:keep_state, record_operation(data, ref, signature, :rejected, result),
+         [{:reply, from, result}]}
+
+      early_admissible?(data, phase, early, request) ->
+        execute_early_operation(data, from, ref, signature, request)
 
       phase != :established and elem(request, 0) != :close ->
         result = {:error, :not_established}
 
         {:keep_state, record_operation(data, ref, signature, :rejected, result),
          [{:reply, from, result}]}
+
+      match?({:migrate, _}, request) ->
+        start_local_migration(data, from, ref, signature, request, deadline)
 
       true ->
         execute_operation(data, from, ref, signature, request)
@@ -741,6 +774,17 @@ defmodule Quic.Connection do
     end
   end
 
+  def handle_event({:timeout, :early_keys}, generation, phase, %{generation: generation} = data)
+      when phase in [:handshaking, :established] do
+    deadline = data.scheduler.early_key_deadline
+
+    if is_integer(deadline) and data.adapter.monotonic_time() >= deadline do
+      {:keep_state, %{data | scheduler: HandshakeScheduler.retire_early_keys(data.scheduler)}}
+    else
+      {:keep_state, data, early_keys_timer(data)}
+    end
+  end
+
   def handle_event({:timeout, :recovery}, {generation, token}, phase, data)
       when phase in [:handshaking, :established] do
     recovery = data.scheduler.recovery
@@ -777,7 +821,14 @@ defmodule Quic.Connection do
 
       case Paths.on_time(data.paths, now, available) do
         {:ok, paths, _retiring} ->
-          data = select_path(%{data | paths: paths}) |> reclaim_path()
+          data = select_path(%{data | paths: paths})
+
+          data =
+            if data.local_migration && data.local_migration.phase in [:binding, :validating],
+              do: migration_outcome(data, {:error, :validation_timeout}),
+              else: data
+
+          data = reclaim_path(data)
           {data, effects} = path_probes(data, now, [])
           advance(data, effects, [])
 
@@ -787,6 +838,103 @@ defmodule Quic.Connection do
     else
       :keep_state_and_data
     end
+  end
+
+  def handle_event(
+        :info,
+        {:quic_path_bound, generation, ref, id, result},
+        :established,
+        %{generation: generation, local_migration: %{ref: ref, id: id, phase: :binding}} = data
+      ) do
+    case result do
+      {:ok, writer, local} ->
+        paths = data.paths
+        paths = put_in(paths.paths[id].local, local)
+        paths = put_in(paths.paths[id].retry_at, data.adapter.monotonic_time())
+        migration = %{data.local_migration | phase: :validating}
+
+        next = %{
+          data
+          | paths: paths,
+            path_writers: Map.put(data.path_writers, id, writer),
+            local_migration: migration
+        }
+
+        if data.adapter.monotonic_time() >= paths.paths[id].deadline do
+          fail_local_migration(next, :validation_timeout)
+        else
+          {next, effects} = path_probes(next, data.adapter.monotonic_time(), [])
+          advance(next, effects, [])
+        end
+
+      {:error, reason} ->
+        fail_local_migration(data, reason)
+    end
+  end
+
+  def handle_event(
+        :info,
+        {:quic_path_bound, generation, _ref, id, _result},
+        _phase,
+        %{generation: generation} = data
+      ) do
+    send(data.owner, {:quic_retire_local_path, self(), generation, id})
+    :keep_state_and_data
+  end
+
+  def handle_event(
+        :info,
+        {:quic_path_retired, generation, id},
+        :established,
+        %{generation: generation, local_migration: %{phase: :retiring}} = data
+      ) do
+    if data.paths.retiring == id do
+      {:ok, paths} = Paths.drop(data.paths, id)
+
+      next = %{
+        data
+        | paths: paths,
+          path_writers: Map.delete(data.path_writers, id),
+          local_migration: nil
+      }
+
+      advance(next, [], [])
+    else
+      :keep_state_and_data
+    end
+  end
+
+  def handle_event(
+        :info,
+        {:quic_local_path_failed, generation, id},
+        :established,
+        %{generation: generation, local_migration: %{id: id, phase: phase}} = data
+      )
+      when phase in [:binding, :validating] do
+    fail_local_migration(data, :candidate_socket_closed)
+  end
+
+  def handle_event(
+        :info,
+        {:quic_tls_result, generation, id, result},
+        phase,
+        %{generation: generation, pending_tls: %{id: id, deadline: deadline}} = data
+      )
+      when phase in [:handshaking, :established] do
+    reply = if System.monotonic_time(:millisecond) < deadline, do: result, else: :miss
+    if reply == :miss, do: send(data.owner, {:quic_early_release, self(), data.generation})
+    continue_tls_request(%{data | pending_tls: nil}, id, reply)
+  end
+
+  def handle_event(
+        {:timeout, :tls_authority},
+        {generation, id},
+        phase,
+        %{generation: generation, pending_tls: %{id: id}} = data
+      )
+      when phase in [:handshaking, :established] do
+    send(data.owner, {:quic_early_release, self(), data.generation})
+    continue_tls_request(%{data | pending_tls: nil}, id, :miss)
   end
 
   def handle_event(:info, {:quic_cid_registered, generation, identity}, phase, data)
@@ -862,9 +1010,54 @@ defmodule Quic.Connection do
 
   def handle_event(_, _, _, _), do: :keep_state_and_data
 
+  defp execute_public_pull(data, from, ref, signature, {:events, max}, _phase)
+       when is_integer(max) and max in 1..128 do
+    {out, rest} = Enum.split(data.events, max)
+    result = {:ok, out}
+    next = record_operation(%{data | events: rest}, ref, signature, :completed, result)
+    {:keep_state, next, [{:reply, from, result}]}
+  end
+
+  defp execute_public_pull(
+         data,
+         from,
+         ref,
+         signature,
+         {:read_datagrams, _} = request,
+         :established
+       ),
+       do: read_public_datagrams(data, from, ref, signature, request)
+
+  defp execute_public_pull(data, from, ref, signature, {:read, _, _} = request, :established),
+    do: read_public_stream(data, from, ref, signature, request)
+
+  defp execute_public_pull(data, from, ref, signature, _request, _phase) do
+    result = {:error, :invalid_operation}
+
+    {:keep_state, record_operation(data, ref, signature, :rejected, result),
+     [{:reply, from, result}]}
+  end
+
+  defp closing_request?(phase, request),
+    do: phase in [:closing, :draining] and elem(request, 0) == :close
+
+  defp early_admissible?(data, phase, early, request) do
+    phase == :handshaking and early and early_request?(request) and
+      HandshakeScheduler.early_writable?(data.scheduler) and
+      Enum.count(data.operations, fn {_, entry} -> Map.get(entry, :early, false) end) <
+        data.operation_limit - 1
+  end
+
   defp receive_arrival(data, bytes, at, from, %{local: local, remote: remote}) do
-    case Paths.lookup(data.paths, remote) do
-      {:ok, id} when local == data.local ->
+    case Paths.lookup_local(data.paths, local, remote) do
+      {:ok, id}
+      when data.local_migration != nil and data.local_migration.phase == :retiring and
+             data.paths.retiring == id ->
+        # Keep path identity until native IO retirement is acknowledged, but never
+        # decrypt or account ingress after its controller and ledger are released.
+        reply(from, :ok)
+
+      {:ok, id} ->
         receive_packet(data, bytes, at, from, remote, id)
 
       :error
@@ -901,26 +1094,38 @@ defmodule Quic.Connection do
         # RFC9001 section5.5: unauthenticated packets do not affect the connection.
         reply(from, :ok)
 
+      {:error, {:wrong_encryption_level, type, _} = reason, scheduler} ->
+        frame_type =
+          Map.get(
+            %{
+              ack: 0x02,
+              crypto: 0x06,
+              new_token: 0x07,
+              path_response: 0x1B,
+              handshake_done: 0x1E
+            },
+            type,
+            0
+          )
+
+        close_transport_error(%{data | scheduler: scheduler}, from, reason, 0x0A, frame_type)
+
       {:error, {:key_update_error, _} = reason, scheduler} ->
         close_transport_error(%{data | scheduler: scheduler}, from, reason, 0x0E, 0)
 
       {:error, %SSL.QUIC.Error{kind: :tls} = error, scheduler} ->
-        reason = {:tls, error.kind, error.alert, error.reason}
-        code = 0x100 + Map.get(@tls_alert_codes, error.alert, 80)
-
-        # Fatal TLS failures retain their terminal lifecycle. Emit the alert before
-        # stopping; the endpoint retires the connection's routes on quic_closed.
-        next =
-          case begin_closing(%{data | scheduler: scheduler}, {:transport, code, 0x06}) do
-            {:ok, next, _actions} -> next
-            {:error, _close_reason, next} -> next
-          end
-
+        {next, reason} = tls_failure_state(%{data | scheduler: scheduler}, error)
         stop_with_replies(next, reason, [{:reply, from, {:error, reason}}])
 
       {:error, %SSL.QUIC.Error{} = error, _scheduler} ->
         reason = {:tls, error.kind, error.alert, error.reason}
         {:stop_and_reply, :normal, [{:reply, from, {:error, reason}}], %{data | reason: reason}}
+
+      {:error, {:transport_parameters, :reduced_early_transport_limits} = reason, scheduler} ->
+        close_transport_error(%{data | scheduler: scheduler}, from, reason, 0x08, 0x06)
+
+      {:error, {:transport_error, code, frame_type, reason}, scheduler} ->
+        close_transport_error(%{data | scheduler: scheduler}, from, reason, code, frame_type)
 
       {:error, {:protocol_violation, 0x0A, frame_type} = reason, scheduler} ->
         close_transport_error(%{data | scheduler: scheduler}, from, reason, 0x0A, frame_type)
@@ -928,6 +1133,20 @@ defmodule Quic.Connection do
       {:error, reason, _scheduler} ->
         stop_with_replies(data, reason, [{:reply, from, {:error, reason}}])
     end
+  end
+
+  defp tls_failure_state(data, error) do
+    reason = {:tls, error.kind, error.alert, error.reason}
+    code = 0x100 + Map.get(@tls_alert_codes, error.alert, 80)
+
+    # Fatal TLS failures emit the alert before terminal route retirement.
+    next =
+      case begin_closing(data, {:transport, code, 0x06}) do
+        {:ok, next, _actions} -> next
+        {:error, _close_reason, next} -> next
+      end
+
+    {next, reason}
   end
 
   defp receive_authenticated(data, events, path_id, at, from, authenticated) do
@@ -985,7 +1204,7 @@ defmodule Quic.Connection do
 
       case bind_arrival(data, scheduler, facts, path_id, known) do
         {:ok, scheduler} ->
-          paths = observe_paths(data, scheduler, facts, remote, at, pto)
+          paths = arrival_paths(data, scheduler, facts, path_id, remote, at, pto)
 
           {:ok, budget} = Endpoint.receive_bytes(budget, bytes, path_id)
 
@@ -1017,6 +1236,15 @@ defmodule Quic.Connection do
     end
   end
 
+  defp arrival_paths(%{role: :client} = data, _scheduler, facts, path_id, _remote, _at, _pto) do
+    Enum.reduce(facts, data.paths, fn packet, paths ->
+      Paths.note_cid(paths, path_id, packet.dcid, packet.number)
+    end)
+  end
+
+  defp arrival_paths(data, scheduler, facts, _path_id, remote, at, pto),
+    do: observe_paths(data, scheduler, facts, remote, at, pto)
+
   defp observe_paths(data, scheduler, facts, remote, at, pto) do
     Enum.reduce(facts, data.paths, fn packet, paths ->
       {paths, id} =
@@ -1047,26 +1275,76 @@ defmodule Quic.Connection do
     {:ok, recovery} = Recovery.select_path(data.scheduler.recovery, id)
     {:ok, budget} = Endpoint.select_path(data.budget, id)
 
-    %{
+    next = %{
       data
       | scheduler: %{data.scheduler | recovery: recovery},
         budget: budget,
         remote: data.paths.paths[id].remote
     }
+
+    writer = data.path_writers[id]
+
+    if data.role == :client and is_pid(writer) and writer != data.writer do
+      Process.demonitor(data.writer_monitor, [:flush])
+      send(data.owner, {:quic_select_local_path, self(), data.generation, id})
+
+      %{
+        next
+        | writer: writer,
+          writer_monitor: Process.monitor(writer),
+          local: data.paths.paths[id].local
+      }
+    else
+      next
+    end
+  end
+
+  defp receive_path_response(data, value, at, effects) do
+    case Paths.response(data.paths, value, at) do
+      {:ok, paths, id} ->
+        {:ok, budget} = Endpoint.validate_address(data.budget, id)
+        next = %{data | paths: paths, budget: budget}
+
+        case data.local_migration do
+          %{id: ^id, phase: :validating} ->
+            case Paths.commit_local(paths, id) do
+              {:ok, paths} ->
+                next = select_path(%{next | paths: paths})
+
+                {:ok, scheduler, sends} =
+                  HandshakeScheduler.send_path_frames(
+                    next.scheduler,
+                    id,
+                    [%{type: :ping}],
+                    0
+                  )
+
+                next =
+                  migration_outcome(
+                    %{next | scheduler: scheduler},
+                    {:ok, paths.paths[id].local}
+                  )
+
+                {next, effects ++ sends}
+
+              {:error, :unvalidated_path} ->
+                {next, effects}
+            end
+
+          _ ->
+            {next, effects}
+        end
+
+      :ignore ->
+        {data, effects}
+    end
   end
 
   defp path_events(data, events, arrival, at, effects) do
     {data, effects} =
       Enum.reduce(events, {data, effects}, fn
         %{type: :path_response, data: value}, {data, effects} ->
-          case Paths.response(data.paths, value, at) do
-            {:ok, paths, id} ->
-              {:ok, budget} = Endpoint.validate_address(data.budget, id)
-              {%{data | paths: paths, budget: budget}, effects}
-
-            :ignore ->
-              {data, effects}
-          end
+          receive_path_response(data, value, at, effects)
 
         %{type: :path_challenge, data: value}, {data, effects} ->
           padding = path_padding(data, arrival, effects)
@@ -1143,16 +1421,30 @@ defmodule Quic.Connection do
 
   defp reclaim_path(%{paths: %{retiring: nil}} = data), do: data
 
+  defp reclaim_path(%{local_migration: %{phase: :retiring}} = data), do: data
+
   defp reclaim_path(data) do
     id = data.paths.retiring
     pending = Enum.any?(data.pending, &(Map.get(&1, :path_id, :default) == id))
 
     with false <- pending,
          {:ok, recovery} <- Recovery.drop_path(data.scheduler.recovery, id),
-         {:ok, budget} <- Endpoint.drop_path(data.budget, id),
-         {:ok, paths} <- Paths.drop(data.paths, id) do
+         {:ok, budget} <- Endpoint.drop_path(data.budget, id) do
       scheduler = HandshakeScheduler.drop_path_binding(%{data.scheduler | recovery: recovery}, id)
-      %{data | scheduler: scheduler, paths: paths, budget: budget}
+
+      if data.local_migration do
+        send(data.owner, {:quic_retire_local_path, self(), data.generation, id})
+
+        %{
+          data
+          | scheduler: scheduler,
+            budget: budget,
+            local_migration: %{data.local_migration | phase: :retiring}
+        }
+      else
+        {:ok, paths} = Paths.drop(data.paths, id)
+        %{data | scheduler: scheduler, paths: paths, budget: budget}
+      end
     else
       _ -> data
     end
@@ -1215,8 +1507,7 @@ defmodule Quic.Connection do
           refresh_idle(%{
             data
             | scheduler: scheduler,
-              effective_idle_timeout: timeout,
-              ready: true
+              effective_idle_timeout: timeout
           })
 
         finish_readiness(data)
@@ -1230,23 +1521,35 @@ defmodule Quic.Connection do
   end
 
   defp finish_readiness(data) do
-    if data.role == :server do
-      case HandshakeScheduler.handshake_done(HandshakeScheduler.confirm_handshake(data.scheduler)) do
-        {:ok, scheduler, effects} ->
-          {:ok, %{data | scheduler: scheduler, ready: true, parameters_valid: true}, effects}
+    {scheduler, early_events} = HandshakeScheduler.take_early_events(data.scheduler)
 
-        {:error, reason, _} ->
-          {:error, reason}
+    case complete_handshake(scheduler, data.role) do
+      {:ok, scheduler, effects} ->
+        send(data.owner, {:quic_early_release, self(), data.generation})
 
-        {:error, reason} ->
-          {:error, reason}
-      end
-    else
-      {:ok, %{data | ready: true, parameters_valid: true}, []}
+        next =
+          %{data | scheduler: scheduler, ready: true, parameters_valid: true}
+          |> notify_ready()
+          |> collect_stream_events(early_events)
+
+        {:ok, next, effects}
+
+      {:error, reason, _} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
+  defp complete_handshake(scheduler, :server),
+    do: HandshakeScheduler.handshake_done(HandshakeScheduler.confirm_handshake(scheduler))
+
+  defp complete_handshake(scheduler, :client), do: {:ok, scheduler, []}
+
   defp advance(data, effects, replies) do
+    data = data |> dispatch_tls_actions() |> settle_early_operations()
+
     pending =
       Enum.reject(data.pending ++ effects, &HandshakeScheduler.retired?(data.scheduler, &1.level))
 
@@ -1285,7 +1588,16 @@ defmodule Quic.Connection do
     else
       result =
         Enum.reduce_while(cancel, {:ok, data.scheduler}, fn effect, {:ok, scheduler} ->
-          case HandshakeScheduler.cancel_unsent(scheduler, effect.space, effect.packet_number) do
+          result =
+            if match?(
+                 %{status: :discarded},
+                 scheduler.recovery.spaces[effect.space].sent[effect.packet_number]
+               ),
+               do: {:ok, scheduler},
+               else:
+                 HandshakeScheduler.cancel_unsent(scheduler, effect.space, effect.packet_number)
+
+          case result do
             {:ok, scheduler} -> {:cont, {:ok, scheduler}}
             {:error, reason} -> {:halt, {:error, reason}}
           end
@@ -1322,11 +1634,16 @@ defmodule Quic.Connection do
             {:next_state, :established, established_data,
              replies ++
                [{{:timeout, :handshake}, :cancel}] ++
+               early_keys_timer(established_data) ++
                recovery_timer(established_data) ++
-               idle_timer(established_data) ++ path_timer(established_data)}
+               idle_timer(established_data) ++
+               path_timer(established_data) ++ tls_authority_timer(established_data)}
 
           {:ok, data} ->
-            {:keep_state, data, replies ++ recovery_timer(data) ++ idle_timer(data)}
+            {:keep_state, data,
+             replies ++
+               early_keys_timer(data) ++
+               recovery_timer(data) ++ idle_timer(data) ++ tls_authority_timer(data)}
 
           {:error, reason, data} ->
             stop_with_replies(data, reason, replies)
@@ -1353,7 +1670,10 @@ defmodule Quic.Connection do
           data = observe(%{data | budget: budget})
           packet = data.scheduler.recovery.spaces[effect.space].sent[effect.packet_number]
           ack_eliciting = packet.metadata.ack_eliciting
-          {result, at} = local_send(data, effect.bytes, remote)
+
+          {result, at} =
+            local_send(data, effect.bytes, remote, Map.get(effect, :path_id, :default))
+
           {:ok, budget, _receipt} = Endpoint.local_send(budget, send, result, at)
 
           case HandshakeScheduler.local_send(
@@ -1398,6 +1718,59 @@ defmodule Quic.Connection do
           {:halt, {:ok, budget, send, effect, List.delete_at(data.pending, index), remote}}
       end
     end)
+  end
+
+  defp dispatch_tls_actions(data) do
+    {scheduler, actions} = HandshakeScheduler.take_tls_actions(data.scheduler)
+
+    Enum.reduce(actions, %{data | scheduler: scheduler}, fn
+      {:session_ticket, session}, data ->
+        send(data.owner, {:quic_session_ticket, self(), data.generation, session})
+        data
+
+      {_kind, request}, data ->
+        now = System.monotonic_time(:millisecond)
+        deadline = if data.ready, do: now + 100, else: min(now + 100, div(data.deadline, 1000))
+        send(data.owner, {:quic_tls_request, self(), data.generation, request, deadline})
+        %{data | pending_tls: %{id: request.id, deadline: deadline}}
+    end)
+  end
+
+  defp continue_tls_request(data, id, result) do
+    case HandshakeScheduler.continue_tls(data.scheduler, id, result) do
+      {:ok, scheduler, effects} ->
+        case readiness(%{data | scheduler: scheduler}) do
+          {:ok, data, extra} -> advance(data, effects ++ extra, [])
+          {:error, reason} -> stop(%{data | scheduler: scheduler}, reason)
+        end
+
+      {:error, %SSL.QUIC.Error{kind: :tls} = error, scheduler} ->
+        {next, reason} = tls_failure_state(%{data | scheduler: scheduler}, error)
+        stop(next, reason)
+
+      {:error, reason, scheduler} ->
+        stop(%{data | scheduler: scheduler}, {:tls_continuation, reason})
+    end
+  end
+
+  defp tls_authority_timer(data)
+       when not is_map_key(data, :pending_tls) or data.pending_tls == nil,
+       do: [{{:timeout, :tls_authority}, :cancel}]
+
+  defp tls_authority_timer(data) do
+    delay = max(0, data.pending_tls.deadline - System.monotonic_time(:millisecond))
+    [{{:timeout, :tls_authority}, delay, {data.generation, data.pending_tls.id}}]
+  end
+
+  defp early_keys_timer(data) do
+    case data.scheduler.early_key_deadline do
+      nil ->
+        [{{:timeout, :early_keys}, :cancel}]
+
+      deadline ->
+        delay = max(0, div(deadline - data.adapter.monotonic_time() + 999, 1000))
+        [{{:timeout, :early_keys}, delay, data.generation}]
+    end
   end
 
   defp recovery_timer(data) do
@@ -1488,7 +1861,8 @@ defmodule Quic.Connection do
       {{:timeout, :handshake}, :cancel},
       {{:timeout, :recovery}, :cancel},
       {{:timeout, :idle}, :cancel},
-      {{:timeout, :path}, :cancel}
+      {{:timeout, :path}, :cancel},
+      {{:timeout, :tls_authority}, :cancel}
     ]
   end
 
@@ -1609,8 +1983,13 @@ defmodule Quic.Connection do
     end
   end
 
-  defp local_send(data, bytes, remote) do
-    case data.adapter.send(data.writer, bytes, remote) do
+  defp local_send(data, bytes, remote, path_id) do
+    writer =
+      if data.scheduler.role == :client,
+        do: Map.get(Map.get(data, :path_writers, %{}), path_id, data.writer),
+        else: data.writer
+
+    case data.adapter.send(writer, bytes, remote) do
       {:ok, at} when is_integer(at) -> {:ok, at}
       {:error, reason} -> {{:error, reason}, data.adapter.monotonic_time()}
     end
@@ -1632,6 +2011,16 @@ defmodule Quic.Connection do
           Map.new(data.paths.paths, fn {id, path} ->
             {id, Map.take(path, [:local, :remote, :validated, :mtu_validated])}
           end)
+      },
+      reliable_reset: %{
+        draft: 11,
+        local: data.scheduler.local_reset_stream_at,
+        peer: data.scheduler.peer_reset_stream_at,
+        negotiated: data.scheduler.local_reset_stream_at and data.scheduler.peer_reset_stream_at
+      },
+      resumption: %{
+        resumed: TLSDriver.info(data.scheduler.tls)[:resumed] == true,
+        early_data: data.scheduler.early_status
       },
       alpn: TLSDriver.info(data.scheduler.tls)[:alpn],
       tls_complete: data.scheduler.tls.facts.tls_complete,
@@ -1676,6 +2065,10 @@ defmodule Quic.Connection do
       io_queue_bytes: data.budget.queue_bytes,
       in_flight_sends: map_size(data.budget.in_flight),
       application_crypto_bytes: data.scheduler.tls.levels.application.recv.next,
+      early_staged_bytes: data.scheduler.early_staged_bytes,
+      early_staged_datagrams: length(data.scheduler.early_staged),
+      early_datagram_bytes: data.scheduler.early_datagram_bytes,
+      early_datagram_items: length(data.scheduler.early_datagrams),
       operation_result_bytes: data.operation_result_bytes,
       queued_bytes: data.scheduler.queued_bytes,
       datagram_ready_bytes: data.datagram_bytes,
@@ -1729,11 +2122,22 @@ defmodule Quic.Connection do
   end
 
   defp collect_stream_events(%{public: false} = data, events) do
+    {data, events} =
+      Enum.map_reduce(events, data, fn
+        %{type: :stream, frame: %{stream_id: id}, events: :retained} = event, data ->
+          {:ok, scheduler, items} = HandshakeScheduler.consume_stream(data.scheduler, id, 65_536)
+          {%{event | events: items}, %{data | scheduler: scheduler}}
+
+        event, data ->
+          {event, data}
+      end)
+      |> then(fn {events, data} -> {data, events} end)
+
     Enum.each(events, fn
       %{type: :stream, frame: frame, events: items} ->
         send(data.owner, {:quic_stream, self(), frame.stream_id, items})
 
-      %{type: :reset_stream, frame: frame, events: items} ->
+      %{type: type, frame: frame, events: items} when type in [:reset_stream, :reset_stream_at] ->
         send(data.owner, {:quic_stream_reset, self(), frame.stream_id, items})
 
       _ ->
@@ -1756,9 +2160,14 @@ defmodule Quic.Connection do
           %{data | datagram_drops: data.datagram_drops + 1}
         end
 
-      %{type: type, frame: frame}, data when type in [:stream, :reset_stream] ->
+      %{type: type, frame: frame}, data when type in [:stream, :reset_stream, :reset_stream_at] ->
         id = frame.stream_id
-        handle = %StreamHandle{connection: public_handle(data), id: id}
+
+        handle = %StreamHandle{
+          connection: public_handle(data),
+          id: id,
+          epoch: data.scheduler.early_epoch
+        }
 
         data =
           if MapSet.member?(data.seen_streams, id),
@@ -1776,7 +2185,12 @@ defmodule Quic.Connection do
       %{type: :stop_sending, stream_id: id, error_code: code}, data ->
         queue_event(
           data,
-          {:stopped, %StreamHandle{connection: public_handle(data), id: id}, code}
+          {:stopped,
+           %StreamHandle{
+             connection: public_handle(data),
+             id: id,
+             epoch: data.scheduler.early_epoch
+           }, code}
         )
 
       %{type: type}, data
@@ -1832,7 +2246,16 @@ defmodule Quic.Connection do
 
     {operations, total_bytes} =
       if map_size(operations) > data.operation_limit do
-        {oldest, removed} = Enum.min_by(operations, fn {_, entry} -> entry.sequence end)
+        pinned = if data.local_migration, do: data.local_migration.ref
+
+        {oldest, removed} =
+          operations
+          |> Enum.reject(fn {key, entry} ->
+            key == pinned or
+              (Map.get(entry, :early, false) and Map.get(entry, :outcome) == :pending)
+          end)
+          |> Enum.min_by(fn {_, entry} -> entry.sequence end)
+
         {Map.delete(operations, oldest), total_bytes - removed.result_bytes}
       else
         {operations, total_bytes}
@@ -1846,10 +2269,121 @@ defmodule Quic.Connection do
     })
   end
 
+  defp start_local_migration(data, from, ref, signature, {:migrate, local}, deadline) do
+    reason =
+      cond do
+        data.role != :client -> :client_only
+        not data.exclusive_io -> :endpoint_not_exclusive
+        not data.scheduler.tls.facts.quic_confirmed -> :handshake_not_confirmed
+        data.scheduler.peer_disable_active_migration -> :peer_disabled_migration
+        data.local_migration != nil or map_size(data.paths.paths) >= 2 -> :migration_busy
+        not valid_migration_local?(local) -> :invalid_local_address
+        local == data.local -> :unchanged_local_address
+        true -> nil
+      end
+
+    if reason do
+      result = {:error, reason}
+
+      {:keep_state, record_operation(data, ref, signature, :rejected, result),
+       [{:reply, from, result}]}
+    else
+      id = data.paths.next_id
+
+      with {:ok, scheduler} <-
+             HandshakeScheduler.bind_path(data.scheduler, id, data.paths.active, false),
+           {:ok, recovery} <- Recovery.add_path(scheduler.recovery, id),
+           {:ok, budget} <- Endpoint.add_path(data.budget, id, true) do
+        pto = max(Recovery.pto_duration(recovery), Recovery.pto_duration(recovery, id))
+
+        {:ok, paths, ^id} =
+          Paths.start_local(
+            data.paths,
+            local,
+            data.adapter.monotonic_time(),
+            pto,
+            deadline * 1000
+          )
+
+        paths = put_in(paths.paths[id].retry_at, nil)
+        migration = %{ref: ref, id: id, deadline: deadline, phase: :binding}
+
+        next =
+          record_operation(
+            %{
+              data
+              | scheduler: %{scheduler | recovery: recovery},
+                budget: budget,
+                paths: paths,
+                local_migration: migration
+            },
+            ref,
+            signature,
+            :admitted,
+            {:ok, ref}
+          )
+
+        send(data.owner, {:quic_bind_path, self(), data.generation, ref, id, local, deadline})
+        {:keep_state, next, [{:reply, from, {:ok, ref}} | path_timer(next)]}
+      else
+        {:error, reason} ->
+          result = {:error, reason}
+
+          {:keep_state, record_operation(data, ref, signature, :rejected, result),
+           [{:reply, from, result}]}
+      end
+    end
+  end
+
+  defp valid_migration_local?({ip, port})
+       when is_tuple(ip) and tuple_size(ip) in [4, 8] and
+              is_integer(port) and port in 0..65_535 do
+    max = if tuple_size(ip) == 4, do: 255, else: 65_535
+    parts = Tuple.to_list(ip)
+    Enum.all?(parts, &(is_integer(&1) and &1 in 0..max)) and Enum.any?(parts, &(&1 != 0))
+  end
+
+  defp valid_migration_local?(_), do: false
+
+  defp migration_outcome(data, outcome) do
+    ref = data.local_migration.ref
+    entry = data.operations[ref]
+    # Preserve the original admission result for same-ref retries.
+    operations =
+      if entry,
+        do:
+          Map.put(data.operations, ref, Map.merge(entry, %{status: :completed, outcome: outcome})),
+        else: data.operations
+
+    queue_event(
+      %{
+        data
+        | operations: operations,
+          local_migration: %{data.local_migration | phase: :settling}
+      },
+      {:migration, ref, outcome}
+    )
+  end
+
+  defp fail_local_migration(data, reason) do
+    id = data.local_migration.id
+    paths = %{data.paths | retiring: id}
+    paths = update_in(paths.paths[id], &%{&1 | deadline: nil, retry_at: nil, challenges: []})
+    next = migration_outcome(%{data | paths: paths}, {:error, reason})
+    advance(next, [], [])
+  end
+
   defp execute_operation(data, from, ref, signature, {:open, kind}) do
     case HandshakeScheduler.open_stream(data.scheduler, kind) do
       {:ok, scheduler, id} ->
-        result = {:ok, %StreamHandle{connection: public_handle(data), id: id}}
+        result =
+          {:ok,
+           %StreamHandle{
+             connection: public_handle(data),
+             id: id,
+             epoch: data.scheduler.early_epoch
+           }}
+
         next = record_operation(%{data | scheduler: scheduler}, ref, signature, :admitted, result)
         {:keep_state, next, [{:reply, from, result}]}
 
@@ -1897,6 +2431,59 @@ defmodule Quic.Connection do
 
   defp expired?(data), do: not data.ready and data.adapter.monotonic_time() >= data.deadline
   defp reply(from, result), do: {:keep_state_and_data, [{:reply, from, result}]}
+
+  defp unwrap_stream_epoch({:stream_epoch, epoch, request}, current),
+    do: {request, epoch == current}
+
+  defp unwrap_stream_epoch(request, _), do: {request, true}
+  defp early_request?({:open, kind}), do: kind in [:uni, :bidi]
+  defp early_request?({:send, _, _, _}), do: true
+  defp early_request?({:send_datagram, _}), do: true
+  defp early_request?(_), do: false
+
+  defp execute_early_operation(data, from, ref, signature, request) do
+    case execute_operation(data, from, ref, signature, request) do
+      {transition, data, actions} when transition in [:keep_state, :next_state] ->
+        {transition, mark_early_operation(data, ref), actions}
+
+      {:next_state, phase, data, actions} ->
+        {:next_state, phase, mark_early_operation(data, ref), actions}
+
+      other ->
+        other
+    end
+  end
+
+  defp mark_early_operation(data, ref) do
+    case data.operations[ref] do
+      %{status: :admitted} = entry ->
+        %{
+          data
+          | operations:
+              Map.put(data.operations, ref, Map.merge(entry, %{early: true, outcome: :pending}))
+        }
+
+      _ ->
+        data
+    end
+  end
+
+  defp settle_early_operations(data) do
+    status = data.scheduler.early_status
+
+    if status in [:accepted, :rejected] do
+      Enum.reduce(data.operations, data, fn {ref, entry}, data ->
+        if Map.get(entry, :early, false) and Map.get(entry, :outcome) == :pending do
+          operations = Map.put(data.operations, ref, %{entry | outcome: {:early_data, status}})
+          queue_event(%{data | operations: operations}, {:early_data, ref, status})
+        else
+          data
+        end
+      end)
+    else
+      data
+    end
+  end
 
   defp stop(data, reason), do: {:stop, :normal, %{data | reason: reason}}
 
@@ -2053,6 +2640,12 @@ defmodule Quic.Connection do
        when is_integer(id) and id >= 0 and is_integer(code) and code >= 0 and
               code < 4_611_686_018_427_387_904 do
     HandshakeScheduler.reset_stream(scheduler, id, code)
+  end
+
+  defp scheduler_operation(scheduler, {:reset_at, id, code, reliable})
+       when is_integer(id) and id >= 0 and is_integer(code) and code >= 0 and
+              code < 4_611_686_018_427_387_904 and is_integer(reliable) and reliable >= 0 do
+    HandshakeScheduler.reset_stream_at(scheduler, id, code, reliable)
   end
 
   defp scheduler_operation(scheduler, {:stop, id, code})

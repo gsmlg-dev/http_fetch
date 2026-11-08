@@ -62,6 +62,8 @@ defmodule Quic.Streams do
               reset: nil,
               receive_stopped: nil,
               send_reset: nil,
+              send_reliable: nil,
+              recv_reliable: nil,
               stopped: nil
   end
 
@@ -187,6 +189,54 @@ defmodule Quic.Streams do
 
   def install_peer_parameters(%__MODULE__{} = state, _), do: state
 
+  @doc "Raise ordinary receive credit after Finished, retaining all early offsets and accounting."
+  def grant_ordinary(state, opts) do
+    target = new(state.role, Keyword.put(opts, :delivery, state.delivery))
+
+    keys = [
+      :max_data,
+      :max_stream_data,
+      :max_stream_data_bidi_local,
+      :max_stream_data_bidi_remote,
+      :max_stream_data_uni,
+      :max_streams_bidi,
+      :max_streams_uni
+    ]
+
+    next =
+      Enum.reduce(keys, state, fn key, next ->
+        Map.put(next, key, max(Map.fetch!(next, key), Map.fetch!(target, key)))
+      end)
+
+    next = %{
+      next
+      | max_peer_stream_records: next.max_streams_bidi + next.max_streams_uni,
+        max_local_stream_records:
+          next.max_stream_records - next.max_streams_bidi - next.max_streams_uni
+    }
+
+    frames = [
+      %{type: :max_data, value: next.max_data},
+      %{type: :max_streams_bidi, value: next.max_streams_bidi},
+      %{type: :max_streams_uni, value: next.max_streams_uni}
+    ]
+
+    {streams, frames} =
+      Enum.reduce(state.streams, {%{}, frames}, fn {id, stream}, {streams, frames} ->
+        limit =
+          max(stream.recv_limit, local_stream_limit(next, stream.bidi, stream.local_initiated))
+
+        credit =
+          if stream.bidi or not stream.local_initiated,
+            do: [%{type: :max_stream_data, stream_id: id, value: limit} | frames],
+            else: frames
+
+        {Map.put(streams, id, %{stream | recv_limit: limit}), credit}
+      end)
+
+    {%{next | streams: streams}, Enum.reverse(frames)}
+  end
+
   @doc "Open a locally initiated stream and return its stable stream id."
   def open(%__MODULE__{} = state, kind) when kind in [:bidi, :uni] do
     limit = if kind == :bidi, do: state.peer_max_streams_bidi, else: state.peer_max_streams_uni
@@ -258,7 +308,7 @@ defmodule Quic.Streams do
       when is_integer(id) and id >= 0 and is_integer(offset) and offset >= 0 and is_binary(data) and
              is_boolean(fin) do
     with {:ok, state, stream} <- ensure_peer_stream(state, id), :ok <- can_receive?(stream) do
-      if stream.reset != nil do
+      if stream.recv_terminal == :reset do
         case consistent_final(stream, offset + byte_size(data), fin) do
           :ok -> {:ok, state, []}
           {:error, _} = error -> error
@@ -272,6 +322,7 @@ defmodule Quic.Streams do
                | recv_final: if(fin, do: offset + byte_size(data), else: stream.recv_final),
                  recv_highest: max(stream.recv_highest, offset + byte_size(data))
              },
+             {offset, data} <- reliable_chunk(stream, offset, data),
              {:ok, stream} <- insert_chunk(state, stream, offset, data),
              {:ok, stream, events} <- consume_chunks(stream, id) do
           next = %{state | streams: Map.put(state.streams, id, stream)}
@@ -290,6 +341,12 @@ defmodule Quic.Streams do
     case retain_events(next, id, events) do
       {:ok, next, delivered} ->
         next = replenish_credit(next, id, emitted_bytes(delivered))
+
+        next =
+          if next.delivery == :immediate,
+            do:
+              next |> release_reset_credit(id, delivered) |> replenish_stream_slot(id, delivered),
+            else: next
 
         {:ok, %{next | data_delivered: next.data_delivered + emitted_bytes(delivered)}, delivered}
 
@@ -370,9 +427,26 @@ defmodule Quic.Streams do
     else
       {:error, :stopped} ->
         case fetch_stream(state, id) do
-          {:ok, %Stream{send_reset: ^error_code}} -> {:ok, state, nil}
-          {:ok, %Stream{send_reset: _}} -> {:error, :stopped}
-          error -> error
+          {:ok, %Stream{send_reset: ^error_code, send_reliable: reliable} = stream}
+          when is_integer(reliable) and reliable > 0 ->
+            stream = %{stream | send_reliable: 0}
+
+            {:ok, %{state | streams: Map.put(state.streams, id, stream)},
+             %{
+               type: :reset_stream,
+               stream_id: id,
+               error_code: error_code,
+               final_size: stream.send_offset
+             }}
+
+          {:ok, %Stream{send_reset: ^error_code}} ->
+            {:ok, state, nil}
+
+          {:ok, %Stream{send_reset: _}} ->
+            {:error, :stopped}
+
+          error ->
+            error
         end
 
       {:error, _} = error ->
@@ -380,9 +454,116 @@ defmodule Quic.Streams do
     end
   end
 
+  @doc "Reset with a reliable prefix; no data after the admitted send offset is invented."
+  def reset_send_at(%__MODULE__{} = state, id, error_code, reliable)
+      when is_integer(error_code) and error_code >= 0 and is_integer(reliable) and reliable >= 0 do
+    with {:ok, stream} <- fetch_stream(state, id),
+         :ok <- can_send?(%{stream | stopped: nil}) do
+      cond do
+        reliable > stream.send_offset ->
+          {:error, :invalid_reliable_size}
+
+        stream.send_reset != nil and stream.send_reset != error_code ->
+          {:error, :stream_state_error}
+
+        is_integer(stream.send_reliable) and reliable > stream.send_reliable ->
+          {:error, :reliable_size_increase}
+
+        stream.send_reset != nil and stream.send_reliable == nil ->
+          {:error, :stopped}
+
+        true ->
+          stream = %{
+            stream
+            | send_reset: error_code,
+              stopped: error_code,
+              send_reliable: reliable
+          }
+
+          frame = %{
+            type: :reset_stream_at,
+            stream_id: id,
+            error_code: error_code,
+            final_size: stream.send_offset,
+            reliable_size: reliable
+          }
+
+          {:ok, %{state | streams: Map.put(state.streams, id, stream)}, frame}
+      end
+    end
+  end
+
+  def reset_send_at(_, _, _, _), do: {:error, :invalid_reliable_size}
+
+  @doc "Defer reset delivery until the smallest advertised reliable prefix is contiguous."
+  def receive_reset_at(%__MODULE__{} = state, id, code, final, reliable)
+      when is_integer(id) and id >= 0 and is_integer(code) and code >= 0 and
+             is_integer(final) and final >= 0 and is_integer(reliable) and reliable >= 0 do
+    with true <- reliable <= final,
+         {:ok, state, stream} <- ensure_peer_stream(state, id),
+         :ok <- can_receive?(stream),
+         :ok <- reset_final(stream, final),
+         true <- stream.reset == nil or stream.reset == code,
+         {:ok, state, stream} <- account_receive(state, stream, final) do
+      if stream.recv_terminal in [:fin, :reset] do
+        {:ok, state, []}
+      else
+        reliable =
+          if is_integer(stream.recv_reliable),
+            do: min(reliable, stream.recv_reliable),
+            else: reliable
+
+        stream = %{stream | reset: code, recv_reliable: reliable, recv_final: final}
+
+        chunks = retain_reliable_chunks(stream)
+
+        buffered = Enum.reduce(chunks, 0, fn {_, bytes}, acc -> acc + byte_size(bytes) end)
+        stream = %{stream | recv_chunks: chunks, recv_buffered: buffered}
+        {:ok, stream, events} = consume_chunks(stream, id)
+
+        deliver_received_events(
+          %{state | streams: Map.put(state.streams, id, stream)},
+          id,
+          events
+        )
+      end
+    else
+      false when reliable > final -> {:error, :frame_encoding_error}
+      false -> {:error, :stream_state_error}
+      {:error, _} = error -> error
+    end
+  end
+
+  def receive_reset_at(_, _, _, _, _), do: {:error, :frame_encoding_error}
+
+  defp retain_reliable_chunks(stream) do
+    Enum.reduce(stream.recv_chunks, %{}, fn {offset, data}, acc ->
+      {offset, data} = reliable_chunk(stream, offset, data)
+      if data == <<>>, do: acc, else: Map.put(acc, offset, data)
+    end)
+  end
+
+  defp reliable_chunk(%Stream{recv_reliable: reliable}, offset, bytes)
+       when is_integer(reliable) do
+    length = max(0, min(byte_size(bytes), reliable - offset))
+    {offset, binary_part(bytes, 0, length)}
+  end
+
+  defp reliable_chunk(_, offset, bytes), do: {offset, bytes}
+
   @doc "Apply a peer RESET_STREAM, admitting a previously unseen peer stream."
   def receive_reset(%__MODULE__{} = state, id, error_code, final_size)
       when is_integer(id) and id >= 0 do
+    case state.streams[id] do
+      %Stream{recv_reliable: reliable} when is_integer(reliable) ->
+        receive_reset_at(state, id, error_code, final_size, 0)
+
+      _ ->
+        receive_ordinary_reset(state, id, error_code, final_size)
+    end
+  end
+
+  defp receive_ordinary_reset(state, id, error_code, final_size) do
     with {:ok, state, stream} <- ensure_peer_stream(state, id), :ok <- can_receive?(stream) do
       case {stream.recv_terminal, stream.reset} do
         {:fin, _} ->
@@ -705,6 +886,12 @@ defmodule Quic.Streams do
 
   defp consume_chunks(stream, id, events) do
     case Map.pop(stream.recv_chunks, stream.recv_next) do
+      {nil, _}
+      when is_integer(stream.recv_reliable) and stream.recv_next >= stream.recv_reliable and
+             stream.recv_terminal == nil ->
+        {:ok, %{stream | recv_terminal: :reset},
+         Enum.reverse([{:reset, id, stream.reset, stream.recv_final} | events])}
+
       {nil, _} ->
         if is_integer(stream.recv_final) and stream.recv_next == stream.recv_final and
              stream.reset == nil and stream.recv_terminal == nil do
