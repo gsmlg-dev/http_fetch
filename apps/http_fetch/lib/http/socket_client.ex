@@ -1,7 +1,9 @@
 defmodule HTTP.SocketClient do
   @moduledoc false
 
+  alias HTTP.AltSvc.Cache, as: AltSvcCache
   alias HTTP.HTTP1.{IdleTimeout, Upload}
+  alias HTTP.HTTP3.PoolKey, as: HTTP3PoolKey
   alias HTTP.Runtime.Dialer
   alias HTTP.Stream.Writer
   alias HTTP.Transport.ExSSL
@@ -36,10 +38,103 @@ defmodule HTTP.SocketClient do
         request_http3(request, abort_controller_pid, unix_socket_path)
 
       true ->
-        with {:ok, request} <- pin_tls_backend(request) do
-          request_socket(request, abort_controller_pid, unix_socket_path)
+        with {:ok, pinned} <- pin_tls_backend(request) do
+          case alt_svc_route(request, unix_socket_path) do
+            {:ok, route} ->
+              request_http3(http3_request(request), abort_controller_pid, nil, route)
+
+            :none ->
+              request_socket(pinned, abort_controller_pid, unix_socket_path)
+          end
         end
     end
+  end
+
+  # Alt-Svc routing applies only to opt-in `:auto` requests whose TLS backend
+  # was left to the default, and whose QUIC route configures cleanly.
+  defp alt_svc_route(%Request{} = request, unix_socket_path) do
+    with true <- alt_svc_eligible?(request, unix_socket_path),
+         origin when origin != nil <- AltSvcCache.origin(request.url),
+         {:ok, port} <- AltSvcCache.lookup(origin),
+         route = %{origin: origin, port: port},
+         {:ok, _key, _connect} <-
+           HTTP3PoolKey.build(http3_request(request), alt_svc_runtime_opts(route)) do
+      {:ok, route}
+    else
+      _ -> :none
+    end
+  end
+
+  defp alt_svc_eligible?(%Request{transport_options: options}, unix_socket_path) do
+    options[:alt_svc] == true and options[:http_version] == :auto and unix_socket_path == nil and
+      Enum.all?(
+        [
+          :proxy,
+          :unix_socket,
+          :connect_address,
+          :tls_backend,
+          :http2_profile,
+          :transport_scope,
+          :pool
+        ],
+        &(options[&1] == nil)
+      ) and options[:socket_opts] in [nil, []]
+  end
+
+  defp alt_svc_runtime_opts(%{port: port}),
+    do: [http3_connect_port: port, connection_ready_event: true]
+
+  defp http3_request(%Request{} = request),
+    do: %{
+      request
+      | transport_options: Keyword.put(request.transport_options, :http_version, :http3)
+    }
+
+  defp tcp_request(%Request{} = request) do
+    request
+    |> Map.update!(:transport_options, &Keyword.put(&1, :http_version, :auto))
+    |> pin_tls_backend()
+  end
+
+  defp alt_svc_fallback?(%{alt_svc: %{}, connected?: false}, reason),
+    do: reason == :opening_timeout or match?({:http3_not_established, _}, reason)
+
+  defp alt_svc_fallback?(_state, _reason), do: false
+
+  # Re-select per hop: a cached H3 origin stays on H3, otherwise use H2/H1.
+  defp alt_svc_hop(parent, ref, request, redirects, deadline_at) do
+    request = Map.update!(request, :transport_options, &Keyword.put(&1, :http_version, :auto))
+
+    case alt_svc_route(request, nil) do
+      {:ok, route} ->
+        http3_owner(parent, ref, http3_request(request), redirects, true, deadline_at, route)
+
+      :none ->
+        run_tcp(parent, ref, request, redirects, true, deadline_at)
+    end
+  end
+
+  # The H3 task becomes the TCP owner, so it takes the same lifecycle
+  # registration that `request_socket/3` performs before launching an owner.
+  defp run_tcp(parent, ref, request, redirects, redirected?, deadline_at) do
+    tracker = Keyword.get(request.transport_options, :request_lifecycle)
+
+    with {:ok, request} <- tcp_request(request),
+         :ok <- HTTP.RequestLifecycle.register(tracker, self(), :owner, deadline_at) do
+      owner(parent, ref, request, nil, redirects, redirected?, deadline_at)
+    else
+      {:error, reason} -> send_error(parent, ref, reason)
+    end
+  end
+
+  defp learn_alt_svc(%Request{transport_options: options, url: url}, %Response{} = response) do
+    with true <- options[:alt_svc] == true,
+         origin when origin != nil <- AltSvcCache.origin(url),
+         [_ | _] = values <- Headers.get_all(response.headers, "alt-svc") do
+      AltSvcCache.put(origin, Enum.join(values, ", "))
+    end
+
+    :ok
   end
 
   @doc false
@@ -98,19 +193,21 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp request_http3(_request, _abort_controller_pid, unix_socket_path)
+  defp request_http3(request, abort_controller_pid, unix_socket_path, route \\ nil)
+
+  defp request_http3(_request, _abort_controller_pid, unix_socket_path, _route)
        when is_binary(unix_socket_path) do
     {:error, {:unsupported_http_version_for_unix_socket, :http3}}
   end
 
-  defp request_http3(%Request{} = request, abort_controller_pid, _unix_socket_path) do
+  defp request_http3(%Request{} = request, abort_controller_pid, _unix_socket_path, route) do
     ref = make_ref()
     parent = self()
     timeout = request_timeout(request)
     deadline_at = System.monotonic_time(:millisecond) + timeout
 
     case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
-           http3_owner(parent, ref, request, 0, false, deadline_at)
+           http3_owner(parent, ref, request, 0, false, deadline_at, route)
          end) do
       {:ok, owner_pid} ->
         set_abort_owner(abort_controller_pid, owner_pid)
@@ -121,7 +218,7 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp http3_owner(parent, ref, request, redirects, redirected?, deadline_at) do
+  defp http3_owner(parent, ref, request, redirects, redirected?, deadline_at, route) do
     case remaining_timeout(deadline_at) do
       0 ->
         send_error(parent, ref, :request_timeout)
@@ -140,21 +237,35 @@ defmodule HTTP.SocketClient do
           informational: [],
           informational_bytes: 0,
           response_sent?: false,
-          action: nil
+          action: nil,
+          alt_svc: route,
+          connected?: false
         }
+
+        state =
+          if route,
+            do: Map.put(state, :http3_runtime_opts, alt_svc_runtime_opts(route)),
+            else: state
 
         case HTTP.HTTP3.request(request, state, &handle_http3_event/2) do
           {:ok, %{action: {:redirect, response}}} ->
-            follow_http3_redirect(response, parent, ref, request, redirects, deadline_at)
+            follow_http3_redirect(response, parent, ref, request, redirects, deadline_at, route)
 
           {:ok, _state} ->
             :ok
 
           {:error, reason, state} ->
-            fail_http3(state, reason)
+            if alt_svc_fallback?(state, reason) do
+              AltSvcCache.mark_broken(route.origin)
+              run_tcp(parent, ref, request, redirects, redirected?, deadline_at)
+            else
+              fail_http3(state, reason)
+            end
         end
     end
   end
+
+  defp handle_http3_event(state, :connection_ready), do: {:cont, %{state | connected?: true}}
 
   defp handle_http3_event(state, {:informational, status, headers}) do
     bytes =
@@ -257,10 +368,13 @@ defmodule HTTP.SocketClient do
 
   defp handle_http3_event(state, :done), do: {:error, :invalid_http_response, state}
 
-  defp follow_http3_redirect(response, parent, ref, request, redirects, deadline_at) do
+  defp follow_http3_redirect(response, parent, ref, request, redirects, deadline_at, route) do
     case redirect_request(request, response) do
+      {:ok, redirected_request} when route != nil ->
+        alt_svc_hop(parent, ref, redirected_request, redirects + 1, deadline_at)
+
       {:ok, redirected_request} ->
-        http3_owner(parent, ref, redirected_request, redirects + 1, true, deadline_at)
+        http3_owner(parent, ref, redirected_request, redirects + 1, true, deadline_at, nil)
 
       {:error, reason} ->
         send_error(parent, ref, reason)
@@ -2003,6 +2117,8 @@ defmodule HTTP.SocketClient do
   end
 
   defp send_response(parent, ref, response, request) do
+    learn_alt_svc(request, response)
+
     if Response.stream_body?(response) or
          HTTP.HTTP1.body_forbidden?(request.method, response.status) or
          not Keyword.get(request.transport_options, :decode_body, true) do

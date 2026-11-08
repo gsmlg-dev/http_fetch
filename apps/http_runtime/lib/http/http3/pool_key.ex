@@ -1,5 +1,11 @@
 defmodule HTTP.HTTP3.PoolKey do
-  @moduledoc "Origin, TLS identity, profile and ownership identity for HTTP/3 reuse."
+  @moduledoc """
+  Origin, TLS identity, profile and ownership identity for HTTP/3 reuse.
+
+  The optional `http3_connect_port` (an Alt-Svc alternative) changes only the
+  dialed UDP port and the pool identity; authority, SNI and certificate identity
+  remain those of the request origin.
+  """
   alias HTTP.Request
 
   def build(request, opts \\ [])
@@ -10,8 +16,10 @@ defmodule HTTP.HTTP3.PoolKey do
     tls_options = Keyword.get(options, :tls, Keyword.get(options, :ssl, []))
     profile = Keyword.get(options, :profile, Keyword.get(options, :http3_profile, :ordered))
     endpoint = Keyword.get(options, :endpoint)
+    connect_port = Keyword.get(options, :http3_connect_port)
 
     with :ok <- compatible_route(options),
+         :ok <- valid_connect_port(connect_port),
          {:ok, options} <- HTTP.HTTP3.ReceiveBudget.normalize(options),
          {:ok, tls} <- QuicHttp3.TLSOptions.normalize(host, tls_options),
          {:ok, compiled} <- Quic.Profile.compile(profile, alpn: ["h3"]) do
@@ -30,7 +38,10 @@ defmodule HTTP.HTTP3.PoolKey do
         ])
         |> Map.new()
 
-      identity = {String.downcase(host), port || 443, tls, compiled, endpoint, policy}
+      identity =
+        {String.downcase(host), port || 443, tls, compiled, endpoint, policy}
+        |> with_connect_port(connect_port)
+
       reuse = Keyword.get(options, :http3_reuse, true)
       key = :crypto.hash(:sha256, :erlang.term_to_binary(identity, [:deterministic]))
       key = if reuse and safe?(tls), do: key, else: {key, make_ref()}
@@ -51,7 +62,7 @@ defmodule HTTP.HTTP3.PoolKey do
       connect =
         Keyword.merge(connect,
           host: host,
-          port: port || 443,
+          port: connect_port || port || 443,
           tls: tls_options,
           profile: profile,
           exclusive?: reuse == false
@@ -75,6 +86,13 @@ defmodule HTTP.HTTP3.PoolKey do
       true -> :ok
     end
   end
+
+  defp valid_connect_port(nil), do: :ok
+  defp valid_connect_port(port) when port in 1..65_535, do: :ok
+  defp valid_connect_port(_port), do: {:error, :invalid_http3_connect_port}
+
+  defp with_connect_port(identity, nil), do: identity
+  defp with_connect_port(identity, port), do: Tuple.insert_at(identity, 6, {:connect_port, port})
 
   defp safe?(value) when is_function(value), do: false
   defp safe?(value) when is_list(value), do: Enum.all?(value, &safe?/1)

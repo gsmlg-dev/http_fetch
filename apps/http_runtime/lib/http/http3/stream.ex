@@ -1,5 +1,12 @@
 defmodule HTTP.HTTP3.Stream do
-  @moduledoc "Supervised per-request H3 relay; application acknowledgements gate native reads."
+  @moduledoc """
+  Supervised per-request H3 relay; application acknowledgements gate native reads.
+
+  With `connection_ready_event: true` the subscriber receives
+  `{:http_runtime, generation, pid, :connection_ready}` once a QUIC connection is
+  established or leased, before request stream admission. Earlier failures
+  prove that no request stream was admitted.
+  """
   alias HTTP.HTTP3.{BodyBridge, ConnectionOwner, ConnectionSupervisor, Pool, PoolKey}
   alias HTTP.RequestLifecycle
   alias HTTP.Runtime.Delivery
@@ -106,7 +113,7 @@ defmodule HTTP.HTTP3.Stream do
              pool,
              key,
              connect,
-             {fields, body, generation, deadline, opts},
+             {fields, body, generation, deadline, ready_notice(opts, subscriber, generation)},
              {opening_deadline, monitor, if(tunnel?, do: 1, else: @max_open_attempts)}
            ) do
       try do
@@ -179,6 +186,7 @@ defmodule HTTP.HTTP3.Stream do
 
   defp open_request(pool, key, connect, request, {deadline, monitor, attempts} = context) do
     with {:ok, owner, lease} <- acquire(pool, key, connect, deadline, monitor) do
+      notify_ready(elem(request, 4))
       result = open_leased(pool, owner, lease, request, context)
 
       case result do
@@ -944,6 +952,19 @@ defmodule HTTP.HTTP3.Stream do
 
   defp notify(subscriber, generation, event),
     do: send(subscriber, {:http_runtime, generation, self(), event})
+
+  defp ready_notice(opts, subscriber, generation) do
+    if opts[:connection_ready_event] == true,
+      do: Keyword.put(opts, :ready_notice, {subscriber, generation}),
+      else: opts
+  end
+
+  defp notify_ready(opts) do
+    case opts[:ready_notice] do
+      {subscriber, generation} -> notify(subscriber, generation, :connection_ready)
+      nil -> :ok
+    end
+  end
 
   defp deadline(:infinity), do: :infinity
   defp deadline(timeout) when is_integer(timeout) and timeout >= 0, do: now() + timeout

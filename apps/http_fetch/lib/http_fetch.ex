@@ -6,6 +6,7 @@ defmodule HTTPFetch.Application do
 
   - **Task.Supervisor** (`:http_fetch_task_supervisor`) - Supervises all async HTTP request tasks
   - **Registry** (`HTTP.AbortController`) - Tracks AbortController agents for request cancellation
+  - **HTTP.AltSvc.Cache** - Bounded opt-in Alt-Svc HTTP/3 alternative cache
 
   The application starts automatically when the `:http_fetch` application is loaded.
   No manual configuration is required.
@@ -15,7 +16,8 @@ defmodule HTTPFetch.Application do
   def start(_type, _args) do
     children = [
       {Task.Supervisor, name: :http_fetch_task_supervisor},
-      {Registry, keys: :unique, name: HTTP.AbortController}
+      {Registry, keys: :unique, name: HTTP.AbortController},
+      HTTP.AltSvc.Cache
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: HTTPFetch.Application)

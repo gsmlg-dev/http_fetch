@@ -66,11 +66,30 @@ verified readiness.
 
 The initial profile is static/literal QPACK with Huffman decoding, zero dynamic
 table capacity and zero blocked-stream allowance. Dynamic QPACK, 0-RTT,
-connection migration, Alt-Svc/racing, WebSocket over HTTP/3 and WebTransport remain
-unsupported. Raw `Quic.capabilities().http3` remains false because raw QUIC owns
+connection migration, connection racing and WebTransport remain unsupported.
+WebSocket over HTTP/3 is experimental; see `http3-extensions-contract.md`. Raw `Quic.capabilities().http3` remains false because raw QUIC owns
 transport rather than HTTP semantics.
 
 Validation evidence is separated in the implementation audit: native regression
 results, independent peer traffic, load/rotation, artifact consumers, CI and
 canary are distinct gates. An authenticated ALPN alone is not evidence of public
 HTTP/3 behavior.
+
+## Opt-in Alt-Svc discovery
+
+`HTTP.fetch(url, http_version: :auto, alt_svc: true)` learns same-host `h3`
+alternatives from `Alt-Svc` on final HTTPS responses into a bounded per-origin
+cache (1024 origins, `ma` default 86400 s, `clear` honoured). A later eligible
+request with a fresh entry uses HTTP/3 on the alternative port, keeping the
+origin authority, SNI and certificate identity. Requests with a proxy, Unix
+socket, connect address, explicit `tls_backend`, socket options, HTTP/2 profile,
+transport scope or pool stay on TCP. `alt_svc: true` with any other
+`http_version` raises `ArgumentError`; `:auto` without it is unchanged.
+
+Fallback to H2/H1 happens only when the QUIC connection never became ready
+(`{:http3_not_established, _}` or `:opening_timeout` before the runtime's
+`:connection_ready` event), so no request stream was admitted. It runs within
+the original deadline and marks the origin broken for 300 s (no H3 routing or
+re-learning). Failures after readiness, including indeterminate admission, are
+returned without replay. Redirect hops on an Alt-Svc route re-select per origin.
+Alternatives on a different host are ignored.

@@ -334,6 +334,45 @@ defmodule HTTP.FetchOptionsTest do
     end
   end
 
+  describe "alt_svc" do
+    test "defaults to false and is omitted from transport options" do
+      options = HTTP.FetchOptions.new(http_version: :auto)
+      assert options.alt_svc == false
+      refute Keyword.has_key?(HTTP.FetchOptions.to_transport_options(options), :alt_svc)
+      assert options.tls_backend == :ex_ssl
+    end
+
+    test "requires http_version :auto and defers the default TLS backend" do
+      for init <- [
+            [http_version: :auto, alt_svc: true],
+            %{"httpVersion" => "auto", "altSvc" => true},
+            %{"http_version" => :auto, "alt_svc" => true}
+          ] do
+        options = HTTP.FetchOptions.new(init)
+        transport = HTTP.FetchOptions.to_transport_options(options)
+        assert transport[:alt_svc] == true
+        assert options.tls_backend == nil
+      end
+
+      explicit = HTTP.FetchOptions.new(http_version: :auto, alt_svc: true, tls_backend: :ex_ssl)
+      assert explicit.tls_backend == :ex_ssl
+    end
+
+    test "rejects other versions and non-boolean values" do
+      for version <- [nil, :http1, :http2, :http3, :h2c] do
+        assert_raise ArgumentError, ~r/alt_svc requires http_version: :auto/, fn ->
+          HTTP.FetchOptions.new(http_version: version, alt_svc: true)
+        end
+      end
+
+      assert_raise ArgumentError, ~r/invalid alt_svc/, fn ->
+        HTTP.FetchOptions.new(http_version: :auto, alt_svc: "yes")
+      end
+
+      assert_raise ArgumentError, fn -> HTTP.fetch("https://example.test", alt_svc: true) end
+    end
+  end
+
   describe "edge cases" do
     test "handles empty options" do
       options = HTTP.FetchOptions.new([])

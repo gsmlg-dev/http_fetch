@@ -83,6 +83,20 @@ defmodule HTTP.FetchOptions do
     original IP verification identity is currently unsupported.
   - `http_version` - protocol selection, one of `:http1`, `:http2`, `:http3`,
     `:h2c`, or `:auto`; defaults to `:http1`
+  - `alt_svc` - opt in to RFC 7838 Alt-Svc HTTP/3 discovery; defaults to `false`
+    and requires `http_version: :auto` (other versions raise `ArgumentError`).
+    Final `https` responses carrying `Alt-Svc` update a bounded per-origin cache
+    of same-host `h3` alternatives (`ma` defaults to 86,400 s; `clear` removes
+    the origin). A later eligible `https` request with a fresh entry uses HTTP/3
+    on the alternative UDP port, keeping the origin authority, SNI and
+    certificate identity. Requests with a proxy, Unix socket, `connect_address`,
+    explicit `tls_backend`, `socket_opts`, `http2_profile`, `transport_scope` or
+    explicit `pool` never use the alternative. If the QUIC connection is never
+    established (`{:http3_not_established, _}` or `:opening_timeout`), the
+    request runs on the normal `:auto` H2/HTTP/1.1 path within the original
+    deadline and the origin is marked broken for five minutes. Failures after
+    the connection is established are returned without replay. Redirect hops
+    re-select per origin; `response.http_version` reports the actual protocol.
   - `prefer_ipv6` - Prefer IPv6 with IPv4 fallback only during TCP establishment.
     Explicit `connect_address` pins and `:inet`/`:inet6` socket options remain strict.
     For a proxy route this policy selects the proxy endpoint address family.
@@ -155,6 +169,8 @@ defmodule HTTP.FetchOptions do
     "headers" => :headers,
     "http_version" => :http_version,
     "httpVersion" => :http_version,
+    "alt_svc" => :alt_svc,
+    "altSvc" => :alt_svc,
     "http1_reuse" => :http1_reuse,
     "http1Reuse" => :http1_reuse,
     "http1_scope" => :http1_scope,
@@ -211,6 +227,7 @@ defmodule HTTP.FetchOptions do
             unix_socket: nil,
             redirect: :follow,
             http_version: :http1,
+            alt_svc: false,
             tls_backend: nil,
             timeout: nil,
             error_mode: :raw,
@@ -256,6 +273,7 @@ defmodule HTTP.FetchOptions do
           unix_socket: String.t() | nil,
           redirect: redirect(),
           http_version: http_version(),
+          alt_svc: boolean(),
           tls_backend: tls_backend(),
           timeout: timeout() | nil,
           error_mode: :raw | :structured,
@@ -327,6 +345,7 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:proxy, options.proxy)
     |> maybe_add(:redirect, options.redirect)
     |> maybe_add(:http_version, options.http_version)
+    |> maybe_add(:alt_svc, if(options.alt_svc, do: true))
     |> maybe_add(:tls_backend, options.tls_backend)
     |> maybe_add(:http1_reuse, if(options.http1_reuse, do: true, else: nil))
     |> maybe_add(:http1_scope, options.http1_scope)
@@ -419,6 +438,9 @@ defmodule HTTP.FetchOptions do
 
       {:http_version, http_version}, acc ->
         %{acc | http_version: http_version}
+
+      {:alt_svc, alt_svc}, acc ->
+        %{acc | alt_svc: alt_svc}
 
       {:tls_backend, tls_backend}, acc ->
         %{acc | tls_backend: tls_backend}
@@ -520,6 +542,7 @@ defmodule HTTP.FetchOptions do
 
   defp normalize_options(%__MODULE__{} = options) do
     http_version = normalize_http_version(options.http_version)
+    alt_svc = normalize_alt_svc(options.alt_svc, http_version)
 
     %{
       options
@@ -532,6 +555,7 @@ defmodule HTTP.FetchOptions do
         telemetry: normalize_telemetry(options.telemetry),
         error_mode: normalize_error_mode(options.error_mode),
         http_version: http_version,
+        alt_svc: alt_svc,
         prefer_ipv6: normalize_prefer_ipv6(options.prefer_ipv6),
         response_header_limits:
           HTTP.ResponseHeaderLimits.normalize(options.response_header_limits),
@@ -542,7 +566,7 @@ defmodule HTTP.FetchOptions do
           normalize_response_stream_idle_timeout(options.response_stream_idle_timeout),
         response_stream_ack_timeout:
           normalize_response_stream_ack_timeout(options.response_stream_ack_timeout),
-        tls_backend: normalize_tls_backend(options.tls_backend, http_version),
+        tls_backend: normalize_tls_backend(options.tls_backend, http_version, alt_svc),
         http1_reuse: normalize_http1_reuse(options.http1_reuse, http_version),
         http1_scope: normalize_http2_scope(options.http1_scope),
         http1_pool_size: normalize_http1_limit(options.http1_pool_size, 16, :http1_pool_size),
@@ -753,9 +777,26 @@ defmodule HTTP.FetchOptions do
     "unsupported http_version: #{inspect(http_version)}; expected :http1, :http2, :http3, :h2c, or :auto"
   end
 
-  defp normalize_tls_backend(nil, :http3), do: nil
-  defp normalize_tls_backend(tls_backend, :http3), do: tls_backend
-  defp normalize_tls_backend(tls_backend, _http_version), do: resolve_tls_backend(tls_backend)
+  defp normalize_tls_backend(nil, :http3, _alt_svc), do: nil
+  defp normalize_tls_backend(tls_backend, :http3, _alt_svc), do: tls_backend
+  # Alt-Svc defers the default backend so an explicit selection stays distinguishable.
+  defp normalize_tls_backend(nil, _http_version, true), do: nil
+
+  defp normalize_tls_backend(tls_backend, _http_version, _alt_svc),
+    do: resolve_tls_backend(tls_backend)
+
+  defp normalize_alt_svc(value, _http_version) when value in [nil, false], do: false
+  defp normalize_alt_svc(true, :auto), do: true
+
+  defp normalize_alt_svc(true, http_version),
+    do:
+      raise(
+        ArgumentError,
+        "alt_svc requires http_version: :auto, got: #{inspect(http_version)}"
+      )
+
+  defp normalize_alt_svc(value, _http_version),
+    do: raise(ArgumentError, "invalid alt_svc: #{inspect(value)}; expected boolean")
 
   defp normalize_http2_profile(nil), do: nil
   defp normalize_http2_profile(profile) when is_atom(profile) or is_binary(profile), do: profile
