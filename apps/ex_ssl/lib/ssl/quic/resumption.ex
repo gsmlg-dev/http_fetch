@@ -124,14 +124,12 @@ defmodule SSL.QUIC.Resumption do
   def early?(_, _), do: false
 
   def early_secret(session, hello) do
-    with {:ok, secret} <- KeySchedule.early_secret(session.hash, session.psk),
-         {:ok, traffic} <-
-           KeySchedule.client_early_traffic_secret(
-             session.hash,
-             secret,
-             :crypto.hash(session.hash, hello)
-           ) do
-      {:ok, traffic}
+    with {:ok, secret} <- KeySchedule.early_secret(session.hash, session.psk) do
+      KeySchedule.client_early_traffic_secret(
+        session.hash,
+        secret,
+        :crypto.hash(session.hash, hello)
+      )
     end
   end
 

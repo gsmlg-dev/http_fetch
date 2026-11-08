@@ -597,25 +597,27 @@ defmodule SSL.QUIC do
         session.hash == Capabilities.resolve(:cipher_suite, core.suite).hash
 
     if eligible do
-      with :ok <- Resumption.verify(session, core.offer, state.core) do
-        early =
-          tuple_size(prepared) == 2 and Resumption.early?(state.config, session) and
-            42 in core.offer.extension_ids and core.suite == session.cipher_suite and
-            Resumption.early_age_valid?(session, core.offer, now)
+      case Resumption.verify(session, core.offer, state.core) do
+        :ok ->
+          early =
+            tuple_size(prepared) == 2 and Resumption.early?(state.config, session) and
+              42 in core.offer.extension_ids and core.suite == session.cipher_suite and
+              Resumption.early_age_valid?(session, core.offer, now)
 
-        config = %{state.config | resumption: %{state.config.resumption | now: now}}
+          config = %{state.config | resumption: %{state.config.resumption | now: now}}
 
-        {next, action} =
-          request(
-            %{state | config: config},
-            :commit,
-            %{session: session, lease: lease, early_data: early},
-            %{prepared: prepared}
-          )
+          {next, action} =
+            request(
+              %{state | config: config},
+              :commit,
+              %{session: session, lease: lease, early_data: early},
+              %{prepared: prepared}
+            )
 
-        {:ok, next, [action]}
-      else
-        _ -> {:error, {:decrypt_error, :invalid_psk_binder}}
+          {:ok, next, [action]}
+
+        _ ->
+          {:error, {:decrypt_error, :invalid_psk_binder}}
       end
     else
       dispatch_server(state, prepared)

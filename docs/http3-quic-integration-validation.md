@@ -44,11 +44,11 @@ private pinned aioquic/wsproto environment.
 | Source stability | PASS: the same app source/test, root mix.exs and mix.lock hash before/after both combined regression and independent gate runs |
 | `git diff --check` | PASS |
 
-The source hash is
+The original checkpoint source hash is
 `ff48b33f405ec2c39013c7f8c52dab3c3b920137bef893272b1a332b66caaeff`.
 This hashes ordered relative paths and contents of app `.ex`/`.exs` files plus
-root mix.exs/mix.lock. It identifies this local uncommitted source checkpoint,
-not a commit, package artifact or permanent source freeze.
+root mix.exs/mix.lock. It identifies the source at the original checkpoint,
+not a package artifact or permanent source freeze.
 
 The 1,077-test closure was:
 
@@ -75,6 +75,31 @@ python scripts/http3_websocket/gate.py --settings-refusal
 python scripts/http3_websocket/gate.py --hold-settings
 ```
 
+## Pre-push TLS provider follow-up
+
+Root `mix credo` subsequently identified five new findings in the QUIC TLS
+provider and its test helper. The follow-up extracts the existing session
+predicates into private helpers, simplifies equivalent `with` expressions and
+groups two test-driver policy arguments. Validation rules, binder failure
+handling and assertions remain unchanged.
+
+Fresh evidence is retained separately under
+`/tmp/http-fetch-h3-quic-integrated-EEvpod/followup`:
+
+| Follow-up check | Actual result |
+| --- | --- |
+| Root `mix compile --warnings-as-errors` | PASS, exit 0 |
+| Same combined targeted unit/integration closure | PASS: 1,077 tests, zero failures, exit 0 |
+| Root `mix credo` | PASS: 894 files, no issues, exit 0 |
+| Source stability during all three checks | PASS |
+| Root `mix format --check-formatted` | PASS, exit 0 |
+
+The follow-up source hash is
+`a5d9eafec8627cad3ed7ee19d6ed914fd5cd6b7df140c68b286d63bb672e6dea`,
+using the same hashing method. The original independent H3 gate results above
+predate this behavior-preserving refactoring; those three standalone gates were
+not rerun. This follow-up does not certify strict Credo, Dialyzer or docs.
+
 ## Open acceptance and delivery
 
 Global capability fields still report local migration/resumption/early data and
@@ -86,10 +111,13 @@ WebTransport still needs both in-repository live H3/adapter integration and a
 matching independent-profile gate. Missing live integration is unfinished work,
 not an external dependency failure. Engine negative acceptance remains incomplete.
 Strict Credo findings, raw Dialyzer warnings and documentation warnings reported
-by the lanes were not repaired or certified clean by the coordinator's tests.
+by the lanes remain uncertified; the follow-up only certifies ordinary root Credo.
 The joint scope does not include a whole-repository quality/E2E run, browser,
 production, remote CI, published artifacts or release verification.
 
-No source implementation was changed by this coordinator checkpoint. No commit,
-push, version change or release was performed. The existing user-owned untracked
-plan remains preserved. The overall implementation programme remains incomplete.
+The original coordinator checkpoint made no source changes or delivery actions.
+The user subsequently authorized main integration and a GitHub patch release;
+the follow-up above records the additional lint refactoring before push. Release
+version and GitHub-only versus unified Hex publication are still awaiting
+clarification. The existing user-owned untracked plan remains preserved. The
+overall implementation programme remains incomplete.

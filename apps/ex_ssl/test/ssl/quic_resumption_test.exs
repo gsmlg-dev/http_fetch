@@ -41,15 +41,15 @@ defmodule SSL.QUICResumptionTest do
   defp exchange(client_opts \\ [], server_opts \\ [], cached \\ nil, commit \\ :resumed) do
     {:ok, c, co} = SSL.QUIC.new(:client, options(:client, client_opts))
     {:ok, s, so} = SSL.QUIC.new(:server, options(:server, server_opts))
-    drive(c, s, co, so, co, so, cached, commit, 0)
+    drive(c, s, co, so, co, so, {cached, commit}, 0)
   end
 
-  defp drive(c, s, [], [], ca, sa, _, _, _), do: {c, s, ca, sa}
+  defp drive(c, s, [], [], ca, sa, _, _), do: {c, s, ca, sa}
 
-  defp drive(c, s, co, so, ca, sa, cached, commit, n) when n < 30 do
+  defp drive(c, s, co, so, ca, sa, {cached, commit} = policy, n) when n < 30 do
     {s, out_s} = deliver(s, co, cached, commit)
     {c, out_c} = deliver(c, so, cached, commit)
-    drive(c, s, out_c, out_s, ca ++ out_c, sa ++ out_s, cached, commit, n + 1)
+    drive(c, s, out_c, out_s, ca ++ out_c, sa ++ out_s, policy, n + 1)
   end
 
   defp deliver(state, actions, cached, commit) do
