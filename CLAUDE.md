@@ -51,9 +51,14 @@ built and is not part of the umbrella.
   consumes only public `SSL.QUIC` APIs. `elixir_quic_http3` owns `QuicHttp3`.
   Fetch and EventSource support explicit HTTPS HTTP/3 beta with a dynamic-table
   QPACK decoder (the encoder stays static/literal); Fetch also offers opt-in
-  Alt-Svc discovery (`http_version: :auto, alt_svc: true`). WebSocket over
-  HTTP/3 has a cleanup receipt. HTTP-layer 0-RTT, migration and WebTransport remain
-  unsupported; raw `Quic.capabilities().http3` remains false.
+  Alt-Svc discovery (`http_version: :auto, alt_svc: true`) and beta opt-in
+  `http3_resumption` / `early_data` (0-RTT for safe requests). WebSocket over
+  HTTP/3 has a cleanup receipt. Exclusive WebSocket/H3 and WebTransport sessions
+  expose beta `migrate/2`. WebTransport (draft-17) runs live on an exclusive
+  owner but has no independent peer acceptance, so `Profile.supported?/0`
+  stays false. Engine capability flags (`Quic.capabilities()` http3, local
+  migration, resumption) remain false. Remaining plan:
+  `docs/superpowers/plans/2026-11-09-http3-remaining-work.md`.
 - **HTTPFetch.Application** (`apps/http_fetch/lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
 
 ### Key Design Patterns

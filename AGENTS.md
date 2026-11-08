@@ -74,9 +74,11 @@ licenses, constraints, and current release status are recorded in
 EventSource support explicit HTTPS HTTP/3 beta with a dynamic-table QPACK
 decoder (static/literal encoder); Fetch also offers opt-in Alt-Svc discovery.
 Raw Quic/Abyss servers accept authenticated peer migration with bounded path
-validation; explicit local client migration and resumption/0-RTT remain unsupported.
-WebSocket over HTTP/3 is supported with a cleanup receipt. HTTP client migration and WebTransport remain
-unsupported; raw `Quic.capabilities().http3` remains false. App presence and
+validation. Fetch offers beta opt-in HTTP/3 resumption and 0-RTT for safe
+requests; exclusive WebSocket/H3 and WebTransport sessions offer beta `migrate/2`.
+WebSocket over HTTP/3 is supported with a cleanup receipt. WebTransport draft-17
+runs live but lacks independent peer acceptance (`Profile.supported?/0` false).
+Engine capability flags, including raw `Quic.capabilities().http3`, remain false. App presence and
 negotiated ALPN alone do not establish application readiness or acceptance.
 
 Entry point is `HTTP.fetch/2` in `apps/http_fetch/lib/http.ex`. It is async by default
