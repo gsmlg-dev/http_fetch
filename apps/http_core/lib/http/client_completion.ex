@@ -9,8 +9,10 @@ defmodule HTTP.ClientCompletion do
   and concurrent waits are safe. Lost evidence is reported as unconfirmed.
 
   This barrier does not certify native allocator or kernel memory reclamation,
-  or remote receipt of application bytes. HTTP/3 retains its separate QUIC
-  cleanup contract and is explicitly unsupported by this receipt.
+  or remote receipt of application bytes. WebSocket over HTTP/3 confirms the
+  CONNECT stream settled on its owner and, for an exclusive owner, native QUIC
+  cleanup (see `docs/http3-extensions-contract.md`). EventSource over HTTP/3
+  remains explicitly unsupported by this receipt.
   """
   @opaque t :: %__MODULE__{
             tracker: pid() | nil,

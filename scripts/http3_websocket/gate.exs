@@ -21,7 +21,8 @@ defmodule HTTP3WebSocketGate do
       %WS{} = refused = WS.new("wss://127.0.0.1:#{port}/echo", [], options)
       %Error{reason: :extended_connect_not_supported} = event(refused)
       %Close{was_clean: false} = event(refused)
-      IO.puts("independent SETTINGS refusal without fallback: PASS")
+      :ok = receipt(refused)
+      IO.puts("independent SETTINGS refusal without fallback, cleanup receipt: PASS")
       System.halt(0)
     end
 
@@ -30,6 +31,7 @@ defmodule HTTP3WebSocketGate do
       owner = await_owner(now() + 4000)
       :ok = WS.close(cancelled)
       %Close{was_clean: false} = event(cancelled)
+      :ok = receipt(cancelled)
       await_empty(owner, now() + 4000)
 
       %WS{} =
@@ -38,10 +40,11 @@ defmodule HTTP3WebSocketGate do
 
       %Error{reason: :opening_timeout} = event(expired)
       %Close{was_clean: false} = event(expired)
+      :ok = receipt(expired)
       await_empty(owner, now() + 4000)
 
       IO.puts(
-        "independent held SETTINGS: no CONNECT bytes, cancellation/deadline/owner cleanup: PASS"
+        "independent held SETTINGS: no CONNECT bytes, cancellation/deadline receipts and owner cleanup: PASS"
       )
 
       System.halt(0)
@@ -65,7 +68,21 @@ defmodule HTTP3WebSocketGate do
     close(fragment)
     remote = open(port, "/close-fin", options)
     %Close{code: 1000, reason: "peer-close", was_clean: true} = event(remote)
-    IO.puts("independent fragmented message and Close+FIN ordering: PASS")
+    :ok = receipt(remote)
+    IO.puts("independent fragmented message and Close+FIN ordering, receipt: PASS")
+
+    reset = open(port, "/echo", options)
+    :ok = WS.send(reset, "reset-stream")
+    %Error{} = event(reset)
+    %Close{was_clean: false} = event(reset)
+    :ok = receipt(reset)
+    IO.puts("independent peer stream reset settles the cleanup receipt: PASS")
+
+    exclusive = open(port, "/echo", Keyword.put(options, :http3_reuse, false))
+    :ok = WS.send(exclusive, "exclusive")
+    %Message{data: "exclusive"} = event(exclusive)
+    close(exclusive)
+    IO.puts("exclusive QUIC owner: native Quic.Cleanup confirmed by the receipt: PASS")
 
     ping = open(port, "/ping", options)
     %Message{data: "pong:proof"} = event(ping)
@@ -76,6 +93,7 @@ defmodule HTTP3WebSocketGate do
       %WS{} = socket = WS.new("wss://127.0.0.1:#{port}" <> path, protocols, options)
       %Error{} = event(socket)
       %Close{was_clean: false} = event(socket)
+      :ok = receipt(socket)
     end
 
     limited = open(port, "/oversize", Keyword.put(options, :max_message_size, 128))
@@ -163,9 +181,10 @@ defmodule HTTP3WebSocketGate do
     :ok = WS.close(socket, 1000, "done")
     %Close{code: 1000, was_clean: true} = event(socket)
 
-    {:error, {:unsupported_completion, :http3}} =
-      HTTP.ClientCompletion.await(WS.completion(socket), 2_000)
+    :ok = receipt(socket)
   end
+
+  defp receipt(socket), do: HTTP.ClientCompletion.await(WS.completion(socket), 6_000)
 
   defp await_buffered(socket, deadline) do
     cond do

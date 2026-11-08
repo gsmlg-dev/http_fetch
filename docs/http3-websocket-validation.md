@@ -1,6 +1,7 @@
 # HTTP/3 CONNECT / WebSocket validation
 
-Task C, current checkout, 2026-11-08. Explicit WebSocket/H3 implementation and
+Task C, current checkout, 2026-11-08; WP3 completion receipt 2026-11-09.
+Explicit WebSocket/H3 is supported (no fallback); implementation and
 independent peer gates pass at the checkpoints below. WebTransport remains pure
 primitives only: live owner integration and matching independent acceptance are
 BLOCKED. Public capability flags remain false. No version, lockfile, branch,
@@ -46,10 +47,30 @@ The exact APIs/events are in `http3-extensions-contract.md`.
 | Peer SETTINGS withheld | PASS | `/tmp/http-fetch-task-c-held-final.log`: peer exits on any early client bidi bytes; owner is ready with SETTINGS absent; opening cancellation and deadline clear owner/session request and queue state. This is local owner-state cleanup, not a native cleanup receipt. |
 | Scoped formatting / diff whitespace | PASS | Explicit owned Elixir paths formatted and checked; `git diff --check` passes. Python fixtures parse without generated repository output. |
 | Scoped Credo | FAIL, existing findings remain | Each app scanned separately with `--strict`; engine/runtime/WebSocket logs `/tmp/http-fetch-task-c-credo-final-{engine,runtime,websocket}.log`; refreshed core `/tmp/http-fetch-task-c-credo-verified-core.log`. Existing nested alias/readability/test apply findings remain. New writer complexity, alias and line-length findings were fixed. No unrelated cleanup performed. |
-| Public H3 completion receipt | Explicitly unsupported | Gate requires `{:error, {:unsupported_completion, :http3}}`. Internal tracker settlement does not prove native QUIC cleanup. Clean WebSocket Close is not a native resource receipt. |
+| Public H3 completion receipt | PASS (WP3, 2026-11-09) | Supported with the stream-level/exclusive-native meaning in `http3-extensions-contract.md` ("WebSocket/H3 completion receipt"). Superseded the earlier explicit `{:unsupported_completion, :http3}`. Evidence in the WP3 section below. Shared-owner QUIC connection/endpoint reclamation remains outside this receipt. |
 | WT independent profile / network adapter | BLOCKED | Task D's audited independent peers do not match draft-17/reliable-reset. Shared pure router is not wired into sole-owner live streams/datagrams. `webtransport-h3` admission returns `:webtransport_network_not_ready`. |
 | Dialyzer / generated docs | NOT RUN | No shared PLT or generated documentation state was mutated. |
 | Browser / production / published artifacts | NOT RUN | Separate gates; no publication authorized. |
+
+## WP3 completion receipt checkpoint (2026-11-09)
+
+Root `_build`, `MIX_ENV=test`, current shared checkout. Python peers via
+`uv run --python 3.12` with `aioquic==1.2.0`, `wsproto==1.2.0` (and `h2==4.2.0`,
+`hpack==4.1.0`, `hyperframe==6.1.0` for H1/H2 WebSocket fixtures);
+`aioquic.h3.connection` SHA-256 unchanged from the ledger below.
+
+| Check | Result | Evidence / limits |
+| --- | --- | --- |
+| Strict compile | PASS | `MIX_ENV=test mix compile --warnings-as-errors`. |
+| Owner settlement units | PASS | `tunnel_owner_test.exs`: settle retires only the caller's tunnel, natively cancels before `:settled`, rejects queued opens, stays pending while a pending write/open references it. |
+| Relay receipt units | PASS | `tunnel_completion_test.exs` (6): confirmed only after owner `:settled`; never-settling owner -> `:cleanup_unconfirmed`; owner death -> confirmed; relay killed before proof -> `:cleanup_unconfirmed`; tracker abort is graceful and still settles; untracked tunnels unchanged. |
+| Exclusive native integration | PASS | `cleanup_integration_test.exs` (native QUIC peer, SETTINGS CONNECT=1, 200 CONNECT): for local close, peer RESET_STREAM and tracker abort the public receipt is `:ok` only with the relay-owned `Quic.Cleanup` scope `:confirmed` and the owner down. |
+| Runtime/engine/Fetch/EventSource H3 regression | PASS | `mix test apps/http_runtime/test/http/http3 apps/elixir_quic_http3/test apps/http_fetch/test/http/http3_test.exs apps/http_event_source/test/http/event_source/http3_test.exs --include integration`: runtime 76/0, engine 171/0, EventSource 9/0, Fetch 20/0. |
+| WebSocket suite | PASS for H3; pre-existing H1/H2 env failures | `mix test apps/http_web_socket/test --include integration` with the uv peer env: 257 tests. New H3 opening-deadline receipt test passes. `TransportControlsTest` pinned-address cases (2) fail identically with the WP3 files stashed (`:eaddrnotavail`, macOS loopback alias). `WebSocketTLSLifecycleTest` cancel/timeout/eof cases fail intermittently (1 in ~5-8 runs) on both baseline and WP3; other one-off H1/H2 fixture timeouts under full-suite load did not reproduce on file reruns. No H3 test failed. Without the uv env, 59 H1/H2 cases fail on missing Python `h2`. |
+| Independent positive gate | PASS | `uv run ... python scripts/http3_websocket/gate.py`: every local Close, peer Close+FIN, peer RESET_STREAM (new `reset-stream` peer message), refusal/subprotocol mismatch and exclusive `http3_reuse: false` socket assert `ClientCompletion.await/2 == :ok`; sibling continuity still passes. |
+| Independent SETTINGS refusal | PASS | `--settings-refusal`: refused opening receipt `:ok`. |
+| Independent held SETTINGS | PASS | `--hold-settings`: cancellation and opening-deadline receipts `:ok`, owner state empty. |
+| Scoped format / Credo | PASS for new code | `mix format --check-formatted` on changed files. `mix credo --strict` on changed files reports only 3 pre-existing nested-alias suggestions in `connection_owner.ex`. |
 
 ## Independent peer identity and ownership
 
@@ -89,6 +110,9 @@ mix test --include integration \
 python scripts/http3_websocket/gate.py
 python scripts/http3_websocket/gate.py --settings-refusal
 python scripts/http3_websocket/gate.py --hold-settings
+# or, without a private venv:
+# uv run --python 3.12 --with aioquic==1.2.0 --with wsproto==1.2.0 \
+#   python scripts/http3_websocket/gate.py [--settings-refusal|--hold-settings]
 mix credo apps/http_core --strict
 mix credo apps/elixir_quic_http3 --strict
 mix credo apps/http_runtime --strict

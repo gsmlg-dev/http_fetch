@@ -86,6 +86,10 @@ class Peer(QuicConnectionProtocol):
                 websocket = self.sessions[item.stream_id]
                 websocket.receive_data(item.data)
                 for message in websocket.events():
+                    if isinstance(message, TextMessage) and message.data == "reset-stream":
+                        self._quic.reset_stream(item.stream_id, 0x10C)
+                        self.sessions.pop(item.stream_id, None)
+                        break
                     if isinstance(message, (TextMessage, BytesMessage)):
                         self.send_data(item.stream_id, websocket.send(message))
                     elif isinstance(message, CloseConnection):

@@ -87,7 +87,7 @@ The local encoder stays static/literal; Huffman strings are decoded. The indepen
 gate is `uv run --python 3.12 --with aioquic==1.2.0 python
 scripts/http3/qpack_dynamic_gate.py`. 0-RTT, connection migration, connection
 racing and WebTransport remain unsupported.
-WebSocket over HTTP/3 is experimental; see `http3-extensions-contract.md`. Raw `Quic.capabilities().http3` remains false because raw QUIC owns
+WebSocket over HTTP/3 is supported (explicit opt-in, no fallback) with a stream-level cleanup receipt; see `http3-extensions-contract.md`. Raw `Quic.capabilities().http3` remains false because raw QUIC owns
 transport rather than HTTP semantics.
 
 Validation evidence is separated in the implementation audit: native regression

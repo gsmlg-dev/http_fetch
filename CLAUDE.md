@@ -52,7 +52,7 @@ built and is not part of the umbrella.
   Fetch and EventSource support explicit HTTPS HTTP/3 beta with a dynamic-table
   QPACK decoder (the encoder stays static/literal); Fetch also offers opt-in
   Alt-Svc discovery (`http_version: :auto, alt_svc: true`). WebSocket over
-  HTTP/3 is experimental. HTTP-layer 0-RTT, migration and WebTransport remain
+  HTTP/3 has a cleanup receipt. HTTP-layer 0-RTT, migration and WebTransport remain
   unsupported; raw `Quic.capabilities().http3` remains false.
 - **HTTPFetch.Application** (`apps/http_fetch/lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
 

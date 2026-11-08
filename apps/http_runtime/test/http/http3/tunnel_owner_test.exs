@@ -170,5 +170,72 @@ defmodule HTTP.HTTP3.TunnelOwnerTest do
     assert state.extension_bytes == 0
   end
 
+  test "settle retires only the subscriber's tunnel and confirms after native cancellation" do
+    state = state()
+    control = %{state.session.control | received_settings?: true, peer_settings: [{8, 1}]}
+    state = put_in(state.session.control, control)
+    opts = [purpose: :extended_connect, protocol: "websocket", deadline_at: now() + 1000]
+    sibling = spawn(fn -> receive do: (:stop -> :ok) end)
+    on_exit(fn -> send(sibling, :stop) end)
+
+    {state, [ref, other]} =
+      Enum.reduce([self(), sibling], {state, []}, fn subscriber, {state, refs} ->
+        tag = make_ref()
+
+        {:noreply, state} =
+          ConnectionOwner.handle_call(
+            {:open, @fields, :stream, subscriber, make_ref(), opts},
+            {self(), tag},
+            state
+          )
+
+        assert_receive {^tag, {:ok, ref}}
+        {state, refs ++ [ref]}
+      end)
+
+    assert {:reply, {:pending, [^ref]}, state} =
+             ConnectionOwner.handle_call({:settle, self(), []}, {self(), make_ref()}, state)
+
+    refute Map.has_key?(state.requests, ref)
+    refute Map.has_key?(state.session.requests, ref)
+    assert Map.has_key?(state.requests, other)
+    assert Map.has_key?(state.session.requests, other)
+
+    assert {:reply, :settled, _state} =
+             ConnectionOwner.handle_call({:settle, self(), [ref]}, {self(), make_ref()}, state)
+  end
+
+  test "settle rejects queued opens and stays pending while a native action references the stream" do
+    state = state()
+    tag = make_ref()
+    opts = [purpose: :extended_connect, protocol: "websocket", deadline_at: now() + 1000]
+
+    {:noreply, state} =
+      ConnectionOwner.handle_call(
+        {:open, @fields, :stream, self(), make_ref(), opts},
+        {self(), tag},
+        state
+      )
+
+    assert length(state.queue) == 1
+
+    assert {:reply, :settled, state} =
+             ConnectionOwner.handle_call({:settle, self(), []}, {self(), make_ref()}, state)
+
+    assert_receive {^tag, {:error, :aborted}}
+    assert state.queue == []
+
+    ref = make_ref()
+    pending = %{state | pending: {:write, ref, "x", true, self(), make_ref()}}
+
+    assert {:reply, {:pending, [^ref]}, _} =
+             ConnectionOwner.handle_call({:settle, self(), [ref]}, {self(), make_ref()}, pending)
+
+    opening = %{state | pending: {:open, {self(), make_ref()}, self(), make_ref(), [], "", []}}
+
+    assert {:reply, {:pending, []}, _} =
+             ConnectionOwner.handle_call({:settle, self(), []}, {self(), make_ref()}, opening)
+  end
+
   defp now, do: System.monotonic_time(:millisecond)
 end

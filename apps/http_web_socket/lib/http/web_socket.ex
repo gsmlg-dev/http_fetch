@@ -10,8 +10,8 @@ defmodule HTTP.WebSocket do
       {HTTP.WebSocket, socket, %HTTP.WebSocket.Event.Close{}}
 
   HTTP/1 is the default. Select `http_version: :http2`, `:h2c`, or `:auto`
-  explicitly. Experimental `http_version: :http3` selects an RFC 9220 tunnel
-  for `wss`, with explicit QUIC CA trust in `ssl` and no fallback. TCP
+  explicitly. `http_version: :http3` selects an RFC 9220 tunnel for `wss`,
+  with explicit QUIC CA trust in `ssl` and no fallback. TCP
   `tls_backend`, socket options and connection-address pins are rejected for H3.
   `http_version/1` reports the negotiated HTTP version, while
   `protocol/1` continues to report the selected WebSocket subprotocol.
@@ -111,9 +111,17 @@ defmodule HTTP.WebSocket do
   supply trusted `ssl: [cacertfile: ...]` for private CAs. Owner death closes
   the connection. `close/1` signals cancellation; use `completion/1` with
   `HTTP.ClientCompletion.await/2` to confirm cleanup, including a cancelled
-  opening. H3 returns `{:error, {:unsupported_completion, :http3}}` from
-  that barrier; it uses the separate QUIC cleanup contract. The receipt remains
-  readable after the socket process exits. A
+  opening. The receipt remains readable after the socket process exits.
+
+  Over HTTP/3, `:ok` additionally requires the tunnel relay to prove that its
+  connection owner retired the CONNECT stream: no owner demux entry, native
+  session request or queued/pending/suspended action remains for it (Close,
+  peer reset, deadline and cancellation all reach this check), or the owner
+  process was observed down. A shared pooled QUIC connection stays open and
+  its native endpoint is not certified by this receipt. With `http3_reuse:
+  false` the exclusive connection's `Quic.Cleanup` scope must also confirm
+  that its endpoint, connection, IO actor and UDP port were joined. Missing
+  evidence is reported as `{:error, :cleanup_unconfirmed}`. A
   Close event describes the handshake result; it does not prove peer
   application receipt of earlier writes. Terminal cancellation discards
   pending transport bytes, so a failed write may have reached the peer partly.
@@ -172,10 +180,6 @@ defmodule HTTP.WebSocket do
 
     with {:ok, options} <- Options.new(url, protocols, put_ref(init, ref)) do
       receipt = HTTP.ClientCompletion.new(:client)
-      # Keep internal lifecycle tracking, but do not certify native QUIC cleanup
-      # through the TCP/H2 completion barrier.
-      receipt =
-        if options.http_version == :http3, do: %{receipt | unsupported: :http3}, else: receipt
 
       case DynamicSupervisor.start_child(
              HTTP.WebSocket.ConnectionSupervisor,

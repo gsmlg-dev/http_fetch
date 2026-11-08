@@ -6,11 +6,19 @@ defmodule HTTP.HTTP3.Stream do
   `{:http_runtime, generation, pid, :connection_ready}` once a QUIC connection is
   established or leased, before request stream admission. Earlier failures
   prove that no request stream was admitted.
+
+  An extended CONNECT relay started with `request_lifecycle` is a proof-bearing
+  lifecycle worker: it returns normally only after its owner confirms that the
+  tunnel's request, native session request and queued actions are settled (or
+  the owner is observed down) and, for an exclusive owner, after the relay's
+  own `Quic.Cleanup` scope confirms native cleanup. Otherwise it marks the
+  tracker unconfirmed; death before return is unconfirmed too.
   """
   alias HTTP.HTTP3.{BodyBridge, ConnectionOwner, ConnectionSupervisor, Pool, PoolKey}
   alias HTTP.RequestLifecycle
   alias HTTP.Runtime.Delivery
   @max_open_attempts 3
+  @settle_timeout 5_000
 
   def start(%HTTP.Request{} = request, subscriber, opts \\ []) when is_pid(subscriber) do
     with :ok <- validate_tunnel_options(opts), do: start_stream(request, subscriber, opts)
@@ -70,12 +78,19 @@ defmodule HTTP.HTTP3.Stream do
     opts =
       Keyword.merge(opts, deadline_at: request_deadline, opening_deadline_at: opening_deadline)
 
+    # A certified tunnel uses the lifecycle's proof-bearing worker kind: tracker
+    # cancellation is a graceful :abort and death before normal return is
+    # sticky uncertainty. Other relays keep their original kind.
+    kind = if certified?(opts), do: :dial, else: :http3_relay
+
     case RequestLifecycle.start_worker(
            opts[:request_lifecycle],
-           :http3_relay,
+           kind,
            opening_deadline,
            fn ->
-             run(request, subscriber, generation, opts)
+             if certified?(opts),
+               do: run_certified(request, subscriber, generation, opts),
+               else: run(request, subscriber, generation, opts)
            end
          ) do
       {:ok, pid} -> {:ok, pid, generation}
@@ -85,6 +100,83 @@ defmodule HTTP.HTTP3.Stream do
 
   def acknowledge(pid, ref), do: send(pid, {:acknowledge, ref})
   def close(pid), do: send(pid, :abort)
+
+  defp certified?(opts),
+    do: opts[:purpose] == :extended_connect and is_pid(opts[:request_lifecycle])
+
+  defp run_certified(request, subscriber, generation, opts) do
+    result = run(request, subscriber, generation, opts)
+    deadline = now() + Keyword.get(opts, :settle_timeout, @settle_timeout)
+
+    proof =
+      with :ok <- settle_stream(Process.get({__MODULE__, :tunnel}), deadline),
+           do: settle_native(Process.get({__MODULE__, :native_cleanup}), deadline)
+
+    if proof != :ok, do: RequestLifecycle.unconfirmed(opts[:request_lifecycle])
+    result
+  end
+
+  defp settle_stream(nil, _deadline), do: :ok
+  defp settle_stream({owner, ref}, deadline), do: settle_stream(owner, List.wrap(ref), deadline)
+
+  defp settle_stream(owner, refs, deadline) do
+    reply =
+      try do
+        ConnectionOwner.settle(owner, self(), refs, max(remaining(deadline), 1))
+      catch
+        :exit, _ -> :exit
+      end
+
+    cond do
+      reply == :settled ->
+        :ok
+
+      # The owner held the only demux and native session state for this stream.
+      not Process.alive?(owner) ->
+        :ok
+
+      now() >= deadline ->
+        :error
+
+      true ->
+        receive do
+        after
+          5 -> :ok
+        end
+
+        settle_stream(owner, pending_refs(reply, refs), deadline)
+    end
+  end
+
+  defp pending_refs({:pending, refs}, _refs), do: refs
+  defp pending_refs(_reply, refs), do: refs
+
+  defp settle_native(nil, _deadline), do: :ok
+
+  defp settle_native(descriptor, deadline) do
+    case Quic.Cleanup.retire(descriptor.lease, {:abs_ms, deadline}) do
+      {:ok, %{cleanup: :confirmed}} -> :ok
+      _ -> :error
+    end
+  end
+
+  # Only a relay-created scope is retired by the relay. Caller-supplied
+  # descriptors keep their caller's retention contract.
+  defp relay_cleanup(connect, opts) do
+    if certified?(opts) and connect[:exclusive?] == true and connect[:quic_cleanup] == nil and
+         connect[:cleanup] == nil do
+      relay = self()
+      Process.put({__MODULE__, :relay_cleanup}, true)
+      Keyword.put(connect, :quic_cleanup, fn _deadline -> native_scope(relay) end)
+    else
+      connect
+    end
+  end
+
+  defp native_scope(relay) do
+    with {:ok, handle, lease} <- Quic.Cleanup.new(owner: relay),
+         do: {:ok, %{handle: handle, lease: lease}}
+  end
 
   defp run(request, subscriber, generation, opts) do
     tunnel? = opts[:purpose] == :extended_connect
@@ -107,6 +199,7 @@ defmodule HTTP.HTTP3.Stream do
                :cleanup
              ])
            ),
+         connect = relay_cleanup(connect, opts),
          {:ok, fields, body} <- headers(request, opts),
          {:ok, owner, lease, ref} <-
            open_request(
@@ -187,10 +280,12 @@ defmodule HTTP.HTTP3.Stream do
   defp open_request(pool, key, connect, request, {deadline, monitor, attempts} = context) do
     with {:ok, owner, lease} <- acquire(pool, key, connect, deadline, monitor) do
       notify_ready(elem(request, 4))
+      Process.put({__MODULE__, :tunnel}, {owner, nil})
       result = open_leased(pool, owner, lease, request, context)
 
       case result do
         {:ok, ref} ->
+          Process.put({__MODULE__, :tunnel}, {owner, ref})
           {:ok, owner, lease, ref}
 
         {:error, {:not_sent, :goaway}} ->
@@ -260,6 +355,9 @@ defmodule HTTP.HTTP3.Stream do
         try do
           case cleanup_descriptor(connect, deadline, monitor) do
             {:ok, cleanup} ->
+              if cleanup && Process.get({__MODULE__, :relay_cleanup}),
+                do: Process.put({__MODULE__, :native_cleanup}, cleanup)
+
               launch_owner(pool, key, lease, connect, cleanup, deadline, monitor)
 
             error ->

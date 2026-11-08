@@ -176,6 +176,61 @@ defmodule HTTP.HTTP3.CleanupIntegrationTest do
     end
   end
 
+  for cause <- [:close, :peer_reset, :tracker_abort] do
+    @cause cause
+    test "exclusive WebSocket tunnel receipt joins its relay-owned native scope after #{@cause}",
+         ctx do
+      receipt = HTTP.ClientCompletion.new()
+      tracker = HTTP.ClientCompletion.tracker(receipt)
+      :ok = HTTP.RequestLifecycle.enter(tracker, :owner)
+
+      request = %{
+        ctx.request
+        | method: :connect,
+          headers: HTTP.Headers.new([{"sec-websocket-version", "13"}])
+      }
+
+      assert {:ok, relay, generation} =
+               Stream.start(request, self(),
+                 pool: ctx.pool,
+                 purpose: :extended_connect,
+                 protocol: "websocket",
+                 request_lifecycle: tracker,
+                 opening_timeout: 3_000
+               )
+
+      assert_receive {:quic_accept, _server}, 2_000
+      {:ok, accepted} = Quic.accept(ctx.server)
+      :ok = Quic.attach(accepted, self())
+      {:ok, control} = Quic.open_stream(accepted, :uni)
+      settings = QuicHttp3.Frame.encode!(:settings, QuicHttp3.Settings.encode!([{8, 1}]))
+      assert {:ok, _} = Quic.send_stream(control, <<0>> <> settings, false)
+      connect = incoming(accepted, 0, bound(2_000))
+      {:ok, block} = QuicHttp3.Qpack.encode_header_block([{":status", "200"}])
+      assert {:ok, _} = Quic.send_stream(connect, QuicHttp3.Frame.encode!(:headers, block), false)
+
+      assert_receive {:http_runtime, ^generation, ^relay, {:opened, %{owner: owner}}}, 2_000
+
+      assert_receive {:http_runtime, ^generation, ^relay, {:headers, [{":status", "200"}], []}},
+                     2_000
+
+      %{cleanup: %{handle: handle}} = :sys.get_state(owner)
+      assert {:pending, _} = Cleanup.status(handle)
+      HTTP.RequestLifecycle.retire_owner(tracker)
+      assert {:error, :cleanup_pending} = HTTP.ClientCompletion.await(receipt, 20)
+
+      case @cause do
+        :close -> Stream.close(relay)
+        :peer_reset -> {:ok, _} = Quic.reset_stream(connect, 0x10C)
+        :tracker_abort -> HTTP.RequestLifecycle.abort(tracker)
+      end
+
+      assert :ok = HTTP.ClientCompletion.await(receipt, 6_000)
+      assert {:ok, %{cleanup: :confirmed}} = Cleanup.status(handle)
+      refute Process.alive?(owner)
+    end
+  end
+
   defp incoming(connection, id, {:abs_ms, deadline} = bound) do
     assert now() < deadline
     assert {:ok, events} = Quic.events(connection)

@@ -32,6 +32,17 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     do: GenServer.cast(owner, {:cancel_open, subscriber, generation})
 
   def cancel(owner, ref), do: GenServer.call(owner, {:cancel, ref})
+
+  @doc """
+  Retires every request and queued open of `subscriber`, then reports settlement.
+
+  Returns `:settled` only when no demux entry, native session request among
+  `refs`, or queued/pending/suspended action remains for that subscriber.
+  Otherwise returns `{:pending, refs}`, including any refs retired by this call.
+  """
+  def settle(owner, subscriber, refs, timeout),
+    do: GenServer.call(owner, {:settle, subscriber, refs}, timeout)
+
   def status(owner), do: GenServer.call(owner, :status)
 
   @impl true
@@ -206,6 +217,27 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     next = remove_request(state, ref)
     action = {:cancel, ref}
     {:reply, :ok, enqueue(next, action)}
+  end
+
+  def handle_call({:settle, subscriber, refs}, _from, state) do
+    {opens, queue} =
+      Enum.split_with(state.queue, &match?({:open, _, ^subscriber, _, _, _, _}, &1))
+
+    state = Enum.reduce(opens, %{state | queue: queue}, &reject(&2, &1, :aborted))
+    owned = for {ref, %{subscriber: ^subscriber}} <- state.requests, do: ref
+
+    state =
+      Enum.reduce(owned, state, fn ref, acc ->
+        enqueue(remove_request(acc, ref), {:cancel, ref})
+      end)
+
+    refs = Enum.uniq(owned ++ refs)
+
+    settled? =
+      owned == [] and not Enum.any?(refs, &Map.has_key?(state.session.requests, &1)) and
+        not Enum.any?(actions(state), &involves?(&1, subscriber, refs))
+
+    {:reply, if(settled?, do: :settled, else: {:pending, refs}), state}
   end
 
   @impl true
@@ -802,14 +834,22 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     Enum.reduce(actions, state, &reject(&2, &1, reason))
   end
 
-  defp open_count(state) do
-    contexts =
-      state.queue ++
-        Enum.map(state.continuations, &elem(&1, 0)) ++
-        if(state.pending, do: [state.pending], else: [])
+  defp open_count(state),
+    do: Enum.count(actions(state), &match?({:open, _, _, _, _, _, _}, &1))
 
-    Enum.count(contexts, &match?({:open, _, _, _, _, _, _}, &1))
+  defp actions(state) do
+    state.queue ++
+      Enum.map(state.continuations, &elem(&1, 0)) ++
+      if(state.pending, do: [state.pending], else: [])
   end
+
+  defp involves?({:open, _, subscriber, _, _, _, _}, subscriber, _refs), do: true
+  defp involves?({:open, _, _, _, _, _, _}, _subscriber, _refs), do: false
+
+  defp involves?(action, _subscriber, refs) when is_tuple(action),
+    do: tuple_size(action) >= 2 and elem(action, 1) in refs
+
+  defp involves?(_action, _subscriber, _refs), do: false
 
   defp pending_budget(state) do
     min(state.timeout, max(state.session.pending.deadline - now(), 1))

@@ -75,7 +75,7 @@ EventSource support explicit HTTPS HTTP/3 beta with a dynamic-table QPACK
 decoder (static/literal encoder); Fetch also offers opt-in Alt-Svc discovery.
 Raw Quic/Abyss servers accept authenticated peer migration with bounded path
 validation; explicit local client migration and resumption/0-RTT remain unsupported.
-WebSocket over HTTP/3 is experimental. HTTP client migration and WebTransport remain
+WebSocket over HTTP/3 is supported with a cleanup receipt. HTTP client migration and WebTransport remain
 unsupported; raw `Quic.capabilities().http3` remains false. App presence and
 negotiated ALPN alone do not establish application readiness or acceptance.
 

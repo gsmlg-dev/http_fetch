@@ -85,11 +85,52 @@ is no H3 fallback. TCP backend, address pin and infinite opening timeout options
 are rejected for H3. `http3_profile` and `http3_reuse` select the existing runtime
 policies.
 
-`HTTP.ClientCompletion.await(HTTP.WebSocket.completion(socket), timeout)` returns
-`{:error, {:unsupported_completion, :http3}}`. The internal lifecycle tracker is
-retained, but it does not certify QUIC/native cleanup. A clean Close event is
-WebSocket handshake evidence; native resource completion requires the separate
-QUIC cleanup contract and is not exposed by this public receipt.
+`HTTP.ClientCompletion.await(HTTP.WebSocket.completion(socket), timeout)` is a
+supported H3 barrier; its exact meaning is defined in the next section. A clean
+Close event remains WebSocket handshake evidence only.
+
+## WebSocket/H3 completion receipt
+
+Design, 2026-11-09. The public receipt reuses the existing client/attempt
+`HTTP.RequestLifecycle` trackers; no new public type or engine API was added.
+
+Evidence chain:
+
+1. A tunnel relay started with `request_lifecycle` (every `HTTP.WebSocket`
+   H3 attempt) is registered under the lifecycle's proof-bearing worker kind.
+   Tracker cancellation reaches it as a graceful `:abort`; death before a
+   normal return (kill, crash) is sticky uncertainty. Untracked tunnels and all
+   Fetch/EventSource relays keep their original `:http3_relay` kind and code.
+2. Before returning, the relay asks its owner
+   `ConnectionOwner.settle(owner, relay, refs, timeout)`. The owner rejects any
+   queued open by that relay, removes the relay's demux entries, enqueues
+   native `Session.cancel` (RESET_STREAM + STOP_SENDING + request removal) and
+   replies `:settled` only when no demux entry, no native session request among
+   the tracked refs and no queued, pending or suspended action for the relay or
+   those refs remains. Otherwise it replies `{:pending, refs}`; the relay polls
+   within a 5 s bound. An owner observed down also settles the stream: that
+   process held the only demux and native session state for it.
+3. With `http3_reuse: false` (exclusive owner) the relay supplies its own
+   `quic_cleanup` callback, creating a `Quic.Cleanup` scope it owns. After
+   lease release and stream settlement it calls `Quic.Cleanup.retire/2` and
+   requires `{:ok, %{cleanup: :confirmed}}`: the exclusive endpoint,
+   connection, IO actor and UDP Port were joined. Caller-supplied
+   `quic_cleanup`/`cleanup` descriptors are never retired by the relay.
+4. Missing proof (owner alive but unsettled at the bound, native scope pending
+   or unconfirmed, relay killed) calls `RequestLifecycle.unconfirmed/1`; the
+   public result is `{:error, :cleanup_unconfirmed}`. Lifecycle-registered
+   exclusive owner/watchdog/connector processes must also go DOWN.
+
+What `:ok` proves: the WebSocket connection process, its relay and (exclusive)
+owner processes terminated; the CONNECT stream was retired from its owner,
+natively cancelled or finished; and, for an exclusive owner, native QUIC
+cleanup was confirmed. Clean Close, peer Close+FIN, peer stream reset, opening
+cancellation/deadline, refusal and owner death all reach this check.
+
+What it does not prove: peer application receipt; the peer's view of stream
+closure; for a shared pooled owner, closure or native reclamation of the QUIC
+connection, endpoint or UDP Port, which stay open for siblings by design (no
+shared-owner native receipt exists); kernel or allocator memory reclamation.
 
 ## Pure draft-17 codecs
 

@@ -13,9 +13,9 @@ its independent acceptance gate.
 | --- | --- | --- | --- |
 | 1 | Fetch Alt-Svc discovery, opt-in H3 for `:auto`, safe fallback | none | Committed 6d8bbbc; independent-peer gate pending |
 | 2 | Dynamic QPACK decoder (RFC 9204), bounded table and blocked streams | none | Done; aioquic gate PASS |
-| 3 | WebSocket/H3: native completion receipt, drop experimental label | QUIC cleanup receipt contract | Planned |
-| 4 | WebTransport live adapter on `HTTP.HTTP3.ConnectionOwner` | WP3 runtime contract; matching draft-17 peer for acceptance | Planned; acceptance blocked |
-| 5 | HTTP-layer 0-RTT / migration exposure | QUIC engine negative acceptance (Lane A) | Deferred |
+| 3 | WebSocket/H3: native completion receipt, drop experimental label | QUIC cleanup receipt contract | Done; independent gate PASS |
+| 4 | WebTransport live adapter on `HTTP.HTTP3.ConnectionOwner` | WP3 runtime contract; matching draft-17 peer for acceptance | In progress |
+| 5 | HTTP-layer resumption, 0-RTT for safe requests, migration for exclusive long-lived sessions | WP3, WP4 | Planned; capability flags stay false until engine negative acceptance |
 
 ## WP1: Alt-Svc auto-HTTP/3 (Fetch)
 
@@ -85,3 +85,38 @@ its independent acceptance gate.
   dynamic table) serving repeated and large header sets over public Fetch.
 - No regressions in the existing H3, Fetch H3, EventSource H3 and WebSocket H3
   suites.
+
+## WP3: WebSocket/H3 supported
+
+- `HTTP.WebSocket` H3 completion receipt backed by the runtime's native QUIC
+  cleanup contract; a receipt is confirmed only when cleanup is proven, and its
+  meaning for shared pooled owners is documented precisely.
+- Remove the experimental label once the receipt and the independent gates pass.
+
+## WP4: WebTransport live adapter
+
+- Wire `HTTP.WebTransport.Transport.QUIC` to `HTTP.HTTP3.ConnectionOwner` on an
+  exclusive H3 connection using the draft-17 profile: extended CONNECT
+  `webtransport-h3`, WT bidi/uni stream association, HTTP DATAGRAM, capsules,
+  reliable reset, close/drain, bounded credit.
+- Independent acceptance needs a peer matching draft-17 plus reliable reset
+  draft-11. Re-audit current upstream releases; if none matches, the gate stays
+  BLOCKED and `Profile.supported?/0` stays false. In-repo fixture tests still
+  cover the live path.
+
+## WP5: HTTP-layer resumption, 0-RTT and migration
+
+- Resumption (R1): opt-in `http3_resumption: true` for Fetch, EventSource and
+  WebSocket H3 using an endpoint-local ticket authority shared by the runtime
+  pool, partitioned by origin/trust/profile.
+- 0-RTT (R2): opt-in `early_data: true` per Fetch request, allowed only for safe
+  methods with no request body (GET/HEAD/OPTIONS). Requires remembered peer
+  SETTINGS (RFC 9114 §7.2.4.2). If 0-RTT is rejected, the request is re-sent
+  once after the handshake (it is safe). A 425 Too Early response to an early
+  request is retried once after the handshake (RFC 8470). Unsafe methods are
+  never sent early.
+- Migration: `migrate/2` for long-lived exclusive H3 sessions (WebSocket with
+  `http3_reuse: false`, WebTransport), forwarding to `Quic.migrate/2` through the
+  owner. Pooled Fetch connections are not migratable.
+- Engine capability flags stay false until Lane A's negative acceptance completes;
+  these HTTP options are documented as beta.

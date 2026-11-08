@@ -106,6 +106,27 @@ defmodule HTTP.WebSocket.ClientCompletionTest do
     end
   end
 
+  @tag :integration
+  test "HTTP/3 opening deadline yields a confirmed receipt instead of unsupported" do
+    # A bound but silent UDP socket never completes the QUIC handshake.
+    {:ok, udp} = :gen_udp.open(0, [:binary, ip: {127, 0, 0, 1}, active: false])
+    on_exit(fn -> :gen_udp.close(udp) end)
+    {:ok, port} = :inet.port(udp)
+    root = Path.expand("../../../elixir_quic/test/fixtures/tls/root.pem", __DIR__)
+
+    socket =
+      WebSocket.new("wss://127.0.0.1:#{port}/ws", [],
+        http_version: :http3,
+        opening_timeout: 300,
+        ssl: [cacertfile: root, reference_identity: {:dns_id, "example.test"}]
+      )
+
+    assert %WebSocket{} = socket
+    assert_receive {WebSocket, ^socket, %HTTP.WebSocket.Event.Error{}}, 2_000
+    assert_receive {WebSocket, ^socket, %HTTP.WebSocket.Event.Close{was_clean: false}}, 2_000
+    assert :ok = ClientCompletion.await(WebSocket.completion(socket), 6_000)
+  end
+
   test "invalid protocols retain existing constructor error" do
     assert {:error, _} = WebSocket.new("wss://example.test", ["duplicate", "duplicate"])
   end
