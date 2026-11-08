@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Add explicit exclusive-client QUIC migration, negotiated reliable-prefix stream
+  reset, endpoint-local PSK-DHE resumption and opt-in replayable early-data source
+  APIs. Preserve finite operation references, path/resource limits, authenticated
+  readiness and the no-automatic-replay contract.
+- Add the pure QUIC TLS continuation provider, bounded ticket actions and
+  transcript/binder regressions without changing TCP TLS policy.
+- Add explicit WebSocket over HTTP/3 through extended CONNECT, with existing
+  framing, masking, delivery credit, Close handling and strict protocol selection.
+- Add versioned WebTransport draft-17 primitives and bounded application session,
+  waiter, stream and operation lifecycles. Its default network backend remains
+  unsupported pending live runtime integration and matching independent acceptance.
+
+### Fixed
+- Retire migrated QUIC sockets without processing stale path traffic or returning
+  receive credit to an already terminated IO process.
+- Deliver authenticated readiness before retained early application events.
+
+### Validation
+- Combined current-source regression: 1,077 tests with zero failures, strict
+  compilation and three independent WebSocket/H3 gates passed. Separate QUIC
+  positive wire gates passed; complete adversarial acceptance remains open and
+  the corresponding global capability flags remain unchanged.
+
 ## [1.0.0-rc.9] - 2026-11-08
 
 ### Added
