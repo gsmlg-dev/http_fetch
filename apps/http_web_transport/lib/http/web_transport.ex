@@ -14,6 +14,7 @@ defmodule HTTP.WebTransport do
 
   alias HTTP.WebTransport.CloseInfo
   alias HTTP.WebTransport.DatagramDuplexStream
+  alias HTTP.WebTransport.Operation
   alias HTTP.WebTransport.Options
   alias HTTP.WebTransport.Promise
   alias HTTP.WebTransport.SendGroup
@@ -120,6 +121,20 @@ defmodule HTTP.WebTransport do
   @spec get_stats(t()) :: {:ok, HTTP.WebTransport.Stats.t()} | {:error, term()}
   def get_stats(transport), do: connection_call(transport, :get_stats, {:error, :closed})
 
+  @doc """
+  Reads the local callback result for a mutation whose caller timed out.
+
+  The last 128 results are retained; eviction or an unavailable session returns
+  `:unknown`. A callback result does not establish remote delivery. Never retry
+  an indeterminate operation automatically.
+  """
+  @spec operation_status(t(), reference()) :: term()
+  def operation_status(%__MODULE__{pid: pid}, ref) when is_reference(ref) do
+    GenServer.call(pid, {:operation_status, ref}, @call_timeout)
+  catch
+    :exit, _ -> :unknown
+  end
+
   @spec close(t()) :: :ok | {:error, term()}
   def close(transport), do: close(transport, [])
 
@@ -152,12 +167,22 @@ defmodule HTTP.WebTransport do
   end
 
   defp connection_call(%__MODULE__{pid: pid}, request, default) when is_pid(pid) do
-    GenServer.call(pid, request, @call_timeout)
+    if mutation?(request) do
+      Operation.call(pid, request, @call_timeout)
+    else
+      GenServer.call(pid, request, @call_timeout)
+    end
   catch
     :exit, _reason -> default
   end
 
   defp connection_call(_transport, _request, default), do: default
+
+  defp mutation?({kind, _})
+       when kind in [:create_bidirectional_stream, :create_unidirectional_stream, :close],
+       do: true
+
+  defp mutation?(_), do: false
 
   defp put_ref(init, ref) when is_map(init), do: Map.put(init, :ref, ref)
   defp put_ref(init, ref) when is_list(init), do: Keyword.put(init, :ref, ref)

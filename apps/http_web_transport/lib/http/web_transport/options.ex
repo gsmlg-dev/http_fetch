@@ -28,6 +28,10 @@ defmodule HTTP.WebTransport.Options do
     "max_datagram_size" => :max_datagram_size,
     "max_incoming_datagrams" => :max_incoming_datagrams,
     "max_outgoing_datagrams" => :max_outgoing_datagrams,
+    "max_pending_waiters" => :max_pending_waiters,
+    "max_streams" => :max_streams,
+    "max_buffered_bytes" => :max_buffered_bytes,
+    "max_buffered_items" => :max_buffered_items,
     "owner" => :owner,
     "protocols" => :protocols,
     "quic" => :quic,
@@ -63,6 +67,10 @@ defmodule HTTP.WebTransport.Options do
             max_incoming_datagrams: @default_max_datagrams,
             max_outgoing_datagrams: @default_max_datagrams,
             max_datagram_size: @default_max_datagram_size,
+            max_pending_waiters: 128,
+            max_streams: 128,
+            max_buffered_bytes: 262_144,
+            max_buffered_items: 1_024,
             ref: nil
 
   @type t :: %__MODULE__{
@@ -87,6 +95,10 @@ defmodule HTTP.WebTransport.Options do
           max_incoming_datagrams: pos_integer(),
           max_outgoing_datagrams: pos_integer(),
           max_datagram_size: pos_integer(),
+          max_pending_waiters: pos_integer(),
+          max_streams: pos_integer(),
+          max_buffered_bytes: pos_integer(),
+          max_buffered_items: pos_integer(),
           ref: reference()
         }
 
@@ -121,6 +133,10 @@ defmodule HTTP.WebTransport.Options do
          max_outgoing_datagrams:
            Keyword.get(init, :max_outgoing_datagrams, @default_max_datagrams),
          max_datagram_size: Keyword.get(init, :max_datagram_size, @default_max_datagram_size),
+         max_pending_waiters: Keyword.get(init, :max_pending_waiters, 128),
+         max_streams: Keyword.get(init, :max_streams, 128),
+         max_buffered_bytes: Keyword.get(init, :max_buffered_bytes, 262_144),
+         max_buffered_items: Keyword.get(init, :max_buffered_items, 1_024),
          ref: Keyword.get(init, :ref, make_ref())
        }}
     end
@@ -151,7 +167,8 @@ defmodule HTTP.WebTransport.Options do
   end
 
   defp normalize_init(init) when is_list(init) do
-    with :ok <- validate_tls_backend(Keyword.get(init, :tls_backend)),
+    with :ok <- validate_limits(init),
+         :ok <- validate_tls_backend(Keyword.get(init, :tls_backend)),
          {:ok, headers} <- normalize_headers(Keyword.get(init, :headers, [])),
          {:ok, owner} <- normalize_owner(Keyword.get(init, :owner, self())),
          {:ok, allow_pooling} <-
@@ -232,6 +249,20 @@ defmodule HTTP.WebTransport.Options do
   end
 
   defp normalize_init(_init), do: {:error, :invalid_options}
+
+  defp validate_limits(init) do
+    Enum.reduce_while(
+      [:max_pending_waiters, :max_streams, :max_buffered_bytes, :max_buffered_items],
+      :ok,
+      fn key, :ok ->
+        case Keyword.fetch(init, key) do
+          :error -> {:cont, :ok}
+          {:ok, value} when is_integer(value) and value > 0 -> {:cont, :ok}
+          _ -> {:halt, {:error, {:invalid_limit, key}}}
+        end
+      end
+    )
+  end
 
   defp validate_tls_backend(nil), do: :ok
   defp validate_tls_backend(_backend), do: {:error, :tls_backend_not_supported_for_quic}

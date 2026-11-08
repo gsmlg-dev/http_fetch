@@ -13,9 +13,13 @@ defmodule HTTP.WebTransport.Promise do
 
   @spec await(t(), timeout()) :: :ok | {:ok, term()} | {:error, term()}
   def await(%__MODULE__{pid: pid, kind: kind}, timeout \\ :infinity) when is_pid(pid) do
-    GenServer.call(pid, {:await, kind}, timeout)
+    GenServer.call(pid, {:await, kind, timeout}, call_timeout(timeout))
   catch
     :exit, {:timeout, _call} -> {:error, :timeout}
     :exit, _reason -> {:error, :closed}
   end
+
+  defp call_timeout(:infinity), do: :infinity
+  defp call_timeout(timeout) when is_integer(timeout) and timeout >= 0, do: timeout + 1_000
+  defp call_timeout(_), do: 1_000
 end

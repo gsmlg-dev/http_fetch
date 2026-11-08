@@ -7,6 +7,8 @@ defmodule HTTP.WebTransport.ReceiveStream do
 
   @type t :: %__MODULE__{transport: HTTP.WebTransport.t(), ref: term()}
 
+  alias HTTP.WebTransport.Operation
+
   @call_timeout 5_000
 
   @spec read(t(), keyword() | map()) :: {:ok, binary()} | :fin | {:error, term()}
@@ -25,7 +27,11 @@ defmodule HTTP.WebTransport.ReceiveStream do
     options = if is_map(options), do: Map.to_list(options), else: options
     code = Keyword.get(options, :code, 0)
 
-    GenServer.call(transport.pid, {:cancel_receive_stream, stream_ref, code}, @call_timeout)
+    Operation.call(
+      transport.pid,
+      {:cancel_receive_stream, stream_ref, code},
+      @call_timeout
+    )
   catch
     :exit, _reason -> {:error, :closed}
   end

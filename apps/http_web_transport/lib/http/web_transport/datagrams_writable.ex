@@ -11,12 +11,14 @@ defmodule HTTP.WebTransport.DatagramsWritable do
           send_order: integer()
         }
 
+  alias HTTP.WebTransport.Operation
+
   @call_timeout 5_000
 
   @spec write(t(), binary()) :: :ok | {:error, term()}
   def write(%__MODULE__{datagrams: %{transport: transport}} = writable, bytes)
       when is_binary(bytes) do
-    GenServer.call(
+    Operation.call(
       transport.pid,
       {:send_datagram, bytes, send_group: writable.send_group, send_order: writable.send_order},
       @call_timeout
