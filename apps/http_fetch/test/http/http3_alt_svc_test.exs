@@ -114,6 +114,18 @@ defmodule HTTP.FetchHTTP3AltSvcTest do
              await(promise)
   end
 
+  test "TCP-form ex_ssl reference identity is carried onto the H3 route", context do
+    Cache.put(context.origin, ~s(h3=":#{context.udp_port}"))
+
+    ssl = context.ssl ++ [ex_ssl: [reference_identity: {:dns_id, "localhost"}]]
+    promise = fetch(context, ssl: ssl)
+    stream = context.server |> accept() |> await_stream(0)
+    _items = await_fin(stream, [])
+    reply(stream, 200, "h3 identity")
+
+    assert %HTTP.Response{http_version: :http3, body: "h3 identity"} = await(promise)
+  end
+
   test "ineligible routes ignore cached alternatives", context do
     Cache.put(context.origin, ~s(h3=":#{context.udp_port}"))
     serve_h1(context.listener, [], "explicit backend")

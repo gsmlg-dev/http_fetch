@@ -113,3 +113,6 @@ the original deadline and marks the origin broken for 300 s (no H3 routing or
 re-learning). Failures after readiness, including indeterminate admission, are
 returned without replay. Redirect hops on an Alt-Svc route re-select per origin.
 Alternatives on a different host are ignored.
+On the H3 route a TCP-form `ssl: [ex_ssl: [reference_identity: id]]` is lifted
+to the flat QUIC `reference_identity` when it is the only `ex_ssl` setting; any
+other `ex_ssl` setting keeps the request on TCP.

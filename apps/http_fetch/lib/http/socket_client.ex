@@ -84,11 +84,29 @@ defmodule HTTP.SocketClient do
   defp alt_svc_runtime_opts(%{port: port}),
     do: [http3_connect_port: port, connection_ready_event: true]
 
-  defp http3_request(%Request{} = request),
-    do: %{
-      request
-      | transport_options: Keyword.put(request.transport_options, :http_version, :http3)
-    }
+  defp http3_request(%Request{} = request) do
+    options =
+      request.transport_options
+      |> Keyword.put(:http_version, :http3)
+      |> Keyword.update(:ssl, [], &quic_ssl/1)
+
+    %{request | transport_options: options}
+  end
+
+  # TCP takes reference identity under `ex_ssl:`, QUIC takes it flat. Lift it
+  # when it is the only ex_ssl setting; any other TCP-only setting is kept so
+  # the QUIC route fails eligibility and the request stays on TCP.
+  defp quic_ssl(ssl) when is_list(ssl) do
+    case Keyword.get(ssl, :ex_ssl) do
+      [reference_identity: identity] ->
+        ssl |> Keyword.delete(:ex_ssl) |> Keyword.put_new(:reference_identity, identity)
+
+      _ ->
+        ssl
+    end
+  end
+
+  defp quic_ssl(ssl), do: ssl
 
   defp tcp_request(%Request{} = request) do
     request

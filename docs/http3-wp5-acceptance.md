@@ -121,6 +121,64 @@ Updating only the acceptance peer fixes both independent and native upload
 integrity without synthesizing a client length or weakening STOP_SENDING
 handling. The existing TLS fingerprint fixture remains a separate gate.
 
+## Alt-Svc
+
+The opt-in discovery path (`http_version: :auto, alt_svc: true`, see the
+[Fetch contract](http3-fetch-contract.md#opt-in-alt-svc-discovery)) has its own
+fail-closed gate. It does not need Docker:
+
+```sh
+MIX_ENV=test mix compile --warnings-as-errors
+uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/alt_svc_gate.py
+```
+
+`alt_svc_gate.py` rejects aioquic other than `1.2.0`, issues an ephemeral CA and
+a leaf with `example.test` and IP `127.0.0.1` SANs (shared with
+`public_gate.py`), and owns every peer: an aioquic 1.2.0 HTTP/3 peer
+(`alt_svc_peer.py`, which adds `/authority`) and three Python standard-library
+`ssl` HTTP/1.1 origins (`alt_svc_origin.py`) whose responses carry `Alt-Svc`.
+The public-API driver `alt_svc_gate.exs` checks `http_version`, `x-peer` and body
+bytes for every response:
+
+- **Positive.** The origin advertises `h3=":Q"; ma=60` for the aioquic UDP port.
+  The first request must be TCP (`:http1`/`:http2`) from the origin; the next 21
+  (GET, `/authority`, 61,719-byte POST digest, streamed 8MiB download and 16
+  concurrent POSTs) must be `:http3` from aioquic, with `:authority` equal to
+  the TCP origin.
+- **Blackhole.** `h3` points to a UDP socket held by the launcher that never
+  answers. With `connect_timeout: 2_000, timeout: 10_000`, the second request
+  must fall back to TCP within the deadline, and the third (8MiB) must stay on
+  TCP in less than `connect_timeout` because the origin is marked broken.
+- **Closed.** As blackhole, but the advertised UDP port has no listener.
+
+Result on `ad2bf0e` plus the gate scripts, macOS arm64, 2026-11-09, three
+consecutive runs, all exit 0 (one shown):
+
+```text
+Alt-Svc positive: TCP http1 learned h3=:52123; 21 subsequent requests HTTP/3 via aioquic-1.2.0 with origin authority: PASS
+Alt-Svc negative blackhole udp=52085: fallback http1 in 2010ms (deadline 10000ms, connect_timeout 2000ms); next request http1 in 10ms: PASS
+Alt-Svc negative closed udp=57457: fallback http1 in 2013ms (deadline 10000ms, connect_timeout 2000ms); next request http1 in 11ms: PASS
+Alt-Svc independent acceptance result: PASS
+```
+
+Both negatives fell back through the opening timeout (about `connect_timeout`);
+the closed port produced no faster `{:http3_not_established, _}` on macOS. No
+peer processes or certificate directories remained after the runs.
+
+Not run: a Caddy-based Alt-Svc variant (same-port `h3` advertised by Caddy's
+own HTTPS listener). Docker was unavailable on the run host. The TCP side here
+is HTTP/1.1 only, so HTTP/2-to-HTTP/3 discovery is not independently covered.
+
+The fixture leaf `apps/elixir_quic/test/fixtures/tls/leaf.pem` carries only
+`DNS:example.test`, and no single `ssl:` option set overrides the identity on
+both transports: TCP rejects a flat `reference_identity`
+(`{:options, {:reference_identity, :unsupported_or_invalid}}`) and requires
+`ex_ssl: [reference_identity: ...]`, which QUIC TLS options did not accept. The
+gate therefore uses an IP-SAN certificate. Follow-up fix: the Alt-Svc H3 route
+now lifts `ssl: [ex_ssl: [reference_identity: id]]` into the flat QUIC form when
+it is the only `ex_ssl` setting (other TCP-only settings keep the request on TCP);
+covered by `http3_alt_svc_test.exs`.
+
 ## Acceptance limits
 
 These fixtures do not establish dynamic QPACK, 0-RTT, migration, Alt-Svc racing,
