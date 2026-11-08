@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0-rc.10] - 2026-11-08
 
 ### Added
 - Add explicit exclusive-client QUIC migration, negotiated reliable-prefix stream
@@ -27,9 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Validation
 - Combined current-source regression: 1,077 tests with zero failures, strict
-  compilation and three independent WebSocket/H3 gates passed. Separate QUIC
-  positive wire gates passed; complete adversarial acceptance remains open and
-  the corresponding global capability flags remain unchanged.
+  compilation, root Credo and formatting passed. Three independent WebSocket/H3
+  gates passed before the final behavior-preserving TLS lint refactoring.
+  Separate QUIC positive wire gates passed; complete adversarial acceptance
+  remains open and the corresponding global capability flags remain unchanged.
 
 ## [1.0.0-rc.9] - 2026-11-08
 

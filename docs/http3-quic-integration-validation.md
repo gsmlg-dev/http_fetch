@@ -115,9 +115,27 @@ by the lanes remain uncertified; the follow-up only certifies ordinary root Cred
 The joint scope does not include a whole-repository quality/E2E run, browser,
 production, remote CI, published artifacts or release verification.
 
+Remote checks for the integrated `8c095fc` source were inspected before release.
+Test, E2E, Public HTTP3 acceptance and Server packages passed. CI run
+[`42490698385`](https://github.com/gsmlg-dev/http_fetch/actions/runs/42490698385)
+reported the following failures:
+
+| Check | Observed failure |
+| --- | --- |
+| QUIC Dialyzer | `streams.ex:92`: `new/1` opaque subtype differs from success typing |
+| ExSSL Dialyzer | `quic.ex:181`: unreachable pattern |
+| WebSocket Dialyzer | `web_socket.ex:178`: opaque completion pattern and map guard |
+| WebTransport Dialyzer | `session.ex:1086`: unmatched return types |
+| No-OTP production release proof | `complete production source census changed`; source audit stopped before runtime proof |
+
+These checks have not been bypassed or certified clean. Integration and other CI
+jobs were still running at that inspection. Detailed job logs and annotations are
+retained under the evidence directory's `release-preflight` subdirectory.
+
 The original coordinator checkpoint made no source changes or delivery actions.
 The user subsequently authorized main integration and a GitHub patch release;
-the follow-up above records the additional lint refactoring before push. Release
-version and GitHub-only versus unified Hex publication are still awaiting
-clarification. The existing user-owned untracked plan remains preserved. The
+the follow-up above records the additional lint refactoring before push. Main
+was pushed at `8c095fc`. The user confirmed `1.0.0-rc.10` through the existing
+unified GitHub/Hex publication workflow. Publication results require separate
+verification. The existing user-owned untracked plan remains preserved. The
 overall implementation programme remains incomplete.
