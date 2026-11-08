@@ -26,13 +26,16 @@ defmodule SSL.QUIC.Config do
     :profile,
     :limits,
     :depth,
-    :customize_hostname_check
+    :customize_hostname_check,
+    :resumption
   ]
 
   def build(role, options) when role in [:client, :server] and is_list(options) do
     with true <- Keyword.keyword?(options),
          true <- Enum.all?(Keyword.keys(options), &(&1 in @keys)),
          true <- Keyword.keys(options) == Enum.uniq(Keyword.keys(options)),
+         {:ok, resumption} <- SSL.QUIC.Resumption.policy(Keyword.get(options, :resumption)),
+         true <- role != :server or is_nil(resumption) or is_nil(resumption.session),
          {:ok, limits} <- limits(Keyword.get(options, :limits, [])),
          {:ok, ciphers} <-
            algorithms(options, :ciphers, :cipher_suite, Capabilities.cipher_ids(0x0304)),
@@ -68,6 +71,7 @@ defmodule SSL.QUIC.Config do
       {:ok,
        %{
          role: role,
+         resumption: resumption,
          ciphers: ciphers,
          groups: groups,
          alpn: alpn,

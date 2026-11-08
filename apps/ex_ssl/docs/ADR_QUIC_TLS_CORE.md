@@ -48,3 +48,15 @@ must remain observable without becoming advertised supported algorithms. No
 JA3/JA4 library implementation exists at the starting HEAD; the existing Caddy
 fixture is an independent expected-output source, not a substitute for an
 analyzer. Fingerprints must be recomputed from emitted/received bytes.
+
+## QUIC continuation extension (2026-11-08)
+
+The opt-in QUIC provider now accepts one caller-resolved continuation at a time.
+`SSL.QUIC.Resumption` validates QUIC session bindings and current cached PKIX
+credentials; `SSL.Protocol.Resumption` verifies exact-byte binders. The server
+core derives fresh PSK-DHE secrets only after an adapter-level commit receipt,
+including consumption before HRR. Shared client EE verification enables early
+data only on the explicit QUIC path, leaving TCP's rejection policy unchanged.
+Storage, clocks, leases, quota and network IO remain runtime responsibilities.
+See [the contract](../../../docs/quic/tls-continuation-contract.md); provider
+implementation and complete transport acceptance are separate gates.

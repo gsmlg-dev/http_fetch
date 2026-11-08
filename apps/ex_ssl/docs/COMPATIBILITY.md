@@ -756,3 +756,17 @@ migration/release gates.
 Final source regression passes20 properties/3485 tests with integration included;
 Core transport/source-pin checks pass27/27, strict compile and root formatting pass.
 This does not replace the remaining candidate/package/platform and release gates.
+
+## Experimental QUIC resumption provider (2026-11-08)
+
+`SSL.QUIC.continue/3` adds caller-owned lookup/commit/store continuations and
+private ticket receipt actions. Enabled clients revalidate cached PKIX/name and
+algorithm policy; selected binder/Finished failures are fatal. Server resumed
+HRR consumes CH1 once and verifies CH2 over the rewritten transcript. Early
+traffic secrets require a separate opt-in policy and positive runtime admission;
+Finished still gates completion. This changes no TCP option or default policy.
+
+The source provider was independently exercised with aioquic in both roles;
+complete QUIC packet-level R1/R2 acceptance remains unrun and capability flags
+remain false. See the [contract](../../../docs/quic/tls-continuation-contract.md)
+and [current evidence](../../../docs/quic/tls-resumption-validation.md).

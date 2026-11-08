@@ -442,3 +442,18 @@ The optional full local integration command is not rerun for this syntax-only
 change. Earlier macOS TCP failures above remain historical evidence, not current
 passes or formatter failures. The user's final instruction explicitly authorizes
 commit/push and the v0.7.1 GitHub patch release.
+
+## QUIC continuation provider — 2026-11-08
+
+Implemented opt-in record-free session lookup/atomic-commit/store/ticket-receipt
+continuations, selected binder/PSK-DHE/HRR authentication and separately enabled
+early-secret/acceptance actions. No clock, storage, process or transport IO is
+added to the TLS state transitions. TCP default policy remains unchanged.
+
+Current provider tests, independent aioquic full/resumed traffic-secret evidence
+and explicit unrun full QUIC runtime gates are maintained in
+[the Task B validation ledger](../../../docs/quic/tls-resumption-validation.md).
+The [continuation contract](../../../docs/quic/tls-continuation-contract.md) is the
+public integration boundary. Capability flags remain false until full R1/R2
+transport acceptance; the historical certificate-only evidence above does not
+establish those new capabilities.

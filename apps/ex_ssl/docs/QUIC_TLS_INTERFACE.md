@@ -194,11 +194,16 @@ encoding/lengths produce `decode_error`. Missing QUIC parameters remain
 The `SSL.QUIC` function signatures, ordered-action contract and error domains
 are unchanged; callers need no migration, but now receive the corrected alerts.
 
-Local resumption, 0-RTT and server-mTLS requests are unsupported configuration.
-A legal peer PSK/early-data proposal can be declined for a certificate handshake;
-no PSK is selected and no early traffic secret is produced. Unknown PSK mode IDs
-remain observable and unselected. A completed client boundedly parses and ignores
-NewSessionTicket, retaining no tickets. Unexpected post-handshake messages,
+The default certificate-only policy declines legal peer PSK/early-data offers.
+Opt-in `resumption` adds `continue/3` with private lookup, atomic commit and store
+requests and client ticket receipts, described in the
+[continuation contract](../../../docs/quic/tls-continuation-contract.md).
+Early traffic secrets require an explicit separate early-data policy; server
+secrets and acceptance are gated by a successful atomic commit receipt. These
+provider functions do not establish transport acceptance, so capability flags
+remain false. Server mTLS remains unsupported. Unknown PSK mode IDs remain
+observable and unselected. Clients without enabled resumption decode and ignore
+tickets, while validating QUIC's `0xffffffff` early-data maximum. Unexpected post-handshake messages,
 including TLS KeyUpdate and post-handshake authentication, terminate the instance.
 TLS KeyUpdate returns `kind: :tls, alert: :unexpected_message` (QUIC 0x010a).
 Post-handshake CertificateRequest on the client returns `kind: :quic` (QUIC

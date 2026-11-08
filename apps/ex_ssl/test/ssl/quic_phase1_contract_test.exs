@@ -184,6 +184,8 @@ defmodule SSL.QUIC.Phase1ContractTest do
                :cipher_suite,
                :alpn,
                :allowed_algorithms,
+               :resumed,
+               :early_status,
                :peer_parameters_authenticated
              ])
 

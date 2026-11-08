@@ -36,7 +36,14 @@ defmodule SSL.Protocol.HandshakeCore do
     @moduledoc false
     @derive {Inspect, only: [:identity]}
     @enforce_keys [:client_hello, :server_hello, :client_key_pair, :trust_source, :identity]
-    defstruct @enforce_keys ++ [client_identity: nil, ticket: nil, enable_tickets: false]
+    defstruct @enforce_keys ++
+                [
+                  client_identity: nil,
+                  ticket: nil,
+                  enable_tickets: false,
+                  allow_early_data: false
+                ]
+
     @type t :: %__MODULE__{}
   end
 
@@ -207,7 +214,12 @@ defmodule SSL.Protocol.HandshakeCore do
 
     with {:ok, %EncryptedExtensions{} = message} <-
            decode_message(encoded, EncryptedExtensions, options),
-         :ok <- validate_encrypted_extensions(message, state.offer),
+         :ok <-
+           validate_encrypted_extensions(
+             message,
+             state.offer,
+             state.input.allow_early_data and selected_ticket?(state.input)
+           ),
          :ok <- resumed_alpn(state.input, selected_alpn(message)) do
       {:ok,
        %{
@@ -647,9 +659,18 @@ defmodule SSL.Protocol.HandshakeCore do
     end
   end
 
-  defp validate_encrypted_extensions(%EncryptedExtensions{extensions: extensions}, offer) do
+  defp validate_encrypted_extensions(message, offer, allow_early \\ false)
+
+  defp validate_encrypted_extensions(
+         %EncryptedExtensions{extensions: extensions},
+         offer,
+         allow_early
+       ) do
     Enum.reduce_while(extensions, :ok, fn extension, :ok ->
-      case validate_encrypted_extension(extension, offer) do
+      case if(extension == {:early_data} and allow_early,
+             do: :ok,
+             else: validate_encrypted_extension(extension, offer)
+           ) do
         :ok -> {:cont, :ok}
         {:error, {_alert, _reason}} = error -> {:halt, error}
       end

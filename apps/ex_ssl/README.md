@@ -257,6 +257,14 @@ SSL.Connection             :gen_statem per connection
 :gen_tcp
 ```
 
+Opt-in record-free resumption now uses `SSL.QUIC.continue/3` and private
+session lookup/commit/store/receipt actions. TLS binder/PSK-DHE/HRR and optional
+early traffic-secret derivation remain separate from QUIC networking acceptance;
+`resumption` and `zero_rtt` capabilities stay false pending the complete runtime
+gates. TCP options and early-data policy are unchanged. See the
+[continuation contract](../../docs/quic/tls-continuation-contract.md) and
+[validation evidence](../../docs/quic/tls-resumption-validation.md).
+
 The raw TCP socket is controlled by `SSL.Connection`, normally using internal `active: :once`. Application-visible `active` mode is implemented above TLS so handshake/record processing cannot be disabled by application socket mode.
 
 ## Wire profiles

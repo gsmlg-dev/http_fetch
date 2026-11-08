@@ -20,7 +20,9 @@ defmodule SSL.Protocol.ServerHandshake do
       :secrets,
       :peer_parameters,
       :first_offer,
-      :application_secrets
+      :application_secrets,
+      :session,
+      early_data: false
     ]
 
     @type t :: %__MODULE__{}
@@ -49,6 +51,7 @@ defmodule SSL.Protocol.ServerHandshake do
 
       state = %State{
         phase: :hello,
+        session: if(previous, do: previous.session),
         suite: suite,
         group: group,
         alpn: alpn,
@@ -91,35 +94,34 @@ defmodule SSL.Protocol.ServerHandshake do
     spec = Capabilities.resolve(:cipher_suite, state.suite)
 
     hello =
-      hello(random, state.offer.legacy_session_id, state.suite, [
-        {43, <<0x0304::16>>},
-        {51, <<state.group::16, byte_size(pair.public_key)::16, pair.public_key::binary>>}
-      ])
+      hello(
+        random,
+        state.offer.legacy_session_id,
+        state.suite,
+        [
+          {43, <<0x0304::16>>},
+          {51, <<state.group::16, byte_size(pair.public_key)::16, pair.public_key::binary>>}
+        ] ++ if(state.session, do: [{41, <<0::16>>}], else: [])
+      )
 
     transcript = Transcript.append(state.transcript, hello)
 
     ee =
       message(
         8,
-        extensions([
-          {16, <<byte_size(state.alpn) + 1::16, byte_size(state.alpn), state.alpn::binary>>},
-          {57, config.transport_parameters}
-        ])
+        extensions(
+          [
+            {16, <<byte_size(state.alpn) + 1::16, byte_size(state.alpn), state.alpn::binary>>},
+            {57, config.transport_parameters}
+          ] ++ if(state.early_data, do: [{42, <<>>}], else: [])
+        )
       )
 
-    with {:ok, secrets} <- HandshakeCore.derive_secrets(pair, public, spec.name, transcript),
-         chain = config.identity.chain,
-         {:ok, certificate} <- ServerFlight.encode_client_certificate(<<>>, chain),
-         transcript = transcript |> Transcript.append(ee) |> Transcript.append(certificate),
-         {:ok, signature} <-
-           Signature.sign_server(
-             state.scheme,
-             config.identity.private_key,
-             spec.hash,
-             Transcript.digest(transcript)
-           ),
-         {:ok, cv} <- ServerFlight.encode_client_certificate_verify(state.scheme, signature),
-         transcript = Transcript.append(transcript, cv),
+    psk = if state.session, do: state.session.psk
+
+    with {:ok, secrets} <- HandshakeCore.derive_secrets(pair, public, spec.name, transcript, psk),
+         transcript = Transcript.append(transcript, ee),
+         {:ok, transcript, authentication} <- authentication(state, config, spec, transcript),
          {:ok, verify_data} <-
            Finished.client_verify_data(
              spec.hash,
@@ -149,7 +151,26 @@ defmodule SSL.Protocol.ServerHandshake do
           application_secrets: %{client: client_application, server: server_application}
       }
 
-      {:ok, next, hello, [ee, certificate, cv, finished]}
+      {:ok, next, hello, [ee] ++ authentication ++ [finished]}
+    end
+  end
+
+  defp authentication(%{session: session}, _config, _spec, transcript) when not is_nil(session),
+    do: {:ok, transcript, []}
+
+  defp authentication(state, config, spec, transcript) do
+    with {:ok, certificate} <-
+           ServerFlight.encode_client_certificate(<<>>, config.identity.chain),
+         transcript = Transcript.append(transcript, certificate),
+         {:ok, signature} <-
+           Signature.sign_server(
+             state.scheme,
+             config.identity.private_key,
+             spec.hash,
+             Transcript.digest(transcript)
+           ),
+         {:ok, cv} <- ServerFlight.encode_client_certificate_verify(state.scheme, signature) do
+      {:ok, Transcript.append(transcript, cv), [certificate, cv]}
     end
   end
 

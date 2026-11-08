@@ -51,6 +51,37 @@ defmodule SSL.Protocol.Resumption do
 
   def bind(_encoded_client_hello, _ticket, _prefix), do: {:error, :invalid_input}
 
+  @doc "Verifies identity-zero's binder over exact bytes, retaining legal additional identities."
+  @spec verify_binder(binary(), binary(), :sha256 | :sha384, binary()) ::
+          :ok | {:error, atom()}
+  def verify_binder(encoded, psk, hash, prefix \\ <<>>)
+
+  def verify_binder(encoded, psk, hash, prefix)
+      when is_binary(encoded) and is_binary(psk) and hash in [:sha256, :sha384] and
+             is_binary(prefix) do
+    with {:ok, offer} <- ClientOffer.from_client_hello(encoded),
+         true <- 1 in offer.psk_key_exchange_modes,
+         {41,
+          <<size::16, _identities::binary-size(size), binders_size::16,
+            binders::binary-size(binders_size)>>} <- List.last(offer.extensions),
+         <<length, binder::binary-size(length), _::binary>> <- binders,
+         true <- length == byte_size(:crypto.hash(hash, <<>>)) and byte_size(psk) == length,
+         partial = binary_part(encoded, 0, byte_size(encoded) - 2 - binders_size),
+         {:ok, early} <- KeySchedule.early_secret(hash, psk),
+         key when is_binary(key) <-
+           HKDF.derive_secret(hash, early, "res binder", :crypto.hash(hash, <<>>)),
+         {:ok, finished} <- KeySchedule.finished_key(hash, key),
+         {:ok, expected} <-
+           KeySchedule.finished_verify_data(hash, finished, :crypto.hash(hash, [prefix, partial])),
+         true <- :crypto.hash_equals(expected, binder) do
+      :ok
+    else
+      _ -> {:error, :invalid_psk_binder}
+    end
+  end
+
+  def verify_binder(_, _, _, _), do: {:error, :invalid_psk_binder}
+
   defp valid_age(ticket, now_ms) do
     if now_ms >= ticket.issued_at and now_ms < ticket.expires_at,
       do: :ok,

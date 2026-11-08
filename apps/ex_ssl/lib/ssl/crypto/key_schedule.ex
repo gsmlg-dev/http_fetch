@@ -46,6 +46,12 @@ defmodule SSL.Crypto.KeySchedule do
     end
   end
 
+  @spec client_early_traffic_secret(hash(), binary(), binary()) ::
+          {:ok, binary()} | {:error, error_reason()}
+  def client_early_traffic_secret(hash, early_secret, transcript_hash) do
+    traffic_secret(hash, early_secret, :early_secret, "c e traffic", transcript_hash)
+  end
+
   @spec client_handshake_traffic_secret(hash(), binary(), binary()) ::
           {:ok, binary()} | {:error, error_reason()}
   def client_handshake_traffic_secret(hash, handshake_secret, transcript_hash) do
