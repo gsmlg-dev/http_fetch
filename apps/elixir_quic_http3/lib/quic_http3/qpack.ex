@@ -1,10 +1,14 @@
 defmodule QuicHttp3.Qpack do
   @moduledoc """
-  QPACK wire primitives for static and literal header fields.
+  Pure QPACK (RFC 9204) wire primitives and decoder-side dynamic table.
 
-  The initial profile supports static indexes, literal fields and Huffman
-  strings. Dynamic references are rejected; the HTTP/3 session advertises
-  zero dynamic-table capacity and zero blocked streams.
+  `decode_header_block/2` is the static/literal profile: dynamic references are
+  rejected. `decode_field_section/3` decodes against a bounded dynamic table,
+  including Required Insert Count/Base, relative and post-base references, and
+  reports sections whose Required Insert Count is not yet satisfied as blocked.
+  `apply_encoder_instructions/3` applies peer encoder-stream instructions
+  incrementally with a bounded partial-instruction buffer. The local encoder
+  remains static/literal.
   """
 
   import Bitwise, only: [&&&: 2, <<<: 2, |||: 2, >>>: 2]
@@ -372,23 +376,41 @@ defmodule QuicHttp3.Qpack do
     {"x-frame-options", "sameorigin"}
   ]
 
-  defstruct capacity: 0, entries: [], size: 0, insert_count: 0
+  defstruct capacity: 0, max_capacity: 0, entries: [], size: 0, insert_count: 0
 
   @type dynamic_entry :: %{name: binary(), value: binary(), size: pos_integer()}
   @type t :: %__MODULE__{
           capacity: non_neg_integer(),
+          max_capacity: non_neg_integer(),
           entries: [dynamic_entry()],
           size: non_neg_integer(),
           insert_count: non_neg_integer()
         }
 
+  @typedoc "A field section waiting for its Required Insert Count."
+  @opaque section :: {pos_integer(), non_neg_integer(), binary()}
+
+  @type decoder_instruction ::
+          {:section_ack, non_neg_integer()}
+          | {:stream_cancel, non_neg_integer()}
+          | {:insert_count_increment, non_neg_integer()}
+
+  @doc """
+  Build a dynamic table.
+
+  `:capacity` is the current capacity. `:max_capacity` is the locally advertised
+  `SETTINGS_QPACK_MAX_TABLE_CAPACITY`; it defaults to `:capacity`. A decoder
+  table starts with `new(max_capacity: advertised)` at capacity zero.
+  """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     capacity = Keyword.get(opts, :capacity, 0)
+    max_capacity = Keyword.get(opts, :max_capacity, capacity)
 
-    if is_integer(capacity) and capacity >= 0,
-      do: %__MODULE__{capacity: capacity},
-      else: %__MODULE__{}
+    if is_integer(capacity) and capacity >= 0 and is_integer(max_capacity) and
+         max_capacity >= capacity,
+       do: %__MODULE__{capacity: capacity, max_capacity: max_capacity},
+       else: %__MODULE__{}
   end
 
   @spec insert(t(), binary(), binary()) :: {:ok, t()} | {:error, term()}
@@ -545,8 +567,9 @@ defmodule QuicHttp3.Qpack do
     if is_integer(limit) and limit >= 0 do
       with {:ok, required_insert_count, rest} <- decode_integer(data, 8),
            {:ok, delta_base, rest} <- decode_base(rest),
-           :ok <- validate_prefix(required_insert_count, delta_base) do
-        decode_fields(rest, [], limit)
+           :ok <- validate_prefix(required_insert_count, delta_base),
+           {:ok, fields, nil} <- decode_fields(rest, [], limit, nil) do
+        {:ok, fields}
       end
     else
       {:error, :invalid_field_limit}
@@ -554,6 +577,275 @@ defmodule QuicHttp3.Qpack do
   end
 
   def decode_header_block(_data, _opts), do: {:error, :invalid_header_block}
+
+  @doc """
+  Decode a complete field section against the decoder's dynamic table.
+
+  Returns `{:ok, fields, required_insert_count}`, or `{:blocked, section}` when
+  the Required Insert Count exceeds the table's insert count. Resume a blocked
+  section with `resume_field_section/3` after more inserts arrive.
+  """
+  @spec decode_field_section(binary(), t(), keyword()) ::
+          {:ok, [field()], non_neg_integer()} | {:blocked, section()} | :more | {:error, term()}
+  def decode_field_section(data, %__MODULE__{} = table, opts \\ []) when is_binary(data) do
+    with {:ok, required, base, rest} <- decode_section_prefix(data, table) do
+      resume_field_section({required, base, rest}, table, opts)
+    end
+  end
+
+  @doc "Retry a blocked section; it stays blocked until enough inserts arrive."
+  @spec resume_field_section(section(), t(), keyword()) ::
+          {:ok, [field()], non_neg_integer()} | {:blocked, section()} | :more | {:error, term()}
+  def resume_field_section({required, base, rest} = section, %__MODULE__{} = table, opts) do
+    limit = Keyword.get(opts, :max_fields, 128)
+
+    cond do
+      not (is_integer(limit) and limit >= 0) ->
+        {:error, :invalid_field_limit}
+
+      required > table.insert_count ->
+        {:blocked, section}
+
+      true ->
+        context = %{table: table, base: base, required: required, largest: -1}
+
+        with {:ok, fields, context} <- decode_fields(rest, [], limit, context),
+             :ok <- validate_required(required, context.largest) do
+          {:ok, fields, required}
+        end
+    end
+  end
+
+  @doc "Required Insert Count of a blocked section."
+  @spec section_required_insert_count(section()) :: pos_integer()
+  def section_required_insert_count({required, _base, _rest}), do: required
+
+  @doc "Encoded bytes retained by a blocked section."
+  @spec section_bytes(section()) :: non_neg_integer()
+  def section_bytes({_required, _base, rest}), do: byte_size(rest)
+
+  @doc "Decode the Required Insert Count and Base prefix (RFC 9204 Section 4.5.1)."
+  @spec decode_section_prefix(binary(), t()) ::
+          {:ok, non_neg_integer(), non_neg_integer(), binary()} | :more | {:error, term()}
+  def decode_section_prefix(data, %__MODULE__{} = table) when is_binary(data) do
+    with {:ok, encoded, rest} <- decode_integer(data, 8),
+         {:ok, required} <- required_insert_count(encoded, table),
+         {:ok, delta, rest} <- decode_base(rest),
+         {:ok, base} <- section_base(required, delta) do
+      {:ok, required, base, rest}
+    end
+  end
+
+  @doc "Decoder `MaxEntries` derived from the advertised maximum capacity."
+  @spec max_entries(t()) :: non_neg_integer()
+  def max_entries(%__MODULE__{max_capacity: max_capacity}), do: div(max_capacity, 32)
+
+  @doc "Encode a Required Insert Count for a decoder advertising `max_capacity`."
+  @spec encode_required_insert_count(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  def encode_required_insert_count(0, _max_capacity), do: 0
+
+  def encode_required_insert_count(required, max_capacity) when max_capacity >= 32,
+    do: rem(required, 2 * div(max_capacity, 32)) + 1
+
+  @doc "Set Dynamic Table Capacity; above the advertised maximum is an error."
+  @spec set_capacity(t(), non_neg_integer()) :: {:ok, t()} | {:error, term()}
+  def set_capacity(%__MODULE__{} = table, capacity)
+      when is_integer(capacity) and capacity >= 0 and capacity <= table.max_capacity do
+    entries = evict(table.entries, capacity, table.size)
+    {:ok, %{table | capacity: capacity, entries: entries, size: entries_size(entries)}}
+  end
+
+  def set_capacity(_table, _capacity), do: {:error, :invalid_dynamic_table_capacity}
+
+  @doc "Insert an entry as instructed by the peer encoder, evicting oldest entries."
+  @spec insert_entry(t(), binary(), binary()) :: {:ok, t()} | {:error, term()}
+  def insert_entry(%__MODULE__{} = table, name, value)
+      when is_binary(name) and is_binary(value) do
+    entry_size = byte_size(name) + byte_size(value) + 32
+
+    if entry_size > table.capacity do
+      {:error, :dynamic_entry_too_large}
+    else
+      entry = %{name: :binary.copy(name), value: :binary.copy(value), size: entry_size}
+      entries = evict([entry | table.entries], table.capacity, table.size + entry_size)
+
+      {:ok,
+       %{
+         table
+         | entries: entries,
+           size: entries_size(entries),
+           insert_count: table.insert_count + 1
+       }}
+    end
+  end
+
+  def insert_entry(_table, _name, _value), do: {:error, :invalid_dynamic_entry}
+
+  @doc "Look up a live dynamic entry by absolute index."
+  @spec absolute(t(), integer()) :: {:ok, field()} | {:error, :invalid_dynamic_reference}
+  def absolute(%__MODULE__{entries: entries, insert_count: count}, index)
+      when is_integer(index) and index >= 0 and index < count do
+    case Enum.at(entries, count - 1 - index) do
+      %{name: name, value: value} -> {:ok, {name, value}}
+      nil -> {:error, :invalid_dynamic_reference}
+    end
+  end
+
+  def absolute(_table, _index), do: {:error, :invalid_dynamic_reference}
+
+  @doc """
+  Apply complete encoder-stream instructions and return the unconsumed suffix.
+
+  A trailing partial instruction is returned for buffering; it is bounded by
+  `:max_buffer` (default `4 * max_capacity + 64`).
+  """
+  @spec apply_encoder_instructions(t(), binary(), keyword()) ::
+          {:ok, t(), binary()} | {:error, term()}
+  def apply_encoder_instructions(%__MODULE__{} = table, data, opts \\ []) when is_binary(data) do
+    max_buffer = Keyword.get(opts, :max_buffer, 4 * table.max_capacity + 64)
+    apply_encoder(table, data, max_buffer)
+  end
+
+  defp apply_encoder(table, <<>>, _max_buffer), do: {:ok, table, <<>>}
+
+  defp apply_encoder(table, data, max_buffer) do
+    case encoder_instruction(data, table) do
+      {:ok, next, rest} ->
+        apply_encoder(next, rest, max_buffer)
+
+      :more when byte_size(data) > max_buffer ->
+        {:error, :encoder_instruction_too_large}
+
+      :more ->
+        {:ok, table, data}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp encoder_instruction(<<first, _::binary>> = data, table) when (first &&& 0x80) != 0 do
+    with {:ok, index, rest} <- decode_integer(data, 6),
+         {:ok, {name, _}} <- insert_name(table, (first &&& 0x40) != 0, index),
+         {:ok, value, rest} <- decode_string(rest),
+         {:ok, table} <- insert_entry(table, name, value) do
+      {:ok, table, rest}
+    end
+  end
+
+  defp encoder_instruction(<<first, _::binary>> = data, table) when (first &&& 0xC0) == 0x40 do
+    with {:ok, name, rest} <- decode_prefixed_string(data, 5, 0x20),
+         {:ok, value, rest} <- decode_string(rest),
+         {:ok, table} <- insert_entry(table, name, value) do
+      {:ok, table, rest}
+    end
+  end
+
+  defp encoder_instruction(<<first, _::binary>> = data, table) when (first &&& 0xE0) == 0x20 do
+    with {:ok, capacity, rest} <- decode_integer(data, 5),
+         {:ok, table} <- set_capacity(table, capacity) do
+      {:ok, table, rest}
+    end
+  end
+
+  defp encoder_instruction(data, table) do
+    with {:ok, index, rest} <- decode_integer(data, 5),
+         {:ok, {name, value}} <- absolute(table, table.insert_count - 1 - index),
+         {:ok, table} <- insert_entry(table, name, value) do
+      {:ok, table, rest}
+    end
+  end
+
+  defp insert_name(_table, true, index), do: static(index)
+  defp insert_name(table, false, index), do: absolute(table, table.insert_count - 1 - index)
+
+  @doc "Section Acknowledgment decoder instruction."
+  @spec section_ack(non_neg_integer()) :: binary()
+  def section_ack(stream_id), do: encode_integer!(stream_id, 7, 0x80)
+
+  @doc "Stream Cancellation decoder instruction."
+  @spec stream_cancel(non_neg_integer()) :: binary()
+  def stream_cancel(stream_id), do: encode_integer!(stream_id, 6, 0x40)
+
+  @doc "Insert Count Increment decoder instruction; the increment must be positive."
+  @spec insert_count_increment(pos_integer()) :: binary()
+  def insert_count_increment(increment) when is_integer(increment) and increment > 0,
+    do: encode_integer!(increment, 6, 0)
+
+  @doc "Decode complete decoder-stream instructions and return the partial suffix."
+  @spec decode_decoder_instructions(binary()) ::
+          {:ok, [decoder_instruction()], binary()} | {:error, term()}
+  def decode_decoder_instructions(data) when is_binary(data),
+    do: decode_decoder_instructions(data, [])
+
+  defp decode_decoder_instructions(<<>>, acc), do: {:ok, Enum.reverse(acc), <<>>}
+
+  defp decode_decoder_instructions(<<first, _::binary>> = data, acc) do
+    {kind, bits} =
+      cond do
+        (first &&& 0x80) != 0 -> {:section_ack, 7}
+        (first &&& 0x40) != 0 -> {:stream_cancel, 6}
+        true -> {:insert_count_increment, 6}
+      end
+
+    case decode_integer(data, bits) do
+      {:ok, 0, _rest} when kind == :insert_count_increment ->
+        {:error, :invalid_insert_count_increment}
+
+      {:ok, value, rest} ->
+        decode_decoder_instructions(rest, [{kind, value} | acc])
+
+      :more ->
+        {:ok, Enum.reverse(acc), data}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp encode_integer!(value, bits, prefix) do
+    {:ok, encoded} = encode_integer(value, bits, prefix)
+    encoded
+  end
+
+  defp required_insert_count(0, _table), do: {:ok, 0}
+
+  defp required_insert_count(encoded, table) do
+    max_entries = max_entries(table)
+    full_range = 2 * max_entries
+
+    if encoded > full_range do
+      {:error, :invalid_required_insert_count}
+    else
+      max_value = table.insert_count + max_entries
+      max_wrapped = div(max_value, full_range) * full_range
+      required = max_wrapped + encoded - 1
+
+      required =
+        cond do
+          required <= max_value -> required
+          required <= full_range -> :error
+          true -> required - full_range
+        end
+
+      if required in [:error, 0],
+        do: {:error, :invalid_required_insert_count},
+        else: {:ok, required}
+    end
+  end
+
+  defp section_base(required, {:positive, delta}), do: {:ok, required + delta}
+
+  defp section_base(required, {:negative, delta}) when required > delta,
+    do: {:ok, required - delta - 1}
+
+  defp section_base(_required, _delta), do: {:error, :invalid_base}
+
+  defp validate_required(0, _largest), do: :ok
+  defp validate_required(required, largest) when required == largest + 1, do: :ok
+  defp validate_required(_required, _largest), do: {:error, :invalid_required_insert_count}
+
+  defp entries_size(entries), do: Enum.reduce(entries, 0, &(&1.size + &2))
 
   defp validate_fields(fields) do
     if Enum.all?(fields, fn
@@ -618,69 +910,117 @@ defmodule QuicHttp3.Qpack do
   defp validate_prefix(0, {:positive, _base}), do: :ok
   defp validate_prefix(_required, _base), do: {:error, :dynamic_table_not_supported}
 
-  defp decode_fields(<<>>, fields, _limit), do: {:ok, Enum.reverse(fields)}
+  # A nil context is the static/literal profile: dynamic references keep their
+  # historical rejection reasons.
+  defp decode_fields(<<>>, fields, _limit, context), do: {:ok, Enum.reverse(fields), context}
 
-  defp decode_fields(_data, _fields, limit) when limit <= 0, do: {:error, :field_limit}
+  defp decode_fields(_data, _fields, limit, _context) when limit <= 0, do: {:error, :field_limit}
 
-  defp decode_fields(<<first, _rest::binary>> = data, fields, limit) do
+  defp decode_fields(<<first, _rest::binary>> = data, fields, limit, context) do
+    with {:ok, field, rest, context} <- decode_field(first, data, context) do
+      decode_fields(rest, [field | fields], limit - 1, context)
+    end
+  end
+
+  defp decode_field(first, data, context) do
     cond do
-      (first &&& 0x80) != 0 -> decode_indexed_field(data, fields, limit)
-      (first &&& 0xC0) == 0x40 -> decode_name_reference(data, fields, limit)
-      (first &&& 0xE0) == 0x20 -> decode_literal_field(data, fields, limit)
-      true -> {:error, :unsupported_field_representation}
+      (first &&& 0xC0) == 0xC0 -> decode_static_indexed(data, context)
+      (first &&& 0x80) != 0 -> decode_dynamic_indexed(data, context)
+      (first &&& 0xD0) == 0x50 -> decode_static_name_reference(data, context)
+      (first &&& 0xC0) == 0x40 -> decode_dynamic_name_reference(data, context)
+      (first &&& 0xE0) == 0x20 -> decode_literal_field(data, context)
+      (first &&& 0xF0) == 0x10 -> decode_post_base_indexed(data, context)
+      true -> decode_post_base_name_reference(data, context)
     end
   end
 
-  defp decode_indexed_field(data, fields, limit) do
-    first = :binary.at(data, 0)
-    static? = (first &&& 0x40) != 0
-
-    if static? do
-      with {:ok, index, rest} <- decode_integer(data, 6),
-           {:ok, field} <- static(index) do
-        decode_fields(rest, [field | fields], limit - 1)
-      end
-    else
-      {:error, :indexed_field_not_supported}
+  defp decode_static_indexed(data, context) do
+    with {:ok, index, rest} <- decode_integer(data, 6),
+         {:ok, field} <- static(index) do
+      {:ok, field, rest, context}
     end
   end
 
-  defp decode_name_reference(data, fields, limit) do
-    first = :binary.at(data, 0)
-    static? = (first &&& 0x10) != 0
+  defp decode_dynamic_indexed(_data, nil), do: {:error, :indexed_field_not_supported}
 
-    if static? do
-      with {:ok, index, rest} <- decode_integer(data, 4),
-           {:ok, {name, _}} <- static(index),
-           {:ok, value, rest} <- decode_string(rest) do
-        decode_fields(rest, [{name, value} | fields], limit - 1)
-      end
-    else
-      {:error, :dynamic_table_not_supported}
+  defp decode_dynamic_indexed(data, context) do
+    with {:ok, index, rest} <- decode_integer(data, 6),
+         {:ok, field, context} <- dynamic_reference(context, context.base - 1 - index),
+         :ok <- validate_decoded_name(elem(field, 0)) do
+      {:ok, field, rest, context}
     end
   end
 
-  defp decode_literal_field(data, fields, limit) do
-    first = :binary.at(data, 0)
-    huffman? = (first &&& 0x08) != 0
+  defp decode_post_base_indexed(_data, nil), do: {:error, :unsupported_field_representation}
 
-    if huffman? do
-      with {:ok, name_length, rest} <- decode_integer(data, 3),
-           {:ok, encoded_name, rest} <- take_bytes(rest, name_length),
-           {:ok, name} <- decode_huffman(encoded_name),
-           :ok <- validate_decoded_name(name),
-           {:ok, value, rest} <- decode_string(rest) do
-        decode_fields(rest, [{name, value} | fields], limit - 1)
-      end
-    else
-      with {:ok, name_length, rest} <- decode_integer(data, 3),
-           {:ok, name, rest} <- take_bytes(rest, name_length),
-           :ok <- validate_decoded_name(name),
-           {:ok, value, rest} <- decode_string(rest) do
-        decode_fields(rest, [{name, value} | fields], limit - 1)
-      end
+  defp decode_post_base_indexed(data, context) do
+    with {:ok, index, rest} <- decode_integer(data, 4),
+         {:ok, field, context} <- dynamic_reference(context, context.base + index),
+         :ok <- validate_decoded_name(elem(field, 0)) do
+      {:ok, field, rest, context}
     end
   end
+
+  defp decode_static_name_reference(data, context) do
+    with {:ok, index, rest} <- decode_integer(data, 4),
+         {:ok, {name, _}} <- static(index),
+         {:ok, value, rest} <- decode_string(rest) do
+      {:ok, {name, value}, rest, context}
+    end
+  end
+
+  defp decode_dynamic_name_reference(_data, nil), do: {:error, :dynamic_table_not_supported}
+
+  defp decode_dynamic_name_reference(data, context) do
+    with {:ok, index, rest} <- decode_integer(data, 4),
+         {:ok, {name, _}, context} <- dynamic_reference(context, context.base - 1 - index),
+         :ok <- validate_decoded_name(name),
+         {:ok, value, rest} <- decode_string(rest) do
+      {:ok, {name, value}, rest, context}
+    end
+  end
+
+  defp decode_post_base_name_reference(_data, nil),
+    do: {:error, :unsupported_field_representation}
+
+  defp decode_post_base_name_reference(data, context) do
+    with {:ok, index, rest} <- decode_integer(data, 3),
+         {:ok, {name, _}, context} <- dynamic_reference(context, context.base + index),
+         :ok <- validate_decoded_name(name),
+         {:ok, value, rest} <- decode_string(rest) do
+      {:ok, {name, value}, rest, context}
+    end
+  end
+
+  defp decode_literal_field(data, context) do
+    with {:ok, name, rest} <- decode_prefixed_string(data, 3, 0x08),
+         :ok <- validate_decoded_name(name),
+         {:ok, value, rest} <- decode_string(rest) do
+      {:ok, {name, value}, rest, context}
+    end
+  end
+
+  defp dynamic_reference(%{required: required} = context, index)
+       when index >= 0 and index < required do
+    with {:ok, field} <- absolute(context.table, index) do
+      {:ok, field, %{context | largest: max(context.largest, index)}}
+    end
+  end
+
+  defp dynamic_reference(_context, _index), do: {:error, :invalid_dynamic_reference}
+
+  defp decode_prefixed_string(<<first, _rest::binary>> = data, bits, huffman_mask) do
+    with {:ok, length, rest} <- decode_integer(data, bits),
+         {:ok, raw, tail} <- take_bytes(rest, length),
+         {:ok, value} <- maybe_huffman(raw, (first &&& huffman_mask) != 0) do
+      {:ok, value, tail}
+    end
+  end
+
+  defp decode_prefixed_string(<<>>, _bits, _huffman_mask), do: :more
+
+  defp maybe_huffman(raw, true), do: decode_huffman(raw)
+  defp maybe_huffman(raw, false), do: {:ok, raw}
 
   defp validate_decoded_name(name) do
     if valid_field_name?(name), do: :ok, else: {:error, :invalid_fields}

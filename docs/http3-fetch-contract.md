@@ -64,9 +64,29 @@ separate finite opening deadline and its own established idle/reconnect policy.
 It requires explicit `http_version: :http3` and reports the actual protocol after
 verified readiness.
 
-The initial profile is static/literal QPACK with Huffman decoding, zero dynamic
-table capacity and zero blocked-stream allowance. Dynamic QPACK, 0-RTT,
-connection migration, connection racing and WebTransport remain unsupported.
+Response QPACK decoding supports the dynamic table (RFC 9204). The client
+advertises `SETTINGS_QPACK_MAX_TABLE_CAPACITY` 4096 and
+`SETTINGS_QPACK_BLOCKED_STREAMS` 16 by default, configurable per session with
+`QuicHttp3.Session` options `:qpack_max_table_capacity` (0..65536) and
+`:qpack_blocked_streams` (0..128), for example through the runtime
+`session_options`; `0`/`0` restores the static/literal profile without QPACK
+streams. With a nonzero capacity the client opens its QPACK encoder and decoder
+streams, applies peer encoder instructions to a bounded table (capacity above
+the advertised maximum, oversized inserts, invalid references and partial
+instructions beyond `4 * capacity + 64` bytes are `QPACK_ENCODER_STREAM_ERROR`),
+and decodes Required Insert Count/Base, dynamic, post-base and name references.
+A section whose Required Insert Count is not yet satisfied blocks only its own
+stream: further reads of that stream stop, held bytes and FIN count against the
+session retained-byte budget, and sections resume in blocking order. More
+blocked streams than advertised, or invalid section references, are
+`QPACK_DECOMPRESSION_FAILED`. The decoder stream carries Section
+Acknowledgment, Stream Cancellation for abandoned incomplete streams, and
+Insert Count Increment through normal write admission; peer decoder
+instructions other than Stream Cancellation are `QPACK_DECODER_STREAM_ERROR`.
+The local encoder stays static/literal; Huffman strings are decoded. The independent
+gate is `uv run --python 3.12 --with aioquic==1.2.0 python
+scripts/http3/qpack_dynamic_gate.py`. 0-RTT, connection migration, connection
+racing and WebTransport remain unsupported.
 WebSocket over HTTP/3 is experimental; see `http3-extensions-contract.md`. Raw `Quic.capabilities().http3` remains false because raw QUIC owns
 transport rather than HTTP semantics.
 

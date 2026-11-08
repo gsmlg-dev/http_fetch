@@ -1,10 +1,17 @@
 defmodule QuicHttp3.Response do
   @moduledoc """
-  Bounded incremental HTTP/3 response message decoder for the static QPACK profile.
+  Bounded incremental HTTP/3 response message decoder.
 
   DATA and unknown extension payloads are consumed without buffering a complete
   frame. HEADERS have independent encoded, decoded and field-count limits.
   Protocol errors carry their stream/connection scope and application error code.
+
+  Without a QPACK table only the static/literal profile is accepted. With a
+  dynamic table, a HEADERS section whose Required Insert Count is not yet
+  satisfied blocks the message: later stream bytes and FIN are held, in order,
+  until `resume/2` succeeds. A decoded section with a nonzero Required Insert
+  Count emits `{:qpack_ack, required_insert_count}` for the session's decoder
+  stream.
   """
   alias QuicHttp3.{Qpack, Varint}
 
@@ -18,23 +25,74 @@ defmodule QuicHttp3.Response do
             frame: nil,
             max_encoded_headers: 65_536,
             max_header_bytes: 65_536,
-            max_fields: 128
+            max_fields: 128,
+            blocked: nil,
+            held: <<>>,
+            held_fin?: false
 
   def new(opts \\ []), do: struct!(__MODULE__, opts)
 
   def retained_bytes(state) do
-    byte_size(state.prefix) +
+    byte_size(state.prefix) + byte_size(state.held) +
+      if(state.blocked, do: Qpack.section_bytes(state.blocked), else: 0) +
       case state.frame do
         {1, _remaining, bytes} -> byte_size(bytes)
         _ -> 0
       end
   end
 
-  def feed(%__MODULE__{phase: :done} = state, <<>>), do: {:ok, state, []}
-  def feed(%__MODULE__{phase: :done}, _), do: message_error(:data_after_fin)
-  def feed(%__MODULE__{} = state, bytes) when is_binary(bytes), do: parse(state, bytes, [])
+  @doc "Whether a HEADERS section is waiting for dynamic-table inserts."
+  def blocked?(%__MODULE__{blocked: blocked}), do: blocked != nil
+
+  @doc "Required Insert Count of the blocked section, or nil."
+  def required_insert_count(%__MODULE__{blocked: nil}), do: nil
+
+  def required_insert_count(%__MODULE__{blocked: blocked}),
+    do: Qpack.section_required_insert_count(blocked)
+
+  def feed(state, bytes, table \\ nil)
+  def feed(%__MODULE__{phase: :done} = state, <<>>, _table), do: {:ok, state, []}
+  def feed(%__MODULE__{phase: :done}, _, _table), do: message_error(:data_after_fin)
+
+  def feed(%__MODULE__{blocked: blocked} = state, bytes, _table)
+      when blocked != nil and is_binary(bytes),
+      do: {:ok, %{state | held: state.held <> bytes}, []}
+
+  def feed(%__MODULE__{} = state, bytes, table) when is_binary(bytes),
+    do: parse(state, bytes, [], table)
+
+  @doc """
+  Retry a blocked HEADERS section with the current dynamic table, then replay
+  held bytes and a held FIN in order.
+  """
+  def resume(%__MODULE__{blocked: nil} = state, _table), do: {:ok, state, []}
+
+  def resume(%__MODULE__{blocked: blocked} = state, table) do
+    case Qpack.resume_field_section(blocked, table, max_fields: state.max_fields) do
+      {:blocked, _section} ->
+        {:ok, state, []}
+
+      result ->
+        held = state.held
+        fin? = state.held_fin?
+        unblocked = %{state | blocked: nil, held: <<>>, held_fin?: false}
+
+        with {:ok, next, emitted} <- section_result(unblocked, result),
+             {:ok, next, parsed} <- parse(next, held, [], table),
+             {:ok, next, finished} <- resume_finish(next, fin?) do
+          {:ok, next, emitted ++ parsed ++ finished}
+        end
+    end
+  end
+
+  defp resume_finish(state, false), do: {:ok, state, []}
+  defp resume_finish(%{blocked: nil} = state, true), do: finish(state)
+  defp resume_finish(state, true), do: {:ok, %{state | held_fin?: true}, []}
 
   def finish(%__MODULE__{phase: :done} = state), do: {:ok, state, []}
+
+  def finish(%__MODULE__{blocked: blocked} = state) when blocked != nil,
+    do: {:ok, %{state | held_fin?: true}, []}
 
   def finish(%__MODULE__{} = state) do
     cond do
@@ -53,29 +111,35 @@ defmodule QuicHttp3.Response do
     end
   end
 
-  defp parse(%{frame: nil} = state, bytes, events) do
+  defp parse(%{frame: nil} = state, bytes, events, table) do
     data = state.prefix <> bytes
 
     with {:ok, type, tail} <- Varint.decode(data),
          {:ok, length, payload} <- Varint.decode(tail),
          :ok <- validate_frame(state, type, length) do
-      parse(%{state | prefix: <<>>, frame: {type, length, <<>>}}, payload, events)
+      parse(%{state | prefix: <<>>, frame: {type, length, <<>>}}, payload, events, table)
     else
       :more -> {:ok, %{state | prefix: :binary.copy(data)}, Enum.reverse(events)}
       {:error, _} = error -> error
     end
   end
 
-  defp parse(%{frame: {type, 0, bytes}} = state, data, events) do
-    case complete_frame(state, type, bytes) do
-      {:ok, next, emitted} -> parse(%{next | frame: nil}, data, Enum.reverse(emitted, events))
-      {:error, _} = error -> error
+  defp parse(%{frame: {type, 0, bytes}} = state, data, events, table) do
+    case complete_frame(state, type, bytes, table) do
+      {:ok, next, emitted} ->
+        parse(%{next | frame: nil}, data, Enum.reverse(emitted, events), table)
+
+      {:blocked, next} ->
+        {:ok, %{next | frame: nil, held: :binary.copy(data)}, Enum.reverse(events)}
+
+      {:error, _} = error ->
+        error
     end
   end
 
-  defp parse(state, <<>>, events), do: {:ok, state, Enum.reverse(events)}
+  defp parse(state, <<>>, events, _table), do: {:ok, state, Enum.reverse(events)}
 
-  defp parse(%{frame: {type, remaining, buffered}} = state, data, events) do
+  defp parse(%{frame: {type, remaining, buffered}} = state, data, events, table) do
     size = min(remaining, byte_size(data))
     <<chunk::binary-size(^size), rest::binary>> = data
     next = %{state | frame: {type, remaining - size, buffered}}
@@ -85,14 +149,14 @@ defmodule QuicHttp3.Response do
         with :ok <- validate_data(state, size) do
           next = %{next | received: state.received + size}
           emitted = if size == 0, do: events, else: [{:data, :binary.copy(chunk)} | events]
-          parse(next, rest, emitted)
+          parse(next, rest, emitted, table)
         end
 
       1 ->
-        parse(%{next | frame: {type, remaining - size, buffered <> chunk}}, rest, events)
+        parse(%{next | frame: {type, remaining - size, buffered <> chunk}}, rest, events, table)
 
       _ ->
-        parse(next, rest, events)
+        parse(next, rest, events, table)
     end
   end
 
@@ -119,8 +183,30 @@ defmodule QuicHttp3.Response do
 
   defp validate_frame(_state, _type, _length), do: :ok
 
-  defp complete_frame(state, 1, bytes) do
-    case Qpack.decode_header_block(bytes, max_fields: state.max_fields) do
+  defp complete_frame(state, 1, bytes, nil),
+    do: section_result(state, Qpack.decode_header_block(bytes, max_fields: state.max_fields))
+
+  defp complete_frame(state, 1, bytes, table),
+    do:
+      section_result(
+        state,
+        Qpack.decode_field_section(bytes, table, max_fields: state.max_fields)
+      )
+
+  defp complete_frame(state, _type, _bytes, _table), do: {:ok, state, []}
+
+  defp section_result(state, {:ok, fields, 0}), do: section_result(state, {:ok, fields})
+
+  defp section_result(state, {:ok, fields, required}) do
+    with {:ok, next, events} <- section_result(state, {:ok, fields}) do
+      {:ok, next, [{:qpack_ack, required} | events]}
+    end
+  end
+
+  defp section_result(state, {:blocked, section}), do: {:blocked, %{state | blocked: section}}
+
+  defp section_result(state, result) do
+    case result do
       {:ok, fields} ->
         with :ok <- decoded_budget(state, fields),
              :ok <- validate_fields(fields) do
@@ -140,8 +226,6 @@ defmodule QuicHttp3.Response do
         connection_error(0x200, reason)
     end
   end
-
-  defp complete_frame(state, _type, _bytes), do: {:ok, state, []}
 
   defp decoded_budget(state, fields) do
     size =

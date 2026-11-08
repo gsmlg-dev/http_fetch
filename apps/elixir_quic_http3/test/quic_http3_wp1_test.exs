@@ -93,6 +93,7 @@ defmodule QuicHttp3.WP1Test do
   end
 
   test "blocked control write keeps stream and admitted prefix", %{session: session} do
+    session = static_qpack(session)
     Process.put({:results, :send_stream}, [{:ok, make_ref()}, {:blocked, :credit}])
     assert {:blocked, session, :credit} = Session.open(session)
     stream = session.control_stream
@@ -275,6 +276,7 @@ defmodule QuicHttp3.WP1Test do
     session: session,
     native: native
   } do
+    session = static_qpack(session)
     Process.put({:results, :open_stream}, [fn [_, _, opts] -> {:unknown, opts[:ref]} end])
     assert {:unknown, session, _ref} = Session.open(session)
     stream = %StreamHandle{connection: native, id: 2}
@@ -507,4 +509,8 @@ defmodule QuicHttp3.WP1Test do
       0 -> Enum.reverse(acc)
     end
   end
+
+  # These cases pin the control-stream-only static/literal QPACK profile.
+  defp static_qpack(session),
+    do: %{session | qpack_max_table_capacity: 0, qpack_blocked_streams: 0}
 end

@@ -9,9 +9,18 @@ defmodule QuicHttp3.Session do
   fragments under the original deadline; `max_frame` remains an upper bound.
   Native query calls and DNS retain their transport timeout bounds; the session
   deadline is an admission/reconciliation budget, not a shorter wall-clock bound.
+
+  QPACK: `:qpack_max_table_capacity` (default 4096) and `:qpack_blocked_streams`
+  (default 16) are advertised in SETTINGS. A nonzero capacity opens local QPACK
+  encoder and decoder streams, applies peer encoder instructions to a bounded
+  dynamic table, holds blocked sections without reading further from their
+  streams, and sends Section Acknowledgment, Stream Cancellation and Insert
+  Count Increment through ordinary stream-write admission. `0`/`0` keeps the
+  static/literal profile without QPACK streams. The local encoder is always
+  static/literal.
   """
 
-  alias QuicHttp3.{Connect, Control, Frame, Qpack, Response, Stream}
+  alias QuicHttp3.{Connect, Control, Frame, Qpack, Response, Stream, Varint}
   alias QuicHttp3.Transport.Quic, as: QuicTransport
   alias QuicHttp3.Transport.Quic.Stream, as: TransportStream
 
@@ -28,6 +37,14 @@ defmodule QuicHttp3.Session do
             max_header_bytes: 65_536,
             max_retained_bytes: 262_144,
             qpack_streams: %{},
+            qpack_max_table_capacity: 4_096,
+            qpack_blocked_streams: 16,
+            qpack: nil,
+            qpack_encoder_stream: nil,
+            qpack_decoder_stream: nil,
+            qpack_known: 0,
+            qpack_blocked: [],
+            qpack_out: <<>>,
             continuations: %{},
             max_frame: 16_384,
             timeout: 5_000,
@@ -65,7 +82,9 @@ defmodule QuicHttp3.Session do
           :max_fields,
           :max_encoded_headers,
           :max_header_bytes,
-          :max_retained_bytes
+          :max_retained_bytes,
+          :qpack_max_table_capacity,
+          :qpack_blocked_streams
         ])
 
       session =
@@ -129,8 +148,23 @@ defmodule QuicHttp3.Session do
     else
       case ready(session) do
         :ready ->
-          {:ok, control} = Control.new(:client, [{1, 0}, {6, session.max_header_bytes}, {7, 0}])
-          begin(%{session | control: control}, :open, [:open_control], [])
+          capacity = session.qpack_max_table_capacity
+
+          {:ok, control} =
+            Control.new(:client, [
+              {1, capacity},
+              {6, session.max_header_bytes},
+              {7, session.qpack_blocked_streams}
+            ])
+
+          {qpack, steps} =
+            if capacity > 0,
+              do:
+                {Qpack.new(max_capacity: capacity),
+                 [:open_control, {:open_qpack, :qpack_encoder}, {:open_qpack, :qpack_decoder}]},
+              else: {nil, [:open_control]}
+
+          begin(%{session | control: control, qpack: qpack}, :open, steps, [])
 
         :pending ->
           {:blocked, session, :not_ready}
@@ -462,6 +496,17 @@ defmodule QuicHttp3.Session do
     if session.deadline, do: min(requested, elem(session.deadline, 1)), else: requested
   end
 
+  defp drive(%{qpack_out: out, qpack_decoder_stream: stream} = session)
+       when out != <<>> and stream != nil do
+    steps = chunks(stream, out, false, session.max_frame)
+
+    drive(%{
+      session
+      | qpack_out: <<>>,
+        work: %{session.work | steps: steps ++ session.work.steps}
+    })
+  end
+
   defp drive(%{work: %{steps: []}} = session), do: finish(session)
 
   defp drive(%{work: %{steps: [action | rest]}} = session) do
@@ -525,8 +570,11 @@ defmodule QuicHttp3.Session do
 
   defp read_allowed?(session, stream) do
     case request_for_stream(session.requests, stream) do
-      {ref, _} -> not MapSet.member?(session.work.paused, ref)
-      nil -> true
+      {ref, request} ->
+        not MapSet.member?(session.work.paused, ref) and not Response.blocked?(request.decoder)
+
+      nil ->
+        true
     end
   end
 
@@ -592,6 +640,9 @@ defmodule QuicHttp3.Session do
   defp operation(session, :open_control, opts),
     do: session.transport.open_stream(session.connection, :uni, opts)
 
+  defp operation(session, {:open_qpack, _type}, opts),
+    do: session.transport.open_stream(session.connection, :uni, opts)
+
   defp operation(session, {:open_request, _, _, _, _}, opts),
     do: session.transport.open_stream(session.connection, :bidi, opts)
 
@@ -623,6 +674,7 @@ defmodule QuicHttp3.Session do
 
   defp operation_kind({:connect, _, _, _}), do: :connect
   defp operation_kind(:open_control), do: :open_stream
+  defp operation_kind({:open_qpack, _}), do: :open_stream
   defp operation_kind({:open_request, _, _, _, _}), do: :open_stream
   defp operation_kind({:send, _, _, _}), do: :send_stream
   defp operation_kind({:events, _}), do: :events
@@ -701,6 +753,16 @@ defmodule QuicHttp3.Session do
      }}
   end
 
+  defp accepted(session, {:open_qpack, type}, {:ok, stream}) do
+    session =
+      if type == :qpack_encoder,
+        do: %{session | qpack_encoder_stream: stream},
+        else: %{session | qpack_decoder_stream: stream}
+
+    send = {:send, stream, Varint.encode!(Stream.type_id(type)), false}
+    {:ok, put_in(session.work.steps, [send | session.work.steps])}
+  end
+
   defp accepted(session, {:open_request, ref, headers, body, method}, {:ok, stream}) do
     decoder =
       Response.new(
@@ -711,16 +773,17 @@ defmodule QuicHttp3.Session do
         max_header_bytes: session.max_header_bytes
       )
 
+    id = stream_id(stream, session.next_stream_id)
+
     request = %{
       stream: stream,
+      stream_id: id,
       ref: ref,
       decoder: decoder,
       upload: :open,
       purpose: method,
       remote_fin?: false
     }
-
-    id = stream_id(stream, session.next_stream_id)
 
     next = %{
       session
@@ -835,6 +898,12 @@ defmodule QuicHttp3.Session do
              retired: MapSet.new(),
              continuations: %{},
              qpack_streams: %{},
+             qpack: nil,
+             qpack_encoder_stream: nil,
+             qpack_decoder_stream: nil,
+             qpack_known: 0,
+             qpack_blocked: [],
+             qpack_out: <<>>,
              open?: false
          }}
 
@@ -906,30 +975,125 @@ defmodule QuicHttp3.Session do
   defp consume_items(session, stream, items) do
     case request_for_stream(session.requests, stream) do
       {ref, request} ->
-        case response_items(request, items, []) do
-          {:ok, request, events, terminal?} ->
-            next = put_in(session.requests[ref], request)
-
-            if terminal?,
-              do: finish_response(next, ref, request, events),
-              else: {:ok, next, events}
-
-          {:error, {:http3_error, :stream, code, reason}} ->
-            steps = [{:reset_code, stream, code}, {:stop_code, stream, code}]
-
-            with {:ok, next} <- retire_request(session, ref) do
-              {:ok, put_in(next.work.steps, steps ++ next.work.steps),
-               [{:stream_error, ref, code, reason}]}
-            end
-
-          error ->
-            error
-        end
+        settle_response(session, ref, request, response_items(session, request, items, []))
 
       nil ->
         consume_peer_items(session, stream, items)
     end
   end
+
+  defp settle_response(session, ref, request, result) do
+    case result do
+      {:ok, request, events, terminal?} ->
+        {acks, events} = Enum.split_with(events, &match?({:qpack_ack, _}, &1))
+
+        next =
+          session
+          |> put_in([Access.key(:requests), ref], request)
+          |> acknowledge_sections(request.stream_id, acks)
+
+        with {:ok, next} <- track_blocked(next, ref, request) do
+          if terminal?,
+            do: finish_response(next, ref, request, events),
+            else: {:ok, next, events}
+        end
+
+      {:error, {:http3_error, :stream, code, reason}} ->
+        steps = [{:reset_code, request.stream, code}, {:stop_code, request.stream, code}]
+
+        with {:ok, next} <- retire_request(session, ref) do
+          {:ok, put_in(next.work.steps, steps ++ next.work.steps),
+           [{:stream_error, ref, code, reason}]}
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp acknowledge_sections(session, _stream_id, []), do: session
+
+  defp acknowledge_sections(session, stream_id, acks) do
+    known = Enum.reduce(acks, session.qpack_known, fn {:qpack_ack, ric}, acc -> max(acc, ric) end)
+
+    out =
+      Enum.reduce(acks, session.qpack_out, fn _, acc -> acc <> Qpack.section_ack(stream_id) end)
+
+    %{session | qpack_known: known, qpack_out: out}
+  end
+
+  defp track_blocked(session, ref, request) do
+    cond do
+      not Response.blocked?(request.decoder) ->
+        {:ok, %{session | qpack_blocked: List.delete(session.qpack_blocked, ref)}}
+
+      ref in session.qpack_blocked ->
+        {:ok, session}
+
+      length(session.qpack_blocked) >= session.qpack_blocked_streams ->
+        protocol_error(0x200, :qpack_blocked_streams_limit)
+
+      true ->
+        {:ok, %{session | qpack_blocked: session.qpack_blocked ++ [ref]}}
+    end
+  end
+
+  # Resume blocked sections in blocking order, then report remaining inserts.
+  defp unblock_sections(session) do
+    ready =
+      Enum.filter(session.qpack_blocked, fn ref ->
+        Response.required_insert_count(session.requests[ref].decoder) <=
+          session.qpack.insert_count
+      end)
+
+    with {:ok, session, events} <- resume_sections(session, ready, []) do
+      {:ok, increment_insert_count(session), events}
+    end
+  end
+
+  defp resume_sections(session, [], events), do: {:ok, session, events}
+
+  defp resume_sections(session, [ref | rest], events) do
+    request = session.requests[ref]
+
+    result =
+      case Response.resume(request.decoder, session.qpack) do
+        {:ok, decoder, emitted} ->
+          mapped = Enum.map(emitted, &response_event(ref, &1))
+          {:ok, %{request | decoder: decoder}, mapped, decoder.phase == :done}
+
+        error ->
+          error
+      end
+
+    with {:ok, next, more} <- settle_response(session, ref, request, result) do
+      next = requeue_unblocked(next, ref)
+      resume_sections(next, rest, events ++ more)
+    end
+  end
+
+  defp requeue_unblocked(session, ref) do
+    case session.requests[ref] do
+      %{decoder: decoder, stream: stream} ->
+        if Response.blocked?(decoder) or decoder.phase == :done or decoder.held_fin?,
+          do: session,
+          else: %{session | runnable: Enum.uniq(session.runnable ++ [stream])}
+
+      nil ->
+        session
+    end
+  end
+
+  defp increment_insert_count(%{qpack: %{insert_count: count}, qpack_known: known} = session)
+       when count > known do
+    %{
+      session
+      | qpack_known: count,
+        qpack_out: session.qpack_out <> Qpack.insert_count_increment(count - known)
+    }
+  end
+
+  defp increment_insert_count(session), do: session
 
   defp finish_response(
          session,
@@ -952,34 +1116,38 @@ defmodule QuicHttp3.Session do
     end
   end
 
-  defp response_items(request, [], events), do: {:ok, request, Enum.reverse(events), false}
+  defp response_items(_session, request, [], events),
+    do: {:ok, request, Enum.reverse(events), false}
 
-  defp response_items(request, [{:data, _id, bytes} | rest], events),
-    do: response_items(request, [{:data, bytes} | rest], events)
+  defp response_items(session, request, [{:data, _id, bytes} | rest], events),
+    do: response_items(session, request, [{:data, bytes} | rest], events)
 
-  defp response_items(request, [{:data, bytes} | rest], events) when is_binary(bytes) do
-    with {:ok, decoder, emitted} <- Response.feed(request.decoder, bytes) do
+  defp response_items(session, request, [{:data, bytes} | rest], events) when is_binary(bytes) do
+    with {:ok, decoder, emitted} <- Response.feed(request.decoder, bytes, session.qpack) do
       mapped = Enum.map(emitted, &response_event(request.ref, &1))
-      response_items(%{request | decoder: decoder}, rest, Enum.reverse(mapped, events))
+      response_items(session, %{request | decoder: decoder}, rest, Enum.reverse(mapped, events))
     end
   end
 
-  defp response_items(request, [{:fin, _id} | rest], events),
-    do: response_items(request, [{:fin} | rest], events)
+  defp response_items(session, request, [{:fin, _id} | rest], events),
+    do: response_items(session, request, [{:fin} | rest], events)
 
-  defp response_items(request, [{:fin}], events) do
+  defp response_items(_session, request, [{:fin}], events) do
     with {:ok, decoder, emitted} <- Response.finish(request.decoder) do
       mapped = Enum.map(emitted, &response_event(request.ref, &1))
-      {:ok, %{request | decoder: decoder}, Enum.reverse(Enum.reverse(mapped, events)), true}
+
+      {:ok, %{request | decoder: decoder}, Enum.reverse(Enum.reverse(mapped, events)),
+       decoder.phase == :done}
     end
   end
 
-  defp response_items(request, [{:reset, _id, code, final_size}], events),
+  defp response_items(_session, request, [{:reset, _id, code, final_size}], events),
     do:
       {:ok, request, Enum.reverse([{:stream_reset, request.ref, code, final_size} | events]),
        true}
 
-  defp response_items(_request, _items, _events), do: protocol_error(0x101, :invalid_stream_event)
+  defp response_items(_session, _request, _items, _events),
+    do: protocol_error(0x101, :invalid_stream_event)
 
   defp response_event(ref, {:headers, status, fields}),
     do: {:headers, ref, [{":status", Integer.to_string(status)} | fields]}
@@ -990,6 +1158,7 @@ defmodule QuicHttp3.Session do
   defp response_event(ref, {:data, bytes}), do: {:data, ref, bytes}
   defp response_event(ref, {:trailers, fields}), do: {:trailers, ref, fields}
   defp response_event(ref, :done), do: {:done, ref}
+  defp response_event(_ref, {:qpack_ack, _required} = ack), do: ack
 
   defp valid_read_batch(_stream, items) when not is_list(items), do: {:error, :invalid_read_batch}
 
@@ -1031,7 +1200,8 @@ defmodule QuicHttp3.Session do
 
   defp valid_limits?(session) do
     session.max_fields in 1..128 and session.max_encoded_headers in 1..65_536 and
-      session.max_header_bytes in 1..65_536 and session.max_retained_bytes in 1..1_048_576
+      session.max_header_bytes in 1..65_536 and session.max_retained_bytes in 1..1_048_576 and
+      session.qpack_max_table_capacity in 0..65_536 and session.qpack_blocked_streams in 0..128
   end
 
   defp request_admission(%{pending: pending}) when not is_nil(pending),
@@ -1088,8 +1258,23 @@ defmodule QuicHttp3.Session do
     request = session.requests[ref]
 
     with {:ok, next} <- retire_stream(session, request.stream) do
+      next = cancel_sections(next, ref, request)
       {:ok, %{drop_continuations(next, ref) | requests: Map.delete(next.requests, ref)}}
     end
+  end
+
+  # RFC 9204 Section 4.4.2: abandoning an incomplete response stream releases
+  # the peer encoder's references through Stream Cancellation.
+  defp cancel_sections(%{qpack: nil} = session, _ref, _request), do: session
+
+  defp cancel_sections(session, ref, %{decoder: %{phase: phase}} = request) do
+    session = %{session | qpack_blocked: List.delete(session.qpack_blocked, ref)}
+    goaway = session.control && session.control.goaway_id
+
+    # Streams rejected by GOAWAY were never processed by the peer.
+    if phase == :done or (goaway != nil and request.stream_id >= goaway),
+      do: session,
+      else: %{session | qpack_out: session.qpack_out <> Qpack.stream_cancel(request.stream_id)}
   end
 
   defp retire_stream(session, stream) do
@@ -1233,16 +1418,45 @@ defmodule QuicHttp3.Session do
     end
   end
 
-  defp receive_peer_payload(session, _stream, :qpack_encoder, bytes) do
+  defp receive_peer_payload(%{qpack: nil} = session, _stream, :qpack_encoder, bytes) do
     if Enum.all?(:binary.bin_to_list(bytes), &(&1 == 0x20)),
       do: {:ok, session, []},
       else: protocol_error(0x201, :invalid_static_encoder_instruction)
   end
 
-  defp receive_peer_payload(session, _stream, :qpack_decoder, <<>>), do: {:ok, session, []}
+  defp receive_peer_payload(%{qpack: nil} = session, _stream, :qpack_decoder, <<>>),
+    do: {:ok, session, []}
 
-  defp receive_peer_payload(_session, _stream, :qpack_decoder, _bytes),
+  defp receive_peer_payload(%{qpack: nil}, _stream, :qpack_decoder, _bytes),
     do: protocol_error(0x202, :invalid_static_decoder_instruction)
+
+  defp receive_peer_payload(session, stream, :qpack_encoder, bytes) do
+    data = session.peer_streams[stream].buffer <> bytes
+
+    case Qpack.apply_encoder_instructions(session.qpack, data) do
+      {:ok, table, rest} ->
+        session = put_in(session.peer_streams[stream].buffer, :binary.copy(rest))
+        unblock_sections(%{session | qpack: table})
+
+      {:error, reason} ->
+        protocol_error(0x201, reason)
+    end
+  end
+
+  # The local encoder never references the dynamic table, so the peer decoder
+  # can only cancel streams; acknowledgments and increments are errors.
+  defp receive_peer_payload(session, stream, :qpack_decoder, bytes) do
+    data = session.peer_streams[stream].buffer <> bytes
+
+    with {:ok, instructions, rest} <- Qpack.decode_decoder_instructions(data),
+         true <- Enum.all?(instructions, &match?({:stream_cancel, _}, &1)),
+         true <- byte_size(rest) <= 16 do
+      {:ok, put_in(session.peer_streams[stream].buffer, :binary.copy(rest)), []}
+    else
+      false -> protocol_error(0x202, :unexpected_decoder_instruction)
+      {:error, reason} -> protocol_error(0x202, reason)
+    end
+  end
 
   defp receive_peer_payload(session, _stream, {:unknown, _type}, _bytes), do: {:ok, session, []}
 

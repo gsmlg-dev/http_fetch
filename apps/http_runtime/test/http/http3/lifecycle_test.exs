@@ -245,6 +245,9 @@ defmodule HTTP.HTTP3.LifecycleTest do
 
       assert_receive {:native_connect, ^owner}
       assert_receive {:native_send, 2, _, false}
+      # Default dynamic QPACK opens the local encoder (0x02) and decoder (0x03) streams.
+      assert_receive {:native_send, 2, <<2>>, false}
+      assert_receive {:native_send, 2, <<3>>, false}
       assert {:ok, stream, generation} = Stream.start(request, self(), pool: pool)
       stream_monitor = Process.monitor(stream)
       assert_receive {:native_send, 0, headers, false}

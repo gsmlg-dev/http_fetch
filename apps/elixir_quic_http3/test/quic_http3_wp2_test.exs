@@ -318,9 +318,10 @@ defmodule QuicHttp3.WP2Test do
   end
 
   test "static QPACK critical streams reject instructions and duplicates", %{
-    session: session,
+    opts: opts,
     native: native
   } do
+    session = static_session(opts)
     encoder = %StreamHandle{connection: native, id: 3}
 
     Process.put({:results, :events}, [
@@ -370,9 +371,10 @@ defmodule QuicHttp3.WP2Test do
   end
 
   test "unsolicited push and static decoder instructions fail explicitly", %{
-    session: session,
+    opts: opts,
     native: native
   } do
+    session = static_session(opts)
     push = %StreamHandle{connection: native, id: 3}
     Process.put({:results, :events}, [{:ok, [{:stream_open, push, :uni}, {:readable, push}]}])
     Process.put({:results, :read}, [{:ok, [{:data, 3, <<1, 0>>}]}])
@@ -446,6 +448,17 @@ defmodule QuicHttp3.WP2Test do
              Adapter.connect({127, 0, 0, 1}, 443, Keyword.put(opts, :tls, tls))
 
     refute_received {:call, :client, _}
+  end
+
+  # Explicit 0/0 QPACK settings reproduce the static/literal profile.
+  defp static_session(opts) do
+    {:ok, session} =
+      Session.new(max_frame: 128, qpack_max_table_capacity: 0, qpack_blocked_streams: 0)
+
+    {:ok, session} = Session.connect(session, {127, 0, 0, 1}, 443, opts)
+    {:ok, session} = Session.open(session)
+    _ = calls()
+    session
   end
 
   defp poll_read(stream, items) do

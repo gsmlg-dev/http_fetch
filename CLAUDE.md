@@ -49,9 +49,11 @@ built and is not part of the umbrella.
   evidence is recorded in [the implementation audit](docs/http3-implementation-audit.md).
 - `ex_ssl` owns `SSL` and the TLS handshake APIs. `elixir_quic` owns `Quic` and
   consumes only public `SSL.QUIC` APIs. `elixir_quic_http3` owns `QuicHttp3`.
-  Fetch and EventSource support explicit HTTPS HTTP/3 beta with static/literal
-  QPACK. Dynamic QPACK, 0-RTT, migration, WebSocket over HTTP/3 and WebTransport
-  remain unsupported; raw `Quic.capabilities().http3` remains false.
+  Fetch and EventSource support explicit HTTPS HTTP/3 beta with a dynamic-table
+  QPACK decoder (the encoder stays static/literal); Fetch also offers opt-in
+  Alt-Svc discovery (`http_version: :auto, alt_svc: true`). WebSocket over
+  HTTP/3 is experimental. HTTP-layer 0-RTT, migration and WebTransport remain
+  unsupported; raw `Quic.capabilities().http3` remains false.
 - **HTTPFetch.Application** (`apps/http_fetch/lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
 
 ### Key Design Patterns

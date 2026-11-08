@@ -11,8 +11,8 @@ its independent acceptance gate.
 
 | WP | Scope | Depends on | Status |
 | --- | --- | --- | --- |
-| 1 | Fetch Alt-Svc discovery, opt-in H3 for `:auto`, safe fallback | none | Implemented; locally verified (uncommitted) |
-| 2 | Dynamic QPACK (RFC 9204 encoder/decoder streams, bounded table) | none | Planned |
+| 1 | Fetch Alt-Svc discovery, opt-in H3 for `:auto`, safe fallback | none | Committed 6d8bbbc; independent-peer gate pending |
+| 2 | Dynamic QPACK decoder (RFC 9204), bounded table and blocked streams | none | Done; aioquic gate PASS |
 | 3 | WebSocket/H3: native completion receipt, drop experimental label | QUIC cleanup receipt contract | Planned |
 | 4 | WebTransport live adapter on `HTTP.HTTP3.ConnectionOwner` | WP3 runtime contract; matching draft-17 peer for acceptance | Planned; acceptance blocked |
 | 5 | HTTP-layer 0-RTT / migration exposure | QUIC engine negative acceptance (Lane A) | Deferred |
@@ -50,3 +50,38 @@ its independent acceptance gate.
   `:http3` against the in-repo QUIC fixture; dead UDP port → falls back to
   `:http1` and marks broken; post-readiness H3 failure does not fall back.
 - Existing Fetch H3 and options suites stay green; strict compile, format, Credo.
+
+## WP2: Dynamic QPACK decoder
+
+### Contract
+
+- The client advertises `SETTINGS_QPACK_MAX_TABLE_CAPACITY` (default 4096) and
+  `SETTINGS_QPACK_BLOCKED_STREAMS` (default 16). Both are configurable per
+  session/profile; `0`/`0` restores the previous static-only profile exactly.
+- Peer encoder-stream instructions are applied to a bounded dynamic table: Set
+  Dynamic Table Capacity (above the advertised maximum is
+  `QPACK_ENCODER_STREAM_ERROR`), Insert With Name Reference (static/dynamic),
+  Insert With Literal Name and Duplicate. Partial instructions are buffered,
+  with a bound.
+- Field sections decode Required Insert Count/Base, dynamic indexed, post-base
+  indexed and dynamic/post-base name references, per RFC 9204 §4.5.
+- A section whose Required Insert Count exceeds the current insert count is
+  blocked until enough inserts arrive. More blocked streams than advertised is
+  `QPACK_DECOMPRESSION_FAILED`. Blocked bytes count against existing header
+  limits.
+- The client opens its decoder stream and sends Section Acknowledgment (for
+  sections with a nonzero Required Insert Count), Stream Cancellation (reset or
+  abandoned streams with references) and Insert Count Increment.
+- The client's encoder stays static/literal (RFC 9204 allows this); the client
+  still opens the encoder stream as required.
+
+### Verification
+
+- Pure tests: RFC 9204 Appendix B examples, eviction, capacity changes,
+  invalid references, blocked/unblocked ordering, size bounds.
+- Session tests: encoder/decoder stream wiring, acknowledgements, cancellation,
+  blocked limit errors.
+- Independent: the pinned aioquic 1.2.0 peer (pylsqpack, which uses the
+  dynamic table) serving repeated and large header sets over public Fetch.
+- No regressions in the existing H3, Fetch H3, EventSource H3 and WebSocket H3
+  suites.
