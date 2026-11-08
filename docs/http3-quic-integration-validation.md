@@ -131,6 +131,8 @@ reported the following failures:
 These checks have not been bypassed or certified clean. Integration and other CI
 jobs were still running at that inspection. Detailed job logs and annotations are
 retained under the evidence directory's `release-preflight` subdirectory.
+Integration subsequently passed. After reviewing the failures, the user explicitly
+accepted the current CI failures and authorized proceeding with RC10 publication.
 
 The original coordinator checkpoint made no source changes or delivery actions.
 The user subsequently authorized main integration and a GitHub patch release;

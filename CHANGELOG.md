@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gates passed before the final behavior-preserving TLS lint refactoring.
   Separate QUIC positive wire gates passed; complete adversarial acceptance
   remains open and the corresponding global capability flags remain unchanged.
+- Remote CI reports five Dialyzer warnings and a stale no-OTP production source
+  audit census. This RC is published with those failures explicitly accepted;
+  Test, Integration, E2E and public HTTP/3 acceptance passed.
 
 ## [1.0.0-rc.9] - 2026-11-08
 
