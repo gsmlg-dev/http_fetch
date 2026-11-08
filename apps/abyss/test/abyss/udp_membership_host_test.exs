@@ -2,6 +2,7 @@ defmodule Abyss.UDPMembershipHostTest do
   use ExUnit.Case, async: false
 
   @moduletag :integration
+  @moduletag skip: Abyss.TestHost.linux_only()
   @group1 {239, 255, 72, 1}
   @group2 {239, 255, 72, 2}
 

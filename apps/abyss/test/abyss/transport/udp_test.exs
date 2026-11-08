@@ -34,6 +34,7 @@ defmodule Abyss.Transport.UDPTest do
   end
 
   describe "send/3 and recv/3" do
+    @tag skip: Abyss.TestHost.linux_only()
     test "preserves independent packets including empty and large payloads" do
       {:ok, server} = UDP.listen(0, ip: {127, 0, 0, 1}, buffer: 65_536)
       {:ok, {ip, port}} = UDP.sockname(server)

@@ -10,6 +10,7 @@ defmodule Abyss.UDPPeerValidationTest do
   @loopback {127, 0, 0, 1}
 
   for helper <- [:client, :udp, :unicast], address <- [{127, 0, 0, 1}, {127, 0, 0, 2}] do
+    @tag skip: address != {127, 0, 0, 1} and Abyss.TestHost.linux_only()
     test "#{helper} rejects unrelated source #{inspect(address)} before valid empty reply" do
       helper = unquote(helper)
       address = unquote(Macro.escape(address))

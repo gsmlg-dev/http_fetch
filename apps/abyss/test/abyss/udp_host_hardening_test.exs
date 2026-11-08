@@ -191,6 +191,7 @@ defmodule Abyss.UDPHostHardeningTest do
     assert %{responses_total: 1, bytes_sent: 9} = Abyss.Telemetry.get_metrics(first)
   end
 
+  @tag skip: Abyss.TestHost.linux_only()
   test "mixed loopback delivery modes isolate a saturated and crashing endpoint" do
     group = {239, 255, 72, 3}
     {unicast, _, _, unicast_port} = endpoint(num_connections: 1)

@@ -334,6 +334,7 @@ defmodule Abyss.Transport.UDP.BroadcastTest do
       Broadcast.close(socket)
     end
 
+    @tag skip: Abyss.TestHost.linux_only()
     test "sends to directed loopback broadcast and proves delivery" do
       {:ok, receiver} = Broadcast.listen(0, active: false)
       {:ok, {_, port}} = Broadcast.sockname(receiver)
