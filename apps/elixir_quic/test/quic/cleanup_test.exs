@@ -141,6 +141,20 @@ defmodule Quic.CleanupTest do
              Cleanup.retire(lease, bound())
   end
 
+  test "reliable reset is an admitted stream operation kind" do
+    {:ok, _handle, lease} = Cleanup.new(owner: self())
+
+    assert {:ok, operation} =
+             Cleanup.operation(lease, make_ref(), make_ref(), :reset_stream_at, bound())
+
+    assert :ok = Cleanup.resolved(operation)
+
+    assert {:error, :invalid_operation_kind} =
+             Cleanup.operation(lease, make_ref(), make_ref(), :unknown_kind, bound())
+
+    assert {:ok, %{cleanup: :confirmed}} = Cleanup.retire(lease, bound())
+  end
+
   test "expired operation intent grants no admission" do
     {:ok, handle, lease} = Cleanup.new(owner: self())
 

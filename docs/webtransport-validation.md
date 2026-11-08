@@ -1,11 +1,60 @@
 # WebTransport Task D validation
 
-Status: independent application work implemented; network adapter and draft-17
-interoperability **BLOCKED**. No WebTransport capability is enabled. All checks
-use the current checkout; no branch/worktree, commit, push, package version or
-lockfile change, publication, or external source change was performed.
+Status 2026-11-09 (WP4): the draft-17 live adapter is implemented end to end on
+an exclusive `HTTP.HTTP3.ConnectionOwner` and passes an in-repo QUIC peer
+integration suite. Independent draft-17 interoperability is **BLOCKED** (no
+qualifying peer; see `webtransport-peer-profile.md`). Local reliable reset
+under the session's cleanup scope works after the engine fix below. No
+WebTransport capability is enabled: `HTTP.WebTransport.Profile.supported?/0`
+remains false. No branch/worktree, commit, lockfile, CI or engine change.
 
-## Implemented application behavior
+## WP4 live adapter (2026-11-09)
+
+- `HTTP.WebTransport.Transport.QUIC` starts one inert, exclusive owner
+  (`max_streams: 1`, `webtransport: true`) under the runtime connection
+  supervisor with a session-owned `Quic.Cleanup` scope and `reliable_reset: true`,
+  then sends one `webtransport-h3` CONNECT with `wt-available-protocols` when
+  protocols are offered. Refusals (missing draft-17/DATAGRAM/CONNECT SETTINGS,
+  reliable reset or QUIC DATAGRAM not negotiated, non-2xx, deadline, owner
+  death) are explicit errors, and the owner and its native resources are retired
+  before `connect/2` returns. There is no fallback.
+- Owner deliveries carry router credit receipts. The session returns a stream
+  receipt when its bytes reach a reader (or are discarded) and a datagram receipt
+  on arrival (datagram retention is already bounded by drop-oldest). The owner
+  reads a WT stream only with 16 KiB/1 item headroom in its at most 262144-byte
+  router budget, so slow readers backpressure the peer through QUIC flow control.
+- `Session` gained a backend `handle_message/2` hook (push delivery), receipts on
+  `{:webtransport_stream_data, ref, bytes, receipt}` and a send-side
+  `{:webtransport_send_stopped, ref, code}` event.
+- `close/2` sends CLOSE_WEBTRANSPORT_SESSION with FIN, lingers (default 500 ms)
+  for the peer FIN, stops the owner and returns `:ok` only if the cleanup receipt
+  is `:confirmed`; otherwise the session reports `{:cleanup_failed, reason}`.
+- Owner operation calls that exit without a result return
+  `{:error, {:indeterminate_operation, ref}}`; they are never replayed.
+
+Engine findings (apps/elixir_quic, out of scope; reported, not worked around):
+
+1. `Quic.Cleanup.operation/5` rejects kind `:reset_stream_at`
+   (`apps/elixir_quic/lib/quic/cleanup/observer.ex` allow-list), so a cleanup-
+   scoped session cannot retain a RESET_STREAM_AT intent:
+   `SendStream.abort/2` returns `{:error, :invalid_operation_kind}` and nothing
+   is sent (no RESET_STREAM substitution). **Fixed** by the coordinator: the
+   observer admits `:reset_stream_at` (regression in `cleanup_test.exs`); the
+   integration suite now asserts the peer receives the WT prefix and then
+   RESET_STREAM_AT with the draft-17 code. The H3 layer computes
+   `reliable_size` = WT prefix length.
+2. On peer STOP_SENDING the engine automatically sends an ordinary RESET_STREAM
+   (`handshake_scheduler.ex` `peer_stop_sending`). Draft-17 §4.4 prefers a
+   reset that keeps the WT header reliable; the adapter only records the event
+   and closes the local send side.
+
+Other bounds: a blocked write holds the session process until admission or its
+deadline (5 s default); the H3 session's terminal-stream ledger caps one
+connection at 1024 retired streams; no keepalive is sent, so the QUIC idle
+timeout applies; the QPACK/peer stream budget admits 16 peer bidi and 16 peer
+WT uni streams concurrently.
+
+## Application behavior (Task D, 2026-11-08)
 
 - Owner monitoring terminates and cleans the session on owner death. Backend
   close is attempted once across close/failure/termination; callback errors are
@@ -38,26 +87,42 @@ lockfile change, publication, or external source change was performed.
   SETTINGS plus both DATAGRAM and reliable-reset transport parameters and
   Task A's actual `%{draft: 11, local: true, peer: true, negotiated: true}` engine
   negotiation info. No parser
-  was copied into this app. Default `Transport.QUIC` remains explicitly unsupported
-  while its required shared network contract is unavailable.
+  was copied into this app. (2026-11-08: `Transport.QUIC` was then a stub; WP4
+  replaced it with the live adapter above.)
 
 Synchronous backend callbacks must themselves honor transport bounds and return;
-Session cannot interrupt an indefinitely blocking backend. Network admission,
-credit and cleanup guarantees await the actual adapter/runtime gate.
+Session cannot interrupt an indefinitely blocking backend. The live adapter
+bounds every owner call by its operation timeout.
 
 ## Reproducible commands
 
-Run from the umbrella root with task-private build state. Do not run deps.get or
-write shared `_build`.
+Run from the umbrella root:
 
 ```sh
-ERL_FLAGS='+S 4:4' MIX_ENV=test MIX_BUILD_PATH=/tmp/http-fetch-task-d-build/test mix compile --warnings-as-errors
-ERL_FLAGS='+S 4:4' MIX_ENV=test MIX_BUILD_PATH=/tmp/http-fetch-task-d-build/test mix test apps/http_web_transport/test
-ERL_FLAGS='+S 4:4' MIX_ENV=test MIX_BUILD_PATH=/tmp/http-fetch-task-d-build/test mix credo apps/http_web_transport --strict
-python3 scripts/webtransport/probe_peer.py
+MIX_ENV=test mix compile --warnings-as-errors
+mix test apps/http_web_transport/test apps/elixir_quic_http3/test \
+  apps/http_runtime/test/http/http3 apps/http_core/test/http/h3 --include integration
+mix test apps/http_web_transport/test/http/web_transport/quic_integration_test.exs --include integration
+mix test apps/http_web_transport/e2e --include e2e
+python3 scripts/webtransport/probe_peer.py   # pinned source probe; exits 2 (BLOCKED)
 ```
 
-## Evidence ledger
+## Evidence ledger (2026-11-09)
+
+| Gate | Result | Evidence / limitation |
+| --- | --- | --- |
+| Strict compilation | PASS | `MIX_ENV=test mix compile --warnings-as-errors`. |
+| Scoped suites with integration | PASS | http_core 28, elixir_quic_http3 177, http_runtime/http3 78, http_web_transport 61 tests; 0 failures. |
+| In-repo QUIC peer, live adapter | PASS (5 repeated runs) | `quic_integration_test.exs`, 13 tests: bidi/uni both directions with exact bytes and FIN (40000-byte uni write), empty/duplicate/boundary and foreign-session datagrams, streams and datagrams before CONNECT acceptance, foreign session ID rejected per stream (`WT_BUFFERED_STREAM_REJECTED`), peer reliable reset (code 43) and STOP_SENDING code mapping both ways, local Close capsule + FIN with owner exit, peer Drain then Close, missing draft-17 SETTINGS refused with no CONNECT stream, peer without reliable reset refused, 404 refusal, silent-peer deadline with no owner left, owner kill fails the session. The peer is our own engine: not independent acceptance. |
+| Local reliable reset (cleanup scope) | PASS (in-repo peer) | Peer reads the WT prefix then RESET_STREAM_AT with the mapped draft-17 code. |
+| Unit: H3 session, router, owner, budget | PASS | `quic_http3_web_transport_session_test.exs` (refusal order, single session, prefix, reliable size, receipts, capsules), router local/reset/forget, `webtransport_owner_test.exs` (subscriber-only ops, credit ack, deadline, receive budget). |
+| E2E | PASS | 2 tests; default backend refuses without explicit QUIC trust. |
+| Regression | PASS | Fetch H3 + Alt-Svc 26, EventSource H3 9, WebSocket completion 6 (integration); full http_runtime units 210; aioquic 1.2.0 RFC 9220 gate 9/9 PASS. |
+| Format / Credo | PASS | Changed files formatted; `mix credo` clean; `--strict` reports only pre-existing design notes. Global `mix format --check-formatted` fails on unrelated `apps/abyss/lib/abyss/quic/service.ex`. |
+| Independent draft-17 peer | BLOCKED | 2026-11-09 re-audit of 18 implementations, none qualifies (`webtransport-peer-profile.md`). |
+| Browser / production / published artifacts | NOT RUN | Separate acceptance; no publication authorized. |
+
+## Task D evidence (2026-11-08, historical; superseded above)
 
 | Gate | Result | Evidence / limitation |
 | --- | --- | --- |

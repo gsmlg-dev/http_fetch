@@ -1,5 +1,12 @@
 defmodule HTTP.HTTP3.ReceiveBudget do
-  @moduledoc "Finite receive windows reserve capacity for every admitted request and peer stream."
+  @moduledoc """
+  Finite receive windows reserve capacity for every admitted request and peer stream.
+
+  With `webtransport: true` an owned endpoint also admits peer-initiated
+  WebTransport streams: by default 16 bidirectional and 16 unidirectional
+  streams beyond the three H3 control/QPACK streams, each reserved at its
+  receive window. Ordinary HTTP/3 owners keep peer bidirectional streams at 0.
+  """
   @window 65_536
 
   def normalize(options) do
@@ -45,8 +52,12 @@ defmodule HTTP.HTTP3.ReceiveBudget do
   end
 
   defp owned(options, streams, concurrency) do
+    wt? = Keyword.get(options, :webtransport, false) == true
+
     streams =
-      streams |> Keyword.put_new(:max_streams_bidi, 0) |> Keyword.put_new(:max_streams_uni, 3)
+      streams
+      |> Keyword.put_new(:max_streams_bidi, if(wt?, do: 16, else: 0))
+      |> Keyword.put_new(:max_streams_uni, if(wt?, do: 19, else: 3))
 
     request =
       Keyword.get(
@@ -59,12 +70,20 @@ defmodule HTTP.HTTP3.ReceiveBudget do
       Keyword.get(streams, :max_stream_data_uni, Keyword.get(streams, :max_stream_data, @window))
 
     count = streams[:max_streams_uni]
+    bidi = streams[:max_streams_bidi]
 
-    if valid_windows?(request, uni, count) and streams[:max_streams_bidi] == 0 and
+    remote =
+      Keyword.get(
+        streams,
+        :max_stream_data_bidi_remote,
+        Keyword.get(streams, :max_stream_data, @window)
+      )
+
+    if valid_windows?(request, uni, count, wt?) and valid_peer_bidi?(bidi, remote, wt?) and
          Enum.all?([:max_data, :max_buffer, :max_ready_bytes, :max_receive_buffer], fn key ->
            not Keyword.has_key?(streams, key) or (is_integer(streams[key]) and streams[key] > 0)
          end) do
-      required = concurrency * request + count * uni
+      required = concurrency * request + count * uni + bidi * remote
 
       streams =
         streams
@@ -76,7 +95,7 @@ defmodule HTTP.HTTP3.ReceiveBudget do
 
       actual = QuicHttp3.Transport.Quic.stream_budget(streams)
 
-      if sufficient?(actual, concurrency),
+      if sufficient?(actual, concurrency, wt?),
         do: {:ok, Keyword.put(options, :streams, streams)},
         else: {:error, :http3_receive_budget_too_small}
     else
@@ -87,17 +106,20 @@ defmodule HTTP.HTTP3.ReceiveBudget do
   defp borrowed(options, streams, concurrency, actual) do
     matching = streams == [] or QuicHttp3.Transport.Quic.stream_budget(streams) == actual
 
-    if matching and sufficient?(actual, concurrency) do
+    if matching and sufficient?(actual, concurrency, false) do
       {:ok, Keyword.put(options, :streams, Enum.sort(Map.to_list(actual)))}
     else
       {:error, :http3_endpoint_receive_budget_mismatch}
     end
   end
 
-  defp sufficient?(actual, concurrency) do
+  defp sufficient?(actual, concurrency, wt?) do
     request = actual[:max_stream_data_bidi_local]
     uni = actual[:max_stream_data_uni]
     count = actual[:max_streams_uni]
+    bidi = actual[:max_streams_bidi]
+    remote = Map.get(actual, :max_stream_data_bidi_remote, request)
+    required = concurrency * request + count * uni + bidi * remote
 
     capacity =
       Enum.all?(
@@ -113,18 +135,26 @@ defmodule HTTP.HTTP3.ReceiveBudget do
         end
       )
 
-    capacity and valid_windows?(request, uni, count) and actual[:max_streams_bidi] == 0 and
+    capacity and valid_windows?(request, uni, count, wt?) and
+      valid_peer_bidi?(bidi, remote, wt?) and
       actual[:delivery] == :manual and
       Enum.all?([:max_data, :max_buffer, :max_ready_bytes], fn key ->
         is_integer(actual[key]) and actual[key] > 0
       end) and
-      actual[:max_data] >= concurrency * request + count * uni and
-      actual[:max_buffer] >= concurrency * request + count * uni and
-      actual[:max_ready_bytes] >= concurrency * request + count * uni
+      actual[:max_data] >= required and
+      actual[:max_buffer] >= required and
+      actual[:max_ready_bytes] >= required
   end
 
-  defp valid_windows?(request, uni, count),
+  defp valid_windows?(request, uni, count, wt?),
     do:
       is_integer(request) and request in 1..@window and is_integer(uni) and uni in 1..@window and
-        is_integer(count) and count in 3..16
+        is_integer(count) and count in 3..if(wt?, do: 67, else: 16)
+
+  defp valid_peer_bidi?(0, _remote, _wt?), do: true
+
+  defp valid_peer_bidi?(bidi, remote, true),
+    do: is_integer(bidi) and bidi in 1..64 and is_integer(remote) and remote in 1..@window
+
+  defp valid_peer_bidi?(_bidi, _remote, _wt?), do: false
 end

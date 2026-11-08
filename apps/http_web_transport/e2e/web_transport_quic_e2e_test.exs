@@ -5,11 +5,10 @@ defmodule E2E.WebTransportQUICE2ETest do
 
   @moduletag :e2e
 
-  test "reports the WebTransport backend capability boundary" do
+  test "the live backend refuses without explicit QUIC trust and never falls back" do
     transport = WebTransport.new("https://example.com/transport", connect_timeout: 1_000)
 
-    assert {:error, :webtransport_not_supported_by_elixir_quic_http3} =
-             WebTransport.await_ready(transport, 1_000)
+    assert {:error, {:http3_not_established, _}} = WebTransport.await_ready(transport, 2_000)
 
     assert WebTransport.state(transport) == :failed
   end

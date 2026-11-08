@@ -18,11 +18,22 @@ defmodule QuicHttp3.Session do
   Count Increment through ordinary stream-write admission. `0`/`0` keeps the
   static/literal profile without QPACK streams. The local encoder is always
   static/literal.
+
+  WebTransport: `webtransport: true` (or router limits as a keyword list)
+  advertises the draft-17 client SETTINGS and admits exactly one
+  `webtransport-h3` extended CONNECT after the peer's draft-17 SETTINGS and the
+  connection's negotiated reliable reset and QUIC DATAGRAM support are
+  confirmed. Peer WT streams and datagrams are associated through
+  `QuicHttp3.WebTransportRouter`; deliveries are `{:wt, connect_ref, event}`
+  poll events whose credit is released by `webtransport_acknowledge/2`.
   """
 
+  alias HTTP.H3.{Capsule, Datagram}
+  alias HTTP.H3.WebTransport.Draft17
   alias QuicHttp3.{Connect, Control, Frame, Qpack, Response, Stream, Varint}
   alias QuicHttp3.Transport.Quic, as: QuicTransport
   alias QuicHttp3.Transport.Quic.Stream, as: TransportStream
+  alias QuicHttp3.WebTransportRouter, as: Router
 
   defstruct transport: QuicTransport,
             connection: nil,
@@ -55,6 +66,7 @@ defmodule QuicHttp3.Session do
             runnable: [],
             retired: MapSet.new(),
             aborted_operation: nil,
+            wt: nil,
             open?: false
 
   defmodule Continuation do
@@ -99,8 +111,11 @@ defmodule QuicHttp3.Session do
           ] ++ limits
         )
 
-      with :ok <- validate_cleanup(cleanup, transport) do
-        if valid_limits?(session), do: {:ok, session}, else: {:error, :invalid_session_options}
+      with :ok <- validate_cleanup(cleanup, transport),
+           {:ok, wt} <- webtransport_state(Keyword.get(opts, :webtransport)) do
+        if valid_limits?(session),
+          do: {:ok, %{session | wt: wt}},
+          else: {:error, :invalid_session_options}
       end
     else
       {:error, :invalid_session_options}
@@ -108,6 +123,28 @@ defmodule QuicHttp3.Session do
   end
 
   def new(_), do: {:error, :invalid_session_options}
+
+  defp webtransport_state(value) when value in [nil, false], do: {:ok, nil}
+  defp webtransport_state(true), do: webtransport_state([])
+
+  defp webtransport_state(opts) when is_list(opts) do
+    case Router.new(Keyword.take(opts, [:max_bytes, :max_items, :max_streams])) do
+      {:ok, router} ->
+        {:ok,
+         %{
+           router: router,
+           connect: nil,
+           streams: %{},
+           capsule: Capsule.new(),
+           datagram_max: 0
+         }}
+
+      {:error, _} ->
+        {:error, :invalid_session_options}
+    end
+  end
+
+  defp webtransport_state(_), do: {:error, :invalid_session_options}
 
   defp valid_deadline?(nil), do: true
   defp valid_deadline?({:abs_ms, deadline}), do: is_integer(deadline)
@@ -150,12 +187,17 @@ defmodule QuicHttp3.Session do
         :ready ->
           capacity = session.qpack_max_table_capacity
 
+          wt_settings = if session.wt, do: Draft17.client_settings(), else: []
+
           {:ok, control} =
-            Control.new(:client, [
-              {1, capacity},
-              {6, session.max_header_bytes},
-              {7, session.qpack_blocked_streams}
-            ])
+            Control.new(
+              :client,
+              [
+                {1, capacity},
+                {6, session.max_header_bytes},
+                {7, session.qpack_blocked_streams}
+              ] ++ wt_settings
+            )
 
           {qpack, steps} =
             if capacity > 0,
@@ -204,7 +246,7 @@ defmodule QuicHttp3.Session do
          :ok <- connect_deadline(session, opts),
          :ok <- request_admission(session),
          :ready <- Connect.ready(session.control),
-         :ok <- extension_requirements(protocol),
+         {:ok, session} <- extension_requirements(session, protocol),
          {:ok, fields} <- Connect.fields(protocol, fields),
          :ok <- outgoing_fields(session, fields),
          {:ok, block} <- Qpack.encode_header_block(fields, opts),
@@ -235,11 +277,144 @@ defmodule QuicHttp3.Session do
     end
   end
 
-  # The token codec exists for the pinned WT profile, but admitting network WT
-  # before negotiated reliable reset and sole-owner routing are connected would
-  # send an unsupported profile. Keep that dependent path fail-closed.
-  defp extension_requirements("webtransport-h3"), do: {:error, :webtransport_network_not_ready}
-  defp extension_requirements(_), do: :ok
+  # Draft-17 admission: no profile bytes are sent unless the peer advertised the
+  # draft-17 SETTINGS and this connection negotiated reliable reset draft-11
+  # plus QUIC DATAGRAM. One session per connection; no fallback is attempted.
+  defp extension_requirements(%{wt: nil}, "webtransport-h3"),
+    do: {:error, :webtransport_not_enabled}
+
+  defp extension_requirements(%{wt: %{connect: connect}}, "webtransport-h3")
+       when connect != nil,
+       do: {:error, :webtransport_session_capacity}
+
+  defp extension_requirements(session, "webtransport-h3") do
+    with :ok <- Draft17.validate_server_settings(session.control.peer_settings),
+         {:ok, info} <- session.transport.info(session.connection),
+         {:ok, max} <- webtransport_transport(info) do
+      {:ok, put_in(session.wt.datagram_max, max)}
+    end
+  end
+
+  defp extension_requirements(session, _), do: {:ok, session}
+
+  defp webtransport_transport(%{
+         reliable_reset: %{draft: 11, local: true, peer: true, negotiated: true},
+         datagram: %{send_max_bytes: max}
+       })
+       when is_integer(max) and max > 0,
+       do: {:ok, max}
+
+  defp webtransport_transport(%{reliable_reset: %{draft: 11, negotiated: true}}),
+    do: {:error, :quic_datagram_not_negotiated}
+
+  defp webtransport_transport(_), do: {:error, :reliable_reset_not_negotiated}
+
+  @doc "Returns the accepted WT session identity and maximum DATAGRAM payload."
+  def webtransport_info(%{wt: %{connect: ref, router: %{session_id: id}} = wt})
+      when ref != nil do
+    overhead = byte_size(Varint.encode!(div(id, 4)))
+
+    {:ok,
+     %{
+       connect: ref,
+       session_id: id,
+       phase: wt.router.phase,
+       max_datagram_payload: max(wt.datagram_max - overhead, 0)
+     }}
+  end
+
+  def webtransport_info(_), do: {:error, :no_webtransport_session}
+
+  @doc "Opens a session-associated WT stream; returns its QUIC stream ID as key."
+  def webtransport_open(session, kind, opts \\ []) when kind in [:bidi, :uni] do
+    with :ok <- wt_accepted(session),
+         :ok <- request_admission(session) do
+      begin(session, {:wt_open, nil}, [{:open_wt, kind}], opts)
+    else
+      {:error, reason} -> {:error, session, reason}
+    end
+  end
+
+  @doc "Writes raw WT stream bytes; FIN closes the send side."
+  def webtransport_send(session, key, bytes, fin, opts \\ [])
+      when is_binary(bytes) and is_boolean(fin) do
+    with :ok <- wt_accepted(session),
+         {:ok, %{send: :open, stream: stream}} <- wt_entry(session, key) do
+      begin(session, :wt_send, wt_send_steps(stream, bytes, fin, session.max_frame), opts)
+    else
+      {:ok, _} -> {:error, session, :send_closed}
+      {:error, reason} -> {:error, session, reason}
+    end
+  end
+
+  defp wt_send_steps(stream, <<>>, true, _max), do: [{:send, stream, <<>>, true}]
+  defp wt_send_steps(_stream, <<>>, false, _max), do: []
+  defp wt_send_steps(stream, bytes, fin, max), do: chunks(stream, bytes, fin, max)
+
+  @doc "Resets the send side with RESET_STREAM_AT, reliably delivering the WT prefix."
+  def webtransport_reset(session, key, code, opts \\ []) do
+    with {:ok, %{send: :open} = entry} <- wt_entry(session, key),
+         {:ok, wire} <- Draft17.application_error(code) do
+      begin(session, :wt_reset, [{:reset_at, entry.stream, wire, entry.prefix}], opts)
+    else
+      {:ok, _} -> {:error, session, :send_closed}
+      {:error, reason} -> {:error, session, reason}
+    end
+  end
+
+  @doc "Aborts the receive side with STOP_SENDING carrying a mapped application code."
+  def webtransport_stop(session, key, code, opts \\ []) do
+    with {:ok, %{recv: :open} = entry} <- wt_entry(session, key),
+         {:ok, wire} <- Draft17.application_error(code) do
+      begin(session, :wt_stop, [{:stop_code, entry.stream, wire}], opts)
+    else
+      {:ok, _} -> {:error, session, :receive_closed}
+      {:error, reason} -> {:error, session, reason}
+    end
+  end
+
+  @doc "Sends one HTTP DATAGRAM associated with the accepted WT session."
+  def webtransport_datagram(session, payload, opts \\ []) when is_binary(payload) do
+    with :ok <- wt_accepted(session),
+         {:ok, bytes} <-
+           Datagram.encode(session.wt.router.session_id, payload, session.wt.datagram_max) do
+      begin(session, :wt_datagram, [{:datagram, bytes}], opts)
+    else
+      {:error, reason} -> {:error, session, reason}
+    end
+  end
+
+  @doc "Sends CLOSE_WEBTRANSPORT_SESSION and FIN on the CONNECT stream."
+  def webtransport_close(session, code, reason, opts \\ []) do
+    with %{connect: ref} when ref != nil <- session.wt || {:error, :no_webtransport_session},
+         {:ok, capsule} <- Draft17.close_capsule(code, reason) do
+      {:ok, router, _actions} = Router.close(session.wt.router, session.wt.router.session_id)
+      send_data(put_in(session.wt.router, router), ref, capsule, true, opts)
+    else
+      %{} -> {:error, session, :no_webtransport_session}
+      {:error, reason} -> {:error, session, reason}
+    end
+  end
+
+  @doc "Releases delivery credit retained for a WT event receipt."
+  def webtransport_acknowledge(%{wt: %{router: router}} = session, receipt) do
+    with {:ok, router} <- Router.acknowledge(router, receipt),
+         do: {:ok, put_in(session.wt.router, router)}
+  end
+
+  def webtransport_acknowledge(_session, _receipt), do: {:error, :unknown_receipt}
+
+  defp wt_accepted(%{wt: %{router: %{phase: :accepted}}}), do: :ok
+  defp wt_accepted(_), do: {:error, :webtransport_not_accepted}
+
+  defp wt_entry(%{wt: %{streams: streams}}, key) do
+    case Map.fetch(streams, key) do
+      {:ok, entry} -> {:ok, entry}
+      :error -> {:error, :unknown_stream}
+    end
+  end
+
+  defp wt_entry(_, _), do: {:error, :no_webtransport_session}
 
   def send_data(session, ref, bytes, fin, opts)
       when is_binary(bytes) and byte_size(bytes) <= 16_384 and is_boolean(fin) do
@@ -512,10 +687,7 @@ defmodule QuicHttp3.Session do
   defp drive(%{work: %{steps: [action | rest]}} = session) do
     case action do
       {:event, event} ->
-        case consume_event(session, event) do
-          {:ok, next} -> drive(put_in(next.work.steps, rest))
-          {:error, reason} -> {:error, session, reason}
-        end
+        drive_event(session, event, rest)
 
       :drain ->
         drain(session, rest)
@@ -558,6 +730,14 @@ defmodule QuicHttp3.Session do
     end
   end
 
+  defp drive_event(session, event, rest) do
+    case consume_event(session, event) do
+      {:ok, next} -> drive(put_in(next.work.steps, rest))
+      {:ok, next, steps} -> drive(put_in(next.work.steps, steps ++ rest))
+      {:error, reason} -> {:error, session, reason}
+    end
+  end
+
   defp drain(%{work: %{reads: 0}} = session, _rest), do: finish(session)
   defp drain(%{work: %{bytes: 0}} = session, _rest), do: finish(session)
 
@@ -574,9 +754,16 @@ defmodule QuicHttp3.Session do
         not MapSet.member?(session.work.paused, ref) and not Response.blocked?(request.decoder)
 
       nil ->
-        true
+        not wt_stream?(session, stream) or wt_credit?(session.wt.router)
     end
   end
+
+  # A read admits at most 16 KiB, so reading only with that much room left keeps
+  # reliable stream bytes inside the router budget instead of rejecting them.
+  defp wt_credit?(router),
+    do:
+      router.retained_bytes + 16_384 <= router.max_bytes and
+        map_size(router.outstanding) < router.max_items
 
   defp invoke(session, action) do
     remaining = session.work.deadline - now()
@@ -658,6 +845,18 @@ defmodule QuicHttp3.Session do
   defp operation(session, {:reset_code, stream, code}, opts),
     do: session.transport.reset_stream(stream, code, opts)
 
+  defp operation(session, {:reset_at, stream, code, size}, opts),
+    do: session.transport.reset_stream_at(stream, code, size, opts)
+
+  defp operation(session, {:open_wt, kind}, opts),
+    do: session.transport.open_stream(session.connection, kind, opts)
+
+  defp operation(session, {:datagram, bytes}, opts),
+    do: session.transport.send_datagram(session.connection, bytes, opts)
+
+  defp operation(session, {:datagrams, max}, opts),
+    do: session.transport.read_datagrams(session.connection, max, opts)
+
   defp operation(session, {:stop_code, stream, code}, opts),
     do: session.transport.stop_stream(stream, code, opts)
 
@@ -681,6 +880,10 @@ defmodule QuicHttp3.Session do
   defp operation_kind({:read, _}), do: :read
   defp operation_kind({:reset, _}), do: :reset_stream
   defp operation_kind({:reset_code, _, _}), do: :reset_stream
+  defp operation_kind({:reset_at, _, _, _}), do: :reset_stream_at
+  defp operation_kind({:open_wt, _}), do: :open_stream
+  defp operation_kind({:datagram, _}), do: :send_datagram
+  defp operation_kind({:datagrams, _}), do: :read_datagrams
   defp operation_kind({:stop_code, _, _}), do: :stop_stream
   defp operation_kind({:stop, _}), do: :stop_stream
   defp operation_kind(:close), do: :close
@@ -792,6 +995,11 @@ defmodule QuicHttp3.Session do
         next_stream_id: id + 4
     }
 
+    next =
+      if method == {:extended_connect, "webtransport-h3"},
+        do: register_webtransport(next, ref, id),
+        else: next
+
     if session.control.goaway_id != nil and id >= session.control.goaway_id do
       steps = [{:reset_code, stream, 0x10B}, {:stop_code, stream, 0x10B}, {:remove_request, ref}]
       {:ok, %{next | work: %{next.work | kind: {:rejected, ref, :goaway}, steps: steps}}}
@@ -806,8 +1014,61 @@ defmodule QuicHttp3.Session do
     case request_for_stream(session.requests, stream) do
       {ref, %{remote_fin?: true}} -> retire_request(session, ref)
       {ref, _request} -> {:ok, put_in(session.requests[ref].upload, :closed)}
-      nil -> {:ok, session}
+      nil -> wt_update(session, stream, send: :closed)
     end
+  end
+
+  defp accepted(session, {:open_wt, kind}, {:ok, stream}) do
+    key = stream_key(stream)
+    {:ok, prefix} = Draft17.prefix(kind, session.wt.router.session_id)
+    recv = if kind == :bidi, do: :open, else: :closed
+
+    router =
+      if kind == :bidi,
+        do: elem(Router.local_stream(session.wt.router, key, :bidi), 1),
+        else: session.wt.router
+
+    entry = %{stream: stream, kind: kind, local?: true, send: :open, recv: recv, prefix: 0}
+
+    next_id =
+      if kind == :bidi and is_integer(key),
+        do: max(session.next_stream_id, key + 4),
+        else: session.next_stream_id
+
+    wt = %{
+      session.wt
+      | router: router,
+        streams: Map.put(session.wt.streams, key, %{entry | prefix: byte_size(prefix)})
+    }
+
+    steps = [{:send, stream, prefix, false} | session.work.steps]
+
+    {:ok,
+     %{
+       session
+       | wt: wt,
+         next_stream_id: next_id,
+         work: %{session.work | kind: {:wt_open, key}, steps: steps}
+     }}
+  end
+
+  defp accepted(session, {:reset_at, stream, _code, _size}, _success),
+    do: wt_update(session, stream, send: :reset)
+
+  defp accepted(session, {:stop_code, stream, _code}, _success),
+    do: wt_update(session, stream, recv: :closed)
+
+  defp accepted(session, {:datagrams, _}, {:ok, datagrams}) when is_list(datagrams) do
+    {router, deliveries} =
+      Enum.reduce(datagrams, {session.wt.router, []}, fn bytes, {router, acc} ->
+        case Router.datagram(router, bytes) do
+          {:ok, router, delivered} -> {router, acc ++ delivered}
+          {:error, _} -> {router, acc}
+        end
+      end)
+
+    session = put_in(session.wt.router, router)
+    {:ok, record_events(session, wt_events(session, deliveries))}
   end
 
   defp accepted(_session, {:events, _}, {:ok, events}) when not is_list(events),
@@ -876,6 +1137,9 @@ defmodule QuicHttp3.Session do
       {:request, ref} ->
         {:ok, next, ref}
 
+      {:wt_open, key} ->
+        {:ok, next, key}
+
       {:rejected, ref, reason} ->
         {:error, next, {:request_rejected, ref, reason}}
 
@@ -933,9 +1197,22 @@ defmodule QuicHttp3.Session do
   end
 
   defp consume_event(session, {:stream_open, stream, :bidi}) do
-    if request_for_stream(session.requests, stream) || MapSet.member?(session.retired, stream),
-      do: {:ok, session},
-      else: {:error, :peer_bidirectional_stream}
+    cond do
+      request_for_stream(session.requests, stream) || MapSet.member?(session.retired, stream) ->
+        {:ok, session}
+
+      session.wt != nil and map_size(session.wt.streams) < 1_024 ->
+        entry = %{stream: stream, kind: :bidi, local?: false, send: :open, recv: :open, prefix: 0}
+
+        {:ok,
+         put_in(session.wt.streams, Map.put_new(session.wt.streams, stream_key(stream), entry))}
+
+      session.wt != nil ->
+        protocol_error(0x107, :webtransport_stream_limit)
+
+      true ->
+        {:error, :peer_bidirectional_stream}
+    end
   end
 
   defp consume_event(session, {:readable, stream}) do
@@ -943,7 +1220,8 @@ defmodule QuicHttp3.Session do
       MapSet.member?(session.retired, stream) ->
         {:ok, session}
 
-      request_for_stream(session.requests, stream) || Map.has_key?(session.peer_streams, stream) ->
+      request_for_stream(session.requests, stream) || Map.has_key?(session.peer_streams, stream) ||
+          wt_stream?(session, stream) ->
         {:ok, %{session | runnable: Enum.uniq(session.runnable ++ [stream])}}
 
       true ->
@@ -957,14 +1235,24 @@ defmodule QuicHttp3.Session do
         {:ok, record_events(session, [{:stopped, ref, code}])}
 
       nil ->
-        if MapSet.member?(session.retired, stream),
-          do: {:ok, session},
-          else: {:error, :unknown_stream_event}
+        cond do
+          MapSet.member?(session.retired, stream) ->
+            {:ok, session}
+
+          wt_stream?(session, stream) ->
+            wt_stopped(session, stream, code)
+
+          true ->
+            {:error, :unknown_stream_event}
+        end
     end
   end
 
   defp consume_event(_session, {:closed, reason}), do: {:error, {:connection_closed, reason}}
   defp consume_event(_session, {:error, reason}), do: {:error, reason}
+
+  defp consume_event(%{wt: %{}} = session, :datagram_readable),
+    do: {:ok, session, [{:datagrams, 32}]}
 
   defp consume_event(session, event) when event in [:ready, :writable, :datagram_readable],
     do: {:ok, record_events(session, [event])}
@@ -978,11 +1266,17 @@ defmodule QuicHttp3.Session do
         settle_response(session, ref, request, response_items(session, request, items, []))
 
       nil ->
-        consume_peer_items(session, stream, items)
+        cond do
+          wt_stream?(session, stream) -> consume_wt_items(session, stream, items)
+          wt_uni?(session, stream, items) -> promote_wt_uni(session, stream, items)
+          true -> consume_peer_items(session, stream, items)
+        end
     end
   end
 
   defp settle_response(session, ref, request, result) do
+    {session, result} = connect_result(session, ref, result)
+
     case result do
       {:ok, request, events, terminal?} ->
         {acks, events} = Enum.split_with(events, &match?({:qpack_ack, _}, &1))
@@ -1478,6 +1772,271 @@ defmodule QuicHttp3.Session do
 
   defp control_code(_reason), do: 0x105
   defp protocol_error(code, reason), do: {:error, {:http3_error, :connection, code, reason}}
+
+  # -- WebTransport association ------------------------------------------
+
+  defp register_webtransport(session, ref, id) do
+    case Router.register(session.wt.router, id) do
+      {:ok, router} -> %{session | wt: %{session.wt | router: router, connect: ref}}
+      {:error, _} -> session
+    end
+  end
+
+  defp stream_key(%TransportStream{handle: %{id: id}}), do: id
+  defp stream_key(stream), do: stream
+
+  defp wt_stream?(%{wt: %{streams: streams}}, stream),
+    do: Map.has_key?(streams, stream_key(stream))
+
+  defp wt_stream?(_session, _stream), do: false
+
+  defp wt_uni?(%{wt: %{}} = session, stream, items) do
+    case session.peer_streams[stream] do
+      %{type: nil, buffer: buffer} ->
+        match?({:ok, {:unknown, 0x54}, _}, Stream.decode_type(buffer <> item_bytes(items)))
+
+      _ ->
+        false
+    end
+  end
+
+  defp wt_uni?(_session, _stream, _items), do: false
+
+  defp promote_wt_uni(session, stream, items) do
+    %{buffer: buffer} = session.peer_streams[stream]
+    entry = %{stream: stream, kind: :uni, local?: false, send: :closed, recv: :open, prefix: 0}
+
+    session = %{
+      session
+      | peer_streams: Map.delete(session.peer_streams, stream),
+        wt: %{session.wt | streams: Map.put(session.wt.streams, stream_key(stream), entry)}
+    }
+
+    consume_wt_items(session, stream, [{:data, buffer} | items])
+  end
+
+  defp item_bytes(items) do
+    for item <- items, into: <<>> do
+      case item do
+        {:data, _id, bytes} -> bytes
+        {:data, bytes} -> bytes
+        _ -> <<>>
+      end
+    end
+  end
+
+  defp consume_wt_items(session, stream, items) do
+    key = stream_key(stream)
+    entry = session.wt.streams[key]
+    bytes = item_bytes(items)
+
+    terminal =
+      Enum.find_value(items, fn
+        {:fin, _} -> :fin
+        {:fin} -> :fin
+        {:reset, _id, code, _size} -> {:reset, code}
+        _ -> nil
+      end)
+
+    cond do
+      entry.recv != :open ->
+        {:ok, session, []}
+
+      match?({:reset, _}, terminal) ->
+        wt_reset_items(session, stream, bytes, elem(terminal, 1))
+
+      bytes == <<>> and terminal == nil ->
+        {:ok, session, []}
+
+      true ->
+        wt_data_items(session, key, entry.kind, bytes, terminal == :fin)
+    end
+  end
+
+  # Reliable-reset data precedes the reset; deliver it before terminating.
+  defp wt_reset_items(session, stream, bytes, code) do
+    key = stream_key(stream)
+
+    with {:ok, session, events} <- consume_wt_items(session, stream, [{:data, bytes}]) do
+      if match?(%{recv: :open}, session.wt.streams[key]) do
+        {:ok, router, deliveries} = Router.reset(session.wt.router, key, code)
+        session = put_in(session.wt.router, router)
+        finish_wt_receive(session, key, events ++ wt_events(session, deliveries), [])
+      else
+        {:ok, session, events}
+      end
+    end
+  end
+
+  defp wt_data_items(session, key, kind, bytes, fin) do
+    case Router.stream_data(session.wt.router, key, kind, bytes, fin) do
+      {:ok, router, deliveries} ->
+        session = put_in(session.wt.router, router)
+        {delivered, actions} = Enum.split_with(deliveries, &match?({_, _}, &1))
+        events = wt_events(session, delivered)
+
+        if actions == [] and not fin,
+          do: {:ok, session, events},
+          else: finish_wt_receive(session, key, events, actions)
+
+      {:error, _reason} ->
+        # Malformed association is a stream error; the connection survives.
+        finish_wt_receive(session, key, [], [{:reset, key, 0x101}])
+    end
+  end
+
+  # Receive side terminal; rejected streams are also stopped and reset.
+  defp finish_wt_receive(session, key, events, actions) do
+    session = put_in(session.wt.streams[key].recv, :closed)
+
+    steps =
+      Enum.flat_map(actions, fn {:reset, ^key, code} ->
+        entry = session.wt.streams[key]
+        stop = [{:stop_code, entry.stream, code}]
+        if entry.send == :open, do: [{:reset_code, entry.stream, code} | stop], else: stop
+      end)
+
+    session =
+      if actions == [],
+        do: session,
+        else: put_in(session.wt.router, Router.forget(session.wt.router, key))
+
+    with {:ok, next} <- maybe_retire_wt(session, key) do
+      {:ok, put_in(next.work.steps, steps ++ next.work.steps), events}
+    end
+  end
+
+  # The QUIC engine answers STOP_SENDING itself and discards the send side, so
+  # the stream's send direction is terminal here; no second reset is issued.
+  defp wt_stopped(session, stream, code) do
+    key = stream_key(stream)
+    event = {:wt, session.wt.connect, {:stopped, key, decode_wt_code(code)}}
+    wt_update(record_events(session, [event]), stream, send: :reset)
+  end
+
+  defp wt_update(%{wt: %{}} = session, stream, changes) do
+    key = stream_key(stream)
+
+    case session.wt.streams[key] do
+      nil ->
+        {:ok, session}
+
+      entry ->
+        session = put_in(session.wt.streams[key], Map.merge(entry, Map.new(changes)))
+
+        session =
+          if Keyword.get(changes, :recv) == :closed,
+            do: put_in(session.wt.router, Router.forget(session.wt.router, key)),
+            else: session
+
+        maybe_retire_wt(session, key)
+    end
+  end
+
+  defp wt_update(session, _stream, _changes), do: {:ok, session}
+
+  defp maybe_retire_wt(session, key) do
+    case session.wt.streams[key] do
+      %{send: send, recv: :closed, stream: stream} when send != :open ->
+        with {:ok, next} <- retire_stream(session, stream) do
+          {:ok, put_in(next.wt.streams, Map.delete(next.wt.streams, key))}
+        end
+
+      _ ->
+        {:ok, session}
+    end
+  end
+
+  defp wt_events(session, deliveries) do
+    connect = session.wt.connect
+
+    Enum.map(deliveries, fn
+      {receipt, {:stream, _id, key, kind, bytes, fin}} ->
+        {:wt, connect, {:stream, key, kind, bytes, fin, receipt}}
+
+      {receipt, {:datagram, _id, payload}} ->
+        {:wt, connect, {:datagram, payload, receipt}}
+
+      {nil, {:reset, _id, key, code}} ->
+        {:wt, connect, {:reset, key, decode_wt_code(code)}}
+    end)
+  end
+
+  defp decode_wt_code(code) do
+    case Draft17.decode_application_error(code) do
+      {:ok, application} -> application
+      {:error, _} -> {:http3_error, code}
+    end
+  end
+
+  # CONNECT stream of the WT session: 2xx accepts the router; DATA carries
+  # capsules; any other final status, FIN or reset closes the router.
+  defp connect_result(%{wt: %{connect: ref}} = session, ref, {:ok, request, events, terminal?}) do
+    case Enum.reduce_while(events, {:ok, session, []}, &connect_event(ref, &1, &2)) do
+      {:ok, session, mapped} ->
+        session = if terminal?, do: close_router(session), else: session
+        {session, {:ok, request, Enum.reverse(mapped), terminal?}}
+
+      {:error, session, reason} ->
+        {close_router(session), {:error, {:http3_error, :stream, 0x10E, reason}}}
+    end
+  end
+
+  defp connect_result(%{wt: %{connect: ref}} = session, ref, result),
+    do: {close_router(session), result}
+
+  defp connect_result(session, _ref, result), do: {session, result}
+
+  defp connect_event(ref, {:headers, ref, [{":status", status} | _]} = event, {:ok, session, acc}) do
+    if String.to_integer(status) in 200..299 do
+      case Router.accept(session.wt.router, session.wt.router.session_id) do
+        {:ok, router, pending} ->
+          session = put_in(session.wt.router, router)
+          {:cont, {:ok, session, Enum.reverse(wt_events(session, pending)) ++ [event | acc]}}
+
+        {:error, reason} ->
+          {:halt, {:error, session, reason}}
+      end
+    else
+      {:cont, {:ok, close_router(session), [event | acc]}}
+    end
+  end
+
+  defp connect_event(ref, {:data, ref, bytes}, {:ok, session, acc}) do
+    with {:ok, capsule, capsules} <- Capsule.feed(session.wt.capsule, bytes),
+         {:ok, mapped} <- decode_capsules(ref, capsules) do
+      {:cont, {:ok, put_in(session.wt.capsule, capsule), Enum.reverse(mapped, acc)}}
+    else
+      {:error, reason} -> {:halt, {:error, session, reason}}
+    end
+  end
+
+  defp connect_event(_ref, event, {:ok, session, acc}), do: {:cont, {:ok, session, [event | acc]}}
+
+  defp decode_capsules(ref, capsules) do
+    Enum.reduce_while(capsules, {:ok, []}, fn capsule, {:ok, acc} ->
+      case Draft17.decode_capsule(capsule) do
+        {:ok, {:close, code, reason}} ->
+          {:cont, {:ok, acc ++ [{:wt, ref, {:close, code, reason}}]}}
+
+        {:ok, :drain} ->
+          {:cont, {:ok, acc ++ [{:wt, ref, :drain}]}}
+
+        :ignore ->
+          {:cont, {:ok, acc}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp close_router(session) do
+    case Router.close(session.wt.router, session.wt.router.session_id) do
+      {:ok, router, _actions} -> put_in(session.wt.router, router)
+      {:error, _} -> session
+    end
+  end
 
   defp request_for_stream(requests, stream) do
     Enum.find_value(requests, fn

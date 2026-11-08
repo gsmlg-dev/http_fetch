@@ -280,6 +280,11 @@ defmodule QuicHttp3.Transport.Quic do
   def reset_stream(%Stream{handle: stream, ops: ops}, code, options),
     do: ops.reset_stream(stream, code, options)
 
+  @doc "Resets the send side while reliably delivering the first `reliable_size` bytes."
+  @impl true
+  def reset_stream_at(%Stream{handle: stream, ops: ops}, code, reliable_size, options),
+    do: ops.reset_stream_at(stream, code, reliable_size, options)
+
   @impl true
   def stop_stream(%Stream{handle: stream, ops: ops}, code, options),
     do: ops.stop_stream(stream, code, options)

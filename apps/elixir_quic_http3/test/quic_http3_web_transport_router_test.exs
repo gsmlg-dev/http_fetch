@@ -57,4 +57,29 @@ defmodule QuicHttp3.WebTransportRouterTest do
 
     assert {:error, :unknown_receipt} = Router.acknowledge(state, make_ref())
   end
+
+  test "local streams need no prefix, FIN and reset release entries, resets carry no receipt" do
+    {:ok, state} = Router.new(max_streams: 1)
+    assert {:error, :session_not_accepted} = Router.local_stream(state, 0, :bidi)
+    {:ok, state} = Router.register(state, 0)
+    {:ok, state, []} = Router.accept(state, 0)
+    {:ok, state} = Router.local_stream(state, 4, :bidi)
+    assert {:error, :duplicate_stream} = Router.local_stream(state, 4, :bidi)
+
+    assert {:ok, state, [{r1, {:stream, 0, 4, :bidi, "echo", true}}]} =
+             Router.stream_data(state, 4, :bidi, "echo", true)
+
+    refute Map.has_key?(state.streams, 4)
+    {:ok, prefix} = Draft17.prefix(:uni, 0)
+    {:ok, state, [_]} = Router.stream_data(state, 3, :uni, prefix <> "a", false)
+    assert {:ok, state, [{nil, {:reset, 0, 3, 42}}]} = Router.reset(state, 3, 42)
+    assert {:ok, ^state, []} = Router.reset(state, 3, 42)
+
+    {:ok, state, []} = Router.stream_data(state, 7, :uni, binary_part(prefix, 0, 1), false)
+    # "echo" and "a" stay charged until acknowledged; one buffered prefix byte.
+    assert state.retained_bytes == 6
+    state = Router.forget(state, 7)
+    assert state.retained_bytes == 5
+    assert {:ok, _} = Router.acknowledge(state, r1)
+  end
 end

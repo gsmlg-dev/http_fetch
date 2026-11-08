@@ -32,8 +32,10 @@ defmodule HTTP.HTTP3.Stream do
       opts[:purpose] != :extended_connect ->
         :ok
 
+      # WebTransport runs on an exclusive owner via HTTP.WebTransport, never a
+      # pooled relay.
       opts[:protocol] == "webtransport-h3" ->
-        {:error, :webtransport_network_not_ready}
+        {:error, :webtransport_requires_exclusive_owner}
 
       opts[:protocol] != "websocket" ->
         {:error, :unsupported_connect_protocol}

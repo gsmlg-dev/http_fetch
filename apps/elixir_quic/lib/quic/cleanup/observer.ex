@@ -146,6 +146,7 @@ defmodule Quic.Cleanup.Observer do
         :send_stream,
         :events,
         :reset_stream,
+        :reset_stream_at,
         :stop_stream,
         :send_datagram,
         :read_datagrams

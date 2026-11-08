@@ -261,7 +261,8 @@ defmodule HTTP.WebTransport.Session do
 
         state =
           if reply == :ok do
-            state = put_stream_state(state, stream_ref, %{stream | queue: []})
+            Enum.each(stream.credits, &acknowledge(state, &1))
+            state = put_stream_state(state, stream_ref, %{stream | queue: [], credits: []})
             deliver_stream(stream_ref, {:error, :cancelled}, state)
           else
             state
@@ -306,8 +307,11 @@ defmodule HTTP.WebTransport.Session do
     {:stop, :normal, close_session(state, %CloseInfo{reason: "owner exited"})}
   end
 
-  def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
-    {:noreply, remove_dead_waiters(state, monitor)}
+  def handle_info({:DOWN, monitor, :process, _pid, _reason} = message, state) do
+    case backend_message(state, message) do
+      {:ok, events} -> {:noreply, apply_backend_events(events, state)}
+      :ignore -> {:noreply, remove_dead_waiters(state, monitor)}
+    end
   end
 
   def handle_info(_message, %{state: status} = state) when status in [:closed, :failed],
@@ -347,6 +351,21 @@ defmodule HTTP.WebTransport.Session do
     {:noreply, deliver_stream(stream_ref, {:data, bytes}, state)}
   end
 
+  def handle_info({:webtransport_stream_data, stream_ref, bytes, receipt}, state)
+      when is_binary(bytes) do
+    {:noreply, deliver_stream(stream_ref, {:data, bytes}, state, receipt)}
+  end
+
+  def handle_info({:webtransport_send_stopped, stream_ref, _code}, state) do
+    case Map.fetch(state.streams, stream_ref) do
+      {:ok, %{writable: true} = stream} ->
+        {:noreply, put_stream_state(state, stream_ref, %{stream | send_closed: true})}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info({:webtransport_stream_fin, stream_ref}, state) do
     {:noreply, deliver_stream(stream_ref, :fin, state)}
   end
@@ -375,7 +394,38 @@ defmodule HTTP.WebTransport.Session do
     {:noreply, timeout_stream_waiter(stream_ref, from, state)}
   end
 
-  def handle_info(_message, state), do: {:noreply, state}
+  def handle_info(message, state) do
+    case backend_message(state, message) do
+      {:ok, events} -> {:noreply, apply_backend_events(events, state)}
+      :ignore -> {:noreply, state}
+    end
+  end
+
+  # Backends with push delivery translate their own messages into the session
+  # events above; unknown messages are ignored.
+  defp backend_message(%{session_ref: nil}, _message), do: :ignore
+
+  defp backend_message(state, message) do
+    if function_exported?(state.backend, :handle_message, 2),
+      do: state.backend.handle_message(state.session_ref, message),
+      else: :ignore
+  end
+
+  defp apply_backend_events(events, state) do
+    Enum.reduce(events, state, fn event, acc ->
+      {:noreply, next} = handle_info(event, acc)
+      next
+    end)
+  end
+
+  defp acknowledge(_state, nil), do: :ok
+
+  defp acknowledge(state, receipt) do
+    if function_exported?(state.backend, :acknowledge, 2),
+      do: state.backend.acknowledge(state.session_ref, receipt)
+
+    :ok
+  end
 
   defp connect_success(state, session_ref, info, duration) do
     protocol = Map.get(info, :protocol, "")
@@ -514,7 +564,12 @@ defmodule HTTP.WebTransport.Session do
   defp read_known_stream(stream_ref, stream_state, timeout, from, state) do
     case stream_state.queue do
       [{:data, bytes} | rest] ->
-        state = put_stream_state(state, stream_ref, %{stream_state | queue: rest})
+        {credits, receipt} = pop_credit(stream_state.credits)
+        acknowledge(state, receipt)
+
+        state =
+          put_stream_state(state, stream_ref, %{stream_state | queue: rest, credits: credits})
+
         {:reply, {:ok, bytes}, state}
 
       [] ->
@@ -549,7 +604,9 @@ defmodule HTTP.WebTransport.Session do
     end
   end
 
-  defp deliver_stream(stream_ref, event, state) do
+  # A data receipt is returned to the backend once its bytes leave the session:
+  # immediately for a waiting reader or a dropped event, otherwise when read.
+  defp deliver_stream(stream_ref, event, state, receipt \\ nil) do
     case Map.fetch(state.streams, stream_ref) do
       {:ok, %{readable: true, terminal: nil} = stream} ->
         state = record_stream_event(state, stream_ref, event)
@@ -558,6 +615,7 @@ defmodule HTTP.WebTransport.Session do
 
         case stream.waiters do
           [waiter | rest] ->
+            acknowledge(state, receipt)
             release_waiter(waiter)
             GenServer.reply(waiter.from, stream_reply(event))
             stream = %{stream | waiters: rest}
@@ -570,17 +628,26 @@ defmodule HTTP.WebTransport.Session do
                 put_stream_state(state, stream_ref, stream)
 
               buffer_fits?(state, event_bytes(event), 1) ->
-                put_stream_state(state, stream_ref, %{stream | queue: stream.queue ++ [event]})
+                put_stream_state(state, stream_ref, %{
+                  stream
+                  | queue: stream.queue ++ [event],
+                    credits: stream.credits ++ [receipt]
+                })
 
               true ->
+                acknowledge(state, receipt)
                 fail_session(state, :receive_buffer_exceeded)
             end
         end
 
       _ ->
+        acknowledge(state, receipt)
         state
     end
   end
+
+  defp pop_credit([receipt | rest]), do: {rest, receipt}
+  defp pop_credit([]), do: {[], nil}
 
   defp record_stream_event(state, ref, {:data, bytes}) do
     Telemetry.stream_received(state.uri, ref, byte_size(bytes))
@@ -917,6 +984,7 @@ defmodule HTTP.WebTransport.Session do
     Map.update!(state, :streams, fn streams ->
       Map.put_new(streams, stream_ref, %{
         queue: [],
+        credits: [],
         waiters: [],
         readable: readable,
         writable: writable,

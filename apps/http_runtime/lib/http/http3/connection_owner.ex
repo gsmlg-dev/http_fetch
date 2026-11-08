@@ -45,6 +45,23 @@ defmodule HTTP.HTTP3.ConnectionOwner do
 
   def status(owner), do: GenServer.call(owner, :status)
 
+  @doc """
+  Runs one WebTransport operation for the accepted `webtransport-h3` CONNECT `ref`.
+
+  Only that CONNECT's subscriber may call. Operations are serialized with all
+  other native work under the absolute deadline `timeout` from now and are never
+  replayed: `{:open, :bidi | :uni}` returns `{:ok, stream_key}`; `{:send, key,
+  bytes, fin}`, `{:reset, key, code}`, `{:stop, key, code}`, `{:datagram,
+  bytes}` and `{:close, code, reason}` return `:ok`. `:info` reads the session
+  identity and DATAGRAM payload limit.
+  """
+  def webtransport(owner, ref, op, timeout) when is_integer(timeout) and timeout > 0,
+    do: GenServer.call(owner, {:webtransport, ref, op, now() + timeout}, timeout + 1_000)
+
+  @doc "Releases owner delivery credit retained for a WT event receipt."
+  def webtransport_ack(owner, ref, receipt),
+    do: GenServer.cast(owner, {:webtransport_ack, ref, receipt})
+
   @impl true
   def init(opts) do
     {:ok, opts} = HTTP.HTTP3.ReceiveBudget.normalize(opts)
@@ -138,7 +155,8 @@ defmodule HTTP.HTTP3.ConnectionOwner do
             :activation,
             :creator,
             :request_lifecycle,
-            :session_options
+            :session_options,
+            :webtransport
           ])
           |> Keyword.put(:deadline, {:abs_ms, state.opening_deadline})
           |> Keyword.put(:timeout, min(state.timeout, max(state.opening_deadline - now(), 1)))
@@ -213,6 +231,22 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     end
   end
 
+  def handle_call({:webtransport, _ref, _op, _deadline}, _from, %{lifecycle: :inert} = state),
+    do: {:reply, {:error, :owner_inert}, state}
+
+  def handle_call({:webtransport, ref, op, deadline}, {caller, _} = from, state) do
+    case state.requests[ref] do
+      %{subscriber: ^caller, protocol: "webtransport-h3"} when op == :info ->
+        {:reply, QuicHttp3.Session.webtransport_info(state.session), state}
+
+      %{subscriber: ^caller, protocol: "webtransport-h3"} ->
+        {:noreply, enqueue(state, {:webtransport, from, ref, op, deadline})}
+
+      _ ->
+        {:reply, {:error, :unknown_webtransport_session}, state}
+    end
+  end
+
   def handle_call({:cancel, ref}, _from, state) do
     next = remove_request(state, ref)
     action = {:cancel, ref}
@@ -251,6 +285,18 @@ defmodule HTTP.HTTP3.ConnectionOwner do
 
   def handle_cast({:write, ref, bytes, fin, recipient, write_ref}, state),
     do: {:noreply, enqueue(state, {:write, ref, bytes, fin, recipient, write_ref})}
+
+  def handle_cast({:webtransport_ack, ref, receipt}, state) do
+    next =
+      with %{protocol: "webtransport-h3"} <- state.requests[ref],
+           {:ok, session} <- Session.webtransport_acknowledge(state.session, receipt) do
+        %{state | session: session}
+      else
+        _ -> state
+      end
+
+    {:noreply, touch(next)}
+  end
 
   def handle_cast({:ack, ref}, state) do
     next =
@@ -483,6 +529,30 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     end
   end
 
+  defp perform(state, {:webtransport, _from, ref, op, deadline} = action) do
+    cond do
+      now() >= deadline ->
+        reject(state, action, :operation_timeout)
+
+      not Map.has_key?(state.requests, ref) ->
+        reject(state, action, :unknown_webtransport_session)
+
+      true ->
+        opts = [deadline: {:abs_ms, deadline}]
+
+        result(
+          state,
+          action,
+          guarded(
+            state,
+            min(state.timeout, max(deadline - now(), 1)),
+            fn -> webtransport_call(state.session, op, opts) end,
+            action
+          )
+        )
+    end
+  end
+
   defp perform(state, {:cancel, ref} = action) do
     if Map.has_key?(state.session.requests, ref),
       do:
@@ -509,6 +579,26 @@ defmodule HTTP.HTTP3.ConnectionOwner do
         action,
         guarded(state, state.timeout, fn -> Session.reset_send(state.session, ref) end)
       )
+
+  defp webtransport_call(session, {:open, kind}, opts),
+    do: Session.webtransport_open(session, kind, opts)
+
+  defp webtransport_call(session, {:send, key, bytes, fin}, opts),
+    do: Session.webtransport_send(session, key, bytes, fin, opts)
+
+  defp webtransport_call(session, {:reset, key, code}, opts),
+    do: Session.webtransport_reset(session, key, code, opts)
+
+  defp webtransport_call(session, {:stop, key, code}, opts),
+    do: Session.webtransport_stop(session, key, code, opts)
+
+  defp webtransport_call(session, {:datagram, bytes}, opts),
+    do: Session.webtransport_datagram(session, bytes, opts)
+
+  defp webtransport_call(session, {:close, code, reason}, opts),
+    do: Session.webtransport_close(session, code, reason, opts)
+
+  defp webtransport_call(session, _op, _opts), do: {:error, session, :invalid_operation}
 
   defp write(session, ref, {:trailers, fields}, true, opts),
     do: Session.send_trailers(session, ref, fields, opts)
@@ -583,6 +673,7 @@ defmodule HTTP.HTTP3.ConnectionOwner do
       subscriber: subscriber,
       generation: generation,
       purpose: opts[:purpose],
+      protocol: opts[:protocol],
       data_bytes: 0,
       deadline: opts[:request_deadline_at],
       monitor: monitor,
@@ -603,6 +694,16 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     if Process.alive?(subscriber),
       do: next,
       else: enqueue(remove_request(next, ref), {:cancel, ref})
+  end
+
+  defp apply_result(state, {:webtransport, from, _, _, _}, {:ok, session, key}) do
+    GenServer.reply(from, {:ok, key})
+    %{state | session: session, pending: nil}
+  end
+
+  defp apply_result(state, {:webtransport, from, _, _, _}, {:ok, session}) do
+    GenServer.reply(from, :ok)
+    %{state | session: session, pending: nil}
   end
 
   defp apply_result(state, {:write, _ref, _bytes, _fin, recipient, write_ref}, {:ok, session}) do
@@ -650,6 +751,10 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   end
 
   defp dispatch_event(:writable, state), do: %{state | writable_epoch: state.writable_epoch + 1}
+
+  # Session-associated WT deliveries; byte credit stays in the Session router
+  # until the subscriber returns the receipt through webtransport_ack/3.
+  defp dispatch_event({:wt, ref, event}, state), do: deliver(state, ref, {:wt, event})
 
   defp dispatch_event({:headers, ref, fields}, state) do
     {":status", value} = List.keyfind(fields, ":status", 0)
@@ -806,6 +911,11 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   end
 
   defp reject(state, {:open, from, _, _, _, _, _}, reason) do
+    GenServer.reply(from, {:error, reason})
+    state
+  end
+
+  defp reject(state, {:webtransport, from, _, _, _}, reason) do
     GenServer.reply(from, {:error, reason})
     state
   end

@@ -7,6 +7,10 @@ defmodule QuicHttp3.WebTransportRouter do
   actions through reliable-prefix-aware transport operations, and include these
   retained bytes in its total application budget. Events are exposed only after
   accept/2 and retain credit until acknowledge/2. Unknown acknowledgements fail.
+
+  Locally opened streams are registered with `local_stream/3` and need no
+  prefix on receipt. A stream entry is released at its FIN or reset; terminal
+  reset deliveries carry a `nil` receipt and consume no credit.
   """
   alias HTTP.H3.{Datagram, WebTransport.Draft17}
   @buffered_rejected 0x3994BD84
@@ -58,6 +62,64 @@ defmodule QuicHttp3.WebTransportRouter do
   def close(%{session_id: id, phase: :closed} = state, id), do: {:ok, state, []}
   def close(_, _), do: {:error, :unknown_session}
 
+  @doc "Registers a locally opened stream of an accepted session."
+  def local_stream(%{phase: :accepted, session_id: id} = state, key, kind)
+      when kind in [:uni, :bidi] do
+    if Map.has_key?(state.streams, key),
+      do: {:error, :duplicate_stream},
+      else:
+        {:ok,
+         %{
+           state
+           | streams:
+               Map.put(state.streams, key, %{
+                 kind: kind,
+                 id: id,
+                 prefix: <<>>,
+                 fin?: false,
+                 local?: true
+               })
+         }}
+  end
+
+  def local_stream(_, _, _), do: {:error, :session_not_accepted}
+
+  @doc "Reports a peer reset; unassociated streams are discarded without delivery."
+  def reset(state, key, code) when is_integer(code) do
+    case Map.pop(state.streams, key) do
+      {nil, _} ->
+        {:ok, state, []}
+
+      {%{id: nil, prefix: prefix}, streams} ->
+        {:ok,
+         %{state | streams: streams, retained_bytes: state.retained_bytes - byte_size(prefix)},
+         []}
+
+      {%{id: id}, streams} ->
+        delivery = {nil, {:reset, id, key, code}}
+        next = %{state | streams: streams}
+
+        if state.phase == :accepted,
+          do: {:ok, next, [delivery]},
+          else: {:ok, %{next | pending: next.pending ++ [delivery]}, []}
+    end
+  end
+
+  @doc "Drops a stream entry after local abandonment; delivered credit stays charged."
+  def forget(state, key) do
+    case Map.pop(state.streams, key) do
+      {nil, _} ->
+        state
+
+      {stream, streams} ->
+        %{
+          state
+          | streams: streams,
+            retained_bytes: state.retained_bytes - byte_size(stream.prefix)
+        }
+    end
+  end
+
   def acknowledge(state, receipt) do
     case Map.pop(state.outstanding, receipt) do
       {nil, _} ->
@@ -76,7 +138,7 @@ defmodule QuicHttp3.WebTransportRouter do
       state.phase not in [:pending, :accepted] ->
         {:ok, state, [{:reset, key, @session_gone}]}
 
-      stream == nil and map_size(state.streams) >= state.max_streams ->
+      stream == nil and peer_streams(state) >= state.max_streams ->
         {:ok, state, [{:reset, key, @buffered_rejected}]}
 
       stream && stream.kind != kind ->
@@ -147,8 +209,17 @@ defmodule QuicHttp3.WebTransportRouter do
     end
   end
 
+  defp peer_streams(state),
+    do: Enum.count(state.streams, fn {_, s} -> Map.get(s, :local?) != true end)
+
   defp deliver_stream(state, key, stream, bytes, fin) do
-    next = %{state | streams: Map.put(state.streams, key, %{stream | fin?: fin})}
+    # A FIN is the last receive event of the stream, so its entry is released.
+    streams =
+      if fin,
+        do: Map.delete(state.streams, key),
+        else: Map.put(state.streams, key, %{stream | fin?: fin})
+
+    next = %{state | streams: streams}
 
     retain(
       next,

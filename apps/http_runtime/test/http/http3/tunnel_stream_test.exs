@@ -117,7 +117,7 @@ defmodule HTTP.HTTP3.TunnelStreamTest do
                ])
     end
 
-    assert {:error, :webtransport_network_not_ready} =
+    assert {:error, :webtransport_requires_exclusive_owner} =
              Stream.start(request(), self(),
                purpose: :extended_connect,
                protocol: "webtransport-h3"

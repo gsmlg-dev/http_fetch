@@ -1,16 +1,20 @@
 # HTTP/3 extension contract — Task C
 
-Source contract, 2026-11-08. Explicit WebSocket/H3 is implemented and locally
-verified. WebTransport support below consists of pure codecs and a pure router;
-there is no live WT owner API or network adapter. Capability flags remain false.
+Source contract, 2026-11-08; WebTransport live wiring updated 2026-11-09.
+Explicit WebSocket/H3 is implemented and locally verified. WebTransport draft-17
+is wired end to end on an exclusive owner (see "Live WebTransport owner
+contract"); independent interoperability acceptance is BLOCKED, so
+`HTTP.WebTransport.Profile.supported?/0` and every capability flag remain false.
 See `http3-websocket-validation.md` for acceptance evidence and its limits.
 
 ## Caller-owned extended CONNECT
 
 `QuicHttp3.Session.extended_connect(session, protocol, fields, opts \\ [])`
 uses the existing resumable session operation/result shapes. The implemented
-network protocol is `"websocket"`. `"webtransport-h3"` is recognized but fails
-with `:webtransport_network_not_ready`; it cannot admit an unsupported session.
+network protocols are `"websocket"` and, on a session created with
+`webtransport: true`, `"webtransport-h3"`. Without that option the latter fails
+with `:webtransport_not_enabled`. The pooled relay `HTTP.HTTP3.Stream` still
+refuses `"webtransport-h3"` with `:webtransport_requires_exclusive_owner`.
 
 Fields contain exactly `:method=CONNECT`, `:scheme=https`, nonempty `:authority`
 and an absolute `:path`, followed by ordinary fields. The function adds the one
@@ -161,7 +165,7 @@ shared-owner native receipt exists); kernel or allocator memory reclamation.
   `retained_bytes/1` supports owner accounting. Flow-control capsule types are
   ignored in the initial zero-limit profile.
 
-## Pure association router; WT network boundary unavailable
+## Pure association router
 
 `QuicHttp3.WebTransportRouter.new(opts)` returns `{:ok, state}` with positive
 finite byte/item/stream/datagram limits (defaults 262144/128/32/1200; aggregate
@@ -177,14 +181,78 @@ retained bytes; unknown receipts error. Pending and exposed events consume the
 same finite byte/item budget, including empty datagram items. Excess streams
 return `{:reset, key, code}` actions; excess datagrams are dropped whole.
 `close(state, id)` clears retained state and emits resets; repeated close is safe.
-Tracked terminal stream handles remain bounded until session close.
+`local_stream(state, key, kind)` registers a locally opened stream of an accepted
+session (no receive prefix). A FIN delivery releases the stream entry;
+`reset(state, key, code)` emits `{nil, {:reset, session_id, key, code}}` (no
+credit) for an associated stream and silently discards an unassociated one;
+`forget(state, key)` drops an entry after local abandonment. Only peer-initiated
+entries count toward `max_streams`. Delivered credit stays charged until its
+receipt is acknowledged.
 
-This module performs no IO. A future owner must validate all negotiation before
-registration, charge these retained bytes to its aggregate budget and execute
-reset actions through reliable-prefix-aware transport operations. It is not
-wired to live peer uni/bidi streams or datagrams. Direct QUIC reads by
-WebTransport would violate sole ownership and must not be added as a workaround.
-There is no live WT stream/datagram API, so Task D's network adapter remains
-blocked. Task A's reliable-reset API alone does not complete this integration.
-A matching independent draft-17/reliable-reset peer is also still unavailable;
-see `webtransport-peer-profile.md` and `webtransport-validation.md`.
+This module performs no IO; `QuicHttp3.Session` is its only owner.
+
+## Live WebTransport owner contract
+
+`QuicHttp3.Session.new(webtransport: true | [max_bytes:, max_items:, max_streams:])`
+adds `Draft17.client_settings/0` to the local SETTINGS. `extended_connect/4` with
+`"webtransport-h3"` sends nothing unless, in order: the session has no WT
+CONNECT yet (else `:webtransport_session_capacity`); peer SETTINGS pass
+`validate_server_settings/1` (`:webtransport_draft17_not_enabled`,
+`:h3_datagram_disabled`, `:extended_connect_disabled`); and transport `info/1`
+reports `reliable_reset: %{draft: 11, local: true, peer: true, negotiated: true}`
+(`:reliable_reset_not_negotiated`) and `datagram.send_max_bytes > 0`
+(`:quic_datagram_not_negotiated`). The CONNECT stream ID registers the router.
+A 2xx accepts it and releases pending deliveries; any other final status, FIN,
+reset or stream error closes it. CONNECT DATA is parsed as capsules: Close and
+Drain become events, unknown capsules are skipped, malformed ones are a stream
+error `0x10e`.
+
+Peer bidi streams (refused with `:peer_bidirectional_stream` without WT) and
+uni streams of type `0x54` are associated through the router; malformed or
+foreign session IDs reset/stop only that stream (`0x101`, or
+`WT_BUFFERED_STREAM_REJECTED` for a foreign session/overflow). `:datagram_readable`
+reads up to 32 QUIC DATAGRAMs per event; datagrams for other sessions, oversize
+or undecodable ones are dropped. A WT stream is read only while the router keeps
+16384 bytes and one item of headroom, so reliable bytes are backpressured
+through QUIC flow control instead of rejected. Peer data preceding a reliable
+reset is delivered before the reset. A peer STOP_SENDING closes the local send
+side; the engine itself answers with RESET_STREAM (see validation report).
+
+Poll events: `{:wt, connect_ref, ev}` with `ev` in `{:stream, key, :uni | :bidi,
+bytes, fin?, receipt}`, `{:datagram, payload, receipt}`, `{:reset, key, code}`,
+`{:stopped, key, code}`, `{:close, code, reason}` and `:drain`. `key` is the QUIC
+stream ID; codes are decoded draft-17 application codes or `{:http3_error, code}`.
+`webtransport_acknowledge/2` releases credit; unknown receipts error.
+Operations (resumable, never replayed, under the caller's absolute deadline):
+`webtransport_open/3` (prefix sent first; returns `{:ok, session, key}`),
+`webtransport_send/5` (raw bytes, FIN), `webtransport_reset/4`
+(`RESET_STREAM_AT` with `reliable_size` = this stream's WT prefix length, mapped
+code), `webtransport_stop/4` (mapped STOP_SENDING), `webtransport_datagram/3`
+(quarter-stream association; payload limit `webtransport_info/1`
+`max_datagram_payload` = QUIC send limit minus association bytes) and
+`webtransport_close/4` (Close capsule in DATA with FIN). The QUIC transport
+behaviour gains `reset_stream_at/4`.
+
+`HTTP.HTTP3.ConnectionOwner` remains the sole QUIC consumer. Its CONNECT
+subscriber receives `{:http3, generation, ref, {:wt, ev}}` and is the only
+process allowed to call `ConnectionOwner.webtransport(owner, ref, op, timeout)`
+(`{:open, kind}`, `{:send, key, bytes, fin}`, `{:reset, key, code}`,
+`{:stop, key, code}`, `{:datagram, bytes}`, `{:close, code, reason}`, `:info`);
+others get `:unknown_webtransport_session`. Operations join the owner's single
+action queue, continuations and watchdog; an expired deadline is
+`:operation_timeout` without native admission. `webtransport_ack/3` returns
+credit. `ReceiveBudget` with `webtransport: true` reserves receive windows for
+16 peer bidi and 16 peer WT uni streams (in addition to the three H3 streams);
+ordinary owners keep peer bidi at 0. Retained WT bytes stay within the router
+budget (at most 262144), the owner's extension budget.
+
+`HTTP.WebTransport.Transport.QUIC` starts one inert exclusive owner
+(`max_streams: 1`) with a session-owned `Quic.Cleanup` scope, activates it, sends
+exactly one CONNECT and never falls back. `close/2` sends the Close capsule,
+lingers up to `quic: [close_linger: ms]` (default 500) for the peer's FIN, stops
+the owner and returns `:ok` only when the cleanup receipt is `:confirmed`.
+
+Known gaps: blocked writes hold the session
+process until admission or deadline. The session's terminal-stream ledger caps a
+connection at 1024 retired streams. No keepalive is sent; the QUIC idle timeout
+applies.

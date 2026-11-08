@@ -3,9 +3,13 @@ defmodule HTTP.WebTransport do
   Browser-like WebTransport client API for Elixir.
 
   This module provides the public API shape and lifecycle management for
-  WebTransport sessions. The default backend currently returns
-  `{:error, :webtransport_not_supported_by_elixir_quic_http3}`; network
-  WebTransport sessions over HTTP/3 are not implemented.
+  WebTransport sessions. The default backend, `HTTP.WebTransport.Transport.QUIC`,
+  speaks the draft-ietf-webtrans-http3-17 profile on one exclusive HTTP/3
+  connection and requires the server's draft-17 SETTINGS, extended CONNECT,
+  H3 DATAGRAM, QUIC DATAGRAM and reliable stream reset (draft-11). A server
+  missing any of them is refused explicitly; there is no legacy fallback.
+  This is beta: independent interoperability acceptance has not passed, so
+  `HTTP.WebTransport.Profile.supported?/0` remains false.
 
   QUIC TLS configuration is separate from TCP TLS. The shared
   `:http_core, :tls_backend` configuration does not apply here; an explicit

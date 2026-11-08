@@ -47,7 +47,7 @@ defmodule QuicHttp3.ConnectTest do
     refute_received {:wire, _, _}
     control = %{control | received_settings?: true, peer_settings: [{8, 1}]}
 
-    assert {:error, _, :webtransport_network_not_ready} =
+    assert {:error, _, :webtransport_not_enabled} =
              Session.extended_connect(%{session | control: control}, "webtransport-h3", @fields)
 
     assert {:ok, session, ref} =

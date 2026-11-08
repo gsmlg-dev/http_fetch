@@ -14,7 +14,7 @@ its independent acceptance gate.
 | 1 | Fetch Alt-Svc discovery, opt-in H3 for `:auto`, safe fallback | none | Committed 6d8bbbc; independent-peer gate pending |
 | 2 | Dynamic QPACK decoder (RFC 9204), bounded table and blocked streams | none | Done; aioquic gate PASS |
 | 3 | WebSocket/H3: native completion receipt, drop experimental label | QUIC cleanup receipt contract | Done; independent gate PASS |
-| 4 | WebTransport live adapter on `HTTP.HTTP3.ConnectionOwner` | WP3 runtime contract; matching draft-17 peer for acceptance | In progress |
+| 4 | WebTransport live adapter on `HTTP.HTTP3.ConnectionOwner` | WP3 runtime contract; matching draft-17 peer for acceptance | Live adapter done (in-repo peer); independent acceptance BLOCKED: no qualifying peer |
 | 5 | HTTP-layer resumption, 0-RTT for safe requests, migration for exclusive long-lived sessions | WP3, WP4 | Planned; capability flags stay false until engine negative acceptance |
 
 ## WP1: Alt-Svc auto-HTTP/3 (Fetch)

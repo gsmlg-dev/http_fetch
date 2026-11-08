@@ -2,9 +2,9 @@ defmodule E2E.WebTransportLifecycleTest do
   @moduledoc """
   WebTransport public API lifecycle exercised through the backend boundary.
 
-  This is intentionally backed by `HTTP.WebTransport.FakeBackend` until a real
-  QUIC/HTTP3 backend exists. A true wire-level WebTransport e2e test should be
-  added behind this same `test.e2e` path when that backend lands.
+  This is intentionally backed by `HTTP.WebTransport.FakeBackend`. Wire-level
+  coverage of the live draft-17 backend against an in-repo QUIC peer lives in
+  `test/http/web_transport/quic_integration_test.exs` (integration tier).
   """
 
   use ExUnit.Case, async: true

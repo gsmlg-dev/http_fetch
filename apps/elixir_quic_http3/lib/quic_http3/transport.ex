@@ -33,6 +33,8 @@ defmodule QuicHttp3.Transport do
   @callback events(connection(), pos_integer(), options()) :: {:ok, list()} | failure()
   @callback reset_stream(stream(), non_neg_integer(), options()) ::
               {:ok, reference()} | :ok | failure()
+  @callback reset_stream_at(stream(), non_neg_integer(), non_neg_integer(), options()) ::
+              {:ok, reference()} | :ok | failure()
   @callback stop_stream(stream(), non_neg_integer(), options()) ::
               {:ok, reference()} | :ok | failure()
   @callback close(connection(), non_neg_integer(), binary(), options()) :: :ok | failure()
