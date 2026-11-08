@@ -6,11 +6,50 @@ defmodule HTTP.HTTP3.Stream do
   @max_open_attempts 3
 
   def start(%HTTP.Request{} = request, subscriber, opts \\ []) when is_pid(subscriber) do
+    with :ok <- validate_tunnel_options(opts), do: start_stream(request, subscriber, opts)
+  end
+
+  defp validate_tunnel_options(opts) do
+    cond do
+      opts[:purpose] not in [nil, :request, :extended_connect] ->
+        {:error, :invalid_stream_purpose}
+
+      opts[:purpose] != :extended_connect ->
+        :ok
+
+      opts[:protocol] == "webtransport-h3" ->
+        {:error, :webtransport_network_not_ready}
+
+      opts[:protocol] != "websocket" ->
+        {:error, :unsupported_connect_protocol}
+
+      not is_integer(Keyword.get(opts, :opening_timeout, 5_000)) or
+          Keyword.get(opts, :opening_timeout, 5_000) <= 0 ->
+        {:error, :invalid_opening_timeout}
+
+      not is_integer(Keyword.get(opts, :write_timeout, 5_000)) or
+          Keyword.get(opts, :write_timeout, 5_000) <= 0 ->
+        {:error, :invalid_write_timeout}
+
+      not is_integer(Keyword.get(opts, :max_write_bytes, 16_777_230)) or
+          Keyword.get(opts, :max_write_bytes, 16_777_230) <= 0 ->
+        {:error, :invalid_max_write_bytes}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp start_stream(request, subscriber, opts) do
     generation = Keyword.get(opts, :generation, make_ref())
+
+    tunnel? = opts[:purpose] == :extended_connect
 
     request_deadline =
       Keyword.get_lazy(opts, :deadline_at, fn ->
-        deadline(Keyword.get(request.transport_options, :timeout, 30_000))
+        if tunnel?,
+          do: :infinity,
+          else: deadline(Keyword.get(request.transport_options, :timeout, 30_000))
       end)
 
     opening_deadline =
@@ -41,6 +80,7 @@ defmodule HTTP.HTTP3.Stream do
   def close(pid), do: send(pid, :abort)
 
   defp run(request, subscriber, generation, opts) do
+    tunnel? = opts[:purpose] == :extended_connect
     monitor = Process.monitor(subscriber)
     tracker_monitor = if opts[:request_lifecycle], do: Process.monitor(opts[:request_lifecycle])
     Process.put({__MODULE__, :tracker_monitor}, tracker_monitor)
@@ -60,14 +100,14 @@ defmodule HTTP.HTTP3.Stream do
                :cleanup
              ])
            ),
-         {:ok, fields, body} <- headers(request),
+         {:ok, fields, body} <- headers(request, opts),
          {:ok, owner, lease, ref} <-
            open_request(
              pool,
              key,
              connect,
-             {fields, body, generation, deadline},
-             {opening_deadline, monitor, @max_open_attempts}
+             {fields, body, generation, deadline, opts},
+             {opening_deadline, monitor, if(tunnel?, do: 1, else: @max_open_attempts)}
            ) do
       try do
         state = %{
@@ -82,6 +122,11 @@ defmodule HTTP.HTTP3.Stream do
           bridge: nil,
           upload: body,
           write: nil,
+          tunnel?: tunnel?,
+          local_end?: false,
+          remote_end?: false,
+          write_timeout: Keyword.get(opts, :write_timeout, 5_000),
+          max_write_bytes: Keyword.get(opts, :max_write_bytes, 16_777_230),
           terminal?: false,
           terminal_event: nil,
           native_settled?: false,
@@ -96,6 +141,9 @@ defmodule HTTP.HTTP3.Stream do
           tracker: opts[:request_lifecycle],
           tracker_monitor: tracker_monitor
         }
+
+        if tunnel?,
+          do: notify(subscriber, generation, {:opened, %{owner: owner, ref: ref, protocol: :h3}})
 
         try do
           uploaded = if request_expired?(state), do: state, else: start_upload(state)
@@ -157,13 +205,17 @@ defmodule HTTP.HTTP3.Stream do
          pool,
          owner,
          lease,
-         {fields, body, generation, request_deadline},
+         {fields, body, generation, request_deadline, opts},
          {deadline, monitor, _attempts}
        ) do
     opening_call(
       owner,
-      {:open, fields, if(body == "", do: "", else: :stream), self(), generation,
+      {:open, fields,
+       if(body == "" and opts[:purpose] != :extended_connect, do: "", else: :stream), self(),
+       generation,
        [
+         purpose: opts[:purpose],
+         protocol: opts[:protocol],
          timeout: remaining(deadline),
          deadline_at: deadline,
          request_deadline_at: request_deadline,
@@ -525,12 +577,13 @@ defmodule HTTP.HTTP3.Stream do
     {:error, reason}
   end
 
-  defp headers(request) do
+  defp headers(request, opts) do
     original = request.headers.headers
     forbidden = ~w(connection proxy-connection keep-alive transfer-encoding upgrade)
 
     if Enum.any?(original, fn {name, value} ->
          String.downcase(name) in forbidden or
+           (opts[:purpose] == :extended_connect and String.downcase(name) == "content-length") or
            (String.downcase(name) == "te" and value != "trailers")
        end) do
       {:error, :invalid_http3_headers}
@@ -547,7 +600,14 @@ defmodule HTTP.HTTP3.Stream do
               String.downcase(name) == "trailer",
               do: {"trailer", value}
 
-        {:ok, fields ++ declarations, body}
+        fields = fields ++ declarations
+
+        fields =
+          if opts[:purpose] == :extended_connect,
+            do: List.keydelete(fields, "content-length", 0),
+            else: fields
+
+        {:ok, fields, body}
       end
     end
   end
@@ -577,6 +637,14 @@ defmodule HTTP.HTTP3.Stream do
 
   defp relay(%{terminal?: true}), do: :ok
 
+  defp relay(%{tunnel?: true, write: {_, :tunnel, write}} = state) do
+    cond do
+      request_expired?(state) -> expire_request(state)
+      now() >= write.deadline -> relay(expire_tunnel_write(state))
+      true -> receive_messages(state)
+    end
+  end
+
   defp relay(%{deadline: deadline} = state) when is_integer(deadline) do
     if now() >= deadline, do: expire_request(state), else: receive_messages(state)
   end
@@ -586,7 +654,11 @@ defmodule HTTP.HTTP3.Stream do
   defp receive_messages(state) do
     receive do
       {:http3, generation, ref, event} when generation == state.generation and ref == state.ref ->
-        state = if match?({:headers, _, _}, event), do: stop_upload(state), else: state
+        state =
+          if not state.tunnel? and match?({:headers, _, _}, event),
+            do: stop_upload(state),
+            else: state
+
         relay(queue(state, event))
 
       {:acknowledge, ref} ->
@@ -597,6 +669,9 @@ defmodule HTTP.HTTP3.Stream do
           do: ConnectionOwner.acknowledge(state.owner, state.ref)
 
         relay(next)
+
+      {:write, ref, bytes, fin} when state.tunnel? ->
+        relay(admit_tunnel_write(state, ref, bytes, fin))
 
       {:body_chunk, bridge, bytes, ref} when bridge == state.bridge ->
         if request_expired?(state) do
@@ -620,20 +695,9 @@ defmodule HTTP.HTTP3.Stream do
         relay(queue(state, {:error, reason}))
 
       {:http3_write, ref, :done} when state.write != nil and elem(state.write, 0) == ref ->
-        next =
-          case elem(state.write, 1) do
-            :producer ->
-              BodyBridge.ack(state.bridge, ref)
-              %{state | write: nil}
+        next = complete_write(state, ref)
 
-            :binary ->
-              write_binary(%{state | write: nil})
-
-            :fin ->
-              %{state | write: nil}
-          end
-
-        relay(next)
+        relay(settle_terminal(next))
 
       {:http3_write, _ref, {:error, :upload_closed}} ->
         relay(state)
@@ -664,10 +728,106 @@ defmodule HTTP.HTTP3.Stream do
       _message ->
         relay(state)
     after
-      remaining(state.deadline) ->
-        expire_request(state)
+      receive_timeout(state) ->
+        if state.tunnel? and state.write != nil do
+          relay(expire_tunnel_write(state))
+        else
+          expire_request(state)
+        end
     end
   end
+
+  defp complete_write(%{write: {_, :producer}} = state, ref) do
+    BodyBridge.ack(state.bridge, ref)
+    %{state | write: nil}
+  end
+
+  defp complete_write(%{write: {_, :binary}} = state, _ref),
+    do: write_binary(%{state | write: nil})
+
+  defp complete_write(%{write: {_, :fin}} = state, _ref), do: %{state | write: nil}
+
+  defp complete_write(%{write: {_, :tunnel, write}} = state, _ref) do
+    if write.rest == <<>> do
+      tunnel_notify(state, {:write, write.ref, {:progress, write.total}})
+      tunnel_notify(state, {:write, write.ref, :done})
+      %{state | write: nil, local_end?: write.fin or state.local_end?}
+    else
+      tunnel_write(state)
+    end
+  end
+
+  defp admit_tunnel_write(state, ref, bytes, fin)
+       when is_reference(ref) and is_binary(bytes) and is_boolean(fin) do
+    cond do
+      state.write != nil ->
+        tunnel_notify(state, {:write, ref, {:error, :write_busy}})
+        state
+
+      state.local_end? or byte_size(bytes) > state.max_write_bytes ->
+        tunnel_notify(state, {:write, ref, {:error, :invalid_tunnel_write}})
+        state
+
+      true ->
+        write = %{
+          ref: ref,
+          rest: bytes,
+          fin: fin,
+          total: byte_size(bytes),
+          deadline: now() + state.write_timeout
+        }
+
+        tunnel_write(%{state | write: {nil, :tunnel, write}})
+    end
+  end
+
+  defp admit_tunnel_write(state, ref, _, _) do
+    tunnel_notify(state, {:write, ref, {:error, :invalid_tunnel_write}})
+    state
+  end
+
+  defp tunnel_write(state) do
+    write = elem(state.write, 2)
+
+    if now() >= write.deadline,
+      do: expire_tunnel_write(state),
+      else: send_tunnel_chunk(state, write)
+  end
+
+  defp expire_tunnel_write(state) do
+    write = elem(state.write, 2)
+    failure = {:indeterminate_operation, write.ref}
+    tunnel_notify(state, {:write, write.ref, {:error, failure}})
+
+    if Process.alive?(state.owner),
+      do: safe(fn -> ConnectionOwner.cancel(state.owner, state.ref) end)
+
+    queue(%{state | write: nil, native_settled?: true}, {:error, failure})
+  end
+
+  defp send_tunnel_chunk(state, write) do
+    size = min(byte_size(write.rest), 16_384)
+    <<bytes::binary-size(^size), rest::binary>> = write.rest
+    native_ref = make_ref()
+
+    ConnectionOwner.send_data(
+      state.owner,
+      state.ref,
+      bytes,
+      write.fin and rest == <<>>,
+      self(),
+      native_ref
+    )
+
+    %{state | write: {native_ref, :tunnel, %{write | rest: rest}}}
+  end
+
+  defp tunnel_notify(state, event), do: notify(state.subscriber, state.generation, event)
+
+  defp receive_timeout(%{tunnel?: true, write: {_, :tunnel, write}} = state),
+    do: min(remaining(state.deadline), remaining(write.deadline))
+
+  defp receive_timeout(state), do: remaining(state.deadline)
 
   defp expire_request(state) do
     if state.bridge && Process.alive?(state.bridge),
@@ -694,6 +854,9 @@ defmodule HTTP.HTTP3.Stream do
     if state.bridge && Process.alive?(state.bridge), do: BodyBridge.early_response(state.bridge)
     %{state | upload: <<>>, write: nil}
   end
+
+  defp queue(%{tunnel?: true, terminal_event: :done} = state, {:error, _} = event),
+    do: queue(%{state | terminal_event: nil}, event)
 
   defp queue(%{terminal_event: terminal} = state, _event) when terminal != nil, do: state
 
@@ -727,8 +890,29 @@ defmodule HTTP.HTTP3.Stream do
   defp dispatch(state, []), do: settle_terminal(state)
 
   defp dispatch(state, [{{:data, bytes}, ref}]) do
-    notify(state.subscriber, state.generation, {:data, bytes, ref})
+    if state.tunnel?,
+      do: tunnel_notify(state, {:data, bytes, [], ref}),
+      else: notify(state.subscriber, state.generation, {:data, bytes, ref})
+
     state
+  end
+
+  defp dispatch(%{tunnel?: true} = state, [{:done, ref}]) do
+    tunnel_notify(state, :remote_end)
+    {:ok, delivery, emitted} = Delivery.acknowledge(state.delivery, ref)
+    dispatch(%{state | delivery: delivery, remote_end?: true}, emitted)
+  end
+
+  defp dispatch(%{tunnel?: true} = state, [{{:headers, status, fields}, ref}]) do
+    tunnel_notify(state, {:headers, [{":status", Integer.to_string(status)} | fields], []})
+    {:ok, delivery, emitted} = Delivery.acknowledge(state.delivery, ref)
+    dispatch(%{state | delivery: delivery}, emitted)
+  end
+
+  defp dispatch(%{tunnel?: true} = state, [{{:informational, status, fields}, ref}]) do
+    tunnel_notify(state, {:headers, [{":status", Integer.to_string(status)} | fields], []})
+    {:ok, delivery, emitted} = Delivery.acknowledge(state.delivery, ref)
+    dispatch(%{state | delivery: delivery}, emitted)
   end
 
   defp dispatch(state, [{event, ref}]) do
@@ -736,6 +920,15 @@ defmodule HTTP.HTTP3.Stream do
     {:ok, delivery, emitted} = Delivery.acknowledge(state.delivery, ref)
     next = %{state | delivery: delivery, terminal?: event == :done or match?({:error, _}, event)}
     dispatch(next, emitted)
+  end
+
+  defp settle_terminal(%{tunnel?: true, remote_end?: true, terminal_event: :done} = state) do
+    %{
+      state
+      | terminal?:
+          state.local_end? and state.write == nil and
+            Delivery.status(state.delivery).queued_events == 0
+    }
   end
 
   defp settle_terminal(%{terminal_event: nil} = state), do: state

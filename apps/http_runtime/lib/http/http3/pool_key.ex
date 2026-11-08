@@ -25,7 +25,8 @@ defmodule HTTP.HTTP3.PoolKey do
           :streams,
           :datagram,
           :socket,
-          :limits
+          :limits,
+          :extension_policy
         ])
         |> Map.new()
 

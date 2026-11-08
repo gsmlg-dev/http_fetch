@@ -67,6 +67,8 @@ defmodule HTTP.WebSocket.Options do
             max_send_queue: @default_max_send_queue,
             http_version: :http1,
             http2_profile: nil,
+            http3_profile: nil,
+            http3_reuse: true,
             http2_scope: nil,
             http2_reuse: true,
             unix_socket: nil,
@@ -102,7 +104,9 @@ defmodule HTTP.WebSocket.Options do
           max_frame_bytes: pos_integer(),
           max_read_bytes: pos_integer() | nil,
           max_send_queue: pos_integer(),
-          http_version: :http1 | :http2 | :h2c | :auto,
+          http_version: :http1 | :http2 | :h2c | :http3 | :auto,
+          http3_profile: term(),
+          http3_reuse: boolean(),
           http2_profile: HTTP.HTTP2.WireProfile.t() | nil,
           http2_scope: atom() | binary() | nil,
           http2_reuse: boolean(),
@@ -128,7 +132,8 @@ defmodule HTTP.WebSocket.Options do
          {:ok, protocols} <- normalize_protocols(protocols),
          {:ok, init} <- normalize_init(init),
          :ok <- validate_mode(init),
-         {:ok, init} <- HTTP.Runtime.Options.validate(uri, init),
+         {:ok, init} <- HTTP.Runtime.Options.validate(uri, init, allow_http3: true),
+         :ok <- validate_http3_limits(init),
          :ok <- validate_connect_address(uri, init),
          :ok <- validate_limits(init),
          :ok <- validate_delivery_capacity(init) do
@@ -155,6 +160,8 @@ defmodule HTTP.WebSocket.Options do
          max_send_queue: Keyword.get(init, :max_send_queue, @default_max_send_queue),
          http_version: Keyword.fetch!(init, :http_version),
          http2_profile: Keyword.get(init, :http2_profile),
+         http3_profile: Keyword.get(init, :http3_profile),
+         http3_reuse: Keyword.get(init, :http3_reuse, true),
          http2_scope: Keyword.get(init, :http2_scope),
          http2_reuse: Keyword.get(init, :http2_reuse, true),
          unix_socket: Keyword.get(init, :unix_socket),
@@ -200,6 +207,20 @@ defmodule HTTP.WebSocket.Options do
         max(Map.get(options, :max_message_size, @default_max_message_size), 125) + 10
 
   defp validate_connect_address(uri, init) do
+    if init[:http_version] == :http3 do
+      if init[:connect_address], do: {:error, :connect_address_not_supported_for_quic}, else: :ok
+    else
+      validate_tcp_connect_address(uri, init)
+    end
+  end
+
+  defp validate_http3_limits(init) do
+    if init[:http_version] == :http3 and init[:opening_timeout] == :infinity,
+      do: {:error, {:invalid_option, :opening_timeout}},
+      else: :ok
+  end
+
+  defp validate_tcp_connect_address(uri, init) do
     request = %HTTP.Request{
       url: HTTP.Runtime.Options.origin_uri(uri),
       transport_options: transport_options(init)
@@ -311,6 +332,12 @@ defmodule HTTP.WebSocket.Options do
 
   defp normalize_init(_init), do: {:error, :invalid_options}
 
+  defp normalize_backend(init) do
+    if init[:http_version] in [:http3, "http3", "h3"],
+      do: {:ok, init[:tls_backend]},
+      else: HTTP.TLSBackend.resolve(init[:tls_backend])
+  end
+
   defp normalize_options(init) do
     with {:ok, headers} <- normalize_headers(Keyword.get(init, :headers, [])),
          {:ok, binary_type} <- normalize_binary_type(Keyword.get(init, :binary_type, :blob)),
@@ -318,7 +345,7 @@ defmodule HTTP.WebSocket.Options do
          {:ok, ssl} <- normalize_keyword(Keyword.get(init, :ssl, []), :invalid_ssl_options),
          {:ok, socket_opts} <-
            normalize_keyword(Keyword.get(init, :socket_opts, []), :invalid_socket_options),
-         {:ok, tls_backend} <- HTTP.TLSBackend.resolve(Keyword.get(init, :tls_backend)),
+         {:ok, tls_backend} <- normalize_backend(init),
          {:ok, telemetry_url} <-
            normalize_telemetry_url(Keyword.get(init, :telemetry_url, :default)) do
       {:ok,

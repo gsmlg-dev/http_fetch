@@ -10,6 +10,7 @@ defmodule QuicHttp3.Response do
 
   defstruct phase: :initial,
             method: :get,
+            purpose: :request,
             status: nil,
             content_length: nil,
             received: 0,
@@ -103,6 +104,9 @@ defmodule QuicHttp3.Response do
 
   defp validate_frame(%{phase: :initial}, 0, _),
     do: connection_error(0x105, :data_before_final_headers)
+
+  defp validate_frame(%{phase: :tunnel}, 1, _),
+    do: message_error(:tunnel_trailers_forbidden)
 
   defp validate_frame(%{phase: :trailers}, 0, _),
     do: connection_error(0x105, :data_after_trailers)
@@ -219,6 +223,11 @@ defmodule QuicHttp3.Response do
       else: {:ok, state, [{:informational, status, fields}]}
   end
 
+  defp receive_status(%{purpose: :extended_connect} = state, status, fields)
+       when status in 200..299 do
+    {:ok, %{state | phase: :tunnel, status: status}, [{:headers, status, fields}]}
+  end
+
   defp receive_status(state, status, fields) do
     with {:ok, length} <- content_length(fields),
          :ok <- validate_length_status(status, length) do
@@ -250,6 +259,8 @@ defmodule QuicHttp3.Response do
 
   defp validate_length_status(_, _), do: :ok
   defp bodyless?(state), do: state.method in [:head, "HEAD"] or state.status in [204, 205, 304]
+
+  defp validate_data(%{phase: :tunnel}, _size), do: :ok
 
   defp validate_data(state, size) do
     cond do

@@ -131,9 +131,11 @@ defmodule HTTP.WebSocket.Connection do
 
     case admit_attempt(state) do
       {:ok, state} ->
-        if HTTP.Runtime.Options.h2?(state.options),
-          do: connect_http2(state),
-          else: {:noreply, connect_http1(state)}
+        cond do
+          state.options.http_version == :http3 -> connect_multiplexed(state)
+          HTTP.Runtime.Options.h2?(state.options) -> connect_multiplexed(state)
+          true -> {:noreply, connect_http1(state)}
+        end
 
       {:error, reason} ->
         fail(state, reason)
@@ -482,7 +484,7 @@ defmodule HTTP.WebSocket.Connection do
 
   defp diagnostic_summary(state) when is_map(state) do
     %{
-      http_version: diagnostic_enum(Map.get(state, :http_version), [:http1, :http2]),
+      http_version: diagnostic_enum(Map.get(state, :http_version), [:http1, :http2, :http3]),
       ready_state:
         diagnostic_enum(Map.get(state, :ready_state), [@connecting, @open, @closing, @closed]),
       binary_type: diagnostic_enum(Map.get(state, :binary_type), [:blob, :array_buffer]),
@@ -499,7 +501,9 @@ defmodule HTTP.WebSocket.Connection do
   defp diagnostic_count(value) when is_integer(value) and value >= 0, do: value
   defp diagnostic_count(_value), do: nil
 
-  defp connect_http2(state) do
+  defp connect_multiplexed(state) do
+    runtime = if state.options.http_version == :http3, do: HTTP.HTTP3.Stream, else: Stream
+
     with {:ok, request} <-
            Handshake.extended_connect_request(
              state.uri,
@@ -516,7 +520,10 @@ defmodule HTTP.WebSocket.Connection do
                )
          },
          {:ok, pid, _generation} <-
-           Stream.start(request, self(),
+           runtime.start(request, self(),
+             protocol: "websocket",
+             request_lifecycle: state.attempt_tracker,
+             write_timeout: state.options.write_timeout,
              purpose: :extended_connect,
              generation: state.generation,
              opening_timeout: remaining(state.opening_deadline),
@@ -652,8 +659,17 @@ defmodule HTTP.WebSocket.Connection do
       state = %{state | handshake: Handshake.response_metadata(status, ordinary)}
 
       case Handshake.validate_extended_response(status, ordinary, state.options.protocols) do
-        {:ok, negotiated} -> advance(established(state, negotiated, :http2))
-        {:error, reason} -> fail(state, reason)
+        {:ok, negotiated} ->
+          advance(
+            established(
+              state,
+              negotiated,
+              if(state.options.http_version == :http3, do: :http3, else: :http2)
+            )
+          )
+
+        {:error, reason} ->
+          fail(state, reason)
       end
     else
       {:informational, status} when status != 101 -> {:noreply, state}

@@ -13,6 +13,7 @@ defmodule QuicHttp3.Settings do
   defdelegate enable_connect_protocol(), to: CoreSettings
   defdelegate h3_datagram(), to: CoreSettings
   defdelegate wt_enabled(), to: CoreSettings
+  defdelegate wt_enabled_draft17(), to: CoreSettings
   defdelegate wt_initial_max_streams_uni(), to: CoreSettings
   defdelegate wt_initial_max_streams_bidi(), to: CoreSettings
   defdelegate wt_initial_max_data(), to: CoreSettings

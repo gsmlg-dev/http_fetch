@@ -79,6 +79,7 @@ defmodule HTTP.HTTP3.ConnectionOwner do
       continuations: [],
       queue: [],
       allocations: 0,
+      extension_bytes: 0,
       writable_epoch: 0,
       continuation_turn?: true,
       max_streams: Keyword.get(opts, :max_streams, 32),
@@ -173,6 +174,7 @@ defmodule HTTP.HTTP3.ConnectionOwner do
        pending: state.pending != nil,
        continuations: length(state.continuations),
        queued: length(state.queue),
+       extension_bytes: state.extension_bytes,
        endpoint: endpoint,
        watchdog: state.watchdog,
        exclusive?: state.exclusive?,
@@ -221,7 +223,7 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   def handle_cast({:ack, ref}, state) do
     next =
       if Map.has_key?(state.requests, ref),
-        do: put_in(state.requests[ref].paused, false),
+        do: release_credit(state, ref),
         else: state
 
     next = touch(next)
@@ -402,6 +404,10 @@ defmodule HTTP.HTTP3.ConnectionOwner do
           now() >= opts[:deadline_at] ->
         reject(state, action, :opening_timeout)
 
+      opts[:purpose] == :extended_connect and
+          QuicHttp3.Connect.ready(state.session.control) == :pending ->
+        %{state | queue: state.queue ++ [action]}
+
       true ->
         result(
           state,
@@ -410,7 +416,9 @@ defmodule HTTP.HTTP3.ConnectionOwner do
             state,
             min(state.timeout, Keyword.get(opts, :timeout, state.timeout)),
             fn ->
-              Session.request(state.session, fields, body, opts)
+              if opts[:purpose] == :extended_connect,
+                do: Session.extended_connect(state.session, opts[:protocol], fields, opts),
+                else: Session.request(state.session, fields, body, opts)
             end,
             action
           )
@@ -542,6 +550,8 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     request = %{
       subscriber: subscriber,
       generation: generation,
+      purpose: opts[:purpose],
+      data_bytes: 0,
       deadline: opts[:request_deadline_at],
       monitor: monitor,
       paused: false,
@@ -615,18 +625,9 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   end
 
   defp dispatch_event({:headers, ref, status, fields}, state) do
-    state = stop_blocked_upload(state, ref)
-
-    if Map.has_key?(state.session.requests, ref) and state.session.requests[ref].upload == :open and
-         Map.has_key?(state.requests, ref) do
-      next =
-        put_in(state.requests[ref], %{state.requests[ref] | headers_pending?: true, paused: true})
-
-      enqueue(next, {:reset_send, ref, {:headers, status, fields}})
-    else
-      notify(state, ref, {:headers, status, fields})
-      state
-    end
+    tunnel? = match?(%{purpose: :extended_connect}, state.requests[ref]) and status in 200..299
+    if tunnel?, do: notify(state, ref, {:headers, status, fields})
+    if tunnel?, do: state, else: response_headers(state, ref, status, fields)
   end
 
   defp dispatch_event({:informational, ref, status, fields}, state),
@@ -636,17 +637,37 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     do: deliver(state, ref, {:trailers, fields})
 
   defp dispatch_event({:data, ref, bytes}, state) do
-    notify(state, ref, {:data, bytes})
-    state = touch(state)
+    request = state.requests[ref]
+    tunnel? = match?(%{purpose: :extended_connect}, request)
 
-    if Map.has_key?(state.requests, ref),
-      do: put_in(state.requests[ref].paused, true),
-      else: state
+    if tunnel? and state.extension_bytes + byte_size(bytes) > 262_144 do
+      notify(state, ref, {:error, :consumer_overloaded})
+      enqueue(remove_request(state, ref), {:cancel, ref})
+    else
+      notify(state, ref, {:data, bytes})
+      state = touch(state)
+
+      if request do
+        next = put_in(state.requests[ref].paused, true)
+
+        if tunnel? do
+          next = put_in(next.requests[ref].data_bytes, request.data_bytes + byte_size(bytes))
+          %{next | extension_bytes: next.extension_bytes + byte_size(bytes)}
+        else
+          next
+        end
+      else
+        state
+      end
+    end
   end
 
   defp dispatch_event({:done, ref}, state) do
     notify(state, ref, :done)
-    remove_request(state, ref)
+
+    if match?(%{purpose: :extended_connect}, state.requests[ref]),
+      do: state,
+      else: remove_request(state, ref)
   end
 
   defp dispatch_event({:stream_error, ref, code, reason}, state),
@@ -660,7 +681,14 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   defp dispatch_event({:stream_reset, ref, code, final_size}, state),
     do: event({:stream_error, ref, {:reset, code, final_size}}, state)
 
-  defp dispatch_event({:stopped, ref, _code}, state), do: enqueue(state, {:reset_send, ref})
+  defp dispatch_event({:stopped, ref, code}, state) do
+    if match?(%{purpose: :extended_connect}, state.requests[ref]) do
+      notify(state, ref, {:error, {:stop_sending, code}})
+      enqueue(remove_request(state, ref), {:cancel, ref})
+    else
+      enqueue(state, {:reset_send, ref})
+    end
+  end
 
   defp dispatch_event({:goaway, id}, state) do
     rejected =
@@ -676,6 +704,21 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   end
 
   defp dispatch_event(_event, state), do: state
+
+  defp response_headers(state, ref, status, fields) do
+    state = stop_blocked_upload(state, ref)
+
+    if Map.has_key?(state.session.requests, ref) and state.session.requests[ref].upload == :open and
+         Map.has_key?(state.requests, ref) do
+      next =
+        put_in(state.requests[ref], %{state.requests[ref] | headers_pending?: true, paused: true})
+
+      enqueue(next, {:reset_send, ref, {:headers, status, fields}})
+    else
+      notify(state, ref, {:headers, status, fields})
+      state
+    end
+  end
 
   defp stop_blocked_upload(state, ref) do
     {blocked, retained} =
@@ -699,6 +742,12 @@ defmodule HTTP.HTTP3.ConnectionOwner do
       do: send(request.subscriber, {:http3, request.generation, ref, event})
   end
 
+  defp release_credit(state, ref) do
+    request = state.requests[ref]
+    next = put_in(state.requests[ref], %{request | paused: false, data_bytes: 0})
+    %{next | extension_bytes: max(0, next.extension_bytes - request.data_bytes)}
+  end
+
   defp remove_request(state, ref) do
     case Map.pop(state.requests, ref) do
       {nil, _} ->
@@ -706,7 +755,12 @@ defmodule HTTP.HTTP3.ConnectionOwner do
 
       {request, requests} ->
         Process.demonitor(request.monitor, [:flush])
-        touch(%{state | requests: requests})
+
+        touch(%{
+          state
+          | requests: requests,
+            extension_bytes: max(0, state.extension_bytes - request.data_bytes)
+        })
     end
   end
 

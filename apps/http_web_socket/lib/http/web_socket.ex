@@ -10,7 +10,10 @@ defmodule HTTP.WebSocket do
       {HTTP.WebSocket, socket, %HTTP.WebSocket.Event.Close{}}
 
   HTTP/1 is the default. Select `http_version: :http2`, `:h2c`, or `:auto`
-  explicitly; `http_version/1` reports the negotiated HTTP version, while
+  explicitly. Experimental `http_version: :http3` selects an RFC 9220 tunnel
+  for `wss`, with explicit QUIC CA trust in `ssl` and no fallback. TCP
+  `tls_backend`, socket options and connection-address pins are rejected for H3.
+  `http_version/1` reports the negotiated HTTP version, while
   `protocol/1` continues to report the selected WebSocket subprotocol.
 
   With `delivery: :ack`, message events include a delivery reference:
@@ -37,7 +40,7 @@ defmodule HTTP.WebSocket do
   it occurs exactly once and its value is at most 1024 bytes; otherwise it is
   omitted and `truncated?` is true. Values are copied, so this metadata retains
   at most 2048 value bytes and no other response headers. Failed upgrades retain
-  their original Error reason. This applies to HTTP/1 and HTTP/2.
+  their original Error reason. This applies to HTTP/1, HTTP/2 and HTTP/3.
 
   Receive limits are independent: `max_message_size` bounds each reassembled
   message (16 MiB by default); `max_frame_bytes` bounds each frame payload
@@ -108,7 +111,9 @@ defmodule HTTP.WebSocket do
   supply trusted `ssl: [cacertfile: ...]` for private CAs. Owner death closes
   the connection. `close/1` signals cancellation; use `completion/1` with
   `HTTP.ClientCompletion.await/2` to confirm cleanup, including a cancelled
-  opening. The receipt remains readable after the socket process exits. A
+  opening. H3 returns `{:error, {:unsupported_completion, :http3}}` from
+  that barrier; it uses the separate QUIC cleanup contract. The receipt remains
+  readable after the socket process exits. A
   Close event describes the handshake result; it does not prove peer
   application receipt of earlier writes. Terminal cancellation discards
   pending transport bytes, so a failed write may have reached the peer partly.
@@ -167,6 +172,10 @@ defmodule HTTP.WebSocket do
 
     with {:ok, options} <- Options.new(url, protocols, put_ref(init, ref)) do
       receipt = HTTP.ClientCompletion.new(:client)
+      # Keep internal lifecycle tracking, but do not certify native QUIC cleanup
+      # through the TCP/H2 completion barrier.
+      receipt =
+        if options.http_version == :http3, do: %{receipt | unsupported: :http3}, else: receipt
 
       case DynamicSupervisor.start_child(
              HTTP.WebSocket.ConnectionSupervisor,
@@ -206,7 +215,7 @@ defmodule HTTP.WebSocket do
   def protocol(socket), do: connection_call(socket, :protocol, "")
 
   @doc "Returns the negotiated HTTP version, or nil before establishment."
-  @spec http_version(t()) :: :http1 | :http2 | nil
+  @spec http_version(t()) :: :http1 | :http2 | :http3 | nil
   def http_version(socket), do: connection_call(socket, :http_version, nil)
 
   @doc "Returns connection state and bounded delivery and send queue usage."

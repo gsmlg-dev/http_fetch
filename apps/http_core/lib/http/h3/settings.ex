@@ -9,6 +9,7 @@ defmodule HTTP.H3.Settings do
   @enable_connect_protocol 0x08
   @h3_datagram 0x33
   @wt_enabled 0x2C7C_F000
+  @wt_enabled_draft17 0x20B8_933B
   @wt_initial_max_streams_uni 0x2B64
   @wt_initial_max_streams_bidi 0x2B65
   @wt_initial_max_data 0x2B61
@@ -21,6 +22,7 @@ defmodule HTTP.H3.Settings do
     enable_connect_protocol: @enable_connect_protocol,
     h3_datagram: @h3_datagram,
     wt_enabled: @wt_enabled,
+    wt_enabled_draft17: @wt_enabled_draft17,
     wt_initial_max_streams_uni: @wt_initial_max_streams_uni,
     wt_initial_max_streams_bidi: @wt_initial_max_streams_bidi,
     wt_initial_max_data: @wt_initial_max_data
@@ -28,7 +30,7 @@ defmodule HTTP.H3.Settings do
 
   @setting_names Map.new(@setting_ids, fn {name, id} -> {id, name} end)
   @reserved_setting_ids [0x00, 0x02, 0x03, 0x04, 0x05]
-  @boolean_setting_ids [@enable_connect_protocol, @h3_datagram, @wt_enabled]
+  @boolean_setting_ids [@enable_connect_protocol, @h3_datagram, @wt_enabled, @wt_enabled_draft17]
 
   @type setting_id :: non_neg_integer()
   @type setting :: {setting_id(), non_neg_integer()}
@@ -51,6 +53,9 @@ defmodule HTTP.H3.Settings do
 
   @spec wt_enabled() :: 746_385_408
   def wt_enabled, do: @wt_enabled
+
+  @doc "The explicit draft-ietf-webtrans-http3-17 setting; historical wt_enabled is unchanged."
+  def wt_enabled_draft17, do: @wt_enabled_draft17
 
   @spec wt_initial_max_streams_uni() :: 11_108
   def wt_initial_max_streams_uni, do: @wt_initial_max_streams_uni

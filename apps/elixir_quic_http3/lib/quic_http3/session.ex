@@ -11,7 +11,7 @@ defmodule QuicHttp3.Session do
   deadline is an admission/reconciliation budget, not a shorter wall-clock bound.
   """
 
-  alias QuicHttp3.{Control, Frame, Qpack, Response, Stream}
+  alias QuicHttp3.{Connect, Control, Frame, Qpack, Response, Stream}
   alias QuicHttp3.Transport.Quic, as: QuicTransport
   alias QuicHttp3.Transport.Quic.Stream, as: TransportStream
 
@@ -147,6 +147,7 @@ defmodule QuicHttp3.Session do
   def request(session, fields, body, opts)
       when is_list(fields) and (is_binary(body) or body == :stream) do
     with :ok <- request_admission(session),
+         false <- List.keymember?(fields, ":protocol", 0),
          :ok <- outgoing_fields(session, fields),
          {:ok, headers} <- Qpack.encode_header_block(fields, opts),
          :ok <- encoded_headers(session, headers),
@@ -158,13 +159,61 @@ defmodule QuicHttp3.Session do
 
       begin(session, {:request, ref}, [{:open_request, ref, header_frame, body, method}], opts)
     else
+      true -> {:error, session, :protocol_requires_extended_connect}
       {:error, reason} -> {:error, session, reason}
     end
   end
 
+  @doc "Opens an explicitly negotiated extended CONNECT without closing its sending direction."
+  def extended_connect(session, protocol, fields, opts \\ []) do
+    with true <- session.open?,
+         :ok <- connect_deadline(session, opts),
+         :ok <- request_admission(session),
+         :ready <- Connect.ready(session.control),
+         :ok <- extension_requirements(protocol),
+         {:ok, fields} <- Connect.fields(protocol, fields),
+         :ok <- outgoing_fields(session, fields),
+         {:ok, block} <- Qpack.encode_header_block(fields, opts),
+         :ok <- encoded_headers(session, block),
+         {:ok, frame} <- Frame.encode(:headers, block) do
+      ref = make_ref()
+
+      begin(
+        session,
+        {:request, ref},
+        [{:open_request, ref, frame, :stream, {:extended_connect, protocol}}],
+        opts
+      )
+    else
+      false -> {:error, session, :not_open}
+      :pending -> {:blocked, session, :peer_settings_pending}
+      {:error, reason} -> {:error, session, reason}
+    end
+  end
+
+  defp connect_deadline(session, opts) do
+    deadline = Keyword.get(opts, :deadline, session.deadline)
+
+    cond do
+      not valid_deadline?(deadline) -> {:error, :invalid_operation_options}
+      deadline != nil and now() >= elem(deadline, 1) -> {:error, :deadline_expired}
+      true -> :ok
+    end
+  end
+
+  # The token codec exists for the pinned WT profile, but admitting network WT
+  # before negotiated reliable reset and sole-owner routing are connected would
+  # send an unsupported profile. Keep that dependent path fail-closed.
+  defp extension_requirements("webtransport-h3"), do: {:error, :webtransport_network_not_ready}
+  defp extension_requirements(_), do: :ok
+
   def send_data(session, ref, bytes, fin, opts)
       when is_binary(bytes) and byte_size(bytes) <= 16_384 and is_boolean(fin) do
     case Map.fetch(session.requests, ref) do
+      {:ok, %{purpose: {:extended_connect, _}, decoder: %{status: status}}}
+      when status == nil or status < 200 or status > 299 ->
+        {:error, session, :tunnel_not_accepted}
+
       {:ok, %{upload: :open, stream: stream}} ->
         begin(session, :send_data, data_steps(stream, bytes, fin, session.max_frame), opts)
 
@@ -181,6 +230,9 @@ defmodule QuicHttp3.Session do
   @doc "Sends ordered request trailing HEADERS with FIN through resumable admission."
   def send_trailers(session, ref, fields, opts) do
     case Map.fetch(session.requests, ref) do
+      {:ok, %{purpose: {:extended_connect, _}}} ->
+        {:error, session, :tunnel_trailers_forbidden}
+
       {:ok, %{upload: :open, stream: stream}} ->
         with {:ok, trailers} <- HTTP.Trailers.validate(fields),
              fields =
@@ -652,13 +704,22 @@ defmodule QuicHttp3.Session do
   defp accepted(session, {:open_request, ref, headers, body, method}, {:ok, stream}) do
     decoder =
       Response.new(
-        method: method,
+        method: if(is_tuple(method), do: :connect, else: method),
+        purpose: if(is_tuple(method), do: :extended_connect, else: :request),
         max_fields: session.max_fields,
         max_encoded_headers: session.max_encoded_headers,
         max_header_bytes: session.max_header_bytes
       )
 
-    request = %{stream: stream, ref: ref, decoder: decoder, upload: :open}
+    request = %{
+      stream: stream,
+      ref: ref,
+      decoder: decoder,
+      upload: :open,
+      purpose: method,
+      remote_fin?: false
+    }
+
     id = stream_id(stream, session.next_stream_id)
 
     next = %{
@@ -680,6 +741,7 @@ defmodule QuicHttp3.Session do
 
   defp accepted(session, {:send, stream, _bytes, true}, _success) do
     case request_for_stream(session.requests, stream) do
+      {ref, %{remote_fin?: true}} -> retire_request(session, ref)
       {ref, _request} -> {:ok, put_in(session.requests[ref].upload, :closed)}
       nil -> {:ok, session}
     end
@@ -867,6 +929,20 @@ defmodule QuicHttp3.Session do
       nil ->
         consume_peer_items(session, stream, items)
     end
+  end
+
+  defp finish_response(
+         session,
+         ref,
+         %{
+           purpose: {:extended_connect, _},
+           upload: :open,
+           decoder: %{status: status, phase: :done}
+         } = request,
+         events
+       )
+       when status in 200..299 do
+    {:ok, put_in(session.requests[ref], %{request | remote_fin?: true}), events}
   end
 
   defp finish_response(session, ref, request, events) do
