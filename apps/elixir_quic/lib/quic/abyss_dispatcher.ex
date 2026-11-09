@@ -43,6 +43,10 @@ defmodule Quic.AbyssDispatcher do
   def terminate(reason, %{endpoint: endpoint}) do
     if Process.alive?(endpoint), do: GenServer.stop(endpoint, reason)
     :ok
+  catch
+    # The endpoint is linked to its owner and may exit between the alive check
+    # and the stop; it is gone either way.
+    :exit, _reason -> :ok
   end
 
   def terminate(_reason, _state), do: :ok

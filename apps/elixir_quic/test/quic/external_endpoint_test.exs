@@ -68,6 +68,12 @@ defmodule Quic.ExternalEndpointTest do
              Quic.IO.ExternalWriter.send(writer, <<1>>, {{127, 0, 0, 1}, 1})
   end
 
+  test "Abyss callback adapter terminate tolerates an endpoint that exits while stopping" do
+    endpoint = spawn(fn -> receive do: (_ -> exit(:endpoint_gone)) end)
+
+    assert :ok = Quic.AbyssDispatcher.terminate(:normal, %{endpoint: endpoint})
+  end
+
   test "Abyss callback adapter owns the QUIC endpoint and uses injected egress" do
     parent = self()
     remote = {{127, 0, 0, 1}, 45_002}
