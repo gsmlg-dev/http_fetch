@@ -244,12 +244,23 @@ Scope:
 - TLS 1.3 only. `versions` other than `[:"tlsv1.3"]` return
   `{:error, {:unsupported_option, :versions}}`; there is no TLS 1.2 server.
 - Supported TLS options: `certfile`/`keyfile`, `cert`/`key`, `certs_keys`,
-  `password`, `alpn_preferred_protocols`, `ciphers` (TLS 1.3 suites) and
-  `verify: :verify_none`. Every other option is a `:gen_tcp` option;
-  `:binary` and `active: false` are enforced on the carrier, and OTP
+  `password`, `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers`
+  (TLS 1.3 suites) and `verify: :verify_none`. Every other option is a
+  `:gen_tcp` option; `:binary` and `active: false` are enforced on the carrier, and OTP
   `:ssl`-only options are errors. Options are validated before the port opens.
-- `verify: :verify_peer` (client-certificate authentication) and
-  `sni_hosts`/`sni_fun` currently return `{:error, {:unsupported_option, key}}`.
+- SNI: `sni_hosts: [{name, identity_options}]` identities are loaded when the
+  options are validated, so a bad certificate, a non-identity key or a
+  duplicate name fails `listen/2` with `{:error, {:invalid_option, :sni_hosts}}`.
+  `sni_fun.(name)` runs in the connection process for each handshake and returns
+  identity options or `:undefined`. Selection order is `sni_hosts[name]`, then
+  `sni_fun.(name)`, then the default identity; names match exactly. With no
+  identity the handshake fails with `unrecognized_name`; an `sni_fun` raise,
+  throw, exit or invalid result fails it with `internal_error`.
+- If the chain does not match the client's `signature_algorithms_cert` (or
+  `signature_algorithms`), the server still sends it (RFC 8446 §4.4.2.2); the
+  CertificateVerify scheme must still be one the client offered.
+- `verify: :verify_peer` (client-certificate authentication) currently returns
+  `{:error, {:unsupported_option, :verify}}`.
 - No session tickets or resumption: the server sends no NewSessionTicket, and a
   client offering a PSK gets a full handshake. 0-RTT is not accepted.
 - Server carriers default to `send_timeout: 30_000, send_timeout_close: true`
@@ -258,8 +269,8 @@ Scope:
 - A handshake timeout, a TLS failure or a peer TCP close returns `{:error, _}`,
   and the connection process stops and closes its carrier.
 
-SNI identity selection and server-side client-certificate authentication are
-being added to this server; until then their options are rejected, never ignored.
+Server-side client-certificate authentication is being added to this server;
+until then `verify: :verify_peer` is rejected, never ignored.
 
 ## Architecture
 

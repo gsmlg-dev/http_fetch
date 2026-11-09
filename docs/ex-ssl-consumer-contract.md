@@ -283,12 +283,19 @@ Boundaries:
 
 - TLS 1.3 only; there is no TLS 1.2 server.
 - Supported TLS options are `certfile`/`keyfile`, `cert`/`key`, `certs_keys`,
-  `password`, `alpn_preferred_protocols`, `ciphers` and `verify: :verify_none`.
+  `password`, `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers` and
+  `verify: :verify_none`.
   Other keys are `:gen_tcp` options; OTP `:ssl`-only options are errors.
   `listen/2` validates every option before it opens the port.
-- `verify: :verify_peer` and `sni_hosts`/`sni_fun` return
-  `{:error, {:unsupported_option, key}}` until server client-certificate
-  authentication and SNI selection are wired in; they are never ignored.
+- SNI selection order is `sni_hosts[name]`, `sni_fun.(name)` (`:undefined`
+  selects the default), then the default identity. `sni_hosts` identities are
+  loaded by `listen/2`; invalid entries or duplicate names return
+  `{:error, {:invalid_option, :sni_hosts}}`. No identity is an
+  `unrecognized_name` alert; a failing `sni_fun` is an `internal_error` alert.
+- A TCP server sends its chain even when it does not match the client's
+  `signature_algorithms_cert` (RFC 8446 §4.4.2.2); `SSL.QUIC` keeps the hard check.
+- `verify: :verify_peer` returns `{:error, {:unsupported_option, :verify}}` until
+  server client-certificate authentication is wired in; it is never ignored.
 - No server session tickets, resumption or 0-RTT.
 - Server carriers default to `send_timeout: 30_000, send_timeout_close: true`
   unless the caller sets either key.

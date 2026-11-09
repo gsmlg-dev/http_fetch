@@ -9,6 +9,7 @@ defmodule SSL.Protocol.ServerHandshake do
   """
   alias SSL.Capabilities
   alias SSL.Crypto.{Finished, KeySchedule, Signature}
+  alias SSL.PKIX.CertificateSignaturePolicy
   alias SSL.Protocol.{ClientOffer, HandshakeCore, ServerFlight, Transcript}
 
   @hrr_random Base.decode16!("CF21AD74E59A6111BE1D8C021E65B891C2A211167ABB8C5E079E09E2C8A8339C")
@@ -48,12 +49,7 @@ defmodule SSL.Protocol.ServerHandshake do
          {:ok, alpn} <- select_alpn(config.alpn, offer.alpn_protocols, quic?),
          {:ok, scheme} <-
            select(config.signature_algorithms, offer.signature_schemes, :no_shared_signature),
-         true <-
-           SSL.PKIX.CertificateSignaturePolicy.compatible?(
-             config.identity.chain,
-             nil,
-             offer.certificate_signature_schemes || offer.signature_schemes
-           ),
+         true <- not quic? or chain_compatible?(config, offer),
          {:ok, parameters} <- if(quic?, do: parameters(offer.extensions), else: {:ok, nil}) do
       spec = Capabilities.resolve(:cipher_suite, suite)
       transcript = if previous, do: previous.transcript, else: Transcript.new(spec.hash)
@@ -94,6 +90,16 @@ defmodule SSL.Protocol.ServerHandshake do
       false -> {:error, {:handshake_failure, :certificate_signature_policy}}
       {:error, _} = error -> error
     end
+  end
+
+  # RFC 8446 §4.4.2.2: a TCP server whose chain does not match the client's
+  # signature_algorithms(_cert) SHOULD continue with it; QUIC keeps the hard check.
+  defp chain_compatible?(config, offer) do
+    CertificateSignaturePolicy.compatible?(
+      config.identity.chain,
+      nil,
+      offer.certificate_signature_schemes || offer.signature_schemes
+    )
   end
 
   @spec flight(State.t(), map(), SSL.Crypto.KeyExchange.KeyPair.t(), binary()) ::

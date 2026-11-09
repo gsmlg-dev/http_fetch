@@ -3,9 +3,10 @@ defmodule SSL.ServerOptions do
   alias SSL.{Capabilities, ClientIdentity, PKIX}
   alias SSL.QUIC.Config
 
+  # sni_hosts identities are loaded at build time; sni_fun results per handshake.
   @type sni ::
           nil
-          | {:hosts, %{charlist() => keyword()}}
+          | {:hosts, %{charlist() => ClientIdentity.t()}}
           | {:fun, (charlist() -> keyword() | :undefined)}
   @type t :: %{
           ciphers: [non_neg_integer()],
@@ -102,13 +103,7 @@ defmodule SSL.ServerOptions do
          :ok <- identity_present(identity, sni),
          {:ok, ciphers} <- ciphers(Keyword.get(options, :ciphers)),
          {:ok, groups} <- Config.algorithms([], :groups, :group, Config.ids(:group)),
-         {:ok, signatures} <-
-           Config.algorithms(
-             [],
-             :signature_algorithms,
-             :signature_algorithm,
-             Config.ids(:signature_algorithm)
-           ),
+         {:ok, signatures} <- signatures(),
          {:ok, limits} <- Config.limits([]),
          {:ok, alpn} <- alpn(Keyword.get(options, :alpn_preferred_protocols)),
          {:ok, client_auth} <- client_auth(options) do
@@ -129,6 +124,80 @@ defmodule SSL.ServerOptions do
   end
 
   def build(_), do: {:error, {:invalid_option, :options}}
+
+  @doc """
+  Selects the identity for a ClientHello `server_name` (`nil` when absent).
+
+  Order: `sni_hosts[name]`, then `sni_fun.(name)` (`:undefined` selects the
+  default), then the default identity. The returned config carries the
+  selected identity and the signature schemes it can sign. `sni_fun` runs in
+  the caller; a raise, throw, exit or invalid result is an `internal_error`.
+  """
+  @spec select_identity(t(), charlist() | nil) :: {:ok, t()} | {:error, {atom(), term()}}
+  def select_identity(config, name) do
+    case lookup(config.sni, name) do
+      {:ok, identity} ->
+        with {:ok, signatures} <- signatures() do
+          {:ok,
+           %{
+             config
+             | identity: identity,
+               signature_algorithms: filter_signatures(signatures, identity)
+           }}
+        end
+
+      :default when config.identity != nil ->
+        {:ok, config}
+
+      :default ->
+        {:error, {:unrecognized_name, :no_server_identity}}
+
+      {:error, reason} ->
+        {:error, {:internal_error, reason}}
+    end
+  end
+
+  defp lookup(nil, _name), do: :default
+  defp lookup(_sni, nil), do: :default
+
+  defp lookup({:hosts, hosts}, name) do
+    case Map.fetch(hosts, name) do
+      {:ok, identity} -> {:ok, identity}
+      :error -> :default
+    end
+  end
+
+  defp lookup({:fun, fun}, name) do
+    case fun.(name) do
+      :undefined -> :default
+      options -> host_identity(options)
+    end
+  catch
+    kind, _ -> {:error, {:sni_fun, kind}}
+  else
+    {:error, _} -> {:error, {:sni_fun, :invalid_result}}
+    result -> result
+  end
+
+  defp host_identity(options) do
+    with true <- is_list(options) and Keyword.keyword?(options),
+         true <- Enum.all?(Keyword.keys(options), &(&1 in [:certs_keys | @identity_keys])),
+         {:ok, identity_opts} <- identity_options(options),
+         {:ok, %ClientIdentity{} = identity} <- load_identity(identity_opts) do
+      {:ok, identity}
+    else
+      _ -> {:error, :invalid_identity}
+    end
+  end
+
+  defp signatures,
+    do:
+      Config.algorithms(
+        [],
+        :signature_algorithms,
+        :signature_algorithm,
+        Config.ids(:signature_algorithm)
+      )
 
   defp check_shape(options) do
     if Keyword.keyword?(options), do: :ok, else: {:error, {:invalid_option, :options}}
@@ -190,11 +259,23 @@ defmodule SSL.ServerOptions do
   end
 
   defp sni_hosts(hosts) do
-    if Enum.all?(hosts, &match?({host, opts} when is_list(host) and is_list(opts), &1)) do
-      {:ok, {:hosts, Map.new(hosts)}}
+    names = Enum.map(hosts, &elem_or_nil/1)
+
+    with true <- Enum.all?(names, &is_list/1) and names == Enum.uniq(names),
+         {:ok, identities} <- load_hosts(hosts, []) do
+      {:ok, {:hosts, Map.new(identities)}}
     else
-      {:error, {:invalid_option, :sni_hosts}}
+      _ -> {:error, {:invalid_option, :sni_hosts}}
     end
+  end
+
+  defp elem_or_nil({host, _options}), do: host
+  defp elem_or_nil(_), do: nil
+
+  defp load_hosts([], acc), do: {:ok, acc}
+
+  defp load_hosts([{host, options} | rest], acc) do
+    with {:ok, identity} <- host_identity(options), do: load_hosts(rest, [{host, identity} | acc])
   end
 
   defp identity_present(nil, nil), do: {:error, :server_identity_required}

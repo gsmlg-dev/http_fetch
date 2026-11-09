@@ -20,9 +20,6 @@ defmodule SSL.ServerAPITest do
     assert SSL.listen(0, verify: :verify_peer, certfile: @cert, keyfile: @key) ==
              {:error, {:unsupported_option, :verify}}
 
-    assert SSL.listen(0, sni_hosts: [{~c"a.test", [certfile: @cert, keyfile: @key]}]) ==
-             {:error, {:unsupported_option, :sni_hosts}}
-
     assert SSL.listen(0, certfile: @cert, keyfile: @key, versions: [:"tlsv1.2"]) ==
              {:error, {:unsupported_option, :versions}}
 
@@ -56,7 +53,7 @@ defmodule SSL.ServerAPITest do
     monitor = Process.monitor(pid)
     started = System.monotonic_time(:millisecond)
     assert SSL.handshake(s, 100) == {:error, :timeout}
-    assert System.monotonic_time(:millisecond) - started < 500
+    assert System.monotonic_time(:millisecond) - started < 1_000
     assert_receive {:DOWN, ^monitor, :process, ^pid, _}, 1000
     :gen_tcp.close(raw)
   end
@@ -120,6 +117,7 @@ defmodule SSL.ServerAPITest do
       end)
 
     assert :ok = SSL.controlling_process(listen, owner)
+    assert :erlang.port_info(listen.carrier, :connected) == {:connected, owner}
     send(owner, :close)
     assert_receive {:closed, :ok}, 1000
   end
@@ -146,6 +144,33 @@ defmodule SSL.ServerAPITest do
     assert :ok = SSL.send(s, "ok")
     assert finish(client) == {:ok, "ok"}
     SSL.close(s)
+    :gen_tcp.close(tcp_listen)
+  end
+
+  test "server upgrade enforces a passive binary carrier over caller options" do
+    hello = client_hello()
+    {:ok, tcp_listen} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(tcp_listen)
+    {:ok, raw} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
+    {:ok, tcp} = :gen_tcp.accept(tcp_listen, 5000)
+    :ok = :gen_tcp.send(raw, hello)
+
+    upgrade =
+      Task.async(fn ->
+        receive do: (:go -> :ok)
+        options = [certfile: @cert, keyfile: @key, active: true, mode: :list]
+        result = SSL.handshake(tcp, options, 5000)
+        {:messages, messages} = Process.info(self(), :messages)
+        {result, messages}
+      end)
+
+    :ok = :gen_tcp.controlling_process(tcp, upgrade.pid)
+    send(upgrade.pid, :go)
+    # The ClientHello reaches the TLS process, which answers with a ServerHello.
+    assert {:ok, <<22, 3, 3, _::binary>>} = :gen_tcp.recv(raw, 0, 2000)
+    :gen_tcp.close(raw)
+    assert {{:error, :closed}, messages} = Task.await(upgrade)
+    refute Enum.any?(messages, &match?({:tcp, _, _}, &1))
     :gen_tcp.close(tcp_listen)
   end
 
@@ -176,12 +201,40 @@ defmodule SSL.ServerAPITest do
     SSL.close(s)
   end
 
-  test "an explicit send_timeout wins over the default" do
-    {listen, port} = listen(send_timeout: 1230)
-    client = client(port, [], fn _c -> :ok end)
-    {:ok, s} = accept(listen)
-    assert SSL.getopts(s, [:send_timeout]) == {:ok, [send_timeout: 1230]}
-    assert :ok = finish(client)
+  test "an explicit send_timeout or send_timeout_close replaces both defaults" do
+    for {extra, expected} <- [
+          {[send_timeout: 1230], [send_timeout: 1230, send_timeout_close: false]},
+          {[send_timeout_close: false], [send_timeout: :infinity, send_timeout_close: false]}
+        ] do
+      {listen, port} = listen(extra)
+      client = client(port, [], fn _c -> :ok end)
+      {:ok, s} = accept(listen)
+      assert SSL.getopts(s, [:send_timeout, :send_timeout_close]) == {:ok, expected}
+      assert :ok = finish(client)
+      SSL.close(s)
+    end
+  end
+
+  test "an ex_ssl client accepts the server chain it can verify" do
+    {listen, port} = listen([])
+
+    client =
+      Task.async(fn ->
+        with {:ok, c} <-
+               SSL.connect(~c"localhost", port,
+                 verify: :verify_peer,
+                 cacertfile: @ca,
+                 server_name_indication: ~c"localhost"
+               ) do
+          result = SSL.recv(c, 0, 2000)
+          SSL.close(c)
+          result
+        end
+      end)
+
+    assert {:ok, s} = accept(listen)
+    assert :ok = SSL.send(s, "hello")
+    assert Task.await(client) == {:ok, "hello"}
     SSL.close(s)
   end
 

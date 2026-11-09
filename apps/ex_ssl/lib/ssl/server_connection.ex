@@ -9,10 +9,11 @@ defmodule SSL.ServerConnection do
   # closed; the transport is already gone. No NewSessionTicket is issued.
   @behaviour :gen_statem
 
-  alias SSL.{Capabilities, IodataCursor, Options, Socket, TCPOptions}
+  alias SSL.{Capabilities, IodataCursor, Options, ServerOptions, Socket, TCPOptions}
   alias SSL.Crypto.{KeyExchange, KeySchedule, TrafficState}
 
   alias SSL.Protocol.{
+    ClientOffer,
     HandshakeFramer,
     HandshakeMachine,
     Record,
@@ -508,6 +509,29 @@ defmodule SSL.ServerConnection do
   end
 
   defp client_hello(hello, data) do
+    case select_identity(hello, data) do
+      {:ok, data} -> accept_hello(hello, data)
+      {:error, {alert, reason}} -> {:error, alert(alert, reason), data}
+    end
+  end
+
+  # The identity is chosen once from the first ClientHello; a retried hello keeps
+  # its server_name (RFC 8446 §4.1.2). An unparsable hello is left to accept_hello.
+  defp select_identity(_hello, %{core: core} = data) when not is_nil(core), do: {:ok, data}
+
+  defp select_identity(hello, data) do
+    case ClientOffer.from_client_hello(hello) do
+      {:ok, offer} ->
+        with {:ok, config} <-
+               ServerOptions.select_identity(data.config, ClientOffer.server_name(offer)),
+             do: {:ok, %{data | config: config}}
+
+      {:error, _reason} ->
+        {:ok, data}
+    end
+  end
+
+  defp accept_hello(hello, data) do
     case ServerHandshake.accept_hello(data.config, hello, data.core) do
       {:retry, core, retry} ->
         bytes = [plaintext(retry), compat_ccs(core, data)]

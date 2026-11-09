@@ -57,6 +57,18 @@ defmodule SSL.Protocol.ClientOffer do
 
   def from_client_hello(_input), do: {:error, {:invalid_input, :client_hello}}
 
+  @doc "Returns the validated `server_name` host name as a charlist, or `nil` when absent."
+  @spec server_name(t()) :: charlist() | nil
+  def server_name(%__MODULE__{extensions: extensions}) do
+    case List.keyfind(extensions, 0, 0) do
+      {0, <<_::16, 0, length::16, name::binary-size(length), _::binary>>} ->
+        :binary.bin_to_list(name)
+
+      _ ->
+        nil
+    end
+  end
+
   @doc false
   @spec observe(term()) ::
           {:error,

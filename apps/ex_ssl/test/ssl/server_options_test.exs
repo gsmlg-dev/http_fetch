@@ -81,7 +81,7 @@ defmodule SSL.ServerOptionsTest do
     fun = fn _ -> :undefined end
     assert {:ok, %{sni: {:fun, ^fun}, identity: nil}} = ServerOptions.build(sni_fun: fun)
 
-    assert {:ok, %{sni: {:hosts, %{~c"a.test" => [certfile: _, keyfile: _]}}}} =
+    assert {:ok, %{sni: {:hosts, %{~c"a.test" => %SSL.ClientIdentity{}}}}} =
              ServerOptions.build(sni_hosts: [{~c"a.test", [certfile: @cert, keyfile: @key]}])
   end
 end

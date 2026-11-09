@@ -35,10 +35,6 @@ defmodule SSL do
     Socket
   }
 
-  # Server SNI and client-certificate authentication are not wired into
-  # SSL.ServerConnection yet, so these options are rejected rather than ignored.
-  @unwired_server_options [:sni_hosts, :sni_fun]
-
   @spec connect(:gen_tcp.socket() | Socket.t(), list()) :: {:ok, Socket.t()} | {:error, term()}
   def connect(tcp_socket, options), do: connect(tcp_socket, options, :infinity)
 
@@ -292,9 +288,16 @@ defmodule SSL do
 
   Options are validated before the port is opened. TLS options are the
   certificate identity (`certfile`/`keyfile`, `cert`/`key`, `certs_keys`,
-  `password`), `alpn_preferred_protocols`, `ciphers`, `versions: [:"tlsv1.3"]`
-  and `verify: :verify_none`. OTP `:ssl`-only options are errors; every other
-  option is a `:gen_tcp` listen option. `:binary` and `active: false` are enforced.
+  `password`), `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers`,
+  `versions: [:"tlsv1.3"]` and `verify: :verify_none`. OTP `:ssl`-only options
+  are errors; every other option is a `:gen_tcp` listen option. `:binary` and
+  `active: false` are enforced.
+
+  `sni_hosts: [{name, identity_options}]` identities are loaded here, so a bad
+  certificate fails `listen/2`. `sni_fun.(name)` runs in the connection process
+  per handshake and returns identity options or `:undefined`. Selection order is
+  `sni_hosts[name]`, `sni_fun.(name)`, then the default identity; with none the
+  handshake fails with `unrecognized_name`. A failing `sni_fun` is `internal_error`.
   """
   @spec listen(:inet.port_number(), keyword()) :: {:ok, ListenSocket.t()} | {:error, term()}
   def listen(port, options) when is_integer(port) and port in 0..65_535 do
@@ -333,8 +336,10 @@ defmodule SSL do
   Upgrades an owned `:gen_tcp` socket to a TLS 1.3 server connection.
 
   Options are those of `listen/2`; carrier options are applied with
-  `:inet.setopts/2`. An option error leaves the socket open and owned by the
-  caller. Once the connection process takes the socket, a failed handshake closes it.
+  `:inet.setopts/2`, with `:binary` and `active: false` enforced (caller
+  `active`/`mode` values are ignored). An option error leaves the socket open
+  and owned by the caller. Once the connection process takes the socket, a
+  failed handshake closes it.
   """
   @spec handshake(:gen_tcp.socket(), keyword(), timeout()) ::
           {:ok, Socket.t(), []} | {:error, term()}
@@ -342,7 +347,7 @@ defmodule SSL do
     with {:ok, deadline} <- Options.deadline(timeout),
          {:ok, config} <- server_options(options),
          :ok <- owned_socket(tcp),
-         :ok <- :inet.setopts(tcp, server_carrier(config.tcp)),
+         :ok <- :inet.setopts(tcp, upgrade_carrier(config.tcp)),
          {:ok, socket} <- ServerConnection.start(tcp, config, self()),
          {:ok, socket} <- ServerConnection.handshake(socket, Options.remaining(deadline)) do
       {:ok, socket, []}
@@ -379,26 +384,27 @@ defmodule SSL do
 
   def shutdown(_, _), do: {:error, :badarg}
 
+  # Server-side client-certificate authentication is not wired into
+  # SSL.ServerConnection yet, so verify_peer is rejected rather than ignored.
   defp server_options(options) when is_list(options) do
-    cond do
-      Keyword.get(options, :verify, :verify_none) != :verify_none ->
-        {:error, {:unsupported_option, :verify}}
-
-      key = Enum.find(@unwired_server_options, &Keyword.has_key?(options, &1)) ->
-        {:error, {:unsupported_option, key}}
-
-      true ->
-        ServerOptions.build(options)
-    end
+    if Keyword.get(options, :verify, :verify_none) != :verify_none,
+      do: {:error, {:unsupported_option, :verify}},
+      else: ServerOptions.build(options)
   end
 
   defp server_options(options), do: ServerOptions.build(options)
 
+  # :inet.setopts/2 applies options in order, so a caller's active/mode would
+  # take effect before an appended override; drop them instead.
+  defp upgrade_carrier(tcp),
+    do: server_carrier(Keyword.drop(tcp, [:active, :mode])) ++ [:binary, active: false]
+
   # Server writes are synchronous carrier sends, so an infinite send timeout could wedge them.
+  # The defaults apply only when the caller set neither key.
   defp server_carrier(tcp) do
-    tcp
-    |> Keyword.put_new(:send_timeout, 30_000)
-    |> Keyword.put_new(:send_timeout_close, true)
+    if Keyword.has_key?(tcp, :send_timeout) or Keyword.has_key?(tcp, :send_timeout_close),
+      do: tcp,
+      else: tcp ++ [send_timeout: 30_000, send_timeout_close: true]
   end
 
   defp upgrade_profile_context(options) do
