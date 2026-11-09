@@ -14,7 +14,7 @@ defmodule ReleaseVersions do
     "http_event_source" => ~w(http_core http_runtime),
     "http_web_transport" => ~w(http_core http_runtime),
     "abyss" => [],
-    "hell" => [],
+    "hell" => ~w(ex_ssl),
     "abyss_raw" => []
   }
 

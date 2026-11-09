@@ -10,7 +10,8 @@ defmodule ReleaseArchives do
     "http_fetch" => ~w(http_core http_pool http_runtime),
     "http_web_socket" => ~w(http_core http_runtime),
     "http_event_source" => ~w(http_core http_runtime),
-    "http_web_transport" => ~w(http_core http_runtime)
+    "http_web_transport" => ~w(http_core http_runtime),
+    "hell" => ~w(ex_ssl)
   }
 
   def run([version, directory]), do: validate(version, directory, @order)
@@ -36,7 +37,8 @@ defmodule ReleaseArchives do
       requirements = metadata["requirements"] || %{}
 
       if package in ~w(abyss hell) do
-        expected = if package == "abyss", do: ~w(telemetry telemetry_metrics), else: ~w(telemetry)
+        expected =
+          if package == "abyss", do: ~w(telemetry telemetry_metrics), else: ~w(ex_ssl telemetry)
 
         unless Enum.sort(Map.keys(requirements)) == expected,
           do: raise("unexpected server dependencies in #{package}")

@@ -76,7 +76,7 @@ class SelectionTest(unittest.TestCase):
         graph = dependency_graph()
         self.assertEqual(graph["http_fetch"], {"http_core", "http_pool", "http_runtime"})
         affected = {
-            "ex_ssl": ALL[:-1],
+            "ex_ssl": ALL,
             "elixir_quic": ALL[1:-1],
             "http_core": ALL[2:-2],
             "http_pool": ["http_pool", "http_runtime", "http_fetch", "http_test", "http_web_socket", "http_event_source", "http_web_transport"],
@@ -231,7 +231,7 @@ class SelectionTest(unittest.TestCase):
             check(base, "HEAD", ["ex_ssl"])
             for path, expected in (
                 ("apps/ex_ssl/test/policy_test.exs",
-                 ALL[:-1]),
+                 ALL),
                 ("apps/http_fetch/mix.exs", ["http_fetch", "http_test"]),
                 ("scripts/ex_ssl_options_test.exs",
                  ALL),

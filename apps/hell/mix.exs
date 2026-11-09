@@ -39,7 +39,7 @@ defmodule Hell.MixProject do
   end
 
   def application do
-    [extra_applications: [:logger, :ssl]]
+    [extra_applications: [:logger] ++ if(Mix.env() == :test, do: [:ssl], else: [])]
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
@@ -47,6 +47,7 @@ defmodule Hell.MixProject do
 
   defp deps() do
     [
+      {:ex_ssl, "== 1.0.0-rc.11", in_umbrella: true, hex: :ex_ssl},
       {:telemetry, "~> 0.4 or ~> 1.0"},
       {:machete, ">= 0.0.0", only: [:dev, :test]},
       {:ex_doc, "~> 0.25", only: [:dev, :test], runtime: false},

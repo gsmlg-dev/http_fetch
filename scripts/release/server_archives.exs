@@ -16,7 +16,7 @@ for {package, %{"version" => version, "archive" => archive}} <- packages do
   expected =
     case package do
       "abyss" -> ~w(telemetry telemetry_metrics)
-      "hell" -> ~w(telemetry)
+      "hell" -> ~w(ex_ssl telemetry)
       "abyss_raw" -> ~w(rustler)
     end
 

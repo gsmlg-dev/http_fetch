@@ -17,14 +17,14 @@ defmodule Hell.Transport do
   ]
 
   @typedoc "A listener socket used to wait for connections"
-  @type listener_socket() :: :inet.socket() | :ssl.sslsocket()
+  @type listener_socket() :: :inet.socket() | SSL.ListenSocket.t()
 
   @typedoc "A listener socket options"
   @type listen_options() ::
-          [:inet.inet_backend() | :gen_tcp.listen_option()] | [:ssl.tls_server_option()]
+          [:inet.inet_backend() | :gen_tcp.listen_option()] | keyword()
 
   @typedoc "A socket representing a client connection"
-  @type socket() :: :inet.socket() | :ssl.sslsocket()
+  @type socket() :: :inet.socket() | SSL.Socket.t()
 
   @typedoc "Information about an endpoint, either remote ('peer') or local"
   @type socket_info() ::
@@ -57,7 +57,7 @@ defmodule Hell.Transport do
   @type on_accept() :: {:ok, socket()} | {:error, on_accept_tcp_error() | on_accept_ssl_error()}
 
   @type on_accept_tcp_error() :: :closed | :system_limit | :inet.posix()
-  @type on_accept_ssl_error() :: :closed | :timeout | :ssl.error_alert()
+  @type on_accept_ssl_error() :: :closed | :timeout | {:tls_alert, {atom(), charlist()}}
 
   @typedoc "An error returned from a controlling_process/2 call"
   @type controlling_process_error() :: :closed | :not_owner | :badarg | :inet.posix()
@@ -68,7 +68,7 @@ defmodule Hell.Transport do
   @typedoc "The return value from a handshake/1 call"
   @type on_handshake() :: {:ok, socket()} | {:error, on_handshake_ssl_error()}
 
-  @type on_handshake_ssl_error() :: :closed | :timeout | :ssl.error_alert()
+  @type on_handshake_ssl_error() :: :closed | :timeout | {:tls_alert, {atom(), charlist()}}
 
   @typedoc "The return value from a upgrade/2 call"
   @type on_upgrade() :: {:ok, socket()} | {:error, term()}
@@ -106,7 +106,7 @@ defmodule Hell.Transport do
   @type on_peercert() :: {:ok, :public_key.der_encoded()} | {:error, reason :: any()}
 
   @typedoc "The return value from a connection_information/1 call"
-  @type on_connection_information() :: {:ok, :ssl.connection_info()} | {:error, reason :: any()}
+  @type on_connection_information() :: {:ok, keyword()} | {:error, reason :: any()}
 
   @typedoc "The return value from a negotiated_protocol/1 call"
   @type on_negotiated_protocol() ::

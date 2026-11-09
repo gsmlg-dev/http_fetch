@@ -64,6 +64,17 @@ defmodule Hell.ServerTest do
     end
   end
 
+  defmodule PeerCert do
+    use Hell.Handler
+
+    @impl Hell.Handler
+    def handle_connection(socket, state) do
+      {:ok, der} = Hell.Socket.peercert(socket)
+      Hell.Socket.send(socket, der)
+      {:close, state}
+    end
+  end
+
   defmodule Whoami do
     use Hell.Handler
 
@@ -604,6 +615,64 @@ defmodule Hell.ServerTest do
       :ssl.send(client, "HI")
       {:ok, ~c"HI"} = :ssl.recv(client, 0, 100)
     end
+
+    test "ssl mTLS exposes the client certificate to the handler" do
+      certfile = Path.join(__DIR__, "../support/cert.pem")
+      keyfile = Path.join(__DIR__, "../support/key.pem")
+      cacertfile = Path.join(__DIR__, "../support/ca.pem")
+
+      {:ok, _, port} =
+        start_handler(PeerCert,
+          transport_module: Hell.Transports.SSL,
+          transport_options: [
+            certfile: certfile,
+            keyfile: keyfile,
+            verify: :verify_peer,
+            cacertfile: cacertfile,
+            fail_if_no_peer_cert: true
+          ]
+        )
+
+      {:ok, client} =
+        :ssl.connect(~c"localhost", port,
+          mode: :binary,
+          active: false,
+          verify: :verify_none,
+          certfile: certfile,
+          keyfile: keyfile
+        )
+
+      [{:Certificate, client_der, _}] = certfile |> File.read!() |> :public_key.pem_decode()
+
+      assert {:ok, ^client_der} = recv_all(client, byte_size(client_der))
+      :ssl.close(client)
+    end
+
+    test "ssl rejects TLS 1.2 versions option" do
+      assert {:error, reason} =
+               start_supervised(
+                 {Hell,
+                  port: 0,
+                  handler_module: Echo,
+                  transport_module: Hell.Transports.SSL,
+                  transport_options: [
+                    certfile: Path.join(__DIR__, "../support/cert.pem"),
+                    keyfile: Path.join(__DIR__, "../support/key.pem"),
+                    versions: [:"tlsv1.2"]
+                  ]}
+               )
+
+      assert inspect(reason) =~ "{:unsupported_option, :versions}"
+    end
+
+    test "ssl transport BEAM does not import OTP :ssl" do
+      {:ok, {_, [imports: imports]}} =
+        :beam_lib.chunks(:code.which(Hell.Transports.SSL), [:imports])
+
+      imported = imports |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+
+      assert MapSet.disjoint?(imported, MapSet.new([:ssl, :tls_socket, :ssl_gen_statem]))
+    end
   end
 
   describe "invalid configuration" do
@@ -699,20 +768,23 @@ defmodule Hell.ServerTest do
         transport_options: [
           certfile: Path.join(__DIR__, "../support/cert.pem"),
           keyfile: Path.join(__DIR__, "../support/key.pem"),
-          alpn_preferred_protocols: ["foo"]
+          alpn_preferred_protocols: ["foo"],
+          ciphers: [:tls_aes_256_gcm_sha384]
         ]
       ]
 
       {:ok, server_pid} = start_supervised({Hell, server_args})
       {:ok, {_ip, port}} = Hell.listener_info(server_pid)
 
+      # The client offers only a TLS 1.3 suite the server excludes.
       {:error, _} =
         :ssl.connect(~c"localhost", port,
           active: false,
           verify: :verify_peer,
           cacertfile: Path.join(__DIR__, "../support/ca.pem"),
+          versions: [:"tlsv1.3"],
           ciphers: [
-            %{cipher: :rc4_128, key_exchange: :rsa, mac: :md5, prf: :default_prf}
+            %{cipher: :aes_128_gcm, key_exchange: :any, mac: :aead, prf: :sha256}
           ]
         )
 
@@ -720,7 +792,19 @@ defmodule Hell.ServerTest do
 
       Hell.stop(server_pid)
 
-      assert_received {:tls_alert, {:insufficient_security, _}}
+      # RFC 8446 section 4.1.1: no shared cipher suite aborts with handshake_failure.
+      assert_received {:tls_alert, {:handshake_failure, _}}
+    end
+  end
+
+  defp recv_all(client, length, acc \\ "")
+
+  defp recv_all(_client, length, acc) when byte_size(acc) >= length, do: {:ok, acc}
+
+  defp recv_all(client, length, acc) do
+    case :ssl.recv(client, 0, 1_000) do
+      {:ok, data} -> recv_all(client, length, acc <> data)
+      error -> error
     end
   end
 

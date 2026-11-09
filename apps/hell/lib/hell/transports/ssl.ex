@@ -1,22 +1,34 @@
 defmodule Hell.Transports.SSL do
   @moduledoc """
-  Defines a `Hell.Transport` implementation based on TCP SSL sockets
-  as provided by Erlang's `:ssl` module. For the most part, users of Hell
-  will only ever need to deal with this module via `transport_options`
-  passed to `Hell` at startup time. A complete list of such options
-  is defined via the `t::ssl.tls_server_option/0` type. This list can be somewhat
-  difficult to decipher; by far the most common values to pass to this transport
-  are the following:
+  Defines a `Hell.Transport` implementation based on TLS 1.3 over TCP as
+  provided by the `ex_ssl` package's `SSL` module. For the most part, users of
+  Hell will only ever need to deal with this module via `transport_options`
+  passed to `Hell` at startup time.
 
-  * `keyfile`: The path to a PEM encoded key to use for SSL
-  * `certfile`: The path to a PEM encoded cert to use for SSL
-  * `ip`:  The IP to listen on. Can be specified as:
-    * `{1, 2, 3, 4}` for IPv4 addresses
-    * `{1, 2, 3, 4, 5, 6, 7, 8}` for IPv6 addresses
-    * `:loopback` for local loopback
-    * `:any` for all interfaces (ie: `0.0.0.0`)
-    * `{:local, "/path/to/socket"}` for a Unix domain socket. If this option is used, the `port`
-      option *must* be set to `0`.
+  Only TLS 1.3 is supported. The accepted TLS options are:
+
+  * `certfile` / `keyfile`, `cert` / `key`, `certs_keys` and `password`: the
+    server certificate identity. One identity, `sni_hosts` or `sni_fun` is
+    required
+  * `sni_hosts` and `sni_fun`: per-server-name identities
+  * `alpn_preferred_protocols`: the ALPN protocols the server selects from
+  * `ciphers`: a subset of the TLS 1.3 cipher suites
+  * `versions`: only `[:"tlsv1.3"]`
+  * `verify: :verify_peer` with `cacerts` or `cacertfile`, `fail_if_no_peer_cert`
+    and `depth`: client certificate authentication (mTLS). The validated client
+    leaf is available through `Hell.Socket.peercert/1`. The default is
+    `verify: :verify_none`
+
+  Other OTP `:ssl` options (such as `verify_fun`, `honor_cipher_order` or TLS 1.2
+  `versions`) are rejected with `{:error, {:unsupported_option, key}}`. Every
+  remaining option is a `:gen_tcp` listen option, such as `ip`:
+
+  * `{1, 2, 3, 4}` for IPv4 addresses
+  * `{1, 2, 3, 4, 5, 6, 7, 8}` for IPv6 addresses
+  * `:loopback` for local loopback
+  * `:any` for all interfaces (ie: `0.0.0.0`)
+  * `{:local, "/path/to/socket"}` for a Unix domain socket. If this option is used, the `port`
+    option *must* be set to `0`.
 
   Unless overridden, this module uses the following default options:
 
@@ -38,11 +50,14 @@ defmodule Hell.Transports.SSL do
   mode: :binary,
   active: false
   ```
+
+  `upgrade/2,3` accepts the TLS options above plus `:inet.setopts/2` carrier
+  options; listen-only options such as `ip` or `backlog` are not valid there.
   """
 
-  @type options() :: [:ssl.tls_server_option()]
-  @type listener_socket() :: :ssl.sslsocket()
-  @type socket() :: :ssl.sslsocket()
+  @type options() :: keyword()
+  @type listener_socket() :: SSL.ListenSocket.t()
+  @type socket() :: SSL.Socket.t()
 
   @behaviour Hell.Transport
 
@@ -50,31 +65,14 @@ defmodule Hell.Transports.SSL do
   @sendfile_chunk_size 1024 * 1024
 
   @impl Hell.Transport
-  @spec listen(:inet.port_number(), [:ssl.tls_server_option()]) ::
-          Hell.Transport.on_listen()
+  @spec listen(:inet.port_number(), options()) :: Hell.Transport.on_listen()
   def listen(port, user_options) do
-    resolved_options = Hell.Transport.resolve_options(user_options)
-
-    if not Enum.any?(
-         [:certs_keys, :keyfile, :key, :sni_hosts, :sni_fun],
-         &:proplists.is_defined(&1, resolved_options)
-       ) do
-      raise "transport_options must include one of keyfile, key, sni_hosts or sni_fun"
-    end
-
-    if not Enum.any?(
-         [:certs_keys, :certfile, :cert, :sni_hosts, :sni_fun],
-         &:proplists.is_defined(&1, resolved_options)
-       ) do
-      raise "transport_options must include one of certfile, cert, sni_hosts or sni_fun"
-    end
-
-    :ssl.listen(port, resolved_options)
+    SSL.listen(port, Hell.Transport.resolve_options(user_options))
   end
 
   @impl Hell.Transport
   @spec accept(listener_socket()) :: Hell.Transport.on_accept()
-  defdelegate accept(listener_socket), to: :ssl, as: :transport_accept
+  def accept(listener_socket), do: SSL.transport_accept(listener_socket)
 
   @impl Hell.Transport
   @spec handshake(socket()) :: Hell.Transport.on_handshake()
@@ -83,21 +81,17 @@ defmodule Hell.Transports.SSL do
   @impl Hell.Transport
   @spec handshake(socket(), timeout()) :: Hell.Transport.on_handshake()
   def handshake(socket, timeout) do
-    case :ssl.handshake(socket, timeout) do
-      {:ok, socket} -> {:ok, socket}
-      {:ok, socket, _protocol_extensions} -> {:ok, socket}
-      other -> other
-    end
+    SSL.handshake(socket, timeout)
   end
 
   @impl Hell.Transport
-  @spec upgrade(socket(), options()) :: Hell.Transport.on_upgrade()
+  @spec upgrade(:inet.socket(), options()) :: Hell.Transport.on_upgrade()
   def upgrade(socket, opts), do: upgrade(socket, opts, :infinity)
 
   @impl Hell.Transport
-  @spec upgrade(socket(), options(), timeout()) :: Hell.Transport.on_upgrade()
+  @spec upgrade(:inet.socket(), options(), timeout()) :: Hell.Transport.on_upgrade()
   def upgrade(socket, opts, timeout) do
-    case :ssl.handshake(socket, opts, timeout) do
+    case SSL.handshake(socket, opts, timeout) do
       {:ok, socket, _protocol_extensions} -> {:ok, socket}
       other -> other
     end
@@ -105,15 +99,15 @@ defmodule Hell.Transports.SSL do
 
   @impl Hell.Transport
   @spec controlling_process(socket(), pid()) :: Hell.Transport.on_controlling_process()
-  defdelegate controlling_process(socket, pid), to: :ssl
+  defdelegate controlling_process(socket, pid), to: SSL
 
   @impl Hell.Transport
   @spec recv(socket(), non_neg_integer(), timeout()) :: Hell.Transport.on_recv()
-  defdelegate recv(socket, length, timeout), to: :ssl
+  defdelegate recv(socket, length, timeout), to: SSL
 
   @impl Hell.Transport
   @spec send(socket(), iodata()) :: Hell.Transport.on_send()
-  defdelegate send(socket, data), to: :ssl
+  defdelegate send(socket, data), to: SSL
 
   @impl Hell.Transport
   @spec sendfile(
@@ -123,7 +117,7 @@ defmodule Hell.Transports.SSL do
           length :: non_neg_integer()
         ) :: Hell.Transport.on_sendfile()
   def sendfile(socket, filename, offset, length) do
-    # We can't use :file.sendfile here since it works on clear sockets, not ssl sockets.
+    # We can't use :file.sendfile here since it works on clear sockets, not TLS sockets.
     # Build our own version with chunking for large files.
     case :file.open(filename, [:read, :raw, :binary]) do
       {:ok, fd} ->
@@ -145,7 +139,7 @@ defmodule Hell.Transports.SSL do
   defp sendfile_loop(socket, fd, offset, length, sent) do
     with read_size <- chunk_size(length, sent, @sendfile_chunk_size),
          {:ok, data} <- :file.pread(fd, offset, read_size),
-         :ok <- :ssl.send(socket, data) do
+         :ok <- SSL.send(socket, data) do
       now_sent = byte_size(data)
       sendfile_loop(socket, fd, offset + now_sent, length, sent + now_sent)
     else
@@ -163,39 +157,33 @@ defmodule Hell.Transports.SSL do
   @impl Hell.Transport
   @spec getopts(socket(), Hell.Transport.socket_get_options()) ::
           Hell.Transport.on_getopts()
-  defdelegate getopts(socket, options), to: :ssl
+  defdelegate getopts(socket, options), to: SSL
 
   @impl Hell.Transport
   @spec setopts(socket(), Hell.Transport.socket_set_options()) ::
           Hell.Transport.on_setopts()
-  defdelegate setopts(socket, options), to: :ssl
+  defdelegate setopts(socket, options), to: SSL
 
   @impl Hell.Transport
   @spec shutdown(socket(), Hell.Transport.way()) ::
           Hell.Transport.on_shutdown()
-  defdelegate shutdown(socket, way), to: :ssl
+  defdelegate shutdown(socket, way), to: SSL
 
   @impl Hell.Transport
   @spec close(socket() | listener_socket()) :: Hell.Transport.on_close()
-  defdelegate close(socket), to: :ssl
-
-  # :ssl.sockname/1's typespec is incorrect
-  @dialyzer {:no_match, sockname: 1}
+  defdelegate close(socket), to: SSL
 
   @impl Hell.Transport
   @spec sockname(socket() | listener_socket()) :: Hell.Transport.on_sockname()
-  defdelegate sockname(socket), to: :ssl
-
-  # :ssl.peername/1's typespec is incorrect
-  @dialyzer {:no_match, peername: 1}
+  defdelegate sockname(socket), to: SSL
 
   @impl Hell.Transport
   @spec peername(socket()) :: Hell.Transport.on_peername()
-  defdelegate peername(socket), to: :ssl
+  defdelegate peername(socket), to: SSL
 
   @impl Hell.Transport
   @spec peercert(socket()) :: Hell.Transport.on_peercert()
-  defdelegate peercert(socket), to: :ssl
+  defdelegate peercert(socket), to: SSL
 
   @impl Hell.Transport
   @spec secure?() :: true
@@ -203,13 +191,13 @@ defmodule Hell.Transports.SSL do
 
   @impl Hell.Transport
   @spec getstat(socket()) :: Hell.Transport.socket_stats()
-  defdelegate getstat(socket), to: :ssl
+  defdelegate getstat(socket), to: SSL
 
   @impl Hell.Transport
   @spec negotiated_protocol(socket()) :: Hell.Transport.on_negotiated_protocol()
-  defdelegate negotiated_protocol(socket), to: :ssl
+  defdelegate negotiated_protocol(socket), to: SSL
 
   @impl Hell.Transport
   @spec connection_information(socket()) :: Hell.Transport.on_connection_information()
-  defdelegate connection_information(socket), to: :ssl
+  defdelegate connection_information(socket), to: SSL
 end

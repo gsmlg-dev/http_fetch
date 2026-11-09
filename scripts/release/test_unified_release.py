@@ -105,7 +105,7 @@ class UnifiedReleaseTests(unittest.TestCase):
                     redirect_stdout(io.StringIO()):
                 server_consumer_gate.run(archives, published=True)
                 self.assertEqual([call.args[0] for call in status.call_args_list],
-                                 ["abyss", "hell", "elixir_quic", "ex_ssl"])
+                                 ["abyss", "hell", "ex_ssl", "elixir_quic"])
                 self.assertEqual([call.args[1] for call in project.call_args_list], ["abyss", "hell", "quic"])
                 environment = project.call_args.args[3]
                 self.assertNotIn("HEX_MIRROR", environment)

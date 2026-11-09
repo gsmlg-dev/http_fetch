@@ -128,6 +128,25 @@ class ServerConsumerGateTests(unittest.TestCase):
             telemetry.assert_called_once_with(public / "tarballs")
             self.assertIn("--name=hexpm", command.call_args_list[-1].args[0])
 
+    def test_hell_consumer_closure_includes_its_ex_ssl_transport(self):
+        versions = {"hell": "1.0.0-rc.6", "ex_ssl": "1.0.0-rc.6"}
+        with patch.object(gate, "locked_package", return_value=("1.2.3", "0" * 64)):
+            source = gate.provenance("hell", versions)
+        self.assertIn('hell: "1.0.0-rc.6", telemetry: "1.2.3", ex_ssl: "1.0.0-rc.6"', source)
+        self.assertIn("[Hell, Hell.Transports.SSL, SSL]", source)
+        self.assertIn("[Abyss, HTTP, Quic, Rustler, AbyssDhcpSocket.Native]", source)
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(gate, "source_versions", return_value=versions) as source_versions, \
+                patch.object(gate, "prepare_mix_toolchain"), \
+                patch.object(gate, "setup_registry", return_value=Path(temporary)) as registry, \
+                patch.object(gate, "local_registry"), \
+                patch.object(gate, "command"), \
+                patch.object(gate, "verify_project"), \
+                patch.object(gate.tempfile, "mkdtemp", return_value=temporary):
+            gate.run(temporary, "hell", keep=True)
+        source_versions.assert_called_once_with(("hell", "ex_ssl"))
+        self.assertEqual(registry.call_args.args[1], ("hell", "ex_ssl"))
+
     def test_registry_fails_closed_for_missing_requested_candidate(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

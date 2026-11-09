@@ -109,7 +109,8 @@ defmodule Hell.TransportOptionsTest do
   defp transports do
     [
       {Hell.Transports.TCP, :gen_tcp, []},
-      {Hell.Transports.SSL, :ssl, [certfile: @certfile, keyfile: @keyfile]}
+      # ex_ssl validates TLS options, then opens its carrier with :gen_tcp.listen/2.
+      {Hell.Transports.SSL, :gen_tcp, [certfile: @certfile, keyfile: @keyfile]}
     ]
   end
 

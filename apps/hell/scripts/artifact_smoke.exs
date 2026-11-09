@@ -1,5 +1,8 @@
 ExUnit.start()
 
+# OTP :ssl is only the test client peer; the server transport runs on ex_ssl.
+{:ok, _} = Application.ensure_all_started(:ssl)
+
 # Execute the existing timer and lifecycle regressions against the unpacked package.
 for file <- ~w(read_timeout_transition_test.exs lifecycle_regression_test.exs) do
   Code.require_file(Path.join([System.fetch_env!("HELL_TEST_DIR"), "hell", file]))
@@ -30,11 +33,12 @@ defmodule HellArtifactSmokeTest do
 
     assert Code.ensure_loaded?(Hell.Transports.TCP)
     assert Code.ensure_loaded?(Hell.Transports.SSL)
+    assert Code.ensure_loaded?(SSL)
 
     assert Enum.sort(Application.spec(:hell, :applications)) ==
-             Enum.sort([:kernel, :stdlib, :elixir, :logger, :ssl, :telemetry])
+             Enum.sort([:kernel, :stdlib, :elixir, :logger, :ex_ssl, :telemetry])
 
-    for module <- [HTTP, Abyss, Quic, SSL, Rustler] do
+    for module <- [HTTP, Abyss, Quic, Rustler] do
       refute Code.ensure_loaded?(module)
     end
   end

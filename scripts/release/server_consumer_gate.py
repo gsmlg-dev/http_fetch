@@ -126,9 +126,11 @@ def provenance(package, versions):
         expected["telemetry_metrics"] = locked_package("telemetry_metrics")[0]
     if package == "quic":
         expected.update({name: versions[name] for name in ("elixir_quic", "ex_ssl")})
+    if package == "hell":
+        expected["ex_ssl"] = versions["ex_ssl"]
     entries = ", ".join(f'{name}: "{version}"' for name, version in expected.items())
-    modules = "[Abyss, Telemetry.Metrics]" if package == "abyss" else "[Hell, Hell.Transports.SSL]"
-    forbidden = "[Hell, HTTP, Quic, SSL, Rustler, AbyssDhcpSocket.Native]" if package == "abyss" else "[Abyss, HTTP, Quic, SSL, Rustler, AbyssDhcpSocket.Native]"
+    modules = "[Abyss, Telemetry.Metrics]" if package == "abyss" else "[Hell, Hell.Transports.SSL, SSL]"
+    forbidden = "[Hell, HTTP, Quic, SSL, Rustler, AbyssDhcpSocket.Native]" if package == "abyss" else "[Abyss, HTTP, Quic, Rustler, AbyssDhcpSocket.Native]"
     if package == "quic":
         modules = "[Abyss, Quic, SSL.QUIC]"
         forbidden = "[Hell, HTTP, Rustler, AbyssDhcpSocket.Native, QUIC]"
@@ -227,8 +229,9 @@ def verify_project(directory, package, versions, env):
 def run(archive_dir, mode="all", keep=False, *, published=False):
     consumers = {"all": ("abyss", "hell", "quic"), "udp": ("abyss",),
                  "hell": ("hell",), "quic": ("quic",)}[mode]
-    packages = tuple(dict.fromkeys(name for consumer in consumers for name in
-                     (("abyss", "elixir_quic", "ex_ssl") if consumer == "quic" else (consumer,))))
+    closures = {"quic": ("abyss", "elixir_quic", "ex_ssl"), "hell": ("hell", "ex_ssl")}
+    packages = tuple(dict.fromkeys(name for consumer in consumers
+                                   for name in closures.get(consumer, (consumer,))))
     directory = Path(tempfile.mkdtemp(prefix="http-fetch-server-hex-"))
     env = isolated_environment(directory)
     versions = source_versions(packages)

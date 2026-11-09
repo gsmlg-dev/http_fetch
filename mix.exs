@@ -70,7 +70,7 @@ defmodule HttpFetch.Umbrella.MixProject do
         [:abyss]
 
       "hell" ->
-        [:hell]
+        [:ex_ssl, :hell]
 
       "elixir_quic" ->
         [:ex_ssl, :elixir_quic]

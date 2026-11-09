@@ -55,7 +55,7 @@ defmodule Hell.Socket do
   This is normally called internally by `Hell.Handler` and does not need to be
   called by implementations which are based on `Hell.Handler`
   """
-  @spec handshake(t()) :: Hell.Transport.on_handshake()
+  @spec handshake(t()) :: {:ok, t()} | {:error, Hell.Transport.on_handshake_ssl_error()}
   def handshake(%__MODULE__{} = socket) do
     case do_handshake(socket) do
       {:ok, inner_socket} ->
@@ -88,7 +88,7 @@ defmodule Hell.Socket do
   This is normally called internally by `Hell.Handler` and does not need to be
   called by implementations which are based on `Hell.Handler`
   """
-  @spec upgrade(t(), module(), term()) :: Hell.Transport.on_upgrade()
+  @spec upgrade(t(), module(), term()) :: {:ok, t()} | {:error, term()}
   def upgrade(%__MODULE__{} = socket, module, opts) when is_atom(module) do
     result =
       if Code.ensure_loaded?(module) and function_exported?(module, :upgrade, 3) do
