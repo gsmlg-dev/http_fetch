@@ -3054,13 +3054,16 @@ defmodule NoOTP.ReleaseAuditTest do
     end)
 
     requests = [
-      {module, [{{:deliver, 3}, 2, [{:tuple, :informational, 3}, {:tuple, :trailers, 2}]}],
-       [{{:deliver, 3}, 2, {:notify, 3}, 2, :discover}]}
+      {module,
+       [
+         {{:deliver, 3}, 2,
+          [{:tuple, :wt, 2}, {:tuple, :informational, 3}, {:tuple, :trailers, 2}]}
+       ], [{{:deliver, 3}, 2, {:notify, 3}, 2, :discover}]}
     ]
 
     result = s_install(context, module, bytes, requests)
     assert result.record.status == "checked"
-    assert length(result.record.callers) == 2
+    assert length(result.record.callers) == 3
     assert [observation] = result.record.observations
     assert observation.site.owner == %{function: "deliver", arity: 3}
     assert Enum.all?(result.record.callers, &(&1.site.owner.function == "dispatch_event"))
@@ -3928,7 +3931,7 @@ defmodule NoOTP.ReleaseAuditTest do
     result = v_actual_slice(context, true)
 
     assert Enum.map(result.unresolved_dispatch, &{&1.line, &1.kind}) ==
-             [{604, "unresolved_module_dispatch"}]
+             [{631, "unresolved_module_dispatch"}]
   end
 
   defp v_body do
@@ -4198,7 +4201,7 @@ defmodule NoOTP.ReleaseAuditTest do
     result = w_actual_slice(context, :original)
 
     assert Enum.map(result.unconfigured.unresolved_dispatch, &{&1.line, &1.kind}) ==
-             [{635, "unresolved_module_dispatch"}]
+             [{662, "unresolved_module_dispatch"}]
 
     assert result.configured.unresolved_dispatch == []
     assert result.configured.parameter_invariant_derivation.status == "checked"
@@ -5232,7 +5235,7 @@ defmodule NoOTP.ReleaseAuditTest do
     assert length(before.unresolved_dispatch) == 18
     assert length(after_result.unresolved_dispatch) == 12
     removed = before.unresolved_dispatch -- after_result.unresolved_dispatch
-    assert Enum.sort(Enum.map(removed, & &1.line)) == [424, 445, 453, 620, 714, 900]
+    assert Enum.sort(Enum.map(removed, & &1.line)) == [578, 599, 607, 774, 868, 1054]
     assert Enum.all?(removed, &(&1.kind == "unresolved_module_dispatch"))
     assert after_result.parameter_invariant_derivation.status == "checked"
     assert length(after_result.parameter_invariant_derivation.checked_slots) == 9
@@ -5352,11 +5355,12 @@ defmodule NoOTP.ReleaseAuditTest do
       |> String.replace("HTTP.SocketClient", "NoOTPActualForwardedSocketClient")
       |> String.replace("alias HTTP.Runtime.Dialer", "alias NoOTPActualTaggedDialer, as: Dialer")
       |> String.replace("alias HTTP.Request", "alias NoOTPActualTaggedRequest, as: Request")
+      |> String.replace("alias HTTP.Response", "alias NoOTPActualTaggedResponse, as: Response")
 
     original_source = source
     source = z_mutation_source(source, mutation)
 
-    struct_sources = Enum.take(dependencies, 3)
+    struct_sources = Enum.take(dependencies, 4)
     entries = z_compile_sources(dependencies, context.z_source_bytes, struct_sources)
 
     [{module, original_bytes}] =
@@ -5747,6 +5751,13 @@ defmodule NoOTP.ReleaseAuditTest do
       |> String.replace("HTTP.Headers", "NoOTPActualTaggedHeaders")
       |> String.replace("HTTP.FormData", "NoOTPActualTaggedFormData")
 
+    # SocketClient pattern-matches %Response{}, so its struct must be compiled
+    # before the forwarded SocketClient source.
+    response =
+      File.read!(Path.join(root, "apps/http_fetch/lib/http/response.ex"))
+      |> String.replace("HTTP.Response", "NoOTPActualTaggedResponse")
+      |> String.replace("HTTP.Headers", "NoOTPActualTaggedHeaders")
+
     backend =
       File.read!(Path.join(root, "apps/http_core/lib/http/tls_backend.ex"))
       |> String.replace("HTTP.TLSBackend", "NoOTPActualTaggedBackend")
@@ -5786,7 +5797,7 @@ defmodule NoOTP.ReleaseAuditTest do
           ),
         else: dialer
 
-    [headers, form_data, request, backend, proxy, dialer]
+    [headers, form_data, request, response, backend, proxy, dialer]
   end
 
   test "F01 partial map seeds and recursive field identity never discharge ordinary findings",

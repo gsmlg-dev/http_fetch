@@ -23,7 +23,8 @@ defmodule AppClosuresTest do
       ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_web_socket)a,
     "http_event_source" =>
       ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_event_source)a,
-    "http_web_transport" => ~w(ex_ssl elixir_quic http_core http_web_transport)a
+    "http_web_transport" =>
+      ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_web_transport)a
   }
 
   setup do

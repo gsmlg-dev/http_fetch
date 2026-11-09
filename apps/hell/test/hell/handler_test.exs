@@ -988,22 +988,28 @@ defmodule Hell.HandlerTest do
     # the timeout is always measured from the *last* client message, not the first.
     #
     test "timer resets from the last client message, not the first" do
-      read_timeout = 100
+      read_timeout = 400
+      gap = div(read_timeout, 8)
       {:ok, port} = start_handler(EchoWithTimeout, read_timeout: read_timeout)
 
       messages =
         capture_log(fn ->
           {:ok, client} = :gen_tcp.connect(:localhost, port, active: false)
 
-          # Send several pings spread over 3x the timeout window — if the timer
-          # were not resetting, we'd be closed long before the last ping
+          # The echo is written by handle_data just before the handler records
+          # its new read deadline, so each gap is measured from that event
+          # rather than from a shared schedule. Every gap stays well inside the
+          # timeout while the pings together outlast it; if the timer were not
+          # resetting, we'd be closed long before the last ping.
           started_at = System.monotonic_time(:millisecond)
 
-          for index <- 1..4 do
+          for index <- 1..10 do
+            if index > 1, do: Process.sleep(gap)
             :gen_tcp.send(client, "ping")
             assert :gen_tcp.recv(client, 4) == {:ok, ~c"ping"}
-            wait_until(started_at + index * 80)
           end
+
+          assert System.monotonic_time(:millisecond) - started_at > read_timeout
 
           # Now stop sending; the timeout should fire from the last ping
           assert :gen_tcp.recv(client, 0, read_timeout * 3) == {:error, :closed}
