@@ -381,9 +381,9 @@ defmodule Abyss.QUIC.Service do
   end
 
   defp validate_option_keys(opts, defaults) do
-    if Keyword.keys(opts) -- (Keyword.keys(defaults) ++ [:_backend, :handler, :alpn, :name]) == [],
-       do: :ok,
-       else: {:error, :unknown_option}
+    allowed = Keyword.keys(defaults) ++ [:_backend, :handler, :alpn, :name]
+
+    if Keyword.keys(opts) -- allowed == [], do: :ok, else: {:error, :unknown_option}
   end
 
   defp valid_engine_options?(options) do

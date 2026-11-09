@@ -639,7 +639,8 @@ defmodule SSL.ServerConnection do
            ServerHandshake.flight(core, data.config, pair, :crypto.strong_rand_bytes(32)),
          {:ok, handshake_write} <-
            KeySchedule.traffic_state(spec.name, core.secrets.server_handshake_secret),
-         {:ok, read} <- KeySchedule.traffic_state(spec.name, core.secrets.client_handshake_secret),
+         {:ok, read} <-
+           KeySchedule.traffic_state(spec.name, core.secrets.client_handshake_secret),
          {:ok, write} <- KeySchedule.traffic_state(spec.name, core.application_secrets.server),
          {:ok, flight} <- protect(handshake_write, :handshake, IO.iodata_to_binary(messages)),
          :ok <- transmit(data, [plaintext(hello), compat_ccs(core, data), flight]) do
