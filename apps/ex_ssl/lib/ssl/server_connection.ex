@@ -217,6 +217,13 @@ defmodule SSL.ServerConnection do
       when name in [:connected, :closing],
       do: connected_call(from, request, name, data)
 
+  # As with OTP :ssl, carrier addresses are available before the handshake.
+  def handle_event({:call, from}, {_ref, :peername}, _name, %{tcp: tcp}) when not is_nil(tcp),
+    do: reply(from, :inet.peername(tcp))
+
+  def handle_event({:call, from}, {_ref, :sockname}, _name, %{tcp: tcp}) when not is_nil(tcp),
+    do: reply(from, :inet.sockname(tcp))
+
   def handle_event({:call, from}, _request, _name, _data), do: reply(from, {:error, :closed})
 
   def handle_event(:info, {:tcp, tcp, bytes}, name, %{tcp: tcp} = data) do

@@ -92,10 +92,15 @@ defmodule SSL.ServerOptions do
     :key_update_at
   ]
 
-  @spec build(keyword()) :: {:ok, t()} | {:error, term()}
+  @tls_keys @own_keys ++ [:session_tickets, :reuse_sessions]
+  # Bare `:gen_tcp` address-family atoms, passed to the carrier in order.
+  @carrier_atoms [:inet, :inet6, :local]
+
+  @spec build([atom() | {atom(), term()}]) :: {:ok, t()} | {:error, term()}
   def build(options) when is_list(options) do
     # The carrier is always passive binary; a bare `:binary` is redundant.
-    options = Enum.reject(options, &(&1 == :binary))
+    carrier = Enum.reject(options, &(&1 == :binary))
+    options = Enum.reject(carrier, &(&1 in @carrier_atoms))
 
     with :ok <- check_shape(options),
          :ok <- reject_unsupported(options),
@@ -121,12 +126,15 @@ defmodule SSL.ServerOptions do
          transport_parameters: nil,
          sni: sni,
          client_auth: client_auth,
-         tcp: Keyword.drop(options, @own_keys ++ [:session_tickets, :reuse_sessions])
+         tcp: carrier_options(carrier)
        }}
     end
   end
 
   def build(_), do: {:error, {:invalid_option, :options}}
+
+  defp carrier_options(options),
+    do: Enum.reject(options, &match?({key, _} when key in @tls_keys, &1))
 
   @doc """
   Selects the identity for a ClientHello `server_name` (`nil` when absent).

@@ -62,6 +62,17 @@ defmodule SSL.ServerAPITest do
     assert SSL.transport_accept(listen, 100) == {:error, :closed}
   end
 
+  test "peername and sockname answer from the carrier before the handshake" do
+    {listen, port} = listen([])
+    {:ok, raw} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
+    {:ok, {_, client_port}} = :inet.sockname(raw)
+    assert {:ok, %SSL.Socket{} = s} = SSL.transport_accept(listen, 5000)
+    assert SSL.peername(s) == {:ok, {{127, 0, 0, 1}, client_port}}
+    assert SSL.sockname(s) == {:ok, {{127, 0, 0, 1}, port}}
+    assert :ok = SSL.close(s)
+    :gen_tcp.close(raw)
+  end
+
   test "handshake timeout" do
     {listen, port} = listen([])
     {:ok, raw} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])

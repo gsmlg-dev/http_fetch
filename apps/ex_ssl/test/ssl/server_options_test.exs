@@ -19,6 +19,15 @@ defmodule SSL.ServerOptionsTest do
     assert Enum.all?(o.signature_algorithms, &(&1 in o.identity.signature_schemes))
   end
 
+  test "bare address families pass to the carrier in order" do
+    assert {:ok, %{tcp: [:inet6]}} = ServerOptions.build(base() ++ [:inet6])
+
+    assert {:ok, %{tcp: [:inet, {:backlog, 5}, :local]}} =
+             ServerOptions.build([:binary, :inet] ++ base() ++ [{:backlog, 5}, :local])
+
+    assert {:error, {:unsupported_option, :mode}} = ServerOptions.build(base() ++ [:list])
+  end
+
   test "alpn, ciphers and certs_keys" do
     assert {:ok, %{alpn: ["h2", "http/1.1"]}} =
              ServerOptions.build(base() ++ [alpn_preferred_protocols: ["h2", "http/1.1"]])
