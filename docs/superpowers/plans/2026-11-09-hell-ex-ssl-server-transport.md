@@ -74,7 +74,7 @@ This plan reverses that decision.
 2. **TLS 1.2-only client, or a client mid-handshake disconnect.** The server sends
    a fatal `protocol_version` alert or sees `:closed`. Handshake returns
    `{:error, _}`, the connection process exits, the carrier closes, and the Hell
-   listener keeps accepting. Pinned in Tasks 2 and 5.
+   listener keeps accepting. Pinned in Tasks 2 and 6.
 3. **Handshake timeout.** `SSL.handshake(sock, 100)` against a silent client returns
    `{:error, :timeout}` within the deadline and leaks no process. Pinned in Task 3.
 4. **Ownership transfer.** After `controlling_process/2` from the acceptor to the
@@ -82,7 +82,7 @@ This plan reverses that decision.
    socket. Pinned in Task 3.
 5. **TCP option passthrough and sendfile.** Carrier options such as `send_timeout`
    are readable through `getopts/2`. `sendfile/4` over 1 MiB chunks delivers
-   exact bytes. Pinned in Task 5 (existing Hell tests
+   exact bytes. Pinned in Task 6 (existing Hell tests
    `server_test.exs:540` and the sendfile tests).
 
 ---
