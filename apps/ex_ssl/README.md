@@ -175,8 +175,9 @@ The active message contract targets OTP forms:
 
 ## Protocol scope
 
-The TCP protocol target is a **TLS client**, using RFC 9846 as the normative
-TLS 1.3 specification. The separate `SSL.QUIC` engine also implements the
+The primary TCP protocol target is a **TLS client**, using RFC 9846 as the normative
+TLS 1.3 specification. A bounded TCP TLS 1.3 server is described in
+[TCP TLS 1.3 server](#tcp-tls-13-server). The separate `SSL.QUIC` engine also implements the
 record-free TLS 1.3 server role; its acceptance status is documented separately.
 
 Initial target features:
@@ -221,6 +222,44 @@ certificates and explicit bounded TLS 1.2 are implemented in version 0.4.
 The current migration candidate also supports TLS1.2 RSA-PKCS1 SHA256/384/512
 server and client handshake signatures. These schemes remain excluded from
 TLS1.3 CertificateVerify and QUIC.
+
+## TCP TLS 1.3 server
+
+`SSL.listen/2`, `SSL.transport_accept/2`, `SSL.handshake/2` and the server
+upgrade `SSL.handshake(tcp, options, timeout)` (returning `{:ok, socket, []}`)
+provide an OTP-shaped TCP TLS server. Accepted sockets use the ordinary
+`SSL.send/recv/setopts/controlling_process/close` calls, plus server-socket
+`SSL.getopts/2`, `SSL.getstat/1,2` and `SSL.shutdown/2`. Client sockets return
+`{:error, :enotsup}` for those server-only calls. `close/1`, `sockname/1` and
+`controlling_process/2` also accept an `SSL.ListenSocket`.
+
+```elixir
+{:ok, listen} = SSL.listen(4443, certfile: "cert.pem", keyfile: "key.pem")
+{:ok, socket} = SSL.transport_accept(listen)
+{:ok, socket} = SSL.handshake(socket, 5_000)
+```
+
+Scope:
+
+- TLS 1.3 only. `versions` other than `[:"tlsv1.3"]` return
+  `{:error, {:unsupported_option, :versions}}`; there is no TLS 1.2 server.
+- Supported TLS options: `certfile`/`keyfile`, `cert`/`key`, `certs_keys`,
+  `password`, `alpn_preferred_protocols`, `ciphers` (TLS 1.3 suites) and
+  `verify: :verify_none`. Every other option is a `:gen_tcp` option;
+  `:binary` and `active: false` are enforced on the carrier, and OTP
+  `:ssl`-only options are errors. Options are validated before the port opens.
+- `verify: :verify_peer` (client-certificate authentication) and
+  `sni_hosts`/`sni_fun` currently return `{:error, {:unsupported_option, key}}`.
+- No session tickets or resumption: the server sends no NewSessionTicket, and a
+  client offering a PSK gets a full handshake. 0-RTT is not accepted.
+- Server carriers default to `send_timeout: 30_000, send_timeout_close: true`
+  unless the caller sets either key, because server writes are synchronous
+  carrier sends. This differs from OTP's infinite default.
+- A handshake timeout, a TLS failure or a peer TCP close returns `{:error, _}`,
+  and the connection process stops and closes its carrier.
+
+SNI identity selection and server-side client-certificate authentication are
+being added to this server; until then their options are rejected, never ignored.
 
 ## Architecture
 

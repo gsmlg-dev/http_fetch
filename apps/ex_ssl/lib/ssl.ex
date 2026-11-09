@@ -1,6 +1,6 @@
 defmodule SSL do
   @moduledoc """
-  OTP `:ssl`-compatible client facade for the implemented `ex_ssl` feature subset.
+  OTP `:ssl`-compatible client and TLS 1.3 server facade for the implemented `ex_ssl` feature subset.
 
   This experimental client supports TLS 1.3 and explicit bounded TLS 1.2, binary raw sockets, passive and
   active-once delivery, application ownership transfer, authenticated ALPN,
@@ -15,6 +15,10 @@ defmodule SSL do
   separate IP/DNS identity independently of SNI and the TCP destination. Once
   upgrade is attempted, an owned socket is closed on failure; plaintext must
   never resume. A socket belonging to another process is left untouched.
+
+  The TCP server API (`listen/2`, `transport_accept/2`, `handshake/2`, `handshake/3`) is
+  TLS 1.3 only and issues no session tickets. Server carriers default to
+  `send_timeout: 30_000, send_timeout_close: true` unless the caller sets either key.
   """
   import Kernel, except: [send: 2]
 
@@ -23,10 +27,17 @@ defmodule SSL do
     Connection,
     IodataCursor,
     Lifecycle.Driver,
+    ListenSocket,
     Options,
     PreparedUpgrade,
+    ServerConnection,
+    ServerOptions,
     Socket
   }
+
+  # Server SNI and client-certificate authentication are not wired into
+  # SSL.ServerConnection yet, so these options are rejected rather than ignored.
+  @unwired_server_options [:sni_hosts, :sni_fun]
 
   @spec connect(:gen_tcp.socket() | Socket.t(), list()) :: {:ok, Socket.t()} | {:error, term()}
   def connect(tcp_socket, options), do: connect(tcp_socket, options, :infinity)
@@ -201,8 +212,15 @@ defmodule SSL do
          do: call(socket, {:setopts, normalized})
   end
 
-  @doc "Transfers application ownership while the TLS process retains the TCP socket."
-  @spec controlling_process(Socket.t(), pid()) :: :ok | {:error, term()}
+  @doc """
+  Transfers application ownership while the TLS process retains the TCP socket.
+
+  For a listen socket, transfers ownership of the listening TCP port.
+  """
+  @spec controlling_process(Socket.t() | ListenSocket.t(), pid()) :: :ok | {:error, term()}
+  def controlling_process(%ListenSocket{} = listen, owner) when is_pid(owner),
+    do: :gen_tcp.controlling_process(ListenSocket.carrier(listen), owner)
+
   def controlling_process(socket, owner) when is_pid(owner),
     do: call(socket, {:controlling_process, owner})
 
@@ -240,8 +258,9 @@ defmodule SSL do
   def peername(socket), do: call(socket, :peername)
 
   @doc "Returns the live local TCP address and port."
-  @spec sockname(Socket.t()) ::
+  @spec sockname(Socket.t() | ListenSocket.t()) ::
           {:ok, {:inet.ip_address(), :inet.port_number()}} | {:error, term()}
+  def sockname(%ListenSocket{} = listen), do: :inet.sockname(ListenSocket.carrier(listen))
   def sockname(socket), do: call(socket, :sockname)
 
   @doc "Receives available bytes for length 0, or exactly length bytes. Timeout retains buffered data."
@@ -254,8 +273,10 @@ defmodule SSL do
 
   def recv(_, _, _), do: {:error, :badarg}
 
-  @doc "Closes the connection. Closing an already closed handle succeeds."
-  @spec close(Socket.t()) :: :ok | {:error, term()}
+  @doc "Closes the connection or listen socket. Closing an already closed handle succeeds."
+  @spec close(Socket.t() | ListenSocket.t()) :: :ok | {:error, term()}
+  def close(%ListenSocket{} = listen), do: :gen_tcp.close(ListenSocket.carrier(listen))
+
   def close(%Socket{} = socket) do
     case call(socket, :close) do
       {:error, :closed} -> :ok
@@ -265,6 +286,120 @@ defmodule SSL do
   end
 
   def close(_), do: {:error, :badarg}
+
+  @doc """
+  Opens a TLS 1.3 server listen socket.
+
+  Options are validated before the port is opened. TLS options are the
+  certificate identity (`certfile`/`keyfile`, `cert`/`key`, `certs_keys`,
+  `password`), `alpn_preferred_protocols`, `ciphers`, `versions: [:"tlsv1.3"]`
+  and `verify: :verify_none`. OTP `:ssl`-only options are errors; every other
+  option is a `:gen_tcp` listen option. `:binary` and `active: false` are enforced.
+  """
+  @spec listen(:inet.port_number(), keyword()) :: {:ok, ListenSocket.t()} | {:error, term()}
+  def listen(port, options) when is_integer(port) and port in 0..65_535 do
+    with {:ok, config} <- server_options(options),
+         {:ok, _} <- Application.ensure_all_started(:ex_ssl),
+         {:ok, carrier} <-
+           :gen_tcp.listen(port, server_carrier(config.tcp) ++ [:binary, active: false]) do
+      {:ok, ListenSocket.new(carrier, config)}
+    end
+  end
+
+  def listen(_, _), do: {:error, :badarg}
+
+  @doc "Accepts a TCP connection and starts its TLS server process without handshaking."
+  @spec transport_accept(ListenSocket.t(), timeout()) :: {:ok, Socket.t()} | {:error, term()}
+  def transport_accept(listen, timeout \\ :infinity)
+
+  def transport_accept(%ListenSocket{} = listen, timeout) do
+    with {:ok, _deadline} <- Options.deadline(timeout),
+         {:ok, tcp} <- :gen_tcp.accept(ListenSocket.carrier(listen), timeout) do
+      close_on_error(ServerConnection.start(tcp, ListenSocket.options(listen), self()), tcp)
+    end
+  end
+
+  def transport_accept(_, _), do: {:error, :badarg}
+
+  @doc """
+  Runs the TLS 1.3 server handshake on a socket from `transport_accept/2`.
+
+  On failure or timeout the connection process stops and its carrier closes.
+  """
+  @spec handshake(Socket.t(), timeout()) :: {:ok, Socket.t()} | {:error, term()}
+  def handshake(socket, timeout), do: ServerConnection.handshake(socket, timeout)
+
+  @doc """
+  Upgrades an owned `:gen_tcp` socket to a TLS 1.3 server connection.
+
+  Options are those of `listen/2`; carrier options are applied with
+  `:inet.setopts/2`. An option error leaves the socket open and owned by the
+  caller. Once the connection process takes the socket, a failed handshake closes it.
+  """
+  @spec handshake(:gen_tcp.socket(), keyword(), timeout()) ::
+          {:ok, Socket.t(), []} | {:error, term()}
+  def handshake(tcp, options, timeout) when is_port(tcp) do
+    with {:ok, deadline} <- Options.deadline(timeout),
+         {:ok, config} <- server_options(options),
+         :ok <- owned_socket(tcp),
+         :ok <- :inet.setopts(tcp, server_carrier(config.tcp)),
+         {:ok, socket} <- ServerConnection.start(tcp, config, self()),
+         {:ok, socket} <- ServerConnection.handshake(socket, Options.remaining(deadline)) do
+      {:ok, socket, []}
+    end
+  end
+
+  def handshake(_, _, _), do: {:error, :badarg}
+
+  @doc "Reads carrier socket options of a server connection. `:active` is the TLS delivery mode."
+  @spec getopts(Socket.t(), [atom()]) :: {:ok, keyword()} | {:error, term()}
+  def getopts(socket, keys) when is_list(keys) do
+    if Enum.all?(keys, &is_atom/1), do: call(socket, {:getopts, keys}), else: {:error, :badarg}
+  end
+
+  def getopts(_, _), do: {:error, :badarg}
+
+  @doc "Returns all carrier `:inet.getstat/1` counters of a server connection."
+  @spec getstat(Socket.t()) :: {:ok, keyword()} | {:error, term()}
+  def getstat(socket), do: call(socket, {:getstat, :all})
+
+  @doc "Returns the requested carrier `:inet.getstat/2` counters of a server connection."
+  @spec getstat(Socket.t(), [atom()]) :: {:ok, keyword()} | {:error, term()}
+  def getstat(socket, keys) when is_list(keys), do: call(socket, {:getstat, keys})
+  def getstat(_, _), do: {:error, :badarg}
+
+  @doc """
+  Shuts down one or both directions of a server connection.
+
+  Write shutdown sends close_notify before the TCP shutdown; reads continue.
+  """
+  @spec shutdown(Socket.t(), :read | :write | :read_write) :: :ok | {:error, term()}
+  def shutdown(socket, how) when how in [:read, :write, :read_write],
+    do: call(socket, {:shutdown, how})
+
+  def shutdown(_, _), do: {:error, :badarg}
+
+  defp server_options(options) when is_list(options) do
+    cond do
+      Keyword.get(options, :verify, :verify_none) != :verify_none ->
+        {:error, {:unsupported_option, :verify}}
+
+      key = Enum.find(@unwired_server_options, &Keyword.has_key?(options, &1)) ->
+        {:error, {:unsupported_option, key}}
+
+      true ->
+        ServerOptions.build(options)
+    end
+  end
+
+  defp server_options(options), do: ServerOptions.build(options)
+
+  # Server writes are synchronous carrier sends, so an infinite send timeout could wedge them.
+  defp server_carrier(tcp) do
+    tcp
+    |> Keyword.put_new(:send_timeout, 30_000)
+    |> Keyword.put_new(:send_timeout_close, true)
+  end
 
   defp upgrade_profile_context(options) do
     case Profile.validate_context(

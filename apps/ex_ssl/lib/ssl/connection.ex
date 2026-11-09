@@ -1070,6 +1070,12 @@ defmodule SSL.Connection do
     end
   end
 
+  # Server-socket requests (SSL.getopts/getstat/shutdown/handshake) are not client operations.
+  defp socket_call({:call, from}, {_ref, request}, :connected, %{closed: false})
+       when is_tuple(request) and tuple_size(request) == 2 and
+              elem(request, 0) in [:getopts, :getstat, :shutdown, :handshake],
+       do: reply(from, {:error, :enotsup})
+
   defp socket_call({:call, from}, {_ref, _}, _phase, _state), do: reply(from, {:error, :closed})
 
   defp reserve_write(from, requested_deadline, state) do

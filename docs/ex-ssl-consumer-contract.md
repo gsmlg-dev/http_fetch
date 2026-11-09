@@ -267,6 +267,32 @@ and still-rejected values before the passing reruns. An earlier source-mode
 test peer now holds its close until the client reads the complete response.
 The final source-mode and published-mode 47-test runs each had zero failures.
 
+## TCP TLS 1.3 server (current source)
+
+`SSL.listen/2`, `SSL.transport_accept/2`, `SSL.handshake/2` and
+`SSL.handshake(tcp, options, timeout) :: {:ok, socket, []} | {:error, term()}`
+keep OTP `:ssl` shapes so a server transport can delegate one-to-one. Active
+messages are `{:ssl, socket, data}`, `{:ssl_closed, socket}` and
+`{:ssl_error, socket, reason}` with `%SSL.Socket{}`. TLS failures are
+`{:tls_alert, {alert, description}}`. `SSL.getopts/2`, `SSL.getstat/1,2` and
+`SSL.shutdown/2` read or shut down the server carrier; client sockets return
+`{:error, :enotsup}` for them. `SSL.close/1`, `SSL.sockname/1` and
+`SSL.controlling_process/2` accept an `SSL.ListenSocket`.
+
+Boundaries:
+
+- TLS 1.3 only; there is no TLS 1.2 server.
+- Supported TLS options are `certfile`/`keyfile`, `cert`/`key`, `certs_keys`,
+  `password`, `alpn_preferred_protocols`, `ciphers` and `verify: :verify_none`.
+  Other keys are `:gen_tcp` options; OTP `:ssl`-only options are errors.
+  `listen/2` validates every option before it opens the port.
+- `verify: :verify_peer` and `sni_hosts`/`sni_fun` return
+  `{:error, {:unsupported_option, key}}` until server client-certificate
+  authentication and SNI selection are wired in; they are never ignored.
+- No server session tickets, resumption or 0-RTT.
+- Server carriers default to `send_timeout: 30_000, send_timeout_close: true`
+  unless the caller sets either key.
+
 ## Current boundaries
 
 HTTP and TLS versions are separate choices: `http_version: :http2` requires h2,

@@ -404,9 +404,9 @@ defmodule SSL.ServerConnection do
        when name in [:hello, :client_finished] and not is_nil(core),
        do: {:ok, name, %{data | ccs_received: true}}
 
-  defp record(name, <<21, 3, _minor, 2::16, _level, description>>, data)
+  defp record(name, <<21, 3, _minor, _length::16, payload::binary>>, data)
        when name in [:hello, :client_finished],
-       do: {:error, {:peer_alert, description}, data}
+       do: peer_alert(payload, data)
 
   defp record(:hello, <<22, 3, minor, _::16, payload::binary>>, data) when minor in 1..3 do
     limit = [max_handshake_length: data.config.limits[:max_handshake_length]]
@@ -431,7 +431,7 @@ defmodule SSL.ServerConnection do
   defp record(:client_finished, <<23, _::binary>> = record, data) do
     case decrypt(data, record) do
       {:ok, :handshake, bytes, read} -> client_finished(bytes, %{data | read: read})
-      {:ok, :alert, <<_level, description>>, _read} -> {:error, {:peer_alert, description}, data}
+      {:ok, :alert, payload, _read} -> peer_alert(payload, data)
       {:ok, type, _bytes, _read} -> unexpected({:unexpected_inner_content_type, type}, data)
       {:error, _reason, _data} = error -> error
     end
@@ -448,14 +448,11 @@ defmodule SSL.ServerConnection do
       {:ok, :alert, <<1, 90>>, read} ->
         {:ok, :connected, %{data | read: read}}
 
-      {:ok, :alert, <<_level, description>>, _read} ->
-        {:error, {:peer_alert, description}, data}
+      {:ok, :alert, payload, _read} ->
+        peer_alert(payload, data)
 
       {:ok, :handshake, bytes, read} ->
         post_handshake(%{data | read: read}, bytes)
-
-      {:ok, type, _bytes, _read} ->
-        unexpected({:unexpected_inner_content_type, type}, data)
 
       {:error, reason, data} ->
         {:error, reason, data}
@@ -465,6 +462,12 @@ defmodule SSL.ServerConnection do
   # Records after a peer close_notify are discarded.
   defp record(:closing, _record, data), do: {:ok, :closing, data}
   defp record(_name, _record, data), do: unexpected(:unexpected_record, data)
+
+  # RFC 8446 §6: an alert is exactly a level and a description byte.
+  defp peer_alert(<<_level, description>>, data), do: {:error, {:peer_alert, description}, data}
+
+  defp peer_alert(payload, data),
+    do: {:error, {:alert, :decode_error, {:alert_length, byte_size(payload)}}, data}
 
   defp decrypt(data, record) do
     case Record.decrypt(data.read, record) do
@@ -583,13 +586,15 @@ defmodule SSL.ServerConnection do
     end
   end
 
+  # After close_notify the write side is closed, so a requested update gets no reply.
   defp key_update(message, data) do
     hash = Capabilities.resolve(:cipher_suite, data.suite).hash
 
     with {:ok, %ServerFlight.KeyUpdate{request_update: request?}, <<>>} <-
            ServerFlight.decode(message, hash: hash),
          {:ok, read} <- HandshakeMachine.update_traffic_state(data.read),
-         {:ok, records, write} <- HandshakeMachine.maybe_update_write(data.write, request?),
+         {:ok, records, write} <-
+           HandshakeMachine.maybe_update_write(data.write, request? and not data.write_closed),
          :ok <- transmit(data, records) do
       {:ok, :connected, %{data | read: read, write: write}}
     else
@@ -618,7 +623,8 @@ defmodule SSL.ServerConnection do
       data.closed and data.size == 0 ->
         notify_pending(data, {:error, :closed})
         if data.active_terminal, do: send(data.owner, {:ssl_closed, data.socket})
-        {:stop_and_reply, :normal, actions, data}
+        # stop_and_reply accepts only reply actions; pending timers die with the process.
+        {:stop_and_reply, :normal, Enum.filter(actions, &match?({:reply, _, _}, &1)), data}
 
       arm?(name, data) ->
         case :inet.setopts(data.tcp, active: :once) do
