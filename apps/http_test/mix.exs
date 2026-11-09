@@ -1,7 +1,7 @@
 defmodule HttpTest.MixProject do
   use Mix.Project
 
-  @version "1.0.0-rc.10"
+  @version "1.0.0-rc.11"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
 
   def project do
@@ -34,7 +34,7 @@ defmodule HttpTest.MixProject do
 
   defp deps do
     [
-      {:http_fetch, "== 1.0.0-rc.10", in_umbrella: true, hex: :http_fetch},
+      {:http_fetch, "== 1.0.0-rc.11", in_umbrella: true, hex: :http_fetch},
       {:plug, "~> 1.16", optional: true},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
