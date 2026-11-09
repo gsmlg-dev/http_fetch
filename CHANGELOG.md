@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.11] - 2026-11-09
+
+### Added
+- Add opt-in Fetch Alt-Svc discovery for HTTP/3 (`http_version: :auto,
+  alt_svc: true`) with a bounded per-origin cache. Fallback to HTTP/2 or
+  HTTP/1.1 happens only before the HTTP/3 connection is ready, so a request is
+  never sent twice; a failing origin is marked broken for 300 seconds.
+- Add a dynamic-table QPACK decoder (RFC 9204) with blocked streams and
+  decoder-stream instructions. Connections now advertise a 4,096-byte table
+  and 16 blocked streams; configure 0/0 for the previous static-only behavior.
+  The request encoder stays static/literal.
+- Add beta opt-in HTTP/3 session resumption (`http3_resumption`) and 0-RTT
+  (`early_data`) for GET, HEAD and OPTIONS without a body. Unsafe requests are
+  never sent early; a rejected 0-RTT or 425 Too Early response is retried once
+  after the handshake. `HTTP.Response.http3` reports resumption and early data.
+- Run WebTransport draft-17 live over an exclusive HTTP/3 owner, including
+  datagrams and reliable stream resets that preserve the stream prefix.
+  `Profile.supported?/0` remains false pending independent peer acceptance.
+- Add beta `migrate/2` for exclusive WebSocket over HTTP/3
+  (`http3_reuse: false`) and WebTransport sessions; shared connections refuse it.
+- Give WebSocket over HTTP/3 a certified cleanup receipt and drop its
+  experimental label.
+
+### Fixed
+- Admit reliable resets and migrations as QUIC cleanup-scope operations.
+- Bind migration sockets for QUIC clients created without a cleanup scope.
+- Answer STOP_SENDING on prefixed streams with RESET_STREAM_AT, and ignore
+  STOP_SENDING after a local reset instead of failing the connection.
+- Register Alt-Svc TCP fallbacks with the request lifecycle and lift the TCP
+  `ex_ssl` reference identity onto QUIC connections.
+
+### Validation
+- Engine, QUIC HTTP/3, runtime HTTP/3, WebTransport, Fetch HTTP/3 and
+  EventSource HTTP/3 suites pass with strict compilation. Independent aioquic
+  1.2.0 gates pass for Alt-Svc, dynamic QPACK, resumption/0-RTT and
+  WebSocket/H3.
+- Not validated: independent WebTransport acceptance (no draft-17 peer with
+  reliable reset exists), HTTP-level independent migration, and the Caddy
+  Alt-Svc variant. Global QUIC capability flags remain false.
+
 ## [1.0.0-rc.10] - 2026-11-08
 
 ### Added
