@@ -33,7 +33,8 @@ defmodule NoOTP.ReleaseAuditTest do
     %{ebin: ebin}
   end
 
-  test "server packages hell and abyss are audited for direct OTP ssl imports", context do
+  test "server packages hell and abyss are audited for direct OTP ssl/tls/dtls imports",
+       context do
     lib = Path.dirname(Path.dirname(context.ebin))
 
     compile = fn app, name, body ->
@@ -59,12 +60,19 @@ defmodule NoOTP.ReleaseAuditTest do
     compile.("abyss", "abyss_fixture", "run() -> ssl:close(socket).")
     compile.("http_fetch", "other_fixture", "run() -> ssl:close(socket).")
     compile.("hell", "hell_clean_fixture", "run() -> ok.")
+    compile.("hell", "hell_tls_record_fixture", "run() -> tls_record:encode_data(data, v, s).")
+    compile.("abyss", "abyss_ssl_cipher_fixture", "run() -> ssl_cipher:suites(v).")
+    compile.("hell", "hell_dtls_fixture", "run() -> dtls_socket:close(socket).")
+    compile.("hell", "hell_sslx_fixture", "run() -> sslx:close(socket).")
 
     imports = NoOTP.ReleaseAudit.server_ssl_imports(lib)
 
-    assert Enum.sort(Enum.map(imports, &{&1.module, &1.function, &1.arity})) == [
-             {":abyss_fixture", "close", 1},
-             {":hell_fixture", "send", 2}
+    assert Enum.sort(Enum.map(imports, &{&1.module, &1.imported, &1.function, &1.arity})) == [
+             {":abyss_fixture", ":ssl", "close", 1},
+             {":abyss_ssl_cipher_fixture", ":ssl_cipher", "suites", 1},
+             {":hell_dtls_fixture", ":dtls_socket", "close", 1},
+             {":hell_fixture", ":ssl", "send", 2},
+             {":hell_tls_record_fixture", ":tls_record", "encode_data", 3}
            ]
   end
 

@@ -122,6 +122,12 @@ jobs:
       - run: mix compile --warnings-as-errors
       - name: Run all original Hell tests
         run: mix test apps/hell/test --include integration --max-cases 1
+      - name: Audit production server BEAMs for OTP ssl/ssl_*/tls_*/dtls_* imports
+        if: matrix.os == 'ubuntu-24.04' && matrix.elixir == '1.18.x'
+        run: |
+          # Compile the whole umbrella so both server packages (abyss, hell) are audited.
+          env -u HTTP_FETCH_CI_APP MIX_ENV=prod mix compile --warnings-as-errors
+          elixir scripts/release/no_otp_server_audit.exs _build/prod/lib
 
   udp-network:
     name: Isolated UDP / OTP ${{ matrix.otp }} / ${{ matrix.backend }} / ${{ matrix.execution }}

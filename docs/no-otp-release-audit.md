@@ -15,8 +15,10 @@ Abyss and Hell: see the server package group below.)
 ## Server package group
 
 Hell's `Hell.Transports.SSL` now runs on `ex_ssl`, so `abyss` and `hell` no longer
-call OTP `:ssl`. `NoOTP.ReleaseAudit.server_ssl_imports/1` reports every direct
-`:ssl` import in their compiled BEAMs as a group separate from the original nine
+call OTP `:ssl`. `NoOTP.ReleaseAudit.server_ssl_imports/1` reports every import
+of an OTP TLS module in their compiled BEAMs: `ssl` itself and any module whose
+name starts with `ssl_`, `tls_` or `dtls_` (for example `:ssl_cipher`,
+`:tls_record`, `:dtls_socket`). This group is separate from the original nine
 packages, whose release proof, package set and test counts are unchanged. From
 the umbrella root:
 
@@ -25,9 +27,14 @@ MIX_ENV=prod mix compile
 elixir scripts/release/no_otp_server_audit.exs _build/prod/lib
 ```
 
-The script exits non-zero and prints each import if either app reintroduces one.
-This is a static import check only; it does not extend the dispatch, runtime or
-consumer-release proofs to Hell or Abyss. `abyss_raw` remains outside it.
+The script exits non-zero and prints each import if either app reintroduces one,
+and also fails when either app has no compiled BEAMs under the given directory.
+CI enforces it: the Ubuntu / Elixir 1.18 entries of the `hell-platforms` job in
+`.github/workflows/servers.yml` compile the umbrella with `MIX_ENV=prod` and run
+the script. Hell's unit suite applies the same prefix rule to every module of the
+`:hell` application. This remains a static import check only; it does not
+extend the dispatch, runtime or consumer-release proofs to Hell or Abyss, and it
+cannot see dynamic calls such as `apply/3`. `abyss_raw` remains outside it.
 
 P6's non-deferred gates **pass** at `658bbd5`. The strict production no-OTP-SSL
 gate passes at `31a8a15`, with identical production sources through `658bbd5`;

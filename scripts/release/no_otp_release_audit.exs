@@ -128,15 +128,24 @@ defmodule NoOTP.ReleaseAudit do
         beam <- Path.wildcard(Path.join([lib_dir, "#{app}{,-*}", "ebin", "*.beam"])),
         {:ok, {module, [imports: imports]}} <-
           [:beam_lib.chunks(String.to_charlist(beam), [:imports])],
-        {:ssl, function, arity} <- imports do
+        {imported, function, arity} <- imports,
+        otp_tls_module?(imported) do
       %{
         app: app,
         beam: beam,
         module: inspect(module),
+        imported: inspect(imported),
         function: to_string(function),
         arity: arity
       }
     end
+  end
+
+  # OTP's TLS implementation lives in `ssl` plus the `ssl_*`, `tls_*` and
+  # `dtls_*` modules of the `ssl` application; match all of them by prefix.
+  defp otp_tls_module?(module) do
+    name = Atom.to_string(module)
+    name == "ssl" or Enum.any?(["ssl_", "tls_", "dtls_"], &String.starts_with?(name, &1))
   end
 
   def artifacts(options \\ []) do

@@ -665,13 +665,19 @@ defmodule Hell.ServerTest do
       assert inspect(reason) =~ "{:unsupported_option, :versions}"
     end
 
-    test "ssl transport BEAM does not import OTP :ssl" do
-      {:ok, {_, [imports: imports]}} =
-        :beam_lib.chunks(:code.which(Hell.Transports.SSL), [:imports])
+    test "no :hell BEAM imports OTP ssl/tls/dtls modules" do
+      modules = Application.spec(:hell, :modules)
+      assert Hell.Transports.SSL in modules
 
-      imported = imports |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+      offending =
+        for module <- modules,
+            {:ok, {_, [imports: imports]}} = :beam_lib.chunks(:code.which(module), [:imports]),
+            {imported, _function, _arity} <- imports,
+            otp_tls_module?(imported),
+            uniq: true,
+            do: {module, imported}
 
-      assert MapSet.disjoint?(imported, MapSet.new([:ssl, :tls_socket, :ssl_gen_statem]))
+      assert offending == []
     end
   end
 
@@ -744,6 +750,12 @@ defmodule Hell.ServerTest do
       {:ok, data} -> recv_all(client, length, acc <> data)
       error -> error
     end
+  end
+
+  defp otp_tls_module?(module) do
+    name = Atom.to_string(module)
+
+    name == "ssl" or Enum.any?(["ssl_", "tls_", "dtls_"], &String.starts_with?(name, &1))
   end
 
   defp start_handler(handler, opts \\ []) do
