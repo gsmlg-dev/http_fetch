@@ -135,6 +135,10 @@ class ServerConsumerGateTests(unittest.TestCase):
         self.assertIn('hell: "1.0.0-rc.6", telemetry: "1.2.3", ex_ssl: "1.0.0-rc.6"', source)
         self.assertIn("[Hell, Hell.Transports.SSL, SSL]", source)
         self.assertIn("[Abyss, HTTP, Quic, Rustler, AbyssDhcpSocket.Native]", source)
+        # OTP :ssl is the consumer's test client peer only, not a Hell dependency.
+        hell_manifest = gate.manifest("hell", versions["hell"], versions)
+        self.assertIn('deps: [{:hell, "== 1.0.0-rc.6"}]', hell_manifest)
+        self.assertIn("extra_applications: [:hell, :ssl]", hell_manifest)
         with tempfile.TemporaryDirectory() as temporary, \
                 patch.object(gate, "source_versions", return_value=versions) as source_versions, \
                 patch.object(gate, "prepare_mix_toolchain"), \

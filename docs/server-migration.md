@@ -262,7 +262,8 @@ afterward. Remote platform verification remains necessary.
 ## Remaining limitations
 
 For the unified 1.0 RC, the approved minimum for `abyss` and `abyss_raw` is
-Elixir `~> 1.18` with Erlang/OTP 27 or later; Hell retains `>= 1.18.0`.
+Elixir `~> 1.18` with Erlang/OTP 27 or later; Hell retains `>= 1.18.0` but,
+since it runs on `ex_ssl`, requires Erlang/OTP 28 or later.
 The first remote minimum-version consumer reached actual UDP traffic after the
 rebar3 repair, but OTP 24 rejected the default socket options. The imported raw
 lock also selects Rustler 0.38.0, which already requires Elixir `~> 1.15`.

@@ -41,7 +41,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        otp: ['27', '28']
+        include:
+          # Hell's floor is OTP 28 (it runs on ex_ssl), so OTP 27 skips the Hell consumer.
+          - {otp: '27', modes: 'udp quic'}
+          - {otp: '28', modes: 'all'}
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -57,7 +60,12 @@ jobs:
             python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives" --package "$package"
           done
       - name: Verify signed Hex consumers, UDP, TCP/TLS, QUIC examples and idle policy
-        run: python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/archives" --mode all
+        env:
+          CONSUMER_MODES: ${{ matrix.modes }}
+        run: |
+          for mode in $CONSUMER_MODES; do
+            python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/archives" --mode "$mode"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: server-candidates-otp${{ matrix.otp }}
@@ -71,20 +79,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {app: abyss, elixir: '1.18', otp: '27', mode: udp}
-          - {app: hell, elixir: '1.18', otp: '26', mode: hell}
+          - {app: abyss, elixir: '1.18', otp: '27', mode: udp, packages: abyss}
+          # Hell runs on ex_ssl, whose tested floor is Elixir 1.18 / OTP 28.
+          - {app: hell, elixir: '1.18', otp: '28', mode: hell, packages: 'hell ex_ssl'}
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}
-      - name: Build only the standalone package at its declared minimum
+      - name: Build the standalone package and its umbrella dependencies at the declared minimum
         env:
-          SERVER_APP: ${{ matrix.app }}
+          SERVER_PACKAGES: ${{ matrix.packages }}
         run: |
-          version=$(python3 -c 'import sys, os; sys.path.insert(0, "scripts/release"); from stage import source_version; print(source_version("apps/" + os.environ["SERVER_APP"]))')
-          python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives" --package "$SERVER_APP"
+          for package in $SERVER_PACKAGES; do
+            version=$(python3 -c 'import sys; sys.path.insert(0, "scripts/release"); from stage import source_version; print(source_version("apps/" + sys.argv[1]))' "$package")
+            python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/stage" "$RUNNER_TEMP/archives" --package "$package"
+          done
       - name: Verify a fresh Hex-only consumer without the umbrella
         run: python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/archives" --mode '${{ matrix.mode }}'
 
@@ -96,7 +107,8 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-26]
         elixir: ['1.18.x', '1.19.0']
-        otp: ['26.x', '27.x', '28.x']
+        # Hell's floor is OTP 28 because Hell.Transports.SSL runs on ex_ssl.
+        otp: ['28.x']
     env:
       MIX_ENV: test
       HTTP_FETCH_CI_APP: hell

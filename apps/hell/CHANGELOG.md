@@ -5,6 +5,8 @@
 - **Breaking:** `Hell.Transports.SSL` now runs on the umbrella `ex_ssl` engine
   instead of OTP `:ssl`, and Hell depends on `ex_ssl` (pinned to the coordinated
   version). OTP `:ssl` is no longer used in production.
+  - Requires OTP 28+ (the `ex_ssl` floor); OTP 26 and 27 are no longer
+    supported or tested.
   - TLS 1.3 only: `versions` accepts only `[:"tlsv1.3"]`; there is no TLS 1.2
     server, and no server session tickets or resumption.
   - Supported option subset: identity, ALPN, TLS 1.3 ciphers, SNI

@@ -676,86 +676,24 @@ defmodule Hell.ServerTest do
   end
 
   describe "invalid configuration" do
-    # SSL startup behaviour with invalid PEM files changed in OTP 28.1. See OTP-19706
-    major = :erlang.system_info(:otp_release) |> List.to_string()
-    vsn_file = Path.join([:code.root_dir(), "releases", major, "OTP_VERSION"])
-    {:ok, contents} = File.read(vsn_file)
+    # ex_ssl validates the identity in SSL.listen on every supported OTP.
+    @tag capture_log: true
+    test "it should error if a certificate is not found" do
+      assert {:error, reason} =
+               start_supervised(
+                 {Hell,
+                  port: 0,
+                  handler_module: Error,
+                  handler_options: [test_pid: self()],
+                  transport_module: Hell.Transports.SSL,
+                  transport_options: [
+                    certfile: Path.join(__DIR__, "./not/a/cert.pem"),
+                    keyfile: Path.join(__DIR__, "./not/a/key.pem"),
+                    alpn_preferred_protocols: ["foo"]
+                  ]}
+               )
 
-    if contents >= "28.1\n" do
-      @tag capture_log: true
-      test "it should error if a certificate is not found (OTP 28.1+)" do
-        assert {:error, _} =
-                 start_supervised(
-                   {Hell,
-                    port: 0,
-                    handler_module: Error,
-                    handler_options: [test_pid: self()],
-                    transport_module: Hell.Transports.SSL,
-                    transport_options: [
-                      certfile: Path.join(__DIR__, "./not/a/cert.pem"),
-                      keyfile: Path.join(__DIR__, "./not/a/key.pem"),
-                      alpn_preferred_protocols: ["foo"]
-                    ]}
-                 )
-      end
-    else
-      @tag capture_log: true
-      test "it should error if a certificate is not found (pre-OTP-28.1)" do
-        on_exit(TelemetryHelpers.attach_all_events(Error))
-
-        {:ok, server_pid, port} =
-          start_handler(Error,
-            handler_options: [test_pid: self()],
-            transport_module: Hell.Transports.SSL,
-            transport_options: [
-              certfile: Path.join(__DIR__, "./not/a/cert.pem"),
-              keyfile: Path.join(__DIR__, "./not/a/key.pem"),
-              alpn_preferred_protocols: ["foo"]
-            ]
-          )
-
-        {:error, _} =
-          :ssl.connect(~c"localhost", port,
-            active: false,
-            verify: :verify_peer,
-            cacertfile: Path.join(__DIR__, "../support/ca.pem")
-          )
-
-        Process.sleep(500)
-
-        Hell.stop(server_pid)
-
-        # Depending on whether the peer closes before socket ownership is transferred, the
-        # certificate error is observed either by the handler or while setting up the connection.
-        # Both paths must surface an error without activating a non-owning handler.
-        result =
-          receive do
-            {:options, {:certfile, _, _}} ->
-              :handler_error
-
-            {:telemetry, [:hell, :acceptor, :spawn_error], measurements, metadata} ->
-              {:ownership_error, measurements, metadata}
-          after
-            1_000 -> :timeout
-          end
-
-        case result do
-          :handler_error ->
-            :ok
-
-          {:ownership_error, measurements, metadata} ->
-            assert measurements
-                   ~> %{
-                     monotonic_time: integer(),
-                     error: {:controlling_process, atom()}
-                   }
-
-            assert metadata ~> %{handler: Error, telemetry_span_context: reference()}
-
-          :timeout ->
-            flunk("expected the certificate or ownership-transfer error to be reported")
-        end
-      end
+      assert inspect(reason) =~ "{:options, :invalid_certificate_file}"
     end
 
     @tag capture_log: true

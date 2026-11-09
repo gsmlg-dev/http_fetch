@@ -22,6 +22,8 @@ The standalone source was imported from `gsmlg-dev/hell` at
 The library implementation and public API are preserved. `Hell.Transports.SSL`
 now runs on the umbrella `ex_ssl` engine (TLS 1.3 only) instead of OTP `:ssl`;
 see the changelog for the breaking differences.
+Hell requires Elixir 1.18 or later on Erlang/OTP 28 or later, the tested floor
+of `ex_ssl`.
 From the umbrella root, run `mix test apps/hell/test --include integration`
 for the complete Hell suite; default tests exclude real socket integration.
 See the root migration report for current validation and release tooling.

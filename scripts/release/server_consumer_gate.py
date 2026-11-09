@@ -108,6 +108,11 @@ def manifest(package, version, versions=None):
         dependencies = ", ".join(f'{{:{name}, "== {versions[name]}"}}'
                                   for name in ("abyss", "elixir_quic", "ex_ssl"))
         application = "[extra_applications: [:abyss, :elixir_quic, :public_key], mod: {AbyssEchoExample.Application, []}]"
+    elif package == "hell":
+        dependencies = f'{{:hell, "== {version}"}}'
+        # Hell's server TLS runs on ex_ssl; OTP :ssl is only the consumer's test
+        # client peer and must stay on the pruned code path for `mix run`.
+        application = "[extra_applications: [:hell, :ssl]]"
     else:
         dependencies = f'{{:{package}, "== {version}"}}'
         application = f"[extra_applications: [:{package}]]"
