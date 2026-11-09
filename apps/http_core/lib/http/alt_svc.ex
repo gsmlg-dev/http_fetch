@@ -20,7 +20,7 @@ defmodule HTTP.AltSvc do
           persist?: boolean()
         }
 
-  @spec default_max_age() :: pos_integer()
+  @spec default_max_age() :: 86_400
   def default_max_age, do: @default_max_age
 
   @spec parse(String.t()) :: :clear | [alternative()] | {:error, term()}

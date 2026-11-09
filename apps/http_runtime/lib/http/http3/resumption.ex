@@ -120,7 +120,7 @@ defmodule HTTP.HTTP3.Resumption do
 
   @impl true
   def terminate(_reason, state) do
-    for {_, %{endpoint: endpoint}} <- state.entries, do: QuicTransport.stop_endpoint(endpoint)
+    for {_, %{endpoint: endpoint}} <- state.entries, do: _ = QuicTransport.stop_endpoint(endpoint)
     :ok
   end
 

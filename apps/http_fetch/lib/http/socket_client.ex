@@ -157,11 +157,12 @@ defmodule HTTP.SocketClient do
   end
 
   defp learn_alt_svc(%Request{transport_options: options, url: url}, %Response{} = response) do
-    with true <- options[:alt_svc] == true,
-         origin when origin != nil <- AltSvcCache.origin(url),
-         [_ | _] = values <- Headers.get_all(response.headers, "alt-svc") do
-      AltSvcCache.put(origin, Enum.join(values, ", "))
-    end
+    _ =
+      with true <- options[:alt_svc] == true,
+           origin when origin != nil <- AltSvcCache.origin(url),
+           [_ | _] = values <- Headers.get_all(response.headers, "alt-svc") do
+        AltSvcCache.put(origin, Enum.join(values, ", "))
+      end
 
     :ok
   end

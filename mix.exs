@@ -127,7 +127,15 @@ defmodule HttpFetch.Umbrella.MixProject do
         test_consumer_apps(:http_web_socket)
 
       "http_web_transport" ->
-        [:ex_ssl, :elixir_quic, :http_core, :http_web_transport]
+        [
+          :ex_ssl,
+          :elixir_quic,
+          :http_core,
+          :http_pool,
+          :elixir_quic_http3,
+          :http_runtime,
+          :http_web_transport
+        ]
 
       other ->
         raise "invalid HTTP_FETCH_CI_APP: #{inspect(other)}"

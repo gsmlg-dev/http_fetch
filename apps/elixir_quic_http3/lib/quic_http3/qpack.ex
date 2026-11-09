@@ -760,15 +760,15 @@ defmodule QuicHttp3.Qpack do
   defp insert_name(table, false, index), do: absolute(table, table.insert_count - 1 - index)
 
   @doc "Section Acknowledgment decoder instruction."
-  @spec section_ack(non_neg_integer()) :: binary()
+  @spec section_ack(non_neg_integer()) :: nonempty_binary()
   def section_ack(stream_id), do: encode_integer!(stream_id, 7, 0x80)
 
   @doc "Stream Cancellation decoder instruction."
-  @spec stream_cancel(non_neg_integer()) :: binary()
+  @spec stream_cancel(non_neg_integer()) :: nonempty_binary()
   def stream_cancel(stream_id), do: encode_integer!(stream_id, 6, 0x40)
 
   @doc "Insert Count Increment decoder instruction; the increment must be positive."
-  @spec insert_count_increment(pos_integer()) :: binary()
+  @spec insert_count_increment(pos_integer()) :: nonempty_binary()
   def insert_count_increment(increment) when is_integer(increment) and increment > 0,
     do: encode_integer!(increment, 6, 0)
 

@@ -62,7 +62,7 @@ defmodule HTTP.AltSvc.Cache do
 
   @impl true
   def init(_opts) do
-    :ets.new(@table, [:named_table, :protected, :set, read_concurrency: true])
+    _ = :ets.new(@table, [:named_table, :protected, :set, read_concurrency: true])
     {:ok, nil}
   end
 

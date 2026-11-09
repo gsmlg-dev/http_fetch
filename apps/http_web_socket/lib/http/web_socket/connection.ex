@@ -765,7 +765,7 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   defp settle_migration(%{migration: migration} = state, reply) do
-    Process.cancel_timer(migration.timer)
+    _ = Process.cancel_timer(migration.timer)
     GenServer.reply(migration.from, reply)
     %{state | migration: nil}
   end

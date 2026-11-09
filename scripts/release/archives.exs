@@ -10,7 +10,7 @@ defmodule ReleaseArchives do
     "http_fetch" => ~w(http_core http_pool http_runtime),
     "http_web_socket" => ~w(http_core http_runtime),
     "http_event_source" => ~w(http_core http_runtime),
-    "http_web_transport" => ~w(http_core)
+    "http_web_transport" => ~w(http_core http_runtime)
   }
 
   def run([version, directory]), do: validate(version, directory, @order)

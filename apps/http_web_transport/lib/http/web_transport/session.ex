@@ -762,7 +762,7 @@ defmodule HTTP.WebTransport.Session do
   defp settle_migration(%{migration: nil} = state, _reply), do: state
 
   defp settle_migration(%{migration: migration} = state, reply) do
-    Process.cancel_timer(migration.timer)
+    _ = Process.cancel_timer(migration.timer)
     GenServer.reply(migration.from, reply)
     %{state | migration: nil}
   end
@@ -1197,7 +1197,7 @@ defmodule HTTP.WebTransport.Session do
 
   @impl true
   def terminate(_reason, state) do
-    cleanup_backend(state, %CloseInfo{reason: "session terminated"})
+    _ = cleanup_backend(state, %CloseInfo{reason: "session terminated"})
     :ok
   end
 
