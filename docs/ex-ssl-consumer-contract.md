@@ -283,8 +283,8 @@ Boundaries:
 
 - TLS 1.3 only; there is no TLS 1.2 server.
 - Supported TLS options are `certfile`/`keyfile`, `cert`/`key`, `certs_keys`,
-  `password`, `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers` and
-  `verify: :verify_none`.
+  `password`, `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers`,
+  `verify`, `cacerts`/`cacertfile`, `fail_if_no_peer_cert` and `depth`.
   Other keys are `:gen_tcp` options; OTP `:ssl`-only options, `active` other
   than `false` and `mode` other than `:binary` (including `:list`) are errors.
   `listen/2` validates every option before it opens the port.
@@ -295,8 +295,24 @@ Boundaries:
   `unrecognized_name` alert; a failing `sni_fun` is an `internal_error` alert.
 - A TCP server sends its chain even when it does not match the client's
   `signature_algorithms_cert` (RFC 8446 §4.4.2.2); `SSL.QUIC` keeps the hard check.
-- `verify: :verify_peer` returns `{:error, {:unsupported_option, :verify}}` until
-  server client-certificate authentication is wired in; it is never ignored.
+- Client-certificate authentication (mTLS): `verify: :verify_peer` with
+  `cacerts` (DER list) or `cacertfile` (PEM) sends a CertificateRequest
+  (`signature_algorithms`, and `certificate_authorities` when the trust list
+  is small). `fail_if_no_peer_cert: true` requires a certificate (default
+  `false`); `depth` (default 10) bounds the intermediate CAs below a trust
+  anchor. The client chain gets path validation without a hostname check, and a
+  leaf extendedKeyUsage, when present, must allow clientAuth. Failures abort the
+  handshake with a fatal alert returned by `SSL.handshake/2` as
+  `{:error, {:tls_alert, {alert, _}}}`: `certificate_required` (no certificate
+  when required), `unknown_ca` (untrusted chain, or longer than `depth`),
+  `certificate_expired`, `bad_certificate`, `illegal_parameter` (CertificateVerify
+  scheme not offered or unfit for the key) and `decrypt_error` (bad
+  CertificateVerify signature or Finished). `SSL.peercert/1` returns the client
+  leaf DER or `{:error, :no_peercert}`; `SSL.connection_information/1` reports
+  `peer_authenticated: :client | false`. `verify: :verify_none` (default) sends
+  no CertificateRequest; any other `verify` value is
+  `{:error, {:invalid_option, :verify}}`. `SSL.QUIC` servers do not request
+  client certificates.
 - No server session tickets, resumption or 0-RTT.
 - Server carriers default to `send_timeout: 30_000, send_timeout_close: true`
   unless the caller sets either key.

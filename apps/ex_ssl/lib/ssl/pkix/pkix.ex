@@ -77,6 +77,7 @@ defmodule SSL.PKIX do
           | :hostname_mismatch
           | :unsupported_certificate_key
           | :invalid_peer_key_usage
+          | :invalid_peer_extended_key_usage
           | {:invalid_peer_certificate_version, non_neg_integer()}
           | :malformed_pem
           | {:invalid_input, :certificate_chain | :trust_source | :options}
@@ -169,6 +170,55 @@ defmodule SSL.PKIX do
 
       signing_peer(result)
     end
+  end
+
+  @doc false
+  # A TLS 1.3 client identity validated against normalized trust anchors: the
+  # same path validation and `depth` as `peer/6`, no service identity check, and
+  # a leaf extendedKeyUsage, when present, that admits client authentication.
+  @spec client_peer(term(), [Certificate.t()], [option()]) ::
+          {:ok, VerifiedPeer.t()} | {:error, error_reason()}
+  def client_peer(chain, [%Certificate{} | _] = trust_anchors, options) do
+    with {:ok, _limits} <- limits(options),
+         :ok <- protocol_chain(chain, :tls13, options),
+         {:ok, [leaf | _] = certificates} <- decode_chain(chain, options),
+         {:ok, public_key} <-
+           validate_path(certificates, trust_anchors, Keyword.get(options, :depth, 10), nil),
+         :ok <- client_usage(leaf.decoded) do
+      signing_peer(
+        {:ok,
+         %VerifiedPeer{
+           leaf_der: leaf.der,
+           leaf: leaf.decoded,
+           public_key: public_key,
+           chain: Enum.map(certificates, & &1.der)
+         }}
+      )
+    end
+  end
+
+  def client_peer(_chain, _trust_anchors, _options), do: {:error, :empty_trust_anchors}
+
+  defp client_usage(certificate) do
+    extensions =
+      certificate |> otp_certificate(:tbsCertificate) |> otp_tbs_certificate(:extensions)
+
+    usages =
+      for extension <- if(is_list(extensions), do: extensions, else: []),
+          certificate_extension(extension, :extnID) == {2, 5, 29, 37},
+          do: certificate_extension(extension, :extnValue)
+
+    case usages do
+      [] -> :ok
+      [usage] when is_list(usage) -> client_auth_usage(usage)
+      _ -> {:error, :invalid_peer_extended_key_usage}
+    end
+  end
+
+  defp client_auth_usage(usage) do
+    if Enum.any?(usage, &(&1 in [{1, 3, 6, 1, 5, 5, 7, 3, 2}, {2, 5, 29, 37, 0}])),
+      do: :ok,
+      else: {:error, :invalid_peer_extended_key_usage}
   end
 
   defp verify_callback(chain, trust_source, identity, options) do

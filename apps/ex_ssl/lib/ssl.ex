@@ -244,7 +244,7 @@ defmodule SSL do
          do: call(socket, {:connection_information, keys})
   end
 
-  @doc "Returns the authenticated server leaf certificate as DER."
+  @doc "Returns the authenticated peer (server, or mTLS client) leaf certificate as DER."
   @spec peercert(Socket.t()) :: {:ok, binary()} | {:error, term()}
   def peercert(socket), do: call(socket, :peercert)
 
@@ -289,7 +289,7 @@ defmodule SSL do
   Options are validated before the port is opened. TLS options are the
   certificate identity (`certfile`/`keyfile`, `cert`/`key`, `certs_keys`,
   `password`), `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers`,
-  `versions: [:"tlsv1.3"]` and `verify: :verify_none`. OTP `:ssl`-only options
+  `versions: [:"tlsv1.3"]` and client authentication. OTP `:ssl`-only options
   are errors; every other option is a `:gen_tcp` listen option. `:binary` and
   `active: false` are enforced; `active` other than `false` and `mode` other
   than `:binary` (including `:list`) return `{:error, {:unsupported_option, key}}`.
@@ -299,6 +299,18 @@ defmodule SSL do
   per handshake and returns identity options or `:undefined`. Selection order is
   `sni_hosts[name]`, `sni_fun.(name)`, then the default identity; with none the
   handshake fails with `unrecognized_name`. A failing `sni_fun` is `internal_error`.
+
+  `verify: :verify_peer` requests a client certificate validated against
+  `cacerts` (DER list) or `cacertfile` (PEM), with at most `depth` (default 10)
+  intermediate CAs and no hostname check; `fail_if_no_peer_cert: true` requires
+  one. The default `verify: :verify_none` sends no CertificateRequest; any
+  other `verify` value is `{:error, {:invalid_option, :verify}}`. Failures abort
+  the handshake with `certificate_required` (no certificate when required),
+  `unknown_ca` (untrusted chain or longer than `depth`), `certificate_expired`,
+  `bad_certificate`, `illegal_parameter` (CertificateVerify scheme not offered
+  or unfit for the key) or `decrypt_error` (bad CertificateVerify signature).
+  `peercert/1` then returns the client leaf and `connection_information/1`
+  reports `peer_authenticated: :client | false`.
   """
   @spec listen(:inet.port_number(), keyword()) :: {:ok, ListenSocket.t()} | {:error, term()}
   def listen(port, options) when is_integer(port) and port in 0..65_535 do
@@ -384,14 +396,6 @@ defmodule SSL do
     do: call(socket, {:shutdown, how})
 
   def shutdown(_, _), do: {:error, :badarg}
-
-  # Server-side client-certificate authentication is not wired into
-  # SSL.ServerConnection yet, so verify_peer is rejected rather than ignored.
-  defp server_options(options) when is_list(options) do
-    if Keyword.get(options, :verify, :verify_none) != :verify_none,
-      do: {:error, {:unsupported_option, :verify}},
-      else: ServerOptions.build(options)
-  end
 
   defp server_options(options), do: ServerOptions.build(options)
 

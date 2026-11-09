@@ -173,6 +173,35 @@ defmodule SSL.Protocol.ServerFlight do
   def encode_client_certificate_verify(_scheme, _signature),
     do: {:error, :invalid_client_certificate_verify}
 
+  @spec encode_certificate_request(binary(), [{non_neg_integer(), binary()}]) ::
+          {:ok, binary()} | {:error, term()}
+  def encode_certificate_request(context, extensions)
+      when is_binary(context) and byte_size(context) <= 255 and is_list(extensions) do
+    if Enum.all?(extensions, &valid_extension?/1) do
+      bytes =
+        IO.iodata_to_binary(
+          for {id, payload} <- extensions, do: [<<id::16, byte_size(payload)::16>>, payload]
+        )
+
+      if byte_size(bytes) <= 0xFFFF do
+        body = <<byte_size(context), context::binary, byte_size(bytes)::16, bytes::binary>>
+        {:ok, <<13, byte_size(body)::24, body::binary>>}
+      else
+        {:error, :invalid_certificate_request}
+      end
+    else
+      {:error, :invalid_certificate_request}
+    end
+  end
+
+  def encode_certificate_request(_context, _extensions),
+    do: {:error, :invalid_certificate_request}
+
+  defp valid_extension?({id, payload}),
+    do: is_integer(id) and id in 0..0xFFFF and is_binary(payload) and byte_size(payload) <= 0xFFFF
+
+  defp valid_extension?(_extension), do: false
+
   @spec encode_key_update(boolean()) :: {:ok, <<_::40>>}
   def encode_key_update(request_update) when is_boolean(request_update),
     do: {:ok, <<24, 1::24, if(request_update, do: 1, else: 0)>>}

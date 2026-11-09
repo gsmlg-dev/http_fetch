@@ -1,6 +1,9 @@
 defmodule SSL.ServerConnection do
   @moduledoc false
   # TCP TLS 1.3 server connection: :hello -> :client_finished -> :connected -> :closing.
+  # With client authentication the encrypted client flight passes through
+  # :client_certificate -> :client_certificate_verify before :client_finished;
+  # application data is accepted only in :connected.
   #
   # The process owns the carrier and answers the same call protocol as
   # SSL.Connection, so SSL.send/recv/setopts/close work on server sockets.
@@ -9,7 +12,7 @@ defmodule SSL.ServerConnection do
   # closed; the transport is already gone. No NewSessionTicket is issued.
   @behaviour :gen_statem
 
-  alias SSL.{Capabilities, IodataCursor, Options, ServerOptions, Socket, TCPOptions}
+  alias SSL.{Capabilities, Diagnostics, IodataCursor, Options, ServerOptions, Socket, TCPOptions}
   alias SSL.Crypto.{KeyExchange, KeySchedule, TrafficState}
 
   alias SSL.Protocol.{
@@ -23,6 +26,8 @@ defmodule SSL.ServerConnection do
   }
 
   @ccs <<20, 3, 3, 0, 1, 1>>
+  @client_flight [:client_certificate, :client_certificate_verify, :client_finished]
+  @handshaking [:hello | @client_flight]
   @max_fragment 16_384
   @max_plaintext 1_048_576
   @rearm_reserve 65_536
@@ -72,6 +77,7 @@ defmodule SSL.ServerConnection do
       :client_secret,
       :suite,
       :alpn,
+      :peercert,
       :handshake_from,
       :recv,
       :write_token,
@@ -347,12 +353,18 @@ defmodule SSL.ServerConnection do
       else: reply(from, {:error, :protocol_not_negotiated})
   end
 
-  defp connected_call(from, :peercert, _name, _data), do: reply(from, {:error, :no_peercert})
+  defp connected_call(from, :peercert, _name, %{peercert: nil}),
+    do: reply(from, {:error, :no_peercert})
+
+  defp connected_call(from, :peercert, _name, data), do: reply(from, {:ok, data.peercert})
 
   defp connected_call(from, {:connection_information, keys}, _name, data) do
     # Diagnostics reads only the negotiated TLS 1.3 suite from a client machine.
+    # The default key list of SSL.connection_information/1 also reports the peer.
     machine = %HandshakeMachine{server_hello: %{cipher_suite: data.suite}}
-    reply(from, SSL.Diagnostics.connection_information(machine, keys))
+    keys = if keys == Diagnostics.keys(), do: keys ++ [:peer_authenticated], else: keys
+    peer = %{peer_authenticated: if(data.peercert, do: :client, else: false)}
+    reply(from, Diagnostics.connection_information(machine, keys, peer))
   end
 
   defp connected_call(from, _request, _name, %{tcp: nil}), do: reply(from, {:error, :closed})
@@ -402,11 +414,11 @@ defmodule SSL.ServerConnection do
 
   # RFC 8446 §5: one middlebox-compatibility change_cipher_spec after the first ClientHello.
   defp record(name, @ccs, %{ccs_received: false, core: core} = data)
-       when name in [:hello, :client_finished] and not is_nil(core),
+       when name in @handshaking and not is_nil(core),
        do: {:ok, name, %{data | ccs_received: true}}
 
   defp record(name, <<21, 3, _minor, _length::16, payload::binary>>, data)
-       when name in [:hello, :client_finished],
+       when name in @handshaking,
        do: peer_alert(payload, data)
 
   defp record(:hello, <<22, 3, minor, _::16, payload::binary>>, data) when minor in 1..3 do
@@ -429,9 +441,9 @@ defmodule SSL.ServerConnection do
     end
   end
 
-  defp record(:client_finished, <<23, _::binary>> = record, data) do
+  defp record(name, <<23, _::binary>> = record, data) when name in @client_flight do
     case decrypt(data, record) do
-      {:ok, :handshake, bytes, read} -> client_finished(bytes, %{data | read: read})
+      {:ok, :handshake, bytes, read} -> client_flight(name, bytes, %{data | read: read})
       {:ok, :alert, payload, _read} -> peer_alert(payload, data)
       {:ok, type, _bytes, _read} -> unexpected({:unexpected_inner_content_type, type}, data)
       {:error, _reason, _data} = error -> error
@@ -477,31 +489,60 @@ defmodule SSL.ServerConnection do
     end
   end
 
-  defp client_finished(bytes, data) do
-    case HandshakeFramer.feed(data.framer, bytes) do
-      {:ok, [], framer} ->
-        {:ok, :client_finished, %{data | framer: framer}}
+  defp client_flight(name, bytes, data) do
+    limit = [max_handshake_length: data.config.limits[:max_handshake_length]]
 
-      {:ok, [<<20, _::binary>> = finished], framer} ->
-        if HandshakeFramer.buffered_size(framer) == 0,
-          do: verify_finished(finished, %{data | framer: framer}),
-          else: unexpected(:handshake_after_client_finished, data)
-
-      {:ok, _messages, _framer} ->
-        unexpected(:expected_client_finished, data)
-
-      {:error, reason} ->
-        {:error, {:alert, :decode_error, reason}, data}
+    case HandshakeFramer.feed(data.framer, bytes, limit) do
+      {:ok, messages, framer} -> client_messages(name, messages, %{data | framer: framer})
+      {:error, reason} -> {:error, {:alert, :decode_error, reason}, data}
     end
   end
+
+  # Each message advances the client flight one step; Finished must end it
+  # (RFC 8446 §5.1: no handshake bytes may follow it under the old key).
+  defp client_messages(name, [], data), do: {:ok, name, data}
+
+  defp client_messages(:client_finished, [<<20, _::binary>> = finished], data) do
+    if HandshakeFramer.buffered_size(data.framer) == 0,
+      do: verify_finished(finished, data),
+      else: unexpected(:handshake_after_client_finished, data)
+  end
+
+  defp client_messages(:client_finished, _messages, data),
+    do: unexpected(:expected_client_finished, data)
+
+  defp client_messages(name, [message | rest], data) do
+    result =
+      if name == :client_certificate,
+        do: ServerHandshake.accept_client_certificate(data.core, message),
+        else: ServerHandshake.accept_client_certificate_verify(data.core, message)
+
+    case result do
+      {:ok, core} -> client_messages(client_state(core), rest, %{data | core: core})
+      {:error, {alert, reason}} -> {:error, alert(alert, reason), data}
+    end
+  end
+
+  defp client_state(%{phase: :client_certificate}), do: :client_certificate
+  defp client_state(%{phase: :client_certificate_verify}), do: :client_certificate_verify
+  defp client_state(%{phase: :finished}), do: :client_finished
 
   defp verify_finished(finished, data) do
     with :ok <- ServerHandshake.finish(data.core, finished),
          {:ok, read} <- KeySchedule.traffic_state(data.read.cipher_suite, data.client_secret) do
       :gen_statem.reply(data.handshake_from, {:ok, data.socket})
 
-      {:ok, :connected, %{data | read: read, core: nil, client_secret: nil, handshake_from: nil},
-       [{{:timeout, :handshake}, :cancel}]}
+      peercert = if data.core.peer, do: data.core.peer.leaf_der
+
+      {:ok, :connected,
+       %{
+         data
+         | read: read,
+           core: nil,
+           client_secret: nil,
+           handshake_from: nil,
+           peercert: peercert
+       }, [{{:timeout, :handshake}, :cancel}]}
     else
       {:error, {alert, reason}} -> {:error, alert(alert, reason), data}
       {:error, reason} -> {:error, alert(:internal_error, reason), data}
@@ -563,7 +604,7 @@ defmodule SSL.ServerConnection do
          {:ok, write} <- KeySchedule.traffic_state(spec.name, core.application_secrets.server),
          {:ok, flight} <- protect(handshake_write, :handshake, IO.iodata_to_binary(messages)),
          :ok <- transmit(data, [plaintext(hello), compat_ccs(core, data), flight]) do
-      {:ok, :client_finished,
+      {:ok, client_state(core),
        %{
          data
          | core: %{

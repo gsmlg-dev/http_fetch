@@ -21,7 +21,8 @@ defmodule SSL.Diagnostics do
 
   defp validate_keys([], _seen), do: :ok
 
-  defp validate_keys([key | rest], seen) when key in [:session_id, :session_data | @keys] do
+  defp validate_keys([key | rest], seen)
+       when key in [:session_id, :session_data, :peer_authenticated | @keys] do
     if Map.has_key?(seen, key) do
       {:error, {:options, :duplicate_connection_information_key}}
     else
@@ -34,9 +35,13 @@ defmodule SSL.Diagnostics do
 
   defp validate_keys(_, _seen), do: {:error, {:options, :invalid_connection_information_keys}}
 
-  @spec connection_information(HandshakeMachine.t(), [atom()]) ::
+  @doc """
+  Reads `keys` from a negotiated machine. `extra` supplies role-specific values
+  such as a server's `:peer_authenticated`; a key with no value is unsupported.
+  """
+  @spec connection_information(HandshakeMachine.t(), [atom()], map()) ::
           {:ok, keyword()} | {:error, term()}
-  def connection_information(machine, keys) do
+  def connection_information(machine, keys, extra \\ %{}) do
     with {:ok, suite} <- suite(machine) do
       values = %{
         protocol: protocol(machine),
@@ -51,7 +56,11 @@ defmodule SSL.Diagnostics do
         session_data: <<>>
       }
 
-      {:ok, Enum.map(keys, &{&1, Map.fetch!(values, &1)})}
+      values = Map.merge(values, extra)
+
+      if Enum.all?(keys, &Map.has_key?(values, &1)),
+        do: {:ok, Enum.map(keys, &{&1, Map.fetch!(values, &1)})},
+        else: {:error, {:options, :unsupported_connection_information_key}}
     end
   end
 

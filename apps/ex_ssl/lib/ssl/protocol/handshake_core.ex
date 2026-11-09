@@ -787,25 +787,32 @@ defmodule SSL.Protocol.HandshakeCore do
     verifier = config.certificate_policy || (&PKIX.peer/6)
 
     case verifier.(chain, input.trust_source, input.identity, config.verify, options, :tls13) do
-      {:ok, verified_peer} ->
-        {:ok, verified_peer}
-
-      {:error, {:invalid_identity, _identity} = reason} ->
-        alert(:illegal_parameter, reason)
-
-      {:error, :hostname_mismatch = reason} ->
-        alert(:certificate_unknown, reason)
-
-      {:error, {:path_validation_failed, {:bad_cert, :cert_expired}} = reason} ->
-        alert(:certificate_expired, reason)
-
-      {:error, {:path_validation_failed, _path_reason} = reason} ->
-        alert(:unknown_ca, reason)
-
-      {:error, reason} ->
-        alert(:bad_certificate, reason)
+      {:ok, verified_peer} -> {:ok, verified_peer}
+      {:error, reason} -> certificate_alert(reason)
     end
   end
+
+  @doc false
+  # The RFC 8446 §6.2 alert for a peer certificate validation failure.
+  @spec certificate_alert(term()) ::
+          {:error,
+           {:bad_certificate
+            | :certificate_expired
+            | :certificate_unknown
+            | :illegal_parameter
+            | :unknown_ca, term()}}
+  def certificate_alert({:invalid_identity, _identity} = reason),
+    do: alert(:illegal_parameter, reason)
+
+  def certificate_alert(:hostname_mismatch = reason), do: alert(:certificate_unknown, reason)
+
+  def certificate_alert({:path_validation_failed, {:bad_cert, :cert_expired}} = reason),
+    do: alert(:certificate_expired, reason)
+
+  def certificate_alert({:path_validation_failed, _path_reason} = reason),
+    do: alert(:unknown_ca, reason)
+
+  def certificate_alert(reason), do: alert(:bad_certificate, reason)
 
   defp finish_incremental(state, server_transcript) do
     transcript_hash = Transcript.digest(server_transcript)

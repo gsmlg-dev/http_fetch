@@ -6,9 +6,15 @@ defmodule SSL.Protocol.ServerHandshake do
   must carry ext 57 and ALPN and an empty legacy session id, and
   EncryptedExtensions echoes the local transport parameters. With `nil` (TCP),
   ALPN is optional and a middlebox-compatibility session id is echoed.
+
+  A non-nil `config.client_auth` on a full TCP handshake requests a client
+  certificate (RFC 8446 §4.3.2). The phase then advances
+  `:client_certificate -> :client_certificate_verify -> :finished`, and only
+  `:finished` admits the client Finished.
   """
   alias SSL.Capabilities
   alias SSL.Crypto.{Finished, KeySchedule, Signature}
+  alias SSL.PKIX
   alias SSL.PKIX.CertificateSignaturePolicy
   alias SSL.Protocol.{ClientOffer, HandshakeCore, ServerFlight, Transcript}
 
@@ -30,6 +36,9 @@ defmodule SSL.Protocol.ServerHandshake do
       :first_offer,
       :application_secrets,
       :session,
+      :client_auth,
+      :client_schemes,
+      :peer,
       early_data: false
     ]
 
@@ -132,9 +141,18 @@ defmodule SSL.Protocol.ServerHandshake do
       )
 
     psk = if state.session, do: state.session.psk
+    # QUIC servers do not authenticate clients (SSL.QUIC reports server_mtls: false).
+    client_auth =
+      if state.session || config.transport_parameters,
+        do: nil,
+        else: Map.get(config, :client_auth)
+
+    client_schemes = if client_auth, do: client_schemes()
 
     with {:ok, secrets} <- HandshakeCore.derive_secrets(pair, public, spec.name, transcript, psk),
          transcript = Transcript.append(transcript, ee),
+         {:ok, request} <- certificate_request(client_auth, client_schemes),
+         transcript = Enum.reduce(request, transcript, &Transcript.append(&2, &1)),
          {:ok, transcript, authentication} <- authentication(state, config, spec, transcript),
          {:ok, verify_data} <-
            Finished.client_verify_data(
@@ -159,14 +177,55 @@ defmodule SSL.Protocol.ServerHandshake do
       # Only the client handshake secret is needed after exporting the other epochs.
       next = %{
         state
-        | phase: :finished,
+        | phase: if(client_auth, do: :client_certificate, else: :finished),
+          client_auth: client_auth,
+          client_schemes: client_schemes,
           transcript: transcript,
           secrets: secrets,
           application_secrets: %{client: client_application, server: server_application}
       }
 
-      {:ok, next, hello, [ee] ++ authentication ++ [finished]}
+      {:ok, next, hello, [ee] ++ request ++ authentication ++ [finished]}
     end
+  end
+
+  # The CertificateRequest advertises every locally verifiable TLS 1.3 scheme,
+  # independent of the server identity; certificate_authorities only when small.
+  defp client_schemes,
+    do:
+      :signature_algorithm
+      |> Capabilities.identifiers()
+      |> Enum.filter(&Capabilities.tls13_signature_scheme?/1)
+
+  defp certificate_request(nil, _schemes), do: {:ok, []}
+
+  defp certificate_request(client_auth, schemes) do
+    algorithms = for scheme <- schemes, into: <<>>, do: <<scheme::16>>
+
+    extensions =
+      [{13, <<byte_size(algorithms)::16, algorithms::binary>>}] ++
+        authorities_extension(client_auth.trust)
+
+    with {:ok, request} <- ServerFlight.encode_certificate_request(<<>>, extensions),
+         do: {:ok, [request]}
+  end
+
+  @max_authorities 64
+  @max_authorities_bytes 16_384
+
+  defp authorities_extension(trust) when length(trust) > @max_authorities, do: []
+
+  defp authorities_extension(trust) do
+    names =
+      for %{der: der} <- trust, into: <<>> do
+        {:Certificate, tbs, _, _} = :public_key.pkix_decode_cert(der, :plain)
+        name = :public_key.der_encode(:Name, elem(tbs, 6))
+        <<byte_size(name)::16, name::binary>>
+      end
+
+    if byte_size(names) <= @max_authorities_bytes,
+      do: [{47, <<byte_size(names)::16, names::binary>>}],
+      else: []
   end
 
   defp alpn_extension(nil), do: []
@@ -196,7 +255,125 @@ defmodule SSL.Protocol.ServerHandshake do
     end
   end
 
+  @doc """
+  Accepts the client Certificate answering a CertificateRequest.
+
+  An empty list is `certificate_required` when the certificate is required and
+  otherwise skips CertificateVerify. A non-empty chain is validated against the
+  configured trust anchors and `depth`, with no service identity check.
+  """
+  @spec accept_client_certificate(State.t(), binary()) :: {:ok, State.t()} | {:error, term()}
+  def accept_client_certificate(%State{phase: :client_certificate} = state, encoded) do
+    {:ok, empty} = ServerFlight.encode_empty_certificate(<<>>)
+
+    cond do
+      encoded != empty ->
+        verify_client_certificate(state, encoded)
+
+      state.client_auth.require ->
+        {:error, {:certificate_required, :empty_client_certificate}}
+
+      true ->
+        {:ok,
+         %{state | phase: :finished, transcript: Transcript.append(state.transcript, encoded)}}
+    end
+  end
+
+  def accept_client_certificate(_state, _encoded),
+    do: {:error, {:unexpected_message, :unexpected_client_certificate}}
+
+  defp verify_client_certificate(state, encoded) do
+    with {:ok, %ServerFlight.Certificate{entries: entries}} <-
+           decode(encoded, ServerFlight.Certificate, hash: state.secrets.hash),
+         :ok <- no_entry_extensions(entries),
+         {:ok, peer} <- client_peer(Enum.map(entries, & &1.der), state.client_auth) do
+      {:ok,
+       %{
+         state
+         | phase: :client_certificate_verify,
+           peer: peer,
+           transcript: Transcript.append(state.transcript, encoded)
+       }}
+    end
+  end
+
+  # No CertificateRequest extension solicits per-entry client extensions.
+  defp no_entry_extensions(entries) do
+    if Enum.all?(entries, &(&1.extensions == [])),
+      do: :ok,
+      else: {:error, {:unsupported_extension, :unsolicited_certificate_extension}}
+  end
+
+  defp client_peer(chain, client_auth) do
+    case PKIX.client_peer(chain, client_auth.trust, depth: client_auth.depth) do
+      {:ok, peer} -> {:ok, peer}
+      {:error, reason} -> HandshakeCore.certificate_alert(reason)
+    end
+  end
+
+  @doc """
+  Accepts the client CertificateVerify over the transcript through the client
+  Certificate. Its scheme must be one the CertificateRequest offered.
+  """
+  @spec accept_client_certificate_verify(State.t(), binary()) ::
+          {:ok, State.t()} | {:error, term()}
+  def accept_client_certificate_verify(%State{phase: :client_certificate_verify} = state, encoded) do
+    options = [hash: state.secrets.hash, allowed_signature_schemes: state.client_schemes]
+
+    with {:ok, %ServerFlight.CertificateVerify{} = verify} <-
+           decode(encoded, ServerFlight.CertificateVerify, options),
+         :ok <- verify_client_signature(state, verify) do
+      {:ok, %{state | phase: :finished, transcript: Transcript.append(state.transcript, encoded)}}
+    end
+  end
+
+  def accept_client_certificate_verify(_state, _encoded),
+    do: {:error, {:unexpected_message, :unexpected_client_certificate_verify}}
+
+  defp verify_client_signature(state, verify) do
+    case Signature.verify_client(
+           verify.signature_scheme,
+           state.peer.public_key,
+           state.transcript.hash,
+           Transcript.digest(state.transcript),
+           verify.signature
+         ) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {signature_alert(reason), reason}}
+    end
+  end
+
+  # A scheme that does not fit the client certificate key is illegal_parameter;
+  # a signature that does not verify is decrypt_error (RFC 8446 §4.4.3).
+  defp signature_alert({:key_type_mismatch, _}), do: :illegal_parameter
+  defp signature_alert({:unsupported_ec_curve, _}), do: :illegal_parameter
+  defp signature_alert(:invalid_public_key), do: :illegal_parameter
+  defp signature_alert(:invalid_rsa_pss_parameters), do: :illegal_parameter
+  defp signature_alert(_reason), do: :decrypt_error
+
+  defp decode(encoded, module, options) do
+    case ServerFlight.decode(encoded, options) do
+      {:ok, %{__struct__: ^module} = message, <<>>} ->
+        {:ok, message}
+
+      {:ok, _message, <<>>} ->
+        {:error, {:unexpected_message, {:expected, module}}}
+
+      {:error, {:unsupported_signature_scheme, scheme}} ->
+        {:error, {:illegal_parameter, {:signature_scheme_not_offered, scheme}}}
+
+      {:error, reason} ->
+        HandshakeCore.decode_alert(reason)
+
+      _ ->
+        {:error, {:decode_error, :malformed_handshake_message}}
+    end
+  end
+
   @spec finish(State.t(), binary()) :: :ok | {:error, term()}
+  def finish(%State{phase: phase}, _encoded) when phase != :finished,
+    do: {:error, {:unexpected_message, :expected_client_authentication}}
+
   def finish(state, encoded) do
     with {:ok, %ServerFlight.Finished{verify_data: verify_data}, <<>>} <-
            ServerFlight.decode(encoded, hash: state.secrets.hash),

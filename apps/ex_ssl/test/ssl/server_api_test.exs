@@ -18,8 +18,11 @@ defmodule SSL.ServerAPITest do
   test "listen validates options before opening a port" do
     ports = owned_ports()
 
+    assert SSL.listen(0, verify: :bogus, certfile: @cert, keyfile: @key) ==
+             {:error, {:invalid_option, :verify}}
+
     assert SSL.listen(0, verify: :verify_peer, certfile: @cert, keyfile: @key) ==
-             {:error, {:unsupported_option, :verify}}
+             {:error, {:invalid_option, :cacerts}}
 
     assert SSL.listen(0, certfile: @cert, keyfile: @key, versions: [:"tlsv1.2"]) ==
              {:error, {:unsupported_option, :versions}}
@@ -184,8 +187,11 @@ defmodule SSL.ServerAPITest do
     {:ok, raw} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
     {:ok, tcp} = :gen_tcp.accept(tcp_listen, 5000)
 
+    assert SSL.handshake(tcp, [certfile: @cert, keyfile: @key, verify: :bogus], 100) ==
+             {:error, {:invalid_option, :verify}}
+
     assert SSL.handshake(tcp, [certfile: @cert, keyfile: @key, verify: :verify_peer], 100) ==
-             {:error, {:unsupported_option, :verify}}
+             {:error, {:invalid_option, :cacerts}}
 
     assert :erlang.port_info(tcp, :connected) == {:connected, self()}
     :gen_tcp.close(raw)
