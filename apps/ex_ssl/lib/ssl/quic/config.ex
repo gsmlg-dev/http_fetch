@@ -160,6 +160,7 @@ defmodule SSL.QUIC.Config do
     }
   end
 
+  @doc false
   def algorithms(opts, key, kind, defaults) do
     values = Keyword.get(opts, key, defaults)
 
@@ -172,6 +173,7 @@ defmodule SSL.QUIC.Config do
     end
   end
 
+  @doc false
   def ids(kind), do: Capabilities.identifiers(kind) |> Enum.filter(&is_integer/1)
   defp identity_limits(nil, _), do: :ok
 
@@ -228,6 +230,7 @@ defmodule SSL.QUIC.Config do
 
   defp valid_ip_reference?(_), do: false
 
+  @doc false
   def limits(opts) when is_list(opts) do
     if Keyword.keyword?(opts) and Keyword.keys(opts) == Enum.uniq(Keyword.keys(opts)) and
          Enum.all?(opts, fn {key, value} ->

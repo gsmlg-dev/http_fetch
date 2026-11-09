@@ -48,6 +48,10 @@ defmodule SSL.ServerOptionsTest do
       assert {:error, {:unsupported_option, ^k}} = ServerOptions.build([{k, v} | base()])
     end
 
+    for {k, v} <- [honor_cipher_order: true, log_level: :debug, signature_algs: [], eccs: []] do
+      assert {:error, {:unsupported_option, ^k}} = ServerOptions.build([{k, v} | base()])
+    end
+
     assert {:ok, _} =
              ServerOptions.build([session_tickets: :disabled, reuse_sessions: false] ++ base())
   end
