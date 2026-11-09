@@ -121,6 +121,181 @@ defmodule SSL.ServerConnectionTest do
     SSL.close(s)
   end
 
+  # RFC 8446 §4.2.10: a server that rejects early data skips the 0-RTT records it
+  # cannot decrypt and completes a full handshake.
+  test "client 0-RTT with an unknown PSK is skipped and the full handshake completes", ctx do
+    ticket = otp_early_data_ticket()
+    early = :binary.copy("0", 4096)
+
+    client =
+      client(
+        ctx.port,
+        [session_tickets: :manual, use_ticket: [ticket], early_data: early],
+        fn c ->
+          :ok = :ssl.send(c, "after-early-data")
+          :ssl.recv(c, 0, 2000)
+        end
+      )
+
+    {:ok, s} = accept(ctx, [])
+    assert SSL.recv(s, 0, 1000) == {:ok, "after-early-data"}
+    assert :ok = SSL.send(s, "full")
+    assert finish(client) == {:ok, "full"}
+    SSL.close(s)
+  end
+
+  # OTP's client cannot complete 0-RTT across a HelloRetryRequest, so its first
+  # flight (ClientHello offering early_data, then 0-RTT records) is replayed raw.
+  test "0-RTT offered before a HelloRetryRequest is skipped", ctx do
+    ticket = otp_early_data_ticket()
+
+    flight =
+      captured_first_flight(
+        supported_groups: [:secp256r1, :x25519],
+        session_tickets: :manual,
+        use_ticket: [ticket],
+        early_data: "early"
+      )
+
+    {:ok, raw} = :gen_tcp.connect({127, 0, 0, 1}, ctx.port, [:binary, active: false])
+    :ok = :gen_tcp.send(raw, flight)
+    test = self()
+    server = spawn_link(fn -> send(test, {:accepted, accept(ctx, [])}) end)
+
+    assert {:ok, <<22, 3, 3, _::16, 2, _::24, 3, 3, random::binary-32, _::binary>>} =
+             :gen_tcp.recv(raw, 0, 2000)
+
+    assert random == @hrr_random
+    # The skipped early data draws no alert; the server waits for a second hello.
+    assert {:error, :timeout} = :gen_tcp.recv(raw, 0, 200)
+    :ok = :gen_tcp.close(raw)
+    assert_receive {:accepted, {:error, :closed}}, 2000
+    refute Process.alive?(server)
+  end
+
+  test "an undecryptable record without an early_data offer is bad_record_mac", ctx do
+    proxy = proxy(ctx.port, bogus_record(64))
+    failing_client(proxy.port, [])
+    assert {:error, {:tls_alert, {:bad_record_mac, _}}} = accept(ctx, [])
+  end
+
+  test "rejected early data beyond the skip budget is bad_record_mac", ctx do
+    ticket = otp_early_data_ticket()
+    # One maximal skipped record plus the client's own early data exceeds 16 KiB.
+    proxy = proxy(ctx.port, bogus_record(16_384 + 17))
+
+    failing_client(proxy.port,
+      session_tickets: :manual,
+      use_ticket: [ticket],
+      early_data: "early"
+    )
+
+    assert {:error, {:tls_alert, {:bad_record_mac, _}}} = accept(ctx, [])
+  end
+
+  # A fast sender must be throttled by the server's buffer, never fail it.
+  test "a slow reader backpressures a large upload without enobufs", ctx do
+    payload = :crypto.strong_rand_bytes(8 * 1_048_576)
+
+    client =
+      client(ctx.port, [], fn c ->
+        :ok = :ssl.send(c, payload)
+        :ok
+      end)
+
+    {:ok, tcp} = :gen_tcp.accept(ctx.listen, 5000)
+    # Large carrier reads make one TCP delivery overshoot the rearm reserve.
+    :ok = :inet.setopts(tcp, buffer: 1_048_576, recbuf: 1_048_576)
+    {:ok, s} = ServerConnection.start(tcp, config([]), self())
+    {:ok, s} = ServerConnection.handshake(s, 5000)
+    # Let the client run ahead so the server buffer reaches its cap.
+    Process.sleep(300)
+    received = slow_read(s, byte_size(payload), 0, [])
+    assert byte_size(received) == byte_size(payload)
+    assert received == payload
+    assert finish(client) == :ok
+    SSL.close(s)
+  end
+
+  defp slow_read(_s, remaining, _count, acc) when remaining <= 0,
+    do: IO.iodata_to_binary(Enum.reverse(acc))
+
+  defp slow_read(s, remaining, count, acc) do
+    if rem(count, 256) == 0, do: Process.sleep(20)
+    # Mix small reads with one near-cap read that must wait on the full buffer.
+    length = if count == 512, do: min(remaining, 1_000_000), else: min(remaining, 4096)
+    {:ok, bytes} = SSL.recv(s, length, 5000)
+    slow_read(s, remaining - byte_size(bytes), count + 1, [bytes | acc])
+  end
+
+  # The first client flight up to and including its first 0-RTT record.
+  defp captured_first_flight(extra) do
+    {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(listen)
+    Task.start(fn -> :ssl.connect({127, 0, 0, 1}, port, client_options(extra), 2000) end)
+    {:ok, tcp} = :gen_tcp.accept(listen, 5000)
+    flight = capture(tcp, <<>>)
+    :gen_tcp.close(tcp)
+    :gen_tcp.close(listen)
+    flight
+  end
+
+  defp capture(tcp, bytes) do
+    if early_record?(bytes) do
+      bytes
+    else
+      {:ok, more} = :gen_tcp.recv(tcp, 0, 2000)
+      capture(tcp, bytes <> more)
+    end
+  end
+
+  defp early_record?(<<23, 3, 3, length::16, _::binary-size(length), _::binary>>), do: true
+
+  defp early_record?(<<_type, 3, _, length::16, _::binary-size(length), rest::binary>>),
+    do: early_record?(rest)
+
+  defp early_record?(_bytes), do: false
+
+  defp bogus_record(length),
+    do: <<23, 3, 3, length::16, :crypto.strong_rand_bytes(length)::binary>>
+
+  # A resumption ticket that permits early data, issued by an OTP :ssl server.
+  defp otp_early_data_ticket do
+    {:ok, listen} =
+      :ssl.listen(0, [
+        :binary,
+        active: false,
+        versions: [:"tlsv1.3"],
+        certfile: @cert,
+        keyfile: @key,
+        session_tickets: :stateless,
+        early_data: :enabled,
+        log_level: :none
+      ])
+
+    {:ok, {_, port}} = :ssl.sockname(listen)
+
+    server =
+      Task.async(fn ->
+        {:ok, t} = :ssl.transport_accept(listen, 5000)
+        {:ok, s} = :ssl.handshake(t, 5000)
+        :ok = :ssl.send(s, "t")
+        {:ok, _} = :ssl.recv(s, 0, 5000)
+        :ssl.close(s)
+      end)
+
+    {:ok, c} =
+      :ssl.connect({127, 0, 0, 1}, port, client_options(session_tickets: :manual), 5000)
+
+    {:ok, "t"} = :ssl.recv(c, 0, 5000)
+    ticket = receive do: ({:ssl, :session_ticket, ticket} -> ticket), after: (5000 -> flunk())
+    :ok = :ssl.send(c, "done")
+    Task.await(server)
+    :ssl.close(c)
+    :ssl.close(listen)
+    ticket
+  end
+
   defp config(extra) do
     {:ok, config} = ServerOptions.build([certfile: @cert, keyfile: @key] ++ extra)
     config
@@ -162,8 +337,9 @@ defmodule SSL.ServerConnectionTest do
     Task.await(task)
   end
 
-  # A byte-transparent relay that reports the first server-to-client bytes.
-  defp proxy(server_port) do
+  # A relay that reports the first server-to-client bytes and appends `inject`
+  # to the first client-to-server chunk (the ClientHello).
+  defp proxy(server_port, inject \\ <<>>) do
     test = self()
     {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     {:ok, port} = :inet.port(listen)
@@ -173,7 +349,7 @@ defmodule SSL.ServerConnectionTest do
         {:ok, front} = :gen_tcp.accept(listen, 5000)
         {:ok, back} = :gen_tcp.connect({127, 0, 0, 1}, server_port, [:binary, active: true])
         :ok = :inet.setopts(front, active: true)
-        relay(test, front, back, <<>>)
+        relay(test, front, back, <<>>, inject)
       end)
 
     on_exit(fn -> :gen_tcp.close(listen) end)
@@ -181,16 +357,16 @@ defmodule SSL.ServerConnectionTest do
   end
 
   # Reports the first 43 server bytes: record header, handshake header and random.
-  defp relay(test, front, back, seen) do
+  defp relay(test, front, back, seen, inject) do
     receive do
       {:tcp, ^front, bytes} ->
-        :ok = :gen_tcp.send(back, bytes)
-        relay(test, front, back, seen)
+        _ = :gen_tcp.send(back, [bytes, inject])
+        relay(test, front, back, seen, <<>>)
 
       {:tcp, ^back, bytes} ->
         seen = report(test, seen, bytes)
-        :ok = :gen_tcp.send(front, bytes)
-        relay(test, front, back, seen)
+        _ = :gen_tcp.send(front, bytes)
+        relay(test, front, back, seen, inject)
 
       {:tcp_closed, _} ->
         :gen_tcp.close(front)

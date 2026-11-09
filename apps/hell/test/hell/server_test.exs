@@ -649,7 +649,9 @@ defmodule Hell.ServerTest do
     end
 
     test "ssl rejects TLS 1.2 versions option" do
-      assert {:error, reason} =
+      assert {:error,
+              {{:shutdown, {:failed_to_start_child, :listener, {:unsupported_option, :versions}}},
+               _child}} =
                start_supervised(
                  {Hell,
                   port: 0,
@@ -661,8 +663,37 @@ defmodule Hell.ServerTest do
                     versions: [:"tlsv1.2"]
                   ]}
                )
+    end
 
-      assert inspect(reason) =~ "{:unsupported_option, :versions}"
+    @tag capture_log: true
+    test "ssl refuses a TLS 1.2-only client with protocol_version and keeps serving" do
+      {:ok, server_pid, port} =
+        start_handler(Echo,
+          transport_module: Hell.Transports.SSL,
+          transport_options: [
+            certfile: Path.join(__DIR__, "../support/cert.pem"),
+            keyfile: Path.join(__DIR__, "../support/key.pem")
+          ]
+        )
+
+      client_options = [
+        mode: :binary,
+        active: false,
+        verify: :verify_none,
+        log_level: :none
+      ]
+
+      assert {:error, {:tls_alert, {:protocol_version, _}}} =
+               :ssl.connect(~c"localhost", port, [versions: [:"tlsv1.2"]] ++ client_options)
+
+      assert Process.alive?(server_pid)
+
+      {:ok, client} =
+        :ssl.connect(~c"localhost", port, [versions: [:"tlsv1.3"]] ++ client_options)
+
+      :ok = :ssl.send(client, "HI")
+      assert {:ok, "HI"} = :ssl.recv(client, 0, 1_000)
+      :ssl.close(client)
     end
 
     test "no :hell BEAM imports OTP ssl/tls/dtls modules" do

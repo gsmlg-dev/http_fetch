@@ -284,7 +284,11 @@ Scope:
   `{:error, {:invalid_option, :verify}}`. `SSL.QUIC` servers do not request
   client certificates.
 - No session tickets or resumption: the server sends no NewSessionTicket, and a
-  client offering a PSK gets a full handshake. 0-RTT is not accepted.
+  client offering a PSK gets a full handshake. 0-RTT is not accepted: when the
+  ClientHello offers `early_data`, up to 16 KiB of early-data records are
+  skipped (RFC 8446 §4.2.10) and the client must resend after the handshake.
+- Receive backpressure: while about 1 MiB of plaintext is buffered unread, the
+  server stops reading its carrier until the application drains it.
 - Server carriers default to `send_timeout: 30_000, send_timeout_close: true`
   unless the caller sets either key, because server writes are synchronous
   carrier sends. This differs from OTP's infinite default.

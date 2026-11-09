@@ -314,7 +314,9 @@ Boundaries:
   no CertificateRequest; any other `verify` value is
   `{:error, {:invalid_option, :verify}}`. `SSL.QUIC` servers do not request
   client certificates.
-- No server session tickets, resumption or 0-RTT.
+- No server session tickets, resumption or 0-RTT; offered early data is
+  skipped (up to 16 KiB) and the handshake completes in full.
+- A full receive buffer (about 1 MiB) pauses carrier reads instead of failing.
 - Server carriers default to `send_timeout: 30_000, send_timeout_close: true`
   unless the caller sets either key.
 

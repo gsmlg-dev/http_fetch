@@ -31,6 +31,11 @@ defmodule SSL.ServerConnection do
   @max_fragment 16_384
   @max_plaintext 1_048_576
   @rearm_reserve 65_536
+  # Rejected 0-RTT bytes a server skips (RFC 8446 §4.2.10); no ticket is ever
+  # issued, so this bounds what a client may send under a foreign PSK.
+  @max_early_data 16_384
+  # AEAD tag plus the inner content type: the smallest per-record overhead.
+  @record_overhead 17
   @alerts %{
     close_notify: 0,
     unexpected_message: 10,
@@ -91,6 +96,7 @@ defmodule SSL.ServerConnection do
       started: false,
       ccs_received: false,
       ccs_sent: false,
+      early_data: 0,
       closed: false,
       write_closed: false
     ]
@@ -451,12 +457,16 @@ defmodule SSL.ServerConnection do
     end
   end
 
+  # RFC 8446 §4.2.10: after a HelloRetryRequest, early data offered in the first
+  # ClientHello is skipped by its outer application_data type.
+  defp record(:hello, <<23, _::binary>> = record, %{core: %{phase: :retry}} = data),
+    do: skip_early_data(:hello, record, data)
+
   defp record(name, <<23, _::binary>> = record, data) when name in @client_flight do
-    case decrypt(data, record) do
-      {:ok, :handshake, bytes, read} -> client_flight(name, bytes, %{data | read: read})
-      {:ok, :alert, payload, _read} -> peer_alert(payload, data)
-      {:ok, type, _bytes, _read} -> unexpected({:unexpected_inner_content_type, type}, data)
-      {:error, _reason, _data} = error -> error
+    case Record.decrypt(data.read, record) do
+      {:error, :authentication_failed} -> skip_early_data(name, record, data)
+      {:error, reason} -> {:error, record_alert(reason), data}
+      {:ok, type, bytes, read} -> client_record(name, type, bytes, %{data | early_data: 0}, read)
     end
   end
 
@@ -485,6 +495,25 @@ defmodule SSL.ServerConnection do
   # Records after a peer close_notify are discarded.
   defp record(:closing, _record, data), do: {:ok, :closing, data}
   defp record(_name, _record, data), do: unexpected(:unexpected_record, data)
+
+  defp client_record(name, :handshake, bytes, data, read),
+    do: client_flight(name, bytes, %{data | read: read})
+
+  defp client_record(_name, :alert, payload, data, _read), do: peer_alert(payload, data)
+
+  defp client_record(_name, type, _bytes, data, _read),
+    do: unexpected({:unexpected_inner_content_type, type}, data)
+
+  # Rejected early data is skipped only while the client offered it, no record
+  # has yet decrypted under the handshake key, and the budget allows it.
+  defp skip_early_data(name, <<_type, _version::16, length::16, _::binary>>, data)
+       when data.early_data > 0 and length - @record_overhead <= data.early_data,
+       do: {:ok, name, %{data | early_data: data.early_data - max(length - @record_overhead, 0)}}
+
+  defp skip_early_data(:hello, _record, data), do: unexpected(:unexpected_record, data)
+
+  defp skip_early_data(_name, _record, data),
+    do: {:error, record_alert(:authentication_failed), data}
 
   # RFC 8446 §6: an alert is exactly a level and a description byte.
   defp peer_alert(<<_level, description>>, data), do: {:error, {:peer_alert, description}, data}
@@ -588,10 +617,10 @@ defmodule SSL.ServerConnection do
         bytes = [plaintext(retry), compat_ccs(core, data)]
 
         with :ok <- transmit(data, bytes),
-             do: {:ok, :hello, %{data | core: core, ccs_sent: true}}
+             do: {:ok, :hello, %{data | core: core, ccs_sent: true, early_data: early_data(core)}}
 
       {:ok, core} ->
-        server_flight(core, data)
+        server_flight(core, %{data | early_data: early_data(core)})
 
       {:error, {alert, reason}} ->
         {:error, alert(alert, reason), data}
@@ -637,6 +666,9 @@ defmodule SSL.ServerConnection do
     end
   end
 
+  # The server accepts no PSK, so an early_data offer is always rejected.
+  defp early_data(core), do: if(42 in core.offer.extension_ids, do: @max_early_data, else: 0)
+
   defp compat_ccs(%{offer: %{legacy_session_id: id}}, %{ccs_sent: false}) when id != <<>>,
     do: @ccs
 
@@ -680,13 +712,13 @@ defmodule SSL.ServerConnection do
     end
   end
 
-  defp buffer(data, bytes) do
-    if data.size + byte_size(bytes) <= @max_plaintext,
-      do:
-        {:ok, :connected,
-         %{data | buffer: :queue.in(bytes, data.buffer), size: data.size + byte_size(bytes)}},
-      else: {:error, :enobufs, data}
-  end
+  # Backpressure lives in arm?/2: the carrier is read only while the buffer is
+  # below the cap (or a pending recv still needs bytes), so one carrier delivery
+  # may overshoot it and memory stays bounded by the cap plus one carrier read.
+  defp buffer(data, bytes),
+    do:
+      {:ok, :connected,
+       %{data | buffer: :queue.in(bytes, data.buffer), size: data.size + byte_size(bytes)}}
 
   ## Delivery
 

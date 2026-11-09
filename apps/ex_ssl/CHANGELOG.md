@@ -8,6 +8,15 @@
   `SSL.ServerOptions` (identity, ALPN, SNI, mTLS). It has no session tickets or
   TLS 1.2. See the server section of `README.md` and
   `docs/ex-ssl-consumer-contract.md`.
+- Server receive backpressure: a full plaintext buffer stops carrier reads
+  until the application drains it, so a fast client never gets `:enobufs`.
+- Server skips rejected 0-RTT records (RFC 8446 §4.2.10, up to 16 KiB) when the
+  ClientHello offered `early_data`, including across a HelloRetryRequest, and
+  completes a full handshake instead of failing with `bad_record_mac`.
+- Server options reject every remaining OTP 28 `:ssl`-only key
+  (`allow_any_ca_purpose`, `client_preferred_next_protocols`, `erl_dist`, `ktls`,
+  `next_protocol_selector`, `psk_groups`, `ssl_imp`, `stapling`, `use_srtp`)
+  with `{:error, {:unsupported_option, key}}` instead of passing it to `:gen_tcp`.
 
 ## [0.7.2] - 2026-09-28
 

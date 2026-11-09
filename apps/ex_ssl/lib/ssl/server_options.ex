@@ -90,7 +90,17 @@ defmodule SSL.ServerOptions do
     :cookie,
     :log_alert,
     :reuse_session,
-    :key_update_at
+    :key_update_at,
+    # Remaining OTP 28 ssl_config:ssl_options/0 and split_options/2 keys.
+    :allow_any_ca_purpose,
+    :client_preferred_next_protocols,
+    :erl_dist,
+    :ktls,
+    :next_protocol_selector,
+    :psk_groups,
+    :ssl_imp,
+    :stapling,
+    :use_srtp
   ]
 
   @tls_keys @own_keys ++ [:session_tickets, :reuse_sessions]

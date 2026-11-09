@@ -65,6 +65,48 @@ defmodule SSL.ServerOptionsTest do
              ServerOptions.build([session_tickets: :disabled, reuse_sessions: false] ++ base())
   end
 
+  # OTP 28 ssl_config:ssl_options/0 plus the keys split_options/2 also strips.
+  @otp_ssl_options ~w(
+    alpn_advertised_protocols alpn_preferred_protocols anti_replay beast_mitigation
+    cacertfile cacerts cert certs_keys certfile certificate_authorities ciphers
+    client_renegotiation cookie crl_cache crl_check customize_hostname_check depth
+    dh dhfile early_data eccs erl_dist fail_if_no_peer_cert fallback handshake
+    hibernate_after honor_cipher_order honor_ecc_order keep_secrets key keyfile
+    key_update_at ktls log_level max_handshake_size middlebox_comp_mode
+    max_fragment_length next_protocol_selector next_protocols_advertised stapling
+    padding_check partial_chain password protocol psk_groups psk_identity
+    receiver_spawn_opts renegotiate_at reuse_session reuse_sessions
+    secure_renegotiate sender_spawn_opts server_name_indication session_tickets
+    stateless_tickets_seed signature_algs signature_algs_cert sni_fun sni_hosts
+    srp_identity supported_groups use_ticket use_srtp user_lookup_fun verify
+    verify_fun cert_policy_opts allow_any_ca_purpose versions
+    cb_info client_preferred_next_protocols ssl_imp
+  )a
+  # Keys the server implements; session_tickets/reuse_sessions only when disabled.
+  @supported ~w(
+    alpn_preferred_protocols cacertfile cacerts cert certs_keys certfile ciphers depth
+    fail_if_no_peer_cert key keyfile password reuse_sessions session_tickets
+    sni_fun sni_hosts verify versions
+  )a
+
+  test "every OTP :ssl-only option is rejected instead of reaching :gen_tcp" do
+    for key <- @otp_ssl_options -- @supported do
+      assert {:error, {:unsupported_option, ^key}} =
+               ServerOptions.build([{key, :x} | base()]),
+             "#{key} was not rejected"
+    end
+  end
+
+  test "the OTP option table matches the installed :ssl when its source is present" do
+    path = Path.join(:code.lib_dir(:ssl), "src/ssl_config.erl")
+
+    with {:ok, source} <- File.read(path),
+         [_, body] <- Regex.run(~r/^ssl_options\(\) ->\s*\[(.*?)\]\./ms, source) do
+      installed = body |> String.split(~r/[\s,]+/, trim: true) |> Enum.map(&String.to_atom/1)
+      assert installed -- @otp_ssl_options == []
+    end
+  end
+
   test "client authentication" do
     assert {:ok, %{client_auth: %{require: false, depth: 10, trust: [_ | _]}}} =
              ServerOptions.build(base() ++ [verify: :verify_peer, cacertfile: @ca])
