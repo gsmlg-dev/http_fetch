@@ -79,11 +79,11 @@ class SelectionTest(unittest.TestCase):
             "ex_ssl": ALL[:-1],
             "elixir_quic": ALL[1:-1],
             "http_core": ALL[2:-2],
-            "http_pool": ["http_pool", "http_runtime", "http_fetch", "http_test", "http_web_socket", "http_event_source"],
+            "http_pool": ["http_pool", "http_runtime", "http_fetch", "http_test", "http_web_socket", "http_event_source", "http_web_transport"],
             "http_fetch": ["http_fetch", "http_test"],
             "http_test": ["http_test"],
-            "http_runtime": ["http_runtime", "http_fetch", "http_test", "http_web_socket", "http_event_source"],
-            "elixir_quic_http3": ["http_runtime", "elixir_quic_http3", "http_fetch", "http_test", "http_web_socket", "http_event_source"],
+            "http_runtime": ["http_runtime", "http_fetch", "http_test", "http_web_socket", "http_event_source", "http_web_transport"],
+            "elixir_quic_http3": ["http_runtime", "elixir_quic_http3", "http_fetch", "http_test", "http_web_socket", "http_event_source", "http_web_transport"],
         }
         for owner, expected in affected.items():
             paths = [f"apps/{owner}/lib/module.ex"]

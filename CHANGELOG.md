@@ -44,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Not validated: independent WebTransport acceptance (no draft-17 peer with
   reliable reset exists), HTTP-level independent migration, and the Caddy
   Alt-Svc variant. Global QUIC capability flags remain false.
+- Remote Test, E2E, Server packages and public HTTP/3 acceptance passed. This RC
+  is published with these CI failures explicitly accepted, all unchanged from
+  rc.10 or outside the changed apps: the `ex_ssl` Dialyzer warning at
+  `lib/ssl/quic.ex:181`, the stale no-OTP production source census, and one
+  Hell handler timing test.
 
 ## [1.0.0-rc.10] - 2026-11-08
 
