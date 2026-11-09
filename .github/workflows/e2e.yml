@@ -95,6 +95,9 @@ jobs:
             python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/server-archives" --mode udp
             python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/server-archives" --mode quic
           else
+            # Hell's TLS transport depends on ex_ssl, so its consumer gate needs the ex_ssl candidate.
+            version=$(python3 -c 'import sys; sys.path.insert(0, "scripts/release"); from stage import source_version; print(source_version("apps/ex_ssl"))')
+            python3 scripts/release/stage.py build "$version" "$RUNNER_TEMP/server-stage" "$RUNNER_TEMP/server-archives" --package ex_ssl
             python3 scripts/release/server_consumer_gate.py "$RUNNER_TEMP/server-archives" --mode hell
           fi
 
