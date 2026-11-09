@@ -8,7 +8,7 @@ This is an Elixir umbrella providing a browser-like HTTP fetch API, shared HTTP
 protocol clients, and experimental TLS/QUIC packages. TCP sockets use Erlang's
 `:gen_tcp`; TCP TLS and the imported QUIC stack use the independent `ex_ssl`
 TLS engine. Legacy OTP `:ssl` backend selections are rejected for HTTP clients.
-Hell's server TLS transport retains OTP `:ssl`. Abyss supplies UDP and explicit
+Hell's server TLS transport also runs on `ex_ssl`. Abyss supplies UDP and explicit
 QUIC servers; the optional `packages/abyss_raw` native package is independently
 built and is not part of the umbrella.
 
@@ -179,4 +179,4 @@ Current known issues to address:
 ## Requirements
 - Elixir 1.18+ (for built-in `JSON` module support)
 - Erlang OTP with `:crypto` and `:public_key` applications; OTP `:ssl` is required
-  by Hell TLS servers and test/reference peers
+  only by test/reference peers

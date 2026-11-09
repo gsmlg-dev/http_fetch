@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** `Hell.Transports.SSL` now runs on the umbrella `ex_ssl` engine
+  instead of OTP `:ssl`, and Hell depends on `ex_ssl` (pinned to the coordinated
+  version). OTP `:ssl` is no longer used in production.
+  - TLS 1.3 only: `versions` accepts only `[:"tlsv1.3"]`; there is no TLS 1.2
+    server, and no server session tickets or resumption.
+  - Supported option subset: identity, ALPN, TLS 1.3 ciphers, SNI
+    (`sni_hosts`/`sni_fun`) and mTLS (`verify: :verify_peer` with
+    `cacerts`/`cacertfile`, `fail_if_no_peer_cert`, `depth`). OTP-only options
+    are rejected, as are `active` other than `false` and `mode` other than
+    `:binary`. `depth: 0`, which OTP accepts, is rejected.
+  - Handshake alerts follow `ex_ssl` (for example `handshake_failure` when no
+    cipher is shared).
+  - `Hell.Transport.on_peername/0` and `on_sockname/0` also include
+    `{:error, :closed}`.
+
 ## Hell 0.1.3
 
 - Add `Hell.Handler.set_read_timeout/2` for persistent owner-side read-idle

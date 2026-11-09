@@ -19,7 +19,9 @@ application and Hex package are `hell`; the repository is
 
 The standalone source was imported from `gsmlg-dev/hell` at
 `4fb5d53a1b2acfb5afc9b1ceba65fdc52d61ef83` (version `0.1.3`).
-The library implementation, public API and OTP `:ssl` transport are preserved.
+The library implementation and public API are preserved. `Hell.Transports.SSL`
+now runs on the umbrella `ex_ssl` engine (TLS 1.3 only) instead of OTP `:ssl`;
+see the changelog for the breaking differences.
 From the umbrella root, run `mix test apps/hell/test --include integration`
 for the complete Hell suite; default tests exclude real socket integration.
 See the root migration report for current validation and release tooling.

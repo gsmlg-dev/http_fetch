@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add a TCP TLS 1.3 server: `SSL.listen/2`, `SSL.transport_accept/1,2`,
+  server-side `SSL.handshake/2,3`, `SSL.getopts/2`, `SSL.getstat/1,2`,
+  `SSL.shutdown/2` and `SSL.ListenSocket`, configured through
+  `SSL.ServerOptions` (identity, ALPN, SNI, mTLS). It has no session tickets or
+  TLS 1.2. See the server section of `README.md` and
+  `docs/ex-ssl-consumer-contract.md`.
+
 ## [0.7.2] - 2026-09-28
 
 - Reject malformed IPv4/IPv6 reference identities at QUIC TLS construction,

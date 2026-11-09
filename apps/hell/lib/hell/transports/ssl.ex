@@ -85,11 +85,11 @@ defmodule Hell.Transports.SSL do
   end
 
   @impl Hell.Transport
-  @spec upgrade(:inet.socket(), options()) :: Hell.Transport.on_upgrade()
+  @spec upgrade(:gen_tcp.socket(), options()) :: Hell.Transport.on_upgrade()
   def upgrade(socket, opts), do: upgrade(socket, opts, :infinity)
 
   @impl Hell.Transport
-  @spec upgrade(:inet.socket(), options(), timeout()) :: Hell.Transport.on_upgrade()
+  @spec upgrade(:gen_tcp.socket(), options(), timeout()) :: Hell.Transport.on_upgrade()
   def upgrade(socket, opts, timeout) do
     case SSL.handshake(socket, opts, timeout) do
       {:ok, socket, _protocol_extensions} -> {:ok, socket}

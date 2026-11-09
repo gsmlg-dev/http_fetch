@@ -97,10 +97,10 @@ defmodule Hell.Transport do
   @type on_setopts() :: :ok | {:error, :inet.posix()}
 
   @typedoc "The return value from a sockname/1 call"
-  @type on_sockname() :: {:ok, socket_info()} | {:error, :inet.posix()}
+  @type on_sockname() :: {:ok, socket_info()} | {:error, :inet.posix() | :closed}
 
   @typedoc "The return value from a peername/1 call"
-  @type on_peername() :: {:ok, socket_info()} | {:error, :inet.posix()}
+  @type on_peername() :: {:ok, socket_info()} | {:error, :inet.posix() | :closed}
 
   @typedoc "The return value from a peercert/1 call"
   @type on_peercert() :: {:ok, :public_key.der_encoded()} | {:error, reason :: any()}

@@ -214,4 +214,5 @@ met, keep standalone repositories and their histories intact.
 The subsequent Abyss, Hell and optional `abyss_raw` source import is recorded in
 [server migration provenance and validation](server-migration.md). Those packages
 retain independent versions; this document's earlier nine-package snapshots and
-TLS client behavior do not redefine Hell's OTP `:ssl` server transport.
+TLS client behavior predate Hell's move to the `ex_ssl` server transport, which is
+recorded in the server report.

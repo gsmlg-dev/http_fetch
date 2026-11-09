@@ -9,8 +9,25 @@ transport or TLS selection changed. All 244 original package source hashes, ten
 review documents, 94 producer inputs and 175 reviewed occurrences remain equal.
 Only the `config/config.exs` hash in the release bundle was rebound. This review
 does not replace fresh candidate/published runtime verification or extend the
-nine-package no-OTP-SSL proof to Abyss, Hell or `abyss_raw`. Hell still uses OTP
-`:ssl` for its server transport.
+nine-package no-OTP-SSL proof to Abyss, Hell or `abyss_raw`. (Superseded for
+Abyss and Hell: see the server package group below.)
+
+## Server package group
+
+Hell's `Hell.Transports.SSL` now runs on `ex_ssl`, so `abyss` and `hell` no longer
+call OTP `:ssl`. `NoOTP.ReleaseAudit.server_ssl_imports/1` reports every direct
+`:ssl` import in their compiled BEAMs as a group separate from the original nine
+packages, whose release proof, package set and test counts are unchanged. From
+the umbrella root:
+
+```bash
+MIX_ENV=prod mix compile
+elixir scripts/release/no_otp_server_audit.exs _build/prod/lib
+```
+
+The script exits non-zero and prints each import if either app reintroduces one.
+This is a static import check only; it does not extend the dispatch, runtime or
+consumer-release proofs to Hell or Abyss. `abyss_raw` remains outside it.
 
 P6's non-deferred gates **pass** at `658bbd5`. The strict production no-OTP-SSL
 gate passes at `31a8a15`, with identical production sources through `658bbd5`;

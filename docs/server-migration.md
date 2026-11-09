@@ -70,8 +70,16 @@ using the imported 0.3.12 lock restores the source baseline. This is a tooling
 resolution difference, not a runtime change or dependency-cache patch.
 The nine-package no-OTP release proof's lock hash was refreshed only after
 checking every original lock entry and every reviewed runtime source unchanged.
-That proof still covers the original nine packages; Hell intentionally requires
-OTP `:ssl`.
+That proof still covers the original nine packages. Hell's TLS server transport
+now runs on `ex_ssl` and Hell no longer uses OTP `:ssl` in production; `abyss` and
+`hell` are audited for direct `:ssl` imports as a separate group (see
+[the no-OTP release audit](no-otp-release-audit.md#server-package-group)).
+OTP `:ssl` remains only in test and reference peers.
+
+Release ordering: Hell pins `{:ex_ssl, "== VERSION"}`, so `ex_ssl` must be
+published before (or together with) Hell. The unified `release.yml` publishes the
+portable packages in dependency order from one version; an independent or partial
+Hell publication ahead of `ex_ssl` would not resolve on Hex.
 
 ## Versions, packaging and CI
 
@@ -132,8 +140,9 @@ python3 scripts/release/server_consumer_gate.py /tmp/release-archives --mode all
 ```
 
 The no-OTP-SSL validation still selects the original nine clients/engines and
-explicitly excludes Hell. Hell continues to use OTP `:ssl`; TCP ExSSL server
-support is a separate feature request. Explicit HTTP/3 remains beta with finite
+explicitly excludes Hell's consumer gate. Hell's TLS server transport now runs on
+the `ex_ssl` TCP TLS 1.3 server (see `apps/ex_ssl/README.md` and
+`docs/ex-ssl-consumer-contract.md`). Explicit HTTP/3 remains beta with finite
 static/literal QPACK support, and WebTransport connection support remains
 unimplemented. A package or ALPN name alone is not application acceptance.
 
