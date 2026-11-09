@@ -1,5 +1,12 @@
 defmodule SSL.Protocol.ServerHandshake do
-  @moduledoc "Record-free TLS 1.3 full-certificate server handshake operations."
+  @moduledoc """
+  Record-free TLS 1.3 full-certificate server handshake operations.
+
+  A non-nil `config.transport_parameters` selects QUIC rules: the ClientHello
+  must carry ext 57 and ALPN and an empty legacy session id, and
+  EncryptedExtensions echoes the local transport parameters. With `nil` (TCP),
+  ALPN is optional and a middlebox-compatibility session id is echoed.
+  """
   alias SSL.Capabilities
   alias SSL.Crypto.{Finished, KeySchedule, Signature}
   alias SSL.Protocol.{ClientOffer, HandshakeCore, ServerFlight, Transcript}
@@ -31,12 +38,14 @@ defmodule SSL.Protocol.ServerHandshake do
   @spec accept_hello(map(), binary(), State.t() | nil) ::
           {:ok, State.t()} | {:retry, State.t(), binary()} | {:error, term()}
   def accept_hello(config, encoded, previous) do
+    quic? = not is_nil(config.transport_parameters)
+
     with {:ok, offer} <- parse_offer(encoded, config.limits),
-         :ok <- validate_offer(offer),
+         :ok <- validate_offer(offer, quic?),
          :ok <- validate_retry(previous, offer),
          {:ok, suite} <- select(config.ciphers, offer.cipher_suites, :no_shared_cipher),
          {:ok, group} <- select(config.groups, offer.supported_groups, :no_shared_group),
-         {:ok, alpn} <- select(config.alpn, offer.alpn_protocols, :no_application_protocol),
+         {:ok, alpn} <- select_alpn(config.alpn, offer.alpn_protocols, quic?),
          {:ok, scheme} <-
            select(config.signature_algorithms, offer.signature_schemes, :no_shared_signature),
          true <-
@@ -45,7 +54,7 @@ defmodule SSL.Protocol.ServerHandshake do
              nil,
              offer.certificate_signature_schemes || offer.signature_schemes
            ),
-         {:ok, parameters} <- parameters(offer.extensions) do
+         {:ok, parameters} <- if(quic?, do: parameters(offer.extensions), else: {:ok, nil}) do
       spec = Capabilities.resolve(:cipher_suite, suite)
       transcript = if previous, do: previous.transcript, else: Transcript.new(spec.hash)
 
@@ -110,10 +119,9 @@ defmodule SSL.Protocol.ServerHandshake do
       message(
         8,
         extensions(
-          [
-            {16, <<byte_size(state.alpn) + 1::16, byte_size(state.alpn), state.alpn::binary>>},
-            {57, config.transport_parameters}
-          ] ++ if(state.early_data, do: [{42, <<>>}], else: [])
+          alpn_extension(state.alpn) ++
+            transport_parameters_extension(config.transport_parameters) ++
+            if(state.early_data, do: [{42, <<>>}], else: [])
         )
       )
 
@@ -154,6 +162,14 @@ defmodule SSL.Protocol.ServerHandshake do
       {:ok, next, hello, [ee] ++ authentication ++ [finished]}
     end
   end
+
+  defp alpn_extension(nil), do: []
+
+  defp alpn_extension(alpn),
+    do: [{16, <<byte_size(alpn) + 1::16, byte_size(alpn), alpn::binary>>}]
+
+  defp transport_parameters_extension(nil), do: []
+  defp transport_parameters_extension(parameters), do: [{57, parameters}]
 
   defp authentication(%{session: session}, _config, _spec, transcript) when not is_nil(session),
     do: {:ok, transcript, []}
@@ -225,14 +241,20 @@ defmodule SSL.Protocol.ServerHandshake do
     end
   end
 
-  defp validate_offer(offer) do
+  # RFC 7301 §3.2: an ALPN offer without overlap is fatal; no offer selects none.
+  # QUIC (RFC 9001 §8.1) always requires ALPN.
+  defp select_alpn(nil, _offered, _quic?), do: {:ok, nil}
+  defp select_alpn(_local, [], false), do: {:ok, nil}
+  defp select_alpn(local, offered, _quic?), do: select(local, offered, :no_application_protocol)
+
+  defp validate_offer(offer, quic?) do
     shares = Enum.map(offer.key_shares, & &1.group)
 
     cond do
       0x0304 not in offer.offered_versions ->
         {:error, {:protocol_version, :tls13_required}}
 
-      offer.legacy_session_id != <<>> ->
+      quic? and offer.legacy_session_id != <<>> ->
         {:error, {:quic, :quic_session_id}}
 
       missing_negotiation_extensions?(offer) ->

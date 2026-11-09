@@ -503,9 +503,11 @@ defmodule SSL.Protocol.HandshakeMachine do
     end
   end
 
-  defp maybe_update_write(write, false), do: {:ok, [], write}
+  # Shared with SSL.ServerConnection, which applies the same TLS 1.3 epoch rules.
+  @doc false
+  def maybe_update_write(write, false), do: {:ok, [], write}
 
-  defp maybe_update_write(write, true) do
+  def maybe_update_write(write, true) do
     with true <- TrafficState.may_update_write?(write),
          {:ok, encoded} <- ServerFlight.encode_key_update(false),
          # Compute the candidate before encryption so derivation failure cannot
@@ -520,7 +522,8 @@ defmodule SSL.Protocol.HandshakeMachine do
     end
   end
 
-  defp update_traffic_state(state) do
+  @doc false
+  def update_traffic_state(state) do
     with {:ok, secret} <- KeySchedule.traffic_update(hash_for(state), state.secret),
          {:ok, next} <- KeySchedule.traffic_state(state.cipher_suite, secret) do
       {:ok, %{next | generation: state.generation + 1}}
