@@ -248,6 +248,7 @@ defmodule HTTPRuntimeConsumerGate do
           HTTP.HTTP1.Pool,
           HTTP.HTTP2.ConnectionSupervisor,
           HTTP.HTTP2.Pool,
+          HTTP.HTTP3.Resumption,
           HTTP.HTTP3.ConnectionSupervisor,
           HTTP.HTTP3.Pool
         ]),

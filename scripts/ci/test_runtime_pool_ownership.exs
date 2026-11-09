@@ -28,6 +28,7 @@ defmodule HTTPRuntimePoolOwnershipTest do
     HTTP.HTTP1.Pool,
     HTTP.HTTP2.ConnectionSupervisor,
     HTTP.HTTP2.Pool,
+    HTTP.HTTP3.Resumption,
     HTTP.HTTP3.ConnectionSupervisor,
     HTTP.HTTP3.Pool
   ]
@@ -37,7 +38,12 @@ defmodule HTTPRuntimePoolOwnershipTest do
   end
 
   test "missing registry or either default pool cannot pass candidate startup" do
-    for required <- [HTTP.Runtime.Pool.Registry, HTTP.HTTP1.Pool, HTTP.HTTP2.Pool] do
+    for required <- [
+          HTTP.Runtime.Pool.Registry,
+          HTTP.HTTP1.Pool,
+          HTTP.HTTP2.Pool,
+          HTTP.HTTP3.Resumption
+        ] do
       assert_raise RuntimeError, "runtime has unexpected supervision owners", fn ->
         HTTPRuntimeConsumerGate.assert_runtime_children!(children(@children -- [required]))
       end
