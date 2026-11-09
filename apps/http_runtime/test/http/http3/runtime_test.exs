@@ -211,7 +211,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
 
   test "an explicit pool stream limit remains a bound on a larger owner capacity" do
     {:ok, pool} = Pool.start_link(max_streams: 1, max_connections: 1)
-    on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+    on_exit(fn -> stop_quietly(pool) end)
 
     owner =
       spawn(fn ->
@@ -279,10 +279,10 @@ defmodule HTTP.HTTP3.RuntimeTest do
   @tag :integration
   test "pool admits the actual owner concurrency and queues until that slot releases", ctx do
     {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> stop_quietly(server) end)
     {_, port} = Quic.local(server)
     {:ok, pool} = Pool.start_link(max_connections: 1)
-    on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+    on_exit(fn -> stop_quietly(pool) end)
 
     request = %HTTP.Request{
       url: URI.parse("https://127.0.0.1:#{port}/one"),
@@ -330,10 +330,10 @@ defmodule HTTP.HTTP3.RuntimeTest do
   @tag :integration
   test "concurrent leases beyond remaining rotation capacity transfer only unsent opens", ctx do
     {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> stop_quietly(server) end)
     {_, port} = Quic.local(server)
     {:ok, pool} = Pool.start_link(max_connections: 1)
-    on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+    on_exit(fn -> stop_quietly(pool) end)
 
     request = %HTTP.Request{
       url: URI.parse("https://127.0.0.1:#{port}/rotation"),
@@ -419,10 +419,10 @@ defmodule HTTP.HTTP3.RuntimeTest do
     @tag :integration
     test "#{admission} request GOAWAY remains terminal without another native allocation", ctx do
       {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
-      on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+      on_exit(fn -> stop_quietly(server) end)
       {_, port} = Quic.local(server)
       {:ok, pool} = Pool.start_link(max_connections: 1)
-      on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+      on_exit(fn -> stop_quietly(pool) end)
 
       request = %HTTP.Request{
         method: :post,
@@ -454,10 +454,10 @@ defmodule HTTP.HTTP3.RuntimeTest do
     @tag :integration
     test "#{cancellation} removes queued admission before a slot becomes available", ctx do
       {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
-      on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+      on_exit(fn -> stop_quietly(server) end)
       {_, port} = Quic.local(server)
       {:ok, pool} = Pool.start_link(max_connections: 1)
-      on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+      on_exit(fn -> stop_quietly(pool) end)
 
       request = %HTTP.Request{
         url: URI.parse("https://127.0.0.1:#{port}/queued"),
@@ -506,10 +506,10 @@ defmodule HTTP.HTTP3.RuntimeTest do
         streams: [max_streams_bidi: 64]
       )
 
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> stop_quietly(server) end)
     {ip, port} = Quic.local(server)
     {:ok, owner} = ConnectionOwner.start_link(host: ip, port: port, tls: ctx.tls, max_streams: 64)
-    on_exit(fn -> if Process.alive?(owner), do: GenServer.stop(owner) end)
+    on_exit(fn -> stop_quietly(owner) end)
     assert :ok = ConnectionOwner.await_ready(owner, 2_000)
     assert_receive {:quic_accept, ^server}, 2_000
     {:ok, accepted} = Quic.accept(server)
@@ -544,7 +544,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
     on_exit(fn -> :gen_udp.close(socket) end)
     {:ok, port} = :inet.port(socket)
     {:ok, pool} = Pool.start_link(max_connections: 1)
-    on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+    on_exit(fn -> stop_quietly(pool) end)
 
     request = %HTTP.Request{
       method: :post,
@@ -581,10 +581,10 @@ defmodule HTTP.HTTP3.RuntimeTest do
   @tag :integration
   test "known-unsent owner opens reject dead subscribers and expired deadlines", ctx do
     {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> stop_quietly(server) end)
     {ip, port} = Quic.local(server)
     {:ok, owner} = ConnectionOwner.start_link(host: ip, port: port, tls: ctx.tls)
-    on_exit(fn -> if Process.alive?(owner), do: GenServer.stop(owner) end)
+    on_exit(fn -> stop_quietly(owner) end)
     assert :ok = ConnectionOwner.await_ready(owner, 2_000)
 
     fields = [
@@ -632,7 +632,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
         streams: [max_streams_bidi: 64]
       )
 
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> stop_quietly(server) end)
     {_, port} = Quic.local(server)
     {:ok, pool} = Pool.start_link()
 
@@ -686,7 +686,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
   test "native early final response cancels the producer without acknowledging unadmitted bytes",
        ctx do
     {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> stop_quietly(server) end)
     {_, port} = Quic.local(server)
     {:ok, pool} = Pool.start_link()
 
@@ -717,7 +717,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
   @tag :integration
   test "stopping an owner preserves a verified shared endpoint", ctx do
     {:ok, server} = Quic.listen(tls: [cert: [ctx.cert], key: ctx.key, alpn: ["h3"]])
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> stop_quietly(server) end)
     {_, port} = Quic.local(server)
     {:ok, budget} = ReceiveBudget.normalize([])
 
@@ -817,7 +817,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
 
   test "upload trailers follow admitted DATA and replace EOF" do
     {:ok, bridge} = BodyBridge.start_link(self(), self())
-    on_exit(fn -> if Process.alive?(bridge), do: GenServer.stop(bridge) end)
+    on_exit(fn -> stop_quietly(bridge) end)
     :ok = BodyBridge.credit(bridge, 1)
     assert_receive {:read_chunk, ^bridge, :ack}
     producer_ref = make_ref()
@@ -831,5 +831,13 @@ defmodule HTTP.HTTP3.RuntimeTest do
     assert_receive {:stream_chunk_ack, ^producer_ref}
     assert_receive {:body_trailers, ^bridge, ^fields}
     refute_receive {:body_eof, ^bridge}, 0
+  end
+
+  # Started processes are linked to the test process, so they may already be
+  # shutting down when on_exit runs; a stop that loses that race is fine.
+  defp stop_quietly(pid) do
+    if Process.alive?(pid), do: GenServer.stop(pid)
+  catch
+    :exit, _reason -> :ok
   end
 end
