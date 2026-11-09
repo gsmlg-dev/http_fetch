@@ -1,7 +1,8 @@
 defmodule SSL.ServerAPITest do
   use ExUnit.Case, async: true
 
-  alias SSL.Protocol.Record
+  alias SSL.PKIX.CertificateSignaturePolicy
+  alias SSL.Protocol.{ClientOffer, Record}
 
   @dir Path.expand("../support/server", __DIR__)
   @cert Path.join(@dir, "cert.pem")
@@ -22,6 +23,18 @@ defmodule SSL.ServerAPITest do
 
     assert SSL.listen(0, certfile: @cert, keyfile: @key, versions: [:"tlsv1.2"]) ==
              {:error, {:unsupported_option, :versions}}
+
+    for {extra, key} <- [
+          {[active: true], :active},
+          {[active: :once], :active},
+          {[mode: :list], :mode},
+          {[:list], :mode}
+        ] do
+      assert SSL.listen(0, @server ++ extra) == {:error, {:unsupported_option, key}}
+    end
+
+    assert {:ok, listen} = SSL.listen(0, [:binary, mode: :binary, active: false] ++ @server)
+    assert :ok = SSL.close(listen)
 
     assert owned_ports() == ports
   end
@@ -147,30 +160,21 @@ defmodule SSL.ServerAPITest do
     :gen_tcp.close(tcp_listen)
   end
 
-  test "server upgrade enforces a passive binary carrier over caller options" do
-    hello = client_hello()
+  test "server upgrade rejects non-passive carrier modes without taking the socket" do
     {:ok, tcp_listen} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     {:ok, port} = :inet.port(tcp_listen)
     {:ok, raw} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
     {:ok, tcp} = :gen_tcp.accept(tcp_listen, 5000)
-    :ok = :gen_tcp.send(raw, hello)
 
-    upgrade =
-      Task.async(fn ->
-        receive do: (:go -> :ok)
-        options = [certfile: @cert, keyfile: @key, active: true, mode: :list]
-        result = SSL.handshake(tcp, options, 5000)
-        {:messages, messages} = Process.info(self(), :messages)
-        {result, messages}
-      end)
+    for {extra, key} <- [{[active: true], :active}, {[mode: :list], :mode}, {[:list], :mode}] do
+      assert SSL.handshake(tcp, [certfile: @cert, keyfile: @key] ++ extra, 100) ==
+               {:error, {:unsupported_option, key}}
+    end
 
-    :ok = :gen_tcp.controlling_process(tcp, upgrade.pid)
-    send(upgrade.pid, :go)
-    # The ClientHello reaches the TLS process, which answers with a ServerHello.
-    assert {:ok, <<22, 3, 3, _::binary>>} = :gen_tcp.recv(raw, 0, 2000)
+    assert :erlang.port_info(tcp, :connected) == {:connected, self()}
+    assert :inet.getopts(tcp, [:active, :mode]) == {:ok, [active: false, mode: :binary]}
     :gen_tcp.close(raw)
-    assert {{:error, :closed}, messages} = Task.await(upgrade)
-    refute Enum.any?(messages, &match?({:tcp, _, _}, &1))
+    :gen_tcp.close(tcp)
     :gen_tcp.close(tcp_listen)
   end
 
@@ -216,6 +220,17 @@ defmodule SSL.ServerAPITest do
   end
 
   test "an ex_ssl client accepts the server chain it can verify" do
+    # The fixture chain matches none of the ex_ssl client's offered certificate
+    # schemes, so this exercises the RFC 8446 §4.4.2.2 TCP relaxation.
+    {:ok, offer} = ClientOffer.from_client_hello(ex_ssl_client_hello())
+    {:ok, %{identity: identity}} = SSL.ServerOptions.build(certfile: @cert, keyfile: @key)
+
+    refute CertificateSignaturePolicy.compatible?(
+             identity.chain,
+             nil,
+             offer.certificate_signature_schemes || offer.signature_schemes
+           )
+
     {listen, port} = listen([])
 
     client =
@@ -236,6 +251,26 @@ defmodule SSL.ServerAPITest do
     assert :ok = SSL.send(s, "hello")
     assert Task.await(client) == {:ok, "hello"}
     SSL.close(s)
+  end
+
+  test "a client offering none of the identity's signature schemes is handshake_failure" do
+    {listen, port} = listen([])
+
+    client =
+      Task.async(fn ->
+        :ssl.connect(
+          {127, 0, 0, 1},
+          port,
+          client_options(signature_algs: [:ecdsa_secp256r1_sha256]),
+          5000
+        )
+      end)
+
+    assert {:ok, s} = SSL.transport_accept(listen, 5000)
+
+    assert {:error, {:tls_alert, {:handshake_failure, description}}} = SSL.handshake(s, 5000)
+    assert List.to_string(description) =~ "no_shared_signature"
+    assert {:error, {:tls_alert, {:handshake_failure, _}}} = Task.await(client)
   end
 
   test "getstat returns carrier counters" do
@@ -414,6 +449,29 @@ defmodule SSL.ServerAPITest do
     :gen_tcp.close(listen)
     assert {:error, _} = Task.await(connect)
     header <> body
+  end
+
+  # Captures the ClientHello handshake message of an ex_ssl client.
+  defp ex_ssl_client_hello do
+    {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(listen)
+
+    connect =
+      Task.async(fn ->
+        SSL.connect(~c"localhost", port,
+          verify: :verify_peer,
+          cacertfile: @ca,
+          server_name_indication: ~c"localhost"
+        )
+      end)
+
+    {:ok, tcp} = :gen_tcp.accept(listen, 5000)
+    {:ok, <<22, 3, _minor, length::16>>} = :gen_tcp.recv(tcp, 5, 2000)
+    {:ok, hello} = :gen_tcp.recv(tcp, length, 2000)
+    :gen_tcp.close(tcp)
+    :gen_tcp.close(listen)
+    assert {:error, _} = Task.await(connect)
+    hello
   end
 
   # A relay between the client and the server. It can inject client-to-server bytes

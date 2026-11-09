@@ -285,7 +285,8 @@ Boundaries:
 - Supported TLS options are `certfile`/`keyfile`, `cert`/`key`, `certs_keys`,
   `password`, `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers` and
   `verify: :verify_none`.
-  Other keys are `:gen_tcp` options; OTP `:ssl`-only options are errors.
+  Other keys are `:gen_tcp` options; OTP `:ssl`-only options, `active` other
+  than `false` and `mode` other than `:binary` (including `:list`) are errors.
   `listen/2` validates every option before it opens the port.
 - SNI selection order is `sni_hosts[name]`, `sni_fun.(name)` (`:undefined`
   selects the default), then the default identity. `sni_hosts` identities are

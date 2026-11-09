@@ -94,6 +94,9 @@ defmodule SSL.ServerOptions do
 
   @spec build(keyword()) :: {:ok, t()} | {:error, term()}
   def build(options) when is_list(options) do
+    # The carrier is always passive binary; a bare `:binary` is redundant.
+    options = Enum.reject(options, &(&1 == :binary))
+
     with :ok <- check_shape(options),
          :ok <- reject_unsupported(options),
          :ok <- versions(Keyword.get(options, :versions)),
@@ -200,13 +203,23 @@ defmodule SSL.ServerOptions do
       )
 
   defp check_shape(options) do
-    if Keyword.keyword?(options), do: :ok, else: {:error, {:invalid_option, :options}}
+    cond do
+      :list in options -> {:error, {:unsupported_option, :mode}}
+      Keyword.keyword?(options) -> :ok
+      true -> {:error, {:invalid_option, :options}}
+    end
   end
 
   defp reject_unsupported(options) do
     cond do
       key = Enum.find(@unsupported, &Keyword.has_key?(options, &1)) ->
         {:error, {:unsupported_option, key}}
+
+      Enum.any?(Keyword.get_values(options, :active), &(&1 != false)) ->
+        {:error, {:unsupported_option, :active}}
+
+      Enum.any?(Keyword.get_values(options, :mode), &(&1 != :binary)) ->
+        {:error, {:unsupported_option, :mode}}
 
       Keyword.get(options, :session_tickets, :disabled) != :disabled ->
         {:error, {:unsupported_option, :session_tickets}}

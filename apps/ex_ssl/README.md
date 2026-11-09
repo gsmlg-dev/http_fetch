@@ -246,8 +246,9 @@ Scope:
 - Supported TLS options: `certfile`/`keyfile`, `cert`/`key`, `certs_keys`,
   `password`, `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers`
   (TLS 1.3 suites) and `verify: :verify_none`. Every other option is a
-  `:gen_tcp` option; `:binary` and `active: false` are enforced on the carrier, and OTP
-  `:ssl`-only options are errors. Options are validated before the port opens.
+  `:gen_tcp` option; `:binary` and `active: false` are enforced on the carrier.
+  `active` other than `false`, `mode` other than `:binary` (including `:list`)
+  and OTP `:ssl`-only options are errors. Options are validated before the port opens.
 - SNI: `sni_hosts: [{name, identity_options}]` identities are loaded when the
   options are validated, so a bad certificate, a non-identity key or a
   duplicate name fails `listen/2` with `{:error, {:invalid_option, :sni_hosts}}`.

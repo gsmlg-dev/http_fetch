@@ -344,6 +344,16 @@ defmodule SSL.QUICTest do
     end
   end
 
+  test "a QUIC server keeps the certificate signature policy as a hard failure" do
+    {:ok, _, [{:emit, :initial, ch}]} = SSL.QUIC.new(:client, client_options())
+    # The ECDSA P-256 chain needs 0x0403; offer only Ed25519 for certificates.
+    ch = rewrite_extensions(ch, &(List.keydelete(&1, 50, 0) ++ [{50, <<2::16, 0x0807::16>>}]))
+    {:ok, s, []} = SSL.QUIC.new(:server, server_options())
+
+    assert {:error, %{alert: :handshake_failure, reason: :certificate_signature_policy}, _, [_]} =
+             SSL.QUIC.feed(s, :initial, ch)
+  end
+
   test "peer certificate, signature and aggregate budgets fail before completion" do
     for limits <- [
           [max_certificate_count: 1],

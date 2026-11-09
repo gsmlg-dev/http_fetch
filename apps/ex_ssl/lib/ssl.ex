@@ -291,7 +291,8 @@ defmodule SSL do
   `password`), `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers`,
   `versions: [:"tlsv1.3"]` and `verify: :verify_none`. OTP `:ssl`-only options
   are errors; every other option is a `:gen_tcp` listen option. `:binary` and
-  `active: false` are enforced.
+  `active: false` are enforced; `active` other than `false` and `mode` other
+  than `:binary` (including `:list`) return `{:error, {:unsupported_option, key}}`.
 
   `sni_hosts: [{name, identity_options}]` identities are loaded here, so a bad
   certificate fails `listen/2`. `sni_fun.(name)` runs in the connection process
@@ -336,8 +337,8 @@ defmodule SSL do
   Upgrades an owned `:gen_tcp` socket to a TLS 1.3 server connection.
 
   Options are those of `listen/2`; carrier options are applied with
-  `:inet.setopts/2`, with `:binary` and `active: false` enforced (caller
-  `active`/`mode` values are ignored). An option error leaves the socket open
+  `:inet.setopts/2`, with `:binary` and `active: false` enforced; other
+  `active`/`mode` values are rejected. An option error leaves the socket open
   and owned by the caller. Once the connection process takes the socket, a
   failed handshake closes it.
   """
@@ -394,10 +395,9 @@ defmodule SSL do
 
   defp server_options(options), do: ServerOptions.build(options)
 
-  # :inet.setopts/2 applies options in order, so a caller's active/mode would
-  # take effect before an appended override; drop them instead.
-  defp upgrade_carrier(tcp),
-    do: server_carrier(Keyword.drop(tcp, [:active, :mode])) ++ [:binary, active: false]
+  # ServerOptions admits only `active: false` and `mode: :binary`, so the
+  # in-order :inet.setopts/2 never activates the carrier before the override.
+  defp upgrade_carrier(tcp), do: server_carrier(tcp) ++ [:binary, active: false]
 
   # Server writes are synchronous carrier sends, so an infinite send timeout could wedge them.
   # The defaults apply only when the caller set neither key.
