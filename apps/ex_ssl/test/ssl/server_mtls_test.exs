@@ -74,6 +74,55 @@ defmodule SSL.ServerMTLSTest do
     assert s.peer == {:ok, [peer_authenticated: :client]}
   end
 
+  @hrr_random Base.decode16!("CF21AD74E59A6111BE1D8C021E65B891C2A211167ABB8C5E079E09E2C8A8339C")
+
+  # The client offers a secp256r1 key share only; the server prefers x25519,
+  # so it answers with a HelloRetryRequest before requesting the certificate.
+  test "a client certificate is authenticated after a HelloRetryRequest",
+       %{ca: ca, client: client} = ctx do
+    listen = listen(ctx, ca, fail_if_no_peer_cert: true)
+    {:ok, {_, port}} = SSL.sockname(listen)
+    %{pid: proxy_pid, port: proxy_port} = proxy(port)
+
+    task =
+      Task.async(fn ->
+        options =
+          [
+            mode: :binary,
+            active: false,
+            versions: [:"tlsv1.3"],
+            verify: :verify_none,
+            supported_groups: [:secp256r1, :x25519],
+            log_level: :none
+          ] ++ client_identity(client)
+
+        {:ok, c} = :ssl.connect({127, 0, 0, 1}, proxy_port, options, 5000)
+        :ok = :ssl.send(c, "after-retry")
+        result = :ssl.recv(c, 0, 5000)
+        receive do: (:finish -> :ssl.close(c))
+        result
+      end)
+
+    {:ok, accepted} = SSL.transport_accept(listen, 5000)
+    assert {:ok, s} = SSL.handshake(accepted, 5000)
+    assert SSL.peercert(s) == {:ok, client.cert}
+
+    assert SSL.connection_information(s, [:peer_authenticated]) ==
+             {:ok, [peer_authenticated: :client]}
+
+    assert SSL.recv(s, 0, 5000) == {:ok, "after-retry"}
+    assert :ok = SSL.send(s, "pong")
+    send(task.pid, :finish)
+    assert Task.await(task) == {:ok, "pong"}
+
+    assert_receive {:server_bytes, ^proxy_pid,
+                    <<22, 3, 3, _::16, 2, _::24, 3, 3, random::binary-32>>},
+                   1000
+
+    assert random == @hrr_random
+    SSL.close(s)
+  end
+
   test "a client without a certificate is certificate_required", %{ca: ca} = ctx do
     listen = listen(ctx, ca, fail_if_no_peer_cert: true)
 
@@ -318,6 +367,55 @@ defmodule SSL.ServerMTLSTest do
   end
 
   defp client_identity(peer), do: [cert: peer.cert, key: peer.key, cacerts: peer.cacerts]
+
+  # A byte-transparent relay that reports the first 43 server-to-client bytes:
+  # record header, handshake header and ServerHello random.
+  defp proxy(server_port) do
+    test = self()
+    {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(listen)
+
+    pid =
+      spawn_link(fn ->
+        {:ok, front} = :gen_tcp.accept(listen, 5000)
+        {:ok, back} = :gen_tcp.connect({127, 0, 0, 1}, server_port, [:binary, active: true])
+        :ok = :inet.setopts(front, active: true)
+        relay(test, front, back, <<>>)
+      end)
+
+    on_exit(fn -> :gen_tcp.close(listen) end)
+    %{pid: pid, port: port}
+  end
+
+  defp relay(test, front, back, seen) do
+    receive do
+      {:tcp, ^front, bytes} ->
+        :ok = :gen_tcp.send(back, bytes)
+        relay(test, front, back, seen)
+
+      {:tcp, ^back, bytes} ->
+        seen = report(test, seen, bytes)
+        :ok = :gen_tcp.send(front, bytes)
+        relay(test, front, back, seen)
+
+      {:tcp_closed, _} ->
+        :gen_tcp.close(front)
+        :gen_tcp.close(back)
+    end
+  end
+
+  defp report(_test, :reported, _bytes), do: :reported
+
+  defp report(test, seen, bytes) do
+    case seen <> bytes do
+      <<prefix::binary-43, _::binary>> ->
+        send(test, {:server_bytes, self(), prefix})
+        :reported
+
+      partial ->
+        partial
+    end
+  end
 
   defp types(config) do
     {:ok, _state, _, messages} = flight(config)
