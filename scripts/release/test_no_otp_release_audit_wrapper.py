@@ -12,7 +12,7 @@ import test_no_otp_release_audit as wrapper
 
 # Both retained suite generations use these resource tests. Their exact count
 # remains independently enforced by the real compiled wrapper, not this mock.
-SUCCESS_OUTPUT = "310 tests, 0 failures\n328 tests, 0 failures\n"
+SUCCESS_OUTPUT = "310 tests, 0 failures\n329 tests, 0 failures\n"
 
 
 class CompiledAuditWrapperIsolationTests(unittest.TestCase):
@@ -79,7 +79,7 @@ class CompiledAuditWrapperIsolationTests(unittest.TestCase):
                     raise response
                 return response
             if captured['inherited_stale_fixture']:
-                return "310 tests, 1 failures\n328 tests, 1 failures\n", None
+                return "310 tests, 1 failures\n329 tests, 1 failures\n", None
             return output, None
 
         child.communicate.side_effect = communicate

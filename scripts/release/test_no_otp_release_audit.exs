@@ -33,6 +33,41 @@ defmodule NoOTP.ReleaseAuditTest do
     %{ebin: ebin}
   end
 
+  test "server packages hell and abyss are audited for direct OTP ssl imports", context do
+    lib = Path.dirname(Path.dirname(context.ebin))
+
+    compile = fn app, name, body ->
+      ebin = Path.join([lib, app, "ebin"])
+      File.mkdir_p!(ebin)
+      source = "-module(#{name}). -export([run/0]). " <> body
+      {:ok, tokens, _} = :erl_scan.string(String.to_charlist(source))
+
+      forms =
+        tokens
+        |> Enum.chunk_by(&match?({:dot, _}, &1))
+        |> Enum.chunk_every(2)
+        |> Enum.map(fn [form, dot] ->
+          {:ok, parsed} = :erl_parse.parse_form(form ++ dot)
+          parsed
+        end)
+
+      {:ok, module, bytes} = :compile.forms(forms, [:binary, :debug_info])
+      File.write!(Path.join(ebin, "#{module}.beam"), bytes)
+    end
+
+    compile.("hell", "hell_fixture", "run() -> ssl:send(socket, data).")
+    compile.("abyss", "abyss_fixture", "run() -> ssl:close(socket).")
+    compile.("http_fetch", "other_fixture", "run() -> ssl:close(socket).")
+    compile.("hell", "hell_clean_fixture", "run() -> ok.")
+
+    imports = NoOTP.ReleaseAudit.server_ssl_imports(lib)
+
+    assert Enum.sort(Enum.map(imports, &{&1.module, &1.function, &1.arity})) == [
+             {":abyss_fixture", "close", 1},
+             {":hell_fixture", "send", 2}
+           ]
+  end
+
   test "literal anonymous closure bindings are closed without executing their bodies", context do
     result = erlang(context, "run() -> F = fun(X) -> {ok,X} end, F(value).")
     assert result.unresolved_dispatch == []

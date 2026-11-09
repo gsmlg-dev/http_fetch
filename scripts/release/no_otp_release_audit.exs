@@ -105,6 +105,9 @@ defmodule NoOTP.ReleaseAudit do
   @dispatches @named_dispatches ++ @node_dispatches ++ @fun_dispatches
 
   @packages ~w(ex_ssl elixir_quic http_core http_pool elixir_quic_http3 http_runtime http_fetch http_web_socket http_event_source http_web_transport)
+  # Server packages sit outside the portable-package release proof, so they are
+  # audited as a separate group and never change `@packages`.
+  @server_packages ~w(abyss hell)
   @modules [
     HTTP,
     SSL.Connection,
@@ -115,6 +118,26 @@ defmodule NoOTP.ReleaseAudit do
     HTTP.EventSource
   ]
   @otp_apps ~w(kernel stdlib elixir logger crypto asn1 public_key sasl compiler eex iex runtime_tools syntax_tools tools parsetools)
+
+  @doc """
+  Direct OTP `:ssl` imports of the server packages' compiled BEAMs under `lib_dir`
+  (a `_build/<env>/lib` or release `lib` directory; versioned dirs are accepted).
+  """
+  def server_ssl_imports(lib_dir) do
+    for app <- @server_packages,
+        beam <- Path.wildcard(Path.join([lib_dir, "#{app}{,-*}", "ebin", "*.beam"])),
+        {:ok, {module, [imports: imports]}} <-
+          [:beam_lib.chunks(String.to_charlist(beam), [:imports])],
+        {:ssl, function, arity} <- imports do
+      %{
+        app: app,
+        beam: beam,
+        module: inspect(module),
+        function: to_string(function),
+        arity: arity
+      }
+    end
+  end
 
   def artifacts(options \\ []) do
     release = System.fetch_env!("NO_OTP_RELEASE") |> Path.expand()
