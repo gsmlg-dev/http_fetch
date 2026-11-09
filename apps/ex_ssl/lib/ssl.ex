@@ -296,7 +296,9 @@ defmodule SSL do
   than `:binary` (including `:list`) return `{:error, {:unsupported_option, key}}`.
 
   `sni_hosts: [{name, identity_options}]` identities are loaded here, so a bad
-  certificate fails `listen/2`. `sni_fun.(name)` runs in the connection process
+  certificate fails `listen/2`. `sni_hosts` names match ASCII case-insensitively
+  (RFC 4343); names differing only in case are duplicates. `sni_fun.(name)`
+  receives the name as sent; it runs in the connection process
   per handshake and returns identity options or `:undefined`. Selection order is
   `sni_hosts[name]`, `sni_fun.(name)`, then the default identity; with none the
   handshake fails with `unrecognized_name`. A failing `sni_fun` is `internal_error`.
@@ -352,7 +354,9 @@ defmodule SSL do
 
   Options are those of `listen/2`; carrier options are applied with
   `:inet.setopts/2`, with `:binary` and `active: false` enforced; other
-  `active`/`mode` values are rejected. An option error leaves the socket open
+  `active`/`mode` values are rejected. Bare address families (`:inet`,
+  `:inet6`, `:local`) are fixed when the socket opens, so they are not passed
+  to `:inet.setopts/2`. An option error leaves the socket open
   and owned by the caller. Once the connection process takes the socket, a
   failed handshake closes it.
   """
@@ -361,6 +365,7 @@ defmodule SSL do
   def handshake(tcp, options, timeout) when is_port(tcp) do
     with {:ok, deadline} <- Options.deadline(timeout),
          {:ok, config} <- server_options(options),
+         {:ok, _} <- Application.ensure_all_started(:ex_ssl),
          :ok <- owned_socket(tcp),
          :ok <- :inet.setopts(tcp, upgrade_carrier(config.tcp)),
          {:ok, socket} <- ServerConnection.start(tcp, config, self()),
@@ -403,7 +408,13 @@ defmodule SSL do
 
   # ServerOptions admits only `active: false` and `mode: :binary`, so the
   # in-order :inet.setopts/2 never activates the carrier before the override.
-  defp upgrade_carrier(tcp), do: server_carrier(tcp) ++ [:binary, active: false]
+  # Address families only apply when a socket opens; :inet.setopts/2 rejects them.
+  defp upgrade_carrier(tcp) do
+    tcp
+    |> Enum.reject(&(&1 in [:inet, :inet6, :local]))
+    |> server_carrier()
+    |> Kernel.++([:binary, active: false])
+  end
 
   # Server writes are synchronous carrier sends, so an infinite send timeout could wedge them.
   # The defaults apply only when the caller set neither key.

@@ -102,17 +102,20 @@ defmodule SSL.ServerConnection do
   @doc false
   def start_link(args), do: :gen_statem.start_link(__MODULE__, args, [])
 
-  @doc "Starts an unhandshaked server connection that takes ownership of `tcp`."
+  @doc """
+  Starts an unhandshaked server connection that takes ownership of `tcp`.
+
+  The `:ex_ssl` application must be started; `SSL.listen/2` and the upgrade
+  `SSL.handshake/3` ensure it once before calling this.
+  """
   @spec start(:gen_tcp.socket(), map(), pid()) :: {:ok, Socket.t()} | {:error, term()}
   def start(tcp, config, owner) when is_port(tcp) and is_map(config) and is_pid(owner) do
-    with {:ok, _} <- Application.ensure_all_started(:ex_ssl) do
-      ref = make_ref()
-      status = :atomics.new(1, signed: false)
+    ref = make_ref()
+    status = :atomics.new(1, signed: false)
 
-      case SSL.ConnectionSupervisor.start_server({owner, ref, status, config}) do
-        {:ok, pid} -> attach(Socket.new(pid, ref, status), tcp)
-        {:error, _} -> {:error, :closed}
-      end
+    case SSL.ConnectionSupervisor.start_server({owner, ref, status, config}) do
+      {:ok, pid} -> attach(Socket.new(pid, ref, status), tcp)
+      {:error, _} -> {:error, :closed}
     end
   end
 

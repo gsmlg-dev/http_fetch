@@ -290,8 +290,9 @@ Boundaries:
   `listen/2` validates every option before it opens the port.
 - SNI selection order is `sni_hosts[name]`, `sni_fun.(name)` (`:undefined`
   selects the default), then the default identity. `sni_hosts` identities are
-  loaded by `listen/2`; invalid entries or duplicate names return
-  `{:error, {:invalid_option, :sni_hosts}}`. No identity is an
+  loaded by `listen/2`; invalid entries or duplicate names (compared ASCII
+  case-insensitively, RFC 4343) return `{:error, {:invalid_option, :sni_hosts}}`.
+  `sni_hosts` lookup is case-insensitive; `sni_fun` receives the name as sent. No identity is an
   `unrecognized_name` alert; a failing `sni_fun` is an `internal_error` alert.
 - A TCP server sends its chain even when it does not match the client's
   `signature_algorithms_cert` (RFC 8446 §4.4.2.2); `SSL.QUIC` keeps the hard check.

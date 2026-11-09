@@ -103,6 +103,43 @@ defmodule SSL.ServerSNITest do
              {:error, {:invalid_option, :sni_hosts}}
   end
 
+  test "sni_hosts matches names case-insensitively (RFC 4343)", %{a: a, b: b} do
+    listen =
+      listen(cert: b.cert, key: b.key, sni_hosts: [{~c"A.Test", [cert: a.cert, key: a.key]}])
+
+    assert {{:ok, {:ok, peer}}, {:ok, _}} = handshake(listen, a, ~c"a.test")
+    assert peer == a.cert
+
+    {:ok, config} = ServerOptions.build(sni_hosts: [{~c"A.Test", [cert: a.cert, key: a.key]}])
+
+    assert {:ok, %{identity: %SSL.ClientIdentity{chain: [^peer | _]}}} =
+             ServerOptions.select_identity(config, ~c"a.TEST")
+  end
+
+  test "sni_hosts names that differ only in case are duplicates", %{a: a} do
+    hosts = [{~c"a.test", [cert: a.cert, key: a.key]}, {~c"A.TEST", [cert: a.cert, key: a.key]}]
+    assert ServerOptions.build(sni_hosts: hosts) == {:error, {:invalid_option, :sni_hosts}}
+  end
+
+  test "sni_fun receives the server name exactly as sent", %{a: a} do
+    test = self()
+
+    fun = fn name ->
+      send(test, {:sni_fun, name})
+      [cert: a.cert, key: a.key]
+    end
+
+    {:ok, config} = ServerOptions.build(sni_fun: fun)
+    assert {:ok, _} = ServerOptions.select_identity(config, ~c"A.Test")
+    assert_received {:sni_fun, ~c"A.Test"}
+  end
+
+  test "empty sni_hosts without a default identity or sni_fun is rejected", %{a: a} do
+    assert ServerOptions.build(sni_hosts: []) == {:error, :server_identity_required}
+    assert SSL.listen(0, sni_hosts: []) == {:error, :server_identity_required}
+    assert {:ok, _} = ServerOptions.build(cert: a.cert, key: a.key, sni_hosts: [])
+  end
+
   # Runs one server handshake against an OTP client; returns {client, server} results.
   defp handshake(listen, identity, sni, extra \\ []) do
     {:ok, {_, port}} = SSL.sockname(listen)

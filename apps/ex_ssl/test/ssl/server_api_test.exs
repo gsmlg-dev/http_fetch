@@ -174,6 +174,28 @@ defmodule SSL.ServerAPITest do
     :gen_tcp.close(tcp_listen)
   end
 
+  test "server upgrade accepts a bare address family option" do
+    {:ok, tcp_listen} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(tcp_listen)
+
+    client =
+      client(port, [], fn c ->
+        :ok = :ssl.send(c, "family")
+        :ssl.recv(c, 0, 2000)
+      end)
+
+    {:ok, tcp} = :gen_tcp.accept(tcp_listen, 5000)
+
+    assert {:ok, %SSL.Socket{} = s, []} =
+             SSL.handshake(tcp, [:inet | [certfile: @cert, keyfile: @key]], 2000)
+
+    assert SSL.recv(s, 0, 1000) == {:ok, "family"}
+    assert :ok = SSL.send(s, "ok")
+    assert finish(client) == {:ok, "ok"}
+    SSL.close(s)
+    :gen_tcp.close(tcp_listen)
+  end
+
   test "server upgrade rejects non-passive carrier modes without taking the socket" do
     {:ok, tcp_listen} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     {:ok, port} = :inet.port(tcp_listen)

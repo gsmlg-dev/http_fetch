@@ -4,6 +4,7 @@ defmodule SSL.ServerOptions do
   alias SSL.QUIC.Config
 
   # sni_hosts identities are loaded at build time; sni_fun results per handshake.
+  # sni_hosts keys are ASCII-lowercased (RFC 4343); sni_fun sees the name as sent.
   @type sni ::
           nil
           | {:hosts, %{charlist() => ClientIdentity.t()}}
@@ -140,7 +141,8 @@ defmodule SSL.ServerOptions do
   Selects the identity for a ClientHello `server_name` (`nil` when absent).
 
   Order: `sni_hosts[name]`, then `sni_fun.(name)` (`:undefined` selects the
-  default), then the default identity. The returned config carries the
+  default), then the default identity. `sni_hosts` matching is ASCII
+  case-insensitive (RFC 4343); `sni_fun` receives the name as sent. The returned config carries the
   selected identity and the signature schemes it can sign. `sni_fun` runs in
   the caller; a raise, throw, exit or invalid result is an `internal_error`.
   """
@@ -172,7 +174,7 @@ defmodule SSL.ServerOptions do
   defp lookup(_sni, nil), do: :default
 
   defp lookup({:hosts, hosts}, name) do
-    case Map.fetch(hosts, name) do
+    case Map.fetch(hosts, ascii_downcase(name)) do
       {:ok, identity} -> {:ok, identity}
       :error -> :default
     end
@@ -279,10 +281,13 @@ defmodule SSL.ServerOptions do
     end
   end
 
+  # Names that differ only in ASCII case are duplicates.
   defp sni_hosts(hosts) do
     names = Enum.map(hosts, &elem_or_nil/1)
 
-    with true <- Enum.all?(names, &is_list/1) and names == Enum.uniq(names),
+    with true <- Enum.all?(names, &is_list/1),
+         keys = Enum.map(names, &ascii_downcase/1),
+         true <- keys == Enum.uniq(keys),
          {:ok, identities} <- load_hosts(hosts, []) do
       {:ok, {:hosts, Map.new(identities)}}
     else
@@ -293,13 +298,20 @@ defmodule SSL.ServerOptions do
   defp elem_or_nil({host, _options}), do: host
   defp elem_or_nil(_), do: nil
 
+  defp ascii_downcase(name), do: Enum.map(name, &if(&1 in ?A..?Z, do: &1 + 32, else: &1))
+
   defp load_hosts([], acc), do: {:ok, acc}
 
   defp load_hosts([{host, options} | rest], acc) do
-    with {:ok, identity} <- host_identity(options), do: load_hosts(rest, [{host, identity} | acc])
+    with {:ok, identity} <- host_identity(options),
+         do: load_hosts(rest, [{ascii_downcase(host), identity} | acc])
   end
 
   defp identity_present(nil, nil), do: {:error, :server_identity_required}
+
+  defp identity_present(nil, {:hosts, hosts}) when map_size(hosts) == 0,
+    do: {:error, :server_identity_required}
+
   defp identity_present(_, _), do: :ok
 
   defp ciphers(nil), do: {:ok, tls13_ids()}

@@ -255,7 +255,11 @@ Scope:
   duplicate name fails `listen/2` with `{:error, {:invalid_option, :sni_hosts}}`.
   `sni_fun.(name)` runs in the connection process for each handshake and returns
   identity options or `:undefined`. Selection order is `sni_hosts[name]`, then
-  `sni_fun.(name)`, then the default identity; names match exactly. With no
+  `sni_fun.(name)`, then the default identity. `sni_hosts` names match
+  ASCII case-insensitively (RFC 4343), so names differing only in case are
+  duplicates; `sni_fun` receives the name exactly as the client sent it. An
+  empty `sni_hosts` with neither a default identity nor `sni_fun` fails with
+  `{:error, :server_identity_required}`. With no
   identity the handshake fails with `unrecognized_name`; an `sni_fun` raise,
   throw, exit or invalid result fails it with `internal_error`.
 - If the chain does not match the client's `signature_algorithms_cert` (or
