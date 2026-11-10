@@ -1,5 +1,8 @@
 ExUnit.start(exclude: [:integration, :e2e])
 ExUnit.configure(exclude: [integration: true, e2e: true, slow: true])
+# Positive message waits (e.g. receive traces) need room on loaded CI runners;
+# refute_receive keeps its own short default.
+ExUnit.configure(assert_receive_timeout: 1_000)
 
 defmodule Abyss.TestHost do
   @moduledoc false

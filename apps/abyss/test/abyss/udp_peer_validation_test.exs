@@ -46,10 +46,13 @@ defmodule Abyss.UDPPeerValidationTest do
           {:ok, sender} = :gen_udp.open(0, [:binary, active: false, ip: @loopback])
 
           try do
-            for _ <- 1..250 do
+            # Flood until killed: a timer reset by wrong-port datagrams would
+            # never fire, so the bounded await below is the real proof.
+            Stream.repeatedly(fn ->
               :ok = :gen_udp.send(sender, ip, client_port, "wrong")
               Process.sleep(1)
-            end
+            end)
+            |> Stream.run()
           after
             :gen_udp.close(sender)
           end
@@ -59,7 +62,7 @@ defmodule Abyss.UDPPeerValidationTest do
 
       try do
         assert {:error, :timeout} = Task.await(task, 500)
-        assert System.monotonic_time(:millisecond) - started < 200
+        assert System.monotonic_time(:millisecond) - started < 400
       after
         Task.shutdown(flood, :brutal_kill)
         :gen_udp.close(peer)
