@@ -222,8 +222,10 @@ I/O queue/send references. `application_crypto_bytes` counts contiguous accepted
 application-level CRYPTO bytes. `operation_result_bytes` is encoded result size,
 not total VM heap memory; `tracked_references` counts operation references,
 I/O receipt/timer references, generation and owner/writer/consumer monitors.
-Mailbox values remain samples at observation points, not a global VM profiler. Application CRYPTO tickets can be parsed/ignored, but resumption/0-RTT,
-explicit local client migration, HTTP/3, QPACK and WebTransport are unsupported. DATAGRAM support is
+Mailbox values remain samples at observation points, not a global VM profiler. Resumption, opt-in 0-RTT and explicit
+local client migration are supported and reported by `Quic.capabilities()` (see
+[client features validation](client-features-validation.md#capability-decision-2026-11-10));
+HTTP/3, QPACK and WebTransport are not owned by raw QUIC. DATAGRAM support is
 described above.
 
 The older PID-oriented `Quic.Connection` and diagnostic `stream_observer` seams
@@ -232,10 +234,14 @@ handles and consumer operations above.
 
 ## Server peer migration
 
-`Quic.capabilities().migration` is `%{peer: [:server], local: []}`. An established,
+`Quic.capabilities().migration` is `%{peer: [:server], local: [:client]}`. An established,
 confirmed server connection accepts authenticated 1-RTT traffic after its client
 changes source port or IP. Both roles process path frames, but a Quic client
-continues to require the original server address. There is no `migrate` API yet.
+continues to require the original server address. `local: [:client]` reports
+explicit client migration with `Quic.migrate/2` (exclusive standalone client,
+confirmed handshake, port and/or IP change, server address unchanged); its
+contract and independent acceptance are in
+[client features validation](client-features-validation.md).
 The same connection/stream handles, operation references, offsets and packet-number
 spaces survive the address change. Abyss uses the same engine behavior on its
 shared listener.

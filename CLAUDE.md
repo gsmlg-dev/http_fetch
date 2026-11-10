@@ -56,8 +56,11 @@ built and is not part of the umbrella.
   HTTP/3 has a cleanup receipt. Exclusive WebSocket/H3 and WebTransport sessions
   expose beta `migrate/2`. WebTransport (draft-17) runs live on an exclusive
   owner but has no independent peer acceptance, so `Profile.supported?/0`
-  stays false. Engine capability flags (`Quic.capabilities()` http3, local
-  migration, resumption) remain false. Remaining plan:
+  stays false. Engine capability flags: `Quic.capabilities()` reports
+  `resumption: true` and `migration: %{peer: [:server], local: [:client]}`
+  and `SSL.QUIC.capabilities()` reports `resumption`/`zero_rtt` true (M2/R1/R2
+  independent matrices CI-confirmed; dishonest-peer rows are in-repo only by
+  ruling); `Quic.capabilities().http3` stays false by design. Remaining plan:
   `docs/superpowers/plans/2026-11-09-http3-remaining-work.md`.
 - **HTTPFetch.Application** (`apps/http_fetch/lib/http_fetch.ex`): Supervision tree with `:http_fetch_task_supervisor` Task.Supervisor and HTTP.AbortController Registry
 

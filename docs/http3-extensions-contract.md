@@ -4,7 +4,7 @@ Source contract, 2026-11-08; WebTransport live wiring updated 2026-11-09.
 Explicit WebSocket/H3 is implemented and locally verified. WebTransport draft-17
 is wired end to end on an exclusive owner (see "Live WebTransport owner
 contract"); independent interoperability acceptance is BLOCKED, so
-`HTTP.WebTransport.Profile.supported?/0` and every capability flag remain false.
+`HTTP.WebTransport.Profile.supported?/0` and every WebTransport capability flag remain false.
 See `http3-websocket-validation.md` for acceptance evidence and its limits.
 
 ## Caller-owned extended CONNECT
@@ -317,6 +317,8 @@ alias. The exclusive owner's cleanup retires the QUIC connection without a
 CONNECTION_CLOSE, so the peer only idles it out. aioquic 1.2.0 is not used: it
 does not answer a padded probe on the new path (see
 `docs/quic/client-features-validation.md`, M2). WebTransport migration has no
-independent peer. `Quic.capabilities().migration.local` stays `[]`
-because the engine's negative acceptance matrix is incomplete; this API is beta
-and is not a general capability claim.
+independent peer. `Quic.capabilities().migration.local` is `[:client]`: the
+engine's M2 positive and negative matrices pass in CI against unmodified
+quic-go v0.62.0 and quinn 0.11.11 (`docs/quic/client-features-validation.md`).
+That is an engine capability; this HTTP API stays beta, and WebTransport
+migration still has no independent peer.

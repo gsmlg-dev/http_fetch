@@ -15,7 +15,7 @@ its independent acceptance gate.
 | 2 | Dynamic QPACK decoder (RFC 9204), bounded table and blocked streams | none | Done; aioquic gate PASS |
 | 3 | WebSocket/H3: native completion receipt, drop experimental label | QUIC cleanup receipt contract | Done; independent gate PASS |
 | 4 | WebTransport live adapter on `HTTP.HTTP3.ConnectionOwner` | WP3 runtime contract; matching draft-17 peer for acceptance | Live adapter done (in-repo peer); independent acceptance BLOCKED: no qualifying peer |
-| 5 | HTTP-layer resumption, 0-RTT for safe requests, migration for exclusive long-lived sessions | WP3, WP4 | Done: 5a resumption + 0-RTT (aioquic gate PASS), 5b migration for exclusive WebSocket/H3 and WebTransport (in-repo peer; independent WebSocket/H3 port migration gate PASS locally against unmodified quic-go/http3 v0.65.0, `scripts/http3_migration/gate.py`; source-IP case runs only in CI where 127.0.0.2 exists; WebTransport has no independent peer); capability flags stay false |
+| 5 | HTTP-layer resumption, 0-RTT for safe requests, migration for exclusive long-lived sessions | WP3, WP4 | Done: 5a resumption + 0-RTT (aioquic gate PASS), 5b migration for exclusive WebSocket/H3 and WebTransport (in-repo peer; independent WebSocket/H3 port migration gate PASS locally against unmodified quic-go/http3 v0.65.0, `scripts/http3_migration/gate.py`; source-IP case runs only in CI where 127.0.0.2 exists; WebTransport has no independent peer); engine flags flipped 2026-11-10 after the M2/R1/R2 negative matrices passed in CI (`Quic.capabilities()` `resumption: true`, `migration.local: [:client]`; `SSL.QUIC` `resumption`/`zero_rtt` true); `http3` and `Profile.supported?/0` stay false |
 
 ## WP1: Alt-Svc auto-HTTP/3 (Fetch)
 
@@ -131,5 +131,13 @@ its independent acceptance gate.
   `:not_exclusive_owner` and keeps exchanging. The exclusive owner retires its
   QUIC connection through the cleanup receipt without a CONNECTION_CLOSE, so the
   peer idles the connection out; this is recorded, not claimed as evidence.
-- Engine capability flags stay false until Lane A's negative acceptance completes;
-  these HTTP options are documented as beta.
+- Engine capability flags (2026-11-10): Lane A's negative acceptance passed in
+  CI (M2 on `2d333b5`/`1d5dbe7`; reliable reset, R1, R2 on `1d5dbe7`), so
+  `Quic.capabilities()` reports `resumption: true` and
+  `migration: %{peer: [:server], local: [:client]}`, and
+  `SSL.QUIC.capabilities()` reports `resumption`/`zero_rtt` true. Rows that
+  need a dishonest peer are accepted with in-repo evidence by ruling (see
+  `docs/quic/client-features-validation.md`, capability decision).
+  `Quic.capabilities().http3` stays false by design and
+  `HTTP.WebTransport.Profile.supported?/0` stays false (no draft-17 peer).
+  These HTTP options remain documented as beta.

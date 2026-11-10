@@ -1,6 +1,6 @@
 # Task A: QUIC client feature contract and validation
 
-Current work-in-progress evidence, 2026-11-08. No release/published/browser acceptance.
+Evidence as of 2026-11-10 (capability decision below). No release/published/browser acceptance.
 
 ## Public transport contract
 
@@ -8,16 +8,16 @@ Current work-in-progress evidence, 2026-11-08. No release/published/browser acce
 
 New socket writer is pinned to its path ID. Endpoint authenticates ingress generation and local socket address. Both sockets remain owned until pending effects and recovery permit retirement; monitored IO termination follows native socket closure. Supplied Cleanup lease enrolls all IO/Port resources before traffic; endpoints without a lease use an endpoint-owned candidate scope.
 
-`Quic.capabilities().migration.local` remains `[]` pending the complete independent acceptance. M1 server migration remains unchanged.
+`Quic.capabilities().migration` is `%{peer: [:server], local: [:client]}` since the M2 independent acceptance completed in CI (2026-11-10, see [capability decision](#capability-decision-2026-11-10)). `local: [:client]` is the role list fixed by the approved design (`docs/superpowers/specs/2026-11-07-quic-migration-and-early-data-design.md`, "Capability, verification, and RC gates"), symmetric with `peer: [:server]`; it means the exclusive standalone client may move its own local address (port and IP) under the contract above. It does not cover shared/external-IO endpoints, server-side local migration, multipath or arbitrary networks. M1 server migration remains unchanged.
 
 ## M2 evidence
 
 - PASS: 84 scoped path/migration/scheduler/IO/cleanup cases including integration.
 - PASS: 16 scoped runtime cases including candidate binding, zero-receive-credit padded probe, CID/policy rejection and retained-ref deduplication.
 - FAIL (fixed): first independent run exposed nested `put_in` root assignment in bound-result handler; direct runtime regression now covers it.
-- BLOCKED: aioquic 1.2.0 independent port/IP acceptance. Real initial stream/DATAGRAM succeeds. Candidate probe reaches independent server at a new source port; candidate expires without PATH_RESPONSE. Installed unmodified `aioquic/quic/connection.py` `datagrams_to_send()` selects only `_network_paths[0]`; `_handle_path_challenge_frame()` queues response on `context.network_path`; new path promotion requires a non-probing packet. A pure padded probe therefore leaves its response unsent. Sending PING before validation would violate the approved commit order; the gate remains failing and capability stays false.
+- BLOCKED: aioquic 1.2.0 independent port/IP acceptance. Real initial stream/DATAGRAM succeeds. Candidate probe reaches independent server at a new source port; candidate expires without PATH_RESPONSE. Installed unmodified `aioquic/quic/connection.py` `datagrams_to_send()` selects only `_network_paths[0]`; `_handle_path_challenge_frame()` queues response on `context.network_path`; new path promotion requires a non-probing packet. A pure padded probe therefore leaves its response unsent. Sending PING before validation would violate the approved commit order; the aioquic gate remains failing; the capability is instead gated on the unmodified quic-go acceptance below.
 - PASS (independent alternative): unmodified `quic-go v0.62.0`, immutable source `793f74d8e03368c5aded128af6f48d21dbb47f73`, source-port then source-IP changes. One handshake, one stream ID 0; exact 9646 bytes and FIN, SHA256 `048ab165ed8ff0294042bb45986fb08dc8f14b0abf3817b60d5a7e9f46662ab4`. Each phase has exact stream and DATAGRAM echo, each settled path count is one. Cleanup joins eight resources: endpoint, connection, three IO processes, three native Ports; all down and no unresolved births/operations. Localhost source-IP change is controlled loopback evidence, not distributed-network acceptance.
-- PASS locally on macOS (2026-11-10), CI confirmation pending: independent negative migration matrix and forced owner death at every two-socket transition; see [M2 negative matrix](#m2-negative-matrix-2026-11-10). The source-IP positive phase stays CI-only (needs a `127.0.0.2` alias).
+- PASS, CI-confirmed (Ubuntu, Public HTTP3 acceptance workflow on `2d333b5` and `1d5dbe7`): independent negative migration matrix and forced owner death at every two-socket transition, plus the source-IP positive phase (CI provides the `127.0.0.2` alias); see [M2 negative matrix](#m2-negative-matrix-2026-11-10).
 
 Commands use `ERL_FLAGS='+S 4:4' MIX_ENV=test MIX_BUILD_PATH=/tmp/http-fetch-quic-A-20261108/test` from the umbrella root. Independent gate: `python3 scripts/quic_client_features/migration.py --python /tmp/http-fetch-quic-A-peer/bin/python` (`aioquic==1.2.0`). The gate has finite child/peer deadlines, records exact bytes/FIN/path addresses and requires a retained native cleanup receipt.
 
@@ -27,26 +27,27 @@ Pinned draft: `draft-ietf-quic-reliable-stream-reset-11`. Transport parameter `r
 
 Reliable prefix on peer STOP_SENDING: `Quic.open_stream(connection, kind, reliable_prefix: bytes)` declares the first `bytes` of the send direction as a reliable prefix (`0`, the default, declares none; negative or non-integer values return `{:error, :invalid_reliable_prefix}`). When both endpoints negotiated reliable reset, a peer STOP_SENDING on that stream is answered with RESET_STREAM_AT carrying the STOP_SENDING code, final size = admitted send offset and reliable size = `min(prefix, admitted offset)`; a prefix not yet admitted cannot be completed after the reset, so only its admitted part is retained. Repeated STOP_SENDING is idempotent and never enlarges an earlier reliable size. Without negotiation, or with no admitted prefix bytes, the answer is the ordinary RESET_STREAM. `QuicHttp3.Session` passes the draft-17 WT prefix length for every WT stream it opens.
 
-Manual reads deliver ordinary `{:data, stream_id, bytes}` before exactly one `{:reset, stream_id, code, final_size}`; reset is withheld until the smallest reliable prefix is contiguous. Stream-open/readable events retain their existing pull/ownership contract. Sparse reassembly uses existing byte/range/stream-record limits. Final size charges stream and connection credit once; reset consumption releases remaining discarded-tail credit. Sender recovery retains/retransmits only unacknowledged prefix bytes plus smallest reset information, with global packet numbers unchanged. Bilateral quic-go traffic now passes; the independent draft-11 negative matrix passes locally (CI confirmation pending), with malformed-frame rows in-repo only; see [reliable reset negative matrix](#reliable-reset-negative-matrix-2026-11-10). Task D must gate production profile claims on the complete profile acceptance, not parameter presence alone.
+Manual reads deliver ordinary `{:data, stream_id, bytes}` before exactly one `{:reset, stream_id, code, final_size}`; reset is withheld until the smallest reliable prefix is contiguous. Stream-open/readable events retain their existing pull/ownership contract. Sparse reassembly uses existing byte/range/stream-record limits. Final size charges stream and connection credit once; reset consumption releases remaining discarded-tail credit. Sender recovery retains/retransmits only unacknowledged prefix bytes plus smallest reset information, with global packet numbers unchanged. Bilateral quic-go traffic now passes; the independent draft-11 negative matrix passes, CI-confirmed on `1d5dbe7`, with malformed-frame rows in-repo only; see [reliable reset negative matrix](#reliable-reset-negative-matrix-2026-11-10). Task D must gate production profile claims on the complete profile acceptance, not parameter presence alone.
 
 ## R1/R2 dependency
 
-Task B has published `docs/quic/tls-continuation-contract.md` and passing independent provider evidence. QUIC endpoint-local cache/authority, continuation and default-off early transport now exist in source. Independent positive traffic is recorded below; global capability claims remain false pending complete acceptance.
+Task B has published `docs/quic/tls-continuation-contract.md` and passing independent provider evidence. QUIC endpoint-local cache/authority, continuation and default-off early transport now exist in source. Independent positive traffic and the negative matrices are recorded below; after CI confirmation `Quic.capabilities().resumption` and `SSL.QUIC.capabilities().resumption`/`.zero_rtt` are true (see [capability decision](#capability-decision-2026-11-10)).
 
 ## Updated runtime evidence (2026-11-08)
 
 The preceding progress notes are superseded by this section where a gate was pending.
-All source remains unreleased, and the global capability claims stay unchanged:
-`migration.local == []`, `resumption == false`, `http3 == false`. No early-data or
-reliable-reset production capability is advertised. The complete adversarial and
-independent acceptance matrices remain open; positive traffic is not that matrix.
+As of 2026-11-10 every independent row in the table below is CI-confirmed and the
+global capability claims are `migration.local == [:client]`, `resumption == true`,
+`http3 == false` (by design); see [capability decision](#capability-decision-2026-11-10).
+Reliable reset stays an explicit per-endpoint opt-in (`reliable_reset: true`) and
+early data stays opt-in per connection; there is no separate global flag for either.
 
 | Area | Source/runtime checks | Independent positive traffic | Remaining acceptance |
 | --- | --- | --- | --- |
-| M2 client local migration | PASS: CID/policy/role/confirmation/address/busy/bind failure, dedup, padded probe, deadline fallback and retained old writer; PASS: forced owner death at all four two-socket transitions (in-repo server) | PASS: quic-go v0.62.0 port then IP migration, exact stream/FIN/DATAGRAM and eight-resource cleanup | PASS locally (port-based, macOS): independent negative matrix vs quic-go v0.62.0 (preconfirmation, bind in-use/unavailable, deadline fallback, concurrent busy, duplicate ref, owner death x4), zero-length-CID quic-go (no spare CID) and quinn 0.11.11 (peer `disable_active_migration`); pending CI confirmation of the new gates; source-IP phases CI-only |
-| Reliable reset draft-11 | PASS: exact TP/frame codec, negotiation, final-size/error checks, decreasing/reordered prefix, sparse receive, prefix loss/recovery and separate reset ACK | PASS: both directions against quic-go v0.62.0; negotiated support, prefix then reset, codes 42/43, retained ref and native cleanup | PASS locally (macOS), CI confirmation pending: independent negative matrix vs quic-go v0.62.0 through a test-owned relay (loss and reorder of RESET_STREAM_AT and prefix in both directions, repeated STOP_SENDING, prefix beyond admitted, non-negotiated peer falls back to RESET_STREAM); see [reliable reset negative matrix](#reliable-reset-negative-matrix-2026-11-10). In-repo only: malformed/decreasing/final-size frames an honest peer never sends |
-| R1 | PASS: bounded endpoint-local store, atomic single use, expiry/partition/eviction/redaction; serialized bounded continuation, timeout/stale/duplicate/late reply handling; actual full then resumed connections | PASS: unmodified aioquic 1.2.0, both client and server roles, exact 269-byte stream plus FIN, no early data, joined socket cleanup | PASS locally (macOS), CI confirmation pending: HRR resumption vs Go crypto/tls in quic-go v0.62.0, remote-server partition, endpoint restart, stale ticket after peer key rotation, concurrent single use; see [R1 negative matrix](#r1-negative-matrix-2026-11-10). In-repo only: trust/profile partition mismatch (endpoint-static, no wire path) |
-| R2 | PASS: type-1 early protection in application PN space, opt-in operations, receive staging/quotas, withheld delivery, rejection/ref retention/stream epochs, Retry without TLS rejection, reliable loss crossing to 1-RTT, DATAGRAM loss isolation and immutable early limits | PASS: aioquic 1.2.0 in both roles with an explicit Finished barrier; exact 274-byte stream/FIN and 23-byte DATAGRAM; PASS: resumed early connection followed by quic-go port and IP migration | PASS locally (macOS), CI confirmation pending: peer rejection and re-send, HRR rejection, undecryptable ticket, Retry + 0-RTT, client quota exhaustion, concurrent reuse, late 0-RTT receipt (server role, quic-go client); Finished barrier by the existing aioquic gates; see [R2 negative matrix](#r2-negative-matrix-2026-11-10). In-repo only: invalid binder, server-side receive quotas; no global support claim |
+| M2 client local migration | PASS: CID/policy/role/confirmation/address/busy/bind failure, dedup, padded probe, deadline fallback and retained old writer; PASS: forced owner death at all four two-socket transitions (in-repo server) | PASS: quic-go v0.62.0 port then IP migration, exact stream/FIN/DATAGRAM and eight-resource cleanup | PASS: independent negative matrix vs quic-go v0.62.0 (preconfirmation, bind in-use/unavailable, deadline fallback, concurrent busy, duplicate ref, owner death x4), zero-length-CID quic-go (no spare CID) and quinn 0.11.11 (peer `disable_active_migration`); CI-confirmed on `2d333b5` and `1d5dbe7`, including the source-IP phases |
+| Reliable reset draft-11 | PASS: exact TP/frame codec, negotiation, final-size/error checks, decreasing/reordered prefix, sparse receive, prefix loss/recovery and separate reset ACK | PASS: both directions against quic-go v0.62.0; negotiated support, prefix then reset, codes 42/43, retained ref and native cleanup | PASS, CI-confirmed on `1d5dbe7`: independent negative matrix vs quic-go v0.62.0 through a test-owned relay (loss and reorder of RESET_STREAM_AT and prefix in both directions, repeated STOP_SENDING, prefix beyond admitted, non-negotiated peer falls back to RESET_STREAM); see [reliable reset negative matrix](#reliable-reset-negative-matrix-2026-11-10). In-repo only: malformed/decreasing/final-size frames an honest peer never sends |
+| R1 | PASS: bounded endpoint-local store, atomic single use, expiry/partition/eviction/redaction; serialized bounded continuation, timeout/stale/duplicate/late reply handling; actual full then resumed connections | PASS: unmodified aioquic 1.2.0, both client and server roles, exact 269-byte stream plus FIN, no early data, joined socket cleanup | PASS, CI-confirmed on `1d5dbe7`: HRR resumption vs Go crypto/tls in quic-go v0.62.0, remote-server partition, endpoint restart, stale ticket after peer key rotation, concurrent single use; see [R1 negative matrix](#r1-negative-matrix-2026-11-10). In-repo only: trust/profile partition mismatch (endpoint-static, no wire path) |
+| R2 | PASS: type-1 early protection in application PN space, opt-in operations, receive staging/quotas, withheld delivery, rejection/ref retention/stream epochs, Retry without TLS rejection, reliable loss crossing to 1-RTT, DATAGRAM loss isolation and immutable early limits | PASS: aioquic 1.2.0 in both roles with an explicit Finished barrier; exact 274-byte stream/FIN and 23-byte DATAGRAM; PASS: resumed early connection followed by quic-go port and IP migration | PASS, CI-confirmed on `1d5dbe7`: peer rejection and re-send, HRR rejection, undecryptable ticket, Retry + 0-RTT, client quota exhaustion, concurrent reuse, late 0-RTT receipt (server role, quic-go client); Finished barrier by the existing aioquic gates; see [R2 negative matrix](#r2-negative-matrix-2026-11-10). In-repo only: invalid binder, server-side receive quotas (accepted by ruling, see [capability decision](#capability-decision-2026-11-10)) |
 
 ### R1 authority contract
 
@@ -218,7 +219,8 @@ closure and zero unresolved births/operations for each retained client receipt;
 server-role gates require IO and native-port DOWN evidence. Combined migration
 also requires the independent peer's exact later stream bytes/hash and FIN from
 both changed source addresses. The full negative matrices in the acceptance table
-remain NOT RUN; capability flags remain unchanged.
+remain NOT RUN; capability flags remain unchanged. (Superseded 2026-11-10: the
+matrices now pass in CI; see [capability decision](#capability-decision-2026-11-10).)
 
 Current logs are `/tmp/http-fetch-quic-A-verified-<gate>.log`,
 `/tmp/http-fetch-quic-A-{strict-compile,engine-suite,format,credo-normal,credo-changed,docs,dialyzer}-final.log`.
@@ -289,9 +291,9 @@ python3 scripts/quic_client_features/wire_gates.py --gate migration-disabled --q
 ```
 
 Local results, 2026-11-10, macOS (no `127.0.0.2` alias): all three gates PASS;
-`migration-negative` passed 11 consecutive runs. CI confirmation of the three
-new gates and of the existing source-IP positive phase is pending. Capability
-flags are unchanged by this section.
+`migration-negative` passed 11 consecutive runs. CI (Ubuntu, Public HTTP3
+acceptance) confirmed the three gates and the source-IP positive phase on
+`2d333b5` and again on `1d5dbe7`.
 
 ## Engine negative matrices: harness (2026-11-10)
 
@@ -401,4 +403,32 @@ python3 scripts/quic_client_features/wire_gates.py --gate early-late-server
 Controls: the `early-rejected` driver against a peer without `--reject-early`,
 and the HRR driver against a peer without `--curves p256`, both fail
 (`expected :rejected, got :accepted`), so those rows depend on the peer knob.
-Capability flags are unchanged by these sections.
+CI (Ubuntu, Public HTTP3 acceptance) confirmed all eight gates on `1d5dbe7`.
+
+## Capability decision (2026-11-10)
+
+Every independent row of the M2, reliable-reset, R1 and R2 matrices above passes
+and is CI-confirmed (M2 on `2d333b5` and `1d5dbe7`; reliable reset, R1 and R2 on
+`1d5dbe7`). The capability reports are therefore:
+
+| Flag | Value | Gated on |
+| --- | --- | --- |
+| `Quic.capabilities().migration` | `%{peer: [:server], local: [:client]}` | M1 (unchanged) + M2 positive and negative matrices |
+| `Quic.capabilities().resumption` | `true` | R1 + R2 positive and negative matrices |
+| `SSL.QUIC.capabilities().resumption` | `true` | provider evidence ([tls-resumption-validation.md](tls-resumption-validation.md)) + R1 runtime acceptance, incl. HRR resumption vs quic-go |
+| `SSL.QUIC.capabilities().zero_rtt` | `true` | provider evidence + R2 runtime acceptance |
+| `Quic.capabilities().http3` | `false` | by design: raw QUIC owns no HTTP/3; `QuicHttp3.capabilities()` reports it |
+
+**Ruling on in-repo-only rows.** The rows marked **in-repo only** (trust/profile
+partition mismatch, invalid binder, server-side receive staging/reservation
+quotas, malformed/decreasing/final-size reset frames, authority late/stale
+continuation replies) require a dishonest or modified peer, and no unmodified
+independent implementation can be one; a patched peer would not be independent
+evidence. In-repo evidence is accepted for these rows. They are not claimed as
+independent evidence.
+
+The flags report library support only. Every feature stays opt-in per endpoint or
+connection (`resumption:`, early-data operations, `reliable_reset: true`,
+`Quic.migrate/2` on an exclusive standalone client); enabled policy is reported
+by `Quic.info/1`. The evidence is controlled localhost/CI loopback interop, not
+distributed-network or production acceptance.

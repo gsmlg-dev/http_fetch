@@ -85,8 +85,8 @@ Insert Count Increment through normal write admission; peer decoder
 instructions other than Stream Cancellation are `QPACK_DECODER_STREAM_ERROR`.
 The local encoder stays static/literal; Huffman strings are decoded. The independent
 gate is `uv run --python 3.12 --with aioquic==1.2.0 python
-scripts/http3/qpack_dynamic_gate.py`. 0-RTT, connection migration, connection
-racing and WebTransport remain unsupported.
+scripts/http3/qpack_dynamic_gate.py`. Fetch connection migration, connection
+racing and WebTransport remain unsupported; 0-RTT is beta opt-in (below).
 WebSocket over HTTP/3 is supported (explicit opt-in, no fallback) with a stream-level cleanup receipt; see `http3-extensions-contract.md`. Raw `Quic.capabilities().http3` remains false because raw QUIC owns
 transport rather than HTTP semantics.
 
@@ -119,8 +119,12 @@ other `ex_ssl` setting keeps the request on TCP.
 
 ## Session resumption and 0-RTT (beta)
 
-Both features are opt-in and beta; defaults are unchanged and
-`Quic.capabilities()` keeps reporting `resumption: false`. EventSource accepts
+Both features are opt-in and beta; defaults are unchanged. The engine now
+reports `Quic.capabilities().resumption == true` and
+`SSL.QUIC.capabilities()` reports `resumption`/`zero_rtt` true, because the
+engine's R1/R2 independent negative matrices pass in CI
+(`docs/quic/client-features-validation.md`, capability decision); that is a
+transport capability, not a change to these HTTP options. EventSource accepts
 `http3_resumption` and never sends 0-RTT. WebSocket and WebTransport over
 HTTP/3 do not take these options: their certified exclusive owners retire a
 per-relay `Quic.Cleanup` scope that requires an owned endpoint.

@@ -53,9 +53,12 @@ Selecting ExSSL for TCP does not change the QUIC TLS path. A non-`nil` TCP
 
 ## Application and selector boundary
 
-`Quic` provides raw QUIC streams, optional unreliable DATAGRAMs and authenticated
-peer migration on established servers (`migration: %{peer: [:server], local: []}`).
-See the [server migration contract](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/quic/consumer-contract.md#server-peer-migration).
+`Quic` provides raw QUIC streams, optional unreliable DATAGRAMs, authenticated
+peer migration on established servers and explicit local migration of an
+exclusive standalone client (`migration: %{peer: [:server], local: [:client]}`),
+and opt-in session resumption with 0-RTT (`resumption: true`).
+See the [server migration contract](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/quic/consumer-contract.md#server-peer-migration)
+and the [client feature acceptance](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/quic/client-features-validation.md#capability-decision-2026-11-10).
 Application
 ALPN is opaque metadata; the transport does not dispatch HTTP/3 from `h3`.
 `QuicHttp3` is a separate HTTP/3 application package with independent
@@ -66,8 +69,12 @@ capability reporting:
   `qpack_profile: :static_literal` and Huffman support.
 - Fetch and EventSource support explicit verified HTTPS `http_version: :http3`
   through the supervised runtime, without protocol fallback.
-- Dynamic QPACK, 0-RTT, HTTP client migration, WebSocket over HTTP/3 and WebTransport remain
-  unsupported. The profile advertises zero dynamic capacity and blocked streams.
+- `QuicHttp3.capabilities()` still reports `dynamic_qpack`, `zero_rtt`,
+  `connection_migration`, `websocket_over_http3` and `webtransport` as false.
+  The HTTP layer's beta features (dynamic-table QPACK decoding, opt-in
+  resumption/0-RTT, WebSocket over HTTP/3 and exclusive-session `migrate/2`)
+  are described in the [Fetch contract](http3-fetch-contract.md) and the
+  [extension contract](http3-extensions-contract.md).
 
 The [Fetch contract](http3-fetch-contract.md) defines upload acknowledgements,
 unknown-operation handling, redirects, deadlines, trailers and cancellation.
