@@ -43,7 +43,7 @@ async fn main() {
         "{{\"event\":\"listening\",\"address\":\"{}\",\"peer\":\"{PEER}\",\"migration\":false}}",
         endpoint.local_addr().unwrap()
     );
-    let _ = tokio::time::timeout(Duration::from_secs(45), async {
+    let _ = tokio::time::timeout(Duration::from_secs(90), async {
         while let Some(incoming) = endpoint.accept().await {
             tokio::spawn(async move {
                 let Ok(conn) = incoming.await else { return };

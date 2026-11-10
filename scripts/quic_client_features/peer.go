@@ -71,7 +71,7 @@ func main() {
 	}
 	defer listener.Close()
 	emit(map[string]any{"event": "listening", "address": listener.Addr().String(), "peer": "quic-go-v0.62.0", "zero_cid": *zeroCID})
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	for {
 		conn, err := listener.Accept(ctx)

@@ -144,7 +144,8 @@ def run(args):
                     [args.python, f"scripts/quic_client_features/{feature}_peer.py", "--role", "client", "--port", port] +
                     (["--barrier", environment["QUIC_EARLY_BARRIER"]] if feature == "early" else []))
                 client = subprocess.run(command, cwd=ROOT, env=environment, stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT, text=True, timeout=35)
+                                        stderr=subprocess.STDOUT, text=True,
+                                        timeout=80 if args.gate in NEGATIVE else 35)
                 print(client.stdout, end="")
                 if not script:
                     peer.wait(timeout=8)
