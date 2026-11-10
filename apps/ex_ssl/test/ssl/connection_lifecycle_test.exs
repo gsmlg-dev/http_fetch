@@ -577,7 +577,8 @@ defmodule SSL.ConnectionLifecycleTest do
     Peer.stop(peer)
   end
 
-  test "abrupt TCP loss wakes a pending receive and remains unclean after process exit" do
+  # A TCP EOF without close_notify reports :closed, as OTP :ssl does (#158).
+  test "abrupt TCP loss wakes a pending receive and stays closed after process exit" do
     {:ok, peer} =
       Peer.start(fn socket ->
         assert {:error, :closed} = :ssl.recv(socket, 0, 5_000)
@@ -596,10 +597,10 @@ defmodule SSL.ConnectionLifecycleTest do
 
       _ = Peer.stop_fragmenting_proxy(proxy)
 
-      assert {:error, :econnreset} = Task.await(receiver)
+      assert {:error, :closed} = Task.await(receiver)
       assert_receive {:DOWN, ^monitor, :process, _, :normal}
-      assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
-      assert {:error, :econnreset} = SSL.send(socket, "must-not-retry")
+      assert {:error, :closed} = SSL.recv(socket, 0, 0)
+      assert {:error, :closed} = SSL.send(socket, "must-not-retry")
       assert :ok = SSL.close(socket)
     after
       if Process.alive?(proxy.task.pid), do: Peer.stop_fragmenting_proxy(proxy)

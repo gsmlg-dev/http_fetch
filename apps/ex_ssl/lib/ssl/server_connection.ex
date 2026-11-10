@@ -98,6 +98,7 @@ defmodule SSL.ServerConnection do
       ccs_sent: false,
       early_data: 0,
       closed: false,
+      close_reason: :closed,
       write_closed: false
     ]
   end
@@ -252,6 +253,13 @@ defmodule SSL.ServerConnection do
 
   def handle_event(:info, {:tcp_closed, tcp}, name, %{tcp: tcp} = data),
     do: fail(name, :closed, data)
+
+  # Like an EOF, a transport error after the handshake keeps decrypted
+  # plaintext deliverable and reports the error only after it is drained (#158).
+  def handle_event(:info, {:tcp_error, tcp, reason}, :connected, %{tcp: tcp} = data) do
+    Socket.mark_terminal(data.socket, false)
+    continue(:closing, close_transport(%{data | closed: true, close_reason: reason}))
+  end
 
   def handle_event(:info, {:tcp_error, tcp, reason}, name, %{tcp: tcp} = data),
     do: fail(name, reason, data)
@@ -726,8 +734,8 @@ defmodule SSL.ServerConnection do
 
     cond do
       data.closed and data.size == 0 ->
-        notify_pending(data, {:error, :closed})
-        if data.active_terminal, do: send(data.owner, {:ssl_closed, data.socket})
+        notify_pending(data, {:error, data.close_reason})
+        if data.active_terminal, do: send(data.owner, active_terminal(data))
         # stop_and_reply accepts only reply actions; pending timers die with the process.
         {:stop_and_reply, :normal, Enum.filter(actions, &match?({:reply, _, _}, &1)), data}
 
@@ -742,6 +750,9 @@ defmodule SSL.ServerConnection do
     end
   end
 
+  defp active_terminal(%{close_reason: :closed} = data), do: {:ssl_closed, data.socket}
+  defp active_terminal(data), do: {:ssl_error, data.socket, data.close_reason}
+
   defp arm?(name, data) do
     data.tcp != nil and data.started and not data.armed and not data.closed and
       (name != :connected or data.recv != nil or data.size < @max_plaintext - @rearm_reserve)
@@ -754,7 +765,9 @@ defmodule SSL.ServerConnection do
   end
 
   defp deliver(%{recv: %{from: from}, closed: true} = data),
-    do: {%{data | recv: nil}, [{:reply, from, {:error, :closed}}, {{:timeout, :recv}, :cancel}]}
+    do:
+      {%{data | recv: nil},
+       [{:reply, from, {:error, data.close_reason}}, {{:timeout, :recv}, :cancel}]}
 
   defp deliver(%{recv: nil, active: :once, size: size} = data) when size > 0 do
     {bytes, data} = take(data, size)

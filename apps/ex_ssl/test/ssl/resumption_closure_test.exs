@@ -12,9 +12,11 @@ defmodule SSL.ResumptionClosureTest do
     %{fixtures: ClientAuthFixtures.create(directory)}
   end
 
-  for {abrupt, terminal} <- [{false, :closed}, {true, :econnreset}],
+  # Both endings are :closed (#158); abrupt TCP EOF lacks only close_notify.
+  for {abrupt, terminal} <- [{false, :closed}, {true, :closed}],
       mode <- [:passive, :once] do
-    test "full and resumed #{mode} preserve bytes before #{terminal}", %{fixtures: fixtures} do
+    test "full and resumed #{mode} preserve bytes before #{if abrupt, do: "abrupt ", else: ""}#{terminal}",
+         %{fixtures: fixtures} do
       peer = peer(fixtures, abrupt_close: unquote(abrupt))
 
       for resumed <- [false, true] do
@@ -35,10 +37,9 @@ defmodule SSL.ResumptionClosureTest do
           if unquote(abrupt) do
             assert :ok = SSL.setopts(socket, active: :once)
             release_abrupt_close(peer)
-            assert_receive {:ssl_error, ^socket, :econnreset}, 5_000
-          else
-            assert_receive {:ssl_closed, ^socket}, 5_000
           end
+
+          assert_receive {:ssl_closed, ^socket}, 5_000
         end
 
         assert_receive {:DOWN, ^monitor, :process, _, _}, 5_000

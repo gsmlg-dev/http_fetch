@@ -71,6 +71,7 @@ defmodule SSL.Connection do
       size: 0,
       armed: false,
       closed: false,
+      close_reason: :closed,
       write_abandoned?: false,
       duplex_reads?: false,
       active_terminal: false,
@@ -1229,13 +1230,35 @@ defmodule SSL.Connection do
       {{:value, {:terminal, terminal}}, input} ->
         state = %{state | input: input, input_terminal: false}
 
-        if state.closed do
-          drain_or_continue(phase, state)
-        else
-          reason = if terminal == :closed, do: :econnreset, else: elem(terminal, 1)
-          fail(state, reason)
+        cond do
+          state.closed ->
+            drain_or_continue(phase, state)
+
+          phase == :connected ->
+            transport_terminal(phase, state, terminal)
+
+          true ->
+            reason = if terminal == :closed, do: :econnreset, else: elem(terminal, 1)
+            fail(state, reason)
         end
     end
+  end
+
+  # A transport EOF or error without close_notify ends the read side like a
+  # peer close_notify, but nothing more can be written: no reciprocal alert is
+  # attempted. Authenticated plaintext already decrypted stays deliverable;
+  # only then does recv/active delivery report the terminal (#158). A plain
+  # EOF reports :closed as OTP :ssl does; a transport error keeps its reason.
+  defp transport_terminal(phase, state, terminal) do
+    reason = if terminal == :closed, do: :closed, else: elem(terminal, 1)
+    Socket.mark_terminal(state.socket, reason == :closed)
+
+    state =
+      %{state | closed: true, close_reason: reason, armed: false}
+      |> settle_write({:error, reason})
+      |> close_transport()
+
+    drain_or_continue(phase, deliver(state))
   end
 
   @impl true
@@ -1437,7 +1460,7 @@ defmodule SSL.Connection do
         state
 
       state.closed ->
-        finish_recv(state, {:error, :closed})
+        finish_recv(state, {:error, state.close_reason})
 
       Options.remaining(receiver.deadline) == 0 ->
         finish_recv(state, {:error, :timeout})
@@ -1524,8 +1547,8 @@ defmodule SSL.Connection do
        do: {:next_state, phase, state, actions}
 
   defp continue(_phase, %{closed: true, size: 0} = state, actions) do
-    notify_pending(state, {:error, :closed})
-    state = notify_active_terminal(state, :closed)
+    notify_pending(state, {:error, state.close_reason})
+    state = notify_active_terminal(state, state.close_reason)
 
     if actions == [] do
       {:stop, :normal, state}

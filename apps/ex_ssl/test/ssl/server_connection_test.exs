@@ -106,6 +106,29 @@ defmodule SSL.ServerConnectionTest do
     assert :ok = finish(client)
   end
 
+  # #158: a transport error must not discard plaintext already decrypted.
+  for mode <- [:passive, :once] do
+    test "#{mode} delivers buffered plaintext before a transport error", ctx do
+      client = client(ctx.port, [], fn c -> :ssl.send(c, "buffered") end)
+      {:ok, s} = accept(ctx, [])
+      await_server_buffer(s, byte_size("buffered"))
+      {:connected, %{tcp: tcp}} = :sys.get_state(s.pid)
+      send(s.pid, {:tcp_error, tcp, :econnreset})
+
+      if unquote(mode) == :passive do
+        assert SSL.recv(s, 0, 1000) == {:ok, "buffered"}
+        assert SSL.recv(s, 0, 1000) == {:error, :econnreset}
+      else
+        assert :ok = SSL.setopts(s, active: :once)
+        assert_receive {:ssl, ^s, "buffered"}, 1000
+        assert_receive {:ssl_error, ^s, :econnreset}, 1000
+        refute_receive {:ssl_closed, ^s}, 20
+      end
+
+      assert :ok = finish(client)
+    end
+  end
+
   test "client KeyUpdate requesting an update keeps both directions usable", ctx do
     client =
       client(ctx.port, [], fn c ->
@@ -294,6 +317,20 @@ defmodule SSL.ServerConnectionTest do
     :ssl.close(c)
     :ssl.close(listen)
     ticket
+  end
+
+  defp await_server_buffer(s, size, attempts \\ 500)
+  defp await_server_buffer(_s, _size, 0), do: flunk("server did not buffer plaintext")
+
+  defp await_server_buffer(s, size, attempts) do
+    case :sys.get_state(s.pid) do
+      {_name, %{size: ^size}} ->
+        :ok
+
+      _ ->
+        Process.sleep(2)
+        await_server_buffer(s, size, attempts - 1)
+    end
   end
 
   defp config(extra) do
