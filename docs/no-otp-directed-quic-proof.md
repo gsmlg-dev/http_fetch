@@ -287,3 +287,14 @@ expressions and owning functions. Their lines move as recorded in the JSON.
 QUIC now has 37 reviewed occurrences. The complete compiled inventory of a
 locally built isolated candidate release has 206 sites, matching the five
 reviews exactly. CI strict candidate and published gates remain required.
+
+### Follow-up: GenUDP bind failure (2026-11-10)
+
+`apps/elixir_quic/lib/quic/io/gen_udp.ex` changed after the rc.11 renewal
+(`de1b8d3`): `Quic.IO.GenUDP.open/1` now starts its actor with
+`GenServer.start/2` and links it only after `init` owns a socket, so a failed
+bind (`:eaddrinuse`, `:eaddrnotavail`) returns `{:error, reason}` instead of
+killing the owner through the link. The change introduces only literal
+`GenServer.start/2` and `Process.link/1` calls; the file holds no reviewed
+occurrence, so no occurrence is added or rebound. The producer hash, the
+release census entry and every group's rc.11 census digest are updated.

@@ -11,7 +11,7 @@
     "apps/elixir_quic/lib/quic/cleanup/observer.ex": "7f2ae82f7d681c51d9458f27278351c30ff5ab4aee8f49c35fae8316884e2b8e",
     "apps/elixir_quic/lib/quic/endpoint.ex": "ed907ad9ed04d45a8e96c2167d1facb98d421a7f848e0a74c308060ce735a248",
     "apps/elixir_quic/lib/quic/connection.ex": "b91a1e0f3fc28f3fc57ae420206b60128d012a84d37cf5b08bcf98c290d8e119",
-    "apps/elixir_quic/lib/quic/io/gen_udp.ex": "399e668f0549474146575fefa37c4e8a542af64b7fad729b5a0e9c996158b09f",
+    "apps/elixir_quic/lib/quic/io/gen_udp.ex": "aa5b62c18f6fe995014557068858258459e19197f376d3d37a1984c0a789bd1c",
     "apps/elixir_quic/lib/quic/io/external_writer.ex": "1fda217ed39c3cbf474d4185a0af5fc5fae94667fd2ab32dcd8fbbd3ed6b2ddb",
     "apps/elixir_quic/lib/quic/abyss_dispatcher.ex": "f54b6fd777987a53374cbc15b4b8bbfa854142170cd276d312bd143ce8fbc249",
     "apps/elixir_quic/lib/quic/tls_driver.ex": "cda177305386e45ce223fdb02549cf741ca675a6a889d8da5577ab2f90e85ab3",
@@ -1514,7 +1514,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "4ae97fc9a618844e36f9bcf59da1893846109677",
+      "source_commit": "2d333b567e45b88391c725645e9b587d143a3645",
       "scope": "client migration, opt-in resumption/0-RTT, reliable reset and TLS provider continuation",
       "changed_source_inputs": {
         "apps/elixir_quic/lib/quic.ex": {
@@ -1535,7 +1535,7 @@
         },
         "apps/elixir_quic/lib/quic/io/gen_udp.ex": {
           "previous_sha256": "1e5c46de218a0614659660815d4560d137191907430d74c4e2027eff307bc98f",
-          "sha256": "399e668f0549474146575fefa37c4e8a542af64b7fad729b5a0e9c996158b09f"
+          "sha256": "aa5b62c18f6fe995014557068858258459e19197f376d3d37a1984c0a789bd1c"
         },
         "apps/elixir_quic/lib/quic/abyss_dispatcher.ex": {
           "previous_sha256": "ecefccf8f0eb0b44f57f1ef7043c48fe8fd18d2865259aea06eee7aed420b7f2",
@@ -1591,7 +1591,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "a491046da6801d839d496131249ae41b3d91256bfd1f8b6ffd3c733f65bb2fe8",
+        "sorted_path_sha256_json": "3f6f77c44036fa6d4cd06d64cf750d1527cd6caab5d103d2a6ca0a3d40046cca",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1797,7 +1797,16 @@
         "sha256": "86b342807dd913b25685cb60bd565da1fa8e68580447c578a0a17f735c4b89b3"
       },
       "historical_artifact_covers_amended_source": false,
-      "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED"
+      "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
+      "follow_up_changes": [
+        {
+          "date": "2026-11-10",
+          "source_commit": "2d333b567e45b88391c725645e9b587d143a3645",
+          "input": "apps/elixir_quic/lib/quic/io/gen_udp.ex",
+          "change": "Quic.IO.GenUDP.open/1 starts its actor with GenServer.start/2 and links only after init has a socket, so a failed bind is an ordinary {:error, reason} instead of an exit signal that killed the owner (de1b8d3).",
+          "dispatch_review": "No dynamic dispatch added or moved: the only calls introduced are GenServer.start/2 and Process.link/1 with literal module/function; the file holds no reviewed occurrence."
+        }
+      ]
     }
   ]
 }
