@@ -5,7 +5,8 @@ go.sum, runs gate.exs against it, and accepts only when the peer itself reports
 that post-migration WebSocket messages arrived with exact bytes, on the same
 connection and stream, from the client's new address (connection RemoteAddr
 switched and the per-source datagram counters attribute the large message to
-the new path). Usage:
+the new path), and that the migrated connection then ended with an application
+CONNECTION_CLOSE carrying H3_NO_ERROR rather than idling out. Usage:
 
     python3 scripts/http3_migration/gate.py          # port migration on 127.0.0.1
     python3 scripts/http3_migration/gate.py --ip     # plus source-IP migration to 127.0.0.2
@@ -118,11 +119,15 @@ def verify(local, remote, ip):
         require(close and close["code"] == 1000 and close["reason"] == reason, f"conn {conn} close {close}")
         end = next((item for item in remote if item["event"] == "stream_end" and item["conn"] == conn), None)
         require(end and end["fin"] and end["trailing_bytes"] == 0, f"conn {conn} stream end {end}")
-    # The exclusive owner retires its QUIC resources through the local cleanup
-    # receipt (asserted by gate.exs) without a CONNECTION_CLOSE, so the peer only
-    # idles the connection out; that is reported, not accepted as evidence.
+    # RFC 9114 section 5.2: after the clean WebSocket close the exclusive owner
+    # ends the migrated connection with CONNECTION_CLOSE(H3_NO_ERROR) before its
+    # cleanup receipt (asserted by gate.exs); an idle-timeout close fails.
     closed = next((item for item in remote if item["event"] == "connection_closed" and item["conn"] == 1), None)
-    print(f"peer-observed QUIC close of the migrated connection: {closed['cause'] if closed else 'none (idle)'}")
+    require(closed and closed["cause"].startswith("Application error 0x100 (remote)"),
+            f"peer-observed QUIC close of the migrated connection: {closed['cause'] if closed else 'none'}")
+    # Prompt, not idle: the peer saw it before the client opened the pooled connection.
+    require(remote.index(closed) < remote.index(connections[1]), "migrated connection closed after the pooled one opened")
+    print(f"peer-observed QUIC close of the migrated connection: {closed['cause']}: PASS")
     print("one connection, one CONNECT stream, exact bytes, clean WebSocket Close + FIN on the migrated path: PASS")
     print("pooled H3 WebSocket refuses migrate with :not_exclusive_owner and keeps exchanging: PASS")
 
@@ -174,7 +179,8 @@ def run(args):
             deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
                 with lock:
-                    if any('"stream_end"' in line and '"conn":2,' in line for line in lines):
+                    if any('"stream_end"' in line and '"conn":2,' in line for line in lines) and \
+                            any('"connection_closed"' in line and '"conn":1,' in line for line in lines):
                         break
                 time.sleep(0.05)
             require(peer.poll() is None, "independent peer exited during acceptance")
