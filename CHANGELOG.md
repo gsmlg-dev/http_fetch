@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP/3 connection owners now end an orderly shutdown of an established
   connection with an application CONNECTION_CLOSE carrying H3_NO_ERROR (0x100)
   before retiring their cleanup lease (RFC 9114 section 5.2), so peers no longer
-  wait for their idle timeout. The close is sent only when no request remains
+  wait for their idle timeout. The close is sent only when no live request
+  remains (an extended CONNECT whose response stream finished does not count)
   and is skipped once the owner has already been retired. On exclusive release
   the pool no longer retires the lease itself; the cleanup receipt now follows
   the owner's guarded close, bounded by `operation_timeout` (default 1 s). A

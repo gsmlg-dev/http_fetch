@@ -122,7 +122,7 @@ Evidence chain:
    `quic_cleanup`/`cleanup` descriptors are never retired by the relay.
    Since `4c1bf8f`, lease release no longer retires the exclusive owner's
    scope directly: the pool sends `:http3_retire`, and the owner first sends
-   CONNECTION_CLOSE with H3_NO_ERROR (only when no request remains) under its
+   CONNECTION_CLOSE with H3_NO_ERROR (only when no live request remains) under its
    watchdog-guarded `operation_timeout` (default 1 s), then retires. The
    receipt therefore follows the owner's guarded close, and confirmation can
    take up to that bound longer.
