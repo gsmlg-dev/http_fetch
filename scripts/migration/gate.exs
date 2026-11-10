@@ -310,6 +310,17 @@ defmodule Quic.MigrationGate do
               1_000 -> raise("closed connection without peer-close receipt")
             end
 
+          # The connection exited while the pull was in flight (or the pull timed
+          # out): a close shows up as its receipt, otherwise poll again under the
+          # worker deadline.
+          {:unknown, _ref} ->
+            receive do
+              {:quic_closed, connection, reason} when connection == state.connection ->
+                closed(reason, state)
+            after
+              1_000 -> worker(state, deadline)
+            end
+
           other ->
             raise("event poll failed: #{inspect(other)}")
         end
