@@ -15,7 +15,7 @@ its independent acceptance gate.
 | 2 | Dynamic QPACK decoder (RFC 9204), bounded table and blocked streams | none | Done; aioquic gate PASS |
 | 3 | WebSocket/H3: native completion receipt, drop experimental label | QUIC cleanup receipt contract | Done; independent gate PASS |
 | 4 | WebTransport live adapter on `HTTP.HTTP3.ConnectionOwner` | WP3 runtime contract; matching draft-17 peer for acceptance | Live adapter done (in-repo peer); independent acceptance BLOCKED: no qualifying peer |
-| 5 | HTTP-layer resumption, 0-RTT for safe requests, migration for exclusive long-lived sessions | WP3, WP4 | Done: 5a resumption + 0-RTT (aioquic gate PASS), 5b migration for exclusive WebSocket/H3 and WebTransport (in-repo peer; independent WebSocket/H3 port migration gate PASS locally against unmodified quic-go/http3 v0.65.0, `scripts/http3_migration/gate.py`; source-IP case runs only in CI where 127.0.0.2 exists; WebTransport has no independent peer); engine flags flipped 2026-11-10 after the M2/R1/R2 negative matrices passed in CI (`Quic.capabilities()` `resumption: true`, `migration.local: [:client]`; `SSL.QUIC` `resumption`/`zero_rtt` true); `http3` and `Profile.supported?/0` stay false |
+| 5 | HTTP-layer resumption, 0-RTT for safe requests, migration for exclusive long-lived sessions | WP3, WP4 | Done: 5a resumption + 0-RTT (aioquic gate PASS), 5b migration for exclusive WebSocket/H3 and WebTransport (in-repo peer; independent WebSocket/H3 port migration gate PASS locally against unmodified quic-go/http3 v0.65.0, `scripts/http3_migration/gate.py`; source-IP case PASS in CI (`17bd1c8`); WebTransport has no independent peer); engine flags flipped 2026-11-10 after the M2/R1/R2 negative matrices passed in CI (`Quic.capabilities()` `resumption: true`, `migration.local: [:client]`; `SSL.QUIC` `resumption`/`zero_rtt` true); `http3` and `Profile.supported?/0` stay false |
 
 ## WP1: Alt-Svc auto-HTTP/3 (Fetch)
 
@@ -126,11 +126,11 @@ its independent acceptance gate.
   post-migration text and 96 KiB binary messages with exact bytes on the same
   connection and CONNECT stream from the client's new address, nearly all bytes
   from the new path, and echoes back, then a clean Close + FIN. Port migration
-  on loopback: PASS locally. Source-IP migration (`--ip`, 127.0.0.2): CI
-  `independent-http3-migration` job only. A pooled WebSocket refuses with
-  `:not_exclusive_owner` and keeps exchanging. The exclusive owner retires its
-  QUIC connection through the cleanup receipt without a CONNECTION_CLOSE, so the
-  peer idles the connection out; this is recorded, not claimed as evidence.
+  on loopback: PASS locally and in CI. Source-IP migration (`--ip`, 127.0.0.2):
+  PASS in the CI `independent-http3-migration` job (`17bd1c8`). A pooled WebSocket refuses with
+  `:not_exclusive_owner` and keeps exchanging. On retirement the owner
+  sends CONNECTION_CLOSE with H3_NO_ERROR (0x100) before the cleanup receipt
+  (`4c1bf8f`), and the gate requires the peer to observe it.
 - Engine capability flags (2026-11-10): Lane A's negative acceptance passed in
   CI (M2 on `2d333b5`/`1d5dbe7`; reliable reset, R1, R2 on `1d5dbe7`), so
   `Quic.capabilities()` reports `resumption: true` and

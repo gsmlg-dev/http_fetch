@@ -311,10 +311,11 @@ connection and CONNECT stream, its connection `RemoteAddr()` equal to the
 client's new address, and its per-source datagram counters attribute the large
 message to the new path; the echoes return, and the tunnel closes with Close +
 FIN. A pooled WebSocket refuses with `:not_exclusive_owner` and keeps
-exchanging. Port migration passes locally; source-IP migration to 127.0.0.2
-(`--ip`) runs in the CI `independent-http3-migration` job, which adds the
-alias. The exclusive owner's cleanup retires the QUIC connection without a
-CONNECTION_CLOSE, so the peer only idles it out. aioquic 1.2.0 is not used: it
+exchanging. Port migration passes locally and in CI; source-IP migration to 127.0.0.2
+(`--ip`) passes in the CI `independent-http3-migration` job (first green on
+`17bd1c8`), which adds the alias. When the owner retires the connection it sends
+CONNECTION_CLOSE with H3_NO_ERROR (0x100) before cleanup (`4c1bf8f`); the gate
+requires the peer to observe it. aioquic 1.2.0 is not used: it
 does not answer a padded probe on the new path (see
 `docs/quic/client-features-validation.md`, M2). WebTransport migration has no
 independent peer. `Quic.capabilities().migration.local` is `[:client]`: the
