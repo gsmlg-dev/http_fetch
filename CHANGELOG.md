@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanly closed WebSocket over HTTP/3 retires its attempt without aborting it.
 
 ### Fixed
+- `HTTP.Promise.then/3` no longer crashes every chain: the chained task awaited a
+  task it did not own. Callbacks are now kept on the promise and run in the
+  process that calls `HTTP.Promise.await/2`, so `then/3` stays non-blocking.
+  `{:error, reason}` rejects the chain and skips success callbacks until an
+  error callback; any other result (including `{:ok, value}`) is passed
+  unchanged to the next callback, and a returned promise is awaited within the
+  same `await/2` timeout. Chained promises keep the original `completion/1`
+  handle.
 - `Quic.IO.GenUDP.open/1` no longer kills its caller when the UDP bind fails
   (`:eaddrinuse`, `:eaddrnotavail`); the failure is returned as
   `{:error, reason}`, so a migration to an unusable local address reports

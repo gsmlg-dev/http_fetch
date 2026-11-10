@@ -221,11 +221,12 @@ defmodule HTTP do
       end)
       |> HTTP.Promise.await() # Await the final chained promise to ensure execution
 
-      # Promise chaining with error handling: fetch -> parse JSON -> handle success or error
-      HTTP.fetch("https://jsonplaceholder.typicode.com/nonexistent") # This URL will cause an error
+      # Promise chaining with error handling. HTTP error statuses such as 404
+      # still resolve with a response; the error callback handles request failures.
+      HTTP.fetch("http://127.0.0.1:1/unreachable") # The connection will be refused
       |> HTTP.Promise.then(
         fn %HTTP.Response{} = response ->
-          IO.puts "This success branch should not be called for a 404!"
+          IO.puts "This success branch is not called for a failed connection"
           HTTP.Response.json(response)
         end,
         fn reason ->
@@ -247,8 +248,8 @@ defmodule HTTP do
           IO.puts "Fetched post \#{post_id}. Now fetching comments..."
           HTTP.fetch("https://jsonplaceholder.typicode.com/posts/\#{post_id}/comments")
         else
-          # If post_id is nil, we want to reject this branch of the promise chain
-          throw {:error, :post_id_not_found}
+          # Returning an error tuple rejects this branch of the promise chain
+          {:error, :post_id_not_found}
         end
       end)
       |> HTTP.Promise.then(fn comments_response ->

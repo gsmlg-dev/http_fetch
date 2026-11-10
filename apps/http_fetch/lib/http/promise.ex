@@ -33,7 +33,7 @@ defmodule HTTP.Promise do
       HTTP.fetch("https://api.example.com/data")
       |> HTTP.Promise.then(
         fn response -> HTTP.Response.json(response) end,
-        fn error -> {:error, :request_failed} end
+        fn _reason -> {:error, :request_failed} end
       )
       |> HTTP.Promise.await()
 
@@ -45,22 +45,37 @@ defmodule HTTP.Promise do
       |> HTTP.Promise.then(fn response ->
         {:ok, post} = HTTP.Response.json(response)
         # Fetch comments for this post
-        HTTP.fetch("https://api.example.com/posts/1/comments")
+        HTTP.fetch("https://api.example.com/posts/\#{post["id"]}/comments")
       end)
       |> HTTP.Promise.then(fn comments_response ->
         HTTP.Response.json(comments_response)
       end)
       |> HTTP.Promise.await()
+
+  `then/3` returns immediately. Its callbacks run in the process that calls
+  `await/2`, after the request settles. A callback result of `{:error, reason}`
+  rejects the chain; any other result is passed unchanged to the next success
+  callback, and a returned promise is awaited first.
   """
 
-  defstruct task: nil, completion: nil
+  defstruct task: nil, completion: nil, callbacks: []
 
-  @type t :: %__MODULE__{task: Task.t(), completion: HTTP.RequestCompletion.t() | nil}
-  @doc "Returns the original request's cleanup handle. Chained promises return nil."
+  @typedoc false
+  @type callback :: {success_callback_fun(), error_callback_fun() | nil}
+
+  @type t :: %__MODULE__{
+          task: Task.t(),
+          completion: HTTP.RequestCompletion.t() | nil,
+          callbacks: [callback()]
+        }
+  @doc """
+  Returns the original request's cleanup handle. Promises derived with `then/3`
+  keep the handle of the request they chain from.
+  """
   @spec completion(t()) :: HTTP.RequestCompletion.t() | nil
   def completion(%__MODULE__{completion: completion}), do: completion
 
-  @type success_callback_fun :: (HTTP.Response.t() -> any())
+  @type success_callback_fun :: (term() -> any())
   @type error_callback_fun :: (term() -> any())
 
   @doc """
@@ -74,6 +89,7 @@ defmodule HTTP.Promise do
     - `%HTTP.Response{}` on successful completion.
     - `{:error, reason}` if the request fails or is aborted.
     - `{:error, :timeout}` if the timeout is reached.
+    - For a promise derived with `then/3`, the final value of its callback chain.
 
   The wait timeout is independent of the request's `timeout:` option. Expiring
   a wait does not cancel the request or confirm cleanup, and the same promise
@@ -81,65 +97,86 @@ defmodule HTTP.Promise do
   the original handle from `completion/1` and use
   `HTTP.RequestCompletion.abort_and_await/2`. Other task exits still exit the
   caller.
+
+  `then/3` callbacks run in the awaiting process once the request settles. The
+  timeout covers the request and any promise a callback returns. A timeout while
+  waiting for the request leaves the chain re-awaitable; once callbacks have
+  started, the request result has been consumed and the chain cannot be resumed.
   """
-  @spec await(t(), timeout :: non_neg_integer() | :infinity) ::
-          HTTP.Response.t() | {:error, term()}
-  def await(%__MODULE__{task: task}, timeout \\ :infinity) do
-    case Task.yield(task, timeout) do
-      {:ok, result} -> result
-      nil -> {:error, :timeout}
-      {:exit, reason} -> exit({reason, {Task, :await, [task, timeout]}})
+  @spec await(t(), timeout :: non_neg_integer() | :infinity) :: term()
+  def await(%__MODULE__{} = promise, timeout \\ :infinity) do
+    case settle(promise, timeout, deadline(timeout)) do
+      {:settled, result} -> result
+      :timeout -> {:error, :timeout}
     end
   end
 
   @doc """
   Attaches callbacks for the resolution or rejection of the Promise.
-  Returns a new `HTTP.Promise` for chaining.
+  Returns a new `HTTP.Promise` for chaining without waiting for the request.
 
   Arguments:
     - `promise`: The current `HTTP.Promise` instance.
-    - `success_fun`: A 1-arity function to be called if the promise resolves successfully.
-                     It receives the `HTTP.Response.t()` as an argument.
+    - `success_fun`: A 1-arity function called with the fulfilled value: the
+                     `HTTP.Response.t()` for a request promise, or the previous
+                     callback's result for a chained promise.
                      Can return a value, `{:ok, value}`, `{:error, reason}`, or another `HTTP.Promise`.
     - `error_fun`: An optional 1-arity function to be called if the promise is rejected.
                    It receives the reason for rejection as an argument.
                    Can return a value, `{:ok, value}`, `{:error, reason}`, or another `HTTP.Promise`.
 
+  A result of `{:error, reason}` rejects the chained promise; any other value
+  (including `{:ok, value}`) fulfills it and is passed unchanged to the next
+  success callback. A returned `HTTP.Promise` is awaited and its result is used.
+  Without `error_fun`, a rejection skips `success_fun` and propagates.
+
+  Callbacks run in the process that calls `await/2`, so a returned promise is
+  owned by, and can be awaited from, that process. `await/2` returns the final
+  value, or `{:error, reason}` for a rejected chain.
+
   Returns:
     - `%HTTP.Promise{}`: A new promise representing the outcome of the callbacks.
   """
   @spec then(t(), success_callback_fun(), error_callback_fun() | nil) :: t()
-  def then(%__MODULE__{task: current_task}, success_fun, error_fun \\ nil) do
-    new_task =
-      Task.Supervisor.async_nolink(:http_fetch_task_supervisor, fn ->
-        case Task.await(current_task) do
-          %HTTP.Response{} = response ->
-            # Call the success function and handle its result
-            apply_callback(success_fun, [response]) |> handle_chained_result()
-
-          {:error, reason} ->
-            if error_fun do
-              # Call the error function if provided and handle its result
-              apply_callback(error_fun, [reason]) |> handle_chained_result()
-            else
-              # If no error_fun, just propagate the error
-              {:error, reason}
-            end
-        end
-      end)
-
-    %__MODULE__{task: new_task}
+  def then(%__MODULE__{callbacks: callbacks} = promise, success_fun, error_fun \\ nil)
+      when is_function(success_fun, 1) and (is_nil(error_fun) or is_function(error_fun, 1)) do
+    %{promise | callbacks: callbacks ++ [{success_fun, error_fun}]}
   end
 
-  @spec apply_callback(fun :: (any() -> any()), args :: list()) :: any()
-  defp apply_callback(fun, args) when is_function(fun, length(args)), do: apply(fun, args)
-  # Should ideally not happen with @spec
-  defp apply_callback(_fun, _args), do: {:error, :invalid_callback_function}
+  defp settle(%__MODULE__{task: task, callbacks: callbacks}, timeout, deadline) do
+    case Task.yield(task, timeout) do
+      {:ok, result} -> run_callbacks(callbacks, result, deadline)
+      nil -> :timeout
+      {:exit, reason} -> exit({reason, {Task, :await, [task, timeout]}})
+    end
+  end
 
-  @spec handle_chained_result(any()) :: {:ok, any()} | {:error, term()}
-  defp handle_chained_result(%HTTP.Promise{} = promise), do: Task.await(promise.task)
-  defp handle_chained_result({:ok, _} = result), do: result
-  defp handle_chained_result({:error, _} = result), do: result
-  # Wrap non-tuple results in :ok
-  defp handle_chained_result(other), do: {:ok, other}
+  defp run_callbacks([], result, _deadline), do: {:settled, result}
+
+  defp run_callbacks([{success_fun, error_fun} | rest], result, deadline) do
+    next =
+      case result do
+        {:error, reason} when is_function(error_fun, 1) -> error_fun.(reason)
+        {:error, _reason} = error -> error
+        value -> success_fun.(value)
+      end
+
+    case resolve(next, deadline) do
+      {:settled, value} -> run_callbacks(rest, value, deadline)
+      :timeout -> :timeout
+    end
+  end
+
+  defp resolve(%__MODULE__{} = promise, deadline),
+    do: settle(promise, remaining(deadline), deadline)
+
+  defp resolve(value, _deadline), do: {:settled, value}
+
+  defp deadline(:infinity), do: :infinity
+
+  defp deadline(timeout) when is_integer(timeout) and timeout >= 0,
+    do: System.monotonic_time(:millisecond) + timeout
+
+  defp remaining(:infinity), do: :infinity
+  defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 end
