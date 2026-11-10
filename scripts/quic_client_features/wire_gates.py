@@ -8,8 +8,14 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import tempfile
 import time
+
+# Every verdict below is a bare `assert`; `python -O` or PYTHONOPTIMIZE would
+# strip them and turn every gate into a vacuous pass.
+if sys.flags.optimize:
+    sys.exit("wire_gates.py: refusing to run with assertions disabled (python -O / PYTHONOPTIMIZE)")
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "apps/elixir_quic/test/fixtures/tls"
@@ -560,7 +566,9 @@ def run(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gate", choices=["migration", "reset", "resumption-client", "resumption-server", "early-client", "early-server", "early-migration", "early-late-server"] + list(NEGATIVE) + list(MATRIX), required=True)
-    parser.add_argument("--go-binary", default="/tmp/http-fetch-quic-A-go-peer/peer")
+    parser.add_argument("--go-binary", default="/tmp/http-fetch-quic-A-go-peer/peer",
+                        help="quic-go v0.62.0 peer; build it from this directory's go.mod/go.sum with "
+                             "GOFLAGS=-mod=readonly go build -trimpath -o <path> .")
     parser.add_argument("--python", default="/tmp/http-fetch-quic-A-peer/bin/python")
     parser.add_argument("--quinn-binary", default="/tmp/http-fetch-quic-A-quinn-peer/quinn-m2-peer")
     run(parser.parse_args())
