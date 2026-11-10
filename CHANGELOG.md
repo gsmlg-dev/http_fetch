@@ -39,6 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{:bind_failed, reason}`. An actor that stops before `open/1` returns can no
   longer kill a non-trapping caller with `:noproc`.
 
+### Security
+- The HTTP/1 response field parser (`HTTP.HTTP1`, http_core) now rejects
+  obs-fold continuation lines, whitespace between a field name and its colon,
+  non-token field names and field values with control characters
+  (`{:error, :invalid_header}`), per RFC 9112 sections 5.1 and 5.2. Previously
+  `"X-A: 1\r\n Transfer-Encoding: chunked"` produced a real `Transfer-Encoding`
+  field and `"Content-Length : 3"` was honoured, a response-desync vector on
+  reused connections and in proxy mode. Optional whitespace around values is
+  still trimmed.
+
 ## [1.0.0-rc.11] - 2026-11-09
 
 ### Added

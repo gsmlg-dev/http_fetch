@@ -297,21 +297,19 @@ defmodule HTTP.HTTP1 do
     end
   end
 
+  # RFC 9112 §5.1/§5.2: the field name is a token immediately followed by the
+  # colon, so obs-fold continuation lines (leading SP/HTAB) and whitespace
+  # before the colon are rejected rather than reinterpreted.
   defp parse_headers(lines) do
     lines
     |> Enum.reduce_while({:ok, []}, fn line, {:ok, acc} ->
-      case String.split(line, ":", parts: 2) do
-        [name, value] ->
-          name = String.trim(name)
-
-          if name == "" do
-            {:halt, {:error, :invalid_header}}
-          else
-            {:cont, {:ok, [{name, String.trim(value)} | acc]}}
-          end
-
-        _ ->
-          {:halt, {:error, :invalid_header}}
+      with [name, value] <- :binary.split(line, ":"),
+           true <- valid_token?(name),
+           value = trim_ows(value),
+           true <- safe_header_value?(value) do
+        {:cont, {:ok, [{name, value} | acc]}}
+      else
+        _ -> {:halt, {:error, :invalid_header}}
       end
     end)
     |> case do
@@ -644,6 +642,21 @@ defmodule HTTP.HTTP1 do
     value
     |> :binary.bin_to_list()
     |> Enum.all?(fn char -> char == ?\t or (char >= 32 and char != 127) end)
+  end
+
+  defp trim_ows(value), do: value |> trim_leading_ows() |> trim_trailing_ows()
+
+  defp trim_leading_ows(<<char, rest::binary>>) when char in [?\s, ?\t],
+    do: trim_leading_ows(rest)
+
+  defp trim_leading_ows(value), do: value
+
+  defp trim_trailing_ows(value) do
+    size = byte_size(value)
+
+    if size > 0 and :binary.last(value) in [?\s, ?\t],
+      do: trim_trailing_ows(binary_part(value, 0, size - 1)),
+      else: value
   end
 
   defp digits_only?(value) do

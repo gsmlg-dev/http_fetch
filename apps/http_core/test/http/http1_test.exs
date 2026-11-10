@@ -299,6 +299,40 @@ defmodule HTTP.HTTP1Test do
                HTTP.HTTP1.stream(conn, "HTTP/1.1 200 OK\r\nMalformed-Header\r\n\r\n")
     end
 
+    test "rejects obs-fold, whitespace before the colon, non-token names and unsafe values" do
+      for fields <- [
+            "X-A: 1\r\n Transfer-Encoding: chunked",
+            "X-A: 1\r\n\tTransfer-Encoding: chunked",
+            " X-A: 1",
+            "Content-Length : 3",
+            "Content-Length\t: 3",
+            "Bad Name: x",
+            "Bad\"Name: x",
+            ": x",
+            "X-A: a\0b",
+            "X-A: a\x7fb",
+            "X-A: a\rb"
+          ] do
+        assert {:error, :invalid_header} =
+                 HTTP.HTTP1.stream(
+                   HTTP.HTTP1.new(:get),
+                   "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n#{fields}\r\n\r\nabc"
+                 ),
+               inspect(fields)
+      end
+    end
+
+    test "trims optional whitespace around valid field values" do
+      assert {:ok, _conn, [{:headers, 200, headers}, {:body, "abc"}, :done]} =
+               HTTP.HTTP1.stream(
+                 HTTP.HTTP1.new(:get),
+                 "HTTP/1.1 200 OK\r\nContent-Length:3\r\nX-A: \t a b\t \r\nX-Empty:\r\n\r\nabc"
+               )
+
+      assert HTTP.Headers.get(headers, "x-a") == "a b"
+      assert HTTP.Headers.get(headers, "x-empty") == ""
+    end
+
     test "accepts matching duplicate content-length responses" do
       conn = HTTP.HTTP1.new(:get)
 
