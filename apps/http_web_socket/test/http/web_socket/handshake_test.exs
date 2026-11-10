@@ -44,6 +44,19 @@ defmodule HTTP.WebSocket.HandshakeTest do
              Handshake.validate_response(101, headers, @key, ["chat.v1"])
   end
 
+  test "rejects obs-fold, whitespace before the colon and malformed fields" do
+    head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+
+    for line <- [
+          " Sec-WebSocket-Accept: #{Handshake.accept_key(@key)}",
+          "Connection : Upgrade",
+          "Bad Name: x",
+          "X-Nul: a" <> <<0>> <> "b"
+        ] do
+      assert {:error, :invalid_header} = Handshake.parse_response(head <> line <> "\r\n\r\n")
+    end
+  end
+
   test "rejects invalid handshake responses" do
     headers =
       HTTP.Headers.new([

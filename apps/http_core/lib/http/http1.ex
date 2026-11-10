@@ -297,6 +297,11 @@ defmodule HTTP.HTTP1 do
     end
   end
 
+  @doc false
+  # Shared HTTP/1 field-line parser (also used by WebSocket upgrade responses).
+  @spec parse_header_lines([binary()]) :: {:ok, Headers.t()} | {:error, :invalid_header}
+  def parse_header_lines(lines) when is_list(lines), do: parse_headers(lines)
+
   # RFC 9112 §5.1/§5.2: the field name is a token immediately followed by the
   # colon, so obs-fold continuation lines (leading SP/HTAB) and whitespace
   # before the colon are rejected rather than reinterpreted.

@@ -211,7 +211,7 @@ defmodule HTTP.WebSocket.Handshake do
     case String.split(head, "\r\n") do
       [status_line | header_lines] ->
         with {:ok, status} <- parse_status_line(status_line),
-             {:ok, headers} <- parse_headers(header_lines) do
+             {:ok, headers} <- HTTP.HTTP1.parse_header_lines(header_lines) do
           {:ok, status, headers}
         end
 
@@ -230,20 +230,6 @@ defmodule HTTP.WebSocket.Handshake do
 
       _ ->
         {:error, :invalid_status_line}
-    end
-  end
-
-  defp parse_headers(lines) do
-    lines
-    |> Enum.reduce_while({:ok, []}, fn line, {:ok, acc} ->
-      case String.split(line, ":", parts: 2) do
-        [name, value] -> {:cont, {:ok, [{String.trim(name), String.trim(value)} | acc]}}
-        _ -> {:halt, {:error, :invalid_header}}
-      end
-    end)
-    |> case do
-      {:ok, headers} -> {:ok, headers |> Enum.reverse() |> HTTP.Headers.new()}
-      {:error, _reason} = error -> error
     end
   end
 
