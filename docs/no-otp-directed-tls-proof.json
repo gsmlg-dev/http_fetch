@@ -9,7 +9,7 @@
     "apps/ex_ssl/lib/ssl.ex": "6f2f5f334860a9f25f94df73130bb751604c069598f80bdae822f8ee274b37f9",
     "apps/ex_ssl/lib/ssl/options.ex": "84500c5c63746215284ebb764284eca97657ca00380c2feaf70c18fbc4c9e58c",
     "apps/ex_ssl/lib/ssl/tcp_options.ex": "b007fe9db46cedb98867797b368d999dd0dbb773d938f11e057eb9cb88f47d75",
-    "apps/ex_ssl/lib/ssl/connection.ex": "1a0fe66286c88e750c8967ec36229cd826d2bf5858fc84482cbb0771bcc2650a",
+    "apps/ex_ssl/lib/ssl/connection.ex": "24adae6aa1f14f0aa2c44aa0690a963c2f4814be7ec22a9ae33867e1c1c06bbc",
     "apps/ex_ssl/lib/ssl/prepared_upgrade.ex": "c62b7433f5848289a58df30bde1cdf18155a0dcd8a3dff0da49546aac3a74461",
     "apps/ex_ssl/lib/ssl/client_identity.ex": "bbda9af456f8c6a182e7d30c1b97cbd4502e6d7fca9058b45a31f30a1cbef053",
     "apps/ex_ssl/lib/ssl/client_hello/materializer.ex": "77fefe616a1f03a075be13dc5e689443c85c75878d59b4ea82833fb36b94518b",
@@ -34,7 +34,7 @@
     "apps/http_core/lib/http/transport/ex_ssl.ex": "20cda2e3507a1fa52ec8a5baf7259ceab9c407d434dda8e9601cfaadb514893f",
     "apps/ex_ssl/lib/ssl/crypto/tls12_key_schedule.ex": "0f21ece4467f13d1ac0acca8dd5c23d04b450b2b47063f403866126860552667",
     "apps/ex_ssl/lib/ssl/server_options.ex": "d5ff070fa5e91c4f49638823fec1f781a6c16e062b56e0164bd0d7712622b67d",
-    "apps/ex_ssl/lib/ssl/server_connection.ex": "68cb5417b999b8a7907cf8c555465fc8a0f4e710bcc92f124a250c0b7ebe007f",
+    "apps/ex_ssl/lib/ssl/server_connection.ex": "5500466131eb0a09e2fbee8f4bcb4f27c5bc348bcecf683e76ce4910c759da57",
     "apps/ex_ssl/lib/ssl/listen_socket.ex": "bd071c6cd1742cd2966c43dd503aa7496a0353047159590f7369f4fd71661982"
   },
   "production_source_census": {
@@ -317,7 +317,7 @@
         },
         "apps/ex_ssl/lib/ssl/connection.ex": {
           "previous_sha256": "f5cdeea8158c200996cd66e554be14f8c7f22ae7200826f1241104486890761b",
-          "sha256": "1a0fe66286c88e750c8967ec36229cd826d2bf5858fc84482cbb0771bcc2650a"
+          "sha256": "24adae6aa1f14f0aa2c44aa0690a963c2f4814be7ec22a9ae33867e1c1c06bbc"
         },
         "apps/ex_ssl/lib/ssl/pkix/pkix.ex": {
           "previous_sha256": "e87da677850294e277f6246e9db21252593444fafbc23566ff459ffd046a0e95",
@@ -338,6 +338,10 @@
         "apps/ex_ssl/lib/ssl/quic/config.ex": {
           "previous_sha256": "a523334dc65a9e82f39943cf9a9bcc7144546cb3ac3f9d0389bd937aee2e01b1",
           "sha256": "db708d4a3dca411cab89dbad09b7b1840a018b48cdfeecdff235eb05b81e291c"
+        },
+        "apps/ex_ssl/lib/ssl/server_connection.ex": {
+          "previous_sha256": "68cb5417b999b8a7907cf8c555465fc8a0f4e710bcc92f124a250c0b7ebe007f",
+          "sha256": "5500466131eb0a09e2fbee8f4bcb4f27c5bc348bcecf683e76ce4910c759da57"
         }
       },
       "added_selected_inputs": [
@@ -347,7 +351,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "c71beece1e80dc41e0d0cc3ea81404589c70684ff0cfb1a743e85bf272eee114",
+        "sorted_path_sha256_json": "637d116e64e800ba3004961766dd05244d979790cc92302ca7bb585c4cbd5e93",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -395,6 +399,20 @@
           "input": "apps/ex_ssl/lib/ssl/quic.ex",
           "change": "capabilities/0 reports resumption: true and zero_rtt: true (b2239e7); literal map change only.",
           "dispatch_review": "No dynamic dispatch added or moved; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "1f4912cdf7ef0b93e0fb81e4141977ddece69962",
+          "input": "apps/ex_ssl/lib/ssl/connection.ex",
+          "change": "A transport close or error without close_notify after the handshake now delivers buffered authenticated plaintext before reporting :econnreset (or the transport error); no write is attempted on the dead transport (#158).",
+          "dispatch_review": "No dynamic dispatch added or moved; only literal local/remote calls and state updates; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "1f4912cdf7ef0b93e0fb81e4141977ddece69962",
+          "input": "apps/ex_ssl/lib/ssl/server_connection.ex",
+          "change": "tcp_error while connected drains buffered plaintext before reporting the reason (#158).",
+          "dispatch_review": "No dynamic dispatch added or moved; only literal local/remote calls and state updates; the file holds no reviewed occurrence."
         }
       ]
     }

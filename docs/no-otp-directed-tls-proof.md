@@ -282,3 +282,12 @@ CI-confirmed M2, reliable-reset, R1 and R2 matrices (`b2239e7`, `b1276f9`,
 documentation only: no dynamic dispatch is added or moved, and no reviewed
 occurrence is rebound. Producer hashes, the release census and every group's
 rc.11 census digest are updated.
+
+### Follow-up: transport close without close_notify (2026-11-11, #158)
+
+`SSL.Connection` now delivers buffered authenticated plaintext before reporting
+a transport close or error that arrives without close_notify (still
+`:econnreset` for a plain close), and `SSL.ServerConnection` drains its buffer
+before reporting a `tcp_error`. Only literal calls and state updates changed: no
+dynamic dispatch is added or moved and no reviewed occurrence is rebound.
+Producer hashes, the release census and every group's census digest are updated.
