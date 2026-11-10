@@ -11,7 +11,7 @@ its independent acceptance gate.
 
 | WP | Scope | Depends on | Status |
 | --- | --- | --- | --- |
-| 1 | Fetch Alt-Svc discovery, opt-in H3 for `:auto`, safe fallback | none | Committed 6d8bbbc; independent-peer gate pending |
+| 1 | Fetch Alt-Svc discovery, opt-in H3 for `:auto`, safe fallback | none | Committed 6d8bbbc; independent Alt-Svc gate (`scripts/http3/alt_svc_gate.py`, aioquic 1.2.0) passes and runs in CI (`independent-aioquic` job in `.github/workflows/http3-public.yml`) |
 | 2 | Dynamic QPACK decoder (RFC 9204), bounded table and blocked streams | none | Done; aioquic gate PASS |
 | 3 | WebSocket/H3: native completion receipt, drop experimental label | QUIC cleanup receipt contract | Done; independent gate PASS |
 | 4 | WebTransport live adapter on `HTTP.HTTP3.ConnectionOwner` | WP3 runtime contract; matching draft-17 peer for acceptance | Live adapter done (in-repo peer); independent acceptance BLOCKED: no qualifying peer |
