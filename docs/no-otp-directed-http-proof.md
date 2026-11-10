@@ -419,3 +419,42 @@ are updated (the census also covers the `Quic.IO.GenUDP` link fix, `d460225`).
 An extended CONNECT whose response stream has finished (`512fd3c`) no longer
 counts as a live request, so a WebTransport session closed by a compliant peer
 still ends with H3_NO_ERROR; this adds only a request field and literal calls.
+
+### Follow-up: rc.12 review fixes (2026-11-11)
+
+`HTTP.Promise.then/3` (`abcc548`) no longer starts a supervised task per
+callback. It accepts only a 1-arity success function and `nil` or a 1-arity
+error function, and appends them to the returned promise's `callbacks` list.
+`HTTP.fetch/2` builds the only production promise, with no callbacks, and
+`then/3` is the only writer. `await/2` settles the request and then runs the
+retained callbacks in the awaiting caller's process under one deadline.
+`run_callbacks/3` calls `error_fun.(reason)` only when `is_function(error_fun, 1)`
+and calls `success_fun.(value)` otherwise. A callback result is only settled as
+a promise or passed on as data; a returned function is never invoked. HTTP-5's
+origin is unchanged: caller-supplied public-API callbacks. The sink changes
+shape:
+
+- occurrence 106 (`unresolved_apply` in `apply_callback/2`, line 135) is rebound
+  to `success_fun.(value)` (`unresolved_fun_invocation`, `run_callbacks/3`, line
+  161). The rebinding records `previous_kind`, `previous_mfa` and
+  `previous_line`.
+- the `error_fun.(reason)` call is the new occurrence 207 (line 159).
+
+SocketClient (`0186b4e`) passes `max_decoded_body_size` to every response stream
+and to buffered decoding. These are literal calls. The 12 HTTP-4 sites keep
+their expressions, retained selectors and owning functions, and move 2 or 15
+lines; their current lines are recorded in the amendment rebindings and the
+follow-up entry. The `request_deadline/1` change (`7e83803`) does not move any
+line. FetchOptions validates `timeout`/`connect_timeout` and accepts
+`max_decoded_body_size`. The WebSocket handshake parses its header lines with
+`HTTP.HTTP1.parse_header_lines/1`. The HTTP/3 ConnectionOwner computes its
+opening deadline through `HTTP.HTTP3.opening_timeout/1`. The `HTTP` changes are
+documentation only. All of these use only literal calls.
+
+The HTTP review now has 85 occurrences. The complete compiled inventory of a
+locally built isolated candidate release matches the five reviews exactly at 207
+sites. The release census also covers the hardened HTTP/1 field parser
+(`198148f`, `baa438c`), the multipart header escaping (`4d02164`) and the
+decoded-body bound in `HTTP.ContentDecoder`, `HTTP.Config` and `HTTP.Stream`
+(`0186b4e`). None of those files is a reviewed input, and the compiled
+inventory shows that none adds a dispatch site.

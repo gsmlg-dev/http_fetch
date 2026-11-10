@@ -336,3 +336,14 @@ updated.
 An extended CONNECT whose response stream has finished (`512fd3c`) no longer
 counts as a live request, so a WebTransport session closed by a compliant peer
 still ends with H3_NO_ERROR; this adds only a request field and literal calls.
+
+### Follow-up: rc.12 review fixes (2026-11-11)
+
+`HTTP.HTTP3.ConnectionOwner` (`7e83803`) now computes its default opening
+deadline lazily through `HTTP.HTTP3.opening_timeout/1`. As a result,
+`connect_timeout: :infinity` keeps the finite 5,000 ms QUIC opening budget. The
+closure passed to `Keyword.get_lazy/3` makes only literal calls. The file holds
+no reviewed occurrence, so no QUIC occurrence is added or rebound. The
+producer hashes, the release census and every group's rc.11 census digest are
+updated. The release now has 207 sites, because HTTP gains one Promise callback
+site.

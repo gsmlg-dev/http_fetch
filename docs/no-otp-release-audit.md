@@ -1,5 +1,31 @@
 # Directed production release audit
 
+## rc.12 proof follow-up — 2026-11-11
+
+Production changes after `1ee0ec6` changed twelve production files: the HTTP/1
+field parser, multipart escaping, Promise callbacks, the WebSocket upgrade
+parser, infinite HTTP/3 timeouts and the decoded-body bound. These changes
+altered the source census. Each changed reviewed input was re-reviewed in the
+rc.11 amendments as a dated follow-up:
+
+- 193 reviewed occurrences are unchanged.
+- 12 HTTP-4 `HTTP.SocketClient` sites keep their expressions and functions and
+  move 2 or 15 lines.
+- HTTP-5 occurrence 106 changes from `apply/2` in `apply_callback/2` to
+  `success_fun.(value)` in `run_callbacks/3` (kind `unresolved_fun_invocation`).
+- One site is new: ID 207, HTTP-5 `error_fun.(reason)` in `run_callbacks/3`. Its
+  only origin is the arity-guarded caller callback retained by
+  `HTTP.Promise.then/3`.
+
+No reviewed occurrence disappeared.
+
+The binding now covers 207 reviewed occurrences: TLS 15, QUIC 37, HTTP 85, H3 63
+and telemetry 7. It also covers the complete 267-file production-source census.
+A locally built isolated candidate release inspects 382 BEAMs and reports 207 raw
+dispatch sites. These match the reviewed identities exactly, and both local TLS
+plans pass the strict directed gate. CI strict candidate and published gates must
+still pass independently.
+
 ## rc.11 proof renewal — 2026-11-10
 
 The strict isolated release gate failed with `complete production source census

@@ -33,7 +33,8 @@ def rewind(proof, version):
         added = amendment.get('added_occurrences', [])
         sites = [site if site['inventory_occurrence'] not in bindings else
                  dict(site, line=bindings[site['inventory_occurrence']]['previous_line'],
-                      mfa=bindings[site['inventory_occurrence']].get('previous_mfa', site['mfa']))
+                      mfa=bindings[site['inventory_occurrence']].get('previous_mfa', site['mfa']),
+                      kind=bindings[site['inventory_occurrence']].get('previous_kind', site['kind']))
                  for site in sites if site['inventory_occurrence'] not in added]
     return sites
 
@@ -57,7 +58,7 @@ def pto_amendment(quic):
 class DirectedReviewTests(unittest.TestCase):
     def test_review_bundle_covers_all_original_sites_and_all_production_sources(self):
         bundle = review.load(ROOT, '1.0.0-rc.0', PACKAGES)
-        self.assertEqual(len(bundle['occurrences']), 206)
+        self.assertEqual(len(bundle['occurrences']), 207)
         self.assertEqual(len([name for name in bundle['sources'] if name.split('/')[0] in PACKAGES]), 267)
         self.assertEqual(len(bundle['reviews']), 10)
         self.assertEqual(bundle['versions']['http_fetch'], '1.0.0-rc.0')
@@ -76,7 +77,7 @@ class DirectedReviewTests(unittest.TestCase):
             site = sites[number]
             line = (ROOT / site['source']).read_text().splitlines()[site['line'] - 1]
             self.assertIn('callback.(' if number == 178 else 'module.', line)
-        self.assertEqual(len(bundle['occurrences']), 206)
+        self.assertEqual(len(bundle['occurrences']), 207)
         rc9 = [site for group in review.GROUPS for site in rewind(proof(group), '1.0.0-rc.11')]
         self.assertEqual(identity_digest(rc9),
                          (180, 180, amendment['reviewed_inventory_reconciliation']['sha256']))
@@ -204,7 +205,7 @@ class DirectedReviewTests(unittest.TestCase):
             lambda sites: [site for site in sites if site['inventory_occurrence'] != 176],
             lambda sites: [site for site in sites if site['inventory_occurrence'] != 177],
             lambda sites: sites + [copy.deepcopy(sites[-1])],
-            lambda sites: sites + [dict(sites[-1], inventory_occurrence=207)],
+            lambda sites: sites + [dict(sites[-1], inventory_occurrence=208)],
         ]
         for change in changes:
             def load_with_changed_quic_sites(text):
@@ -224,7 +225,7 @@ class DirectedReviewTests(unittest.TestCase):
                       if name.split('/')[0] in PACKAGES}
         census = hashlib.sha256(json.dumps(production, sort_keys=True).encode()).hexdigest()
         tokens = {'TLS-7': 'fun.(', 'Q2': 'adapter.', 'Q4': 'adapter.', 'H3-1': 'transport.',
-                  'H3-2': 'ops.', 'WT-1': ('backend.', 'fun.(')}
+                  'H3-2': 'ops.', 'WT-1': ('backend.', 'fun.('), 'HTTP-5': 'fun.('}
         added, current = [], []
         for group in review.GROUPS:
             group_proof = proof(group)
@@ -248,11 +249,26 @@ class DirectedReviewTests(unittest.TestCase):
                                          else (tokens[site['proof']],))))
             added += amendment['added_occurrences']
             reconciliation = amendment['reviewed_inventory_reconciliation']
-            self.assertEqual((reconciliation['count'], reconciliation['duplicates']), (206, 0))
+            self.assertEqual((reconciliation['count'], reconciliation['duplicates']), (207, 0))
             self.assertEqual(identity_digest(bundle['occurrences']),
-                             (206, 206, reconciliation['sha256']))
-        self.assertEqual(sorted(added), list(range(181, 207)))
-        self.assertEqual(sorted(site['inventory_occurrence'] for site in current), list(range(1, 207)))
+                             (207, 207, reconciliation['sha256']))
+        self.assertEqual(sorted(added), list(range(181, 208)))
+        self.assertEqual(sorted(site['inventory_occurrence'] for site in current), list(range(1, 208)))
+
+    def test_promise_callback_follow_up_rebinds_the_apply_sink_and_adds_the_error_callback(self):
+        http = proof('http')
+        sites = {site['inventory_occurrence']: site for site in http['occurrences']}
+        source = (ROOT / 'apps/http_fetch/lib/http/promise.ex').read_text().splitlines()
+        for number, token in ((106, 'success_fun.(value)'), (207, 'error_fun.(reason)')):
+            with self.subTest(occurrence=number):
+                site = sites[number]
+                self.assertEqual((site['module'], site['mfa'], site['kind'], site['proof']),
+                                 ('HTTP.Promise', 'run_callbacks/3', 'unresolved_fun_invocation', 'HTTP-5'))
+                self.assertIn(token, source[site['line'] - 1])
+        rewound = {site['inventory_occurrence']: site for site in rewind(http, '1.0.0-rc.11')}
+        self.assertNotIn(207, rewound)
+        self.assertEqual({key: rewound[106][key] for key in ('mfa', 'line', 'kind')},
+                         dict(mfa='apply_callback/2', line=135, kind='unresolved_apply'))
 
     def test_native_source_and_compiled_release_binding(self):
         result = subprocess.run(['elixir', str(Path(__file__).with_suffix('.exs'))],

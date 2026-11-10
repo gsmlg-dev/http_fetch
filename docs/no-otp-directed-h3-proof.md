@@ -208,3 +208,16 @@ are updated (the census also covers the `Quic.IO.GenUDP` link fix, `d460225`).
 An extended CONNECT whose response stream has finished (`512fd3c`) no longer
 counts as a live request, so a WebTransport session closed by a compliant peer
 still ends with H3_NO_ERROR; this adds only a request field and literal calls.
+
+### Follow-up: rc.12 review fixes (2026-11-11)
+
+Infinite timeouts on HTTP/3 (`7e83803`): `HTTP.HTTP3.request/3` uses the new
+`opening_timeout/1` to compute its opening budget, which is 5,000 ms for `nil` or
+`:infinity`. `await/5` waits with `remaining/1`. `HTTP.HTTP3.ConnectionOwner`
+and SocketClient's `request_http3` use the infinity-aware helpers. All of these
+are literal calls. The H3-5 handler invocations (143, 144) stay at `await/5`
+lines 40 and 53. FetchOptions and SocketClient also gain the decoded-body bound
+(`0186b4e`), and the `HTTP` documentation changes (`abcc548`). This group holds
+none of the moved SocketClient sites; the HTTP review rebinds them. No H3
+occurrence is added or rebound. The release now has 207 sites, because HTTP
+gains one Promise callback site.

@@ -9,16 +9,16 @@
     "apps/elixir_quic_http3/lib/quic_http3/session.ex": "e329caba406925e06286e3bea3f01f8b83a820ef4a77eca1b6ff826a775e3db3",
     "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679",
     "apps/http_core/lib/http/quic/ex_quic.ex": "0cb045e39b362131a53d5b3a1d7a19f5f5f25c7f192cf64a16b28ed488e0ffc6",
-    "apps/http_fetch/lib/http.ex": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d",
-    "apps/http_fetch/lib/http/fetch_options.ex": "9f9c13c9ca4e04f9ad3f54cdacb8f2fc130e94e5b5acf832e6618c4e3af42316",
-    "apps/http_fetch/lib/http/socket_client.ex": "6c24bc65c13535652e045bcfef8b67d1101211ccbcec6068343e184e9b59693f",
+    "apps/http_fetch/lib/http.ex": "f2331ea11d40cc50c5f5af83c65279d04c2d8ec540a5413b8cff35f34db46a7b",
+    "apps/http_fetch/lib/http/fetch_options.ex": "b7c823c68858ce179005ace404dac20851250bbd651420a2ae9519e10bfebdac",
+    "apps/http_fetch/lib/http/socket_client.ex": "9f5bc9f0777cee93d9087c8576843622a3f55a48634fb2f32ed0314230677687",
     "apps/http_event_source/lib/http/event_source/options.ex": "6ee7ca7f5be5e113db4fb3b25e4df8f096c7e94cd1fdeb24bd8bcf88b79e85f0",
     "apps/http_event_source/lib/http/event_source/connection.ex": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
-    "apps/http_runtime/lib/http/http3.ex": "b691a8f1c780c3b9e920c7148f38a17d82975d2788170579073753bea61df92d",
+    "apps/http_runtime/lib/http/http3.ex": "7b1670325485fae44e28a787392e7f10c40788eac9b526a9eac75aeba57a5049",
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
     "apps/http_runtime/lib/http/http3/pool_key.ex": "d9ef3e06fcbaab42181a3b27ddc72e16865e516d0b8c4e07be003558ac62e899",
     "apps/http_runtime/lib/http/http3/pool.ex": "974135c4126244c649815a5d4ab808678da3c1978540d84b940729f299baf73d",
-    "apps/http_runtime/lib/http/http3/connection_owner.ex": "c686ff14614b1c0bb915b3e23c1354f2edae62bb0f6df5715648411367d38f3a",
+    "apps/http_runtime/lib/http/http3/connection_owner.ex": "b2f5eeb3b75afdf1187f0fc4a19b2b8e070f6a0ec06d92841a68b8a7384428e2",
     "apps/http_runtime/lib/http/http3/resumption.ex": "ad78171f1d7f53425400a05a02a1d87f0263e4f3a17b87fa95fc8f4e1559ae29"
   },
   "production_source_census": {
@@ -707,7 +707,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "512fd3ca291b1bd4913781e01d38361823e405f6",
+      "source_commit": "0186b4e3db4637d55c578929ce4d9dc0db808e67",
       "scope": "opt-in resumption/0-RTT, extended CONNECT, datagrams, reliable reset, client migration and WebSocket/H3 completion receipt",
       "changed_source_inputs": {
         "apps/elixir_quic_http3/lib/quic_http3/session.ex": {
@@ -720,11 +720,11 @@
         },
         "apps/http_fetch/lib/http/fetch_options.ex": {
           "previous_sha256": "5e69e37daad48cda62f04c6043b43116383c885cfe809a3089ffad9a3d42d9f1",
-          "sha256": "9f9c13c9ca4e04f9ad3f54cdacb8f2fc130e94e5b5acf832e6618c4e3af42316"
+          "sha256": "b7c823c68858ce179005ace404dac20851250bbd651420a2ae9519e10bfebdac"
         },
         "apps/http_fetch/lib/http/socket_client.ex": {
           "previous_sha256": "dd7f464583e6bf9b687aebec9f8a819cdf84bb9311cfc2e8ff7c96edaf58f052",
-          "sha256": "6c24bc65c13535652e045bcfef8b67d1101211ccbcec6068343e184e9b59693f"
+          "sha256": "9f5bc9f0777cee93d9087c8576843622a3f55a48634fb2f32ed0314230677687"
         },
         "apps/http_event_source/lib/http/event_source/options.ex": {
           "previous_sha256": "d1c36a500c8f5f86b6c5334d8e34b355451d9367487f5d1f4b37df0a31b44202",
@@ -740,11 +740,19 @@
         },
         "apps/http_runtime/lib/http/http3/connection_owner.ex": {
           "previous_sha256": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
-          "sha256": "c686ff14614b1c0bb915b3e23c1354f2edae62bb0f6df5715648411367d38f3a"
+          "sha256": "b2f5eeb3b75afdf1187f0fc4a19b2b8e070f6a0ec06d92841a68b8a7384428e2"
         },
         "apps/http_runtime/lib/http/http3/pool.ex": {
           "previous_sha256": "730b52081a9f99621e5edd677167556dbeede70fd74cef7d1164e9e230118d44",
           "sha256": "974135c4126244c649815a5d4ab808678da3c1978540d84b940729f299baf73d"
+        },
+        "apps/http_fetch/lib/http.ex": {
+          "previous_sha256": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d",
+          "sha256": "f2331ea11d40cc50c5f5af83c65279d04c2d8ec540a5413b8cff35f34db46a7b"
+        },
+        "apps/http_runtime/lib/http/http3.ex": {
+          "previous_sha256": "b691a8f1c780c3b9e920c7148f38a17d82975d2788170579073753bea61df92d",
+          "sha256": "7b1670325485fae44e28a787392e7f10c40788eac9b526a9eac75aeba57a5049"
         }
       },
       "added_selected_inputs": [
@@ -752,7 +760,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "a8e0221717901f513fa29b65f7d3acd61ead0878561edc9e5e30e52e55b01244",
+        "sorted_path_sha256_json": "c71beece1e80dc41e0d0cc3ea81404589c70684ff0cfb1a743e85bf272eee114",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -912,7 +920,7 @@
       },
       "reviewed_inventory_reconciliation": {
         "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
-        "count": 206,
+        "count": 207,
         "duplicates": 0,
         "identity": [
           "module",
@@ -921,7 +929,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "86b342807dd913b25685cb60bd565da1fa8e68580447c578a0a17f735c4b89b3"
+        "sha256": "3ef0649ead2c45a16a3161a9125b589ba375c0728aab5d496d21402e29d9ab9d"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
@@ -953,6 +961,55 @@
           "input": "apps/http_runtime/lib/http/http3/connection_owner.ex",
           "change": "An extended CONNECT request whose response stream finished is marked done? and no longer counts as live, so graceful_close/2 still sends H3_NO_ERROR after a WebTransport session closed by a compliant peer; any other remaining request keeps suppressing it.",
           "dispatch_review": "No dynamic dispatch added or moved: the change adds a request map field, a put_in/2 update and an Enum.any?/2 over the request map; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "abcc548a4f1018c8cbac352b5282830170d85864",
+          "input": "apps/http_fetch/lib/http.ex",
+          "change": "fetch/2 @doc Promise examples now reject with an {:error, reason} return instead of throw and use a refused local connection for the error branch (abcc548); the timeout paragraph states the HTTP/2 and HTTP/3 :infinity behaviour (7e83803). Documentation only.",
+          "dispatch_review": "No dynamic dispatch added or moved: documentation text only; the apparent calls remain documentation examples and the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "7e83803fdf36f157dbffd124c21548a32b836aec",
+          "input": "apps/http_fetch/lib/http/fetch_options.ex",
+          "change": "FetchOptions validates timeout and connect_timeout as non-negative milliseconds or :infinity, raising ArgumentError otherwise.",
+          "dispatch_review": "No dynamic dispatch added or moved: two literal normalize_timeout/2 calls with guard clauses; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "0186b4e3db4637d55c578929ce4d9dc0db808e67",
+          "input": "apps/http_fetch/lib/http/fetch_options.ex",
+          "change": "FetchOptions accepts max_decoded_body_size (and maxDecodedBodySize) as a positive integer or :infinity and forwards it as a transport option.",
+          "dispatch_review": "No dynamic dispatch added or moved: a literal alias entry, struct field, reducer clause, maybe_add/3 call and guarded normalizer; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "7e83803fdf36f157dbffd124c21548a32b836aec",
+          "input": "apps/http_fetch/lib/http/socket_client.ex",
+          "change": "request_http3 computes deadline_at with the existing infinity-aware request_deadline/1 instead of adding the timeout to the monotonic clock.",
+          "dispatch_review": "No dynamic dispatch added or moved: one literal local call replaces an addition on the same line; line numbers are unchanged."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "0186b4e3db4637d55c578929ce4d9dc0db808e67",
+          "input": "apps/http_fetch/lib/http/socket_client.ex",
+          "change": "SocketClient passes max_decoded_body_size (request option or HTTP.Config default) to every response stream and to buffered Content-Encoding decoding.",
+          "dispatch_review": "No dynamic dispatch added: the change adds literal Keyword.get/2, HTTP.Config.max_decoded_body_size/0 and HTTP.ContentDecoder.buffered/3 calls and a keyword option. This group holds no SocketClient occurrence; the moved HTTP-4 sites are rebound in the HTTP review."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "7e83803fdf36f157dbffd124c21548a32b836aec",
+          "input": "apps/http_runtime/lib/http/http3.ex",
+          "change": "HTTP.HTTP3.request/3 derives the opening budget from the new opening_timeout/1 (5,000 ms for nil or :infinity) and await/5 waits with remaining/1, which returns :infinity for an infinite deadline.",
+          "dispatch_review": "No dynamic dispatch added or moved: literal local calls and guard clauses; the H3-5 handler invocations (143, 144) keep await/5 lines 40 and 53."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "7e83803fdf36f157dbffd124c21548a32b836aec",
+          "input": "apps/http_runtime/lib/http/http3/connection_owner.ex",
+          "change": "ConnectionOwner computes the default opening deadline lazily from HTTP.HTTP3.opening_timeout/1, so connect_timeout: :infinity keeps the finite 5,000 ms QUIC opening budget.",
+          "dispatch_review": "No dynamic dispatch added or moved: Keyword.get_lazy/3 receives a local closure whose body is literal now/0 and HTTP.HTTP3.opening_timeout/1 calls; the file holds no reviewed occurrence."
         }
       ]
     }
