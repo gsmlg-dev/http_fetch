@@ -218,14 +218,16 @@ defmodule Quic.Phase1PublicTest do
   defp stop_endpoint(pid) do
     monitor = Process.monitor(pid)
 
+    # The endpoint is linked to the exiting test process, so it may already be
+    # shutting down when on_exit stops it.
     try do
       GenServer.stop(pid)
     catch
-      :exit, {:noproc, {GenServer, :stop, [^pid, :normal, :infinity]}} -> :ok
+      :exit, {_reason, {GenServer, :stop, [^pid, :normal, :infinity]}} -> :ok
     end
 
     assert_receive {:DOWN, ^monitor, :process, ^pid, reason}, 1_000
-    assert reason in [:normal, :noproc]
+    assert reason in [:normal, :noproc, :shutdown]
     :ok
   end
 
