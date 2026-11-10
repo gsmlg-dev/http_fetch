@@ -137,7 +137,7 @@ jobs:
   independent-quic-client:
     name: Independent aioquic and quic-go QUIC client features
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       MIX_ENV: test
     steps:
@@ -190,7 +190,9 @@ jobs:
           set -euo pipefail
           mkdir -p "$QUIC_GATE_LOG_DIR"
           for gate in migration reset resumption-client resumption-server early-client early-server early-migration \
-                      migration-negative migration-no-cid migration-disabled; do
+                      migration-negative migration-no-cid migration-disabled \
+                      reset-negative reset-not-negotiated resumption-negative resumption-hrr \
+                      early-negative early-rejected early-retry early-late-server; do
             python3 scripts/quic_client_features/wire_gates.py --gate "$gate" \
               --python "$RUNNER_TEMP/quic-peer-venv/bin/python" \
               --go-binary "$RUNNER_TEMP/quic-go-peer/peer" \
