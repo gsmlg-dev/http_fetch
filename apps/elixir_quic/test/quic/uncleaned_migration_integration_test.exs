@@ -58,7 +58,9 @@ defmodule Quic.UncleanedMigrationIntegrationTest do
     assert await_data(accepted) == "after-migration"
   end
 
-  # The peer issues spare connection IDs shortly after the handshake.
+  # quic_ready precedes HANDSHAKE_DONE on the client (RFC 9000 §9 forbids
+  # migrating before confirmation), and the peer issues spare connection IDs
+  # shortly after the handshake.
   defp admit_migration(connection, deadline \\ now() + 5_000) do
     assert now() < deadline
     ref = make_ref()
@@ -68,7 +70,7 @@ defmodule Quic.UncleanedMigrationIntegrationTest do
       {:ok, ^ref} ->
         ref
 
-      {:error, :no_unused_connection_id} ->
+      {:error, reason} when reason in [:handshake_not_confirmed, :no_unused_connection_id] ->
         Process.sleep(10)
         admit_migration(connection, deadline)
     end
