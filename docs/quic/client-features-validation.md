@@ -27,7 +27,7 @@ Pinned draft: `draft-ietf-quic-reliable-stream-reset-11`. Transport parameter `r
 
 Reliable prefix on peer STOP_SENDING: `Quic.open_stream(connection, kind, reliable_prefix: bytes)` declares the first `bytes` of the send direction as a reliable prefix (`0`, the default, declares none; negative or non-integer values return `{:error, :invalid_reliable_prefix}`). When both endpoints negotiated reliable reset, a peer STOP_SENDING on that stream is answered with RESET_STREAM_AT carrying the STOP_SENDING code, final size = admitted send offset and reliable size = `min(prefix, admitted offset)`; a prefix not yet admitted cannot be completed after the reset, so only its admitted part is retained. Repeated STOP_SENDING is idempotent and never enlarges an earlier reliable size. Without negotiation, or with no admitted prefix bytes, the answer is the ordinary RESET_STREAM. `QuicHttp3.Session` passes the draft-17 WT prefix length for every WT stream it opens.
 
-Manual reads deliver ordinary `{:data, stream_id, bytes}` before exactly one `{:reset, stream_id, code, final_size}`; reset is withheld until the smallest reliable prefix is contiguous. Stream-open/readable events retain their existing pull/ownership contract. Sparse reassembly uses existing byte/range/stream-record limits. Final size charges stream and connection credit once; reset consumption releases remaining discarded-tail credit. Sender recovery retains/retransmits only unacknowledged prefix bytes plus smallest reset information, with global packet numbers unchanged. Bilateral quic-go traffic now passes; independent draft-11 negative acceptance remains open. Task D must gate production profile claims on the complete profile acceptance, not parameter presence alone.
+Manual reads deliver ordinary `{:data, stream_id, bytes}` before exactly one `{:reset, stream_id, code, final_size}`; reset is withheld until the smallest reliable prefix is contiguous. Stream-open/readable events retain their existing pull/ownership contract. Sparse reassembly uses existing byte/range/stream-record limits. Final size charges stream and connection credit once; reset consumption releases remaining discarded-tail credit. Sender recovery retains/retransmits only unacknowledged prefix bytes plus smallest reset information, with global packet numbers unchanged. Bilateral quic-go traffic now passes; the independent draft-11 negative matrix passes locally (CI confirmation pending), with malformed-frame rows in-repo only; see [reliable reset negative matrix](#reliable-reset-negative-matrix-2026-11-10). Task D must gate production profile claims on the complete profile acceptance, not parameter presence alone.
 
 ## R1/R2 dependency
 
@@ -44,9 +44,9 @@ independent acceptance matrices remain open; positive traffic is not that matrix
 | Area | Source/runtime checks | Independent positive traffic | Remaining acceptance |
 | --- | --- | --- | --- |
 | M2 client local migration | PASS: CID/policy/role/confirmation/address/busy/bind failure, dedup, padded probe, deadline fallback and retained old writer; PASS: forced owner death at all four two-socket transitions (in-repo server) | PASS: quic-go v0.62.0 port then IP migration, exact stream/FIN/DATAGRAM and eight-resource cleanup | PASS locally (port-based, macOS): independent negative matrix vs quic-go v0.62.0 (preconfirmation, bind in-use/unavailable, deadline fallback, concurrent busy, duplicate ref, owner death x4), zero-length-CID quic-go (no spare CID) and quinn 0.11.11 (peer `disable_active_migration`); pending CI confirmation of the new gates; source-IP phases CI-only |
-| Reliable reset draft-11 | PASS: exact TP/frame codec, negotiation, final-size/error checks, decreasing/reordered prefix, sparse receive, prefix loss/recovery and separate reset ACK | PASS: both directions against quic-go v0.62.0; negotiated support, prefix then reset, codes 42/43, retained ref and native cleanup | NOT RUN: independent loss/reorder and exhaustive malformed/decrease/final-size matrix against an explicitly draft-11-certified peer |
-| R1 | PASS: bounded endpoint-local store, atomic single use, expiry/partition/eviction/redaction; serialized bounded continuation, timeout/stale/duplicate/late reply handling; actual full then resumed connections | PASS: unmodified aioquic 1.2.0, both client and server roles, exact 269-byte stream plus FIN, no early data, joined socket cleanup | NOT RUN: independent HRR resumption (aioquic has no HRR support), exhaustive trust/profile/restart/concurrent-network matrix; Task B records provider-level HRR/binder evidence separately |
-| R2 | PASS: type-1 early protection in application PN space, opt-in operations, receive staging/quotas, withheld delivery, rejection/ref retention/stream epochs, Retry without TLS rejection, reliable loss crossing to 1-RTT, DATAGRAM loss isolation and immutable early limits | PASS: aioquic 1.2.0 in both roles with an explicit Finished barrier; exact 274-byte stream/FIN and 23-byte DATAGRAM; PASS: resumed early connection followed by quic-go port and IP migration | NOT RUN: complete independent rejection/invalid binder/Finished/HRR/Retry/concurrent reuse/quota/late-receipt matrix; no global support claim |
+| Reliable reset draft-11 | PASS: exact TP/frame codec, negotiation, final-size/error checks, decreasing/reordered prefix, sparse receive, prefix loss/recovery and separate reset ACK | PASS: both directions against quic-go v0.62.0; negotiated support, prefix then reset, codes 42/43, retained ref and native cleanup | PASS locally (macOS), CI confirmation pending: independent negative matrix vs quic-go v0.62.0 through a test-owned relay (loss and reorder of RESET_STREAM_AT and prefix in both directions, repeated STOP_SENDING, prefix beyond admitted, non-negotiated peer falls back to RESET_STREAM); see [reliable reset negative matrix](#reliable-reset-negative-matrix-2026-11-10). In-repo only: malformed/decreasing/final-size frames an honest peer never sends |
+| R1 | PASS: bounded endpoint-local store, atomic single use, expiry/partition/eviction/redaction; serialized bounded continuation, timeout/stale/duplicate/late reply handling; actual full then resumed connections | PASS: unmodified aioquic 1.2.0, both client and server roles, exact 269-byte stream plus FIN, no early data, joined socket cleanup | PASS locally (macOS), CI confirmation pending: HRR resumption vs Go crypto/tls in quic-go v0.62.0, remote-server partition, endpoint restart, stale ticket after peer key rotation, concurrent single use; see [R1 negative matrix](#r1-negative-matrix-2026-11-10). In-repo only: trust/profile partition mismatch (endpoint-static, no wire path) |
+| R2 | PASS: type-1 early protection in application PN space, opt-in operations, receive staging/quotas, withheld delivery, rejection/ref retention/stream epochs, Retry without TLS rejection, reliable loss crossing to 1-RTT, DATAGRAM loss isolation and immutable early limits | PASS: aioquic 1.2.0 in both roles with an explicit Finished barrier; exact 274-byte stream/FIN and 23-byte DATAGRAM; PASS: resumed early connection followed by quic-go port and IP migration | PASS locally (macOS), CI confirmation pending: peer rejection and re-send, HRR rejection, undecryptable ticket, Retry + 0-RTT, client quota exhaustion, concurrent reuse, late 0-RTT receipt (server role, quic-go client); Finished barrier by the existing aioquic gates; see [R2 negative matrix](#r2-negative-matrix-2026-11-10). In-repo only: invalid binder, server-side receive quotas; no global support claim |
 
 ### R1 authority contract
 
@@ -292,3 +292,113 @@ Local results, 2026-11-10, macOS (no `127.0.0.2` alias): all three gates PASS;
 `migration-negative` passed 11 consecutive runs. CI confirmation of the three
 new gates and of the existing source-IP positive phase is pending. Capability
 flags are unchanged by this section.
+
+## Engine negative matrices: harness (2026-11-10)
+
+The reliable-reset, R1 and R2 matrices below share one harness. The independent
+peer is unmodified quic-go v0.62.0 (`scripts/quic_client_features/peer.go`,
+built in a throwaway module exactly like CI; Go 1.26.3 `crypto/tls`). New modes
+use only public configuration: `--mode matrix` (a command-per-stream server:
+`echo`, `sink`, `stop`, `reset`, `rotate`) and `--mode client` (a 0-RTT client).
+Every listening/client record carries the quic-go module version read from the
+binary's build info, and the orchestrator asserts it equals
+`github.com/quic-go/quic-go@v0.62.0`. Public knobs used:
+
+| Knob | Public API |
+| --- | --- |
+| reliable reset on/off | `quic.Config.EnableStreamResetPartialDelivery` (`--no-reliable-reset`) |
+| frame-level peer evidence | `quic.Config.Tracer = qlog.DefaultConnectionTracer` (`--qlog`, `QLOGDIR`); flushed by closing the transports on SIGTERM |
+| ticket presentation/issue evidence, key rotation | `tls.Config.GetConfigForClient`, `WrapSession`/`UnwrapSession` delegating to `Config.EncryptTicket`/`DecryptTicket`, `SetSessionTicketKeys` |
+| HelloRetryRequest | `tls.Config.CurvePreferences = [P-256]` (runtime key share is X25519); evidence `ConnectionState.HelloRetryRequest` |
+| peer rejects 0-RTT | `UnwrapSession` clears `SessionState.EarlyData` (server policy); resumption itself still succeeds |
+| Retry | `quic.Transport.VerifySourceAddress` always true |
+| 0-RTT | `quic.Config.Allow0RTT` + `Transport.ListenEarly`; client `DialAddrEarly` + `tls.NewLRUClientSessionCache` |
+
+Loss and reordering come from a test-owned UDP relay between the runtime and the
+peer (`scripts/quic_client_features/relay.exs`). It never parses or changes
+packet contents: it forwards, drops, or holds-and-reverses whole short-header
+datagrams per direction on the driver's command, and for the late-receipt case
+holds datagrams whose first packet is a 0-RTT long header (type bits are not
+header-protected) until after the handshake. Some R2 cases pause the peer
+process with SIGSTOP/SIGCONT (as in the M2 matrix) so that early admissions
+deterministically precede its first flight. Neither changes the peer binary.
+
+Malformed or dishonest frames that an unmodified peer never sends are covered by
+in-repo tests and are listed below as **in-repo only**; they are not claimed as
+independent evidence. Every client case owns its Cleanup scope; the gate checks
+each retained receipt (`confirmed`/`resolved`, `down == enrolled`, zero
+unresolved births/operations, exact roles) and one peer handshake per runtime
+connection, matched by client address.
+
+## Reliable reset negative matrix (2026-11-10)
+
+Driver `scripts/quic_client_features/reset_negative.exs`; gates `reset-negative`
+(quic-go `--qlog`) and `reset-not-negotiated` (`--qlog --no-reliable-reset`).
+Peer-side evidence is quic-go's own application read (`StreamError` code and
+bytes, reported back on the stream) and its qlog frames.
+
+| Row | Condition and knob | Result |
+| --- | --- | --- |
+| RESET_STREAM_AT + prefix lost, runtime -> peer | 8000 bytes admitted, `reset_stream_at(42, 6000)` (plus the same ref again) while the relay drops every runtime->peer 1-RTT datagram for 250 ms | PASS: quic-go read >= 6000 exact bytes then `StreamError` 42 (remote); its first RESET_STREAM_AT receipt is after the drop window (a retransmission) and its received packet numbers have gaps; every received RESET_STREAM_AT is (42, final 8000, reliable 6000), no RESET_STREAM |
+| Reordered, runtime -> peer | relay holds the same burst and releases it in reverse order | PASS: quic-go's qlog shows RESET_STREAM_AT received before prefix STREAM frames (offset < 6000); it still read the complete prefix, then 42 |
+| RESET_STREAM_AT + prefix lost, peer -> runtime | quic-go writes 6000 bytes, `SetReliableBoundary`, 2000 more, `CancelWrite(43)`; relay drops every peer->runtime 1-RTT datagram for 250 ms | PASS: runtime delivers exact prefix bytes (>= 6000, pattern-checked), then exactly one `{:reset, _, 43, 8000}`, nothing after; quic-go logged `packet_lost` and sent RESET_STREAM_AT (43, 8000, 6000) at least twice |
+| Reordered, peer -> runtime | relay reverses the burst | PASS: same delivery; qlog proves the RESET_STREAM_AT packet was sent after prefix packets and before the relay released them, so the runtime received it first |
+| Repeated STOP_SENDING | stream `reliable_prefix: 1500`, 2000 bytes admitted; quic-go `CancelRead(77)` after 1000 bytes while the relay drops runtime->peer traffic for 1.2 s, so quic-go retransmits STOP_SENDING | PASS: quic-go sent STOP_SENDING(77) >= 2 times; every RESET_STREAM_AT it received is identical (77, final 2000, reliable 1500); no RESET_STREAM; repeats never enlarged the reliable size |
+| Declared prefix > admitted | `reliable_prefix: 4096`, 100 bytes admitted, `CancelRead(78)` | PASS: answer RESET_STREAM_AT (78, final 100, reliable 100). Local `reset_stream_at` beyond admitted (6 > 5) returns `{:error, :invalid_reliable_size}`; the stream stays usable and a valid reset at 5 is read by quic-go as 5 bytes + code 1 |
+| Non-negotiated peer | quic-go `--no-reliable-reset`; runtime advertises | PASS: `info.reliable_reset == %{draft: 11, local: true, peer: false, negotiated: false}`, `reset_stream_at` returns `{:error, :reliable_reset_not_negotiated}` (never downgraded), stream still delivers 18 bytes + FIN; STOP_SENDING(79) on a prefixed stream is answered with RESET_STREAM (79, final 100); quic-go's trace contains no RESET_STREAM_AT |
+| Malformed frame, reliable size > final size, changed code/final size, decreasing/increasing reliable size on receive, RESET_STREAM_AT without advertised receive, final-size flow control | none: an honest peer never sends these | **in-repo only**: `apps/elixir_quic/test/quic/reliable_reset_test.exs`, `reliable_reset_scheduler_test.exs`, codec tests |
+
+## R1 negative matrix (2026-11-10)
+
+Driver `scripts/quic_client_features/resumption_negative.exs`; gates
+`resumption-negative` (`--listeners 2`) and `resumption-hrr`
+(`--curves p256 --allow-0rtt`). The gate compares the runtime's
+`resumption.resumed` with quic-go's `DidResume`, ticket presentations seen by
+`UnwrapSession`, and requires every exact echo to be read with FIN by quic-go.
+
+| Row | Condition and knob | Result |
+| --- | --- | --- |
+| HRR resumption | `CurvePreferences = [P-256]` vs runtime X25519 key share | PASS: both handshakes took an HRR (peer `HelloRetryRequest == true`, `CurveP256`); the second resumed on both sides, so the rewritten binder over the HRR transcript verified at Go's server; exact echo |
+| Partition by remote server | quic-go with two listeners sharing one `tls.Config` and ticket keys (listener B *could* decrypt A's ticket) | PASS: ticket from A present, connection to B presents no ticket and is a full handshake; A then resumes (presented once, decrypted) |
+| Trust/profile partition mismatch | trust, reference identity, ALPN, profile and early policy are endpoint-static and part of the partition digest; a different value means a different endpoint and store, so no wire path can present a cross-partition ticket | **in-repo only**: `resumption_store_test.exs` (partitions isolate), `apps/ex_ssl/test/ssl/quic_resumption_test.exs` (changed context/reference identity never offers a cached PSK) |
+| Endpoint restart | new endpoint with identical configuration | PASS: 0 tickets, quic-go sees no presentation, full handshake |
+| Stale ticket (peer key rotation) | in-band `rotate` -> `SetSessionTicketKeys` with a fresh key | PASS: the runtime offers the old ticket, quic-go cannot decrypt it, full handshake on both sides; the fresh ticket then resumes |
+| Concurrent reuse | one stored ticket, two connects back to back (peer paused during admission) | PASS: store 1 -> 0 at connect, exactly one connection resumed (runtime and peer agree), exactly one presentation |
+
+## R2 negative matrix (2026-11-10)
+
+Same driver; gates `early-negative` (`--allow-0rtt`), `early-rejected`
+(`--allow-0rtt --reject-early`), `early-retry` (`--allow-0rtt --retry`),
+`resumption-hrr` (`hrr_early`) and `early-late-server` (runtime as server,
+quic-go `--mode client`, driver `scripts/quic_client_features/early_late_server.exs`).
+
+| Row | Condition and knob | Result |
+| --- | --- | --- |
+| 0-RTT rejected by peer -> explicit re-send | `UnwrapSession` clears `EarlyData`: resumption accepted, early data rejected | PASS: `resumed: true`, `early_data: :rejected`; operation outcome `{:early_data, :rejected}` and the matching event; the retained ref returns its original admission; the old handle returns `{:error, :stale_stream_epoch}`; a new-epoch stream re-sends; quic-go's application never read the early bytes and read the re-send exactly once |
+| HRR -> 0-RTT rejected | `CurvePreferences = [P-256]` | PASS: as above, with `resumed: true` and peer `HelloRetryRequest` |
+| Invalid binder | an honest independent client never sends one and the runtime cannot be made to | **in-repo only**: `quic_resumption_test.exs` (selected binder mismatch fatal before atomic consumption; changed CH2 binder after HRR), Python binder vectors. Closest independent row: undecryptable ticket + 0-RTT -> PASS: full handshake, early rejected, exact re-send |
+| Retry + 0-RTT | `VerifySourceAddress` always true | PASS: every connection's first Initial at quic-go carries the Retry token; early data still accepted; quic-go received the 0-RTT STREAM (offset 0, 317 bytes, FIN) after the Retry; exact echo |
+| Quota exhaustion (client) | remembered quic-go limits 64 KiB credit / 8 bidi; peer paused during admission | PASS: 64 early DATAGRAMs admitted, the 65th `{:blocked, :early_datagram_limit}`; stream bytes beyond credit `{:blocked, %{type: :data_blocked, value: 64005}}`; the 9th early stream `{:blocked, %{type: :streams_blocked_bidi, value: 8}}`; early accepted; the refused tail is sent after readiness under ordinary backpressure; all 8 echoes exact; quic-go's 0-RTT packets carry STREAM frames only on the first 8 bidi streams, <= 64005 bytes on stream 0 and <= 65536 in total |
+| Quota exhaustion (server receive staging/reservations) | an honest client stays within the advertised limits | **in-repo only**: `early_data_test.exs` (staging, reservations, DATAGRAM/STREAM independence, coalesced overflow) |
+| Concurrent reuse | one ticket, two early-enabled connects back to back (peer paused) | PASS: exactly one connection admits early operations and is accepted; the other returns `{:error, :not_established}` before readiness and does a full handshake |
+| Late receipt (runtime as server) | quic-go client (one full, two 0-RTT connections of 20 007 bytes); the relay withholds every standalone 0-RTT datagram (9-18 per connection) until after the client's first 1-RTT datagram, then releases it 0 ms or 1000 ms later | PASS: delay 0 arrives before the server's early-key retirement deadline (three PTO after first 1-RTT), delay 1000 after retirement; the runtime stays established, every echo is exact and single, quic-go's connections are alive at close, server IO and native Port DOWN |
+| Finished barrier | existing `early-client`/`early-server` gates (aioquic flight barriers) | PASS (positive gates, unchanged) |
+| Authority late/stale continuation reply | not observable on the wire | **in-repo only**: `tls_continuation_runtime_test.exs`, `tls_continuation_driver_test.exs` |
+
+Gates (CI job `independent-quic-client` runs all eight):
+
+```sh
+python3 scripts/quic_client_features/wire_gates.py --gate reset-negative
+python3 scripts/quic_client_features/wire_gates.py --gate reset-not-negotiated
+python3 scripts/quic_client_features/wire_gates.py --gate resumption-negative
+python3 scripts/quic_client_features/wire_gates.py --gate resumption-hrr
+python3 scripts/quic_client_features/wire_gates.py --gate early-negative
+python3 scripts/quic_client_features/wire_gates.py --gate early-rejected
+python3 scripts/quic_client_features/wire_gates.py --gate early-retry
+python3 scripts/quic_client_features/wire_gates.py --gate early-late-server
+```
+
+Controls: the `early-rejected` driver against a peer without `--reject-early`,
+and the HRR driver against a peer without `--curves p256`, both fail
+(`expected :rejected, got :accepted`), so those rows depend on the peer knob.
+Capability flags are unchanged by these sections.
