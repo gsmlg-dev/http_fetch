@@ -43,16 +43,11 @@ defmodule Quic.IO.GenUDP do
   # ordinary result. `GenServer.start_link/2` would also deliver the init stop
   # reason as an exit signal and kill a non-trapping owner, so the actor is
   # linked only after it has a socket; it monitors its owner from init onward.
-  defp start_linked(opts) do
-    case GenServer.start(__MODULE__, opts) do
-      {:ok, pid} ->
-        Process.link(pid)
-        {:ok, pid}
-
-      error ->
-        error
-    end
-  end
+  # The actor links to the caller, which is still blocked in `GenServer.start`,
+  # at the end of a successful init: a caller-side link after `start` returns
+  # would race an actor that already stopped and deliver `:noproc` instead.
+  defp start_linked(opts),
+    do: GenServer.start(__MODULE__, Keyword.put(opts, :link, self()))
 
   @impl true
   def send(pid, bytes, remote), do: GenServer.call(pid, {:send, bytes, remote})
@@ -81,6 +76,7 @@ defmodule Quic.IO.GenUDP do
     case :inet.setopts(socket, active: :once) do
       :ok ->
         {:ok, local} = :inet.sockname(socket)
+        Process.link(Keyword.fetch!(opts, :link))
 
         {:ok,
          %__MODULE__{

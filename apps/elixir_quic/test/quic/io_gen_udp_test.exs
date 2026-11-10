@@ -76,6 +76,32 @@ defmodule Quic.IO.GenUDPTest do
     :gen_udp.close(holder)
   end
 
+  # The actor stops as soon as it observes its (already dead) owner. A link
+  # made by the caller after start returns raced that stop and killed the
+  # non-trapping caller with :noproc.
+  test "an actor that stops before it is linked does not exit the caller" do
+    parent = self()
+    dead = spawn(fn -> :ok end)
+    ref = Process.monitor(dead)
+    assert_receive {:DOWN, ^ref, :process, ^dead, :normal}
+
+    {caller, monitor} =
+      spawn_monitor(fn ->
+        results = for _ <- 1..2_000, do: GenUDP.open(owner: dead)
+        send(parent, {:results, results})
+      end)
+
+    assert_receive {:results, results}, 30_000
+
+    assert Enum.all?(results, fn
+             {:ok, pid} -> is_pid(pid)
+             {:error, :noproc} -> true
+             _ -> false
+           end)
+
+    assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}, 1_000
+  end
+
   test "socket is closed when its consumer terminates" do
     owner =
       spawn(fn ->
