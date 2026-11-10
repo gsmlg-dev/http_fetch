@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.12] - 2026-11-11
+
+### Added
+- **ex_ssl TCP TLS 1.3 server:** `SSL.listen/2`, `SSL.transport_accept/1,2`,
+  server-side `SSL.handshake/2,3`, `SSL.getopts/2`, `SSL.getstat/1,2`,
+  `SSL.shutdown/2` and `SSL.ListenSocket`, with ALPN, case-insensitive SNI
+  (`sni_hosts`/`sni_fun`), mTLS (`verify: :verify_peer`), receive backpressure
+  and rejected 0-RTT skipping. No TLS 1.2 server and no server session tickets.
+  See `apps/ex_ssl/CHANGELOG.md`.
+- Independent HTTP/3 acceptance in CI: Alt-Svc, dynamic QPACK,
+  resumption/0-RTT and WebSocket/H3 against aioquic 1.2.0; WebSocket/H3 port and
+  source-IP migration against quic-go/http3 v0.65.0; QUIC migration, reliable
+  reset, resumption and 0-RTT negative matrices against quic-go v0.62.0 and
+  quinn 0.11.11.
+
 ### Changed
+- **Breaking (hell):** `Hell.Transports.SSL` now runs on `ex_ssl` instead of OTP
+  `:ssl`: OTP 28+ only, TLS 1.3 only, a supported option subset (OTP-only keys,
+  `active` other than `false`, `mode` other than `:binary` and `depth: 0` are
+  rejected) and `ex_ssl` alert values. See `apps/hell/CHANGELOG.md`.
 - **Contract change (elixir_quic):** `Quic.capabilities()` now reports
   `resumption: true` and `migration: %{peer: [:server], local: [:client]}`
   (previously `false` and `local: []`). The M2 client-migration and R1/R2
@@ -84,6 +103,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `HTTP.FormData.generate_boundary/0` now returns `"http-fetch-"` followed by 16
   hex-encoded bytes from `:crypto.strong_rand_bytes/1`, replacing the
   sequential, guessable `"--boundary-<integer>"` value.
+- WebSocket upgrade responses (http_web_socket) are parsed with the same
+  hardened HTTP/1 field parser, rejecting obs-fold and whitespace before the
+  colon instead of reinterpreting them.
 
 ## [1.0.0-rc.11] - 2026-11-09
 

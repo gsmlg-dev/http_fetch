@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0-rc.12 - 2026-11-11
+
 - **Contract change:** `SSL.QUIC.capabilities()` now reports `resumption: true`
   and `zero_rtt: true`. The QUIC runtime's R1/R2 acceptance, including HRR
   resumption against Go `crypto/tls` in quic-go v0.62.0, passes in CI. Both stay

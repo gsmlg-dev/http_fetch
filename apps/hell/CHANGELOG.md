@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0-rc.12 - 2026-11-11
+
 - **Breaking:** `Hell.Transports.SSL` now runs on the umbrella `ex_ssl` engine
   instead of OTP `:ssl`, and Hell depends on `ex_ssl` (pinned to the coordinated
   version). OTP `:ssl` is no longer used in production.
