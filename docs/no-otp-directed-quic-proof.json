@@ -20,8 +20,8 @@
     "apps/ex_ssl/lib/ssl/quic/config.ex": "db708d4a3dca411cab89dbad09b7b1840a018b48cdfeecdff235eb05b81e291c",
     "apps/elixir_quic_http3/lib/quic_http3/session.ex": "e329caba406925e06286e3bea3f01f8b83a820ef4a77eca1b6ff826a775e3db3",
     "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679",
-    "apps/http_runtime/lib/http/http3/pool.ex": "730b52081a9f99621e5edd677167556dbeede70fd74cef7d1164e9e230118d44",
-    "apps/http_runtime/lib/http/http3/connection_owner.ex": "5cb9a29f5c491f71420bc57592efebc1c28ede0c34c3ece93552bf9722fc65b1",
+    "apps/http_runtime/lib/http/http3/pool.ex": "974135c4126244c649815a5d4ab808678da3c1978540d84b940729f299baf73d",
+    "apps/http_runtime/lib/http/http3/connection_owner.ex": "858460929137bdba7480e68fd4b48898dbd54696a09cd878572d83b9dee12513",
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
     "apps/elixir_quic/lib/quic/local_cids.ex": "8f8c5eb14f93f6e9ca16e2a812df152638d3ef6fabcc2611d117ecf1ebf89f69",
     "apps/elixir_quic/lib/quic/recovery.ex": "50ecf0d0ed76335a2f0414912365625212b7360204fdc9cb19a588bd648cb452",
@@ -1514,7 +1514,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "2d333b567e45b88391c725645e9b587d143a3645",
+      "source_commit": "4c1bf8fde8b1fab2f10dcad73183969eed731052",
       "scope": "client migration, opt-in resumption/0-RTT, reliable reset and TLS provider continuation",
       "changed_source_inputs": {
         "apps/elixir_quic/lib/quic.ex": {
@@ -1567,7 +1567,7 @@
         },
         "apps/http_runtime/lib/http/http3/connection_owner.ex": {
           "previous_sha256": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
-          "sha256": "5cb9a29f5c491f71420bc57592efebc1c28ede0c34c3ece93552bf9722fc65b1"
+          "sha256": "858460929137bdba7480e68fd4b48898dbd54696a09cd878572d83b9dee12513"
         },
         "apps/http_runtime/lib/http/http3/stream.ex": {
           "previous_sha256": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
@@ -1584,6 +1584,10 @@
         "apps/elixir_quic/lib/quic/codec.ex": {
           "previous_sha256": "5c6d9e588d7121b4f2411727eb10d8928ead4e383230b85fe72ac4d1cc91426d",
           "sha256": "ad65e30afa6e495171031676a289bdb5a6b1033e5dfd94ea7b382340d58735d5"
+        },
+        "apps/http_runtime/lib/http/http3/pool.ex": {
+          "previous_sha256": "730b52081a9f99621e5edd677167556dbeede70fd74cef7d1164e9e230118d44",
+          "sha256": "974135c4126244c649815a5d4ab808678da3c1978540d84b940729f299baf73d"
         }
       },
       "added_selected_inputs": [
@@ -1591,7 +1595,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "3f6f77c44036fa6d4cd06d64cf750d1527cd6caab5d103d2a6ca0a3d40046cca",
+        "sorted_path_sha256_json": "d083e59063ea54c76b0658138760dd707ade319c23623271ed0d2b99e77f1ef7",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1805,6 +1809,20 @@
           "input": "apps/elixir_quic/lib/quic/io/gen_udp.ex",
           "change": "Quic.IO.GenUDP.open/1 starts its actor with GenServer.start/2 and links only after init has a socket, so a failed bind is an ordinary {:error, reason} instead of an exit signal that killed the owner (de1b8d3).",
           "dispatch_review": "No dynamic dispatch added or moved: the only calls introduced are GenServer.start/2 and Process.link/1 with literal module/function; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-10",
+          "source_commit": "4c1bf8fde8b1fab2f10dcad73183969eed731052",
+          "input": "apps/http_runtime/lib/http/http3/connection_owner.ex",
+          "change": "ConnectionOwner.terminate/2 now runs QuicHttp3.Session.close/1 under guarded/4 on an orderly :normal stop of a ready or draining owner, then retires the cleanup lease; the :http3_retire handler no longer retires before stopping, so the close is admitted first (RFC 9114 section 5.2, H3_NO_ERROR).",
+          "dispatch_review": "No dynamic dispatch added or moved: the new calls are the literal Session.close/1 inside the existing guarded/4 closure invocation, and the file holds no reviewed occurrence. Session.close/1 reaches only the already reviewed retained session.transport close and cleanup operations (H3-1)."
+        },
+        {
+          "date": "2026-11-10",
+          "source_commit": "4c1bf8fde8b1fab2f10dcad73183969eed731052",
+          "input": "apps/http_runtime/lib/http/http3/pool.ex",
+          "change": "HTTP.HTTP3.Pool no longer retires an exclusive owner's cleanup lease on release; it sends :http3_retire so the owner closes with H3_NO_ERROR before retiring, and still retires on owner DOWN.",
+          "dispatch_review": "No dynamic dispatch added or moved: one literal Quic.Cleanup.retire/2 call path is removed; the file holds no reviewed occurrence."
         }
       ]
     }

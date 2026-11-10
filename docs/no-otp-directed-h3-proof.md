@@ -181,3 +181,16 @@ H3-3 wrappers and SocketClient's literal H3-5 handler are unchanged. H3 now has
 63 reviewed occurrences. The complete compiled inventory of a locally built
 isolated candidate release matches the five reviews exactly at 206 sites. CI
 strict candidate and published gates remain required.
+
+### Follow-up: graceful HTTP/3 connection close (2026-11-10)
+
+`HTTP.HTTP3.ConnectionOwner` and `HTTP.HTTP3.Pool` changed after the rc.11
+renewal (`4c1bf8f`). On an orderly `:normal` stop of a ready or draining owner,
+`terminate/2` runs `QuicHttp3.Session.close/1` (CONNECTION_CLOSE with
+H3_NO_ERROR, then transport cleanup) under `guarded/4` before it retires the
+cleanup lease. The pool no longer retires an exclusive owner's lease on release;
+it sends `:http3_retire` and still retires on owner DOWN. The new calls are
+literal; `Session.close/1` reaches only the reviewed H3-1 `session.transport`
+close and cleanup sites. Neither file holds a reviewed occurrence, so no
+occurrence is added or rebound. The producer hashes, the release census entries
+and every group's rc.11 census digest are updated.

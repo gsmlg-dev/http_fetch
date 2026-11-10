@@ -298,3 +298,15 @@ killing the owner through the link. The change introduces only literal
 `GenServer.start/2` and `Process.link/1` calls; the file holds no reviewed
 occurrence, so no occurrence is added or rebound. The producer hash, the
 release census entry and every group's rc.11 census digest are updated.
+
+### Follow-up: graceful HTTP/3 connection close (2026-11-10)
+
+The reviewed producers `apps/http_runtime/lib/http/http3/connection_owner.ex`
+and `apps/http_runtime/lib/http/http3/pool.ex` changed after the rc.11 renewal
+(`4c1bf8f`): an orderly owner stop closes the connection with H3_NO_ERROR
+through `QuicHttp3.Session.close/1` before retiring its `Quic.Cleanup` lease,
+and the pool leaves that retirement to the owner (retiring itself only on owner
+DOWN). The edits add only literal calls and remove one literal
+`Quic.Cleanup.retire/2` path; neither file holds a reviewed occurrence, so no
+occurrence is added or rebound. The producer hashes, the release census entries
+and every group's rc.11 census digest are updated.

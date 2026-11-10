@@ -29,12 +29,12 @@
     "apps/http_runtime/lib/http/managed_transport.ex": "d3b3eeb9fea115aaeab8cd6ec4780665164ccabee79ba437c44973852119af16",
     "apps/http_runtime/lib/http/managed_transport/scope.ex": "c822312d48110046a5c0fede5e6768236a1e3d8e3ed077eaede961bc5f30f0e5",
     "apps/http_runtime/lib/http/managed_transport/policy.ex": "b283eba84c5b438eb53f35ab548682a0f83f3a7b675082f56c4a01d6767cfbd0",
-    "apps/http_runtime/lib/http/http3/connection_owner.ex": "5cb9a29f5c491f71420bc57592efebc1c28ede0c34c3ece93552bf9722fc65b1",
+    "apps/http_runtime/lib/http/http3/connection_owner.ex": "858460929137bdba7480e68fd4b48898dbd54696a09cd878572d83b9dee12513",
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
     "apps/http_event_source/lib/http/event_source/options.ex": "6ee7ca7f5be5e113db4fb3b25e4df8f096c7e94cd1fdeb24bd8bcf88b79e85f0",
     "apps/http_event_source/lib/http/event_source/connection.ex": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
     "apps/http_web_socket/lib/http/web_socket/options.ex": "08adad3196ae6c860c61317d726c145cfe9eb11dbc4b75fce6276f3d73fc6621",
-    "apps/http_web_socket/lib/http/web_socket/connection.ex": "84a071d4a97bc451d632815185fea0763bb7033f974c0342114b394c6ac0cffc",
+    "apps/http_web_socket/lib/http/web_socket/connection.ex": "f88b15d6dfe02078a0c7fb166035634b18c4c61f4afc1f8aa8555fd6fb705e3b",
     "apps/http_web_transport/lib/http/web_transport.ex": "dd00f10a756d0c65b7b53cce60e78d658d8349202a663dddd1d0e718a11973a7",
     "apps/http_web_transport/lib/http/web_transport/options.ex": "71b69d9236f7dcfdd0a54252fe994b9333cf7dd9c7c185af7079e4290d935e95",
     "apps/http_web_transport/lib/http/web_transport/session.ex": "3fb5f5fc8567c5a6171d889af067c4e263c42650e6db5bdd686f143d7405efdc",
@@ -1341,7 +1341,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "4ae97fc9a618844e36f9bcf59da1893846109677",
+      "source_commit": "4c1bf8fde8b1fab2f10dcad73183969eed731052",
       "scope": "Alt-Svc discovery, HTTP/3 resumption options, WebSocket/H3 completion receipt and live draft-17 WebTransport backend",
       "changed_source_inputs": {
         "apps/http_fetch/lib/http/fetch_options.ex": {
@@ -1358,7 +1358,7 @@
         },
         "apps/http_runtime/lib/http/http3/connection_owner.ex": {
           "previous_sha256": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
-          "sha256": "5cb9a29f5c491f71420bc57592efebc1c28ede0c34c3ece93552bf9722fc65b1"
+          "sha256": "858460929137bdba7480e68fd4b48898dbd54696a09cd878572d83b9dee12513"
         },
         "apps/http_runtime/lib/http/http3/stream.ex": {
           "previous_sha256": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
@@ -1374,7 +1374,7 @@
         },
         "apps/http_web_socket/lib/http/web_socket/connection.ex": {
           "previous_sha256": "322737d98276d94fb450985ce8620d05afeb8e3c6d7943c9cac70077e9ebcb9f",
-          "sha256": "84a071d4a97bc451d632815185fea0763bb7033f974c0342114b394c6ac0cffc"
+          "sha256": "f88b15d6dfe02078a0c7fb166035634b18c4c61f4afc1f8aa8555fd6fb705e3b"
         },
         "apps/http_web_transport/lib/http/web_transport.ex": {
           "previous_sha256": "38751209dffad6dd099a61e4038874ef66d8c57303f42c565483f12904c0346d",
@@ -1400,7 +1400,7 @@
       "added_selected_inputs": [],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "3f6f77c44036fa6d4cd06d64cf750d1527cd6caab5d103d2a6ca0a3d40046cca",
+        "sorted_path_sha256_json": "d083e59063ea54c76b0658138760dd707ade319c23623271ed0d2b99e77f1ef7",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1610,7 +1610,23 @@
         "sha256": "86b342807dd913b25685cb60bd565da1fa8e68580447c578a0a17f735c4b89b3"
       },
       "historical_artifact_covers_amended_source": false,
-      "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED"
+      "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
+      "follow_up_changes": [
+        {
+          "date": "2026-11-10",
+          "source_commit": "4c1bf8fde8b1fab2f10dcad73183969eed731052",
+          "input": "apps/http_runtime/lib/http/http3/connection_owner.ex",
+          "change": "ConnectionOwner.terminate/2 now runs QuicHttp3.Session.close/1 under guarded/4 on an orderly :normal stop of a ready or draining owner, then retires the cleanup lease; the :http3_retire handler no longer retires before stopping, so the close is admitted first (RFC 9114 section 5.2, H3_NO_ERROR).",
+          "dispatch_review": "No dynamic dispatch added or moved: the new calls are the literal Session.close/1 inside the existing guarded/4 closure invocation, and the file holds no reviewed occurrence. Session.close/1 reaches only the already reviewed retained session.transport close and cleanup operations (H3-1)."
+        },
+        {
+          "date": "2026-11-10",
+          "source_commit": "4c1bf8fde8b1fab2f10dcad73183969eed731052",
+          "input": "apps/http_web_socket/lib/http/web_socket/connection.ex",
+          "change": "HTTP.WebSocket.Connection.finish/4 retires a cleanly closed HTTP/3 attempt with RequestLifecycle.retire_owner/1 before detach/1 instead of aborting it, so the connection owner survives to close with H3_NO_ERROR.",
+          "dispatch_review": "No dynamic dispatch added or moved: the new orderly_retire/2 calls only the literal RequestLifecycle.retire_owner/1 and is placed after every reviewed occurrence; the seven HTTP-9 occurrences keep their lines and functions."
+        }
+      ]
     }
   ]
 }

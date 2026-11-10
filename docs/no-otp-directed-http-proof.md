@@ -383,3 +383,16 @@ owning functions; their new lines are recorded in the JSON. The HTTP review now
 has 84 occurrences. The complete compiled inventory of a locally built isolated
 candidate release matches the five reviews exactly at 206 sites. CI strict
 candidate and published gates remain required.
+
+### Follow-up: graceful HTTP/3 connection close (2026-11-10)
+
+`apps/http_runtime/lib/http/http3/connection_owner.ex` and
+`apps/http_web_socket/lib/http/web_socket/connection.ex` changed after the
+rc.11 renewal (`4c1bf8f`). The owner closes an orderly-stopped connection with
+H3_NO_ERROR before retiring its cleanup lease. `HTTP.WebSocket.Connection.finish/4`
+retires a cleanly closed HTTP/3 attempt with the literal
+`RequestLifecycle.retire_owner/1` before `detach/1` instead of aborting it. The
+new `orderly_retire/2` sits after every reviewed occurrence, so the seven HTTP-9
+WebSocket occurrences keep their lines and functions; no occurrence is added or
+rebound. The producer hashes, the release census entries and every group's
+rc.11 census digest are updated.
