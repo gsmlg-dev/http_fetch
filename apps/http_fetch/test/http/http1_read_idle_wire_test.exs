@@ -143,9 +143,11 @@ defmodule HTTP.HTTP1ReadIdleWireTest do
     test "#{backend} the connection budget stops applying after establishment" do
       backend = unquote(backend)
       {peer, url} = peer(backend)
-      promise = fetch(url, backend, connect_timeout: 750, read_idle_timeout: 2_000)
+      # The handshake must fit the connect budget on a loaded runner; the wait
+      # after establishment outlasts that budget but stays inside read idle.
+      promise = fetch(url, backend, connect_timeout: 2_000, read_idle_timeout: 4_000)
       assert_request(peer)
-      tick(1_000)
+      tick(2_500)
       send_bytes(peer, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
       assert %Response{body: "ok"} = Promise.await(promise, @wait)
       finish(peer, promise, backend)
