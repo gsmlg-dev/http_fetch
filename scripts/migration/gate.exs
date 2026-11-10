@@ -79,11 +79,11 @@ defmodule Quic.MigrationGate.Echo do
   def event(:tick, state), do: path_snapshot(state)
   def event(_, state), do: state
 
+  # The peer may close between the event poll and this snapshot; the worker's
+  # next poll then observes the close and checks its peer-close receipt.
   defp path_snapshot(state) do
-    {:ok, info} = apply(state.backend, :info, [state.connection])
-
-    case info do
-      %{migration: %{active_path: active, paths: paths}, resources: %{path_records: count}} ->
+    case apply(state.backend, :info, [state.connection]) do
+      {:ok, %{migration: %{active_path: active, paths: paths}, resources: %{path_records: count}}} ->
         public = %{
           active_path: inspect(active),
           path_records: count,
@@ -109,7 +109,10 @@ defmodule Quic.MigrationGate.Echo do
 
         %{state | last_path: public}
 
-      _ ->
+      {:ok, _info} ->
+        state
+
+      {:error, :closed} ->
         state
     end
   end
