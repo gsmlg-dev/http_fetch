@@ -137,7 +137,8 @@ defmodule HTTP.WebTransport do
   reason}` or `:validation_timeout`; a failed migration keeps the original
   path. An outcome unknown at the deadline (plus a one-second grace) returns
   `{:error, {:indeterminate_operation, ref}}` and is never replayed.
-  `Quic.capabilities().migration.local` remains `[]`.
+  `Quic.capabilities().migration.local` is `[:client]`; this function remains
+  beta and `HTTP.WebTransport.Profile.supported?/0` stays false.
   """
   @spec migrate(t(), keyword()) ::
           {:ok, %{local: {tuple(), :inet.port_number()}}} | {:error, term()}

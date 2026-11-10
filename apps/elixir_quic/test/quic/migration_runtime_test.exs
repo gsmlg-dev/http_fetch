@@ -7,9 +7,9 @@ defmodule Quic.MigrationRuntimeTest do
   @old {{127, 0, 0, 1}, 4000}
   @new {{127, 0, 0, 2}, 4001}
 
-  test "public migration capability describes the accepted server-only milestone" do
-    assert Quic.capabilities().migration == %{peer: [:server], local: []}
-    refute Quic.capabilities().resumption
+  test "public capabilities report accepted M1 server, M2 client migration and resumption" do
+    assert Quic.capabilities().migration == %{peer: [:server], local: [:client]}
+    assert Quic.capabilities().resumption
     refute Quic.capabilities().http3
   end
 

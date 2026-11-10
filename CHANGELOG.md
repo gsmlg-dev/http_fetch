@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Contract change (elixir_quic):** `Quic.capabilities()` now reports
+  `resumption: true` and `migration: %{peer: [:server], local: [:client]}`
+  (previously `false` and `local: []`). The M2 client-migration and R1/R2
+  resumption/0-RTT independent negative matrices pass in CI against unmodified
+  quic-go v0.62.0 and quinn 0.11.11; rows that need a dishonest peer are
+  covered by in-repo tests. Features stay opt-in; no runtime behavior changes.
+  `http3` stays `false` and `HTTP.WebTransport.Profile.supported?/0` stays
+  `false`. See `docs/quic/client-features-validation.md`.
+
 ## [1.0.0-rc.11] - 2026-11-09
 
 ### Added

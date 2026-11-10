@@ -256,8 +256,8 @@ defmodule Quic do
           http3: false,
           io: [:external | :standalone, ...],
           max_write_bytes: 16_384,
-          migration: %{peer: [:server, ...], local: []},
-          resumption: false,
+          migration: %{peer: [:server, ...], local: [:client, ...]},
+          resumption: true,
           streams: [:bidi | :uni, ...],
           version: 1
         }
@@ -269,8 +269,8 @@ defmodule Quic do
       delivery: :pull,
       io: [:standalone, :external],
       datagram: true,
-      migration: %{peer: [:server], local: []},
+      migration: %{peer: [:server], local: [:client]},
       http3: false,
-      resumption: false
+      resumption: true
     }
 end

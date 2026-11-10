@@ -70,12 +70,14 @@ and never retransmitted after loss. See the [consumer contract](../../docs/quic/
 for negotiation, size limits, bounded queues and admission semantics.
 
 Established servers also accept authenticated client NAT rebinding and IP
-migration, retaining connection and stream handles. `Quic.capabilities().migration`
-is `%{peer: [:server], local: []}`; there is no explicit local migration API yet.
+migration, retaining connection and stream handles. An exclusive standalone
+client can move its own local address with `Quic.migrate/2`;
+`Quic.capabilities().migration` is `%{peer: [:server], local: [:client]}`.
 The engine bounds validation to two paths with separate amplification/recovery
 state and path-specific CID bindings. See the [consumer contract](../../docs/quic/consumer-contract.md#server-peer-migration)
 and [independent UDP acceptance](../../docs/quic/peer-migration-validation.md).
-Resumption and 0-RTT remain unsupported.
+Opt-in session resumption and 0-RTT are supported (`Quic.capabilities().resumption`
+is `true`); see the [client feature acceptance](../../docs/quic/client-features-validation.md).
 
 ## Idle expiry and keepalive
 

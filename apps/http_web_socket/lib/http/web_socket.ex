@@ -312,8 +312,8 @@ defmodule HTTP.WebSocket do
   `{:bind_failed, reason}` and `:validation_timeout`; a failed migration keeps
   the original path. An outcome unknown at the deadline (plus a one-second
   grace) returns `{:error, {:indeterminate_operation, ref}}` and is never
-  replayed. `Quic.capabilities().migration.local` remains `[]`: this is not a
-  general migration capability claim.
+  replayed. `Quic.capabilities().migration.local` is `[:client]` (exclusive
+  standalone client port and address migration); this function remains beta.
   """
   @spec migrate(t(), keyword()) ::
           {:ok, %{local: {tuple(), :inet.port_number()}}} | {:error, term()}
