@@ -1084,7 +1084,10 @@ defmodule SSL.Connection do
     deadline = earlier(requested_deadline, configured_deadline)
 
     cond do
-      state.closed or state.write_abandoned? ->
+      state.closed ->
+        reply(from, {:error, state.close_reason})
+
+      state.write_abandoned? ->
         reply(from, {:error, :closed})
 
       state.duplex_reads? and deadline == :infinity ->
@@ -1247,11 +1250,12 @@ defmodule SSL.Connection do
   # A transport EOF or error without close_notify ends the read side like a
   # peer close_notify, but nothing more can be written: no reciprocal alert is
   # attempted. Authenticated plaintext already decrypted stays deliverable;
-  # only then does recv/active delivery report the terminal (#158). A plain
-  # EOF reports :closed as OTP :ssl does; a transport error keeps its reason.
+  # only then does recv/active delivery report the terminal (#158). The
+  # terminal stays unclean: an EOF reports :econnreset, so a close-delimited
+  # body cannot be silently truncated; a transport error keeps its reason.
   defp transport_terminal(phase, state, terminal) do
-    reason = if terminal == :closed, do: :closed, else: elem(terminal, 1)
-    Socket.mark_terminal(state.socket, reason == :closed)
+    reason = if terminal == :closed, do: :econnreset, else: elem(terminal, 1)
+    Socket.mark_terminal(state.socket, false)
 
     state =
       %{state | closed: true, close_reason: reason, armed: false}

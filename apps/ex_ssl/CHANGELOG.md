@@ -6,13 +6,11 @@
 
 - Fix (#158): when the transport closes or fails without a TLS `close_notify`,
   the client keeps already-decrypted plaintext deliverable to `recv/3` and
-  active-once delivery, and reports the terminal only after it is drained; no
-  reciprocal alert is written and pending writes fail. The server does the same
-  for a transport error. **Contract change:** a TCP EOF without
-  `close_notify` now reports `{:error, :closed}` / `{:ssl_closed, socket}`, as
-  OTP `:ssl` does, instead of `{:error, :econnreset}` /
-  `{:ssl_error, socket, :econnreset}`; a transport error (such as a reported
-  reset) still reports `{:error, reason}`.
+  active-once delivery and reports the terminal only after it is drained; no
+  reciprocal alert is written and pending writes fail. A TCP EOF still reports
+  `{:error, :econnreset}` / `{:ssl_error, socket, :econnreset}` (a transport
+  error keeps its reason), so close-delimited data cannot be silently
+  truncated. The server does the same for a transport error.
 - **Contract change:** `SSL.QUIC.capabilities()` now reports `resumption: true`
   and `zero_rtt: true`. The QUIC runtime's R1/R2 acceptance, including HRR
   resumption against Go `crypto/tls` in quic-go v0.62.0, passes in CI. Both stay

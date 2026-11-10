@@ -1,6 +1,7 @@
 defmodule SSL.TransportCloseDeliveryTest do
   # Regression coverage for #158: a peer that ends TCP without close_notify must
   # not discard authenticated plaintext the client has decrypted but not read.
+  # The terminal stays unclean (:econnreset) and is reported only afterwards.
   use ExUnit.Case, async: false
   alias ExSSL.TestSupport.LocalTLSPeer, as: Peer
   @moduletag :integration
@@ -9,33 +10,34 @@ defmodule SSL.TransportCloseDeliveryTest do
   @body IO.iodata_to_binary(@chunks)
 
   describe "TCP close without close_notify" do
-    test "passive recv drains every buffered byte before {:error, :closed}" do
+    test "passive recv drains every buffered byte before {:error, :econnreset}" do
       {socket, peer} = connect_and_close(:fin)
       await_transport_terminal(socket)
 
       assert @body == recv_all(socket, [])
-      assert {:error, :closed} = SSL.recv(socket, 0, 0)
+      assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
       assert :ok = SSL.close(socket)
       stop_peer(peer)
     end
 
-    test "a pending recv receives data then :closed" do
+    test "a pending recv receives data then :econnreset" do
       {socket, peer} = connect_and_close(:fin)
       assert @body == recv_all(socket, [], 5_000)
-      assert {:error, :closed} = SSL.recv(socket, 0, 0)
+      assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
       stop_peer(peer)
     end
 
-    test "active once delivers buffered bytes before {:ssl_closed, socket}" do
+    test "active once delivers buffered bytes before one {:ssl_error, socket, :econnreset}" do
       {socket, peer} = connect_and_close(:fin)
       await_transport_terminal(socket)
 
       assert :ok = SSL.setopts(socket, active: :once)
       assert_receive {:ssl, ^socket, bytes}, 5_000
       assert bytes == @body
-      assert_receive {:ssl_closed, ^socket}, 5_000
+      assert_receive {:ssl_error, ^socket, :econnreset}, 5_000
       refute_receive {:ssl_error, ^socket, _}, 20
-      assert {:error, :closed} = SSL.recv(socket, 0, 0)
+      refute_receive {:ssl_closed, ^socket}, 0
+      assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
       stop_peer(peer)
     end
 
@@ -43,7 +45,7 @@ defmodule SSL.TransportCloseDeliveryTest do
       {socket, peer} = connect_and_close(:fin)
       await_transport_terminal(socket)
 
-      assert {:error, :closed} = SSL.send(socket, "no write on a dead transport")
+      assert {:error, :econnreset} = SSL.send(socket, "no write on a dead transport")
       assert @body == recv_all(socket, [])
       stop_peer(peer)
     end
@@ -55,8 +57,7 @@ defmodule SSL.TransportCloseDeliveryTest do
       await_transport_terminal(socket)
 
       assert @body == recv_all(socket, [])
-      assert {:error, reason} = SSL.recv(socket, 0, 0)
-      assert reason in [:closed, :econnreset]
+      assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
       stop_peer(peer)
     end
 

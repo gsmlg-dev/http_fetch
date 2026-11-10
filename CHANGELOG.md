@@ -54,13 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **ex_ssl (#158):** an HTTPS response whose server closes TCP without
   `close_notify` (common for `connection: close` endpoints and load balancers)
-  no longer ends in `:econnreset` or loses its tail. The ex_ssl client and
-  server now deliver every byte already decrypted before reporting the close, so
-  a chunked HTTP/1.1 stream ends with `:stream_end` and a complete body, as it
-  does over OTP `:ssl`. **Contract change:** a TCP EOF without `close_notify`
-  now reports `{:error, :closed}` / `{:ssl_closed, socket}` (OTP `:ssl`
-  semantics) instead of `:econnreset`; a transport error still reports its
-  reason, after the buffered data.
+  no longer ends in a spurious error or loses its tail. The ex_ssl client and
+  server now deliver every byte already decrypted before reporting the close,
+  so a chunked or Content-Length HTTP/1.1 response ends with `:stream_end` and
+  a complete body, as it does over OTP `:ssl`. The close itself is still
+  reported as `:econnreset` (a transport error keeps its reason), so a
+  read-to-close body without `close_notify` fails instead of being silently
+  truncated.
 - `timeout: :infinity` no longer crashes HTTP/3 fetches (explicit
   `http_version: :http3`, or `:auto` with a cached Alt-Svc route) with an
   `ArithmeticError`, and `connect_timeout: :infinity` no longer crashes the

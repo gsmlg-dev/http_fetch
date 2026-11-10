@@ -23,10 +23,9 @@ and P7 coordinated publication remain open.
 | `SSL.close/1` | Idempotent local close. Sends close_notify when no application write is uncertain and wakes admitted calls. |
 
 Closed and invalid handles follow the existing public call mapping. An orderly
-TLS closure and, as in OTP `:ssl`, a TCP EOF without close_notify produce
-`:closed`; a transport error keeps its reason (such as `:econnreset`) and
-unexpected connection-process loss produces `:econnreset`. Plaintext decrypted
-before a transport terminal is delivered first (#158). TLS failures use redacted `{:tls_alert, ...}`
+TLS closure produces `:closed`; abrupt TCP loss or unexpected connection-process
+loss produces `:econnreset`, after any plaintext already decrypted is delivered
+(#158). TLS failures use redacted `{:tls_alert, ...}`
 reasons. Other roadmap APIs are not exported as success-returning stubs.
 
 ## Ownership and active-once behavior
@@ -297,10 +296,10 @@ discarded. Stale writer acknowledgements, timers, and sender `DOWN` messages
 cannot produce a second completion. Plaintext authenticated before the closure
 remains available to passive `recv` or active-once delivery, with data before the
 terminal event. An already fully acknowledged logical send remains `:ok`.
-A transport EOF or error without close_notify likewise keeps already-decrypted
-plaintext deliverable and writes nothing more; it then reports `:closed` for an
-EOF (OTP `:ssl` semantics) or the transport error reason (#158). Failure of the reciprocal close-notify
-writer after authenticated closure does not discard buffered plaintext or
+Abrupt transport failure retains its existing `:econnreset` classification; it
+is not treated as authenticated closure. Plaintext authenticated before it is
+still delivered first, and nothing more is written (#158). Failure of the
+reciprocal close-notify writer after authenticated closure does not discard buffered plaintext or
 reclassify the terminal state. Orderly close and fatal-alert output use a bounded
 writer shutdown; teardown releases the TCP port, monitors, timers, cursors, and
 writer process.

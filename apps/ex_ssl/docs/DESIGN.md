@@ -642,13 +642,13 @@ Outbound KeyUpdate:
 Maintain a close state distinct from process termination.
 
 In the passive client milestone, authenticated close_notify drains already
-decrypted bytes before returning `:closed`. Since #158 a TCP EOF without
-close_notify also drains already decrypted bytes and then returns `:closed`
-(OTP `:ssl` semantics); a transport error drains them and returns its reason.
-An unexpected connection-process exit returns `:econnreset`, also on later calls
-through the same handle. Discarding authenticated plaintext on an unclean close
-truncated complete responses from servers that never send close_notify; framed
-HTTP bodies (Content-Length, chunked) still detect truncation themselves.
+decrypted bytes before returning `:closed`. An abrupt TCP EOF or unexpected
+connection-process exit returns `:econnreset`, also on later calls through the
+same handle. Authenticated plaintext already decrypted before an abrupt EOF or
+transport error is delivered first and only then is the reset (or transport
+error) reported (#158), so framed responses (Content-Length, chunked) complete,
+while an HTTP consumer still cannot mistake a truncated close-delimited response
+for a complete one.
 
 Support:
 

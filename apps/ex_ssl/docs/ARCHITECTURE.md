@@ -184,9 +184,8 @@ The caller MUST NOT depend on this representation.
 The passive client milestone uses one atomic terminal-status cell written by the
 connection process. It contains only open/orderly/failed state, never keys or
 payloads, and survives process exit while the caller retains the handle.
-This lets later calls distinguish closure (`:closed`, including a TCP EOF
-without close_notify) from transport/process failure (`:econnreset`) without
-tombstone processes or a global table.
+This lets later calls distinguish authenticated closure (`:closed`) from abrupt
+transport/process loss (`:econnreset`) without tombstone processes or a global table.
 
 A stable socket identity is required across:
 

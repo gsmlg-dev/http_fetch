@@ -672,8 +672,7 @@ defmodule SSL.HTTPFetchTransportContractTest do
     assert :ok = Peer.stop(second_peer)
   end
 
-  # A TCP EOF without close_notify reports ssl_closed, as OTP :ssl does (#158).
-  test "active once is accepted at connect and abrupt transport loss emits one ssl_closed" do
+  test "active once is accepted at connect and abrupt transport loss emits one ssl_error" do
     {:ok, peer} =
       Peer.start(fn socket ->
         assert :ok = :ssl.send(socket, "connected-active")
@@ -689,9 +688,8 @@ defmodule SSL.HTTPFetchTransportContractTest do
       assert_receive {:ssl, ^socket, "connected-active"}, 1_000
 
       Peer.stop_fragmenting_proxy(proxy)
-      assert_receive {:ssl_closed, ^socket}, 1_000
+      assert_receive {:ssl_error, ^socket, :econnreset}, 1_000
       refute_receive {:ssl_error, ^socket, _}, 20
-      refute_receive {:ssl_closed, ^socket}, 20
     after
       if Process.alive?(proxy.task.pid), do: Peer.stop_fragmenting_proxy(proxy)
       assert :ok = Peer.stop(peer)

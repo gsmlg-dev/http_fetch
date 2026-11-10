@@ -359,9 +359,8 @@ defmodule SSL.InputOrderingRegressionTest do
 
       assert :ok = Task.await(sender, 5_000)
       assert_receive {:ssl, ^socket, "before-abrupt-eof"}, 5_000
-      assert_receive {:ssl_closed, ^socket}, 5_000
+      assert_receive {:ssl_error, ^socket, :econnreset}, 5_000
       refute_receive {:ssl_error, ^socket, _reason}, 20
-      refute_receive {:ssl_closed, ^socket}, 20
     after
       if Process.alive?(proxy.task.pid), do: Peer.stop_record_gate_proxy(proxy)
       stop_peer_on_failure(peer)

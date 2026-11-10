@@ -29,8 +29,7 @@ defmodule SSL.DuplexProtocolBoundsTest do
     assert :ok = SSL.close(socket)
   end
 
-  # A TCP EOF without close_notify is an unclean but orderly :closed (#158).
-  for {fault, terminal} <- [malformed: :econnreset, eof: :closed] do
+  for fault <- [:malformed, :eof] do
     test "#{fault} while duplex output is held fails closed and settles the sender" do
       {socket, _peer, proxy} = fixture()
       {sender, pending} = hold_write(socket)
@@ -39,7 +38,7 @@ defmodule SSL.DuplexProtocolBoundsTest do
       assert_receive :fault_injected, 1_000
       assert {:error, _reason} = Task.await(sender, 1_000)
       assert_receive {:DOWN, ^monitor, :process, _, :normal}, 1_000
-      assert {:error, unquote(terminal)} = SSL.recv(socket, 0, 0)
+      assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
       assert :erlang.port_info(pending.tcp) == :undefined
     end
   end
