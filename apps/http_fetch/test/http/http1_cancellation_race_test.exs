@@ -216,7 +216,7 @@ defmodule HTTP.HTTP1CancellationRaceTest do
       end
 
       assert_receive {:native_activation_result, {:error, native_reason}}, 3_000
-      assert_native_failure(backend, native_reason)
+      assert_native_closure(backend, native_reason)
       assert {:error, ^native_reason} = Promise.await(promise, 3_000)
       assert :ok = RequestCompletion.await(completion, 3_000)
       join_peer(peer)
@@ -250,7 +250,7 @@ defmodule HTTP.HTTP1CancellationRaceTest do
       close_native_transport(backend, state)
       send(sender, {:release_transport, before_send})
       assert_receive {:transport_gate, ^sender, gate, {:error, native_reason}}, 3_000
-      assert_native_failure(backend, native_reason)
+      assert_native_closure(backend, native_reason)
 
       owner =
         Enum.find_value(state.resources, fn {_, {resource, kind}} ->
@@ -346,8 +346,13 @@ defmodule HTTP.HTTP1CancellationRaceTest do
   defp assert_native_failure(:tcp, reason), do: assert(reason in [:closed, :einval])
 
   # SSL.call reports the opaque socket's abrupt terminal status after provider
-  # cancellation or native closure; it does not use inet's closed-port errors.
+  # cancellation; it does not use inet's closed-port errors.
   defp assert_native_failure(:ex_ssl, reason), do: assert(reason == :econnreset)
+
+  # A native TCP closure reaches the TLS connection as an EOF without
+  # close_notify, which is an orderly :closed, as in OTP :ssl (#158).
+  defp assert_native_closure(:ex_ssl, reason), do: assert(reason == :closed)
+  defp assert_native_closure(backend, reason), do: assert_native_failure(backend, reason)
 
   defp close_native_transport(:tcp, state) do
     tcp =

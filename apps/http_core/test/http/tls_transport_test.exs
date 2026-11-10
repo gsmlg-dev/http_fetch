@@ -325,7 +325,7 @@ defmodule HTTP.TLSTransportTest do
       source = SSL.Connection.module_info(:compile)[:source] |> List.to_string()
 
       assert :crypto.hash(:sha256, File.read!(source)) |> Base.encode16(case: :lower) ==
-               "1a0fe66286c88e750c8967ec36229cd826d2bf5858fc84482cbb0771bcc2650a"
+               "2db6215af472c7c0bdae85902a5ec094250335caa4bf5bfb12e114712d93a035"
 
       assert Application.spec(:ex_ssl, :vsn) == Application.spec(:http_core, :vsn)
       {:connected, state} = :sys.get_state(socket.pid)
