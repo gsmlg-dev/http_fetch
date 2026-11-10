@@ -25,6 +25,8 @@ defmodule Quic.ExSSLContractTest do
     assert capabilities.tls_versions == [0x0304]
     assert capabilities.roles.client.certificate_handshake
     assert capabilities.roles.server.certificate_handshake
+    assert capabilities.resumption
+    assert capabilities.zero_rtt
     refute capabilities.quic_packet_protection
     refute capabilities.tls_records
   end

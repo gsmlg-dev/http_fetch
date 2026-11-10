@@ -77,6 +77,16 @@ defmodule SSL.QUICTest do
     assert {:error, _, ^failed, []} = SSL.QUIC.feed(failed, :initial, <<>>)
   end
 
+  test "capabilities report runtime-accepted resumption and 0-RTT, not mTLS or packet protection" do
+    caps = SSL.QUIC.capabilities()
+    assert caps.resumption
+    assert caps.zero_rtt
+    assert caps.hello_retry_request
+    refute caps.server_mtls
+    refute caps.quic_packet_protection
+    refute caps.tls_records
+  end
+
   test "all available cipher and group combinations derive matching keys" do
     caps = SSL.QUIC.capabilities()
 

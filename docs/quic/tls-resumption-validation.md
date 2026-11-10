@@ -94,10 +94,19 @@ address amplification or combined migration. Provider stub/loopback assertions
 are not used to claim those gates. The independent TLS harness above uses a
 control pipe and no QUIC packet protection or sockets.
 
-Independent HRR resumption is NOT RUN: pinned aioquic 1.2.0 has no HRR support;
-rewritten transcript/binder behavior has deterministic and provider-duplex tests.
+Independent HRR resumption against aioquic is NOT RUN (pinned aioquic 1.2.0 has
+no HRR support); rewritten transcript/binder behavior has deterministic and
+provider-duplex tests. Superseded for the runtime: HRR resumption and HRR 0-RTT
+rejection now PASS against Go `crypto/tls` in unmodified quic-go v0.62.0 (R1/R2
+negative matrices, CI-confirmed on `1d5dbe7`).
 Whole-repository integration/E2E, browser/provider/production acceptance,
 Dialyzer, release/package artifacts and remote CI are NOT RUN in this lane.
-Capability flags `SSL.QUIC.capabilities().resumption` and `.zero_rtt` remain false
-pending the advertised full runtime acceptance. R1/R2 programme acceptance is
-therefore incomplete even when this provider's scoped gates pass.
+Capability flags `SSL.QUIC.capabilities().resumption` and `.zero_rtt` were gated
+on the full runtime acceptance. Update 2026-11-10: the R1/R2 runtime positive and
+negative matrices (including HRR resumption, peer 0-RTT rejection, Retry + 0-RTT
+and late 0-RTT receipt) pass against independent peers and are CI-confirmed on
+`1d5dbe7`, so both flags are now true. Rows that require a dishonest peer
+(invalid binder, server receive quotas, trust/profile partition mismatch) are
+accepted with in-repo evidence by ruling; see
+[client-features-validation.md](client-features-validation.md#capability-decision-2026-11-10).
+The provider-scoped NOT RUN items above remain as stated for this lane.

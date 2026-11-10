@@ -105,13 +105,13 @@ defmodule SSL.QUIC do
           groups: [map()],
           hello_retry_request: true,
           quic_packet_protection: false,
-          resumption: false,
+          resumption: true,
           roles: %{client: map(), server: map()},
           server_mtls: false,
           signatures: [map()],
           tls_records: false,
           tls_versions: [772, ...],
-          zero_rtt: false
+          zero_rtt: true
         }
   def capabilities do
     %{
@@ -123,8 +123,8 @@ defmodule SSL.QUIC do
       cipher_suites: Enum.filter(Capabilities.describe(:cipher_suite), &(&1.version == 0x0304)),
       groups: Capabilities.describe(:group),
       signatures: Capabilities.describe(:signature_algorithm),
-      resumption: false,
-      zero_rtt: false,
+      resumption: true,
+      zero_rtt: true,
       server_mtls: false,
       hello_retry_request: true,
       tls_records: false,

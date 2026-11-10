@@ -332,9 +332,9 @@ SSL.Connection             :gen_statem per connection
 
 Opt-in record-free resumption now uses `SSL.QUIC.continue/3` and private
 session lookup/commit/store/receipt actions. TLS binder/PSK-DHE/HRR and optional
-early traffic-secret derivation remain separate from QUIC networking acceptance;
-`resumption` and `zero_rtt` capabilities stay false pending the complete runtime
-gates. TCP options and early-data policy are unchanged. See the
+early traffic-secret derivation are accepted through the QUIC runtime's
+independent R1/R2 gates, so `SSL.QUIC.capabilities()` reports `resumption` and
+`zero_rtt` as true; both stay opt-in per connection. TCP options and early-data policy are unchanged. See the
 [continuation contract](../../docs/quic/tls-continuation-contract.md) and
 [validation evidence](../../docs/quic/tls-resumption-validation.md).
 

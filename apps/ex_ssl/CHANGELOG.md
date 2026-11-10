@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Contract change:** `SSL.QUIC.capabilities()` now reports `resumption: true`
+  and `zero_rtt: true`. The QUIC runtime's R1/R2 acceptance, including HRR
+  resumption against Go `crypto/tls` in quic-go v0.62.0, passes in CI. Both stay
+  opt-in per connection; TCP resumption and early-data policy are unchanged.
 - Add a TCP TLS 1.3 server: `SSL.listen/2`, `SSL.transport_accept/1,2`,
   server-side `SSL.handshake/2,3`, `SSL.getopts/2`, `SSL.getstat/1,2`,
   `SSL.shutdown/2` and `SSL.ListenSocket`, configured through
