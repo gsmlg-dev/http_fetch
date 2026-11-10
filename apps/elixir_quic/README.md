@@ -37,10 +37,10 @@ The upstream formatter finding is closed and the inspected supported-runtime com
 
 The Hex package and OTP application are `elixir_quic` / `:elixir_quic`.
 The canonical source repository is `gsmlg-dev/http_fetch`; the public module namespace is `Quic`.
-After the shared `0.16.1` release is published, depend on:
+Depend on the coordinated release (all packages share one version):
 
 ```elixir
-{:elixir_quic, "== 0.16.1"}
+{:elixir_quic, "== 1.0.0-rc.12"}
 ```
 
 Consumers moving from the Git dependency must replace their `:ex_quic`

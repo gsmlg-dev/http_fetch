@@ -41,8 +41,9 @@ and reason about, while also being at least as stable and performant as alternat
 Upstream's informal tests placed ranch and Thousand Island at roughly the same
 level of performance and overhead; this fork preserves that implementation.
 
-Hell is written entirely in Elixir, and is nearly dependency-free (the
-only library used is [telemetry](https://github.com/beam-telemetry/telemetry)).
+Hell is written entirely in Elixir. Its dependencies are
+[telemetry](https://github.com/beam-telemetry/telemetry) and the umbrella's
+`ex_ssl` TLS engine (used by `Hell.Transports.SSL`).
 The application strongly embraces OTP design principles, and emphasizes readable,
 simple code. The hope is that as much as Hell is capable of backing
 the most demanding of services, it is also useful as a simple and approachable
@@ -177,12 +178,12 @@ Security disclosures should be handled per Hell's published [security policy](ht
 
 ## Installation
 
-For the `0.1.3` release, add the Hex package `hell` to your dependencies:
+Add the Hex package `hell` (released with the coordinated umbrella version) to your dependencies:
 
 ```elixir
 def deps do
   [
-    {:hell, "~> 0.1.3"}
+    {:hell, "== 1.0.0-rc.12"}
   ]
 end
 ```

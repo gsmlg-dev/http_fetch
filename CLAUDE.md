@@ -142,7 +142,7 @@ published-Hex consumer gate.
 - Automatic streaming for responses >5MB or unknown Content-Length
 - Stream process receives decoded body chunks from the socket owner
 - Stream messages: `{:stream_chunk, pid, data}`, `{:stream_end, pid}`, `{:stream_error, pid, reason}`
-- Streaming uploads pass an `HTTP.Stream` PID as `body` with `duplex: "half"`; this currently uses HTTP/1.1 chunked request framing
+- Streaming uploads pass an `HTTP.Stream` PID as `body` with `duplex: "half"`; HTTP/1.1 uses chunked framing, and HTTP/2 and explicit HTTP/3 stream DATA frames
 
 ### Response Body Handling
 - `HTTP.Response.write_to/2` handles both buffered (direct binary write) and streamed responses (receive loop)
@@ -150,9 +150,10 @@ published-Hex consumer gate.
 
 ### Telemetry Events
 All events use `[:http_fetch, ...]` prefix:
-- `[:request, :start]` - measurements: `start_time`; metadata: `method`, `url`, `headers`
-- `[:request, :stop]` - measurements: `duration`, `status`, `response_size`; metadata: `url`, `status`
-- `[:request, :exception]` - measurements: `duration`; metadata: `url`, `error`
+- `[:request, :start]` - measurements: `start_time`; metadata: `method`, `scheme`
+- `[:request, :stop]` - measurements: `duration`, `status`, `response_size`; metadata: `scheme`, `status` and, for network requests, `http_version`
+- `[:request, :exception]` - measurements: `duration`; metadata: `scheme`, `error`
+- Metadata is privacy-scoped: URLs and headers are not emitted
 - `[:streaming, :start]`, `[:streaming, :chunk]`, `[:streaming, :stop]` - for streaming operations
 
 ## Dependencies
@@ -167,10 +168,8 @@ All events use `[:http_fetch, ...]` prefix:
 ### Credo
 Credo performs static code analysis to enforce Elixir style guidelines and identify code smells. Configuration in `.credo.exs`.
 
-Current known issues to address:
-- Code readability: Number formatting (use underscores for large numbers), sigil usage, alias ordering
-- Refactoring: Use `Enum.map_join/3` instead of `Enum.map/2 |> Enum.join/2`, reduce function complexity and nesting depth
-- Warnings: Struct specifications in `@spec` declarations
+`mix credo` reports no issues; `--strict` reports only design hints (nested aliases,
+`apply/3`).
 
 ### Dialyzer
 Dialyzer performs static type analysis to catch type errors and inconsistencies. PLT (Persistent Lookup Table) stored in `apps/http_fetch/priv/plts/dialyzer.plt`.

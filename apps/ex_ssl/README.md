@@ -31,7 +31,7 @@ Add the `ex_ssl` package to your dependencies:
 ```elixir
 def deps do
   [
-    {:ex_ssl, "== 0.16.1"}
+    {:ex_ssl, "== 1.0.0-rc.12"}
   ]
 end
 ```
@@ -139,13 +139,13 @@ automatic reconnect, or request replay occurs. See the [resumption
 policy](docs/ADR_TLS13_RESUMPTION.md) and [compatibility
 details](docs/COMPATIBILITY.md).
 
-The wider roadmap (not implemented API) includes:
+`shutdown/2`, `getopts/2` and `getstat/1,2` are implemented for server sockets
+(see [TCP TLS 1.3 server](#tcp-tls-13-server)); on client sockets they return
+`{:error, :enotsup}`. The wider roadmap (not implemented API) includes:
 
 ```text
 close/2
-shutdown/2
-getopts/2
-getstat/1,2
+shutdown/2, getopts/2, getstat/1,2 (client sockets)
 update_keys/2
 export_key_materials/4,5
 format_error/1
