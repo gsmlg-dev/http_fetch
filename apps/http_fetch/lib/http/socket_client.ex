@@ -234,7 +234,7 @@ defmodule HTTP.SocketClient do
     ref = make_ref()
     parent = self()
     timeout = request_timeout(request)
-    deadline_at = System.monotonic_time(:millisecond) + timeout
+    deadline_at = request_deadline(timeout)
 
     case Task.Supervisor.start_child(:http_fetch_task_supervisor, fn ->
            http3_owner(parent, ref, request, 0, false, deadline_at, route)

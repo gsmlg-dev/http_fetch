@@ -100,7 +100,9 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     timeout = Keyword.get(opts, :operation_timeout, 1_000)
 
     opening_deadline =
-      Keyword.get(opts, :opening_deadline_at, now() + Keyword.get(opts, :connect_timeout, 5_000))
+      Keyword.get_lazy(opts, :opening_deadline_at, fn ->
+        now() + HTTP.HTTP3.opening_timeout(opts[:connect_timeout])
+      end)
 
     request_deadline = Keyword.get(opts, :deadline_at)
     session_opts = Keyword.put(Keyword.get(opts, :session_options, []), :timeout, timeout)

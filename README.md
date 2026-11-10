@@ -197,12 +197,16 @@ available without a proxy endpoint.
 
 ## Request and Connection Timeouts
 
-For HTTP/1 fetches, `timeout: :infinity` disables the total request deadline,
-including streamed uploads and downloads. `connect_timeout` remains independent:
-use a finite millisecond value to bound connection establishment, or `:infinity`
-to leave it unlimited. A finite request deadline still bounds connection setup
-even when `connect_timeout: :infinity`. Cancellation and caller/stream-owner
-cleanup continue to apply with either timeout set to `:infinity`.
+For HTTP/1, HTTP/2 and HTTP/3 fetches, `timeout: :infinity` disables the total
+request deadline, including streamed uploads and downloads. `connect_timeout`
+remains independent: use a finite millisecond value to bound connection
+establishment, or `:infinity` to leave it unlimited. A finite request deadline
+still bounds connection setup even when `connect_timeout: :infinity`. HTTP/3
+QUIC handshakes always stay finite: with `connect_timeout: :infinity` they use
+the default 5,000 ms opening budget. Both options accept non-negative integer
+milliseconds or `:infinity`; other values raise `ArgumentError`. Cancellation
+and caller/stream-owner cleanup continue to apply with either timeout set to
+`:infinity`.
 
 `HTTP.Promise.await/2` has its own caller wait timeout. Pass `:infinity` there
 as well when the caller should wait indefinitely for response headers:

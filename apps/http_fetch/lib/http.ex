@@ -137,10 +137,11 @@ defmodule HTTP do
   The socket transport defaults `redirect` to `:follow`; pass `redirect: :manual`
   to return redirect responses, or `redirect: :error` to fail on redirect. Request timeout handling
   gives the internal socket owner up to one additional second to report its timeout before the
-  awaiting caller aborts it. For HTTP/1, `timeout: :infinity` removes the total
-  request deadline, including response body reads. `connect_timeout` independently
-  bounds connection establishment (including TLS); it accepts `:infinity` and
-  defaults to at most 30 seconds. The total request deadline still caps a longer
+  awaiting caller aborts it. For HTTP/1, HTTP/2 and HTTP/3, `timeout: :infinity`
+  removes the total request deadline, including response body reads. `connect_timeout`
+  independently bounds connection establishment (including TLS); it accepts `:infinity`
+  and defaults to at most 30 seconds. HTTP/3 QUIC handshakes stay finite and use the
+  default 5,000 ms opening budget for `connect_timeout: :infinity`. The total request deadline still caps a longer
   connection timeout. `HTTP.Promise.await/2` has its own independent wait timeout.
   Cancellation and caller/reader cleanup remain active for infinite requests.
   Stream idle and chunk acknowledgement timeouts, explicit socket send timeouts,

@@ -170,6 +170,25 @@ defmodule HTTP.FetchOptionsTest do
       end
     end
 
+    test "request and connection timeouts accept non-negative milliseconds or infinity" do
+      for key <- [:timeout, :connect_timeout], value <- [0, 1, 30_000, :infinity] do
+        options = HTTP.FetchOptions.new([{key, value}])
+        assert Map.fetch!(options, key) == value
+        assert HTTP.FetchOptions.to_transport_options(options)[key] == value
+      end
+
+      assert %HTTP.FetchOptions{connect_timeout: :infinity} =
+               HTTP.FetchOptions.new(%{"connectTimeout" => :infinity})
+
+      for key <- [:timeout, :connect_timeout], value <- [-1, "5", 1.5, :never, true] do
+        assert_raise ArgumentError,
+                     ~r/#{key} must be non-negative milliseconds or :infinity/,
+                     fn ->
+                       HTTP.FetchOptions.new([{key, value}])
+                     end
+      end
+    end
+
     test "rejects invalid duplex mode" do
       assert_raise ArgumentError, ~r/unsupported duplex mode/, fn ->
         HTTP.FetchOptions.new(duplex: :full)

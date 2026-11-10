@@ -293,6 +293,41 @@ defmodule HTTP.InfiniteTimeoutWireTest do
     end
   end
 
+  for connect_timeout <- [1_000, :infinity] do
+    test "h2c infinite request with #{connect_timeout} connection timeout waits for the response" do
+      parent = self()
+
+      {url, peer} =
+        HTTP.Test.HTTP2ScriptedPeer.start(parent, fn socket ->
+          {id, true} = HTTP.Test.HTTP2ScriptedPeer.request(socket)
+          send(parent, {:h2_request, self()})
+
+          receive do
+            :respond -> HTTP.Test.HTTP2ScriptedPeer.response(socket, id, "ok")
+          end
+        end)
+
+      promise =
+        HTTP.fetch(url,
+          http_version: :h2c,
+          timeout: :infinity,
+          connect_timeout: unquote(connect_timeout)
+        )
+
+      assert_receive {:h2_request, ^peer}, @wait
+      task_ref = promise.task.ref
+      refute_receive {^task_ref, _result}, 1_100
+      send(peer, :respond)
+
+      assert %HTTP.Response{status: 200, http_version: :http2} =
+               response = HTTP.Promise.await(promise, @wait)
+
+      assert HTTP.Response.read_all(response) == "ok"
+
+      send(peer, :close)
+    end
+  end
+
   defp options(backend, opts) do
     base = [http_version: :http1, redirect: :manual]
 

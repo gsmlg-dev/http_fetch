@@ -31,7 +31,8 @@ defmodule HTTP.FetchOptions do
   - `request_mode` - `:fetch` (default) or `:proxy`; proxy mode retains request
     entities for all admitted methods, including GET, DELETE, and HEAD
   - `content_type` - convenience Content-Type value for request bodies
-  - `timeout` - request timeout in milliseconds or `:infinity` for HTTP/1
+  - `timeout` - request timeout in non-negative milliseconds or `:infinity`
+    (HTTP/1, HTTP/2 and HTTP/3); other values raise `ArgumentError`
   - `error_mode` - `:raw` (default) or `:structured`; structured failures return
     `HTTP.RequestError` with conservative pre-send evidence. No automatic retry.
   - `read_idle_timeout` - positive milliseconds (1..4,294,967,295), or `nil`
@@ -50,7 +51,8 @@ defmodule HTTP.FetchOptions do
     `:read_idle_timeout` / `:write_idle_timeout` (or `HTTP.RequestError` in
     structured mode before response headers). Neither changes connection or
     overall request deadlines or the cleanup completion contract.
-  - `connect_timeout` - connection timeout in milliseconds or `:infinity`
+  - `connect_timeout` - connection timeout in non-negative milliseconds or
+    `:infinity`; other values raise `ArgumentError`
   - `response_stream_idle_timeout` - ordinary HTTP/1 response-stream inactivity
     in positive milliseconds (1..4,294,967,295), or `:infinity` to disable the
     network-wait clock. `nil` (default) retains the global streaming timeout.
@@ -586,6 +588,8 @@ defmodule HTTP.FetchOptions do
         http_version: http_version,
         alt_svc: alt_svc,
         prefer_ipv6: normalize_prefer_ipv6(options.prefer_ipv6),
+        timeout: normalize_timeout(options.timeout, :timeout),
+        connect_timeout: normalize_timeout(options.connect_timeout, :connect_timeout),
         response_header_limits:
           HTTP.ResponseHeaderLimits.normalize(options.response_header_limits),
         read_idle_timeout: normalize_idle_timeout(options.read_idle_timeout, :read_idle_timeout),
@@ -673,6 +677,13 @@ defmodule HTTP.FetchOptions do
 
   defp validate_response_stream_ack_protocol(_options),
     do: raise(ArgumentError, "response_stream_ack_timeout requires http_version: :http1")
+
+  defp normalize_timeout(timeout, _key)
+       when timeout in [nil, :infinity] or (is_integer(timeout) and timeout >= 0),
+       do: timeout
+
+  defp normalize_timeout(_timeout, key),
+    do: raise(ArgumentError, "#{key} must be non-negative milliseconds or :infinity")
 
   defp normalize_idle_timeout(nil, _key), do: nil
 

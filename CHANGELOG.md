@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanly closed WebSocket over HTTP/3 retires its attempt without aborting it.
 
 ### Fixed
+- `timeout: :infinity` no longer crashes HTTP/3 fetches (explicit
+  `http_version: :http3`, or `:auto` with a cached Alt-Svc route) with an
+  `ArithmeticError`, and `connect_timeout: :infinity` no longer crashes the
+  HTTP/3 connection owner. QUIC handshakes stay finite: an infinite connection
+  timeout uses the default 5,000 ms opening budget. `timeout` and
+  `connect_timeout` are now validated as non-negative integer milliseconds or
+  `:infinity`; other values raise `ArgumentError` instead of crashing the
+  request task.
 - `HTTP.Promise.then/3` no longer crashes every chain: the chained task awaited a
   task it did not own. Callbacks are now kept on the promise and run in the
   process that calls `HTTP.Promise.await/2`, so `then/3` stays non-blocking.

@@ -335,6 +335,23 @@ defmodule HTTP.FetchHTTP3Test do
     assert {:error, :http3_informational_limit} = HTTP.Promise.await(promise)
   end
 
+  for connect_timeout <- [1_000, :infinity] do
+    @tag :integration
+    test "infinite H3 request with #{connect_timeout} connection timeout waits for the response",
+         context do
+      promise = fetch(context, timeout: :infinity, connect_timeout: unquote(connect_timeout))
+      connection = accept(context.server)
+      stream = await_stream(connection, 0, deadline())
+      await_fin(stream, deadline(), [])
+      task_ref = promise.task.ref
+      refute_receive {^task_ref, _result}, 1_100
+      write(stream, headers(200, [{"content-length", "2"}]) <> Frame.encode!(:data, "OK"), true)
+
+      assert %HTTP.Response{status: 200, body: "OK", http_version: :http3} =
+               HTTP.Promise.await(promise, 5_000)
+    end
+  end
+
   defp decode_data(<<>>, chunks), do: chunks |> Enum.reverse() |> IO.iodata_to_binary()
 
   defp decode_data(bytes, chunks) do

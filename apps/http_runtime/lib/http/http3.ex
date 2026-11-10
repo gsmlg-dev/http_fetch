@@ -6,7 +6,7 @@ defmodule HTTP.HTTP3 do
 
   @spec request(Request.t(), term(), function()) :: term()
   def request(%Request{} = request, state, handler) do
-    opening = Keyword.get(request.transport_options, :connect_timeout, 5_000)
+    opening = opening_timeout(Keyword.get(request.transport_options, :connect_timeout))
 
     opts =
       Keyword.merge(Map.get(state, :http3_runtime_opts, []),
@@ -65,8 +65,17 @@ defmodule HTTP.HTTP3 do
       :deadline ->
         {:error, :request_timeout, state}
     after
-      max(state.deadline_at - System.monotonic_time(:millisecond), 0) ->
+      remaining(state.deadline_at) ->
         {:error, :request_timeout, state}
     end
   end
+
+  # QUIC handshake deadlines stay finite, so an infinite connection timeout
+  # keeps the default opening budget (a finite request deadline still caps it).
+  @doc false
+  def opening_timeout(timeout) when timeout in [nil, :infinity], do: 5_000
+  def opening_timeout(timeout), do: timeout
+
+  defp remaining(:infinity), do: :infinity
+  defp remaining(deadline_at), do: max(deadline_at - System.monotonic_time(:millisecond), 0)
 end
