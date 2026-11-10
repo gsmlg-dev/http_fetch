@@ -627,18 +627,22 @@ defmodule Hell.HandlerTest do
 
     @tag capture_log: true
     test "it should not close the connection if the client keeps sending within the read_timeout, even with local messages arriving" do
-      read_timeout = 100
+      read_timeout = 400
+      gap = div(read_timeout, 8)
       {:ok, port} = start_handler(ReadTimeout, read_timeout: read_timeout)
 
       {:ok, client} = :gen_tcp.connect(:localhost, port, active: false)
 
-      # Send pings every 50ms (well within the 100ms timeout) for 300ms
+      # Each gap stays far inside the timeout (room for runner stalls) while the
+      # pings together outlast it, so only a resetting timer keeps it open.
       started_at = System.monotonic_time(:millisecond)
 
-      for index <- 1..6 do
+      for _ <- 1..10 do
         :gen_tcp.send(client, "ping")
-        wait_until(started_at + index * 50)
+        Process.sleep(gap)
       end
+
+      assert System.monotonic_time(:millisecond) - started_at > read_timeout
 
       # Connection should still be open
       assert :gen_tcp.recv(client, 0, 10) == {:error, :timeout}
@@ -1517,14 +1521,6 @@ defmodule Hell.HandlerTest do
   end
 
   # Keep these short traffic intervals independent of timer wake-up delays.
-  # Yield between clock checks so the handler can run while the client waits.
-  defp wait_until(deadline) do
-    if System.monotonic_time(:millisecond) < deadline do
-      :erlang.yield()
-      wait_until(deadline)
-    end
-  end
-
   defp assert_exception_reason(:error, reason),
     do: assert(%RuntimeError{message: "nope"} = reason)
 
