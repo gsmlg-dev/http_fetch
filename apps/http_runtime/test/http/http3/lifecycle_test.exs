@@ -481,6 +481,31 @@ defmodule HTTP.HTTP3.LifecycleTest do
     assert_received {:native_close, 0x100, ""}
   end
 
+  test "watchdog loss retires without a graceful close after retirement", %{
+    controller: controller
+  } do
+    owner = owner(controller)
+    monitor = Process.monitor(owner)
+    %{watchdog: watchdog} = :sys.get_state(owner)
+    Process.exit(watchdog, :kill)
+    # terminate waits up to 1 s for the already-reported watchdog exit.
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 3_000
+    refute_received {:native_close, _, _}
+  end
+
+  test "orderly stop that abandons live requests does not claim H3_NO_ERROR", %{
+    controller: controller
+  } do
+    owner = owner(controller)
+    monitor = Process.monitor(owner)
+    generation = make_ref()
+    assert {:ok, request} = ConnectionOwner.open(owner, fields(), "", self(), generation)
+    send(owner, :http3_pool_down)
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 1_000
+    assert_received {:http3, ^generation, ^request, {:error, {:owner_down, :normal}}}
+    refute_received {:native_close, _, _}
+  end
+
   test "subscriber death during unknown opening reconciles then cancels the same stream", %{
     controller: controller
   } do

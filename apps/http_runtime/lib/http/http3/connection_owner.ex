@@ -441,7 +441,8 @@ defmodule HTTP.HTTP3.ConnectionOwner do
       when monitor == state.watchdog_monitor or monitor == state.tracker_monitor or
              (monitor == state.creator_monitor and state.pool == nil) do
     retire_native(state.cleanup)
-    {:stop, :normal, state}
+    # Retired: terminate must not attempt a graceful close on it.
+    {:stop, :normal, %{state | lifecycle: :retiring}}
   end
 
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
@@ -478,8 +479,12 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   # connection ends it with an application CONNECTION_CLOSE carrying
   # H3_NO_ERROR, so the peer need not wait for its idle timeout. The close is
   # admitted before the cleanup lease is retired, and the watchdog bounds it.
-  defp graceful_close(:normal, %{lifecycle: lifecycle, pending: nil, watchdog: watchdog} = state)
-       when lifecycle in [:ready, :draining] and watchdog != nil do
+  # A stop that abandons live requests is not a clean H3_NO_ERROR shutdown.
+  defp graceful_close(
+         :normal,
+         %{lifecycle: lifecycle, pending: nil, watchdog: watchdog, requests: requests} = state
+       )
+       when lifecycle in [:ready, :draining] and watchdog != nil and map_size(requests) == 0 do
     if state.session.connection && state.session.pending == nil,
       do: guarded(state, state.timeout, fn -> Session.close(state.session) end)
   end
