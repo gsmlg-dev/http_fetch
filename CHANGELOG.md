@@ -52,6 +52,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanly closed WebSocket over HTTP/3 retires its attempt without aborting it.
 
 ### Fixed
+- **ex_ssl (#158):** an HTTPS response whose server closes TCP without
+  `close_notify` (common for `connection: close` endpoints and load balancers)
+  no longer ends in `:econnreset` or loses its tail. The ex_ssl client and
+  server now deliver every byte already decrypted before reporting the close, so
+  a chunked HTTP/1.1 stream ends with `:stream_end` and a complete body, as it
+  does over OTP `:ssl`. **Contract change:** a TCP EOF without `close_notify`
+  now reports `{:error, :closed}` / `{:ssl_closed, socket}` (OTP `:ssl`
+  semantics) instead of `:econnreset`; a transport error still reports its
+  reason, after the buffered data.
 - `timeout: :infinity` no longer crashes HTTP/3 fetches (explicit
   `http_version: :http3`, or `:auto` with a cached Alt-Svc route) with an
   `ArithmeticError`, and `connect_timeout: :infinity` no longer crashes the
