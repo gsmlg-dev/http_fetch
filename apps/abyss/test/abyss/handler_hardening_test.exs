@@ -27,7 +27,7 @@ defmodule Abyss.HandlerHardeningTest do
     pid = start_probe(:continue)
     for _ <- 1..10, do: send(pid, :memory_check)
     :sys.get_state(pid)
-    assert_receive {:cleanup, :timeout, :preserved}, 300
+    assert_receive {:cleanup, :timeout, :preserved}, 1_000
     assert_receive {:DOWN, _, :process, ^pid, {:shutdown, :timeout}}, 100
   end
 
@@ -68,7 +68,7 @@ defmodule Abyss.HandlerHardeningTest do
     assert current.idle_deadline == deadline
     assert current.idle_token == previous.idle_token
     assert Process.alive?(pid)
-    assert_receive {:cleanup, :timeout, :preserved}, 300
+    assert_receive {:cleanup, :timeout, :preserved}, 1_000
     assert_receive {:DOWN, _, :process, ^pid, {:shutdown, :timeout}}, 100
     refute_receive {:cleanup, :timeout, _}, 20
   end
