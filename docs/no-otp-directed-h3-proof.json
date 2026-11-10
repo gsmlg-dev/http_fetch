@@ -18,7 +18,7 @@
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
     "apps/http_runtime/lib/http/http3/pool_key.ex": "d9ef3e06fcbaab42181a3b27ddc72e16865e516d0b8c4e07be003558ac62e899",
     "apps/http_runtime/lib/http/http3/pool.ex": "974135c4126244c649815a5d4ab808678da3c1978540d84b940729f299baf73d",
-    "apps/http_runtime/lib/http/http3/connection_owner.ex": "858460929137bdba7480e68fd4b48898dbd54696a09cd878572d83b9dee12513",
+    "apps/http_runtime/lib/http/http3/connection_owner.ex": "194a7390dcdea7841222f41d67fd8037f0ce45743039ca546d713d5bba468852",
     "apps/http_runtime/lib/http/http3/resumption.ex": "ad78171f1d7f53425400a05a02a1d87f0263e4f3a17b87fa95fc8f4e1559ae29"
   },
   "production_source_census": {
@@ -707,7 +707,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "4c1bf8fde8b1fab2f10dcad73183969eed731052",
+      "source_commit": "51fd8fe49bc8f45d69762cb130cf277a10dd21ab",
       "scope": "opt-in resumption/0-RTT, extended CONNECT, datagrams, reliable reset, client migration and WebSocket/H3 completion receipt",
       "changed_source_inputs": {
         "apps/elixir_quic_http3/lib/quic_http3/session.ex": {
@@ -740,7 +740,7 @@
         },
         "apps/http_runtime/lib/http/http3/connection_owner.ex": {
           "previous_sha256": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
-          "sha256": "858460929137bdba7480e68fd4b48898dbd54696a09cd878572d83b9dee12513"
+          "sha256": "194a7390dcdea7841222f41d67fd8037f0ce45743039ca546d713d5bba468852"
         },
         "apps/http_runtime/lib/http/http3/pool.ex": {
           "previous_sha256": "730b52081a9f99621e5edd677167556dbeede70fd74cef7d1164e9e230118d44",
@@ -752,7 +752,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "eae76b0222008b74ae6836e45aa3266f9f73a0db5b60afb0caa593446cd25ccd",
+        "sorted_path_sha256_json": "9eb701e8597a998866efb5616002c5e21dc0a3f1c2704554838d1bbdd9c3fc72",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -939,6 +939,13 @@
           "input": "apps/http_runtime/lib/http/http3/pool.ex",
           "change": "HTTP.HTTP3.Pool no longer retires an exclusive owner's cleanup lease on release; it sends :http3_retire so the owner closes with H3_NO_ERROR before retiring, and still retires on owner DOWN.",
           "dispatch_review": "No dynamic dispatch added or moved: one literal Quic.Cleanup.retire/2 call path is removed; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-10",
+          "source_commit": "51fd8fe49bc8f45d69762cb130cf277a10dd21ab",
+          "input": "apps/http_runtime/lib/http/http3/connection_owner.ex",
+          "change": "ConnectionOwner marks itself :retiring when the watchdog, attempt tracker or creator goes DOWN, so terminate/2 skips the graceful close of the already retired connection; graceful_close/2 now also requires that no request remains, so a stop that abandons live requests through fail_all/2 keeps the previous retire/abort path instead of claiming H3_NO_ERROR.",
+          "dispatch_review": "No dynamic dispatch added or moved: the change is a lifecycle field update and a map_size/1 guard; the file holds no reviewed occurrence."
         }
       ]
     }

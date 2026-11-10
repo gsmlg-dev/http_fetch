@@ -194,3 +194,13 @@ literal; `Session.close/1` reaches only the reviewed H3-1 `session.transport`
 close and cleanup sites. Neither file holds a reviewed occurrence, so no
 occurrence is added or rebound. The producer hashes, the release census entries
 and every group's rc.11 census digest are updated.
+
+### Follow-up: final review fixes (2026-11-10)
+
+`HTTP.HTTP3.ConnectionOwner` (`51fd8fe`) marks itself `:retiring` when its
+watchdog, attempt tracker or creator goes DOWN, so `terminate/2` no longer runs
+a graceful close on the already retired connection, and sends H3_NO_ERROR only
+when no request remains. The change is a lifecycle field update and a guard; the
+file holds no reviewed occurrence, so no occurrence is added or rebound. The
+producer hashes, the release census entry and every group's rc.11 census digest
+are updated (the census also covers the `Quic.IO.GenUDP` link fix, `d460225`).

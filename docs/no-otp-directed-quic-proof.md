@@ -319,3 +319,16 @@ CI-confirmed M2, reliable-reset, R1 and R2 matrices (`b2239e7`, `b1276f9`,
 documentation only: no dynamic dispatch is added or moved, and no reviewed
 occurrence is rebound. Producer hashes, the release census and every group's
 rc.11 census digest are updated.
+
+### Follow-up: final review fixes (2026-11-10)
+
+`HTTP.HTTP3.ConnectionOwner` (`51fd8fe`) marks itself `:retiring` when its
+watchdog, attempt tracker or creator goes DOWN, so `terminate/2` no longer runs
+a graceful close on the already retired connection, and sends H3_NO_ERROR only
+when no request remains. `Quic.IO.GenUDP` (`d460225`) now links the actor to its
+still-blocked caller at the end of a successful `init`, instead of linking from
+the caller after `GenServer.start/2` returns, which could deliver `:noproc` to a
+non-trapping caller. Both changes use only literal calls and neither file holds
+a reviewed occurrence, so no occurrence is added or rebound. The producer
+hashes, the release census entries and every group's rc.11 census digest are
+updated.

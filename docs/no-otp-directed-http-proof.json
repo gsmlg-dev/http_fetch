@@ -29,7 +29,7 @@
     "apps/http_runtime/lib/http/managed_transport.ex": "d3b3eeb9fea115aaeab8cd6ec4780665164ccabee79ba437c44973852119af16",
     "apps/http_runtime/lib/http/managed_transport/scope.ex": "c822312d48110046a5c0fede5e6768236a1e3d8e3ed077eaede961bc5f30f0e5",
     "apps/http_runtime/lib/http/managed_transport/policy.ex": "b283eba84c5b438eb53f35ab548682a0f83f3a7b675082f56c4a01d6767cfbd0",
-    "apps/http_runtime/lib/http/http3/connection_owner.ex": "858460929137bdba7480e68fd4b48898dbd54696a09cd878572d83b9dee12513",
+    "apps/http_runtime/lib/http/http3/connection_owner.ex": "194a7390dcdea7841222f41d67fd8037f0ce45743039ca546d713d5bba468852",
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
     "apps/http_event_source/lib/http/event_source/options.ex": "6ee7ca7f5be5e113db4fb3b25e4df8f096c7e94cd1fdeb24bd8bcf88b79e85f0",
     "apps/http_event_source/lib/http/event_source/connection.ex": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
@@ -1341,7 +1341,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "4c1bf8fde8b1fab2f10dcad73183969eed731052",
+      "source_commit": "51fd8fe49bc8f45d69762cb130cf277a10dd21ab",
       "scope": "Alt-Svc discovery, HTTP/3 resumption options, WebSocket/H3 completion receipt and live draft-17 WebTransport backend",
       "changed_source_inputs": {
         "apps/http_fetch/lib/http/fetch_options.ex": {
@@ -1358,7 +1358,7 @@
         },
         "apps/http_runtime/lib/http/http3/connection_owner.ex": {
           "previous_sha256": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
-          "sha256": "858460929137bdba7480e68fd4b48898dbd54696a09cd878572d83b9dee12513"
+          "sha256": "194a7390dcdea7841222f41d67fd8037f0ce45743039ca546d713d5bba468852"
         },
         "apps/http_runtime/lib/http/http3/stream.ex": {
           "previous_sha256": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
@@ -1400,7 +1400,7 @@
       "added_selected_inputs": [],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "eae76b0222008b74ae6836e45aa3266f9f73a0db5b60afb0caa593446cd25ccd",
+        "sorted_path_sha256_json": "9eb701e8597a998866efb5616002c5e21dc0a3f1c2704554838d1bbdd9c3fc72",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1639,6 +1639,13 @@
           "input": "apps/http_web_socket/lib/http/web_socket.ex",
           "change": "migrate/2 @doc text updated for the CI-confirmed migration gate (f70e874); documentation only.",
           "dispatch_review": "No dynamic dispatch added or moved; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-10",
+          "source_commit": "51fd8fe49bc8f45d69762cb130cf277a10dd21ab",
+          "input": "apps/http_runtime/lib/http/http3/connection_owner.ex",
+          "change": "ConnectionOwner marks itself :retiring when the watchdog, attempt tracker or creator goes DOWN, so terminate/2 skips the graceful close of the already retired connection; graceful_close/2 now also requires that no request remains, so a stop that abandons live requests through fail_all/2 keeps the previous retire/abort path instead of claiming H3_NO_ERROR.",
+          "dispatch_review": "No dynamic dispatch added or moved: the change is a lifecycle field update and a map_size/1 guard; the file holds no reviewed occurrence."
         }
       ]
     }
