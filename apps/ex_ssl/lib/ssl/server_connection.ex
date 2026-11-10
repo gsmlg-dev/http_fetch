@@ -120,7 +120,7 @@ defmodule SSL.ServerConnection do
     status = :atomics.new(1, signed: false)
 
     case SSL.ConnectionSupervisor.start_server({owner, ref, status, config}) do
-      {:ok, pid} -> attach(Socket.new(pid, ref, status), tcp)
+      {:ok, pid} -> attach(pid, Socket.new(pid, ref, status), tcp)
       {:error, _} -> {:error, :closed}
     end
   end
@@ -133,13 +133,13 @@ defmodule SSL.ServerConnection do
     with {:ok, deadline} <- Options.deadline(timeout), do: call(socket, {:handshake, deadline})
   end
 
-  defp attach(socket, tcp) do
-    case :gen_tcp.controlling_process(tcp, socket.pid) do
+  defp attach(pid, socket, tcp) do
+    case :gen_tcp.controlling_process(tcp, pid) do
       :ok ->
         with :ok <- call(socket, {:attach, tcp}), do: {:ok, socket}
 
       {:error, _} = error ->
-        _ = DynamicSupervisor.terminate_child(SSL.ConnectionSupervisor, socket.pid)
+        _ = DynamicSupervisor.terminate_child(SSL.ConnectionSupervisor, pid)
         error
     end
   end
@@ -624,9 +624,6 @@ defmodule SSL.ServerConnection do
 
       {:error, {alert, reason}} ->
         {:error, alert(alert, reason), data}
-
-      {:error, reason} ->
-        {:error, alert(:internal_error, reason), data}
     end
   end
 
@@ -898,7 +895,7 @@ defmodule SSL.ServerConnection do
   end
 
   defp failure({:alert, alert, reason}, data) do
-    if data.write_closed, do: :ok, else: send_alert(data, 2, Map.fetch!(@alerts, alert))
+    _ = if data.write_closed, do: :ok, else: send_alert(data, 2, Map.fetch!(@alerts, alert))
     description = ~c"TLS server: " ++ String.to_charlist(inspect(reason, limit: 8))
     {{:tls_alert, {alert, description}}, %{data | write_closed: true}}
   end

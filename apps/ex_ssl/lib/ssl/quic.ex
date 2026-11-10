@@ -178,11 +178,11 @@ defmodule SSL.QUIC do
           {:error, reason} -> fail(next, :tls, :internal_error, reason)
         end
 
-      {:error, {:fatal_alert, alert, reason}} ->
+      {:error, {alert, reason}} when is_atom(alert) ->
         fail(next, :tls, alert, reason)
 
-      {:error, {alert, reason}} ->
-        fail(next, :tls, alert, reason)
+      {:error, reason} ->
+        fail(next, :tls, :internal_error, reason)
 
       :invalid ->
         fail(next, :configuration, nil, :invalid_continuation_result)
