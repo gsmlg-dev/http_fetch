@@ -92,7 +92,7 @@ defmodule Quic.Phase1IOTLSTest do
         tls: [adapter: Initial]
       )
 
-    on_exit(fn -> if Process.alive?(endpoint), do: GenServer.stop(endpoint) end)
+    on_exit(fn -> Quic.TestStop.quietly(endpoint) end)
 
     {:ok, _, [initial]} =
       HandshakeScheduler.new(:client,

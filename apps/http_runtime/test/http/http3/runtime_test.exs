@@ -836,7 +836,7 @@ defmodule HTTP.HTTP3.RuntimeTest do
   # Started processes are linked to the test process, so they may already be
   # shutting down when on_exit runs; a stop that loses that race is fine.
   defp stop_quietly(pid) do
-    if Process.alive?(pid), do: GenServer.stop(pid)
+    HTTP.Runtime.TestStop.quietly(pid)
   catch
     :exit, _reason -> :ok
   end

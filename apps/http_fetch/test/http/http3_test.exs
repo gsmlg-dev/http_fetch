@@ -23,7 +23,7 @@ defmodule HTTP.FetchHTTP3Test do
 
     on_exit(fn ->
       stop_fixture_clients(port)
-      if Process.alive?(server), do: GenServer.stop(server)
+      HTTP.Fetch.TestStop.quietly(server)
     end)
 
     ssl = [cacerts: [cert.("root.pem")], reference_identity: {:dns_id, "example.test"}]

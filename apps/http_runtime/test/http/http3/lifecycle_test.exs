@@ -115,7 +115,7 @@ defmodule HTTP.HTTP3.LifecycleTest do
         )
       )
 
-    on_exit(fn -> if Process.alive?(owner), do: GenServer.stop(owner) end)
+    on_exit(fn -> HTTP.Runtime.TestStop.quietly(owner) end)
     :ok = ConnectionOwner.await_ready(owner)
     owner
   end
@@ -219,7 +219,7 @@ defmodule HTTP.HTTP3.LifecycleTest do
       end)
 
       {:ok, pool} = Pool.start_link(max_connections: 1)
-      on_exit(fn -> if Process.alive?(pool), do: GenServer.stop(pool) end)
+      on_exit(fn -> HTTP.Runtime.TestStop.quietly(pool) end)
 
       request = %HTTP.Request{
         method: :post,

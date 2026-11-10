@@ -534,7 +534,7 @@ defmodule QuicHttp3.CleanupIntegrationTest do
   end
 
   defp stop_server(server) do
-    if Process.alive?(server), do: GenServer.stop(server)
+    QuicHttp3.TestStop.quietly(server)
   catch
     :exit, {:noproc, _} -> :ok
   end

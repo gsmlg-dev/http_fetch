@@ -113,7 +113,7 @@ defmodule Abyss.HandlerHardeningTest do
     Process.monitor(pid)
     send(pid, {:new_connection, make_ref(), {{127, 0, 0, 1}, 1, {self(), result}}})
     assert_receive {:processed, ^pid}
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+    on_exit(fn -> Abyss.TestStop.quietly(pid) end)
     pid
   end
 end

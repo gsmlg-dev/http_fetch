@@ -27,7 +27,7 @@ defmodule HTTP.FetchHTTP3ResumptionTest do
       )
 
     {_, port} = Quic.local(server)
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> HTTP.Fetch.TestStop.quietly(server) end)
     ssl = [cacerts: [cert.("root.pem")], reference_identity: {:dns_id, "example.test"}]
     %{server: server, port: port, url: "https://127.0.0.1:#{port}/r", ssl: ssl}
   end

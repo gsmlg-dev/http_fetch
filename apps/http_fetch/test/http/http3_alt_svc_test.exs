@@ -33,7 +33,7 @@ defmodule HTTP.FetchHTTP3AltSvcTest do
     on_exit(fn ->
       Cache.clear()
       stop_fixture_clients(udp_port)
-      if Process.alive?(server), do: GenServer.stop(server)
+      HTTP.Fetch.TestStop.quietly(server)
       :ssl.close(listener)
     end)
 

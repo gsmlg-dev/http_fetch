@@ -37,7 +37,7 @@ defmodule HTTP.WebTransport.QUICIntegrationTest do
       ] ++ if(context[:no_reset], do: [], else: [reliable_reset: true])
 
     {:ok, server} = Quic.listen(server_opts)
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> HTTP.WebTransport.TestStop.quietly(server) end)
     {_, port} = Quic.local(server)
     ssl = [cacerts: [cert.("root.pem")], reference_identity: {:dns_id, "example.test"}]
     %{server: server, url: "https://127.0.0.1:#{port}/wt?x=1", ssl: ssl}

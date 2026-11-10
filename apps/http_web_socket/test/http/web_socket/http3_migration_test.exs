@@ -19,7 +19,7 @@ defmodule HTTP.WebSocket.HTTP3MigrationTest do
     {:ok, server} =
       Quic.listen(tls: [cert: [cert.("leaf.pem")], key: {type, key}, alpn: ["h3"]])
 
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> HTTP.WebSocket.TestStop.quietly(server) end)
     {_, port} = Quic.local(server)
 
     %{

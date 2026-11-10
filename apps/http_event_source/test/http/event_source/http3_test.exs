@@ -21,7 +21,7 @@ defmodule HTTP.EventSource.HTTP3Test do
       :public_key.pem_decode(File.read!(Path.join(fixture, "leaf-key.pem")))
 
     {:ok, server} = Quic.listen(tls: [cert: [cert.("leaf.pem")], key: {type, key}, alpn: ["h3"]])
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> HTTP.EventSource.TestStop.quietly(server) end)
     {_, port} = Quic.local(server)
     ssl = [cacerts: [cert.("root.pem")], reference_identity: {:dns_id, "example.test"}]
     %{server: server, url: "https://127.0.0.1:#{port}/events", ssl: ssl}
@@ -274,7 +274,7 @@ defmodule HTTP.EventSource.HTTP3Test do
         resumption: [enabled: true, application_profile: "event-source-h3-test"]
       )
 
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> HTTP.EventSource.TestStop.quietly(server) end)
     {_, port} = Quic.local(server)
     context = %{context | server: server, url: "https://127.0.0.1:#{port}/events"}
 

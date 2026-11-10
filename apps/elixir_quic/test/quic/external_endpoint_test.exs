@@ -51,7 +51,7 @@ defmodule Quic.ExternalEndpointTest do
         send_fun: fn _remote, _bytes -> {:error, :closed} end
       )
 
-    on_exit(fn -> if Process.alive?(writer), do: GenServer.stop(writer) end)
+    on_exit(fn -> Quic.TestStop.quietly(writer) end)
     assert {:error, :closed} = Quic.IO.ExternalWriter.send(writer, <<1>>, {{127, 0, 0, 1}, 1})
   end
 
@@ -62,7 +62,7 @@ defmodule Quic.ExternalEndpointTest do
         send_fun: fn _remote, _bytes -> {:ok, make_ref()} end
       )
 
-    on_exit(fn -> if Process.alive?(writer), do: GenServer.stop(writer) end)
+    on_exit(fn -> Quic.TestStop.quietly(writer) end)
 
     assert {:error, {:invalid_send_result, {:ok, _}}} =
              Quic.IO.ExternalWriter.send(writer, <<1>>, {{127, 0, 0, 1}, 1})
@@ -111,7 +111,7 @@ defmodule Quic.ExternalEndpointTest do
   end
 
   defp stop(pid) do
-    if Process.alive?(pid), do: GenServer.stop(pid)
+    Quic.TestStop.quietly(pid)
   end
 
   defp eventually(fun, attempts \\ 100)

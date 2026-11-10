@@ -73,7 +73,7 @@ defmodule HTTP.HTTP3.CleanupIntegrationTest do
 
     {_, port} = Quic.local(server)
     {:ok, tracker} = GenServer.start(Retainer, self())
-    on_exit(fn -> if Process.alive?(tracker), do: GenServer.stop(tracker) end)
+    on_exit(fn -> HTTP.Runtime.TestStop.quietly(tracker) end)
     pool = start_supervised!({Pool, []})
 
     request = %HTTP.Request{

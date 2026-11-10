@@ -296,7 +296,7 @@ defmodule Quic.CleanupIntegrationTest do
 
         receive do
           :stop_receive_client ->
-            if Process.alive?(endpoint), do: GenServer.stop(endpoint)
+            Quic.TestStop.quietly(endpoint)
         after
           3_000 -> exit(:receive_client_timeout)
         end

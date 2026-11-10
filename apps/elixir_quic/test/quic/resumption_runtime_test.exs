@@ -62,7 +62,7 @@ defmodule Quic.ResumptionRuntimeTest do
 
     on_exit(fn ->
       Quic.Cleanup.retire(lease, {:abs_ms, now() + 5000})
-      if Process.alive?(server), do: GenServer.stop(server)
+      Quic.TestStop.quietly(server)
     end)
 
     for index <- 0..1 do

@@ -8,7 +8,7 @@ defmodule Quic.Phase1MetricsTest do
     {server_tls, client_tls} = credentials()
     {:ok, server} = Quic.listen(tls: server_tls)
     {:ok, client} = Quic.client(tls: client_tls)
-    on_exit(fn -> for pid <- [server, client], Process.alive?(pid), do: GenServer.stop(pid) end)
+    on_exit(fn -> Enum.each([server, client], &Quic.TestStop.quietly/1) end)
 
     {:ok, connection} = Quic.connect(client, Endpoint.local(server))
     :ok = Quic.attach(connection, self())

@@ -391,7 +391,7 @@ defmodule Abyss.DispatcherTest do
         result_ttl: 10
       )
 
-    on_exit(fn -> if Process.alive?(admission), do: GenServer.stop(admission) end)
+    on_exit(fn -> Abyss.TestStop.quietly(admission) end)
     :ok = Dispatcher.Admission.bind(admission, self())
 
     capability = %Dispatcher.SendCapability{
@@ -464,7 +464,7 @@ defmodule Abyss.DispatcherTest do
     {:ok, admission} =
       Dispatcher.Admission.start_link(generation: generation, max_queue: 1, max_bytes: 2)
 
-    on_exit(fn -> if Process.alive?(admission), do: GenServer.stop(admission) end)
+    on_exit(fn -> Abyss.TestStop.quietly(admission) end)
     :ok = Dispatcher.Admission.bind(admission, self())
 
     capability = %Dispatcher.SendCapability{

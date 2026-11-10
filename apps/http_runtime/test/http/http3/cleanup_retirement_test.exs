@@ -276,7 +276,7 @@ defmodule HTTP.HTTP3.CleanupRetirementTest do
   end
 
   defp stop(owner) do
-    if Process.alive?(owner), do: GenServer.stop(owner)
+    HTTP.Runtime.TestStop.quietly(owner)
   catch
     :exit, _ -> :ok
   end

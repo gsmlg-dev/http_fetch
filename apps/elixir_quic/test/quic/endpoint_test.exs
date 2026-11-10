@@ -478,5 +478,5 @@ defmodule Quic.EndpointTest do
         )
   end
 
-  defp stop(pid), do: if(Process.alive?(pid), do: GenServer.stop(pid))
+  defp stop(pid), do: Quic.TestStop.quietly(pid)
 end

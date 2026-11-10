@@ -109,7 +109,7 @@ defmodule SSL.ResumptionTest do
 
   test "one-use checkout is atomic under contention and partitions are isolated" do
     {:ok, cache} = TicketCache.start_link(name: nil)
-    on_exit(fn -> if Process.alive?(cache), do: GenServer.stop(cache) end)
+    on_exit(fn -> SSL.TestStop.quietly(cache) end)
     key = :binary.copy(<<1>>, 32)
     other = :binary.copy(<<2>>, 32)
     assert :ok = TicketCache.put(key, ticket(), cache)
@@ -126,7 +126,7 @@ defmodule SSL.ResumptionTest do
 
   test "replacement, expiry, and 128-entry bound" do
     {:ok, cache} = TicketCache.start_link(name: nil)
-    on_exit(fn -> if Process.alive?(cache), do: GenServer.stop(cache) end)
+    on_exit(fn -> SSL.TestStop.quietly(cache) end)
     key = :binary.copy(<<0>>, 32)
     assert :ok = TicketCache.put(key, ticket(), cache)
     assert :ok = TicketCache.put(key, ticket(%{ticket: "replacement"}), cache)
@@ -149,7 +149,7 @@ defmodule SSL.ResumptionTest do
 
   test "retained serialized bytes stay within four MiB" do
     {:ok, cache} = TicketCache.start_link(name: nil)
-    on_exit(fn -> if Process.alive?(cache), do: GenServer.stop(cache) end)
+    on_exit(fn -> SSL.TestStop.quietly(cache) end)
     large_peer = %{chain: [:binary.copy(<<8>>, 100_000)]}
 
     for i <- 1..50 do

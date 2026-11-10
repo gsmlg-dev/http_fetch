@@ -35,7 +35,7 @@ defmodule Quic.Phase1APIRegressionTest do
     {:ok, server} = Quic.listen([])
 
     on_exit(fn ->
-      for pid <- [client, server], Process.alive?(pid), do: GenServer.stop(pid)
+      Enum.each([client, server], &Quic.TestStop.quietly/1)
     end)
 
     connect_ref = make_ref()

@@ -25,7 +25,7 @@ defmodule Quic.IdleTimeoutPublicTest do
   end
 
   defp stop(endpoint) do
-    if Process.alive?(endpoint), do: GenServer.stop(endpoint)
+    Quic.TestStop.quietly(endpoint)
   catch
     :exit, {:noproc, _} -> :ok
   end

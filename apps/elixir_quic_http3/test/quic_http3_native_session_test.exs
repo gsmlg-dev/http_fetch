@@ -19,7 +19,7 @@ defmodule QuicHttp3.NativeSessionTest do
       :public_key.pem_decode(File.read!(Path.join(fixture, "leaf-key.pem")))
 
     {:ok, server} = Quic.listen(tls: [cert: [cert.("leaf.pem")], key: {type, key}, alpn: ["h3"]])
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
+    on_exit(fn -> QuicHttp3.TestStop.quietly(server) end)
     opts = [tls: [cacerts: [cert.("root.pem")], reference_identity: {:dns_id, "example.test"}]]
     %{server: server, opts: opts}
   end
@@ -32,7 +32,7 @@ defmodule QuicHttp3.NativeSessionTest do
     {:ok, session} = Session.new(max_frame: 8)
     {:ok, session} = Session.connect(session, ip, port, opts)
     endpoint = session.connection.endpoint
-    on_exit(fn -> if Process.alive?(endpoint), do: GenServer.stop(endpoint) end)
+    on_exit(fn -> QuicHttp3.TestStop.quietly(endpoint) end)
     connection = session.connection.handle
     assert_receive {:quic_ready, ^connection, %{alpn: "h3", peer_authenticated: true}}, 2_000
     assert :ready = Session.ready(session)
@@ -76,7 +76,7 @@ defmodule QuicHttp3.NativeSessionTest do
     {:ok, session} = Session.new()
     {:ok, session} = Session.connect(session, ip, port, Keyword.put(opts, :tls, tls))
     endpoint = session.connection.endpoint
-    on_exit(fn -> if Process.alive?(endpoint), do: GenServer.stop(endpoint) end)
+    on_exit(fn -> QuicHttp3.TestStop.quietly(endpoint) end)
     connection = session.connection.handle
     assert_receive {:quic_closed, ^connection, _reason}, 2_000
     assert {:error, :closed} = Session.ready(session)
@@ -127,7 +127,7 @@ defmodule QuicHttp3.NativeSessionTest do
     {:ok, session} = Session.new(max_frame: 1_024)
     {:ok, session} = Session.connect(session, ip, port, opts)
     endpoint = session.connection.endpoint
-    on_exit(fn -> if Process.alive?(endpoint), do: GenServer.stop(endpoint) end)
+    on_exit(fn -> QuicHttp3.TestStop.quietly(endpoint) end)
     connection = session.connection.handle
     assert_receive {:quic_ready, ^connection, %{alpn: "h3", peer_authenticated: true}}, 2_000
     assert_receive {:quic_accept, ^server}, 2_000
