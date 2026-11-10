@@ -120,7 +120,7 @@ Evidence chain:
    requires `{:ok, %{cleanup: :confirmed}}`: the exclusive endpoint,
    connection, IO actor and UDP Port were joined. Caller-supplied
    `quic_cleanup`/`cleanup` descriptors are never retired by the relay.
-   Since `4c1bf8f`, lease release no longer retires the exclusive owner's
+   Lease release no longer retires the exclusive owner's
    scope directly: the pool sends `:http3_retire`, and the owner first sends
    CONNECTION_CLOSE with H3_NO_ERROR (only when no live request remains) under its
    watchdog-guarded `operation_timeout` (default 1 s), then retires. The
@@ -257,8 +257,10 @@ budget (at most 262144), the owner's extension budget.
 exactly one CONNECT and never falls back. `close/2` sends the Close capsule,
 lingers up to `quic: [close_linger: ms]` (default 500) for the peer's FIN, stops
 the owner and returns `:ok` only when the cleanup receipt is `:confirmed`.
-The owner's guarded H3_NO_ERROR close (bounded by `operation_timeout`,
-default 1 s) runs before it retires the scope, so the receipt follows it.
+When the peer's FIN arrives within the linger window, the owner's guarded
+H3_NO_ERROR close (bounded by `operation_timeout`, default 1 s) runs before it
+retires the scope, so the receipt follows it; without that FIN the session is
+still live and the owner retires without H3_NO_ERROR.
 
 Known gaps: blocked writes hold the session
 process until admission or deadline. The session's terminal-stream ledger caps a
@@ -322,7 +324,7 @@ FIN. A pooled WebSocket refuses with `:not_exclusive_owner` and keeps
 exchanging. Port migration passes locally and in CI; source-IP migration to 127.0.0.2
 (`--ip`) passes in the CI `independent-http3-migration` job (first green on
 `17bd1c8`), which adds the alias. When the owner retires the connection it sends
-CONNECTION_CLOSE with H3_NO_ERROR (0x100) before cleanup (`4c1bf8f`); the gate
+CONNECTION_CLOSE with H3_NO_ERROR (0x100) before cleanup; the gate
 requires the peer to observe it. aioquic 1.2.0 is not used: it
 does not answer a padded probe on the new path (see
 `docs/quic/client-features-validation.md`, M2). WebTransport migration has no

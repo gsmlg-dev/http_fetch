@@ -95,7 +95,6 @@ defmodule Quic.IO.GenUDPTest do
 
     assert Enum.all?(results, fn
              {:ok, pid} -> is_pid(pid)
-             {:error, :noproc} -> true
              _ -> false
            end)
 
