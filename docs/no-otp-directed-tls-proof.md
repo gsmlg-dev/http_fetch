@@ -216,3 +216,60 @@ artifacts, checks and BEAM hashes remain historical evidence. This amendment is
 source review only: it supplies no new compiled certification and adds no
 automatic publication gate. Source tests and any future compiled audit remain
 separate evidence from publishing packages and documentation.
+
+## 2026-11-10 source review amendment: rc.11 TLS 1.3 server and QUIC resumption
+
+This amendment reviews the production sources at `4ae97fc` against the last bound
+census at `1a1f81d`. Seven selected TLS inputs change and the census gains the
+server modules `SSL.ServerOptions`, `SSL.ServerConnection`, `SSL.ListenSocket`
+and the QUIC `SSL.QUIC.Resumption`/`SSL.QUIC.Session` modules. The three server
+modules are added to the selected inputs because they produce and invoke the new
+server callback. The complete ten-package production census is now 267 files.
+
+### TLS-7: server SNI identity callback
+
+`SSL.listen/2` and the upgrade form `SSL.handshake/3` normalize options only
+through `ServerOptions.build/1`. Its `sni/1` is the sole producer of
+`{:fun, fun}`: the caller's `:sni_fun`, accepted only when it is an arity-one
+function and `:sni_hosts` is absent. `ListenSocket` is opaque and constructed
+only by `listen/2`; `transport_accept/2` passes its retained options to
+`ServerConnection.start/3`, which stores them as the connection's `config`.
+OTP-only server options, including `:verify_fun`, are rejected before any port
+is opened.
+
+The only caller of `lookup/2` is `ServerOptions.select_identity/2`, called once
+from `ServerConnection` for the first ClientHello. It replaces only the selected
+identity and signature schemes and retains `sni`. The callback receives the
+ClientHello server name and returns `:undefined` or identity keyword options. Those
+options are data: their keys are restricted to identity keys, and they are loaded
+by `ClientIdentity.load/1`, whose password callback remains TLS-2. A raise,
+throw, exit or invalid result becomes an `internal_error` alert. No library
+producer supplies `sni_fun`; Hell forwards its caller's options to `SSL.listen/2`.
+The user `sni_fun` body is the approved server callback boundary; it is not
+certified free of OTP SSL.
+
+Server mTLS verifies client certificates with the new `PKIX.client_peer/3`. It
+runs the existing path validation against normalized trust anchors with a nil
+verifier and no hostname matcher, then checks extended key usage. It introduces no
+callback. The server handshake, server flight and connection bodies add no other
+unresolved dispatch and import no OTP SSL module.
+
+### Moved and unchanged client occurrences
+
+`PKIX.hostname_match_fun/3` (ID 71) moves from line 767 to 817 because
+`client_peer/3` is inserted above it; its closure is unchanged (TLS-4).
+`HandshakeCore.verify_peer/3` (ID 73) moves from 768 to 789. It still selects
+`config.certificate_policy || &PKIX.peer/6` and now only delegates the alert
+mapping to `certificate_alert/1` (TLS-6). The new `allow_early_data` handshake
+input is a boolean. `SSL.QUIC` adds resumption and 0-RTT requests answered by
+`continue/3`. `SSL.QUIC.Config` accepts only the data-valued `:resumption`
+policy. Neither adds a module or callback option. `SSL.Connection` now rejects
+server-socket requests, and `HandshakeMachine` exposes two key-update helpers to
+`ServerConnection` as literal calls.
+
+The JSON records all seven old/new input digests, the three added inputs, the
+current census digest, the two line rebindings and new ID 181. TLS now has 15
+reviewed occurrences. The complete compiled inventory of a locally built isolated
+candidate release has 206 sites in 382 BEAMs, matching the five reviews exactly,
+with no direct OTP SSL import. CI strict candidate and published gates must
+still bind these sources and BEAMs independently.

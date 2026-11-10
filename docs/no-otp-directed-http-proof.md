@@ -342,3 +342,44 @@ The lock adds optional Test-only Plug and plug_crypto pins. The production
 consumer gate resolves Fetch without Test/Plug/ExUnit and executes named H1 reuse;
 separate candidate Test consumers compile and run with and without Plug. These
 checks do not replace the strict no-OTP release or real protocol acceptance.
+
+## 2026-11-10 source review amendment: rc.11 Alt-Svc, H3 options and live WebTransport
+
+This amendment reviews the production sources at `4ae97fc` against the census
+bound at `1a1f81d`. Thirteen selected HTTP inputs change. The census is now 267
+files.
+
+### WT-1: retained backend and the live library backend
+
+`Session.init/1` is still the only assignment of `backend`, taken from the
+normalized `Options` (literal default `HTTP.WebTransport.Transport.QUIC`). New
+sites call that retained module: `migrate/3` (ID 202), `handle_message/2`
+(203) and `acknowledge/2` (204), each after a `function_exported?/3` check.
+`backend_or_invalid_state/2` (205) and `finish_send/3` (206) invoke only the
+closures built in `handle_call/3` around the same retained backend. Backend close
+moved from `close_session/2` to `cleanup_backend/2` (ID 159). The send-close and
+abort calls moved into `finish_send/3` closures (IDs 163 and 164). Callback
+results and owner messages are data. They never replace the backend.
+
+The sole library backend is no longer an unsupported stub. `connect/2` creates a
+`Quic.Cleanup.new/1` scope and starts an exclusive HTTP3 `ConnectionOwner`. It
+passes caller `ssl` keywords that `SSL.QUIC.Config` validates, plus literal
+WebTransport session limits. Its stream, datagram, migration and close bodies
+make literal `ConnectionOwner` and `Quic.Cleanup` calls. Those paths are covered
+by H3-1, H3-2 and Q1. External backend bodies remain outside the guarantee.
+
+### HTTP-1, HTTP-4 and HTTP-9
+
+Fetch's opt-in Alt-Svc keeps `tls_backend` nil only until a TCP fallback pins it
+through `TLSBackend.resolve/1`, which accepts only ExSSL. HTTP/3 requests lift
+an `ex_ssl` reference identity into flat QUIC `ssl` data. SocketClient's
+transport and protocol selectors and its literal H3 handler are unchanged.
+WebSocket over HTTP/3 leaves `tls_backend` unresolved; `Runtime.Options`
+rejects an explicit backend for HTTP/3, and the HTTP1 selector maps only
+`:ex_ssl`. The nine RequestLifecycle worker producers (HTTP-2) are unchanged.
+
+The 12 SocketClient and seven WebSocket occurrences keep their expressions and
+owning functions; their new lines are recorded in the JSON. The HTTP review now
+has 84 occurrences. The complete compiled inventory of a locally built isolated
+candidate release matches the five reviews exactly at 206 sites. CI strict
+candidate and published gates remain required.

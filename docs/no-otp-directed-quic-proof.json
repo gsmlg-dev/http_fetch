@@ -6,29 +6,30 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/elixir_quic/lib/quic.ex": "a172bf5d3b431ae3f27bf98072a8d3475764c511078157e95ce344b8aae4f5cb",
+    "apps/elixir_quic/lib/quic.ex": "36e0b80b1e692b0818402c98c02d4a032dfc1ce69e3ae4b2cab640d5826d3663",
     "apps/elixir_quic/lib/quic/cleanup.ex": "b25e373c6e11a96d9248caece562c671b6f87b8a3c6c33ee24943871e1852b99",
-    "apps/elixir_quic/lib/quic/cleanup/observer.ex": "c74428b9ef5cddb0eed7c8966e7593dc3d4371a1709c169fe5cccab2363e5918",
-    "apps/elixir_quic/lib/quic/endpoint.ex": "d23e1a6e3423ee0959663a0f2b4eb8b74fb828c46a6146eaaeb72d19932aac41",
-    "apps/elixir_quic/lib/quic/connection.ex": "183872efc651a02fac6ef7fb85b22577ae5c315e0b8b8bba5c3a8913a71e60f4",
-    "apps/elixir_quic/lib/quic/io/gen_udp.ex": "1e5c46de218a0614659660815d4560d137191907430d74c4e2027eff307bc98f",
+    "apps/elixir_quic/lib/quic/cleanup/observer.ex": "7f2ae82f7d681c51d9458f27278351c30ff5ab4aee8f49c35fae8316884e2b8e",
+    "apps/elixir_quic/lib/quic/endpoint.ex": "ed907ad9ed04d45a8e96c2167d1facb98d421a7f848e0a74c308060ce735a248",
+    "apps/elixir_quic/lib/quic/connection.ex": "b91a1e0f3fc28f3fc57ae420206b60128d012a84d37cf5b08bcf98c290d8e119",
+    "apps/elixir_quic/lib/quic/io/gen_udp.ex": "399e668f0549474146575fefa37c4e8a542af64b7fad729b5a0e9c996158b09f",
     "apps/elixir_quic/lib/quic/io/external_writer.ex": "1fda217ed39c3cbf474d4185a0af5fc5fae94667fd2ab32dcd8fbbd3ed6b2ddb",
-    "apps/elixir_quic/lib/quic/abyss_dispatcher.ex": "ecefccf8f0eb0b44f57f1ef7043c48fe8fd18d2865259aea06eee7aed420b7f2",
-    "apps/elixir_quic/lib/quic/tls_driver.ex": "d404c7c833e7b1ffd4116f8c29eb84f3d1c29fd02f12a6807300a24e4f859e22",
-    "apps/elixir_quic/lib/quic/handshake_scheduler.ex": "379df6e36c99bfcdf2f7328e7732e39dfcd74f52e97b042db3d554f3eb8c4be8",
-    "apps/ex_ssl/lib/ssl/quic.ex": "d8575ea864739830c9b52185ad09aa3af03cf8a61d8164ebce5473b4cbdfddf3",
-    "apps/ex_ssl/lib/ssl/quic/config.ex": "a523334dc65a9e82f39943cf9a9bcc7144546cb3ac3f9d0389bd937aee2e01b1",
-    "apps/elixir_quic_http3/lib/quic_http3/session.ex": "c0b460040007aea68cbca830c60a15c5fb2efda12c1c345bd24c095caa63544f",
-    "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "e3eceea332cdee69f921bae15452e8b4d41fc76265b8bfff76a2dfbf5c28385a",
+    "apps/elixir_quic/lib/quic/abyss_dispatcher.ex": "f54b6fd777987a53374cbc15b4b8bbfa854142170cd276d312bd143ce8fbc249",
+    "apps/elixir_quic/lib/quic/tls_driver.ex": "cda177305386e45ce223fdb02549cf741ca675a6a889d8da5577ab2f90e85ab3",
+    "apps/elixir_quic/lib/quic/handshake_scheduler.ex": "d8b44220e2ce24407f7070da2176388fe1689b13785ced73e53e2582b66c7e80",
+    "apps/ex_ssl/lib/ssl/quic.ex": "f191a25afd2931aa0867ff569da77f176d6db89f5faae8df30cfc52e94bb3121",
+    "apps/ex_ssl/lib/ssl/quic/config.ex": "db708d4a3dca411cab89dbad09b7b1840a018b48cdfeecdff235eb05b81e291c",
+    "apps/elixir_quic_http3/lib/quic_http3/session.ex": "e329caba406925e06286e3bea3f01f8b83a820ef4a77eca1b6ff826a775e3db3",
+    "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679",
     "apps/http_runtime/lib/http/http3/pool.ex": "730b52081a9f99621e5edd677167556dbeede70fd74cef7d1164e9e230118d44",
-    "apps/http_runtime/lib/http/http3/connection_owner.ex": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
-    "apps/http_runtime/lib/http/http3/stream.ex": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
+    "apps/http_runtime/lib/http/http3/connection_owner.ex": "5cb9a29f5c491f71420bc57592efebc1c28ede0c34c3ece93552bf9722fc65b1",
+    "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
     "apps/elixir_quic/lib/quic/local_cids.ex": "8f8c5eb14f93f6e9ca16e2a812df152638d3ef6fabcc2611d117ecf1ebf89f69",
-    "apps/elixir_quic/lib/quic/recovery.ex": "5ac71a0e2b3146aac9fac71693e851cebf6759f23cc6ae7b357b7bf4b8f0731f",
+    "apps/elixir_quic/lib/quic/recovery.ex": "50ecf0d0ed76335a2f0414912365625212b7360204fdc9cb19a588bd648cb452",
     "apps/elixir_quic/lib/quic/peer_cids.ex": "a8c304a2af5000319395417bf6be5a77844419e7fa94d1100b78833e46e8fe7d",
-    "apps/elixir_quic/lib/quic/paths.ex": "fd79d4dc2e928b2cde2c7784916be17e17ac63c0a2ead050c111fb734bd815c9",
-    "apps/elixir_quic/lib/quic/codec.ex": "5c6d9e588d7121b4f2411727eb10d8928ead4e383230b85fe72ac4d1cc91426d",
-    "apps/elixir_quic/lib/quic/io/endpoint.ex": "ea980cd6538fc0a51ec15d0804b6d24f1495063c74625e676d88e292febe2f87"
+    "apps/elixir_quic/lib/quic/paths.ex": "4168934031f50d4d0a5f379fd17b8d08320ff3c0e12419eafd1a15e37aaf9a88",
+    "apps/elixir_quic/lib/quic/codec.ex": "ad65e30afa6e495171031676a289bdb5a6b1033e5dfd94ea7b382340d58735d5",
+    "apps/elixir_quic/lib/quic/io/endpoint.ex": "ea980cd6538fc0a51ec15d0804b6d24f1495063c74625e676d88e292febe2f87",
+    "apps/elixir_quic/lib/quic/resumption_store.ex": "2d7a6d3f17c535043fe7f0925567e3117cc4cbeb82a47333ced502314d4f764f"
   },
   "production_source_census": {
     "files": 244,
@@ -48,7 +49,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "begin_closing/2",
-      "line": 1551,
+      "line": 1888,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -58,7 +59,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "begin_closing/2",
-      "line": 1507,
+      "line": 1932,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -68,7 +69,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "closing_timer/1",
-      "line": 1437,
+      "line": 1817,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -78,7 +79,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "draining_timer/1",
-      "line": 1442,
+      "line": 1822,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -88,7 +89,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "expired?/1",
-      "line": 1898,
+      "line": 2442,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -98,7 +99,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "eligible_send/1",
-      "line": 1382,
+      "line": 1709,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -108,7 +109,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 338,
+      "line": 368,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -118,7 +119,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 714,
+      "line": 754,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -128,7 +129,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 725,
+      "line": 765,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -138,7 +139,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 737,
+      "line": 777,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -148,7 +149,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 747,
+      "line": 798,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -158,7 +159,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handshake_deadline/3",
-      "line": 128,
+      "line": 141,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -168,7 +169,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "idle_timer/1",
-      "line": 1429,
+      "line": 1809,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -177,8 +178,8 @@
     },
     {
       "module": "Quic.Connection",
-      "mfa": "local_send/3",
-      "line": 1613,
+      "mfa": "local_send/4",
+      "line": 1999,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -187,8 +188,8 @@
     },
     {
       "module": "Quic.Connection",
-      "mfa": "local_send/3",
-      "line": 1615,
+      "mfa": "local_send/4",
+      "line": 2001,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -197,8 +198,8 @@
     },
     {
       "module": "Quic.Connection",
-      "mfa": "local_send/3",
-      "line": 1618,
+      "mfa": "local_send/4",
+      "line": 2004,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -208,7 +209,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "receive_authenticated/6",
-      "line": 951,
+      "line": 1177,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -218,7 +219,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "recovery_timer/1",
-      "line": 1411,
+      "line": 1791,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -228,7 +229,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "refresh_idle/1",
-      "line": 1461,
+      "line": 1841,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -238,7 +239,7 @@
     {
       "module": "Quic.Endpoint",
       "mfa": "admit_initial/5",
-      "line": 403,
+      "line": 567,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/endpoint.ex",
       "proof": "Q2",
@@ -258,7 +259,7 @@
     {
       "module": "Quic.TLSDriver",
       "mfa": "abort/2",
-      "line": 146,
+      "line": 171,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
       "proof": "Q4",
@@ -268,7 +269,7 @@
     {
       "module": "Quic.TLSDriver",
       "mfa": "apply_tls/3",
-      "line": 214,
+      "line": 239,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
       "proof": "Q4",
@@ -278,7 +279,7 @@
     {
       "module": "Quic.TLSDriver",
       "mfa": "call_new/3",
-      "line": 333,
+      "line": 378,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
       "proof": "Q4",
@@ -288,7 +289,7 @@
     {
       "module": "Quic.TLSDriver",
       "mfa": "drain_pending/1",
-      "line": 243,
+      "line": 271,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
       "proof": "Q4",
@@ -298,7 +299,7 @@
     {
       "module": "Quic.TLSDriver",
       "mfa": "info/1",
-      "line": 143,
+      "line": 168,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
       "proof": "Q4",
@@ -308,7 +309,7 @@
     {
       "module": "Quic.TLSDriver",
       "mfa": "receive_level/1",
-      "line": 334,
+      "line": 379,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
       "proof": "Q4",
@@ -318,7 +319,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "handle_event/4",
-      "line": 770,
+      "line": 821,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -328,12 +329,75 @@
     {
       "module": "Quic.Connection",
       "mfa": "path_timer/1",
-      "line": 1422,
+      "line": 1802,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
       "beam_sha256": "ab896eb3a1de68b9e56327b13c2074b40e5807776aeb437332c07c3832696dad",
       "inventory_occurrence": 177
+    },
+    {
+      "inventory_occurrence": 182,
+      "module": "Quic.Connection",
+      "mfa": "handle_event/4",
+      "line": 788,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2"
+    },
+    {
+      "inventory_occurrence": 183,
+      "module": "Quic.Connection",
+      "mfa": "handle_event/4",
+      "line": 860,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2"
+    },
+    {
+      "inventory_occurrence": 184,
+      "module": "Quic.Connection",
+      "mfa": "handle_event/4",
+      "line": 870,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2"
+    },
+    {
+      "inventory_occurrence": 185,
+      "module": "Quic.Connection",
+      "mfa": "handle_event/4",
+      "line": 873,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2"
+    },
+    {
+      "inventory_occurrence": 186,
+      "module": "Quic.Connection",
+      "mfa": "early_keys_timer/1",
+      "line": 1778,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2"
+    },
+    {
+      "inventory_occurrence": 187,
+      "module": "Quic.Connection",
+      "mfa": "start_local_migration/6",
+      "line": 2310,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/connection.ex",
+      "proof": "Q2"
+    },
+    {
+      "inventory_occurrence": 188,
+      "module": "Quic.TLSDriver",
+      "mfa": "continue/3",
+      "line": 94,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic/lib/quic/tls_driver.ex",
+      "proof": "Q4"
     }
   ],
   "checks": {
@@ -1445,6 +1509,295 @@
       "runtime_verification_scope": "Coordinator reports first real UDP pressure pass; final full tests, quality and strict candidate/published gates are owned by the coordinator.",
       "historical_failed_evidence_preserved": true,
       "compiled_acceptance": "STRICT_REMOTE_CANDIDATE_RERUN_AND_PUBLISHED_RELEASE_GATES_STILL_REQUIRED"
+    },
+    {
+      "date": "2026-11-10",
+      "release_version": "1.0.0-rc.11",
+      "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
+      "source_commit": "4ae97fc9a618844e36f9bcf59da1893846109677",
+      "scope": "client migration, opt-in resumption/0-RTT, reliable reset and TLS provider continuation",
+      "changed_source_inputs": {
+        "apps/elixir_quic/lib/quic.ex": {
+          "previous_sha256": "a172bf5d3b431ae3f27bf98072a8d3475764c511078157e95ce344b8aae4f5cb",
+          "sha256": "36e0b80b1e692b0818402c98c02d4a032dfc1ce69e3ae4b2cab640d5826d3663"
+        },
+        "apps/elixir_quic/lib/quic/cleanup/observer.ex": {
+          "previous_sha256": "c74428b9ef5cddb0eed7c8966e7593dc3d4371a1709c169fe5cccab2363e5918",
+          "sha256": "7f2ae82f7d681c51d9458f27278351c30ff5ab4aee8f49c35fae8316884e2b8e"
+        },
+        "apps/elixir_quic/lib/quic/endpoint.ex": {
+          "previous_sha256": "d23e1a6e3423ee0959663a0f2b4eb8b74fb828c46a6146eaaeb72d19932aac41",
+          "sha256": "ed907ad9ed04d45a8e96c2167d1facb98d421a7f848e0a74c308060ce735a248"
+        },
+        "apps/elixir_quic/lib/quic/connection.ex": {
+          "previous_sha256": "183872efc651a02fac6ef7fb85b22577ae5c315e0b8b8bba5c3a8913a71e60f4",
+          "sha256": "b91a1e0f3fc28f3fc57ae420206b60128d012a84d37cf5b08bcf98c290d8e119"
+        },
+        "apps/elixir_quic/lib/quic/io/gen_udp.ex": {
+          "previous_sha256": "1e5c46de218a0614659660815d4560d137191907430d74c4e2027eff307bc98f",
+          "sha256": "399e668f0549474146575fefa37c4e8a542af64b7fad729b5a0e9c996158b09f"
+        },
+        "apps/elixir_quic/lib/quic/abyss_dispatcher.ex": {
+          "previous_sha256": "ecefccf8f0eb0b44f57f1ef7043c48fe8fd18d2865259aea06eee7aed420b7f2",
+          "sha256": "f54b6fd777987a53374cbc15b4b8bbfa854142170cd276d312bd143ce8fbc249"
+        },
+        "apps/elixir_quic/lib/quic/tls_driver.ex": {
+          "previous_sha256": "d404c7c833e7b1ffd4116f8c29eb84f3d1c29fd02f12a6807300a24e4f859e22",
+          "sha256": "cda177305386e45ce223fdb02549cf741ca675a6a889d8da5577ab2f90e85ab3"
+        },
+        "apps/elixir_quic/lib/quic/handshake_scheduler.ex": {
+          "previous_sha256": "379df6e36c99bfcdf2f7328e7732e39dfcd74f52e97b042db3d554f3eb8c4be8",
+          "sha256": "d8b44220e2ce24407f7070da2176388fe1689b13785ced73e53e2582b66c7e80"
+        },
+        "apps/ex_ssl/lib/ssl/quic.ex": {
+          "previous_sha256": "d8575ea864739830c9b52185ad09aa3af03cf8a61d8164ebce5473b4cbdfddf3",
+          "sha256": "f191a25afd2931aa0867ff569da77f176d6db89f5faae8df30cfc52e94bb3121"
+        },
+        "apps/ex_ssl/lib/ssl/quic/config.ex": {
+          "previous_sha256": "a523334dc65a9e82f39943cf9a9bcc7144546cb3ac3f9d0389bd937aee2e01b1",
+          "sha256": "db708d4a3dca411cab89dbad09b7b1840a018b48cdfeecdff235eb05b81e291c"
+        },
+        "apps/elixir_quic_http3/lib/quic_http3/session.ex": {
+          "previous_sha256": "c0b460040007aea68cbca830c60a15c5fb2efda12c1c345bd24c095caa63544f",
+          "sha256": "e329caba406925e06286e3bea3f01f8b83a820ef4a77eca1b6ff826a775e3db3"
+        },
+        "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": {
+          "previous_sha256": "e3eceea332cdee69f921bae15452e8b4d41fc76265b8bfff76a2dfbf5c28385a",
+          "sha256": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679"
+        },
+        "apps/http_runtime/lib/http/http3/connection_owner.ex": {
+          "previous_sha256": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
+          "sha256": "5cb9a29f5c491f71420bc57592efebc1c28ede0c34c3ece93552bf9722fc65b1"
+        },
+        "apps/http_runtime/lib/http/http3/stream.ex": {
+          "previous_sha256": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
+          "sha256": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc"
+        },
+        "apps/elixir_quic/lib/quic/recovery.ex": {
+          "previous_sha256": "5ac71a0e2b3146aac9fac71693e851cebf6759f23cc6ae7b357b7bf4b8f0731f",
+          "sha256": "50ecf0d0ed76335a2f0414912365625212b7360204fdc9cb19a588bd648cb452"
+        },
+        "apps/elixir_quic/lib/quic/paths.ex": {
+          "previous_sha256": "fd79d4dc2e928b2cde2c7784916be17e17ac63c0a2ead050c111fb734bd815c9",
+          "sha256": "4168934031f50d4d0a5f379fd17b8d08320ff3c0e12419eafd1a15e37aaf9a88"
+        },
+        "apps/elixir_quic/lib/quic/codec.ex": {
+          "previous_sha256": "5c6d9e588d7121b4f2411727eb10d8928ead4e383230b85fe72ac4d1cc91426d",
+          "sha256": "ad65e30afa6e495171031676a289bdb5a6b1033e5dfd94ea7b382340d58735d5"
+        }
+      },
+      "added_selected_inputs": [
+        "apps/elixir_quic/lib/quic/resumption_store.ex"
+      ],
+      "active_production_source_census": {
+        "files": 267,
+        "sorted_path_sha256_json": "a491046da6801d839d496131249ae41b3d91256bfd1f8b6ffd3c733f65bb2fe8",
+        "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
+      },
+      "occurrence_rebindings": [
+        {
+          "inventory_occurrence": 2,
+          "mfa": "begin_closing/2",
+          "previous_line": 1551,
+          "line": 1888
+        },
+        {
+          "inventory_occurrence": 3,
+          "mfa": "begin_closing/2",
+          "previous_line": 1507,
+          "line": 1932
+        },
+        {
+          "inventory_occurrence": 4,
+          "mfa": "closing_timer/1",
+          "previous_line": 1437,
+          "line": 1817
+        },
+        {
+          "inventory_occurrence": 5,
+          "mfa": "draining_timer/1",
+          "previous_line": 1442,
+          "line": 1822
+        },
+        {
+          "inventory_occurrence": 6,
+          "mfa": "expired?/1",
+          "previous_line": 1898,
+          "line": 2442
+        },
+        {
+          "inventory_occurrence": 7,
+          "mfa": "eligible_send/1",
+          "previous_line": 1382,
+          "line": 1709
+        },
+        {
+          "inventory_occurrence": 8,
+          "mfa": "handle_event/4",
+          "previous_line": 338,
+          "line": 368
+        },
+        {
+          "inventory_occurrence": 9,
+          "mfa": "handle_event/4",
+          "previous_line": 714,
+          "line": 754
+        },
+        {
+          "inventory_occurrence": 10,
+          "mfa": "handle_event/4",
+          "previous_line": 725,
+          "line": 765
+        },
+        {
+          "inventory_occurrence": 11,
+          "mfa": "handle_event/4",
+          "previous_line": 737,
+          "line": 777
+        },
+        {
+          "inventory_occurrence": 12,
+          "mfa": "handle_event/4",
+          "previous_line": 747,
+          "line": 798
+        },
+        {
+          "inventory_occurrence": 13,
+          "mfa": "handshake_deadline/3",
+          "previous_line": 128,
+          "line": 141
+        },
+        {
+          "inventory_occurrence": 14,
+          "mfa": "idle_timer/1",
+          "previous_line": 1429,
+          "line": 1809
+        },
+        {
+          "inventory_occurrence": 15,
+          "previous_mfa": "local_send/3",
+          "mfa": "local_send/4",
+          "previous_line": 1613,
+          "line": 1999,
+          "call_expression": "rewritten_same_retained_selector"
+        },
+        {
+          "inventory_occurrence": 16,
+          "previous_mfa": "local_send/3",
+          "mfa": "local_send/4",
+          "previous_line": 1615,
+          "line": 2001
+        },
+        {
+          "inventory_occurrence": 17,
+          "previous_mfa": "local_send/3",
+          "mfa": "local_send/4",
+          "previous_line": 1618,
+          "line": 2004
+        },
+        {
+          "inventory_occurrence": 18,
+          "mfa": "receive_authenticated/6",
+          "previous_line": 951,
+          "line": 1177
+        },
+        {
+          "inventory_occurrence": 19,
+          "mfa": "recovery_timer/1",
+          "previous_line": 1411,
+          "line": 1791
+        },
+        {
+          "inventory_occurrence": 20,
+          "mfa": "refresh_idle/1",
+          "previous_line": 1461,
+          "line": 1841
+        },
+        {
+          "inventory_occurrence": 21,
+          "mfa": "admit_initial/5",
+          "previous_line": 403,
+          "line": 567
+        },
+        {
+          "inventory_occurrence": 23,
+          "mfa": "abort/2",
+          "previous_line": 146,
+          "line": 171,
+          "call_expression": "rewritten_same_retained_selector"
+        },
+        {
+          "inventory_occurrence": 24,
+          "mfa": "apply_tls/3",
+          "previous_line": 214,
+          "line": 239
+        },
+        {
+          "inventory_occurrence": 25,
+          "mfa": "call_new/3",
+          "previous_line": 333,
+          "line": 378
+        },
+        {
+          "inventory_occurrence": 26,
+          "mfa": "drain_pending/1",
+          "previous_line": 243,
+          "line": 271
+        },
+        {
+          "inventory_occurrence": 27,
+          "mfa": "info/1",
+          "previous_line": 143,
+          "line": 168
+        },
+        {
+          "inventory_occurrence": 28,
+          "mfa": "receive_level/1",
+          "previous_line": 334,
+          "line": 379
+        },
+        {
+          "inventory_occurrence": 176,
+          "mfa": "handle_event/4",
+          "previous_line": 770,
+          "line": 821
+        },
+        {
+          "inventory_occurrence": 177,
+          "mfa": "path_timer/1",
+          "previous_line": 1422,
+          "line": 1802
+        }
+      ],
+      "added_occurrences": [
+        182,
+        183,
+        184,
+        185,
+        186,
+        187,
+        188
+      ],
+      "origin_derivations": {
+        "Q2": "Endpoint.open_io/2 still yields only {GenUDP, socket} or {ExternalWriter, writer}; Connection.init/1 is the only adapter assignment. Client local migration (exclusive, non-external client endpoints only) receives an additional GenUDP socket PID from the generation/ref-qualified quic_path_bound reply and stores it in path_writers; local_send/4 selects that PID as writer data while calling the retained data.adapter (ID 15 rewritten, 16/17 moved). New sites 182-187 query the retained adapter clock for early-key retirement, path binding/validation and migration start.",
+        "Q4": "TLSDriver.continue/3 (ID 188) calls the retained state.adapter with the single outstanding SSL.QUIC.Request id; the reply comes from the endpoint-local literal Quic.ResumptionStore authority. abort/2 (ID 23) additionally clears the continuation. new/2 still defaults :adapter to SSL.QUIC and no fold updates the selector.",
+        "Q1_Q3": "Cleanup leases and the external send callback keep their constructors; the observer only admits two more operation kinds and AbyssDispatcher.terminate/2 tolerates an exiting endpoint."
+      },
+      "reviewed_inventory_reconciliation": {
+        "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
+        "count": 206,
+        "duplicates": 0,
+        "identity": [
+          "module",
+          "line",
+          "kind"
+        ],
+        "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
+        "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
+        "sha256": "86b342807dd913b25685cb60bd565da1fa8e68580447c578a0a17f735c4b89b3"
+      },
+      "historical_artifact_covers_amended_source": false,
+      "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED"
     }
   ]
 }

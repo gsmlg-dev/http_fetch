@@ -15,31 +15,58 @@ from stage import PACKAGES
 ROOT = Path(__file__).resolve().parents[2]
 
 
+RENEWALS = ('1.0.0-rc.9', '1.0.0-rc.11')
+
+
+def proof(group):
+    return json.loads((ROOT / f'docs/no-otp-directed-{group}-proof.json').read_text())
+
+
+def rewind(proof, version):
+    """Undo each versioned renewal at or after `version`, newest first."""
+    sites = proof['occurrences']
+    for amendment in reversed(proof.get('source_review_amendments', [])):
+        release = amendment.get('release_version')
+        if release not in RENEWALS or RENEWALS.index(release) < RENEWALS.index(version):
+            continue
+        bindings = {item['inventory_occurrence']: item for item in amendment['occurrence_rebindings']}
+        added = amendment.get('added_occurrences', [])
+        sites = [site if site['inventory_occurrence'] not in bindings else
+                 dict(site, line=bindings[site['inventory_occurrence']]['previous_line'],
+                      mfa=bindings[site['inventory_occurrence']].get('previous_mfa', site['mfa']))
+                 for site in sites if site['inventory_occurrence'] not in added]
+    return sites
+
+
 def historical_sites(proof):
     """Reconstruct the pre-Phase-1 identities for unchanged historical receipts."""
-    amendment = next((item for item in proof.get('source_review_amendments', [])
-                      if item.get('release_version') == '1.0.0-rc.9'), None)
-    if amendment is None:
-        return proof['occurrences']
-    bindings = {item['inventory_occurrence']: item for item in amendment['occurrence_rebindings']}
-    return [dict(site, line=bindings[site['inventory_occurrence']]['previous_line'])
-            if site['inventory_occurrence'] in bindings else site
-            for site in proof['occurrences']
-            if site['inventory_occurrence'] not in amendment.get('added_occurrences', [])]
+    return rewind(proof, '1.0.0-rc.9')
+
+
+def identity_digest(sites):
+    identities = sorted((site['module'].removeprefix(':'), site['line'], site['kind']) for site in sites)
+    return len(identities), len(set(identities)), hashlib.sha256(
+        json.dumps(identities, separators=(',', ':')).encode()).hexdigest()
+
+
+def pto_amendment(quic):
+    return next(item for item in quic['source_review_amendments']
+                if item.get('purpose', '').startswith('PTO congestion-credit repair'))
 
 
 class DirectedReviewTests(unittest.TestCase):
     def test_review_bundle_covers_all_original_sites_and_all_production_sources(self):
         bundle = review.load(ROOT, '1.0.0-rc.0', PACKAGES)
-        self.assertEqual(len(bundle['occurrences']), 180)
-        self.assertEqual(len([name for name in bundle['sources'] if name.split('/')[0] in PACKAGES]), 250)
+        self.assertEqual(len(bundle['occurrences']), 206)
+        self.assertEqual(len([name for name in bundle['sources'] if name.split('/')[0] in PACKAGES]), 267)
         self.assertEqual(len(bundle['reviews']), 10)
         self.assertEqual(bundle['versions']['http_fetch'], '1.0.0-rc.0')
 
     def test_phase1_additions_and_moved_sites_match_current_production_inventory(self):
         bundle = review.load(ROOT, '1.0.0-rc.9', PACKAGES)
         http = json.loads((ROOT / 'docs/no-otp-directed-http-proof.json').read_text())
-        amendment = http['source_review_amendments'][-1]
+        amendment = next(item for item in http['source_review_amendments']
+                         if item.get('release_version') == '1.0.0-rc.9')
         self.assertEqual(amendment['added_occurrences'], [178, 179, 180])
         sites = {site['inventory_occurrence']: site for site in http['occurrences']}
         self.assertEqual(sites[178]['mfa'], 'activate_owner/3')
@@ -49,18 +76,15 @@ class DirectedReviewTests(unittest.TestCase):
             site = sites[number]
             line = (ROOT / site['source']).read_text().splitlines()[site['line'] - 1]
             self.assertIn('callback.(' if number == 178 else 'module.', line)
-        identities = sorted((site['module'].removeprefix(':'), site['line'], site['kind'])
-                            for site in bundle['occurrences'])
-        digest = hashlib.sha256(json.dumps(identities, separators=(',', ':')).encode()).hexdigest()
-        self.assertEqual(len(identities), 180)
-        self.assertEqual(len(set(identities)), 180)
-        self.assertEqual(digest, amendment['reviewed_inventory_reconciliation']['sha256'])
+        self.assertEqual(len(bundle['occurrences']), 206)
+        rc9 = [site for group in review.GROUPS for site in rewind(proof(group), '1.0.0-rc.11')]
+        self.assertEqual(identity_digest(rc9),
+                         (180, 180, amendment['reviewed_inventory_reconciliation']['sha256']))
         self.assertEqual(amendment['local_compiled_diagnostic']['status'],
                          'DIAGNOSTIC_ONLY_STRICT_RELEASE_PENDING')
 
     def test_m1_additions_retain_exact_reviewed_q2_origins(self):
-        proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
-        sites = {site['inventory_occurrence']: site for site in proof['occurrences']}
+        sites = {site['inventory_occurrence']: site for site in rewind(proof('quic'), '1.0.0-rc.11')}
         self.assertEqual(set(sites), set(range(1, 29)) | {176, 177})
         for number, mfa, line in ((176, 'handle_event/4', 770), (177, 'path_timer/1', 1422)):
             with self.subTest(occurrence=number):
@@ -71,9 +95,9 @@ class DirectedReviewTests(unittest.TestCase):
                                       source='apps/elixir_quic/lib/quic/connection.ex', proof='Q2'))
 
     def test_all_connection_bindings_match_current_calls_and_preserve_failed_history(self):
-        proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
+        quic = proof('quic')
         sites = {site['inventory_occurrence']: (site['mfa'], site['line'])
-                 for site in proof['occurrences'] if site['module'] == 'Quic.Connection'}
+                 for site in rewind(quic, '1.0.0-rc.11') if site['module'] == 'Quic.Connection'}
         self.assertEqual(sites, {
             2: ('begin_closing/2', 1551), 3: ('begin_closing/2', 1507),
             4: ('closing_timer/1', 1437), 5: ('draining_timer/1', 1442),
@@ -88,17 +112,20 @@ class DirectedReviewTests(unittest.TestCase):
             177: ('path_timer/1', 1422),
         })
         source = (ROOT / 'apps/elixir_quic/lib/quic/connection.ex').read_text().splitlines()
-        for number, (_, line) in sites.items():
+        current = {site['inventory_occurrence']: site['line'] for site in quic['occurrences']
+                   if site['module'] == 'Quic.Connection'}
+        self.assertEqual(set(current), set(sites) | set(range(182, 188)))
+        for number, line in current.items():
             with self.subTest(occurrence=number):
                 self.assertIn('adapter.', source[line - 1])
-        amendment = next(item for item in proof['source_review_amendments']
+        amendment = next(item for item in quic['source_review_amendments']
                          if item.get('failed_strict_candidate', {}).get('artifact') == 13572580831)
         self.assertEqual(amendment['failed_strict_candidate']['artifact'], 13572580831)
         self.assertEqual(amendment['failed_strict_candidate']['directed_status'], 'FAIL')
         self.assertEqual(len(amendment['occurrence_rebindings']), 21)
         previous_sites = sites | {
             item['inventory_occurrence']: (item['mfa'], item['previous_line'])
-            for item in proof['source_review_amendments'][-1]['occurrence_rebindings']}
+            for item in pto_amendment(quic)['occurrence_rebindings']}
         for item in amendment['occurrence_rebindings']:
             self.assertEqual(item['line'], item['previous_line'] + 1)
             self.assertEqual(previous_sites[item['inventory_occurrence']], (item['mfa'], item['line']))
@@ -106,9 +133,10 @@ class DirectedReviewTests(unittest.TestCase):
     def test_current_and_historical_complete_occurrence_multisets_remain_bound(self):
         bundle = review.load(ROOT, '1.0.0-rc.0', PACKAGES)
         proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
-        amendment = proof['source_review_amendments'][-1]
+        amendment = pto_amendment(proof)
         tls = json.loads((ROOT / 'docs/no-otp-directed-tls-proof.json').read_text())
-        tls_amendment = tls['source_review_amendments'][-1]
+        tls_amendment = next(item for item in tls['source_review_amendments']
+                             if item.get('change', '').startswith('RC8 issue #157'))
         evidence = tls_amendment['reviewed_inventory_reconciliation']
         original = [site for group in review.GROUPS for site in historical_sites(
             json.loads((ROOT / f'docs/no-otp-directed-{group}-proof.json').read_text()))]
@@ -122,7 +150,7 @@ class DirectedReviewTests(unittest.TestCase):
         self.assertEqual(evidence['status'], 'SOURCE_IDENTITIES_ONLY_COMPILED_CERTIFICATION_NOT_RUN')
         self.assertEqual(tls_amendment['occurrence_rebindings'], [dict(
             inventory_occurrence=74, mfa='verify_certificate/3', previous_line=390, line=396)])
-        tls_sites = {site['inventory_occurrence']: site for site in tls['occurrences']}
+        tls_sites = {site['inventory_occurrence']: site for site in historical_sites(tls)}
         for item in tls_amendment['occurrence_rebindings']:
             site = tls_sites[item['inventory_occurrence']]
             self.assertEqual((site['mfa'], site['line']), (item['mfa'], item['line']))
@@ -157,8 +185,7 @@ class DirectedReviewTests(unittest.TestCase):
         self.assertEqual(historical['duplicates'], 0)
 
     def test_pto_review_preserves_unresolved_root_context_findings(self):
-        proof = json.loads((ROOT / 'docs/no-otp-directed-quic-proof.json').read_text())
-        amendment = proof['source_review_amendments'][-1]
+        amendment = pto_amendment(proof('quic'))
         quic = amendment['compiled_quic_reconciliation']
         self.assertEqual((quic['checked_beams'], quic['raw_dispatches']), (45, 30))
         self.assertEqual((quic['missing'], quic['extra'], quic['changed_owning_mfas']), (0, 0, 0))
@@ -177,7 +204,7 @@ class DirectedReviewTests(unittest.TestCase):
             lambda sites: [site for site in sites if site['inventory_occurrence'] != 176],
             lambda sites: [site for site in sites if site['inventory_occurrence'] != 177],
             lambda sites: sites + [copy.deepcopy(sites[-1])],
-            lambda sites: sites + [dict(sites[-1], inventory_occurrence=181)],
+            lambda sites: sites + [dict(sites[-1], inventory_occurrence=207)],
         ]
         for change in changes:
             def load_with_changed_quic_sites(text):
@@ -190,6 +217,42 @@ class DirectedReviewTests(unittest.TestCase):
                     patch.object(review.json, 'loads', side_effect=load_with_changed_quic_sites), \
                     self.assertRaisesRegex(ValueError, 'reviewed occurrence coverage'):
                 review.load(ROOT, '1.0.0-rc.0', PACKAGES)
+
+    def test_rc11_renewal_binds_current_sources_additions_and_rewound_history(self):
+        bundle = review.load(ROOT, '1.0.0-rc.11', PACKAGES)
+        production = {name: digest for name, digest in bundle['sources'].items()
+                      if name.split('/')[0] in PACKAGES}
+        census = hashlib.sha256(json.dumps(production, sort_keys=True).encode()).hexdigest()
+        tokens = {'TLS-7': 'fun.(', 'Q2': 'adapter.', 'Q4': 'adapter.', 'H3-1': 'transport.',
+                  'H3-2': 'ops.', 'WT-1': ('backend.', 'fun.(')}
+        added, current = [], []
+        for group in review.GROUPS:
+            group_proof = proof(group)
+            current += group_proof['occurrences']
+            if group == 'telemetry':
+                continue
+            amendment = group_proof['source_review_amendments'][-1]
+            self.assertEqual(amendment['release_version'], '1.0.0-rc.11')
+            self.assertEqual(amendment['active_production_source_census']['files'], 267)
+            self.assertEqual(amendment['active_production_source_census']['sorted_path_sha256_json'], census)
+            for name, change in amendment['changed_source_inputs'].items():
+                self.assertEqual(group_proof['source_inputs_sha256'][name], change['sha256'])
+                self.assertNotEqual(change['previous_sha256'], change['sha256'])
+            sites = {site['inventory_occurrence']: site for site in group_proof['occurrences']}
+            for number in amendment['added_occurrences']:
+                site = sites[number]
+                line = (ROOT / site['source']).read_text().splitlines()[site['line'] - 1]
+                with self.subTest(occurrence=number):
+                    self.assertTrue(any(token in line for token in
+                                        (tokens[site['proof']] if isinstance(tokens[site['proof']], tuple)
+                                         else (tokens[site['proof']],))))
+            added += amendment['added_occurrences']
+            reconciliation = amendment['reviewed_inventory_reconciliation']
+            self.assertEqual((reconciliation['count'], reconciliation['duplicates']), (206, 0))
+            self.assertEqual(identity_digest(bundle['occurrences']),
+                             (206, 206, reconciliation['sha256']))
+        self.assertEqual(sorted(added), list(range(181, 207)))
+        self.assertEqual(sorted(site['inventory_occurrence'] for site in current), list(range(1, 207)))
 
     def test_native_source_and_compiled_release_binding(self):
         result = subprocess.run(['elixir', str(Path(__file__).with_suffix('.exs'))],

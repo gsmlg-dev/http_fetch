@@ -1,5 +1,37 @@
 # Directed production release audit
 
+## rc.11 proof renewal — 2026-11-10
+
+The strict isolated release gate failed with `complete production source census
+changed`. Sixty-one production files had changed and 17 had been added since the
+last bound census at `1a1f81d`. The changes cover HTTP/3 resumption and 0-RTT,
+Alt-Svc, live draft-17 WebTransport, QUIC client migration and reliable reset, and
+the ex_ssl TLS 1.3 server with SNI and mTLS. The five directed reviews were
+renewed against `4ae97fc` by source review, not by rehashing:
+
+- 99 reviewed occurrences are unchanged.
+- 76 keep their call expression and move line, or arity for `local_send`.
+- 5 are the same retained-selector call with a rewritten expression or owner
+  (IDs 15, 23, 159, 163 and 164).
+- 26 are new, IDs 181–206: TLS-7 1, Q2 6, Q4 1, H3-1 11, H3-2 2 and WT-1 5.
+
+No reviewed occurrence disappeared.
+
+The new TLS-7 proof covers the server `sni_fun` callback, an approved user
+callback boundary produced only by caller options. H3-4 now also covers the
+library connector closure for certified extended-CONNECT streams, whose body is
+`Quic.Cleanup.new/1`. WT-1 now covers the live library backend. Each group review
+records its changed inputs, rebindings and additions in a dated amendment.
+
+The binding now covers 206 reviewed occurrences: TLS 15, QUIC 37, HTTP 84, H3 63
+and telemetry 7. It also covers the complete 267-file production-source census.
+A locally built isolated candidate release inspects 382 BEAMs and reports 206
+raw dispatch sites, no direct OTP SSL import and no missing abstract code. Its
+raw multiset matches the reviewed identities exactly, and both local TLS plans
+pass the strict directed gate. CI strict candidate and published gates must
+still pass independently. The historical counts below describe their own
+checkpoints and are not rewritten.
+
 ## Logger configuration review — 2026-11-07
 
 The root formatter now includes the literal metadata keys `:event`, `:metadata`
@@ -288,7 +320,7 @@ are reviewed separately.
 | H3-1 | `QuicHttp3.Session.new/1` | Approved `:transport` root, default `QuicHttp3.Transport.Quic`. Prove transport retention, all operation wrappers, resume, and ready paths; retain native cleanup restrictions. |
 | H3-2 | `QuicHttp3.Transport.Quic.client/1, connect/3` | `:ops` is an approved user-module root as of 2026-11-02. Its retained connection/stream selectors, shared endpoint equality checks, default Quic bodies and unchanged native cleanup restrictions are traced in the HTTP3 review. |
 | H3-3 | Internal `HTTP.QUIC.ExQuic` wrappers | Production wrappers default to `Quic`; the extra driver parameter is a test seam. Inventory actual production incoming calls, including explicit driver arguments, before restricting targets to `Quic`. |
-| H3-4 | `HTTP.HTTP3.Stream` connector | `connector_wait/5` invokes a callback obtained by the descriptor path. Prove all supported connector producers and retained-worker handoffs; do not classify an unknown callback from its name. |
+| H3-4 | `HTTP.HTTP3.Stream` connector | `connector_wait/5` invokes a callback obtained by the descriptor path. Prove all supported connector producers and retained-worker handoffs; do not classify an unknown callback from its name. Since rc.11 the only library producer is the certified-stream `relay_cleanup/2` closure around `Quic.Cleanup.new/1`. |
 | H3-5 | Fetch -> `HTTP.HTTP3.request/3 -> await/5` | Production SocketClient supplies `handle_http3_event/2`; the recursive loop preserves the handler. Bind both callsites and any library reentry to that caller. Arbitrary direct handlers at this internal entry are outside the approved guarantee. |
 | TLS-1 | `SSL.ClientHello.Materializer` | Generator defaults to `KeyExchange.generate/1`; `:test_key_share_generator` permits a function. Prove supported production option construction and all library/test-hook alternatives separately. |
 | TLS-2 | `SSL.ClientIdentity` password resolution | `password_option/1` recognizes a zero-argument user password callback. Prove propagation from supported identity options and audit library-supplied alternatives. |
@@ -296,6 +328,7 @@ are reviewed separately.
 | TLS-4 | `SSL.PKIX`, `VerifyFun` | Supported verify and hostname callbacks are external boundaries. `policy_event/3` also receives a library hostname closure from PKIX. Prove that closure and every callback-producing caller; keep internal and external alternatives distinct. |
 | TLS-5 | `SSL.PolicyIO` partial-chain selection | Supported `:partial_chain` callback reaches `partial_selection/2` through normalized policy. Bind every candidate-selection path and library-created alternative. |
 | TLS-6 | `SSL.Connection -> PolicyIO.prepare -> TLS13/TLS12` | Certificate verification selects `PKIX.peer/6` or the policy closure returned by `PolicyIO.prepare`. Public normalized options do not directly choose the internal `certificate_policy` field. Prove both constructors and handshake-machine propagation, including TLS1.2. |
+| TLS-7 | `SSL.listen/2`, `SSL.handshake/3` -> `ServerOptions.select_identity/2` | The caller's arity-one `:sni_fun` is the only producer of `{:fun, fun}` and is retained in the opaque listen/connection config. Its identity-option result is loaded as data through `ClientIdentity`; failures become `internal_error`. Approved server callback boundary; no library producer. |
 | HTTP-1 | Runtime dialer and proxy upgrade | Transport selection is built-in TCP/ExSSL/Unix; proxy TLS upgrade resolves ExSSL. Bind every internal connect/transfer/close/upgrade call to the selector and preserve failure/handoff branches. |
 | HTTP-2 | `HTTP.RequestLifecycle` workers | Launch, worker body and rejection callbacks come from concrete library worker creators. Enumerate all callers and nested closures; supported user body callbacks remain external only at their approved projection. |
 | HTTP-3 | `HTTP.EventSource` -> connection | HTTP1 selection chooses TCP/ExSSL/Unix. Prove generation-tagged connection replies, stale-reply closure, reconnect and state retention through rearm/detach/close. |
@@ -305,7 +338,7 @@ are reviewed separately.
 | HTTP-7 | H2 owner creation from supported clients | Production callers supply a selected built-in module. Prove initialization and every normal/throw/callback state transfer. Internal arbitrary map transports are outside the approved direct-call guarantee, but must be proved unreachable from supported roots. |
 | HTTP-8 | H2 pool owner factory | `init/1` accepts `:owner_factory`; production application starts its pool with the default. Enumerate custom pool/scope constructors and prove whether supported public clients can reach an injected factory. |
 | HTTP-9 | Public WebSocket -> connection | Prove built-in transport selection and retention through connect, reconnect, queued frames, backpressure, EOF, abort, rearm and detach. |
-| WT-1 | `HTTP.WebTransport.new/2` | Approved `:backend` root flows through Options into Session. Audit the unsupported built-in QUIC backend and all library alternatives; no native WebTransport capability is added. |
+| WT-1 | `HTTP.WebTransport.new/2` | Approved `:backend` root flows through Options into Session. Audit the built-in QUIC backend and all library alternatives. Since rc.11 that backend is live over an exclusive HTTP3 owner and is covered by H3-1, H3-2 and Q1; local `finish_send`/`backend_or_invalid_state` closures retain the same backend. |
 | TEL-1 | `telemetry:attach[_many]`, `span/3` | Handler/span functions originate at supported callbacks. The production source and BEAM census contains no library-supplied handler/span; HTTP.Telemetry's logging/metrics examples are documentation only. Attachment storage and reentry are traced in the telemetry review. |
 | TEL-2 | Telemetry application initialization and `persist/0` | `init/1` stores `telemetry_ets` and its list function; successful persistence switches to `telemetry_pt`. Default state has a literal empty-list closure. Prove every implementation-tuple writer and audit both built-in modules. Arbitrary external `persistent_term` mutation is not a supported callback root. |
 

@@ -141,3 +141,43 @@ The HTTP review covers the two new caller adapter dispatches and the H2 provider
 activation callback. This amendment refreshes the three shared source hashes;
 historical artifacts remain historical, and strict candidate/published compiled
 reconciliation is still required.
+
+## 2026-11-10 source review amendment: rc.11 resumption, extensions and migration
+
+This amendment reviews the production sources at `4ae97fc` against the census
+bound at `1a1f81d`. Eight selected inputs change. `HTTP.HTTP3.Resumption` is
+added as a selected input because it creates shared endpoints.
+
+### H3-1 and H3-2
+
+`Session.new/1` still assigns `transport` once, with literal default
+`QuicHttp3.Transport.Quic`. New sites 189–199 call the retained
+`session.transport`. They cover early-data and resumption queries, extension
+requirements, unidirectional and kind-selected stream opens, `reset_stream_at`,
+datagrams and `migrate`. The only library producer of `:session_options` is the
+WebTransport backend, which supplies only WebTransport limits.
+
+`Transport.Quic.reset_stream_at/4` (ID 200) and `migrate/2` (ID 201) call the
+retained stream or connection `ops`. `HTTP.HTTP3.Resumption` creates its shared
+endpoint with `QuicTransport.client/1`. The options are an explicit key projection
+plus a literal resumption policy, without `:ops`, so the endpoint retains literal
+`Quic`. Borrowing still requires equal `ops`. `Quic.reset_stream_at/4` and
+`Quic.migrate/2` route to the reviewed Connection operations.
+
+### H3-4: library-created connector callback
+
+The earlier statement that no library connector callback exists is superseded
+for certified streams. `HTTP.HTTP3.Stream.relay_cleanup/2` creates exactly one,
+`fn _deadline -> native_scope(relay) end`, under four conditions: the stream is
+an extended CONNECT with a request lifecycle, the connection is exclusive, and
+neither a caller callback nor a descriptor is present. Its body calls only
+`Quic.Cleanup.new/1` (Q1) and returns that opaque handle and lease.
+`connector_wait/5` still invokes the retained function once after its tagged
+launch; it moves from line 333 to 520. Public option projections still do not
+expose `:quic_cleanup`, so caller-supplied connector callbacks remain unreachable
+from supported construction.
+
+H3-3 wrappers and SocketClient's literal H3-5 handler are unchanged. H3 now has
+63 reviewed occurrences. The complete compiled inventory of a locally built
+isolated candidate release matches the five reviews exactly at 206 sites. CI
+strict candidate and published gates remain required.

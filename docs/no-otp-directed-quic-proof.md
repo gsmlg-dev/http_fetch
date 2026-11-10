@@ -238,3 +238,52 @@ the current reviewed multiset. Its history remains intact and does not certify
 the PTO repair. Current source/build observations and independent controls are
 supporting evidence; fresh strict candidate and published-release gates remain
 required for complete release acceptance.
+
+## 2026-11-10 source review amendment: rc.11 migration, resumption and reliable reset
+
+This amendment reviews the production sources at `4ae97fc` against the census
+bound at `1a1f81d`. Seventeen selected inputs change; `Quic.EarlyData` and
+`Quic.ResumptionStore` are new. The store is added to the selected inputs
+because it answers TLS provider requests. The complete production census is
+267 files.
+
+### Q2
+
+`Endpoint.open_io/2` still has exactly the `GenUDP` and `ExternalWriter`
+constructors, and `Connection.init/1` is still the only assignment of
+`adapter`. Client local migration is admitted only for an exclusive,
+non-external client endpoint after the handshake is confirmed. The endpoint
+binds a new socket through `open_udp/2` and returns its `GenUDP` PID in a
+generation- and reference-qualified `quic_path_bound` reply. Connection stores
+that PID in `path_writers`. `local_send/4` selects the PID for the packet's path
+as writer data and calls the retained `data.adapter`. ID 15 is the same send
+call rewritten with the path writer; IDs 16 and 17 are its unchanged clock calls
+under the new arity.
+
+New sites 182–187 query the retained adapter clock. They cover early-key
+retirement in `handle_event/4` and `early_keys_timer/1`, path-binding and
+validation handling in `handle_event/4`, and migration admission in
+`start_local_migration/6`. Path, CID, ticket and early-data values are data. None
+writes an adapter or callback field.
+
+### Q4
+
+`TLSDriver.continue/3` (ID 188) calls the retained `state.adapter`. It accepts
+only the single outstanding `SSL.QUIC.Request` ID. The reply comes from the
+endpoint-local `Quic.ResumptionStore`, which uses literal module calls and no
+persistence or IO. `abort/2` (ID 23) also clears the continuation. `new/2` still
+defaults `:adapter` to `SSL.QUIC`, and no action fold updates the selector.
+
+### Q1 and Q3
+
+The cleanup observer admits two more operation kinds (`reset_stream_at`,
+`migrate`). `AbyssDispatcher.terminate/2` tolerates an endpoint that exits
+during stop. Lease and external-send constructors are unchanged.
+
+### Moved occurrences and acceptance
+
+All other Connection, Endpoint and TLSDriver occurrences keep their call
+expressions and owning functions. Their lines move as recorded in the JSON.
+QUIC now has 37 reviewed occurrences. The complete compiled inventory of a
+locally built isolated candidate release has 206 sites, matching the five
+reviews exactly. CI strict candidate and published gates remain required.
