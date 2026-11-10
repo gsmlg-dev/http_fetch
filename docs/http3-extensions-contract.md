@@ -301,10 +301,22 @@ Evidence: in-repo Quic server integration tests migrate a WebSocket tunnel and
 a WebTransport session to a new loopback port and then exchange a WebSocket
 message both ways, and a WebTransport bidi stream with FIN plus DATAGRAMs both
 ways; the peer observes the new remote address. Source-IP migration needs a
-loopback alias not present on macOS by default and is covered only by the
-engine's quic-go gate. An independent HTTP-level gate is not run: aioquic
-1.2.0 does not answer a padded probe on the new path (see
-`docs/quic/client-features-validation.md`, M2), so the WebSocket aioquic gate
-cannot accept migration. `Quic.capabilities().migration.local` stays `[]`
+loopback alias not present on macOS by default. The independent HTTP-level
+gate `scripts/http3_migration/gate.py` runs an exclusive WebSocket/H3 tunnel
+against unmodified quic-go/http3 v0.65.0 (pinned by the committed `go.mod` and
+`go.sum`; the harness adds only RFC 6455 framing over the RFC 9220 extended
+CONNECT stream). After `migrate/2` to a new loopback port, the peer reports the
+post-migration text and 96 KiB binary messages with exact bytes on the same
+connection and CONNECT stream, its connection `RemoteAddr()` equal to the
+client's new address, and its per-source datagram counters attribute the large
+message to the new path; the echoes return, and the tunnel closes with Close +
+FIN. A pooled WebSocket refuses with `:not_exclusive_owner` and keeps
+exchanging. Port migration passes locally; source-IP migration to 127.0.0.2
+(`--ip`) runs in the CI `independent-http3-migration` job, which adds the
+alias. The exclusive owner's cleanup retires the QUIC connection without a
+CONNECTION_CLOSE, so the peer only idles it out. aioquic 1.2.0 is not used: it
+does not answer a padded probe on the new path (see
+`docs/quic/client-features-validation.md`, M2). WebTransport migration has no
+independent peer. `Quic.capabilities().migration.local` stays `[]`
 because the engine's negative acceptance matrix is incomplete; this API is beta
 and is not a general capability claim.
