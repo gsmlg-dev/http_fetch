@@ -22,10 +22,21 @@ import (
 var output sync.Mutex
 
 func emit(value any) { output.Lock(); defer output.Unlock(); json.NewEncoder(os.Stdout).Encode(value) }
+
+// zeroCIDs configures the upstream public ConnectionIDGenerator extension point
+// with zero-length connection IDs: quic-go then issues no NEW_CONNECTION_ID.
+type zeroCIDs struct{}
+
+func (zeroCIDs) GenerateConnectionID() (quic.ConnectionID, error) {
+	return quic.ConnectionIDFromBytes(nil), nil
+}
+func (zeroCIDs) ConnectionIDLen() int { return 0 }
+
 func main() {
 	cert := flag.String("cert", "", "certificate")
 	key := flag.String("key", "", "key")
 	mode := flag.String("mode", "echo", "echo or reset")
+	zeroCID := flag.Bool("zero-cid", false, "server uses zero-length connection IDs (no spare CID)")
 	flag.Parse()
 	pair, err := tls.LoadX509KeyPair(*cert, *key)
 	if err != nil {
@@ -45,6 +56,13 @@ func main() {
 		config.MaxIncomingStreams = 8
 		config.MaxIncomingUniStreams = 8
 		listener, err = quic.ListenAddrEarly("127.0.0.1:0", tlsConfig, config)
+	} else if *zeroCID {
+		udp, udpErr := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+		if udpErr != nil {
+			panic(udpErr)
+		}
+		transport := &quic.Transport{Conn: udp, ConnectionIDGenerator: zeroCIDs{}}
+		listener, err = transport.Listen(tlsConfig, config)
 	} else {
 		listener, err = quic.ListenAddr("127.0.0.1:0", tlsConfig, config)
 	}
@@ -52,7 +70,7 @@ func main() {
 		panic(err)
 	}
 	defer listener.Close()
-	emit(map[string]any{"event": "listening", "address": listener.Addr().String(), "peer": "quic-go-v0.62.0"})
+	emit(map[string]any{"event": "listening", "address": listener.Addr().String(), "peer": "quic-go-v0.62.0", "zero_cid": *zeroCID})
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	for {

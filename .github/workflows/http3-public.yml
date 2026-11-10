@@ -171,6 +171,12 @@ jobs:
           go mod init peer
           GOFLAGS=-mod=mod GOSUMDB=sum.golang.org go get github.com/quic-go/quic-go@v0.62.0
           GOFLAGS=-mod=mod go build -o peer .
+      - name: Build unmodified quinn 0.11.11 peer from committed Cargo.lock
+        run: |
+          cargo --version
+          cargo build --release --locked \
+            --manifest-path scripts/quic_client_features/quinn_peer/Cargo.toml \
+            --target-dir "$RUNNER_TEMP/quinn-target"
       - name: Build pinned aioquic peer environment
         run: |
           uv venv --python 3.12 "$RUNNER_TEMP/quic-peer-venv"
@@ -183,10 +189,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$QUIC_GATE_LOG_DIR"
-          for gate in migration reset resumption-client resumption-server early-client early-server early-migration; do
+          for gate in migration reset resumption-client resumption-server early-client early-server early-migration \
+                      migration-negative migration-no-cid migration-disabled; do
             python3 scripts/quic_client_features/wire_gates.py --gate "$gate" \
               --python "$RUNNER_TEMP/quic-peer-venv/bin/python" \
-              --go-binary "$RUNNER_TEMP/quic-go-peer/peer" 2>&1 | tee "$QUIC_GATE_LOG_DIR/$gate.log"
+              --go-binary "$RUNNER_TEMP/quic-go-peer/peer" \
+              --quinn-binary "$RUNNER_TEMP/quinn-target/release/quinn-m2-peer" 2>&1 | tee "$QUIC_GATE_LOG_DIR/$gate.log"
           done
       - name: Preserve independent peer diagnostics
         if: failure()
