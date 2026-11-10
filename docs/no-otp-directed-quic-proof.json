@@ -21,7 +21,7 @@
     "apps/elixir_quic_http3/lib/quic_http3/session.ex": "e329caba406925e06286e3bea3f01f8b83a820ef4a77eca1b6ff826a775e3db3",
     "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679",
     "apps/http_runtime/lib/http/http3/pool.ex": "974135c4126244c649815a5d4ab808678da3c1978540d84b940729f299baf73d",
-    "apps/http_runtime/lib/http/http3/connection_owner.ex": "194a7390dcdea7841222f41d67fd8037f0ce45743039ca546d713d5bba468852",
+    "apps/http_runtime/lib/http/http3/connection_owner.ex": "c686ff14614b1c0bb915b3e23c1354f2edae62bb0f6df5715648411367d38f3a",
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
     "apps/elixir_quic/lib/quic/local_cids.ex": "8f8c5eb14f93f6e9ca16e2a812df152638d3ef6fabcc2611d117ecf1ebf89f69",
     "apps/elixir_quic/lib/quic/recovery.ex": "50ecf0d0ed76335a2f0414912365625212b7360204fdc9cb19a588bd648cb452",
@@ -1514,7 +1514,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "d460225dded1d6f218284c3e9290752e5e2f9630",
+      "source_commit": "512fd3ca291b1bd4913781e01d38361823e405f6",
       "scope": "client migration, opt-in resumption/0-RTT, reliable reset and TLS provider continuation",
       "changed_source_inputs": {
         "apps/elixir_quic/lib/quic.ex": {
@@ -1567,7 +1567,7 @@
         },
         "apps/http_runtime/lib/http/http3/connection_owner.ex": {
           "previous_sha256": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
-          "sha256": "194a7390dcdea7841222f41d67fd8037f0ce45743039ca546d713d5bba468852"
+          "sha256": "c686ff14614b1c0bb915b3e23c1354f2edae62bb0f6df5715648411367d38f3a"
         },
         "apps/http_runtime/lib/http/http3/stream.ex": {
           "previous_sha256": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
@@ -1595,7 +1595,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "9eb701e8597a998866efb5616002c5e21dc0a3f1c2704554838d1bbdd9c3fc72",
+        "sorted_path_sha256_json": "a8e0221717901f513fa29b65f7d3acd61ead0878561edc9e5e30e52e55b01244",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1851,6 +1851,13 @@
           "input": "apps/elixir_quic/lib/quic/io/gen_udp.ex",
           "change": "Quic.IO.GenUDP.open/1 passes the caller to init, and the actor links to that still-blocked caller at the end of a successful init instead of the caller linking after GenServer.start/2 returns, so an actor that already stopped can no longer kill the non-trapping caller with :noproc.",
           "dispatch_review": "No dynamic dispatch added or moved: the literal Process.link/1 call moves from open/1 into initialize_socket/3 with a Keyword.fetch!/2 argument; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-10",
+          "source_commit": "512fd3ca291b1bd4913781e01d38361823e405f6",
+          "input": "apps/http_runtime/lib/http/http3/connection_owner.ex",
+          "change": "An extended CONNECT request whose response stream finished is marked done? and no longer counts as live, so graceful_close/2 still sends H3_NO_ERROR after a WebTransport session closed by a compliant peer; any other remaining request keeps suppressing it.",
+          "dispatch_review": "No dynamic dispatch added or moved: the change adds a request map field, a put_in/2 update and an Enum.any?/2 over the request map; the file holds no reviewed occurrence."
         }
       ]
     }

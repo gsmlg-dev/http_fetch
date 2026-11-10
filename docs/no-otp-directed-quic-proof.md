@@ -332,3 +332,7 @@ non-trapping caller. Both changes use only literal calls and neither file holds
 a reviewed occurrence, so no occurrence is added or rebound. The producer
 hashes, the release census entries and every group's rc.11 census digest are
 updated.
+
+An extended CONNECT whose response stream has finished (`512fd3c`) no longer
+counts as a live request, so a WebTransport session closed by a compliant peer
+still ends with H3_NO_ERROR; this adds only a request field and literal calls.

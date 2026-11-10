@@ -204,3 +204,7 @@ when no request remains. The change is a lifecycle field update and a guard; the
 file holds no reviewed occurrence, so no occurrence is added or rebound. The
 producer hashes, the release census entry and every group's rc.11 census digest
 are updated (the census also covers the `Quic.IO.GenUDP` link fix, `d460225`).
+
+An extended CONNECT whose response stream has finished (`512fd3c`) no longer
+counts as a live request, so a WebTransport session closed by a compliant peer
+still ends with H3_NO_ERROR; this adds only a request field and literal calls.
