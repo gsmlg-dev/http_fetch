@@ -479,13 +479,13 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   # connection ends it with an application CONNECTION_CLOSE carrying
   # H3_NO_ERROR, so the peer need not wait for its idle timeout. The close is
   # admitted before the cleanup lease is retired, and the watchdog bounds it.
-  # A stop that abandons live requests is not a clean H3_NO_ERROR shutdown.
-  defp graceful_close(
-         :normal,
-         %{lifecycle: lifecycle, pending: nil, watchdog: watchdog, requests: requests} = state
-       )
-       when lifecycle in [:ready, :draining] and watchdog != nil and map_size(requests) == 0 do
-    if state.session.connection && state.session.pending == nil,
+  # A stop that abandons live requests is not a clean H3_NO_ERROR shutdown; an
+  # extended CONNECT whose response stream has finished is no longer live.
+  defp graceful_close(:normal, %{lifecycle: lifecycle, pending: nil, watchdog: watchdog} = state)
+       when lifecycle in [:ready, :draining] and watchdog != nil do
+    live? = Enum.any?(state.requests, fn {_ref, request} -> not request.done? end)
+
+    if state.session.connection && state.session.pending == nil && not live?,
       do: guarded(state, state.timeout, fn -> Session.close(state.session) end)
   end
 
@@ -859,7 +859,8 @@ defmodule HTTP.HTTP3.ConnectionOwner do
       paused: false,
       headers_pending?: false,
       deferred: [],
-      info?: opts[:connection_info] == true
+      info?: opts[:connection_info] == true,
+      done?: false
     }
 
     GenServer.reply(from, {:ok, ref})
@@ -1013,7 +1014,7 @@ defmodule HTTP.HTTP3.ConnectionOwner do
     notify(state, ref, :done)
 
     if match?(%{purpose: :extended_connect}, state.requests[ref]),
-      do: state,
+      do: put_in(state.requests[ref].done?, true),
       else: remove_request(state, ref)
   end
 
