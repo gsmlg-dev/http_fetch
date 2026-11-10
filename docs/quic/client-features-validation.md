@@ -17,7 +17,7 @@ New socket writer is pinned to its path ID. Endpoint authenticates ingress gener
 - FAIL (fixed): first independent run exposed nested `put_in` root assignment in bound-result handler; direct runtime regression now covers it.
 - BLOCKED: aioquic 1.2.0 independent port/IP acceptance. Real initial stream/DATAGRAM succeeds. Candidate probe reaches independent server at a new source port; candidate expires without PATH_RESPONSE. Installed unmodified `aioquic/quic/connection.py` `datagrams_to_send()` selects only `_network_paths[0]`; `_handle_path_challenge_frame()` queues response on `context.network_path`; new path promotion requires a non-probing packet. A pure padded probe therefore leaves its response unsent. Sending PING before validation would violate the approved commit order; the gate remains failing and capability stays false.
 - PASS (independent alternative): unmodified `quic-go v0.62.0`, immutable source `793f74d8e03368c5aded128af6f48d21dbb47f73`, source-port then source-IP changes. One handshake, one stream ID 0; exact 9646 bytes and FIN, SHA256 `048ab165ed8ff0294042bb45986fb08dc8f14b0abf3817b60d5a7e9f46662ab4`. Each phase has exact stream and DATAGRAM echo, each settled path count is one. Cleanup joins eight resources: endpoint, connection, three IO processes, three native Ports; all down and no unresolved births/operations. Localhost source-IP change is controlled loopback evidence, not distributed-network acceptance.
-- NOT RUN: complete negative independent migration matrix and owner-death at every two-socket transition. Matching-profile reset and R1/R2 positives are recorded below; complete negative acceptance remains open.
+- PASS (2026-11-10): independent negative migration matrix and forced owner death at every two-socket transition; see [M2 negative matrix](#m2-negative-matrix-2026-11-10). The source-IP positive phase stays CI-only (needs a `127.0.0.2` alias).
 
 Commands use `ERL_FLAGS='+S 4:4' MIX_ENV=test MIX_BUILD_PATH=/tmp/http-fetch-quic-A-20261108/test` from the umbrella root. Independent gate: `python3 scripts/quic_client_features/migration.py --python /tmp/http-fetch-quic-A-peer/bin/python` (`aioquic==1.2.0`). The gate has finite child/peer deadlines, records exact bytes/FIN/path addresses and requires a retained native cleanup receipt.
 
@@ -43,7 +43,7 @@ independent acceptance matrices remain open; positive traffic is not that matrix
 
 | Area | Source/runtime checks | Independent positive traffic | Remaining acceptance |
 | --- | --- | --- | --- |
-| M2 client local migration | PASS: CID/policy/role/confirmation/address/busy/bind failure, dedup, padded probe, deadline fallback and retained old writer | PASS: quic-go v0.62.0 port then IP migration, exact stream/FIN/DATAGRAM and eight-resource cleanup | NOT RUN: full independent negative matrix and forced owner-death at every two-socket transition |
+| M2 client local migration | PASS: CID/policy/role/confirmation/address/busy/bind failure, dedup, padded probe, deadline fallback and retained old writer; PASS: forced owner death at all four two-socket transitions (in-repo server) | PASS: quic-go v0.62.0 port then IP migration, exact stream/FIN/DATAGRAM and eight-resource cleanup | PASS locally (port-based, macOS): independent negative matrix vs quic-go v0.62.0 (preconfirmation, bind in-use/unavailable, deadline fallback, concurrent busy, duplicate ref, owner death x4), zero-length-CID quic-go (no spare CID) and quinn 0.11.11 (peer `disable_active_migration`); pending CI confirmation of the new gates; source-IP phases CI-only |
 | Reliable reset draft-11 | PASS: exact TP/frame codec, negotiation, final-size/error checks, decreasing/reordered prefix, sparse receive, prefix loss/recovery and separate reset ACK | PASS: both directions against quic-go v0.62.0; negotiated support, prefix then reset, codes 42/43, retained ref and native cleanup | NOT RUN: independent loss/reorder and exhaustive malformed/decrease/final-size matrix against an explicitly draft-11-certified peer |
 | R1 | PASS: bounded endpoint-local store, atomic single use, expiry/partition/eviction/redaction; serialized bounded continuation, timeout/stale/duplicate/late reply handling; actual full then resumed connections | PASS: unmodified aioquic 1.2.0, both client and server roles, exact 269-byte stream plus FIN, no early data, joined socket cleanup | NOT RUN: independent HRR resumption (aioquic has no HRR support), exhaustive trust/profile/restart/concurrent-network matrix; Task B records provider-level HRR/binder evidence separately |
 | R2 | PASS: type-1 early protection in application PN space, opt-in operations, receive staging/quotas, withheld delivery, rejection/ref retention/stream epochs, Retry without TLS rejection, reliable loss crossing to 1-RTT, DATAGRAM loss isolation and immutable early limits | PASS: aioquic 1.2.0 in both roles with an explicit Finished barrier; exact 274-byte stream/FIN and 23-byte DATAGRAM; PASS: resumed early connection followed by quic-go port and IP migration | NOT RUN: complete independent rejection/invalid binder/Finished/HRR/Retry/concurrent reuse/quota/late-receipt matrix; no global support claim |
@@ -236,3 +236,59 @@ socket inside a private cleanup scope in which the endpoint was not an enrolled
 producer. It now binds the migration socket exactly like its first socket (no
 scope), and endpoints with a `cleanup:` scope are unchanged. Regression:
 `apps/elixir_quic/test/quic/uncleaned_migration_integration_test.exs`.
+
+## M2 negative matrix (2026-11-10)
+
+Each case uses a fresh exclusive client endpoint with its own Cleanup scope
+against an unmodified independent server. The orchestrator
+(`scripts/quic_client_features/wire_gates.py`) requires: the pinned peer
+version in the peer's `listening` record; one independent handshake per
+retained client receipt; each receipt `confirmed`/`resolved`, `down == enrolled`,
+zero unresolved births/operations and the exact native roles below; and, for
+every exchanged phase, exactly one peer receipt with the same cumulative byte
+count and SHA-256 whose observed client address equals the address the engine
+reports (old path = the connection's initial address; new path = a different
+port). Every rejected or failed migration is followed by an exact echo plus FIN
+observed by the peer from the original address. Driver:
+`scripts/quic_client_features/migration_negative.exs`.
+
+| Row | Peer and the knob producing the condition | Result | Native roles (IO/Port) |
+| --- | --- | --- | --- |
+| Peer `disable_active_migration` | quinn 0.11.11 / quinn-proto 0.11.17 (`scripts/quic_client_features/quinn_peer`, Cargo.lock pinned), public `ServerConfig::migration(false)`, which sets the transport parameter. quic-go v0.62.0 and aioquic 1.2.0 have no knob that sends it. | PASS: admission and retained ref `{:error, :peer_disabled_migration}`, one path, exact old-path bytes/FIN. Control: the same case against migration-enabled quic-go fails (admitted) | 1/1 |
+| No spare peer CID | quic-go v0.62.0 `--zero-cid`: public `Transport.ConnectionIDGenerator` with zero-length IDs, so quic-go issues no NEW_CONNECTION_ID | PASS: `{:error, :no_unused_connection_id}` after 200 ms, retained, one path, exact old-path bytes/FIN | 1/1 |
+| Migrate before confirmation | quic-go v0.62.0, default config; tight migrate loop from `connect` | PASS: `:not_established` while handshaking, then `{:error, :handshake_not_confirmed}` before HANDSHAKE_DONE (bounded retry if confirmation wins; never needed in 11 local runs); no candidate socket | 1/1 |
+| Bind failure, address in use | quic-go v0.62.0; local port held by another socket | PASS: admitted `{:ok, ref}`, retained, `:operation_ref_conflict` for another address, outcome `{:error, {:bind_failed, :eaddrinuse}}`, same ref after outcome returns the original admission without another bind; old path exact | 2/1 (failed IO actor, no Port) |
+| Bind failure, unavailable address | quic-go v0.62.0; local `192.0.2.1` (TEST-NET-1, never local; port-agnostic, runs without an alias) | PASS: as above with `:eaddrnotavail` | 2/1 |
+| Deadline expiry with fallback + concurrent migrate | quic-go v0.62.0 paused with SIGSTOP for the validation window (no peer change; simulates total loss of the candidate path) | PASS: two concurrent migrations, exactly one admitted and one `{:error, :migration_busy}` (retained as rejected); admitted outcome `{:error, :validation_timeout}`; after SIGCONT the old path carries exact bytes; a later migration on the released two-path budget then succeeds from a new port | 3/3 |
+| Duplicate retained ref | quic-go v0.62.0 | PASS: repeat during binding and after completion return the original `{:ok, ref}`; status keeps result and final outcome; peer saw one new port only | 2/2 (exactly one candidate bind) |
+| Owner death: candidate bound | quic-go v0.62.0 and in-repo server | PASS: connection held before handling its `{:quic_path_bound, ...}`; endpoint killed; all six resources DOWN, both Ports closed | 2/2 |
+| Owner death: probe sent | quic-go paused (SIGSTOP) / in-repo server `:sys.suspend` | PASS: candidate `:validating` with an outstanding PATH_CHALLENGE; endpoint killed; all joined | 2/2 |
+| Owner death: validated | quic-go v0.62.0 and in-repo server | PASS: endpoint held before handling `{:quic_select_local_path, ...}`; migration outcome `{:ok, _}`, phase settling/retiring; endpoint killed; all joined | 2/2 |
+| Owner death: old retiring | quic-go v0.62.0 and in-repo server | PASS: endpoint held before handling `{:quic_retire_local_path, ...}` (old socket still owned); phase `:retiring`; endpoint killed; all joined | 2/2 |
+
+Owner-death holds use a `:sys.install/2` debug hook that blocks inside the
+target process before it handles the transition message, released right after
+the kill. The in-repo ExUnit tests are
+`apps/elixir_quic/test/quic/migration_owner_death_integration_test.exs`; the
+wire-side runs are the `owner_death/*` cases of the `migration-negative` gate.
+
+**FAIL -> PASS (engine bug found by this matrix):** a migration to an in-use or
+unavailable local address killed the client endpoint and its linked caller.
+`Quic.IO.GenUDP.open/1` used `GenServer.start_link/2`, so the init stop reason
+(`:eaddrinuse`/`:eaddrnotavail`) was also delivered as an exit signal. The actor
+is now linked only after it owns a socket. Regressions:
+`apps/elixir_quic/test/quic/io_gen_udp_test.exs` and
+`apps/elixir_quic/test/quic/migration_bind_failure_integration_test.exs`.
+
+Gates (CI job `independent-quic-client` runs all three):
+
+```sh
+python3 scripts/quic_client_features/wire_gates.py --gate migration-negative
+python3 scripts/quic_client_features/wire_gates.py --gate migration-no-cid
+python3 scripts/quic_client_features/wire_gates.py --gate migration-disabled --quinn-binary <path>
+```
+
+Local results, 2026-11-10, macOS (no `127.0.0.2` alias): all three gates PASS;
+`migration-negative` passed 11 consecutive runs. CI confirmation of the three
+new gates and of the existing source-IP positive phase is pending. Capability
+flags are unchanged by this section.
