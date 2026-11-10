@@ -120,6 +120,12 @@ Evidence chain:
    requires `{:ok, %{cleanup: :confirmed}}`: the exclusive endpoint,
    connection, IO actor and UDP Port were joined. Caller-supplied
    `quic_cleanup`/`cleanup` descriptors are never retired by the relay.
+   Since `4c1bf8f`, lease release no longer retires the exclusive owner's
+   scope directly: the pool sends `:http3_retire`, and the owner first sends
+   CONNECTION_CLOSE with H3_NO_ERROR (only when no request remains) under its
+   watchdog-guarded `operation_timeout` (default 1 s), then retires. The
+   receipt therefore follows the owner's guarded close, and confirmation can
+   take up to that bound longer.
 4. Missing proof (owner alive but unsettled at the bound, native scope pending
    or unconfirmed, relay killed) calls `RequestLifecycle.unconfirmed/1`; the
    public result is `{:error, :cleanup_unconfirmed}`. Lifecycle-registered
@@ -251,6 +257,8 @@ budget (at most 262144), the owner's extension budget.
 exactly one CONNECT and never falls back. `close/2` sends the Close capsule,
 lingers up to `quic: [close_linger: ms]` (default 500) for the peer's FIN, stops
 the owner and returns `:ok` only when the cleanup receipt is `:confirmed`.
+The owner's guarded H3_NO_ERROR close (bounded by `operation_timeout`,
+default 1 s) runs before it retires the scope, so the receipt follows it.
 
 Known gaps: blocked writes hold the session
 process until admission or deadline. The session's terminal-stream ledger caps a
