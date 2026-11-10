@@ -26,7 +26,7 @@
     "apps/ex_ssl/lib/ssl/protocol/server_flight_verifier.ex": "a6876ac59a2829e2874d01554719c2be899666bd1ad52cad9c0151e978a70857",
     "apps/ex_ssl/lib/ssl/protocol/handshake_core.ex": "01f519e701a1953349b996a1207a59e84b8c0cae0086833665e7514657f3f40f",
     "apps/ex_ssl/lib/ssl/protocol/tls12.ex": "e60e625beb7320a64eac6f2f1df57b1cdee671e12e484ea3baeeb0a227d0b5dd",
-    "apps/ex_ssl/lib/ssl/quic.ex": "f191a25afd2931aa0867ff569da77f176d6db89f5faae8df30cfc52e94bb3121",
+    "apps/ex_ssl/lib/ssl/quic.ex": "a2f78d3dca05b1dbf1861c77b756dcf8bc3af3c9fc742c264d909df0024fa44f",
     "apps/ex_ssl/lib/ssl/quic/config.ex": "db708d4a3dca411cab89dbad09b7b1840a018b48cdfeecdff235eb05b81e291c",
     "apps/ex_ssl/lib/ssl/resumption_context.ex": "5770e0b4b47d32932fc2d99dd00f6a568b1084eb1f2b5a0623ca6d789136571e",
     "apps/ex_ssl/lib/ssl/tls12_resumption_context.ex": "c7dd29ea5fa6d67992f8fad5eeb5edc4e67c159197a01c1542603ec5df65dd43",
@@ -333,7 +333,7 @@
         },
         "apps/ex_ssl/lib/ssl/quic.ex": {
           "previous_sha256": "d8575ea864739830c9b52185ad09aa3af03cf8a61d8164ebce5473b4cbdfddf3",
-          "sha256": "f191a25afd2931aa0867ff569da77f176d6db89f5faae8df30cfc52e94bb3121"
+          "sha256": "a2f78d3dca05b1dbf1861c77b756dcf8bc3af3c9fc742c264d909df0024fa44f"
         },
         "apps/ex_ssl/lib/ssl/quic/config.ex": {
           "previous_sha256": "a523334dc65a9e82f39943cf9a9bcc7144546cb3ac3f9d0389bd937aee2e01b1",
@@ -347,7 +347,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "d083e59063ea54c76b0658138760dd707ade319c23623271ed0d2b99e77f1ef7",
+        "sorted_path_sha256_json": "eae76b0222008b74ae6836e45aa3266f9f73a0db5b60afb0caa593446cd25ccd",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -387,7 +387,16 @@
         "sha256": "86b342807dd913b25685cb60bd565da1fa8e68580447c578a0a17f735c4b89b3"
       },
       "historical_artifact_covers_amended_source": false,
-      "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED"
+      "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
+      "follow_up_changes": [
+        {
+          "date": "2026-11-10",
+          "source_commit": "bf1e6f0716f5c721094f80c48bebc181c3cc61be",
+          "input": "apps/ex_ssl/lib/ssl/quic.ex",
+          "change": "capabilities/0 reports resumption: true and zero_rtt: true (b2239e7); literal map change only.",
+          "dispatch_review": "No dynamic dispatch added or moved; the file holds no reviewed occurrence."
+        }
+      ]
     }
   ]
 }

@@ -6,7 +6,7 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/elixir_quic/lib/quic.ex": "36e0b80b1e692b0818402c98c02d4a032dfc1ce69e3ae4b2cab640d5826d3663",
+    "apps/elixir_quic/lib/quic.ex": "ceabba4e42c49138d5b13cf312e6d7ea03d9b1c7ef400eafaa9aa6a9010bb23d",
     "apps/elixir_quic/lib/quic/cleanup.ex": "b25e373c6e11a96d9248caece562c671b6f87b8a3c6c33ee24943871e1852b99",
     "apps/elixir_quic/lib/quic/cleanup/observer.ex": "7f2ae82f7d681c51d9458f27278351c30ff5ab4aee8f49c35fae8316884e2b8e",
     "apps/elixir_quic/lib/quic/endpoint.ex": "ed907ad9ed04d45a8e96c2167d1facb98d421a7f848e0a74c308060ce735a248",
@@ -16,7 +16,7 @@
     "apps/elixir_quic/lib/quic/abyss_dispatcher.ex": "f54b6fd777987a53374cbc15b4b8bbfa854142170cd276d312bd143ce8fbc249",
     "apps/elixir_quic/lib/quic/tls_driver.ex": "cda177305386e45ce223fdb02549cf741ca675a6a889d8da5577ab2f90e85ab3",
     "apps/elixir_quic/lib/quic/handshake_scheduler.ex": "d8b44220e2ce24407f7070da2176388fe1689b13785ced73e53e2582b66c7e80",
-    "apps/ex_ssl/lib/ssl/quic.ex": "f191a25afd2931aa0867ff569da77f176d6db89f5faae8df30cfc52e94bb3121",
+    "apps/ex_ssl/lib/ssl/quic.ex": "a2f78d3dca05b1dbf1861c77b756dcf8bc3af3c9fc742c264d909df0024fa44f",
     "apps/ex_ssl/lib/ssl/quic/config.ex": "db708d4a3dca411cab89dbad09b7b1840a018b48cdfeecdff235eb05b81e291c",
     "apps/elixir_quic_http3/lib/quic_http3/session.ex": "e329caba406925e06286e3bea3f01f8b83a820ef4a77eca1b6ff826a775e3db3",
     "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679",
@@ -1519,7 +1519,7 @@
       "changed_source_inputs": {
         "apps/elixir_quic/lib/quic.ex": {
           "previous_sha256": "a172bf5d3b431ae3f27bf98072a8d3475764c511078157e95ce344b8aae4f5cb",
-          "sha256": "36e0b80b1e692b0818402c98c02d4a032dfc1ce69e3ae4b2cab640d5826d3663"
+          "sha256": "ceabba4e42c49138d5b13cf312e6d7ea03d9b1c7ef400eafaa9aa6a9010bb23d"
         },
         "apps/elixir_quic/lib/quic/cleanup/observer.ex": {
           "previous_sha256": "c74428b9ef5cddb0eed7c8966e7593dc3d4371a1709c169fe5cccab2363e5918",
@@ -1551,7 +1551,7 @@
         },
         "apps/ex_ssl/lib/ssl/quic.ex": {
           "previous_sha256": "d8575ea864739830c9b52185ad09aa3af03cf8a61d8164ebce5473b4cbdfddf3",
-          "sha256": "f191a25afd2931aa0867ff569da77f176d6db89f5faae8df30cfc52e94bb3121"
+          "sha256": "a2f78d3dca05b1dbf1861c77b756dcf8bc3af3c9fc742c264d909df0024fa44f"
         },
         "apps/ex_ssl/lib/ssl/quic/config.ex": {
           "previous_sha256": "a523334dc65a9e82f39943cf9a9bcc7144546cb3ac3f9d0389bd937aee2e01b1",
@@ -1595,7 +1595,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "d083e59063ea54c76b0658138760dd707ade319c23623271ed0d2b99e77f1ef7",
+        "sorted_path_sha256_json": "eae76b0222008b74ae6836e45aa3266f9f73a0db5b60afb0caa593446cd25ccd",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1823,6 +1823,20 @@
           "input": "apps/http_runtime/lib/http/http3/pool.ex",
           "change": "HTTP.HTTP3.Pool no longer retires an exclusive owner's cleanup lease on release; it sends :http3_retire so the owner closes with H3_NO_ERROR before retiring, and still retires on owner DOWN.",
           "dispatch_review": "No dynamic dispatch added or moved: one literal Quic.Cleanup.retire/2 call path is removed; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-10",
+          "source_commit": "bf1e6f0716f5c721094f80c48bebc181c3cc61be",
+          "input": "apps/elixir_quic/lib/quic.ex",
+          "change": "capabilities/0 reports resumption: true and migration.local: [:client] after the CI-confirmed M2/R1/R2 matrices (b1276f9); literal map change only.",
+          "dispatch_review": "No dynamic dispatch added or moved; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-10",
+          "source_commit": "bf1e6f0716f5c721094f80c48bebc181c3cc61be",
+          "input": "apps/ex_ssl/lib/ssl/quic.ex",
+          "change": "capabilities/0 reports resumption: true and zero_rtt: true (b2239e7); literal map change only.",
+          "dispatch_review": "No dynamic dispatch added or moved; the file holds no reviewed occurrence."
         }
       ]
     }

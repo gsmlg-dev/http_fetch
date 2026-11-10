@@ -396,3 +396,12 @@ new `orderly_retire/2` sits after every reviewed occurrence, so the seven HTTP-9
 WebSocket occurrences keep their lines and functions; no occurrence is added or
 rebound. The producer hashes, the release census entries and every group's
 rc.11 census digest are updated.
+
+### Follow-up: capability reporting (2026-11-10)
+
+`capabilities/0` values and `migrate/2` documentation changed after the
+CI-confirmed M2, reliable-reset, R1 and R2 matrices (`b2239e7`, `b1276f9`,
+`f70e874`) and the `QuicHttp3` extension flags. These are literal map values and
+documentation only: no dynamic dispatch is added or moved, and no reviewed
+occurrence is rebound. Producer hashes, the release census and every group's
+rc.11 census digest are updated.

@@ -35,14 +35,14 @@
     "apps/http_event_source/lib/http/event_source/connection.ex": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
     "apps/http_web_socket/lib/http/web_socket/options.ex": "08adad3196ae6c860c61317d726c145cfe9eb11dbc4b75fce6276f3d73fc6621",
     "apps/http_web_socket/lib/http/web_socket/connection.ex": "f88b15d6dfe02078a0c7fb166035634b18c4c61f4afc1f8aa8555fd6fb705e3b",
-    "apps/http_web_transport/lib/http/web_transport.ex": "dd00f10a756d0c65b7b53cce60e78d658d8349202a663dddd1d0e718a11973a7",
+    "apps/http_web_transport/lib/http/web_transport.ex": "00c7152a1453c917b610edaed6ac7d858737e5cef9012f196cd9f8dd735eb6ae",
     "apps/http_web_transport/lib/http/web_transport/options.ex": "71b69d9236f7dcfdd0a54252fe994b9333cf7dd9c7c185af7079e4290d935e95",
     "apps/http_web_transport/lib/http/web_transport/session.ex": "3fb5f5fc8567c5a6171d889af067c4e263c42650e6db5bdd686f143d7405efdc",
     "apps/http_web_transport/lib/http/web_transport/transport/quic.ex": "ebfbb11279d0df7571650f86b29da0824f0ba7567b185cbcd22ec59072aef2ae",
     "apps/http_web_socket/lib/http/web_socket/handshake.ex": "99b178e112dc90c47f96e64c50ac2e2535fcc3169b9137bc19ca68744f7ce978",
     "apps/http_web_socket/lib/http/web_socket/event.ex": "63ae8265fde1872a944ac5dadfd6fb4bd02376751985e10ed0cbe8a3ef653634",
     "apps/http_web_socket/lib/http/web_socket/frame.ex": "8f813646db68b69f4531f49472d9bde48bca21877e237af54eac462fb0b4ea33",
-    "apps/http_web_socket/lib/http/web_socket.ex": "d468c051d8e21915138ffcdc01100dd70dba2d8fbc1ccd91880f8eccbe5ecd79",
+    "apps/http_web_socket/lib/http/web_socket.ex": "d5ed5f81c298213dfa81afdb8ba0b6aa5ccc71cb03d35003fefaed52b5005ae7",
     "apps/http_pool/lib/http/pool.ex": "a5192c4a31078ec9aabdaa53a470f20fd343513de9f8522217786db27e5ccec3",
     "apps/http_pool/lib/http/pool/telemetry.ex": "bcd3d7b8c9b50eb5d7db8b21290a86885db7f275aabf81357f2b3377ac52d064",
     "apps/http_pool/lib/http/http2/pool_key.ex": "9e3148277b4adc219c876f68b673a3da84953a4c956e568d096c760c097a240b",
@@ -1378,7 +1378,7 @@
         },
         "apps/http_web_transport/lib/http/web_transport.ex": {
           "previous_sha256": "38751209dffad6dd099a61e4038874ef66d8c57303f42c565483f12904c0346d",
-          "sha256": "dd00f10a756d0c65b7b53cce60e78d658d8349202a663dddd1d0e718a11973a7"
+          "sha256": "00c7152a1453c917b610edaed6ac7d858737e5cef9012f196cd9f8dd735eb6ae"
         },
         "apps/http_web_transport/lib/http/web_transport/options.ex": {
           "previous_sha256": "ce28ffe039cd91eb32ddbf1365bd60c2a16fea71fc6a1badc598827527f90145",
@@ -1394,13 +1394,13 @@
         },
         "apps/http_web_socket/lib/http/web_socket.ex": {
           "previous_sha256": "685c7d0b6f1b4b32f1534cd2faf055bfbd24c8f4e46de1857540f763fd63a593",
-          "sha256": "d468c051d8e21915138ffcdc01100dd70dba2d8fbc1ccd91880f8eccbe5ecd79"
+          "sha256": "d5ed5f81c298213dfa81afdb8ba0b6aa5ccc71cb03d35003fefaed52b5005ae7"
         }
       },
       "added_selected_inputs": [],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "d083e59063ea54c76b0658138760dd707ade319c23623271ed0d2b99e77f1ef7",
+        "sorted_path_sha256_json": "eae76b0222008b74ae6836e45aa3266f9f73a0db5b60afb0caa593446cd25ccd",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1625,6 +1625,20 @@
           "input": "apps/http_web_socket/lib/http/web_socket/connection.ex",
           "change": "HTTP.WebSocket.Connection.finish/4 retires a cleanly closed HTTP/3 attempt with RequestLifecycle.retire_owner/1 before detach/1 instead of aborting it, so the connection owner survives to close with H3_NO_ERROR.",
           "dispatch_review": "No dynamic dispatch added or moved: the new orderly_retire/2 calls only the literal RequestLifecycle.retire_owner/1 and is placed after every reviewed occurrence; the seven HTTP-9 occurrences keep their lines and functions."
+        },
+        {
+          "date": "2026-11-10",
+          "source_commit": "bf1e6f0716f5c721094f80c48bebc181c3cc61be",
+          "input": "apps/http_web_transport/lib/http/web_transport.ex",
+          "change": "migrate/2 @doc text updated (f70e874); documentation only.",
+          "dispatch_review": "No dynamic dispatch added or moved; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-10",
+          "source_commit": "bf1e6f0716f5c721094f80c48bebc181c3cc61be",
+          "input": "apps/http_web_socket/lib/http/web_socket.ex",
+          "change": "migrate/2 @doc text updated for the CI-confirmed migration gate (f70e874); documentation only.",
+          "dispatch_review": "No dynamic dispatch added or moved; the file holds no reviewed occurrence."
         }
       ]
     }
