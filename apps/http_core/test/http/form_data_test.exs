@@ -171,5 +171,81 @@ defmodule HTTP.FormDataTest do
 
       assert HTTP.FormData.get_content_type(form) =~ "multipart/form-data"
     end
+
+    test "uses the form's own boundary so it matches to_body/1" do
+      form =
+        HTTP.FormData.new()
+        |> HTTP.FormData.append_file("upload", "test.txt", "content")
+        |> Map.put(:boundary, "form-boundary")
+
+      {:multipart, _body, boundary} = HTTP.FormData.to_body(form)
+      assert boundary == "form-boundary"
+
+      assert HTTP.FormData.get_content_type(form) ==
+               "multipart/form-data; boundary=form-boundary"
+    end
+  end
+
+  describe "multipart header escaping" do
+    test "escapes quote, CR and LF in names and filenames per the WHATWG encoding" do
+      form =
+        HTTP.FormData.new()
+        |> HTTP.FormData.append_field(~s(a"; x="y), "v")
+        |> HTTP.FormData.append_file(
+          "up\rload",
+          "f\r\nContent-Type: text/html\r\n\r\n<script>",
+          "content"
+        )
+        |> Map.put(:boundary, "b")
+
+      expected =
+        "--b\r\n" <>
+          ~s(Content-Disposition: form-data; name="a%22; x=%22y"\r\n\r\nv\r\n) <>
+          "--b\r\n" <>
+          ~s(Content-Disposition: form-data; name="up%0Dload"; ) <>
+          ~s(filename="f%0D%0AContent-Type: text/html%0D%0A%0D%0A<script>"\r\n) <>
+          "Content-Type: application/octet-stream\r\n\r\ncontent\r\n--b--\r\n"
+
+      assert {:multipart, body, "b"} = HTTP.FormData.to_body(form)
+      assert IO.iodata_to_binary(body) == expected
+
+      assert {:ok, %{body: stream, content_length: length}} = HTTP.FormData.to_stream(form)
+      assert Enum.join(stream) == expected
+      assert length == byte_size(expected)
+    end
+
+    test "rejects control characters in a part content type" do
+      for content_type <- ["text/html\r\nX-Injected: 1", "text/plain\n", "text/\0plain", "a\x7f"] do
+        assert_raise ArgumentError, fn ->
+          HTTP.FormData.new() |> HTTP.FormData.append_file("f", "f.txt", "x", content_type)
+        end
+
+        form = %HTTP.FormData{parts: [{:file, "f", "f.txt", content_type, "x"}], boundary: "b"}
+
+        assert_raise ArgumentError, fn -> HTTP.FormData.to_body(form) end
+        assert {:error, :invalid_multipart_content_type} = HTTP.FormData.to_stream(form)
+      end
+
+      form =
+        HTTP.FormData.new()
+        |> HTTP.FormData.append_file("f", "f.txt", "x", "text/plain;\tcharset=utf-8")
+
+      assert {:multipart, _body, _boundary} = HTTP.FormData.to_body(form)
+    end
+  end
+
+  describe "generate_boundary/0" do
+    test "is long, prefixed and drawn from a strong random source" do
+      boundaries = for _ <- 1..64, do: HTTP.FormData.generate_boundary()
+
+      assert length(Enum.uniq(boundaries)) == 64
+
+      for boundary <- boundaries do
+        assert "http-fetch-" <> random = boundary
+        assert byte_size(random) == 32
+        assert {:ok, <<_::binary-size(16)>>} = Base.decode16(random, case: :lower)
+        assert byte_size(boundary) <= 70
+      end
+    end
   end
 end

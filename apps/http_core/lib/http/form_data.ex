@@ -15,7 +15,10 @@ defmodule HTTP.FormData do
 
   - **File stream inputs**: Accepts `File.Stream` values when building multipart bodies
   - **Automatic encoding**: Selects appropriate encoding based on content
-  - **Boundary generation**: Automatically generates unique multipart boundaries
+  - **Boundary generation**: Generates unpredictable multipart boundaries from a
+    cryptographically strong random source
+  - **Header escaping**: Escapes `"`, CR and LF in part names and filenames as
+    `%22`, `%0D` and `%0A` (WHATWG multipart/form-data encoding)
   - **Mixed content**: Support for both text fields and files in the same form
 
   ## Basic Usage
@@ -111,6 +114,9 @@ defmodule HTTP.FormData do
       iex> file_stream = File.stream!("test.txt")
       iex> HTTP.FormData.new() |> HTTP.FormData.append_file("upload", "test.txt", file_stream)
       %HTTP.FormData{parts: [{:file, "upload", "test.txt", "text/plain", %File.Stream{}}], boundary: nil}
+
+  Raises `ArgumentError` when `content_type` is not a binary or contains a
+  control character other than horizontal tab (such as CR, LF or NUL).
   """
   @spec append_file(t(), String.t(), String.t(), File.Stream.t() | String.t(), String.t()) :: t()
   def append_file(
@@ -120,15 +126,19 @@ defmodule HTTP.FormData do
         content,
         content_type \\ "application/octet-stream"
       ) do
+    content_type = valid_content_type!(content_type)
     %{form | parts: parts ++ [{:file, name, filename, content_type, content}]}
   end
 
   @doc """
-  Generates a random boundary for multipart/form-data.
+  Generates an unpredictable boundary for multipart/form-data.
+
+  The boundary is `"http-fetch-"` followed by 16 bytes from
+  `:crypto.strong_rand_bytes/1`, hex encoded (43 characters in total).
   """
   @spec generate_boundary() :: String.t()
   def generate_boundary do
-    "--boundary-#{System.unique_integer([:positive])}"
+    "http-fetch-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
   end
 
   @doc """
@@ -136,6 +146,9 @@ defmodule HTTP.FormData do
 
   Returns {:url_encoded, body} for regular forms or {:multipart, body, boundary} for multipart.
   The multipart body is returned as iodata for memory efficiency with large file uploads.
+
+  Raises `ArgumentError` when a file part's content type contains a control
+  character (see `append_file/5`).
   """
   @spec to_body(t()) :: {:url_encoded, String.t()} | {:multipart, iodata(), String.t()}
   def to_body(%__MODULE__{parts: parts} = form) do
@@ -244,6 +257,14 @@ defmodule HTTP.FormData do
 
   defp stream_part({:file, name, filename, content_type, content}, boundary, chunk_size)
        when is_binary(name) and is_binary(filename) and is_binary(content_type) do
+    if valid_content_type?(content_type),
+      do: stream_file_part(name, filename, content_type, content, boundary, chunk_size),
+      else: {:error, :invalid_multipart_content_type}
+  end
+
+  defp stream_part(_part, _boundary, _chunk_size), do: {:error, :invalid_multipart_part}
+
+  defp stream_file_part(name, filename, content_type, content, boundary, chunk_size) do
     head =
       IO.iodata_to_binary(
         encode_multipart_file_content(boundary, name, filename, content_type, "")
@@ -253,8 +274,6 @@ defmodule HTTP.FormData do
       {:ok, [{:data, head}, segment, {:data, "\r\n"}], byte_size(head) + length + 2}
     end
   end
-
-  defp stream_part(_part, _boundary, _chunk_size), do: {:error, :invalid_multipart_part}
 
   defp stream_content(content, _chunk_size) when is_binary(content),
     do: {:ok, {:data, content}, byte_size(content)}
@@ -309,9 +328,14 @@ defmodule HTTP.FormData do
 
   @doc """
   Gets the appropriate Content-Type header for the form data.
+
+  For multipart forms the value carries the form's own `boundary`, which is the
+  boundary `to_body/1` and `to_stream/2` use. When the form has no boundary, a
+  fresh one is generated here and the encoders generate a different one; set
+  `boundary` on the form, or use the boundary returned by the encoder.
   """
   @spec get_content_type(t()) :: String.t()
-  def get_content_type(%__MODULE__{parts: parts}) do
+  def get_content_type(%__MODULE__{parts: parts} = form) do
     has_file? =
       Enum.any?(parts, fn
         {:file, _, _, _, %File.Stream{}} -> true
@@ -320,7 +344,7 @@ defmodule HTTP.FormData do
       end)
 
     if has_file? do
-      boundary = generate_boundary()
+      boundary = form.boundary || generate_boundary()
       "multipart/form-data; boundary=#{boundary}"
     else
       "application/x-www-form-urlencoded"
@@ -366,7 +390,7 @@ defmodule HTTP.FormData do
   defp encode_multipart_field(boundary, name, value) do
     [
       "--#{boundary}\r\n",
-      "Content-Disposition: form-data; name=\"#{name}\"\r\n\r\n",
+      "Content-Disposition: form-data; name=\"#{escape_disposition(name)}\"\r\n\r\n",
       value
     ]
   end
@@ -374,11 +398,40 @@ defmodule HTTP.FormData do
   defp encode_multipart_file_content(boundary, name, filename, content_type, content) do
     [
       "--#{boundary}\r\n",
-      "Content-Disposition: form-data; name=\"#{name}\"; filename=\"#{filename}\"\r\n",
-      "Content-Type: #{content_type}\r\n\r\n",
+      "Content-Disposition: form-data; name=\"#{escape_disposition(name)}\"; ",
+      "filename=\"#{escape_disposition(filename)}\"\r\n",
+      "Content-Type: #{valid_content_type!(content_type)}\r\n\r\n",
       content
     ]
   end
+
+  # WHATWG multipart/form-data encoding: percent-escape the characters that
+  # would end the quoted-string or the header line.
+  defp escape_disposition(value) do
+    value
+    |> to_string()
+    |> String.replace(["\"", "\r", "\n"], fn
+      "\"" -> "%22"
+      "\r" -> "%0D"
+      "\n" -> "%0A"
+    end)
+  end
+
+  defp valid_content_type!(content_type) do
+    if valid_content_type?(content_type) do
+      content_type
+    else
+      raise ArgumentError, "invalid multipart content type: #{inspect(content_type)}"
+    end
+  end
+
+  defp valid_content_type?(content_type) when is_binary(content_type) do
+    content_type
+    |> :binary.bin_to_list()
+    |> Enum.all?(fn char -> char == ?\t or (char >= 32 and char != 127) end)
+  end
+
+  defp valid_content_type?(_content_type), do: false
 
   defp encode_multipart_file_stream(
          boundary,

@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{:error, reason}`, so a migration to an unusable local address reports
   `{:bind_failed, reason}`. An actor that stops before `open/1` returns can no
   longer kill a non-trapping caller with `:noproc`.
+- `HTTP.FormData.get_content_type/1` (http_core) now uses the form's own
+  `boundary`, so it matches the body `to_body/1` and `to_stream/2` produce for
+  that form.
 
 ### Security
 - The HTTP/1 response field parser (`HTTP.HTTP1`, http_core) now rejects
@@ -48,6 +51,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field and `"Content-Length : 3"` was honoured, a response-desync vector on
   reused connections and in proxy mode. Optional whitespace around values is
   still trimmed.
+- `HTTP.FormData` (http_core) multipart encoding now escapes `"`, CR and LF in
+  part names and filenames as `%22`, `%0D` and `%0A` (WHATWG multipart/form-data
+  encoding), so a filename such as `"f\r\nContent-Type: text/html\r\n\r\n..."`
+  can no longer inject part headers or body content. A part content type with a
+  control character raises `ArgumentError` from `append_file/5` and `to_body/1`
+  and returns `{:error, :invalid_multipart_content_type}` from `to_stream/2`.
+- `HTTP.FormData.generate_boundary/0` now returns `"http-fetch-"` followed by 16
+  hex-encoded bytes from `:crypto.strong_rand_bytes/1`, replacing the
+  sequential, guessable `"--boundary-<integer>"` value.
 
 ## [1.0.0-rc.11] - 2026-11-09
 
