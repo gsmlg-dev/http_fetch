@@ -22,10 +22,10 @@ defmodule QuicHttp3 do
           required(:qpack) => true,
           required(:qpack_profile) => :static_literal,
           required(:qpack_huffman) => true,
-          required(:dynamic_qpack) => false,
-          required(:zero_rtt) => false,
-          required(:connection_migration) => false,
-          required(:websocket_over_http3) => false,
+          required(:dynamic_qpack) => true,
+          required(:zero_rtt) => true,
+          required(:connection_migration) => true,
+          required(:websocket_over_http3) => true,
           required(:webtransport) => false
         }
 
@@ -38,10 +38,13 @@ defmodule QuicHttp3 do
       qpack: true,
       qpack_profile: :static_literal,
       qpack_huffman: true,
-      dynamic_qpack: false,
-      zero_rtt: false,
-      connection_migration: false,
-      websocket_over_http3: false,
+      # Dynamic-table QPACK decoding (RFC 9204); the encoder stays
+      # `qpack_profile: :static_literal`.
+      dynamic_qpack: true,
+      zero_rtt: true,
+      # Exclusive-session migrate/2 only; pooled connections are not migratable.
+      connection_migration: true,
+      websocket_over_http3: true,
       webtransport: false
     }
   end

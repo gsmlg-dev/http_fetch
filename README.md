@@ -495,10 +495,13 @@ body = HTTP.Response.text(response)
 ```
 
 `QuicHttp3.capabilities/0` reports `status: :beta`, `http3: true`, `qpack: true`,
-`qpack_profile: :static_literal` and `qpack_huffman: true`. The session advertises
-zero dynamic-table capacity and zero blocked streams. Dynamic QPACK, 0-RTT,
-connection migration, Alt-Svc/racing, WebSocket over HTTP/3 and WebTransport
-remain unsupported.
+`qpack_profile: :static_literal` (the encoder) and `qpack_huffman: true`, plus
+`dynamic_qpack: true` (dynamic-table decoding, 4096 bytes and 16 blocked streams by
+default), `zero_rtt: true` (opt-in, safe requests), `connection_migration: true`
+(exclusive sessions) and `websocket_over_http3: true`, each verified by an
+independent CI gate. Fetch also offers opt-in Alt-Svc discovery
+(`http_version: :auto, alt_svc: true`). `webtransport` stays `false`: no released
+peer implements draft-17.
 
 Binary and streamed uploads, pooled siblings, informational responses, trailers,
 total request deadlines and cancellation use the shared HTTP/3 runtime.

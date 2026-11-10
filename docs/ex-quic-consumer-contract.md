@@ -69,11 +69,13 @@ capability reporting:
   `qpack_profile: :static_literal` and Huffman support.
 - Fetch and EventSource support explicit verified HTTPS `http_version: :http3`
   through the supervised runtime, without protocol fallback.
-- `QuicHttp3.capabilities()` still reports `dynamic_qpack`, `zero_rtt`,
-  `connection_migration`, `websocket_over_http3` and `webtransport` as false.
-  The HTTP layer's beta features (dynamic-table QPACK decoding, opt-in
-  resumption/0-RTT, WebSocket over HTTP/3 and exclusive-session `migrate/2`)
-  are described in the [Fetch contract](http3-fetch-contract.md) and the
+- `QuicHttp3.capabilities()` reports `dynamic_qpack` (dynamic-table decoding;
+  the encoder stays static/literal), `zero_rtt` (opt-in, safe requests only),
+  `connection_migration` (exclusive sessions only) and `websocket_over_http3`
+  as true; each has an independent CI gate (aioquic 1.2.0 for QPACK, 0-RTT and
+  WebSocket/H3; quic-go/http3 v0.65.0 for migration). `webtransport` stays
+  false: no released peer implements draft-17. See the
+  [Fetch contract](http3-fetch-contract.md) and the
   [extension contract](http3-extensions-contract.md).
 
 The [Fetch contract](http3-fetch-contract.md) defines upload acknowledgements,

@@ -3,7 +3,7 @@ defmodule QuicHttp3Test do
 
   alias QuicHttp3.{Frame, Qpack, Settings, Varint}
 
-  test "reports the HTTP/3 beta profile and explicit unsupported extensions" do
+  test "reports the HTTP/3 beta profile and its accepted extensions" do
     assert %{
              alpn: "h3",
              status: :beta,
@@ -11,10 +11,10 @@ defmodule QuicHttp3Test do
              qpack: true,
              qpack_profile: :static_literal,
              qpack_huffman: true,
-             dynamic_qpack: false,
-             zero_rtt: false,
-             connection_migration: false,
-             websocket_over_http3: false,
+             dynamic_qpack: true,
+             zero_rtt: true,
+             connection_migration: true,
+             websocket_over_http3: true,
              webtransport: false
            } = QuicHttp3.capabilities()
 

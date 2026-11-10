@@ -9,10 +9,13 @@ settings, response framing and QPACK; `QuicHttp3.Transport.Quic` supplies the
 native transport. The shared runtime owns pooling and application delivery.
 
 `QuicHttp3.capabilities/0` reports `status: :beta`, `http3: true`, `qpack: true`,
-`qpack_profile: :static_literal` and `qpack_huffman: true`. The initial profile
-advertises zero dynamic-table capacity and zero blocked streams. Dynamic QPACK,
-0-RTT, connection migration, WebSocket over HTTP/3 and WebTransport are
-explicitly unsupported. Raw `Quic.capabilities().http3` remains `false`.
+`qpack_profile: :static_literal` (the encoder) and `qpack_huffman: true`. It also
+reports `dynamic_qpack: true` (the decoder advertises a 4096-byte dynamic table and
+16 blocked streams by default; `0`/`0` restores the static-only profile),
+`zero_rtt: true` (opt-in, safe requests only), `connection_migration: true`
+(exclusive sessions only) and `websocket_over_http3: true`. `webtransport` stays
+`false` until a draft-17 peer can verify it. Raw `Quic.capabilities().http3`
+remains `false`.
 
 Fetch and EventSource select this runtime explicitly with
 `http_version: :http3`. HTTPS and verified peer identity are required; there is
