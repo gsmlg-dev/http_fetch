@@ -6,6 +6,8 @@ on:
     paths:
       - 'apps/**'
       - 'scripts/http3/**'
+      - 'scripts/http3_websocket/**'
+      - 'scripts/quic_client_features/**'
       - 'mix.exs'
       - 'mix.lock'
       - '.github/workflows/http3-public.yml'
@@ -14,6 +16,8 @@ on:
     paths:
       - 'apps/**'
       - 'scripts/http3/**'
+      - 'scripts/http3_websocket/**'
+      - 'scripts/quic_client_features/**'
       - 'mix.exs'
       - 'mix.lock'
       - '.github/workflows/http3-public.yml'
@@ -64,3 +68,128 @@ jobs:
           name: public-http3-peer-logs
           path: ${{ runner.temp }}/http3-peer-logs
           if-no-files-found: error
+
+  independent-aioquic:
+    name: Independent aioquic Alt-Svc, QPACK and resumption gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: public-http3-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs') }}
+      - name: Prepare complete runtime closure
+        run: |
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+      - name: Alt-Svc auto-HTTP/3 with learning and fallback
+        run: uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/alt_svc_gate.py
+      - name: Dynamic QPACK decoder
+        run: uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/qpack_dynamic_gate.py
+      - name: Resumption, 0-RTT and 425 retry
+        run: uv run --python 3.12 --with aioquic==1.2.0 python scripts/http3/resumption_gate.py
+
+  independent-websocket-h3:
+    name: Independent aioquic and wsproto WebSocket over HTTP/3
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: public-http3-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs') }}
+      - name: Prepare complete runtime closure
+        run: |
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+      - name: WebSocket over HTTP/3 acceptance
+        run: |
+          uv run --python 3.12 --with aioquic==1.2.0 --with wsproto==1.2.0 python scripts/http3_websocket/gate.py
+      - name: WebSocket over HTTP/3 SETTINGS-held acceptance
+        run: |
+          uv run --python 3.12 --with aioquic==1.2.0 --with wsproto==1.2.0 python scripts/http3_websocket/gate.py --hold-settings
+      - name: WebSocket over HTTP/3 SETTINGS-refusal acceptance
+        run: |
+          uv run --python 3.12 --with aioquic==1.2.0 --with wsproto==1.2.0 python scripts/http3_websocket/gate.py --settings-refusal
+
+  independent-quic-client:
+    name: Independent aioquic and quic-go QUIC client features
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '28'
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: public-http3-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock', 'mix.exs') }}
+      - name: Prepare complete runtime closure
+        run: |
+          mix deps.get --check-locked
+          mix compile --warnings-as-errors
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.3'
+          cache: false
+      - name: Build unmodified quic-go v0.62.0 peer
+        run: |
+          set -euo pipefail
+          peer="$RUNNER_TEMP/quic-go-peer"
+          mkdir -p "$peer"
+          cp scripts/quic_client_features/peer.go "$peer/"
+          cd "$peer"
+          go mod init peer
+          GOFLAGS=-mod=mod GOSUMDB=sum.golang.org go get github.com/quic-go/quic-go@v0.62.0
+          GOFLAGS=-mod=mod go build -o peer .
+      - name: Build pinned aioquic peer environment
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/quic-peer-venv"
+          uv pip install --python "$RUNNER_TEMP/quic-peer-venv/bin/python" aioquic==1.2.0
+      - name: Add 127.0.0.2 loopback source address
+        run: ip addr show lo | grep -q '127.0.0.2' || sudo ip addr add 127.0.0.2/8 dev lo
+      - name: Run independent QUIC client gates
+        env:
+          QUIC_GATE_LOG_DIR: ${{ runner.temp }}/quic-client-logs
+        run: |
+          set -euo pipefail
+          mkdir -p "$QUIC_GATE_LOG_DIR"
+          for gate in migration reset resumption-client resumption-server early-client early-server early-migration; do
+            python3 scripts/quic_client_features/wire_gates.py --gate "$gate" \
+              --python "$RUNNER_TEMP/quic-peer-venv/bin/python" \
+              --go-binary "$RUNNER_TEMP/quic-go-peer/peer" 2>&1 | tee "$QUIC_GATE_LOG_DIR/$gate.log"
+          done
+      - name: Preserve independent peer diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quic-client-gate-logs
+          path: ${{ runner.temp }}/quic-client-logs
+          if-no-files-found: warn
