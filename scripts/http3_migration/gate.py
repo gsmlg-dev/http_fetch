@@ -13,6 +13,7 @@ the new path). Usage:
 import argparse
 import json
 import os
+import signal
 from pathlib import Path
 import selectors
 import socket
@@ -46,9 +47,10 @@ def records(text):
 
 
 def build(directory):
-    print(subprocess.run(["go", "version"], check=True, capture_output=True, text=True).stdout.strip())
+    print(subprocess.run(["go", "version"], check=True, capture_output=True, text=True,
+                         timeout=60).stdout.strip())
     pinned = subprocess.run(["go", "list", "-mod=readonly", "-m", "github.com/quic-go/quic-go"], cwd=HERE,
-                            check=True, capture_output=True, text=True).stdout.split()
+                            check=True, capture_output=True, text=True, timeout=120).stdout.split()
     require(pinned == ["github.com/quic-go/quic-go", PINNED_QUIC_GO], f"quic-go pin drifted: {pinned}")
     binary = directory / "peer"
     subprocess.run(["go", "build", "-mod=readonly", "-trimpath", "-o", str(binary), "."], cwd=HERE, check=True,
@@ -90,8 +92,13 @@ def verify(local, remote, ip):
         new = phase["local"]
         host = "127.0.0.2" if phase["phase"] == "ip" else "127.0.0.1"
         require(new.startswith(host + ":") and new != previous, f"{phase['phase']} migrate returned {new}")
-        for item in received:
-            require(item["remote"] == new, f"{phase['phase']} message seen from {item['remote']}, client moved to {new}")
+        # quic-go switches RemoteAddr() only after validating the new path, so the
+        # first small message may still be attributed to the old address; the
+        # large message must arrive on the new path.
+        require(received[0]["remote"] in (new, previous),
+                f"{phase['phase']} message seen from {received[0]['remote']}, client moved to {new}")
+        require(received[1]["remote"] == new,
+                f"{phase['phase']} large message seen from {received[1]['remote']}, client moved to {new}")
         large = received[1]
         size = large["bytes"]
         require(large["sources"].get(new, {}).get("bytes", 0) >= size,
@@ -149,11 +156,20 @@ def run(args):
             reader.start()
 
             port = listening["address"].rsplit(":", 1)[1]
-            client = subprocess.run(["mix", "run", "scripts/http3_migration/gate.exs"], cwd=ROOT,
-                                    env={**os.environ, "MIX_ENV": "test", "HTTP3_PEER_PORT": port,
-                                         "HTTP3_PEER_CA": str(ca), "HTTP3_MIGRATION_IP": "1" if args.ip else "0"},
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=120)
-            print(client.stdout, end="")
+            # Own process group so a timeout kills the BEAM, not just the mix wrapper.
+            client = subprocess.Popen(["mix", "run", "scripts/http3_migration/gate.exs"], cwd=ROOT,
+                                      env={**os.environ, "MIX_ENV": "test", "HTTP3_PEER_PORT": port,
+                                           "HTTP3_PEER_CA": str(ca), "HTTP3_MIGRATION_IP": "1" if args.ip else "0"},
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                      start_new_session=True)
+            try:
+                output, _ = client.communicate(timeout=120)
+            except subprocess.TimeoutExpired:
+                os.killpg(client.pid, signal.SIGKILL)
+                output, _ = client.communicate()
+                print(output, end="")
+                raise
+            print(output, end="")
             require(client.returncode == 0, f"client exit {client.returncode}")
             deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
@@ -164,7 +180,7 @@ def run(args):
             require(peer.poll() is None, "independent peer exited during acceptance")
             with lock:
                 remote_text = "".join(lines)
-            verify(records(client.stdout), records(remote_text), args.ip)
+            verify(records(output), records(remote_text), args.ip)
             print(json.dumps({"event": "independent_gate", "gate": "http3-websocket-migration" + ("-ip" if args.ip else ""),
                               "peer": f"quic-go/http3 {PINNED_QUIC_GO}", "passed": True}))
         except BaseException:
