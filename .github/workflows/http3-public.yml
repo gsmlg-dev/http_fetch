@@ -161,16 +161,14 @@ jobs:
         with:
           go-version: '1.26.3'
           cache: false
-      - name: Build unmodified quic-go v0.62.0 peer
+      - name: Build unmodified quic-go v0.62.0 peer from committed go.sum
         run: |
           set -euo pipefail
-          peer="$RUNNER_TEMP/quic-go-peer"
-          mkdir -p "$peer"
-          cp scripts/quic_client_features/peer.go "$peer/"
-          cd "$peer"
-          go mod init peer
-          GOFLAGS=-mod=mod GOSUMDB=sum.golang.org go get github.com/quic-go/quic-go@v0.62.0
-          GOFLAGS=-mod=mod go build -o peer .
+          mkdir -p "$RUNNER_TEMP/quic-go-peer"
+          cd scripts/quic_client_features
+          test -z "$(gofmt -l .)"
+          GOFLAGS=-mod=readonly go build -trimpath -o "$RUNNER_TEMP/quic-go-peer/peer" .
+          go version -m "$RUNNER_TEMP/quic-go-peer/peer" | grep -E '^[[:space:]]+dep[[:space:]]+github.com/quic-go/quic-go[[:space:]]+v0\.62\.0[[:space:]]'
       - name: Build unmodified quinn 0.11.11 peer from committed Cargo.lock
         run: |
           cargo --version
