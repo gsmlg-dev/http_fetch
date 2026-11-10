@@ -120,13 +120,16 @@ def qlogs(directory):
 
 
 def qlogs_all(directory):
-    """Every peer trace as (client port, events); one endpoint may own several."""
+    """Every peer trace as (client port, events) in connection start order;
+    one endpoint may own several."""
     traces = []
     for path in Path(directory).glob("*_server.sqlog"):
         chunks = [json.loads(chunk) for chunk in path.read_text().split("\x1e") if chunk.strip()]
         started = next(item for item in chunks[1:] if item["name"] == "transport:connection_started")
-        traces.append((str(started["data"]["remote"]["port_v4"]), chunks[1:]))
-    return traces
+        reference = chunks[0]["trace"]["common_fields"]["reference_time"]["wall_clock_time"]
+        traces.append((datetime.fromisoformat(reference).timestamp() + started["time"] / 1000,
+                       str(started["data"]["remote"]["port_v4"]), chunks[1:]))
+    return [(port, events) for _, port, events in sorted(traces, key=lambda trace: trace[0])]
 
 
 def frames(events, direction, kind, stream):
@@ -184,7 +187,8 @@ def verify_reset(gate, local, remote, qlog_dir):
                                       for _, f in resets), resets
                 assert not frames(events, "received", "reset_stream", stream)
                 if item["mode"] == "drop":
-                    # Sent before the window closed, first seen after it: a retransmission.
+                    # Admitted before the drop window closed, first received after it,
+                    # with gaps in the runtime packet numbers quic-go received.
                     assert resets[0][0]["wall_ns"] > item["window_end_ns"] > item["admitted_ns"], (resets[0], item)
                     numbers = sorted(event["data"]["header"]["packet_number"] for event in events
                                      if event["name"] == "transport:packet_received"
@@ -220,7 +224,8 @@ def verify_reset(gate, local, remote, qlog_dir):
                 stops = frames(events, "sent", "stop_sending", stream)
                 assert stops and all(f["error_code"] == item["code"] for _, f in stops), stops
                 if item["repeated"]:
-                    assert len(stops) >= 2, stops
+                    # The drop was armed before quic-go's first STOP_SENDING.
+                    assert len(stops) >= 2 and stops[0][0]["wall_ns"] > item["armed_ns"], (stops, item)
                 answers = frames(events, "received", "reset_stream_at", stream)
                 plain = frames(events, "received", "reset_stream", stream)
                 if negotiated:
@@ -331,6 +336,10 @@ def verify_resumption(gate, local, remote, qlog_dir):
             for echo in (item for item in local if item["event"] == "echo" and item["local"] == address):
                 match = [item for item in mine if item["sha256"] == echo["sha256"] and item["bytes"] == echo["bytes"]]
                 assert len(match) == 1 and match[0]["fin"], (name, echo, match)
+            # One endpoint keeps its port, so it owns one peer trace per connection,
+            # in the same (sequential) order as the runtime's connection indexes.
+            port_traces = [events for port, events in traces if port == address.rsplit(":", 1)[1]]
+            assert len(port_traces) == len(shakes), (name, len(port_traces))
             if spec.get("rejected"):
                 rejected = [item for item in connections if "rejection" in item]
                 assert len(rejected) == 1 and rejected[0]["early_data"] == "rejected", rejected
@@ -338,10 +347,16 @@ def verify_resumption(gate, local, remote, qlog_dir):
                 # explicit re-send did, exactly once.
                 assert not [item for item in mine if item["sha256"] == rejected[0]["early_sha256"]], name
                 assert len([item for item in mine if item["sha256"] == rejected[0]["resent_sha256"]]) == 1, name
-            # One endpoint keeps its port, so it owns one peer trace per connection.
-            port_traces = [events for port, events in traces if port == address.rsplit(":", 1)[1]]
-            assert len(port_traces) == len(shakes), (name, len(port_traces))
+                # ...and that is not vacuous: quic-go did see 0-RTT packets on that
+                # connection (received and discarded, or dropped without keys).
+                zero_rtt = [event for event in port_traces[rejected[0]["index"]]
+                            if event["name"] in ("transport:packet_received", "transport:packet_dropped")
+                            and event["data"].get("header", {}).get("packet_type") == "0RTT"]
+                assert zero_rtt, (name, "no 0-RTT packet reached the peer")
             if spec.get("retry"):
+                # A token on the first Initial can only come from Retry: the runtime
+                # discards NEW_TOKEN (handshake_scheduler.ex, dispatch_frame :new_token)
+                # and never reuses address-validation tokens across connections.
                 for events in port_traces:
                     initial = next(event for event in events if event["name"] == "transport:packet_received"
                                    and event["data"]["header"]["packet_type"] == "initial")

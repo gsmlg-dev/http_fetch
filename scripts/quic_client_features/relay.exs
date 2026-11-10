@@ -38,6 +38,7 @@ defmodule Quic.ClientFeatures.Relay do
           mode: %{c2s: :pass, s2c: :pass},
           late: %{delays: [], held: [], episodes: []},
           held: %{c2s: [], s2c: []},
+          hold_ref: %{c2s: nil, s2c: nil},
           stats: %{
             c2s: %{forwarded: 0, dropped: 0, held: 0, released: 0, holds: []},
             s2c: %{forwarded: 0, dropped: 0, held: 0, released: 0, holds: []}
@@ -107,8 +108,11 @@ defmodule Quic.ClientFeatures.Relay do
 
         state |> update_in([:late, :episodes], &(&1 ++ [episode])) |> loop()
 
-      {:release, direction} ->
-        state |> release(direction) |> loop()
+      # Only the timer of the current hold may release it.
+      {:release, direction, ref} ->
+        if state.hold_ref[direction] == ref,
+          do: state |> release(direction) |> loop(),
+          else: loop(state)
     end
   end
 
@@ -134,8 +138,14 @@ defmodule Quic.ClientFeatures.Relay do
         update_in(state, [:stats, direction, :dropped], &(&1 + 1))
 
       {:hold, max, ms} ->
-        if state.held[direction] == [],
-          do: Process.send_after(self(), {:release, direction}, ms)
+        state =
+          if state.held[direction] == [] do
+            ref = make_ref()
+            Process.send_after(self(), {:release, direction, ref}, ms)
+            put_in(state, [:hold_ref, direction], ref)
+          else
+            state
+          end
 
         state =
           state
@@ -172,6 +182,7 @@ defmodule Quic.ClientFeatures.Relay do
 
         state
         |> put_in([:held, direction], [])
+        |> put_in([:hold_ref, direction], nil)
         |> update_in([:stats, direction, :released], &(&1 + length(held)))
         |> update_in(
           [:stats, direction, :holds],

@@ -252,13 +252,16 @@ defmodule Quic.ClientFeatures.ResetNegative do
   # The peer reads 1000 bytes, then sends STOP_SENDING(77). The relay drops
   # runtime->peer datagrams, so quic-go never sees our ACK or answer and
   # retransmits STOP_SENDING; every answer must be the same RESET_STREAM_AT.
+  # quic-go waits 1.5 s before STOP_SENDING so the drop is armed first even on
+  # a slow host; the gate checks that ordering in quic-go's own trace.
   def stop_repeat(port) do
     session(port, "stop_repeat", fn ctx ->
       {:ok, stream} = Quic.open_stream(ctx.connection, :bidi, reliable_prefix: 1500)
-      header = "stop 1000 77 300\n"
+      header = "stop 1000 77 1500\n"
       payload = header <> pattern(0, 2000 - byte_size(header))
       {:ok, _} = Quic.send_stream(stream, payload, false)
       quiesce(ctx)
+      armed = System.os_time(:nanosecond)
       :ok = Relay.mode(ctx.relay, :c2s, :drop)
       peer = report(ctx, stream)
       expect!(ctx, "peer_stop_sent", peer["code"], 77)
@@ -274,7 +277,8 @@ defmodule Quic.ClientFeatures.ResetNegative do
         code: 77,
         reliable_size: 1500,
         final_size: 2000,
-        repeated: true
+        repeated: true,
+        armed_ns: armed
       })
     end)
   end

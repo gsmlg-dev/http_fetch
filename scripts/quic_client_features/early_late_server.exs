@@ -71,8 +71,13 @@ defmodule Quic.ClientFeatures.EarlyLateServer do
     end
   end
 
-  # Right after an episode was released, record whether that connection still
-  # held its early read keys and is still established.
+  # After an episode was released, record whether that connection is still
+  # established and whether its early read keys were retired. The keys retire
+  # three PTO after the first 1-RTT packet (a runtime deadline observed from
+  # connection state), which can exceed any fixed wait on a loaded host, so the
+  # record waits until at least 200 ms after the release and until the keys are
+  # gone or the observed deadline is two seconds past (bounded, fail-closed:
+  # keys still present are recorded and rejected by the gate).
   def observe(acc, relay) do
     episodes = Relay.stats(relay).late
 
@@ -81,11 +86,12 @@ defmodule Quic.ClientFeatures.EarlyLateServer do
     |> Enum.reduce(acc, fn {episode, index}, acc ->
       with false <- Map.has_key?(acc.observed, index),
            %Quic.Runtime.ConnectionHandle{id: pid} <- Enum.at(acc.connections, index),
-           true <- System.os_time(:nanosecond) - episode.released_ns > 200_000_000 do
-        {phase, data} = :sys.get_state(pid)
-
-        deadline = Map.get(acc.deadlines, index)
-
+           deadline when is_integer(deadline) <- Map.get(acc.deadlines, index),
+           now = System.monotonic_time(:microsecond),
+           true <- now >= episode.released_us + 200_000,
+           {phase, data} <- connection_state(pid),
+           early_keys = Map.has_key?(data.scheduler.keys, :early_data),
+           true <- not early_keys or now >= deadline + 2_000_000 do
         record = %{
           event: "late_episode",
           connection: index,
@@ -93,12 +99,12 @@ defmodule Quic.ClientFeatures.EarlyLateServer do
           delay_ms: episode.delay_ms,
           phase: phase,
           early_data: data.scheduler.early_status,
-          early_keys_after: Map.has_key?(data.scheduler.keys, :early_data),
-          # Server early read keys retire three PTO after the first 1-RTT packet.
-          key_deadline_seen: is_integer(deadline),
+          early_keys_after: early_keys,
+          key_deadline_seen: true,
           key_deadline_us: deadline,
           released_us: episode.released_us,
-          arrived_before_key_retirement: is_integer(deadline) and episode.released_us < deadline
+          observed_us: now,
+          arrived_before_key_retirement: episode.released_us < deadline
         }
 
         emit(record)
@@ -119,6 +125,12 @@ defmodule Quic.ClientFeatures.EarlyLateServer do
         _ -> acc
       end
     end)
+  end
+
+  def connection_state(pid) do
+    :sys.get_state(pid)
+  catch
+    :exit, _ -> :gone
   end
 
   def early_key_deadline(pid) do
