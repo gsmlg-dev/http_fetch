@@ -284,8 +284,9 @@ defmodule HTTP.HTTP3.Pool do
   defp retire_released_owner(state, %{owner: owner, exclusive?: true}, token)
        when is_pid(owner) do
     case state.owners[owner] do
-      %{exclusive?: true, token: ^token} = info ->
-        retire_native(info.cleanup)
+      %{exclusive?: true, token: ^token} ->
+        # The owner closes gracefully before retiring its cleanup lease; the
+        # owner monitor still retires the lease if the owner dies first.
         send(owner, {:http3_retire, self(), token})
         put_in(state.owners[owner].draining, true)
 

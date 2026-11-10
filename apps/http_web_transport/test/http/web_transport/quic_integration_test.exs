@@ -213,12 +213,16 @@ defmodule HTTP.WebTransport.QUICIntegrationTest do
 
   test "local close sends CLOSE_WEBTRANSPORT_SESSION with FIN and confirms cleanup", ctx do
     {transport, peer} = open(ctx)
+    watch_close(peer.conn)
     owner = :sys.get_state(transport.pid).session_ref.owner
     monitor = Process.monitor(owner)
     assert :ok = WebTransport.close(transport, close_code: 9, reason: "bye")
     assert {:ok, %{close_code: 9, reason: "bye"}} = WebTransport.await_closed(transport, 1_000)
-    assert {data, _} = read_all(peer.connect)
-    {:ok, frame, <<>>} = Frame.decode(data)
+    # RFC 9114 section 5.2: the retired exclusive connection then closes with
+    # H3_NO_ERROR, after which the raw server refuses reads, so the capsule is
+    # taken from the frames it decoded.
+    assert {{:application_close, 0x100}, stream} = await_close(peer.conn, now() + 2_000)
+    {:ok, frame, <<>>} = Frame.decode(received(stream, peer.connect.id))
 
     assert {:ok, _, [{:capsule, 0x2843, <<9::32, "bye">>}]} =
              Capsule.feed(Capsule.new(), frame.payload)
@@ -559,6 +563,46 @@ defmodule HTTP.WebTransport.QUICIntegrationTest do
         Process.sleep(5)
         read_all(stream, acc, deadline)
     end
+  end
+
+  # The raw server records a peer close only as `:peer_closed`; the decoded
+  # frame is the observable carrying the application error code.
+  defp watch_close(%{id: connection}) do
+    on_exit(fn -> :erlang.trace_pattern({Quic.Codec, :decode_frames, 2}, false, [:local]) end)
+
+    :erlang.trace_pattern({Quic.Codec, :decode_frames, 2}, [{:_, [], [{:return_trace}]}], [
+      :local
+    ])
+
+    :erlang.trace(connection, true, [:call])
+  end
+
+  defp await_close(%{id: connection} = handle, deadline, stream \\ []) do
+    receive do
+      {:trace, ^connection, :return_from, {Quic.Codec, :decode_frames, 2}, {:ok, frames, _}} ->
+        stream = stream ++ Enum.filter(frames, &(&1.type == :stream))
+
+        case Enum.find(frames, &(&1.type in [:application_close, :connection_close])) do
+          nil -> await_close(handle, deadline, stream)
+          frame -> {{frame.type, frame.error_code}, stream}
+        end
+
+      {:trace, ^connection, _, _, _} ->
+        await_close(handle, deadline, stream)
+
+      {:trace, ^connection, _, _, _, _} ->
+        await_close(handle, deadline, stream)
+    after
+      max(deadline - now(), 0) -> {:no_peer_close, stream}
+    end
+  end
+
+  defp received(frames, id) do
+    frames
+    |> Enum.filter(&(&1.stream_id == id))
+    |> Enum.uniq_by(& &1.offset)
+    |> Enum.sort_by(& &1.offset)
+    |> Enum.map_join(& &1.data)
   end
 
   defp now, do: System.monotonic_time(:millisecond)

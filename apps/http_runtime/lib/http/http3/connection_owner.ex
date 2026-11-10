@@ -418,8 +418,8 @@ defmodule HTTP.HTTP3.ConnectionOwner do
         {:http3_retire, pool, token},
         %{pool: pool, lease_token: token, exclusive?: true} = state
       ) do
-    retire_native(state.cleanup)
-    {:stop, :normal, %{state | lifecycle: :retiring}}
+    # Orderly retirement: terminate closes with H3_NO_ERROR, then retires.
+    {:stop, :normal, state}
   end
 
   def handle_info({:http3_retire, _, _}, state), do: {:noreply, state}
@@ -461,17 +461,30 @@ defmodule HTTP.HTTP3.ConnectionOwner do
   @impl true
   def terminate(reason, state) do
     fail_all(state, {:owner_down, reason})
+    closed? = graceful_close(reason, state) == :ok
 
     if state.cleanup do
       retire_native(state.cleanup)
     else
-      if state.session.connection && state.watchdog,
+      if state.session.connection && state.watchdog && not closed?,
         do: guarded(state, state.timeout, fn -> Session.abort(state.session) end)
     end
 
     stop_watchdog(state.watchdog, state.watchdog_monitor)
     :ok
   end
+
+  # RFC 9114 section 5.2: an orderly client shutdown of an established
+  # connection ends it with an application CONNECTION_CLOSE carrying
+  # H3_NO_ERROR, so the peer need not wait for its idle timeout. The close is
+  # admitted before the cleanup lease is retired, and the watchdog bounds it.
+  defp graceful_close(:normal, %{lifecycle: lifecycle, pending: nil, watchdog: watchdog} = state)
+       when lifecycle in [:ready, :draining] and watchdog != nil do
+    if state.session.connection && state.session.pending == nil,
+      do: guarded(state, state.timeout, fn -> Session.close(state.session) end)
+  end
+
+  defp graceful_close(_reason, _state), do: :skipped
 
   defp tick(%{pending: context} = state) when context != nil,
     do:

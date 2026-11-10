@@ -1368,7 +1368,7 @@ defmodule HTTP.WebSocket.Connection do
   end
 
   defp finish(state, code, reason, clean?) do
-    state = detach(state)
+    state = state |> orderly_retire(clean?) |> detach()
 
     state = %{
       state
@@ -1459,6 +1459,16 @@ defmodule HTTP.WebSocket.Connection do
     transport.setopts(socket, linger: {true, 0})
     transport.close(socket)
   end
+
+  # A clean HTTP/3 close retires the attempt without aborting it. Abort kills the
+  # connection owner, which then cannot end its exclusive connection with
+  # CONNECTION_CLOSE(H3_NO_ERROR) as RFC 9114 section 5.2 asks.
+  defp orderly_retire(%{http_version: :http3} = state, true) do
+    RequestLifecycle.retire_owner(state.attempt_tracker)
+    %{state | attempt_tracker: nil}
+  end
+
+  defp orderly_retire(state, _clean?), do: state
 
   defp reset_idle(state) do
     state = cancel_timer(state, :idle_timer)

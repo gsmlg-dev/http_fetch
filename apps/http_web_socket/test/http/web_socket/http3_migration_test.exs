@@ -5,7 +5,7 @@ defmodule HTTP.WebSocket.HTTP3MigrationTest do
   @moduletag :integration
 
   alias HTTP.WebSocket
-  alias HTTP.WebSocket.Event.{Message, Open}
+  alias HTTP.WebSocket.Event.{Close, Message, Open}
   alias QuicHttp3.{Frame, Qpack, Settings}
 
   @fixture Path.expand("../../../../elixir_quic/test/fixtures/tls", __DIR__)
@@ -58,6 +58,27 @@ defmodule HTTP.WebSocket.HTTP3MigrationTest do
 
     assert :ok = WebSocket.send(socket, "still-usable")
     assert {:text, "still-usable"} = read_ws(peer)
+  end
+
+  # RFC 9114 section 5.2: once the WebSocket closes cleanly, the exclusive
+  # connection ends with CONNECTION_CLOSE(H3_NO_ERROR) instead of idling out.
+  test "a clean exclusive HTTP/3 WebSocket close sends H3_NO_ERROR to the peer", ctx do
+    {socket, peer} = open(ctx, http3_reuse: false)
+    watch_close(peer.conn)
+
+    assert :ok = WebSocket.close(socket, 1000, "done")
+    assert {8, <<1000::16, "done">>} = read_ws(peer)
+    close = <<1000::16, "done">>
+
+    send!(
+      peer.stream,
+      Frame.encode!(:data, <<1::1, 0::3, 8::4, 0::1, byte_size(close)::7, close::binary>>),
+      true
+    )
+
+    assert_receive {WebSocket, ^socket, %Close{code: 1000, was_clean: true}}, 5_000
+    assert {:application_close, 0x100} = await_close(peer.conn, now() + 2_000)
+    assert :ok = HTTP.ClientCompletion.await(WebSocket.completion(socket), 6_000)
   end
 
   test "a pooled HTTP/3 WebSocket refuses migration explicitly", ctx do
@@ -124,6 +145,36 @@ defmodule HTTP.WebSocket.HTTP3MigrationTest do
     :ok = Quic.attach(conn, self())
     on_exit(fn -> Quic.close(conn, 0x100, <<>>) end)
     conn
+  end
+
+  # The raw server records a peer close only as `:peer_closed`; the decoded
+  # frame is the observable carrying the application error code.
+  defp watch_close(%{id: connection}) do
+    on_exit(fn -> :erlang.trace_pattern({Quic.Codec, :decode_frames, 2}, false, [:local]) end)
+
+    :erlang.trace_pattern({Quic.Codec, :decode_frames, 2}, [{:_, [], [{:return_trace}]}], [
+      :local
+    ])
+
+    :erlang.trace(connection, true, [:call])
+  end
+
+  defp await_close(%{id: connection} = handle, deadline) do
+    receive do
+      {:trace, ^connection, :return_from, {Quic.Codec, :decode_frames, 2}, {:ok, frames, _}} ->
+        case Enum.find(frames, &(&1.type in [:application_close, :connection_close])) do
+          nil -> await_close(handle, deadline)
+          frame -> {frame.type, frame.error_code}
+        end
+
+      {:trace, ^connection, _, _, _} ->
+        await_close(handle, deadline)
+
+      {:trace, ^connection, _, _, _, _} ->
+        await_close(handle, deadline)
+    after
+      max(deadline - now(), 0) -> :no_peer_close
+    end
   end
 
   defp send!(stream, bytes, fin), do: assert({:ok, _} = Quic.send_stream(stream, bytes, fin))

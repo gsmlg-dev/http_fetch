@@ -90,6 +90,13 @@ defmodule HTTP.HTTP3.LifecycleTest do
 
     def stop_stream(_, _, _), do: :ok
     def abort(_, _), do: :ok
+
+    def close(connection, code, reason, _) do
+      send(Agent.get(connection.controller, & &1.test), {:native_close, code, reason})
+      :ok
+    end
+
+    def cleanup(_), do: :ok
   end
 
   setup do
@@ -387,6 +394,8 @@ defmodule HTTP.HTTP3.LifecycleTest do
     ConnectionOwner.cancel(owner, first)
     ConnectionOwner.cancel(owner, second)
     assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 1_000
+    # RFC 9114 section 5.2: an orderly drain ends the connection with H3_NO_ERROR.
+    assert_received {:native_close, 0x100, ""}
   end
 
   test "early final headers wait for send-half reconciliation and abandon only blocked writes", %{
@@ -469,6 +478,7 @@ defmodule HTTP.HTTP3.LifecycleTest do
 
     send(owner, :tick)
     assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 1_000
+    assert_received {:native_close, 0x100, ""}
   end
 
   test "subscriber death during unknown opening reconciles then cancels the same stream", %{
