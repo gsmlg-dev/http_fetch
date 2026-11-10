@@ -13,9 +13,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (previously `false` and `local: []`). The M2 client-migration and R1/R2
   resumption/0-RTT independent negative matrices pass in CI against unmodified
   quic-go v0.62.0 and quinn 0.11.11; rows that need a dishonest peer are
-  covered by in-repo tests. Features stay opt-in; no runtime behavior changes.
-  `http3` stays `false` and `HTTP.WebTransport.Profile.supported?/0` stays
-  `false`. See `docs/quic/client-features-validation.md`.
+  covered by in-repo tests. Features stay opt-in; this capability flip (and the
+  matching `SSL.QUIC.capabilities()` flags in ex_ssl) changes no runtime
+  behavior. `http3` stays `false` and `HTTP.WebTransport.Profile.supported?/0`
+  stays `false`. See `docs/quic/client-features-validation.md`.
+- **Contract change (elixir_quic_http3, breaking):** `QuicHttp3.capabilities()`
+  now reports `dynamic_qpack`, `zero_rtt`, `connection_migration` and
+  `websocket_over_http3` as `true` (previously `false`), each backed by an
+  independent CI gate (aioquic 1.2.0, quic-go/http3 v0.65.0). `webtransport`
+  stays `false`: no independent draft-17 peer exists.
+- HTTP/3 connection owners now end an orderly shutdown of an established
+  connection with an application CONNECTION_CLOSE carrying H3_NO_ERROR (0x100)
+  before retiring their cleanup lease (RFC 9114 section 5.2), so peers no longer
+  wait for their idle timeout. The close is sent only when no request remains
+  and is skipped once the owner has already been retired. On exclusive release
+  the pool no longer retires the lease itself; the cleanup receipt now follows
+  the owner's guarded close, bounded by `operation_timeout` (default 1 s). A
+  cleanly closed WebSocket over HTTP/3 retires its attempt without aborting it.
+
+### Fixed
+- `Quic.IO.GenUDP.open/1` no longer kills its caller when the UDP bind fails
+  (`:eaddrinuse`, `:eaddrnotavail`); the failure is returned as
+  `{:error, reason}`, so a migration to an unusable local address reports
+  `{:bind_failed, reason}`. An actor that stops before `open/1` returns can no
+  longer kill a non-trapping caller with `:noproc`.
 
 ## [1.0.0-rc.11] - 2026-11-09
 
