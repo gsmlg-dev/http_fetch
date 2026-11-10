@@ -59,6 +59,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that form.
 
 ### Security
+- Response Content-Encoding decoding is now bounded (decompression bomb). gzip
+  and deflate bodies inflate incrementally with `:zlib.safeInflate/2` and fail
+  with `{:error, :decoded_body_too_large}` (buffered) or a stream error with
+  that reason (streamed) once the decoded body exceeds the new
+  `max_decoded_body_size` fetch option. It accepts positive bytes or
+  `:infinity` and defaults to `HTTP.Config.max_decoded_body_size/0` (ten times
+  the streaming threshold, 50,000,000 bytes). Previously a small compressed
+  response could expand without limit in the request process.
 - The HTTP/1 response field parser (`HTTP.HTTP1`, http_core) now rejects
   obs-fold continuation lines, whitespace between a field name and its colon,
   non-token field names and field values with control characters

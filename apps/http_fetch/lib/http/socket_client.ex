@@ -355,7 +355,8 @@ defmodule HTTP.SocketClient do
 
         {:ok, stream_pid} =
           HTTP.Stream.start_link(content_length, response_encodings(state.request, headers),
-            telemetry: request_telemetry?(state.request)
+            telemetry: request_telemetry?(state.request),
+            max_decoded_body_size: max_decoded_body_size(state.request)
           )
 
         HTTP.RequestLifecycle.attach_stream(HTTP.RequestLifecycle.current(), stream_pid)
@@ -1401,7 +1402,8 @@ defmodule HTTP.SocketClient do
           HTTP.Stream.start_link(
             stream_content_length(headers),
             response_encodings(state.request, headers),
-            telemetry: request_telemetry?(state.request)
+            telemetry: request_telemetry?(state.request),
+            max_decoded_body_size: max_decoded_body_size(state.request)
           )
 
         case HTTP.RequestLifecycle.attach_stream(
@@ -1798,7 +1800,11 @@ defmodule HTTP.SocketClient do
 
   defp start_http1_response_stream(state, content_length, headers) do
     encodings = response_encodings(state.request, headers)
-    opts = [telemetry: request_telemetry?(state.request)]
+
+    opts = [
+      telemetry: request_telemetry?(state.request),
+      max_decoded_body_size: max_decoded_body_size(state.request)
+    ]
 
     if state.request.transport_options[:managed_coordinator] do
       HTTP.Stream.start_writer(content_length, encodings, opts)
@@ -2164,7 +2170,11 @@ defmodule HTTP.SocketClient do
          not Keyword.get(request.transport_options, :decode_body, true) do
       send(parent, {:http_fetch_response, ref, response})
     else
-      case HTTP.ContentDecoder.buffered(response.headers, response.body || "") do
+      case HTTP.ContentDecoder.buffered(
+             response.headers,
+             response.body || "",
+             max_decoded_body_size(request)
+           ) do
         {:ok, body} ->
           send(parent, {:http_fetch_response, ref, Response.with_buffered_body(response, body)})
 
@@ -2172,6 +2182,11 @@ defmodule HTTP.SocketClient do
           send_error(parent, ref, reason)
       end
     end
+  end
+
+  defp max_decoded_body_size(request) do
+    Keyword.get(request.transport_options, :max_decoded_body_size) ||
+      HTTP.Config.max_decoded_body_size()
   end
 
   defp send_error(parent, ref, reason), do: send(parent, {:http_fetch_error, ref, reason})

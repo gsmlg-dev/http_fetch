@@ -189,6 +189,34 @@ defmodule HTTP.FetchOptionsTest do
       end
     end
 
+    test "decoded-size limit accepts positive bytes or infinity" do
+      assert HTTP.FetchOptions.new([]).max_decoded_body_size == nil
+
+      refute Keyword.has_key?(
+               HTTP.FetchOptions.to_transport_options(HTTP.FetchOptions.new([])),
+               :max_decoded_body_size
+             )
+
+      for input <- [
+            [max_decoded_body_size: 1_024],
+            %{"max_decoded_body_size" => 1_024},
+            %{"maxDecodedBodySize" => 1_024}
+          ] do
+        options = HTTP.FetchOptions.new(input)
+        assert options.max_decoded_body_size == 1_024
+        assert HTTP.FetchOptions.to_transport_options(options)[:max_decoded_body_size] == 1_024
+      end
+
+      assert HTTP.FetchOptions.new(max_decoded_body_size: :infinity).max_decoded_body_size ==
+               :infinity
+
+      for value <- [0, -1, "1024", 1.5, :none] do
+        assert_raise ArgumentError, ~r/max_decoded_body_size must be/, fn ->
+          HTTP.FetchOptions.new(max_decoded_body_size: value)
+        end
+      end
+    end
+
     test "rejects invalid duplex mode" do
       assert_raise ArgumentError, ~r/unsupported duplex mode/, fn ->
         HTTP.FetchOptions.new(duplex: :full)

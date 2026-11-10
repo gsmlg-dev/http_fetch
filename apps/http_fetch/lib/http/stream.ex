@@ -11,7 +11,7 @@ defmodule HTTP.Stream do
   defstruct reader: nil,
             producer: nil,
             telemetry: true,
-            decoders: [],
+            decoders: %{layers: [], remaining: :infinity},
             reader_monitor: nil,
             writer: nil,
             idle_timeout: nil,
@@ -40,7 +40,11 @@ defmodule HTTP.Stream do
     start = if writer, do: &Task.start/1, else: &Task.start_link/1
 
     start.(fn ->
-      decoders = HTTP.ContentDecoder.open(encodings)
+      decoders =
+        HTTP.ContentDecoder.open(
+          encodings,
+          Keyword.get(opts, :max_decoded_body_size, HTTP.Config.max_decoded_body_size())
+        )
 
       Process.put(:stream_producer, nil)
 
@@ -355,16 +359,17 @@ defmodule HTTP.Stream do
     state = if chunk == "", do: state, else: reset_idle_deadline(state)
 
     case HTTP.ContentDecoder.decode(state.decoders, chunk) do
-      {:ok, ""} when state.decoders != [] ->
+      {:ok, "", decoders} when decoders.layers != [] ->
         send(sender, {:chunk_ack, ref})
-        loop(state)
+        loop(%{state | decoders: decoders})
 
-      {:ok, decoded} ->
+      {:ok, decoded, decoders} ->
         chunk_size = byte_size(decoded)
         total_bytes = state.total_bytes + chunk_size
         if state.telemetry, do: HTTP.Telemetry.streaming_chunk(chunk_size, total_bytes)
 
         state
+        |> Map.put(:decoders, decoders)
         |> Map.put(:total_bytes, total_bytes)
         |> push_chunk(decoded, {sender, ref})
         |> loop()

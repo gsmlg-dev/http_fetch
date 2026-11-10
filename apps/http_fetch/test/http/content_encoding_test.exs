@@ -6,6 +6,7 @@ defmodule HTTP.ContentEncodingTest do
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer
 
   @json ~s({"message":"decoded"})
+  @bomb_limit [max_decoded_body_size: 100_000]
 
   for protocol <- [:http1, :h2c], streaming? <- [false, true], encoding <- ["gzip", "deflate"] do
     test "#{protocol} #{encoding} streaming=#{streaming?} exposes decoded bytes to all consumers" do
@@ -183,6 +184,36 @@ defmodule HTTP.ContentEncodingTest do
     end
   end
 
+  for protocol <- [:http1, :h2c], encoding <- ["gzip", "deflate"] do
+    test "#{protocol} buffered #{encoding} bomb returns decoded_body_too_large" do
+      bomb = encode(:binary.copy(<<0>>, 1_000_000), unquote(encoding))
+
+      assert bomb_fetch(unquote(protocol), bomb, unquote(encoding), false) ==
+               {:error, :decoded_body_too_large}
+    end
+
+    test "#{protocol} streamed #{encoding} bomb fails consumption with decoded_body_too_large" do
+      bomb = encode(:binary.copy(<<0>>, 1_000_000), unquote(encoding))
+
+      response = bomb_fetch(unquote(protocol), bomb, unquote(encoding), true)
+
+      assert_raise RuntimeError, ~r/decoded_body_too_large/, fn ->
+        HTTP.Response.read_all(response)
+      end
+    end
+  end
+
+  test "the decoded-size limit admits a body of exactly that size" do
+    encoded = :zlib.gzip(@json)
+
+    response =
+      fetch(:http1, encoded, [{"content-encoding", "gzip"}], false,
+        max_decoded_body_size: byte_size(@json)
+      )
+
+    assert response.body == @json
+  end
+
   test "HEAD retains encoding metadata without trying to decode a forbidden body" do
     response =
       fetch(:http1, :zlib.gzip(@json), [{"content-encoding", "gzip"}], false, method: :head)
@@ -240,6 +271,35 @@ defmodule HTTP.ContentEncodingTest do
     on_exit(fn -> if Process.alive?(peer), do: send(peer, :close) end)
 
     HTTP.fetch(url, Keyword.merge([http_version: protocol, timeout: 5_000], opts))
+    |> HTTP.Promise.await()
+  end
+
+  # The shared h2c fixture sends one DATA frame per byte; a compressed bomb is
+  # sent as a single frame so only the decoded-size limit can reject it.
+  defp bomb_fetch(:h2c, bomb, encoding, streaming?) do
+    headers = [{"content-encoding", encoding}]
+
+    headers =
+      if streaming?,
+        do: headers,
+        else: [{"content-length", to_string(byte_size(bomb))} | headers]
+
+    {url, peer} =
+      Peer.start(self(), fn socket ->
+        {id, true} = Peer.request(socket)
+        fields = HPACK.encode_headers([{":status", "200"} | headers]) |> IO.iodata_to_binary()
+        :ok = :gen_tcp.send(socket, [Peer.frame(1, 4, id, fields), Peer.frame(0, 1, id, bomb)])
+      end)
+
+    on_exit(fn -> if Process.alive?(peer), do: send(peer, :close) end)
+    bomb_await(url, :h2c)
+  end
+
+  defp bomb_fetch(:http1, bomb, encoding, streaming?),
+    do: fetch(:http1, bomb, [{"content-encoding", encoding}], streaming?, @bomb_limit)
+
+  defp bomb_await(url, protocol) do
+    HTTP.fetch(url, [http_version: protocol, timeout: 5_000] ++ @bomb_limit)
     |> HTTP.Promise.await()
   end
 

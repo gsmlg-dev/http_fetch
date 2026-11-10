@@ -65,6 +65,26 @@ defmodule HTTP.Config do
   end
 
   @doc """
+  Returns the default limit (in bytes) for a decoded response body.
+
+  Content-Encoding decoding fails with `{:error, :decoded_body_too_large}` once
+  a body inflates past this size, for buffered and streamed responses alike.
+  Requests can override it with the `max_decoded_body_size` fetch option.
+
+  Default: ten times `streaming_threshold/0` (50,000,000 bytes). Configure with
+  `config :http_fetch, :max_decoded_body_size, bytes_or_infinity`.
+
+  ## Examples
+
+      iex> HTTP.Config.max_decoded_body_size()
+      50_000_000
+  """
+  @spec max_decoded_body_size() :: pos_integer() | :infinity
+  def max_decoded_body_size do
+    Application.get_env(:http_fetch, :max_decoded_body_size, 10 * streaming_threshold())
+  end
+
+  @doc """
   Returns the default request timeout in milliseconds.
 
   This is the maximum time the HTTP client will wait for a complete response

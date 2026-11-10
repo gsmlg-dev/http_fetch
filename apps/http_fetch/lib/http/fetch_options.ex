@@ -23,6 +23,13 @@ defmodule HTTP.FetchOptions do
   - `decode_body` - decode response Content-Encoding; defaults to `true`. Set
     `false` to preserve stored entity bytes for buffered and streamed HTTP/1,
     HTTP/2, and HTTP/3 responses without changing headers.
+  - `max_decoded_body_size` - maximum decoded size in bytes of a response body
+    whose Content-Encoding is decoded, as a positive integer or `:infinity`.
+    Defaults to `HTTP.Config.max_decoded_body_size/0` (50,000,000 bytes).
+    Inflation is incremental, so a compression bomb fails with
+    `{:error, :decoded_body_too_large}` (buffered) or a stream error with that
+    reason (streamed) before the expansion is held in memory. Bodies that are
+    not decoded (`decode_body: false`, identity or unknown encodings) are not limited.
   - `stream_response` - set `true` to resolve at final response headers and
     expose an acknowledged body stream, even for small Content-Length bodies.
     Defaults to `false` (automatic size/framing policy). HEAD and bodyless
@@ -179,6 +186,8 @@ defmodule HTTP.FetchOptions do
     "duplex" => :duplex,
     "decode_body" => :decode_body,
     "decodeBody" => :decode_body,
+    "max_decoded_body_size" => :max_decoded_body_size,
+    "maxDecodedBodySize" => :max_decoded_body_size,
     "stream_response" => :stream_response,
     "streamResponse" => :stream_response,
     "headers" => :headers,
@@ -240,6 +249,7 @@ defmodule HTTP.FetchOptions do
             body: nil,
             duplex: nil,
             decode_body: true,
+            max_decoded_body_size: nil,
             stream_response: false,
             telemetry: true,
             signal: nil,
@@ -288,6 +298,7 @@ defmodule HTTP.FetchOptions do
           body: any(),
           duplex: :half | nil,
           decode_body: boolean(),
+          max_decoded_body_size: pos_integer() | :infinity | nil,
           stream_response: boolean(),
           telemetry: boolean(),
           signal: any() | nil,
@@ -352,6 +363,7 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:transport_scope, options.transport_scope)
     |> maybe_add(:telemetry, options.telemetry)
     |> maybe_add(:decode_body, options.decode_body)
+    |> maybe_add(:max_decoded_body_size, options.max_decoded_body_size)
     |> maybe_add(:stream_response, options.stream_response)
     |> maybe_add(:timeout, options.timeout)
     |> maybe_add(:error_mode, options.error_mode)
@@ -451,6 +463,9 @@ defmodule HTTP.FetchOptions do
 
       {:decode_body, decode_body}, acc ->
         %{acc | decode_body: decode_body}
+
+      {:max_decoded_body_size, limit}, acc ->
+        %{acc | max_decoded_body_size: limit}
 
       {:signal, signal}, acc ->
         %{acc | signal: signal}
@@ -582,6 +597,7 @@ defmodule HTTP.FetchOptions do
         redirect: normalize_redirect(options.redirect),
         duplex: normalize_duplex(options.duplex),
         decode_body: normalize_decode_body(options.decode_body),
+        max_decoded_body_size: normalize_max_decoded_body_size(options.max_decoded_body_size),
         stream_response: normalize_stream_response(options.stream_response),
         telemetry: normalize_telemetry(options.telemetry),
         error_mode: normalize_error_mode(options.error_mode),
@@ -767,6 +783,13 @@ defmodule HTTP.FetchOptions do
 
   defp normalize_decode_body(value),
     do: raise(ArgumentError, "invalid decode_body: #{inspect(value)}; expected boolean")
+
+  defp normalize_max_decoded_body_size(limit)
+       when limit in [nil, :infinity] or (is_integer(limit) and limit > 0),
+       do: limit
+
+  defp normalize_max_decoded_body_size(_limit),
+    do: raise(ArgumentError, "max_decoded_body_size must be positive bytes or :infinity")
 
   defp normalize_method(method) do
     case method |> HTTP.Request.method_token() |> String.upcase() do

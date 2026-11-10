@@ -1515,6 +1515,14 @@ Streams are consumed once and preserve backpressure and trailer ordering;
 all response consumers see the same decoded bytes. Manually constructed
 responses are not decoded.
 
+Decoding is incremental and bounded by `max_decoded_body_size` (bytes or
+`:infinity`; default `HTTP.Config.max_decoded_body_size/0`, ten times the
+streaming threshold, 50,000,000 bytes). The limit counts the whole decoded body
+for buffered and streamed responses. A body that inflates past it fails with
+`{:error, :decoded_body_too_large}` (or a stream error with that reason) before
+the expansion is held in memory, which stops compression bombs. Raise the limit
+or pass `:infinity` for large compressed downloads you trust.
+
 For object storage and other byte-preserving consumers, disable decoding per
 request with `decode_body: false`:
 
