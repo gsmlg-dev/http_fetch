@@ -59,6 +59,23 @@ defmodule Quic.IO.GenUDPTest do
     :ok = GenUDP.close(socket)
   end
 
+  test "a failed bind returns its reason without exiting the linked caller" do
+    {:ok, holder} = :gen_udp.open(0, ip: {127, 0, 0, 1})
+    {:ok, held} = :inet.port(holder)
+    parent = self()
+
+    {caller, monitor} =
+      spawn_monitor(fn ->
+        send(parent, {:in_use, GenUDP.open(port: held)})
+        send(parent, {:unavailable, GenUDP.open(ip: {192, 0, 2, 1})})
+      end)
+
+    assert_receive {:in_use, {:error, :eaddrinuse}}, 1_000
+    assert_receive {:unavailable, {:error, :eaddrnotavail}}, 1_000
+    assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}, 1_000
+    :gen_udp.close(holder)
+  end
+
   test "socket is closed when its consumer terminates" do
     owner =
       spawn(fn ->

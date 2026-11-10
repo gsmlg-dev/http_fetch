@@ -35,7 +35,22 @@ defmodule Quic.IO.GenUDP do
       not valid_ip?(ip) or wildcard?(ip) -> {:error, {:invalid_local_address, ip}}
       role not in [:client, :server] -> {:error, :invalid_role}
       not is_pid(opts[:owner]) -> {:error, :invalid_owner}
-      true -> GenServer.start_link(__MODULE__, opts)
+      true -> start_linked(opts)
+    end
+  end
+
+  # A failed bind (for example `:eaddrinuse` or `:eaddrnotavail`) is an
+  # ordinary result. `GenServer.start_link/2` would also deliver the init stop
+  # reason as an exit signal and kill a non-trapping owner, so the actor is
+  # linked only after it has a socket; it monitors its owner from init onward.
+  defp start_linked(opts) do
+    case GenServer.start(__MODULE__, opts) do
+      {:ok, pid} ->
+        Process.link(pid)
+        {:ok, pid}
+
+      error ->
+        error
     end
   end
 
