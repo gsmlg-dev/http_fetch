@@ -84,6 +84,7 @@ defmodule Quic.Recovery do
             cwnd: term(),
             max_datagram_size: term(),
             mss: number(),
+            recovery_start: nil,
             ssthresh: term()
           },
           deadline: nil,
@@ -258,12 +259,11 @@ defmodule Quic.Recovery do
   def pto_duration(state, id) do
     controller = path(state, id)
 
+    # The application-space PTO (RFC 9002 section 6.2.1): Initial and Handshake
+    # deadlines come from `pto_candidates/1`, which omits max_ack_delay per space.
     (controller.rtt.smoothed || @default_rtt) +
       max(1000, 4 * (controller.rtt.variance || div(@default_rtt, 2))) +
-      if(Enum.any?(state.spaces, fn {space, _} -> space == :application end),
-        do: controller.rtt.max_ack_delay,
-        else: 0
-      )
+      controller.rtt.max_ack_delay
   end
 
   @spec reserve(t(), atom(), map(), non_neg_integer()) ::
@@ -513,8 +513,8 @@ defmodule Quic.Recovery do
       space_state = %{space_state | largest_acked: max(space_state.largest_acked, largest)}
       state = %{state | spaces: Map.put(state.spaces, space, space_state)}
       {state, sample} = update_rtt(state, space, ack, acked, at, receive_path)
-      state = apply_congestion(state, newly_acked_bytes, :on_ack)
-      {state, threshold_lost} = detect_packet_threshold(state, space, largest)
+      state = apply_acked(state, newly_acked_bytes)
+      {state, threshold_lost} = detect_packet_threshold(state, space, largest, at)
       {:ok, arm(state), %{acked: acked, lost: threshold_lost, rtt_sample: sample}}
     end
   end
@@ -816,7 +816,7 @@ defmodule Quic.Recovery do
               p = %{p | status: :acked, acked_at: at, metadata: terminal_metadata(p.metadata)}
 
               {%{s | sent: Map.put(s.sent, n, p)}, [n | nums],
-               add_bytes(bytes, p.path_id, p.bytes)}
+               add_acked(bytes, p.path_id, p.bytes, p.sent_at)}
 
             %Packet{status: status} = p when status in [:lost, :superseded] ->
               p = %{p | status: :acked, acked_at: at, metadata: terminal_metadata(p.metadata)}
@@ -912,17 +912,17 @@ defmodule Quic.Recovery do
           if p.status == :sent and is_integer(p.sent_at) and n <= s.largest_acked and
                now - p.sent_at >= loss_delay(st, p.path_id),
              do:
-               {%{ss | sent: Map.put(ss.sent, n, %{p | status: :lost, lost_at: now})}, [n | ns],
-                add_bytes(b, p.path_id, p.bytes)},
+               {%{ss | sent: Map.put(ss.sent, n, declare_lost(p, now))}, [n | ns],
+                add_lost(b, p.path_id, p.bytes, p.sent_at)},
              else: {ss, ns, b}
         end)
 
-      st = apply_congestion(%{st | spaces: Map.put(st.spaces, space, s)}, bytes, :on_loss)
+      st = apply_lost(%{st | spaces: Map.put(st.spaces, space, s)}, bytes, now)
       {st, lost ++ Enum.map(nums, &{space, &1})}
     end)
   end
 
-  defp detect_packet_threshold(state, space, largest) do
+  defp detect_packet_threshold(state, space, largest, now) do
     threshold = largest - 3
     s = state.spaces[space]
 
@@ -930,13 +930,27 @@ defmodule Quic.Recovery do
       Enum.reduce(s.sent, {s, [], %{}}, fn {n, p}, {ss, ns, b} ->
         if p.status == :sent and threshold >= 0 and n <= threshold,
           do:
-            {%{ss | sent: Map.put(ss.sent, n, %{p | status: :lost})}, [n | ns],
-             add_bytes(b, p.path_id, p.bytes)},
+            {%{ss | sent: Map.put(ss.sent, n, declare_lost(p, p.lost_at))}, [n | ns],
+             add_lost(b, p.path_id, p.bytes, p.sent_at)},
           else: {ss, ns, b}
       end)
 
-    state = apply_congestion(%{state | spaces: Map.put(state.spaces, space, s)}, bytes, :on_loss)
+    state = apply_lost(%{state | spaces: Map.put(state.spaces, space, s)}, bytes, now)
     {state, Enum.map(nums, &{space, &1})}
+  end
+
+  # A lost packet without ack-eliciting frames (an ACK-only packet) has nothing
+  # to retransmit, so its record becomes terminal and can be pruned; otherwise
+  # such records accumulate until the sent-history limit stops all sending.
+  defp declare_lost(packet, lost_at) do
+    if Map.get(packet.metadata, :ack_eliciting, true),
+      do: %{packet | status: :lost, lost_at: lost_at},
+      else: %{
+        packet
+        | status: :discarded,
+          lost_at: lost_at,
+          metadata: terminal_metadata(packet.metadata)
+      }
   end
 
   defp loss_delay(state, id) do
@@ -1004,6 +1018,39 @@ defmodule Quic.Recovery do
       update_path(state, id, fn controller ->
         %{controller | congestion: apply(NewReno, operation, [controller.congestion, bytes])}
       end)
+    end)
+  end
+
+  defp apply_acked(state, by_path) do
+    Enum.reduce(by_path, state, fn {id, packets}, state ->
+      update_path(state, id, fn controller ->
+        %{controller | congestion: NewReno.on_packets_acked(controller.congestion, packets)}
+      end)
+    end)
+  end
+
+  defp apply_lost(state, by_path, now) do
+    Enum.reduce(by_path, state, fn {id, {bytes, largest_sent_at}}, state ->
+      update_path(state, id, fn controller ->
+        %{
+          controller
+          | congestion:
+              NewReno.on_packets_lost(controller.congestion, bytes, largest_sent_at, now)
+        }
+      end)
+    end)
+  end
+
+  defp add_acked(by_path, _id, 0, _sent_at), do: by_path
+
+  defp add_acked(by_path, id, bytes, sent_at),
+    do: Map.update(by_path, id, [{bytes, sent_at}], &[{bytes, sent_at} | &1])
+
+  defp add_lost(by_path, _id, 0, _sent_at), do: by_path
+
+  defp add_lost(by_path, id, bytes, sent_at) do
+    Map.update(by_path, id, {bytes, sent_at}, fn {total, newest} ->
+      {total + bytes, max(newest, sent_at)}
     end)
   end
 
