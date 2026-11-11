@@ -154,8 +154,15 @@ defmodule NoOTP.Consumer do
                    "release closure/import/dispatch/runtime isolation is forbidden or unconfirmed"
                  )
 
-        {:ok, :ex_ssl} = HTTP.TLSBackend.resolve()
-        {:error, _legacy_backend_rejected} = HTTP.TLSBackend.resolve(:ssl)
+        # ex_ssl is the only TLS engine: the removed tls_backend option is rejected.
+        :rejected =
+          try do
+            HTTP.fetch("https://127.0.0.1:1/", tls_backend: :ssl)
+            :accepted
+          rescue
+            ArgumentError -> :rejected
+          end
+
         # Public client calls below omit backend overrides to verify their defaults.
         scenarios = Enum.map(config["scenarios"], &scenario(&1, config["nonce"]))
         Map.put(report, :scenarios, scenarios)
