@@ -11,6 +11,8 @@ defmodule SSL.Connection do
   @max_pending_output 1_048_576
   @rearm_reserve 65_536
   @shutdown_timeout 250
+  # Writer errors that only reflect a transport already known to be gone.
+  @dead_transport [:closed, :enotconn, :epipe, :econnreset]
   @alert_codes %{
     unexpected_message: 10,
     bad_record_mac: 20,
@@ -711,8 +713,11 @@ defmodule SSL.Connection do
       ),
       do: output_failed(phase, output, state, :timeout)
 
-  def handle_event(:info, {:write_timeout, token}, _phase, %{write: %{token: token}} = state),
-    do: fail(state, :timeout)
+  def handle_event(:info, {:write_timeout, token}, phase, %{write: %{token: token}} = state) do
+    if unclean_terminal?(state),
+      do: settle_unclean_write(phase, state, {:error, :timeout}),
+      else: fail(state, :timeout)
+  end
 
   def handle_event(
         :info,
@@ -744,6 +749,8 @@ defmodule SSL.Connection do
         } = state
       ) do
     _ = if state.output, do: cancel_timer(state.output.timer)
+    # After an unclean terminal the writer may still own a write; settle it.
+    state = settle_write(state, {:error, state.close_reason})
 
     finish_shutdown(phase, :peer, %{
       state
@@ -1256,11 +1263,40 @@ defmodule SSL.Connection do
   defp transport_terminal(phase, state, terminal) do
     reason = if terminal == :closed, do: :econnreset, else: elem(terminal, 1)
     Socket.mark_terminal(state.socket, false)
+    state = %{state | closed: true, close_reason: reason, armed: false}
 
+    # A duplex write still owned by the writer settles from the writer's own
+    # result: a local send timeout may be what closed the transport. Closing
+    # the transport here would discard that authoritative result.
     state =
-      %{state | closed: true, close_reason: reason, armed: false}
-      |> settle_write({:error, reason})
-      |> close_transport()
+      if writer_owns_write?(state),
+        do: state,
+        else: state |> settle_write({:error, reason}) |> close_transport()
+
+    drain_or_continue(phase, deliver(state))
+  end
+
+  defp writer_owns_write?(%{output: %{kind: :application}, write: write}), do: write != nil
+  defp writer_owns_write?(_state), do: false
+
+  # The in-flight write after an unclean terminal (closed without a peer
+  # close_notify or local shutdown) settles once, then the transport closes and
+  # buffered plaintext stays deliverable. A writer error that only reflects the
+  # dead transport reports the recorded terminal; any other error (such as a
+  # send timeout) is reported as-is.
+  defp unclean_terminal?(%{closed: true, closing: nil}), do: true
+  defp unclean_terminal?(_state), do: false
+
+  defp settle_unclean_write(phase, state, result) do
+    result =
+      case result do
+        :ok when state.write != nil and state.write.cursor == [] -> :ok
+        :ok -> {:error, state.close_reason}
+        {:error, reason} when reason in @dead_transport -> {:error, state.close_reason}
+        error -> error
+      end
+
+    state = state |> settle_write(result) |> close_transport()
 
     drain_or_continue(phase, deliver(state))
   end
@@ -1890,6 +1926,10 @@ defmodule SSL.Connection do
   defp complete_output(phase, %{continuation: :handshake_start}, state),
     do: drain_or_continue(phase, state)
 
+  defp complete_output(phase, %{continuation: :application}, state)
+       when state.closed and state.closing == nil,
+       do: settle_unclean_write(phase, state, :ok)
+
   defp complete_output(phase, %{continuation: :application}, %{write: nil} = state),
     do: drain_or_continue(phase, state)
 
@@ -1920,9 +1960,17 @@ defmodule SSL.Connection do
     _ = cancel_timer(output.timer)
 
     case {state.closing, output.continuation} do
-      {%{kind: :peer}, _} -> finish_shutdown(phase, :peer, state)
-      {_, {:shutdown, kind}} -> finish_shutdown(phase, kind, state)
-      _ -> fail_now(state, reason)
+      {%{kind: :peer}, _} ->
+        finish_shutdown(phase, :peer, state)
+
+      {_, {:shutdown, kind}} ->
+        finish_shutdown(phase, kind, state)
+
+      {nil, :application} when state.closed ->
+        settle_unclean_write(phase, %{state | output: nil}, {:error, reason})
+
+      _ ->
+        fail_now(state, reason)
     end
   end
 

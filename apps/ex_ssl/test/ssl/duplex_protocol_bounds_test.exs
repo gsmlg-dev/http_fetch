@@ -36,6 +36,13 @@ defmodule SSL.DuplexProtocolBoundsTest do
       monitor = Process.monitor(socket.pid)
       send(proxy.task.pid, {unquote(fault), self()})
       assert_receive :fault_injected, 1_000
+
+      # After an EOF the writer that owns the held write settles it (#158).
+      if unquote(fault) == :eof do
+        wait_for_closed(socket.pid, System.monotonic_time(:millisecond) + 1_000)
+        assert true = :erlang.resume_process(pending.writer)
+      end
+
       assert {:error, _reason} = Task.await(sender, 1_000)
       assert_receive {:DOWN, ^monitor, :process, _, :normal}, 1_000
       assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
@@ -217,6 +224,21 @@ defmodule SSL.DuplexProtocolBoundsTest do
     assert :erlang.suspend_process(initial.writer)
     sender = Task.async(fn -> SSL.send(socket, :binary.copy("x", 65_536)) end)
     {sender, held_output(socket.pid, System.monotonic_time(:millisecond) + 1_000)}
+  end
+
+  defp wait_for_closed(pid, deadline) do
+    assert System.monotonic_time(:millisecond) < deadline
+
+    case :sys.get_state(pid) do
+      {_phase, %{closed: true}} ->
+        :ok
+
+      _ ->
+        receive do
+        after
+          1 -> wait_for_closed(pid, deadline)
+        end
+    end
   end
 
   defp held_output(pid, deadline) do

@@ -89,7 +89,51 @@ defmodule SSL.TransportCloseDeliveryTest do
     end
   end
 
-  defp connect_and_close(mode) do
+  # The writer, not the transport terminal, settles a write it already owns: a
+  # local send timeout can close the socket and race its own {:error, :timeout}.
+  describe "unclean close while the writer owns a duplex write" do
+    for {name, writer_result, expected} <- [
+          {"send timeout", {:error, :timeout}, {:error, :timeout}},
+          {"dead transport", {:error, :epipe}, {:error, :econnreset}},
+          {"partial progress", :ok, {:error, :econnreset}}
+        ] do
+      test "#{name} settles the write from the writer after buffered plaintext" do
+        options = [:binary | Keyword.put(tl(Peer.client_options()), :send_timeout, 2_000)]
+        {socket, peer} = connect_and_close(:none, options)
+        await_buffered(socket, byte_size(@body))
+        assert :ok = SSL.enable_duplex_reads(socket)
+        {:connected, %{writer: writer, tcp: tcp}} = :sys.get_state(socket.pid)
+        assert true = :erlang.suspend_process(writer)
+        sender = Task.async(fn -> SSL.send(socket, :binary.copy("x", 65_536)) end)
+        %{output: output} = held_output(socket.pid, System.monotonic_time(:millisecond) + 1_000)
+
+        send(socket.pid, {:tcp_closed, tcp})
+        await_transport_terminal(socket)
+        assert @body == recv_all(socket, [])
+        assert Task.yield(sender, 50) == nil
+
+        send(socket.pid, {:writer_result, writer, output.token, unquote(writer_result)})
+        assert unquote(expected) == Task.await(sender, 1_000)
+        assert {:error, :econnreset} = SSL.recv(socket, 0, 1_000)
+        stop_peer(peer)
+      end
+    end
+  end
+
+  defp held_output(pid, deadline) do
+    assert System.monotonic_time(:millisecond) < deadline
+
+    case :sys.get_state(pid) do
+      {:connected, %{output: %{kind: :application}} = state} ->
+        state
+
+      _ ->
+        Process.sleep(1)
+        held_output(pid, deadline)
+    end
+  end
+
+  defp connect_and_close(mode, client_options \\ Peer.client_options()) do
     parent = self()
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, packet: :raw, reuseaddr: true])
     {:ok, {_address, port}} = :inet.sockname(listener)
@@ -132,7 +176,7 @@ defmodule SSL.TransportCloseDeliveryTest do
         :gen_tcp.close(listener)
       end)
 
-    assert {:ok, socket} = SSL.connect(~c"127.0.0.1", port, Peer.client_options(), 5_000)
+    assert {:ok, socket} = SSL.connect(~c"127.0.0.1", port, client_options, 5_000)
     assert_receive {:peer_sent, peer_pid}, 5_000
 
     case mode do
