@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.14] - 2026-11-11
+
+API freeze for 1.0.0 (see [the 1.0 release criteria](docs/release-1.0-criteria.md)).
+This release contains breaking changes; each is listed below with its replacement.
+
+### Removed
+- **All packages (breaking):** the `tls_backend` option (including the
+  `"tls_backend"`/`"tlsBackend"` aliases) and `config :http_core, :tls_backend`.
+  `ex_ssl` is the only TLS engine. `HTTP.TLSBackend` is removed. Passing
+  `tls_backend` is now an invalid option and raises `ArgumentError`.
+- **http_fetch (breaking):** the `HTTP.Response` `stream` field and the `:stream`
+  key of `HTTP.Response.new/1`. `body` holds the stream pid of a streamed response.
+- **http_fetch (breaking):** the never-set `body_used` field of `HTTP.Response`.
+  Buffered bodies can be re-read; streamed bodies are consumed once (use `clone/1`).
+- **abyss (breaking):** the duplicate `Abyss.DhcpSocket.Native` facade. Call
+  `AbyssDhcpSocket.Native` from `abyss_raw` directly.
+
+### Changed
+- **http_web_socket, http_event_source, http_runtime (breaking):** `delivery: :legacy`
+  is renamed `delivery: :push` (still the default). `:legacy` is no longer accepted.
+  `:ack` is unchanged.
+- **http_fetch (breaking):** `HTTP.fetch/2` raises `ArgumentError` for unknown
+  option keys and for a `signal` that is not an `HTTP.AbortController` pid or `nil`.
+  Unknown keys used to be ignored.
+- **http_web_socket, http_event_source, http_web_transport, http_runtime (breaking):**
+  `HTTP.WebSocket.new/3`, `HTTP.EventSource.new/2`, `HTTP.WebTransport.new/2`,
+  `HTTP.ProtocolClient.connect/2` and `HTTP.Runtime.Pool.start_link/1` raise
+  `ArgumentError` for unknown option keys, malformed init, and invalid or
+  conflicting option values. This replaces construction-time tuples such as
+  `{:error, {:invalid_option, key}}`, `:invalid_options`, `:invalid_connect_timeout`,
+  `{:invalid_limit, key}`, `:invalid_delivery`, `:proxy_requires_http1` and
+  `:incompatible_alpn`; the message names the old reason. Constructors still return
+  `{:error, reason}` for an invalid URL (and WebSocket subprotocols). Keys that were
+  ignored before now raise: WebSocket `http3_resumption`, EventSource `timeout`.
+  WebTransport normalizes string keys in a keyword list like map keys.
+- **http_runtime (breaking):** `HTTP.ProtocolClient.connect/2` returns
+  `{:error, :invalid_url}` (was `:invalid_options`) for a non-`http://` origin,
+  userinfo or fragment.
+- **abyss, hell (breaking):** invalid or unknown start options, including a missing
+  Hell `handler_module`, raise `ArgumentError` (previously `KeyError` or
+  `RuntimeError`).
+- **http_fetch (breaking):** `HTTP.Response.read_all/1`, `text/1`, `arrayBuffer/1`,
+  `array_buffer/1`, `blob/1` and `clone/1` raise `HTTP.ResponseError` (field
+  `reason`) when a streamed body fails or times out, instead of
+  `RuntimeError "stream read failed: ..."`.
+- **http_fetch (breaking):** `HTTP.Response.json/1` and `read_as_json/1` return
+  `{:error, reason}` on a stream failure instead of raising. Invalid JSON still
+  returns `{:error, decode_error}`.
+- **http_fetch (breaking):** `HTTP.Response.write_to/2` returns `{:error, reason}`
+  with the file error (for example `:eisdir`) instead of raising `MatchError`.
+- **http_fetch (breaking):** `HTTP.Promise.await/2` returns `{:error, :await_timeout}`
+  when its own wait expires (was `{:error, :timeout}`). The request keeps running
+  and can be awaited again.
+- **http_fetch (breaking):** request deadline expiry (`timeout:`) is reported as
+  `:timeout` instead of `:request_timeout`: in `HTTP.Promise.await/2` results,
+  `%HTTP.RequestError{}` under `error_mode: :structured`,
+  `[:http_fetch, :request, :exception]` telemetry `error` metadata,
+  `{:stream_error, stream, _}` on response streams, `HTTP.Response` reader errors
+  and `HTTP.Stream.chunk/3` results for upload producers.
+- **http_test (breaking):** `HTTP.Test.gate/4` returns `{:error, :timeout}` (was
+  `{:error, :request_timeout}`) when the request deadline or the gate's own
+  timeout expires.
+- **abyss_raw (breaking):** owner messages carry the socket returned by `open/2`:
+  `{:dhcp_rx, socket, bin}`, `{:arp_rx, socket, bin}`,
+  `{:dhcp_socket_down, socket, reason}` and `{:arp_socket_down, socket, reason}`.
+  The socket is released by `close/1` or when the owner exits (detected within
+  about 1 s), not when the handle is garbage-collected.
+
+### Deprecated
+- **abyss:** the `handler_module:` / `Abyss.Handler` server mode (compile-time
+  warning on `use Abyss.Handler`, one-time runtime warning for `handler_module:`).
+  It still works and is removed in 2.0. Use `Abyss.Endpoint` with
+  `datagram_handler:`.
+
+### Fixed
+- **http_fetch:** `HTTP.Response.write_to/2` no longer leaks the response stream
+  when the destination cannot be opened or written.
+- **http_event_source:** `MessageEvent.origin` uses WHATWG serialization
+  (bracketed canonical IPv6, default port omitted), and same-origin redirect
+  checks compare canonical IPv6 addresses and implicit default ports.
+- **ex_ssl (tests):** `OpenSSLPeer.stop/1` no longer raises "OpenSSL test peer did
+  not terminate" when called from an `on_exit` process that does not own the
+  peer port. The KeyUpdate/backpressure lifecycle tests wait for the server
+  handshake before pausing the proxy.
+
+### Security
+- **http_event_source, http_web_transport:** telemetry `url` metadata no longer
+  contains userinfo, query or fragment, matching Fetch and WebSocket. Handlers
+  that read query parameters from telemetry `url` must stop doing so.
+
+### Documentation
+- Error reason tables for Fetch (README and `HTTP` moduledoc), WebSocket,
+  EventSource, WebTransport (moduledocs and README), Abyss and Hell. `:closed`
+  is documented as covering both a closed client and an unreachable owner.
+- Telemetry events, measurements with units, and metadata are documented for
+  WebSocket, EventSource, WebTransport, `HTTP.Runtime.Telemetry` and Abyss. No
+  event was renamed.
+- Tests pin the remaining ex_ssl unclean-close delivery cases from #158
+  (truncated trailing record, recv with a length, records queued at close).
+
 ## [1.0.0-rc.13] - 2026-11-11
 
 ### Changed
