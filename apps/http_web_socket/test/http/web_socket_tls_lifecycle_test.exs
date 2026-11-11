@@ -148,7 +148,8 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
             assert %HTTP.WebSocket.Event.Error{reason: :timeout} = next_event(socket)
 
           :cancel ->
-            :ok
+            assert %HTTP.WebSocket.Event.Error{reason: :closed_while_connecting} =
+                     next_event(socket)
         end
 
         assert %Close{code: 1006, was_clean: false} = next_event(socket)

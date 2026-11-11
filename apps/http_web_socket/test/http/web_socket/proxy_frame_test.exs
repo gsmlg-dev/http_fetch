@@ -238,7 +238,8 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
       ws = WebSocket.new(url, [], mode: :proxy)
       assert_receive {WebSocket, ^ws, %Open{}}, @timeout
       assert :ok = WebSocket.close(ws, code, reason)
-      event_code = code
+      # An empty peer Close carries no status; it is reported as 1005 (RFC 6455 section 7.1.5).
+      event_code = code || 1005
 
       assert_receive {WebSocket, ^ws,
                       %Close{code: ^event_code, reason: ^reason, was_clean: true}},
