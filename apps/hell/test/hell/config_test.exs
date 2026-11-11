@@ -6,13 +6,13 @@ defmodule Hell.ConfigTest do
 
   describe "server_config exceptions" do
     test "raises exception when handler_module is nil" do
-      assert_raise RuntimeError, fn ->
+      assert_raise ArgumentError, ~r/No handler_module/, fn ->
         ServerConfig.new(port: 4000, handler_module: nil)
       end
     end
 
     test "raises exception when num_listen_sockets > num_acceptors" do
-      assert_raise RuntimeError, fn ->
+      assert_raise ArgumentError, ~r/num_listen_sockets/, fn ->
         ServerConfig.new(
           port: 4000,
           handler_module: __MODULE__,
@@ -31,6 +31,16 @@ defmodule Hell.ConfigTest do
           transport_options: []
         )
       end
+    end
+
+    test "raises ArgumentError for an unknown option" do
+      assert_raise ArgumentError, ~r/unknown Hell option.*:prot/, fn ->
+        ServerConfig.new(handler_module: __MODULE__, prot: 1)
+      end
+    end
+
+    test "start_link and child_spec start paths reject invalid options with ArgumentError" do
+      assert_raise ArgumentError, fn -> Hell.start_link(handler_module: __MODULE__, bogus: 1) end
     end
 
     test "num_listen_sockets defaults to 1" do

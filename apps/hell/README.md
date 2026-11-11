@@ -120,6 +120,25 @@ Hell emits a rich set of telemetry events including spans for each
 server, acceptor process, and individual client connection. These telemetry
 events are documented in the [`Hell.Telemetry`](lib/hell/telemetry.ex) module.
 
+### Error reasons
+
+Invalid options raise `ArgumentError` from `Hell.start_link/1`, `Hell.child_spec/1` and `Hell.ServerConfig.new/1`, including unknown option names and a missing `handler_module`. Runtime results are `{:error, reason}`:
+
+| Reason | Where | Meaning |
+|---|---|---|
+| `:closed` | `Hell.Socket` send/recv, transports | the peer or local side closed the socket |
+| `:timeout` | recv, handshake, `{:error, :timeout, state}` from `handle_data/2` | the read or handshake deadline passed |
+| `{:timeout, rest_data}` | `Hell.Socket.send/2` | send timed out; `rest_data` is the unsent tail |
+| `:system_limit` | transport `listen/1` | resource exhaustion while opening the listener |
+| `:running`, `:restarting` | server shutdown path | the server is already in that state (treated as success) |
+| `:already_exists`, `:not_found` | `Hell.Logger.attach_logger/1`, `detach_logger/1` | the log level is already attached / not attached |
+| `:not_owner`, `:badarg`, `:eof` | `Hell.Socket.controlling_process/2` and sendfile | ownership or argument misuse; end of file |
+| POSIX atoms (`:econnreset`, `:eaddrinuse`, ...) | any socket operation | passed through from the OS unchanged |
+| TLS error terms | handshake, `peercert/1` | passed through from `ex_ssl` unchanged |
+| any term | `{:error, reason, state}` from `handle_data/2` | chosen by the handler; passed to `handle_error/3` |
+
+`:timeout` always means a deadline the server or caller configured; `:closed` also covers owner loss.
+
 ## Implementation Notes
 
 At a top-level, a `Server` coordinates the processes involved in responding to

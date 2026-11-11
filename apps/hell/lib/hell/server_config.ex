@@ -44,6 +44,7 @@ defmodule Hell.ServerConfig do
 
   @spec new(Hell.options()) :: t()
   def new(opts \\ []) do
+    validate_keys!(opts)
     config = struct!(__MODULE__, opts)
     validate_handler_module!(config)
     validate_num_sockets!(config)
@@ -51,17 +52,29 @@ defmodule Hell.ServerConfig do
     config
   end
 
+  defp validate_keys!(opts) do
+    unless Keyword.keyword?(opts) do
+      raise ArgumentError, "configuration must be a keyword list"
+    end
+
+    known = Map.keys(%__MODULE__{})
+
+    case opts |> Keyword.keys() |> Enum.reject(&(&1 in known)) do
+      [] -> :ok
+      unknown -> raise ArgumentError, "unknown Hell option(s): #{inspect(Enum.uniq(unknown))}"
+    end
+  end
+
   defp validate_handler_module!(config) do
     if !config.handler_module do
-      raise("No handler_module defined in server configuration")
+      raise ArgumentError, "No handler_module defined in server configuration"
     end
   end
 
   defp validate_num_sockets!(config) do
     if config.num_listen_sockets > config.num_acceptors do
-      raise(
-        "num_listen_sockets (#{config.num_listen_sockets}) must be less than or equal to num_acceptors (#{config.num_acceptors})"
-      )
+      raise ArgumentError,
+            "num_listen_sockets (#{config.num_listen_sockets}) must be less than or equal to num_acceptors (#{config.num_acceptors})"
     end
   end
 
