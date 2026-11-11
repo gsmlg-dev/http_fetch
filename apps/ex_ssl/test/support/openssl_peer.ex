@@ -65,10 +65,19 @@ defmodule ExSSL.TestSupport.OpenSSLPeer do
   def stop(%{handle: handle, os_pid: os_pid}) do
     case Port.info(handle, :os_pid) do
       {:os_pid, ^os_pid} ->
+        # exit_status goes only to the port owner, and ExUnit runs on_exit
+        # callbacks in a process that does not own the port (the owner's exit
+        # closes it), so also settle on the port's own DOWN.
+        monitor = Port.monitor(handle)
         _ = System.cmd("kill", ["-TERM", Integer.to_string(os_pid)], stderr_to_stdout: true)
 
         receive do
-          {^handle, {:exit_status, _}} -> :ok
+          {^handle, {:exit_status, _}} ->
+            Process.demonitor(monitor, [:flush])
+            :ok
+
+          {:DOWN, ^monitor, :port, ^handle, _} ->
+            :ok
         after
           2_000 -> raise "OpenSSL test peer did not terminate"
         end
