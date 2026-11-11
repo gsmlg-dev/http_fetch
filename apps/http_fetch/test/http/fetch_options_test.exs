@@ -469,10 +469,38 @@ defmodule HTTP.FetchOptionsTest do
       assert %HTTP.FetchOptions{} = options
     end
 
-    test "ignores unknown options" do
-      options = HTTP.FetchOptions.new(custom_option: "value")
-      assert %HTTP.FetchOptions{} = options
-      refute Map.has_key?(options, :custom_option)
+    test "rejects unknown options" do
+      assert_raise ArgumentError, ~r/unknown fetch option: :custom_option/, fn ->
+        HTTP.FetchOptions.new(custom_option: "value")
+      end
+
+      assert_raise ArgumentError, ~r/unknown fetch option: "custom"/, fn ->
+        HTTP.FetchOptions.new(%{"custom" => "value"})
+      end
+
+      assert_raise ArgumentError, ~r/unknown fetch option/, fn ->
+        HTTP.fetch("http://127.0.0.1:1/", metohd: "POST")
+      end
+    end
+
+    test "rejects non-pair entries" do
+      assert_raise ArgumentError, ~r/key, value/, fn -> HTTP.FetchOptions.new([:method]) end
+    end
+
+    test "validates signal" do
+      controller = HTTP.AbortController.new()
+      assert HTTP.FetchOptions.new(signal: controller).signal == controller
+      assert HTTP.FetchOptions.new(signal: nil).signal == nil
+
+      for bad <- ["abort", :controller, make_ref(), %{}] do
+        assert_raise ArgumentError, ~r/invalid signal/, fn ->
+          HTTP.FetchOptions.new(signal: bad)
+        end
+
+        assert_raise ArgumentError, ~r/invalid signal/, fn ->
+          HTTP.fetch("http://127.0.0.1:1/", signal: bad)
+        end
+      end
     end
   end
 end

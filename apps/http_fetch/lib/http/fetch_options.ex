@@ -13,8 +13,10 @@ defmodule HTTP.FetchOptions do
   - `headers` - request headers as a list, map, or `HTTP.Headers`
   - `body` - request body
   - `duplex` - request streaming mode; `:half` or `"half"` for streaming bodies
-  - `signal` - `HTTP.AbortController` PID
+  - `signal` - `HTTP.AbortController` PID (`nil` for none); any other value raises `ArgumentError`
   - `redirect` - `:follow`, `:manual`, or `:error`; defaults to `:follow`
+
+  Unknown option keys raise `ArgumentError`.
 
   The socket transport also accepts Elixir-specific extensions:
 
@@ -560,14 +562,27 @@ defmodule HTTP.FetchOptions do
       {:http2_priority, priority}, acc ->
         %{acc | http2_priority: priority}
 
-      {key, _value}, acc when is_atom(key) or is_binary(key) ->
+      {key, _value}, _acc when is_atom(key) or is_binary(key) ->
         if http2_option_key?(key) do
           raise ArgumentError, "unsupported HTTP/2 option: #{inspect(key)}"
         else
-          acc
+          raise ArgumentError, "unknown fetch option: #{inspect(key)}"
         end
+
+      other, _acc ->
+        raise ArgumentError,
+              "fetch options must be {key, value} pairs with atom or string keys, got: #{inspect(other)}"
     end)
   end
+
+  defp normalize_signal(signal) when signal == nil or is_pid(signal), do: signal
+
+  defp normalize_signal(signal),
+    do:
+      raise(
+        ArgumentError,
+        "invalid signal: #{inspect(signal)}; expected an HTTP.AbortController pid"
+      )
 
   defp normalize_prefer_ipv6(value) when is_boolean(value), do: value
   defp normalize_prefer_ipv6(_value), do: raise(ArgumentError, "prefer_ipv6 must be a boolean")
@@ -595,6 +610,7 @@ defmodule HTTP.FetchOptions do
       | method: normalize_method(options.method),
         request_mode: normalize_request_mode(options.request_mode),
         redirect: normalize_redirect(options.redirect),
+        signal: normalize_signal(options.signal),
         duplex: normalize_duplex(options.duplex),
         decode_body: normalize_decode_body(options.decode_body),
         max_decoded_body_size: normalize_max_decoded_body_size(options.max_decoded_body_size),
