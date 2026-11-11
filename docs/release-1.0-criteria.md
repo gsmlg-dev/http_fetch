@@ -68,3 +68,20 @@ with the gap listed in the package docs.
 4. No new stable-tier bug reported against the final RC for 7 days.
 5. 1.0.0 is cut from that RC's commit with no code changes, only the version bump
    and CHANGELOG.
+
+## S9 API-freeze rulings (2026-11-11)
+
+From the rc.14 public-API review (66 findings, 25 High):
+
+1. Internal modules that are documented today stay public; no `@moduledoc false` sweep.
+2. Removed before 1.0, without deprecation: `HTTP.Response.stream` (use `body`), the
+   `tls_backend` option and `config :http_core, :tls_backend`, and `delivery: :legacy`
+   (renamed `:push`).
+3. Error contract fixed, shapes kept: Response readers raise `HTTP.ResponseError`;
+   `json/1` returns `{:error, reason}` on stream failure; Fetch reports one `:timeout`;
+   `Promise.await/2` reports its own wait timeout as `{:error, :await_timeout}`; invalid
+   options raise `ArgumentError` in every client; each README lists its error reasons.
+4. EventSource and WebTransport telemetry scrub URLs like Fetch and WebSocket; telemetry
+   names and units are documented, not renamed; abyss_raw owner messages carry the
+   socket; the duplicate `Abyss.DhcpSocket.Native` is removed; the Abyss `handler_module`
+   server mode is deprecated (removal in 2.0).
