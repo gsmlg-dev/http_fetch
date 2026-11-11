@@ -1102,18 +1102,7 @@ defmodule Quic.Connection do
         reply(from, :ok)
 
       {:error, {:wrong_encryption_level, type, _} = reason, scheduler} ->
-        frame_type =
-          Map.get(
-            %{
-              ack: 0x02,
-              crypto: 0x06,
-              new_token: 0x07,
-              path_response: 0x1B,
-              handshake_done: 0x1E
-            },
-            type,
-            0
-          )
+        frame_type = wrong_level_frame_type(type)
 
         close_transport_error(%{data | scheduler: scheduler}, from, reason, 0x0A, frame_type)
 
@@ -1138,15 +1127,26 @@ defmodule Quic.Connection do
         close_transport_error(%{data | scheduler: scheduler}, from, reason, 0x0A, frame_type)
 
       {:error, reason, scheduler} ->
-        case authenticated_error_code(reason) do
-          {code, frame_type} ->
-            close_transport_error(%{data | scheduler: scheduler}, from, reason, code, frame_type)
-
-          nil ->
-            stop_with_replies(data, reason, [{:reply, from, {:error, reason}}])
-        end
+        close_authenticated_error(data, scheduler, from, reason)
     end
   end
+
+  defp close_authenticated_error(data, scheduler, from, reason) do
+    case authenticated_error_code(reason) do
+      {code, frame_type} ->
+        close_transport_error(%{data | scheduler: scheduler}, from, reason, code, frame_type)
+
+      nil ->
+        stop_with_replies(data, reason, [{:reply, from, {:error, reason}}])
+    end
+  end
+
+  defp wrong_level_frame_type(:ack), do: 0x02
+  defp wrong_level_frame_type(:crypto), do: 0x06
+  defp wrong_level_frame_type(:new_token), do: 0x07
+  defp wrong_level_frame_type(:path_response), do: 0x1B
+  defp wrong_level_frame_type(:handshake_done), do: 0x1E
+  defp wrong_level_frame_type(_type), do: 0
 
   # RFC 9000 section 20.1 codes for authenticated frame and packet failures that
   # the scheduler reports without a transport code (section 10.2: close, not drop).
