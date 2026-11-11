@@ -338,8 +338,12 @@ defmodule Abyss.Telemetry do
   Track a response being sent.
 
   `metadata` is included in the emitted `[:abyss, :metrics, :response_time]`
-  event; Abyss handlers pass `%{handler: handler_module}`, which is also used
-  as the metrics scope.
+  event. Abyss does not call this itself; applications that measure their own
+  response times report them here. The metrics scope is `:server_id`,
+  `:server_pid` or `:handler` from `metadata`, in that order. Pass
+  `%{server_pid: server}` (the pid returned by `Abyss.start_link/1`) to feed
+  that server's `Abyss.ListenerPoolScaler`; without it, dynamic listener
+  scaling uses handler count only.
   """
   @spec track_response_sent(response_time :: integer(), metadata()) :: :ok
   def track_response_sent(response_time, metadata \\ %{}) when is_integer(response_time) do

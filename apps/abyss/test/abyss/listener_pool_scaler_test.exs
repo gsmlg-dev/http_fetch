@@ -15,6 +15,21 @@ defmodule Abyss.ListenerPoolScalerTest do
     def handle_data(_data, state), do: {:close, state}
   end
 
+  defmodule InFlightHandler do
+    use Abyss.Handler
+
+    @impl true
+    def handle_data({ip, port, data}, state) do
+      send(state.server_config.handler_options[:owner], {:in_flight, self(), data})
+
+      receive do
+        :reply -> :ok = state.server_config.transport_module.send(state.socket, ip, port, data)
+      end
+
+      {:close, state}
+    end
+  end
+
   defmodule OtherHandler do
     use Abyss.Handler
 
@@ -150,6 +165,43 @@ defmodule Abyss.ListenerPoolScalerTest do
 
       assert :ok = ListenerPoolScaler.check_and_scale(scaler)
       assert active_listeners(server) == 2
+    end
+
+    test "scale-down drains in-flight handlers of a removed listener" do
+      server =
+        start_server(
+          handler_module: InFlightHandler,
+          handler_options: [owner: self()],
+          num_listeners: 2,
+          shutdown_timeout: 5_000
+        )
+
+      scaler = Server.listener_pool_scaler_pid(server)
+      listeners = Abyss.ListenerPool.listener_pids(Server.listener_pool_pid(server))
+      {:ok, client} = :gen_udp.open(0, [:binary, active: false])
+      on_exit(fn -> :gen_udp.close(client) end)
+      {:ok, client_port} = :inet.port(client)
+
+      # Admit one in-flight handler on every listener, so the removed one has work.
+      handlers =
+        for listener <- listeners do
+          {socket, _span} = Abyss.Listener.socket_info(listener)
+          send(listener, {:udp, socket, {127, 0, 0, 1}, client_port, "work"})
+          assert_receive {:in_flight, handler, "work"}, 1_000
+          handler
+        end
+
+      scaling = Task.async(fn -> ListenerPoolScaler.check_and_scale(scaler) end)
+      refute Task.yield(scaling, 100)
+      assert Enum.all?(handlers, &Process.alive?/1)
+
+      Enum.each(handlers, &send(&1, :reply))
+      assert :ok = Task.await(scaling)
+      assert active_listeners(server) == 1
+
+      for _ <- handlers do
+        assert {:ok, {{127, 0, 0, 1}, _port, "work"}} = :gen_udp.recv(client, 0, 1_000)
+      end
     end
 
     test "emits scale telemetry events with actual counts" do

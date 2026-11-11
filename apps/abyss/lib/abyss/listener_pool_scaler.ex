@@ -9,7 +9,11 @@ defmodule Abyss.ListenerPoolScaler do
   1. Reads the number of active handler processes from the connection
      supervisor
   2. Reads the average response time from `[:abyss, :metrics, :response_time]`
-     telemetry events emitted by this server's handler module
+     telemetry events whose metadata carries this server's `:server_pid`.
+     Abyss itself never emits these events: unless the application reports
+     response times with
+     `Abyss.Telemetry.track_response_sent(ms, %{server_pid: server})`, the
+     scaler keeps its 100 ms baseline and scaling follows handler count only
   3. Computes the optimal listener count via
      `Abyss.ServerConfig.calculate_optimal_listeners/2`, clamped to
      `min_listeners`..`max_listeners`
@@ -27,9 +31,12 @@ defmodule Abyss.ListenerPoolScaler do
 
   Scaled-up listeners are added to the `Abyss.ListenerPool` supervisor with
   `"listener-dyn-*"` child ids. Scale-down prefers removing those dynamic
-  listeners first, stops each one gracefully via `Abyss.Listener.stop/1`, and
-  deletes its child spec so the pool size stays consistent with what the
-  scaler decided. No scaling is performed while the pool has no running
+  listeners first, drains each one with `Abyss.Listener.drain/2` (new
+  datagrams on it are dropped while admitted handlers finish, bounded by one
+  `shutdown_timeout` deadline per check), then stops it and deletes its child
+  spec so the pool size stays consistent with what the scaler decided. A
+  scale check therefore blocks for up to `shutdown_timeout` while handlers
+  drain. No scaling is performed while the pool has no running
   listeners (e.g. while suspended via `Abyss.suspend/1`).
 
   ## Telemetry
@@ -90,7 +97,8 @@ defmodule Abyss.ListenerPoolScaler do
   """
   @spec check_and_scale(GenServer.server()) :: :ok
   def check_and_scale(scaler) do
-    GenServer.call(scaler, :check_and_scale)
+    # A scale-down drains removed listeners for up to `shutdown_timeout`.
+    GenServer.call(scaler, :check_and_scale, :infinity)
   end
 
   @impl GenServer
@@ -139,9 +147,9 @@ defmodule Abyss.ListenerPoolScaler do
   end
 
   @doc false
-  # Telemetry handler for response_time events. Only accumulates events
-  # emitted by this server's handler module so that multiple Abyss instances
-  # in one node don't pollute each other's metrics.
+  # Telemetry handler for response_time events. Only accumulates events whose
+  # metadata names this server's pid so that multiple Abyss instances in one
+  # node don't pollute each other's metrics.
   @spec handle_response_time(
           :telemetry.event_name(),
           :telemetry.event_measurements(),
@@ -277,6 +285,8 @@ defmodule Abyss.ListenerPoolScaler do
   defp scale_down(pool, current, optimal, state) do
     to_remove = min(current - optimal, @max_scale_down_per_check)
 
+    deadline = drain_deadline(state.server_config.shutdown_timeout)
+
     removed =
       pool
       |> Supervisor.which_children()
@@ -284,7 +294,7 @@ defmodule Abyss.ListenerPoolScaler do
       # Remove dynamically added listeners before the configured baseline
       |> Enum.sort_by(fn {id, _pid, _type, _modules} -> !dynamic_id?(id) end)
       |> Enum.take(to_remove)
-      |> Enum.count(&remove_listener(pool, &1))
+      |> Enum.count(&remove_listener(pool, &1, deadline))
 
     :telemetry.execute(
       [:abyss, :listener_pool, :scale_down],
@@ -298,11 +308,20 @@ defmodule Abyss.ListenerPoolScaler do
   defp dynamic_id?(id) when is_binary(id), do: String.starts_with?(id, @dynamic_id_prefix)
   defp dynamic_id?(_id), do: false
 
-  defp remove_listener(pool, {id, pid, _type, _modules}) do
-    # Stop gracefully first (closes the socket, runs the listener's
-    # terminate/2), then sync the supervisor and drop the child spec so a
+  defp drain_deadline(:infinity), do: :infinity
+  defp drain_deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
+
+  defp remove_listener(pool, {id, pid, _type, _modules}, deadline) do
+    # Drain first: stop admission and let in-flight handlers finish until the
+    # shared shutdown deadline (handlers still running then are killed). Then
+    # stop the listener, sync the supervisor and drop the child spec so a
     # later resume doesn't resurrect it.
-    Abyss.Listener.stop(pid)
+    try do
+      Abyss.Listener.drain(pid, deadline)
+    catch
+      :exit, _ -> :ok
+    end
+
     _ = Supervisor.terminate_child(pool, id)
     Supervisor.delete_child(pool, id) == :ok
   end
