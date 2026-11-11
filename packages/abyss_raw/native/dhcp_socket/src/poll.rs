@@ -6,17 +6,28 @@
 //!
 //! ## Message Format
 //!
-//! - **DHCP**: `{:dhcp_rx, binary}` — raw UDP payload (kernel strips headers).
-//! - **ARP**: `{:arp_rx, binary}` — full Ethernet frame (Linux AF_PACKET).
-//! - **DHCP failure**: `{:dhcp_socket_down, :poll_error | :recv_error |
+//! Every message carries the socket resource (the term `open/2` returned) as
+//! its second element so an owner holding several sockets can tell them apart.
+//!
+//! - **DHCP**: `{:dhcp_rx, socket, binary}` — raw UDP payload (kernel strips headers).
+//! - **ARP**: `{:arp_rx, socket, binary}` — full Ethernet frame (Linux AF_PACKET).
+//! - **DHCP failure**: `{:dhcp_socket_down, socket, :poll_error | :recv_error |
 //!   :socket_error}` — the poll thread exited abnormally; the socket is no
 //!   longer receiving and the owner should close and reopen it.
-//! - **ARP failure**: `{:arp_socket_down, :recv_error | :socket_error}` —
+//! - **ARP failure**: `{:arp_socket_down, socket, :recv_error | :socket_error}` —
 //!   the ARP socket failed; DAD probes are unavailable but DHCP reception
 //!   continues unaffected.
 //!
 //! No message is sent when the thread exits because `close/1` was called or
 //! the owner process died.
+//!
+//! ## Resource ownership
+//!
+//! The thread holds a strong `ResourceArc` to the socket so it can name it in
+//! messages. The resource is therefore no longer reclaimed by garbage
+//! collection of the owner's term: it is released by `close/1`, or when the
+//! thread notices the owner process is gone (checked every poll timeout and on
+//! every failed send), closes the descriptors itself and exits.
 //!
 //! ## Why a Dedicated Thread
 //!
@@ -33,7 +44,8 @@
 //! and never touches the sockets afterwards, so an fd can never be closed
 //! (and its number reused by the kernel) while the thread is still using it.
 
-use rustler::{Atom, Encoder, LocalPid, NewBinary, OwnedEnv};
+use crate::DhcpSocketResource;
+use rustler::{Atom, Encoder, LocalPid, NewBinary, OwnedEnv, ResourceArc};
 use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -57,10 +69,11 @@ pub fn start(
     arp_fd: Option<RawFd>,
     wake_fd: RawFd,
     owner_pid: LocalPid,
+    socket: ResourceArc<DhcpSocketResource>,
     shutdown: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
-        run(udp_fd, arp_fd, wake_fd, owner_pid, shutdown);
+        run(udp_fd, arp_fd, wake_fd, owner_pid, socket, shutdown);
     })
 }
 
@@ -79,6 +92,7 @@ fn run(
     mut arp_fd: Option<RawFd>,
     wake_fd: RawFd,
     owner_pid: LocalPid,
+    socket: ResourceArc<DhcpSocketResource>,
     shutdown: Arc<AtomicBool>,
 ) {
     let mut buf = vec![0u8; MAX_PACKET_SIZE];
@@ -128,6 +142,7 @@ fn run(
             notify(
                 &mut msg_env,
                 &owner_pid,
+                &socket,
                 crate::atoms::dhcp_socket_down(),
                 crate::atoms::poll_error(),
             );
@@ -135,7 +150,13 @@ fn run(
         }
 
         if ret == 0 {
-            continue; // Timeout, loop back to check the shutdown flag.
+            // Timeout. The thread holds a strong reference to the socket, so
+            // it must notice a dead owner itself or the resource would leak.
+            if !msg_env.run(|env| env.is_process_alive(owner_pid)) {
+                crate::release(&socket);
+                return;
+            }
+            continue; // Loop back to check the shutdown flag.
         }
 
         // Wake pipe. A byte is only ever written together with shutdown=true
@@ -162,6 +183,7 @@ fn run(
             notify(
                 &mut msg_env,
                 &owner_pid,
+                &socket,
                 crate::atoms::dhcp_socket_down(),
                 crate::atoms::socket_error(),
             );
@@ -173,9 +195,11 @@ fn run(
                     if !send_packet(
                         &mut msg_env,
                         &owner_pid,
+                        &socket,
                         crate::atoms::dhcp_rx(),
                         &buf[..len],
                     ) {
+                        crate::release(&socket);
                         return; // Owner process died.
                     }
                 }
@@ -184,6 +208,7 @@ fn run(
                     notify(
                         &mut msg_env,
                         &owner_pid,
+                        &socket,
                         crate::atoms::dhcp_socket_down(),
                         crate::atoms::recv_error(),
                     );
@@ -198,6 +223,7 @@ fn run(
                 notify(
                     &mut msg_env,
                     &owner_pid,
+                    &socket,
                     crate::atoms::arp_socket_down(),
                     crate::atoms::socket_error(),
                 );
@@ -208,9 +234,11 @@ fn run(
                         if !send_packet(
                             &mut msg_env,
                             &owner_pid,
+                            &socket,
                             crate::atoms::arp_rx(),
                             &buf[..len],
                         ) {
+                            crate::release(&socket);
                             return; // Owner process died.
                         }
                     }
@@ -219,6 +247,7 @@ fn run(
                         notify(
                             &mut msg_env,
                             &owner_pid,
+                            &socket,
                             crate::atoms::arp_socket_down(),
                             crate::atoms::recv_error(),
                         );
@@ -249,20 +278,32 @@ fn recv_packet(fd: RawFd, buf: &mut [u8]) -> RecvOutcome {
     }
 }
 
-/// Deliver a received packet as `{tag, binary}`. Returns false if the owner
-/// process is no longer alive.
-fn send_packet(env: &mut OwnedEnv, owner: &LocalPid, tag: Atom, data: &[u8]) -> bool {
+/// Deliver a received packet as `{tag, socket, binary}`. Returns false if the
+/// owner process is no longer alive.
+fn send_packet(
+    env: &mut OwnedEnv,
+    owner: &LocalPid,
+    socket: &ResourceArc<DhcpSocketResource>,
+    tag: Atom,
+    data: &[u8],
+) -> bool {
     env.send_and_clear(owner, |env| {
         let mut bin = NewBinary::new(env, data.len());
         bin.as_mut_slice().copy_from_slice(data);
         let bin_term: rustler::Binary = bin.into();
-        (tag, bin_term).encode(env)
+        (tag, socket, bin_term).encode(env)
     })
     .is_ok()
 }
 
-/// Deliver a `{tag, reason}` status message. Send errors (owner already dead)
-/// are ignored — the thread is exiting either way.
-fn notify(env: &mut OwnedEnv, owner: &LocalPid, tag: Atom, reason: Atom) {
-    let _ = env.send_and_clear(owner, |env| (tag, reason).encode(env));
+/// Deliver a `{tag, socket, reason}` status message. Send errors (owner
+/// already dead) are ignored — the thread is exiting either way.
+fn notify(
+    env: &mut OwnedEnv,
+    owner: &LocalPid,
+    socket: &ResourceArc<DhcpSocketResource>,
+    tag: Atom,
+    reason: Atom,
+) {
+    let _ = env.send_and_clear(owner, |env| (tag, socket, reason).encode(env));
 }

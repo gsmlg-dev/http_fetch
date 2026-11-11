@@ -15,15 +15,13 @@ defp deps do
 end
 ```
 
-The package is also usable independently with only `{:abyss_raw, "== 1.0.0-rc.12"}` and direct calls to `AbyssDhcpSocket.Native`. It has no dependency on Abyss. The implementation module `AbyssDhcpSocket.Native`, Rust crate `dhcp_socket`, and NIF registration retain their existing names for compatibility, including with the facade in Abyss 0.8.1. No `abyss_dhcp_socket` Hex dependency is needed.
+The package is also usable independently with only `{:abyss_raw, "== 1.0.0-rc.12"}` and direct calls to `AbyssDhcpSocket.Native`. It has no dependency on Abyss. The implementation module `AbyssDhcpSocket.Native`, Rust crate `dhcp_socket`, and NIF registration retain their existing names. No `abyss_dhcp_socket` Hex dependency is needed.
 
-Build from source with Elixir/Mix, Cargo/Rust, and a native linker. There are no precompiled NIF downloads; installing the package requires the native toolchain. The crate and Cargo.lock are preserved from Abyss. Its shared library belongs to `:abyss_raw` under `priv/native/dhcp_socket`, never the core application. The package does not ship `Abyss.DhcpSocket.Native` or require a dependency cycle.
+Build from source with Elixir/Mix, Cargo/Rust, and a native linker. There are no precompiled NIF downloads; installing the package requires the native toolchain. The crate and Cargo.lock are preserved from Abyss. Its shared library belongs to `:abyss_raw` under `priv/native/dhcp_socket`, never the core application. The `Abyss.DhcpSocket.Native` facade was removed from Abyss; call `AbyssDhcpSocket.Native` directly.
 
 The five operations are `open/2`, `send_broadcast/2`, `send_unicast/3`, `send_arp_probe/2`, and `close/1`. `open(interface, owner)` returns an opaque resource directly or `{:error, reason}`. Sends return `:ok` or `{:error, reason}`; `close/1` is idempotent. DHCP binds UDP port 68 and sends to port 67. Linux raw ARP needs `CAP_NET_RAW`; binding low ports may need `CAP_NET_BIND_SERVICE`. The implementation targets Unix systems; Windows is unsupported. macOS/FreeBSD raw ARP remains unavailable, as before. FreeBSD compiles, but interface binding (`IP_BOUND_IF` is macOS-only) is unsupported there, so `open/2` returns an error. Packets up to 65535 bytes are delivered untruncated. The send functions take binaries, not iodata.
 
-Owner messages remain `{:dhcp_rx, binary}`, `{:arp_rx, binary}`, `{:dhcp_socket_down, reason}`, and `{:arp_socket_down, reason}`. Explicit close sends no down message. Owner death is observed when packet delivery fails; resource cleanup or explicit `close/1` closes the descriptors. Do not infer immediate native reclamation from process death.
-
-The Abyss 0.9.0 facade reports `{:error, {:missing_optional_dependency, :abyss_raw}}` when this package is absent, and `{:error, {:optional_dependency_load_failed, :abyss_raw, reason}}` when its module cannot load. Native operation errors pass through unchanged.
+Owner messages carry the socket (the term `open/2` returned) as the second element: `{:dhcp_rx, socket, binary}`, `{:arp_rx, socket, binary}`, `{:dhcp_socket_down, socket, reason}`, and `{:arp_socket_down, socket, reason}`. Explicit close sends no down message. The poll thread holds a reference to the socket, so dropping the term does not release it: call `close/1`, or exit the owner process, in which case the thread notices within about a second (or on the next failed delivery), closes the descriptors and exits. Without the optional package installed, `AbyssDhcpSocket.Native` is simply not loaded; guard with `Code.ensure_loaded?/1`.
 
 Run independent validation:
 

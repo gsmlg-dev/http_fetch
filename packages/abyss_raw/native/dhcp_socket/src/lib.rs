@@ -23,10 +23,10 @@
 //!   |                                  +-- ARP socket fd (raw, ETH_P_ARP)
 //!   |                                  +-- poll thread handle
 //!   |
-//!   |<-- {:dhcp_rx, binary}           <-- poll thread (via enif_send)
-//!   |<-- {:arp_rx, binary}            <-- poll thread (via enif_send)
-//!   |<-- {:dhcp_socket_down, reason}  <-- poll thread exited abnormally
-//!   |<-- {:arp_socket_down, reason}   <-- ARP degraded, DHCP still running
+//!   |<-- {:dhcp_rx, res, binary}          <-- poll thread (via enif_send)
+//!   |<-- {:arp_rx, res, binary}           <-- poll thread (via enif_send)
+//!   |<-- {:dhcp_socket_down, res, reason} <-- poll thread exited abnormally
+//!   |<-- {:arp_socket_down, res, reason}  <-- ARP degraded, DHCP still running
 //!   |
 //!   |-- send_broadcast(res, pkt)
 //!   |-- send_unicast(res, ip, pkt)
@@ -67,8 +67,10 @@ pub struct DhcpSocketResource {
     inner: Mutex<Option<SocketInner>>,
 }
 
-/// Clean up on garbage collection (when Elixir code forgot to call `close/1`).
-/// Uses the same wake-join-close teardown as `close/1`: the wake pipe forces
+/// Clean up when the last reference goes away. The poll thread holds one, so
+/// this runs after `close/1` (the thread exits and drops it) or after the
+/// thread notices the owner process died; it can even run on the poll thread
+/// itself, which must not join itself (see `teardown`). Uses the same wake-join-close teardown as `close/1`: the wake pipe forces
 /// `poll(2)` to return immediately, so the join is bounded by roughly one
 /// loop iteration and does not meaningfully block the scheduler.
 impl Drop for DhcpSocketResource {
@@ -127,8 +129,12 @@ fn teardown(mut inner: SocketInner) {
 
     // The thread checks the shutdown flag right after poll(2) returns, so
     // this join completes within roughly one loop iteration.
+    // When the poll thread itself dropped the last reference (owner died) it
+    // is already past its loop and cannot be joined from itself.
     if let Some(handle) = inner.poll_handle.take() {
-        let _ = handle.join();
+        if handle.thread().id() != std::thread::current().id() {
+            let _ = handle.join();
+        }
     }
 
     // The poll thread has exited; nothing references these fds anymore.
@@ -140,6 +146,18 @@ fn teardown(mut inner: SocketInner) {
         }
         libc::close(inner.wake_read);
         libc::close(inner.wake_write);
+    }
+}
+
+/// Called by the poll thread when the owner process is gone: closes the
+/// sockets now rather than whenever the owner's term is collected. Uses
+/// `try_lock` because `close/1` holds the lock while joining this thread; in
+/// that case the teardown is already underway.
+pub(crate) fn release(socket: &ResourceArc<DhcpSocketResource>) {
+    if let Ok(mut guard) = socket.inner.try_lock() {
+        if let Some(inner) = guard.take() {
+            teardown(inner);
+        }
     }
 }
 
@@ -159,7 +177,8 @@ unsafe impl Sync for DhcpSocketResource {}
 ///
 /// Creates a UDP broadcast socket (port 68), optionally an ARP socket for DAD,
 /// and starts a background poll thread that delivers received packets to
-/// `owner_pid` as `{:dhcp_rx, binary}` and `{:arp_rx, binary}` messages.
+/// `owner_pid` as `{:dhcp_rx, socket, binary}` and `{:arp_rx, socket, binary}`
+/// messages, where `socket` is the resource returned by this function.
 #[rustler::nif(schedule = "DirtyIo")]
 fn open(interface: String, owner_pid: LocalPid) -> Result<ResourceArc<DhcpSocketResource>, Error> {
     // 1. Create UDP socket (required — failure is fatal).
@@ -186,9 +205,21 @@ fn open(interface: String, owner_pid: LocalPid) -> Result<ResourceArc<DhcpSocket
         }
     };
 
-    // 5. Start the poll thread.
+    // 5. Start the poll thread. It gets its own strong reference to the
+    // resource so it can name the socket in every owner message; the inner
+    // state is filled in below, before the resource is returned.
     let shutdown = Arc::new(AtomicBool::new(false));
-    let poll_handle = poll::start(udp_fd, arp_fd, wake_read, owner_pid, shutdown.clone());
+    let resource = ResourceArc::new(DhcpSocketResource {
+        inner: Mutex::new(None),
+    });
+    let poll_handle = poll::start(
+        udp_fd,
+        arp_fd,
+        wake_read,
+        owner_pid,
+        resource.clone(),
+        shutdown.clone(),
+    );
 
     let inner = SocketInner {
         interface,
@@ -201,9 +232,8 @@ fn open(interface: String, owner_pid: LocalPid) -> Result<ResourceArc<DhcpSocket
         mac,
     };
 
-    Ok(ResourceArc::new(DhcpSocketResource {
-        inner: Mutex::new(Some(inner)),
-    }))
+    *resource.inner.lock().unwrap() = Some(inner);
+    Ok(resource)
 }
 
 /// Send a DHCP packet as a broadcast to 255.255.255.255:67.
@@ -242,7 +272,7 @@ fn send_unicast(
 ///
 /// Constructs an ARP REQUEST with sender IP 0.0.0.0 (probe) and sends it
 /// on the raw ARP socket. If a reply is received by the poll thread
-/// (`{:arp_rx, binary}`), the address is already in use.
+/// (`{:arp_rx, socket, binary}`), the address is already in use.
 #[rustler::nif(schedule = "DirtyIo")]
 fn send_arp_probe(
     resource: ResourceArc<DhcpSocketResource>,

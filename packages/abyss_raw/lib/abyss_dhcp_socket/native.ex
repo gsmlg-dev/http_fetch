@@ -12,16 +12,21 @@ defmodule AbyssDhcpSocket.Native do
   A background poll thread delivers messages to the `owner` pid passed to
   `open/2`:
 
-  - `{:dhcp_rx, binary}` - received DHCP packet (raw UDP payload)
-  - `{:arp_rx, binary}` - received ARP frame (full Ethernet frame)
-  - `{:dhcp_socket_down, :poll_error | :recv_error | :socket_error}` - the
+  Every message carries the socket (the term `open/2` returned) as its second
+  element, so an owner holding several sockets can tell them apart:
+
+  - `{:dhcp_rx, socket, binary}` - received DHCP packet (raw UDP payload)
+  - `{:arp_rx, socket, binary}` - received ARP frame (full Ethernet frame)
+  - `{:dhcp_socket_down, socket, :poll_error | :recv_error | :socket_error}` - the
     poll thread exited abnormally; the socket no longer receives packets and
     the owner should `close/1` it and open a new one
-  - `{:arp_socket_down, :recv_error | :socket_error}` - the ARP socket
+  - `{:arp_socket_down, socket, :recv_error | :socket_error}` - the ARP socket
     failed; DAD probes are unavailable but DHCP reception continues
 
   No message is sent when the thread exits due to `close/1` or because the
-  owner process died.
+  owner process died. The poll thread keeps the socket alive, so it is released
+  by `close/1` or when the owner exits (detected within about a second); it is
+  not released merely because the caller dropped its reference.
   """
 
   use Rustler,
