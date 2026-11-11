@@ -322,6 +322,25 @@ defmodule Quic.StreamsTest do
     assert state.ready == %{}
   end
 
+  test "STREAM data after local STOP_SENDING is not queued and its connection credit is released" do
+    state = Streams.new(:client, delivery: :manual, max_data: 8, max_stream_data: 8)
+    assert {:ok, state, []} = receive_stream(state, 1, 0, "ab")
+    assert {:ok, state, %{type: :stop_sending}} = Streams.stop_sending(state, 1, 5)
+    {state, _} = Streams.take_credit(state)
+
+    assert {:ok, state, events} = receive_stream(state, 1, 2, "cd")
+    refute Enum.any?(events, &match?({:data, _, _}, &1))
+    assert Enum.all?(state.ready, fn {_id, queued} -> queued == [] end)
+    assert state.ready_bytes == 0
+
+    {state, frames} = Streams.take_credit(state)
+    assert %{type: :max_data, value: 12} in frames
+
+    # Flow control and the final size are still enforced for the stopped stream.
+    assert {:error, :flow_control} = receive_stream(state, 1, 4, "efghijkl")
+    assert {:error, :final_size_error} = receive_stream(state, 1, 0, "ab", true)
+  end
+
   test "emits one FIN and rejects final sizes below received high water" do
     state = Streams.new(:client, max_buffer: 32)
     assert {:ok, state, []} = receive_stream(state, 1, 3, "def")

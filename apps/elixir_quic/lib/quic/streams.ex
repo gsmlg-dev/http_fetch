@@ -315,28 +315,50 @@ defmodule Quic.Streams do
           {:error, _} = error -> error
         end
       else
-        with :ok <- receive_bounds(state, stream, offset, data),
-             :ok <- consistent_final(stream, offset + byte_size(data), fin),
-             {:ok, state, stream} <- account_receive(state, stream, offset + byte_size(data)),
-             stream <- %{
-               stream
-               | recv_final: if(fin, do: offset + byte_size(data), else: stream.recv_final),
-                 recv_highest: max(stream.recv_highest, offset + byte_size(data))
-             },
-             {offset, data} <- reliable_chunk(stream, offset, data),
-             {:ok, stream} <- insert_chunk(state, stream, offset, data),
-             {:ok, stream, events} <- consume_chunks(stream, id) do
-          next = %{state | streams: Map.put(state.streams, id, stream)}
-
-          deliver_received_events(next, id, events)
-        else
-          {:error, _} = error -> error
-        end
+        receive_open(state, stream, id, offset, data, fin)
       end
     end
   end
 
   def receive(_, _), do: {:error, :invalid_stream_frame}
+
+  defp receive_open(state, stream, id, offset, data, fin) do
+    with :ok <- receive_bounds(state, stream, offset, data),
+         :ok <- consistent_final(stream, offset + byte_size(data), fin),
+         {:ok, state, stream} <- account_receive(state, stream, offset + byte_size(data)),
+         stream <- %{
+           stream
+           | recv_final: if(fin, do: offset + byte_size(data), else: stream.recv_final),
+             recv_highest: max(stream.recv_highest, offset + byte_size(data))
+         },
+         {offset, data} <- reliable_chunk(stream, offset, data),
+         {:ok, stream} <- insert_chunk(state, stream, offset, data),
+         {:ok, stream, events} <- consume_chunks(stream, id) do
+      {stream, events, released} = discard_stopped_data(stream, events)
+
+      next =
+        %{state | streams: Map.put(state.streams, id, stream)}
+        |> release_connection_credit(released)
+
+      deliver_received_events(next, id, events)
+    else
+      {:error, _} = error -> error
+    end
+  end
+
+  # RFC 9000 section 3.5: after a local STOP_SENDING, later STREAM data is still
+  # checked against flow control and the final size, but it is never queued for
+  # the application and its connection credit is released at once, so unread
+  # bytes cannot block the peer. Reassembly continues so a reliable reset prefix
+  # still completes.
+  defp discard_stopped_data(%Stream{receive_stopped: nil} = stream, events),
+    do: {stream, events, 0}
+
+  defp discard_stopped_data(stream, events) do
+    released = stream.recv_accounted - stream.recv_consumed
+    events = Enum.reject(events, &match?({:data, _, _}, &1))
+    {%{stream | recv_consumed: stream.recv_accounted}, events, released}
+  end
 
   defp deliver_received_events(next, id, events) do
     case retain_events(next, id, events) do
