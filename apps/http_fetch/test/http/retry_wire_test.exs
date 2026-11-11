@@ -139,8 +139,10 @@ defmodule HTTP.RetryWireTest do
     :telemetry.attach_many(
       id,
       events,
+      # Handlers run in the emitting Promise worker; forward only this test's fetch.
       fn event, measurements, metadata, _ ->
-        send(parent, {ref, event, measurements, metadata})
+        if parent in Process.get(:"$callers", []),
+          do: send(parent, {ref, event, measurements, metadata})
       end,
       nil
     )
