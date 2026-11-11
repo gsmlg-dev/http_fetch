@@ -483,3 +483,50 @@ literals; the WebTransport options reject pooling and socket options. These add
 only literal calls. The HTTP review now has 84 occurrences. The complete compiled
 inventory of a locally built isolated candidate release matches the five reviews
 exactly at 207 sites.
+
+### Follow-up: rc.14 production changes (2026-11-11)
+
+The production changes after `v1.0.0-rc.13` (`5b1adbd`, reviewed at `722a99a`)
+change twenty selected HTTP inputs and delete a twenty-first. `HTTP.TLSBackend`
+is removed with the `tls_backend` option and its `:http_core` configuration
+(`c7fada8`). Its `resolve/1` accepted only `:ex_ssl` and its `transport/1`
+returned only `HTTP.Transport.ExSSL`. The four former `transport/1` calls are now
+the literal `HTTP.Transport.ExSSL`: two in `Dialer.select_transport/2` and one
+each in `select_transport/1` for EventSource and WebSocket. The HTTP-1, HTTP-3,
+HTTP-4 and HTTP-9 TLS selectors therefore name a literal module instead of
+calling a resolver with one value. The deleted file leaves the selected inputs
+and the census. It is recorded under `removed_selected_inputs`. The census stays
+at 267 files because `HTTP.ResponseError` is added. That file holds only literal
+code and is not a selected input.
+
+No dynamic dispatch is added or removed. These sites keep their expressions,
+retained selectors and owning functions, and move:
+
+- 12 HTTP-4 `HTTP.SocketClient` sites by 5, 6 or 10 lines;
+- 12 HTTP-6 `HTTP.HTTP1.Pool` sites by 1 line;
+- 9 HTTP-3 `HTTP.EventSource.Connection` sites by 2 or 5 lines;
+- 5 HTTP-9 `HTTP.WebSocket.Connection` sites by 3 lines;
+- the 2 HTTP-5 `HTTP.Promise` invocations (106, 207) by 3 lines.
+
+The rc.11 amendment did not rebind the HTTP-6 pool sites, so they are added to
+its `occurrence_rebindings` with their rc.11 lines as `previous_line`. The
+history rewind still restores them. The Dialer sites (145–151) and WebSocket
+sites 155–156 keep their lines.
+
+The other changes add only literal calls, guards and key lists:
+
+- strict options: Fetch, EventSource, WebSocket, WebTransport, ProtocolClient and
+  `Runtime.Pool` raise `ArgumentError` for unknown or invalid options (`bcbc0e9`,
+  `f261a03`);
+- Fetch reports deadline expiry as `:timeout` (`c7a3c19`) and `Promise.await/2`
+  reports its own wait expiry as `:await_timeout` (`8f35305`);
+- the `:legacy` delivery mode is renamed `:push` (`c222551`);
+- EventSource origins use WHATWG serialization (`914d2b6`);
+- the remaining edits are documentation.
+
+The HTTP/1 pool now uses provider checkout whenever a request lifecycle is
+current. The managed scope uses `:birth` for every https origin. Neither change
+selects a transport module. `options.backend` is still the only WT-1 backend
+producer. The HTTP review still has 84 occurrences. The compiled inventory of a
+locally built isolated candidate release matches the five reviews exactly at
+207 sites.

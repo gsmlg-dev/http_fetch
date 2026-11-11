@@ -368,3 +368,11 @@ They make only literal local calls and state updates. The two hunks net to zero
 lines, so the seventeen reviewed adapter sites keep their lines and no occurrence
 is added, removed or rebound. Producer hash, release census and every group's
 census digest are updated.
+
+### Follow-up: rc.14 production changes (2026-11-11)
+
+The only changed QUIC input is `QuicHttp3.Transport.Quic` (`c7fada8`), which
+drops `:tls_backend` from its endpoint option projection. It holds no QUIC
+occurrence. Its H3-2 sites are rebound in the H3 review. No QUIC occurrence is
+added, removed or rebound. Producer hash, release census and every group's
+census digest are updated.

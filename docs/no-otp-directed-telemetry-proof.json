@@ -6,7 +6,7 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/http_fetch/lib/http/telemetry.ex": "0e18333a2ffb0250ef0db846445a68eeedbf326e8cb0276f4609360348c293c1"
+    "apps/http_fetch/lib/http/telemetry.ex": "544c033502ad0492553fd22d9f86dc21166e1d6fe6395734a745744530b7b69e"
   },
   "production_source_census": {
     "files": 244,
@@ -111,5 +111,50 @@
     "strict_release_static_status": "FAIL",
     "strict_release_total_unresolved": 175,
     "P6_accepted": false
-  }
+  },
+  "source_review_amendments": [
+    {
+      "date": "2026-11-11",
+      "baseline_commit": "5b1adbdb85ed33d88e903ddb2fcce2b7c5a9dae5",
+      "source_commit": "722a99a123757885630c4c8aab4ec691e99c3bb8",
+      "scope": "rc.14 Fetch timeout reason contract",
+      "changed_source_inputs": {
+        "apps/http_fetch/lib/http/telemetry.ex": {
+          "previous_sha256": "0e18333a2ffb0250ef0db846445a68eeedbf326e8cb0276f4609360348c293c1",
+          "sha256": "544c033502ad0492553fd22d9f86dc21166e1d6fe6395734a745744530b7b69e"
+        }
+      },
+      "added_selected_inputs": [],
+      "active_production_source_census": {
+        "files": 267,
+        "sorted_path_sha256_json": "593f3470ba2aa26228f450342d8595400c4277d1ddfb06b69fa9f5eaa41a22e5",
+        "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
+      },
+      "occurrence_rebindings": [],
+      "reviewed_inventory_reconciliation": {
+        "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
+        "count": 207,
+        "duplicates": 0,
+        "identity": [
+          "module",
+          "line",
+          "kind"
+        ],
+        "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
+        "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
+        "sha256": "29070f6567ac11a5e2cf9a4bf20da284bd7cc059fe98ff09f8cac6fd747124dd"
+      },
+      "historical_artifact_covers_amended_source": false,
+      "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
+      "follow_up_changes": [
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7a3c1921613e16ac8ea77b1d1639c78c9575399",
+          "input": "apps/http_fetch/lib/http/telemetry.ex",
+          "change": "The public error classification no longer lists :request_timeout, which Fetch now reports as :timeout (c7a3c19).",
+          "dispatch_review": "No dynamic dispatch added or moved: one literal list element is removed; HTTP.Telemetry still imports only telemetry:execute/3 and creates no handler, so TEL-1/TEL-2 are unchanged."
+        }
+      ]
+    }
+  ]
 }

@@ -19,7 +19,7 @@
     "apps/ex_ssl/lib/ssl/quic.ex": "a2f78d3dca05b1dbf1861c77b756dcf8bc3af3c9fc742c264d909df0024fa44f",
     "apps/ex_ssl/lib/ssl/quic/config.ex": "db708d4a3dca411cab89dbad09b7b1840a018b48cdfeecdff235eb05b81e291c",
     "apps/elixir_quic_http3/lib/quic_http3/session.ex": "45423f557e8d4b16db2121560b01a2d51d372174eeb7f2d60d7fda643a5901cf",
-    "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679",
+    "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "5197e2316ae0a59722f1261a77b436e73eab2cfd7361b2eda1291a0f5067a9c4",
     "apps/http_runtime/lib/http/http3/pool.ex": "974135c4126244c649815a5d4ab808678da3c1978540d84b940729f299baf73d",
     "apps/http_runtime/lib/http/http3/connection_owner.ex": "b2f5eeb3b75afdf1187f0fc4a19b2b8e070f6a0ec06d92841a68b8a7384428e2",
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
@@ -1514,7 +1514,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "4184fca9f6b565761db9b2c5220bd20a63921417",
+      "source_commit": "722a99a123757885630c4c8aab4ec691e99c3bb8",
       "scope": "client migration, opt-in resumption/0-RTT, reliable reset and TLS provider continuation",
       "changed_source_inputs": {
         "apps/elixir_quic/lib/quic.ex": {
@@ -1563,7 +1563,7 @@
         },
         "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": {
           "previous_sha256": "e3eceea332cdee69f921bae15452e8b4d41fc76265b8bfff76a2dfbf5c28385a",
-          "sha256": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679"
+          "sha256": "5197e2316ae0a59722f1261a77b436e73eab2cfd7361b2eda1291a0f5067a9c4"
         },
         "apps/http_runtime/lib/http/http3/connection_owner.ex": {
           "previous_sha256": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
@@ -1595,7 +1595,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "39954c07688f1d5efeb5655673475e046352b8500a8808f32969dca6c83a75ac",
+        "sorted_path_sha256_json": "593f3470ba2aa26228f450342d8595400c4277d1ddfb06b69fa9f5eaa41a22e5",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1798,7 +1798,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "36ecab8f21975904e1508717dd29d8866e49c07cfb649fdbd56e33d0e97dfeb3"
+        "sha256": "29070f6567ac11a5e2cf9a4bf20da284bd7cc059fe98ff09f8cac6fd747124dd"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
@@ -2019,6 +2019,13 @@
           "input": "apps/elixir_quic/lib/quic/connection.ex",
           "change": "The receive_packet error paths are extracted into the private local helpers wrong_level_frame_type/1 and close_authenticated_error/4 (credo complexity); behaviour is unchanged.",
           "dispatch_review": "No dynamic dispatch added, removed or moved: the helpers make only literal local calls and state updates, and the hunks net to zero lines (-11 at 1102, +11 at 1138). The seventeen reviewed Quic.Connection adapter sites keep their lines, expressions and owning functions; no occurrence is rebound."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+          "change": "The endpoint option projection no longer carries :tls_backend and the :tls_backend_not_supported_for_quic validation clause is removed (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added; the file holds no QUIC occurrence. Its H3-2 ops sites 58 and 59 move by 1 line and are rebound in the H3 review."
         }
       ]
     }

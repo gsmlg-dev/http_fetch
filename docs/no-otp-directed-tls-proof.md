@@ -308,3 +308,10 @@ rebinding records `previous_mfa` and `previous_line`. The PKIX sites (71, 73)
 keep their lines. The wildcard rule, `certs_keys` handling and pre-auth bounds
 add only literal calls and guards. Producer hashes, the release census and every
 group's census digest are updated.
+
+### Follow-up: rc.14 production changes (2026-11-11)
+
+No TLS input changes after `v1.0.0-rc.13`. `HTTP.Transport.ExSSL` is unchanged.
+It is now named literally where `HTTP.TLSBackend.transport/1` used to return it
+(HTTP review). Only the census digest and the reviewed inventory digest are
+updated.

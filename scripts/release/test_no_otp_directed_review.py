@@ -298,6 +298,22 @@ class DirectedReviewTests(unittest.TestCase):
         self.assertEqual((rewound[166]['mfa'], rewound[166]['line']), ('handle_call/3', 216))
         self.assertNotIn(208, {site['inventory_occurrence'] for site in rewind(proof('h3'), '1.0.0-rc.11')})
 
+    def test_rc14_follow_up_rebinds_pool_sites_and_drops_the_tls_backend_input(self):
+        http = proof('http')
+        amendment = http['source_review_amendments'][-1]
+        self.assertEqual(amendment['removed_selected_inputs'][0]['input'],
+                         'apps/http_core/lib/http/tls_backend.ex')
+        self.assertNotIn('apps/http_core/lib/http/tls_backend.ex', http['source_inputs_sha256'])
+        pool = {site['inventory_occurrence']: site for site in http['occurrences']
+                if site['module'] == 'HTTP.HTTP1.Pool'}
+        self.assertEqual(set(pool), set(range(119, 131)))
+        source = (ROOT / 'apps/http_pool/lib/http/http1/pool.ex').read_text().splitlines()
+        rewound = {site['inventory_occurrence']: site for site in rewind(http, '1.0.0-rc.11')}
+        for number, site in pool.items():
+            with self.subTest(occurrence=number):
+                self.assertIn('transport.', source[site['line'] - 1])
+                self.assertEqual(rewound[number]['line'], site['line'] + 1)
+
     def test_native_source_and_compiled_release_binding(self):
         result = subprocess.run(['elixir', str(Path(__file__).with_suffix('.exs'))],
                                 env=dict(os.environ), stdout=subprocess.PIPE,

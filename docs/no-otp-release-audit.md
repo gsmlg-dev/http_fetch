@@ -1,5 +1,37 @@
 # Directed production release audit
 
+## rc.14 proof follow-up — 2026-11-11
+
+Production changes after `v1.0.0-rc.13` (`5b1adbd`) changed 33 production files,
+added `HTTP.ResponseError` and deleted `HTTP.TLSBackend`. The changes cover the
+removed `tls_backend` option, strict client options, the Fetch timeout and
+Promise await-timeout reasons, the `:push` delivery rename, EventSource origin
+serialization and telemetry URL scrubbing. They altered the source census. Each
+changed reviewed input was re-reviewed at `722a99a` as a dated follow-up. The
+QUIC, HTTP and H3 follow-ups go in the rc.11 amendments; telemetry gets its
+first source amendment:
+
+- 165 reviewed occurrences are unchanged.
+- 42 sites keep their expressions and functions and move: 12
+  `HTTP.SocketClient`, 12 `HTTP.HTTP1.Pool`, 9 `HTTP.EventSource.Connection`, 5
+  `HTTP.WebSocket.Connection`, 2 `HTTP.Promise` and 2
+  `QuicHttp3.Transport.Quic`.
+- No site is added or removed. The four former `HTTP.TLSBackend.transport/1`
+  results are now the literal `HTTP.Transport.ExSSL`, so the TLS selectors that
+  reach the HTTP-1, HTTP-3, HTTP-4 and HTTP-9 sites are literal modules.
+  `HTTP.TLSBackend` leaves the HTTP selected inputs under
+  `removed_selected_inputs`.
+- The removed `Abyss.DhcpSocket.Native` facade and the `abyss_raw` changes are
+  outside the ten-package directed-proof boundary. They held no reviewed
+  occurrence.
+
+The binding still covers 207 reviewed occurrences (IDs 1-208 without 166): TLS
+15, QUIC 37, HTTP 84, H3 64 and telemetry 7. It also covers the complete
+267-file production-source census. A locally built isolated candidate release
+inspects 382 BEAMs and reports 207 raw dispatch sites. These match the reviewed
+identities exactly. CI strict candidate and published gates must still pass
+independently.
+
 ## rc.13 proof follow-up — 2026-11-11
 
 Production changes after `v1.0.0-rc.12` changed thirty production files:

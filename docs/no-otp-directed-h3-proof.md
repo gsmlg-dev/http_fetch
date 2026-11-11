@@ -234,3 +234,16 @@ other 26 H3-1 sites keep their expressions and owning functions and move by 5 to
 13 lines; they are rebound in the amendment and the follow-up entry. The H3 review
 now has 64 occurrences. SocketClient, `HTTP` and the EventSource files change as
 described in the HTTP review, which holds the moved sites.
+
+### Follow-up: rc.14 production changes (2026-11-11)
+
+`QuicHttp3.Transport.Quic` (`c7fada8`) no longer carries `:tls_backend` in its
+endpoint option projection and drops the `:tls_backend_not_supported_for_quic`
+clause. The H3-2 sites `start_endpoint/5` (58) and `stop_owned_endpoint/2` (59)
+move by one line with unchanged expressions and retained ops. They are rebound in
+the amendment and the follow-up entry. The other H3-2 sites keep their lines.
+`HTTP.HTTP3.PoolKey` drops its `tls_backend` rejection clause. The Fetch,
+SocketClient and EventSource inputs change as described in the HTTP review,
+which holds their moved sites. SocketClient still supplies only
+`&handle_http3_event/2`. No H3 occurrence is added or removed, and the H3 review
+still has 64 occurrences.

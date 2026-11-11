@@ -70,3 +70,12 @@ verify the dependency source before compilation and bind the reviewed modules
 to the resulting release BEAMs before accepting this proof.
 All seven generic findings remain visible. This document alone does not accept
 P6, replace runtime isolation checks or waive the release regressions.
+
+## 2026-11-11 source review amendment: rc.14 timeout reason
+
+`HTTP.Telemetry` (`c7a3c19`) no longer lists `:request_timeout` among the public
+error reasons, because Fetch now reports deadline expiry as `:timeout`. One
+literal list element is removed. The module still imports only
+`telemetry:execute/3` from the dependency and creates no handler. TEL-1 and
+TEL-2 and the seven dependency occurrences are unchanged. The amendment records
+the producer hash, the current census digest and the reviewed inventory digest.

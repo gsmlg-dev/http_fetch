@@ -6,47 +6,46 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/http_fetch/lib/http.ex": "f39bb1e218018fd6c51d8db31460113be235af61e71789ad25ca01089394da31",
-    "apps/http_fetch/lib/http/fetch_options.ex": "b7c823c68858ce179005ace404dac20851250bbd651420a2ae9519e10bfebdac",
-    "apps/http_fetch/lib/http/socket_client.ex": "9b0d75be354cd0a6a4ffa1278a5c3539a46b313555bcd3a3e8aee15b43ee7d12",
-    "apps/http_fetch/lib/http/promise.ex": "0713d4a5e968f8d29ce37db420460316616ef73dbabaf6e89fe45251179f7d55",
+    "apps/http_fetch/lib/http.ex": "6a39466e0389c97f70715f525264dd9b7329ab16e2de500a3e77442194cc1dd8",
+    "apps/http_fetch/lib/http/fetch_options.ex": "e514c7304112ac05ae41279478e619a6fb68e29021c36feb62d9b03dc04d86b0",
+    "apps/http_fetch/lib/http/socket_client.ex": "f4a9938c14ea801a9b9143d486e519ef4e86ba9bd01788ec87b4c08cd80355f1",
+    "apps/http_fetch/lib/http/promise.ex": "cfbb978f9fa2c666373c1f229fed435e8b0f2da63512da870070f39b57137439",
     "apps/http_fetch/lib/http/http1/idle_timeout.ex": "af2b917e837503e3f84c9e1e5c3a7cb9a2e1c34efc9a61ff19e82547f0f7180d",
     "apps/http_fetch/lib/http/http1/upload.ex": "883b0768562703422acaac33cff16fc86165ff393a6e16c420e8251aa1b27c56",
-    "apps/http_core/lib/http/tls_backend.ex": "83f3f446e37f913312b2be044825fadeb5f02730df1608d1cbab54970f11548c",
     "apps/http_core/lib/http/proxy.ex": "09f61efed26f3495aa84a069f587eaa1bd229e9fd4453f92d430c8d216934f98",
     "apps/http_core/lib/http/request_lifecycle.ex": "979a086365ae7f09486d8f5f322f569b6f8bb1fb297238ce8640b3c32aeb5f62",
     "apps/http_core/lib/http/transport/tcp.ex": "488a125fc494d681fcd1a079b0e0424be3eca8f1bfdd2b5984f7e66dc277eed0",
     "apps/http_core/lib/http/transport/unix.ex": "9d6601dc791cc0704e8a40ee74d79f0e85c8241bcdcde96c380f0b0d7ec0f084",
     "apps/http_core/lib/http/transport/ex_ssl.ex": "20cda2e3507a1fa52ec8a5baf7259ceab9c407d434dda8e9601cfaadb514893f",
     "apps/http_runtime/lib/http_runtime.ex": "4f34226dd1e5393204febfe36523d21b8218343126e287ee1e38a98fcc3ac819",
-    "apps/http_runtime/lib/http/runtime/dialer.ex": "3c2a2817df01e2155c7b5a3999b49f6cbfbc9d7ff1590060bb989ffaf78431fc",
-    "apps/http_runtime/lib/http/runtime/stream.ex": "6c295dc3c6701b85ad08b8e909d4b61777d4564fcb749a43a59a31dc11255c78",
-    "apps/http_pool/lib/http/http1/pool.ex": "875d08dfde3cf50c53371219bf235d6c08906b36dfe5db4cc047160ab9eeb742",
+    "apps/http_runtime/lib/http/runtime/dialer.ex": "d14ecd3bb85f3d0ba218982dccebeb93b882577aadee1c543b942dbc63afed8e",
+    "apps/http_runtime/lib/http/runtime/stream.ex": "a3f6a5d3eff02da7d5fecc0d0733aeceb6ca9d6d51cd2f25851c283d54fc7fde",
+    "apps/http_pool/lib/http/http1/pool.ex": "49146291b36b89e8ef815cdece6713ed2b30ed28ac52a809f6fe2d2bccdd236d",
     "apps/http_pool/lib/http/http2/pool.ex": "8a9928d5c503128b86c1b7bf8b5bfc22f9797fd4a062754f78736987f27c2d6c",
     "apps/http_runtime/lib/http/http2/connection_owner.ex": "02a5913c26d27b7b42fcdb0497a2754761ec432722eb62dd50c928ed5b8454b7",
     "apps/http_runtime/lib/http/http2/connection_supervisor.ex": "6624225a4b82240eed4315fa12bb1a61c9b103aa1b09ffab66ebc56ba142f3e0",
-    "apps/http_runtime/lib/http/protocol_client/session.ex": "53db8f26b74a84ba5f7980334bbbb21d4d1f9ef24dba03f2fc842018a03d8711",
-    "apps/http_runtime/lib/http/managed_transport.ex": "d3b3eeb9fea115aaeab8cd6ec4780665164ccabee79ba437c44973852119af16",
-    "apps/http_runtime/lib/http/managed_transport/scope.ex": "c822312d48110046a5c0fede5e6768236a1e3d8e3ed077eaede961bc5f30f0e5",
-    "apps/http_runtime/lib/http/managed_transport/policy.ex": "b283eba84c5b438eb53f35ab548682a0f83f3a7b675082f56c4a01d6767cfbd0",
+    "apps/http_runtime/lib/http/protocol_client/session.ex": "552cc1dbd699853f86a381654f51378f650194920d15dc6b3b37cd433be880bf",
+    "apps/http_runtime/lib/http/managed_transport.ex": "dc8249af17489aa95286d7aae205ce57c296e36a7e079f3f3652ce7c00ceeafe",
+    "apps/http_runtime/lib/http/managed_transport/scope.ex": "c9489e5deac90de027586642b2351efacd527726ccc7cdc15ecb094f8b154e3f",
+    "apps/http_runtime/lib/http/managed_transport/policy.ex": "bdede8df43709188010253ac01faa4f239764d0a3d6be64f9cb894d6f43af577",
     "apps/http_runtime/lib/http/http3/connection_owner.ex": "b2f5eeb3b75afdf1187f0fc4a19b2b8e070f6a0ec06d92841a68b8a7384428e2",
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
-    "apps/http_event_source/lib/http/event_source/options.ex": "d47237d3552da5744e9a7a60031f6b47daaad5539dc40c79e974159da1f127cc",
-    "apps/http_event_source/lib/http/event_source/connection.ex": "08f36a713d42ef8d33dd23a5635ae4844d35ab8ad17bbe90e1c592aaf4279a6a",
-    "apps/http_web_socket/lib/http/web_socket/options.ex": "08adad3196ae6c860c61317d726c145cfe9eb11dbc4b75fce6276f3d73fc6621",
-    "apps/http_web_socket/lib/http/web_socket/connection.ex": "d8b592f8067564d3c801ea80618f85f92093c6048a128efd065b9ebff2b5009d",
-    "apps/http_web_transport/lib/http/web_transport.ex": "a03bfc07cd0ea158dc9a9af8ef00bf87cceeb8fe4dd9a703a06d605660696c18",
-    "apps/http_web_transport/lib/http/web_transport/options.ex": "169c865ed1a96362beaccce5fe10ed1805497025907960c71a04ae91204cfb2e",
+    "apps/http_event_source/lib/http/event_source/options.ex": "930e41ceef9d626bd4e1e545e4dc48d3bc3571b79dc30a639db642d96b953f84",
+    "apps/http_event_source/lib/http/event_source/connection.ex": "65fcdb74e7e49270db6d35325228c898b0cc9f9c7595b8b03330ab89a9dc475a",
+    "apps/http_web_socket/lib/http/web_socket/options.ex": "b9c0125a90c53b2b73a5e7b8215cd60b7ddfc6557d89be383570e21751a63f64",
+    "apps/http_web_socket/lib/http/web_socket/connection.ex": "08636225c92fb88989688a75eccae069b60de06bb9eb40f2b1a1b5d9bd0fa2ac",
+    "apps/http_web_transport/lib/http/web_transport.ex": "e3b73cb237394160ba80ed662c2a600d64de9a0d7aa50df8762607d985d93123",
+    "apps/http_web_transport/lib/http/web_transport/options.ex": "894cd6f47abcd65b30430b377c5051ef0547e8e74dcfb4511c7a61a506eb0ae1",
     "apps/http_web_transport/lib/http/web_transport/session.ex": "0a84e2c5397d26166af600d819f48deaccfe80b2398c33387ec2cca76b090ce0",
     "apps/http_web_transport/lib/http/web_transport/transport/quic.ex": "fb336ca22999ed2f2ec78a803c52c45c1b709c3b62f29a4b34a1f99eba0db7dd",
     "apps/http_web_socket/lib/http/web_socket/handshake.ex": "03b0b9532bf4d45ee5f06681eb50fcf08976f1d33391dd6282f4887e02b6648e",
     "apps/http_web_socket/lib/http/web_socket/event.ex": "63ae8265fde1872a944ac5dadfd6fb4bd02376751985e10ed0cbe8a3ef653634",
     "apps/http_web_socket/lib/http/web_socket/frame.ex": "8f813646db68b69f4531f49472d9bde48bca21877e237af54eac462fb0b4ea33",
-    "apps/http_web_socket/lib/http/web_socket.ex": "5c89857768427aaec4cf1dada5b3a7ac3cf54b7e2880354140c72fae67d5c1a9",
+    "apps/http_web_socket/lib/http/web_socket.ex": "c39527392ad28879bef3ac0a75f83b1124196d7ce094b49ab232153bff2cdaf1",
     "apps/http_pool/lib/http/pool.ex": "a5192c4a31078ec9aabdaa53a470f20fd343513de9f8522217786db27e5ccec3",
     "apps/http_pool/lib/http/pool/telemetry.ex": "bcd3d7b8c9b50eb5d7db8b21290a86885db7f275aabf81357f2b3377ac52d064",
-    "apps/http_pool/lib/http/http2/pool_key.ex": "9e3148277b4adc219c876f68b673a3da84953a4c956e568d096c760c097a240b",
-    "apps/http_runtime/lib/http/runtime/pool.ex": "be2279a332664d6b5db55cac73c9a8104054e64420b47718c7e5efa1d57b9052",
+    "apps/http_pool/lib/http/http2/pool_key.ex": "aa4bf085980d691ea612025e4e1fedcc4ab7bde16ed491d0bf5a0885b6b6ad3c",
+    "apps/http_runtime/lib/http/runtime/pool.ex": "fddfd221ce34112787bde34bfa5aa72448d8b6df7b6a924187336235c824ecca",
     "apps/http_fetch/lib/http/adapter.ex": "772454274c78cee206f0ff4f7e18576be1ae56fe8302572615b9829bc274858e"
   },
   "production_source_census": {
@@ -106,7 +105,7 @@
       "inventory_occurrence": 94,
       "module": "HTTP.EventSource.Connection",
       "mfa": "detach_transport/1",
-      "line": 755,
+      "line": 750,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_event_source/lib/http/event_source/connection.ex",
       "proof": "HTTP-3",
@@ -116,7 +115,7 @@
       "inventory_occurrence": 95,
       "module": "HTTP.EventSource.Connection",
       "mfa": "handle_info/2",
-      "line": 215,
+      "line": 213,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_event_source/lib/http/event_source/connection.ex",
       "proof": "HTTP-3",
@@ -126,7 +125,7 @@
       "inventory_occurrence": 96,
       "module": "HTTP.EventSource.Connection",
       "mfa": "handle_info/2",
-      "line": 228,
+      "line": 226,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_event_source/lib/http/event_source/connection.ex",
       "proof": "HTTP-3",
@@ -136,7 +135,7 @@
       "inventory_occurrence": 97,
       "module": "HTTP.EventSource.Connection",
       "mfa": "handle_info/2",
-      "line": 257,
+      "line": 255,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_event_source/lib/http/event_source/connection.ex",
       "proof": "HTTP-3",
@@ -146,7 +145,7 @@
       "inventory_occurrence": 98,
       "module": "HTTP.EventSource.Connection",
       "mfa": "open_http1/2",
-      "line": 419,
+      "line": 417,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_event_source/lib/http/event_source/connection.ex",
       "proof": "HTTP-3",
@@ -156,7 +155,7 @@
       "inventory_occurrence": 99,
       "module": "HTTP.EventSource.Connection",
       "mfa": "open_http1/2",
-      "line": 424,
+      "line": 422,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_event_source/lib/http/event_source/connection.ex",
       "proof": "HTTP-3",
@@ -166,7 +165,7 @@
       "inventory_occurrence": 100,
       "module": "HTTP.EventSource.Connection",
       "mfa": "open_transport/1",
-      "line": 433,
+      "line": 431,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_event_source/lib/http/event_source/connection.ex",
       "proof": "HTTP-3",
@@ -176,7 +175,7 @@
       "inventory_occurrence": 101,
       "module": "HTTP.EventSource.Connection",
       "mfa": "rearm/1",
-      "line": 667,
+      "line": 662,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_event_source/lib/http/event_source/connection.ex",
       "proof": "HTTP-3",
@@ -186,7 +185,7 @@
       "inventory_occurrence": 102,
       "module": "HTTP.EventSource.Connection",
       "mfa": "send_request/3",
-      "line": 465,
+      "line": 460,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_event_source/lib/http/event_source/connection.ex",
       "proof": "HTTP-3",
@@ -226,7 +225,7 @@
       "inventory_occurrence": 106,
       "module": "HTTP.Promise",
       "mfa": "run_callbacks/3",
-      "line": 161,
+      "line": 164,
       "kind": "unresolved_fun_invocation",
       "source": "apps/http_fetch/lib/http/promise.ex",
       "proof": "HTTP-5",
@@ -236,7 +235,7 @@
       "inventory_occurrence": 107,
       "module": "HTTP.SocketClient",
       "mfa": "activate_socket/1",
-      "line": 2611,
+      "line": 2606,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -246,7 +245,7 @@
       "inventory_occurrence": 108,
       "module": "HTTP.SocketClient",
       "mfa": "activate_socket/1",
-      "line": 2616,
+      "line": 2611,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -256,7 +255,7 @@
       "inventory_occurrence": 109,
       "module": "HTTP.SocketClient",
       "mfa": "await_request_send/5",
-      "line": 2375,
+      "line": 2370,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -266,7 +265,7 @@
       "inventory_occurrence": 110,
       "module": "HTTP.SocketClient",
       "mfa": "await_request_send/5",
-      "line": 2380,
+      "line": 2375,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -276,7 +275,7 @@
       "inventory_occurrence": 111,
       "module": "HTTP.SocketClient",
       "mfa": "await_request_send/5",
-      "line": 2385,
+      "line": 2380,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -286,7 +285,7 @@
       "inventory_occurrence": 112,
       "module": "HTTP.SocketClient",
       "mfa": "close_http1_socket/1",
-      "line": 2476,
+      "line": 2471,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -296,7 +295,7 @@
       "inventory_occurrence": 113,
       "module": "HTTP.SocketClient",
       "mfa": "handle_closed/1",
-      "line": 1792,
+      "line": 1786,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -306,7 +305,7 @@
       "inventory_occurrence": 114,
       "module": "HTTP.SocketClient",
       "mfa": "handle_data/2",
-      "line": 1773,
+      "line": 1767,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -316,7 +315,7 @@
       "inventory_occurrence": 115,
       "module": "HTTP.SocketClient",
       "mfa": "owner_loop/1",
-      "line": 1762,
+      "line": 1756,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -326,7 +325,7 @@
       "inventory_occurrence": 116,
       "module": "HTTP.SocketClient",
       "mfa": "send_request/5",
-      "line": 2357,
+      "line": 2352,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -336,7 +335,7 @@
       "inventory_occurrence": 117,
       "module": "HTTP.SocketClient",
       "mfa": "send_request/5",
-      "line": 2362,
+      "line": 2357,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -346,7 +345,7 @@
       "inventory_occurrence": 118,
       "module": "HTTP.SocketClient",
       "mfa": "stop_http1_upload/2",
-      "line": 2455,
+      "line": 2450,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_fetch/lib/http/socket_client.ex",
       "proof": "HTTP-4",
@@ -356,7 +355,7 @@
       "inventory_occurrence": 119,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "checkin/4",
-      "line": 72,
+      "line": 71,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -366,7 +365,7 @@
       "inventory_occurrence": 120,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "checkin/4",
-      "line": 65,
+      "line": 64,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -376,7 +375,7 @@
       "inventory_occurrence": 121,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "checkin/4",
-      "line": 67,
+      "line": 66,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -386,7 +385,7 @@
       "inventory_occurrence": 122,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "checkin/4",
-      "line": 69,
+      "line": 68,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -396,7 +395,7 @@
       "inventory_occurrence": 123,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "handle_call/3",
-      "line": 185,
+      "line": 184,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -406,7 +405,7 @@
       "inventory_occurrence": 124,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "handle_info/2",
-      "line": 384,
+      "line": 383,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -416,7 +415,7 @@
       "inventory_occurrence": 125,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "lease/2",
-      "line": 327,
+      "line": 326,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -426,7 +425,7 @@
       "inventory_occurrence": 126,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "publish_checkin/4",
-      "line": 443,
+      "line": 442,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -436,7 +435,7 @@
       "inventory_occurrence": 127,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "queued_socket_event?/1",
-      "line": 392,
+      "line": 391,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -446,7 +445,7 @@
       "inventory_occurrence": 128,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "ready_to_lease/2",
-      "line": 334,
+      "line": 333,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -456,7 +455,7 @@
       "inventory_occurrence": 129,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "ready_to_lease/2",
-      "line": 335,
+      "line": 334,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -466,7 +465,7 @@
       "inventory_occurrence": 130,
       "module": "HTTP.HTTP1.Pool",
       "mfa": "retire_entry/1",
-      "line": 548,
+      "line": 547,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_pool/lib/http/http1/pool.ex",
       "proof": "HTTP-6",
@@ -656,7 +655,7 @@
       "inventory_occurrence": 152,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "abort_transport/2",
-      "line": 1471,
+      "line": 1468,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -666,7 +665,7 @@
       "inventory_occurrence": 153,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "abort_transport/2",
-      "line": 1472,
+      "line": 1469,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -676,7 +675,7 @@
       "inventory_occurrence": 154,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "detach/1",
-      "line": 1451,
+      "line": 1448,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -706,7 +705,7 @@
       "inventory_occurrence": 157,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "rearm/1",
-      "line": 1338,
+      "line": 1335,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -716,7 +715,7 @@
       "inventory_occurrence": 158,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "submit/2",
-      "line": 891,
+      "line": 888,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -888,7 +887,7 @@
       "inventory_occurrence": 207,
       "module": "HTTP.Promise",
       "mfa": "run_callbacks/3",
-      "line": 159,
+      "line": 162,
       "kind": "unresolved_fun_invocation",
       "source": "apps/http_fetch/lib/http/promise.ex",
       "proof": "HTTP-5"
@@ -1340,16 +1339,16 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "89107e7f79e9f50835fd2e6e0ca09b27c2df27bc",
+      "source_commit": "722a99a123757885630c4c8aab4ec691e99c3bb8",
       "scope": "Alt-Svc discovery, HTTP/3 resumption options, WebSocket/H3 completion receipt and live draft-17 WebTransport backend",
       "changed_source_inputs": {
         "apps/http_fetch/lib/http/fetch_options.ex": {
           "previous_sha256": "5e69e37daad48cda62f04c6043b43116383c885cfe809a3089ffad9a3d42d9f1",
-          "sha256": "b7c823c68858ce179005ace404dac20851250bbd651420a2ae9519e10bfebdac"
+          "sha256": "e514c7304112ac05ae41279478e619a6fb68e29021c36feb62d9b03dc04d86b0"
         },
         "apps/http_fetch/lib/http/socket_client.ex": {
           "previous_sha256": "dd7f464583e6bf9b687aebec9f8a819cdf84bb9311cfc2e8ff7c96edaf58f052",
-          "sha256": "9b0d75be354cd0a6a4ffa1278a5c3539a46b313555bcd3a3e8aee15b43ee7d12"
+          "sha256": "f4a9938c14ea801a9b9143d486e519ef4e86ba9bd01788ec87b4c08cd80355f1"
         },
         "apps/http_runtime/lib/http_runtime.ex": {
           "previous_sha256": "77c21907900eaa5e9f6a9946002faff0309e99b4c6bf71cdff6f853a115515d3",
@@ -1365,23 +1364,23 @@
         },
         "apps/http_event_source/lib/http/event_source/options.ex": {
           "previous_sha256": "d1c36a500c8f5f86b6c5334d8e34b355451d9367487f5d1f4b37df0a31b44202",
-          "sha256": "d47237d3552da5744e9a7a60031f6b47daaad5539dc40c79e974159da1f127cc"
+          "sha256": "930e41ceef9d626bd4e1e545e4dc48d3bc3571b79dc30a639db642d96b953f84"
         },
         "apps/http_web_socket/lib/http/web_socket/options.ex": {
           "previous_sha256": "7c35aed5864213f90e9d954c8e78799981c01f1ba5526ab56683f6ea2e4e8177",
-          "sha256": "08adad3196ae6c860c61317d726c145cfe9eb11dbc4b75fce6276f3d73fc6621"
+          "sha256": "b9c0125a90c53b2b73a5e7b8215cd60b7ddfc6557d89be383570e21751a63f64"
         },
         "apps/http_web_socket/lib/http/web_socket/connection.ex": {
           "previous_sha256": "322737d98276d94fb450985ce8620d05afeb8e3c6d7943c9cac70077e9ebcb9f",
-          "sha256": "d8b592f8067564d3c801ea80618f85f92093c6048a128efd065b9ebff2b5009d"
+          "sha256": "08636225c92fb88989688a75eccae069b60de06bb9eb40f2b1a1b5d9bd0fa2ac"
         },
         "apps/http_web_transport/lib/http/web_transport.ex": {
           "previous_sha256": "38751209dffad6dd099a61e4038874ef66d8c57303f42c565483f12904c0346d",
-          "sha256": "a03bfc07cd0ea158dc9a9af8ef00bf87cceeb8fe4dd9a703a06d605660696c18"
+          "sha256": "e3b73cb237394160ba80ed662c2a600d64de9a0d7aa50df8762607d985d93123"
         },
         "apps/http_web_transport/lib/http/web_transport/options.ex": {
           "previous_sha256": "ce28ffe039cd91eb32ddbf1365bd60c2a16fea71fc6a1badc598827527f90145",
-          "sha256": "169c865ed1a96362beaccce5fe10ed1805497025907960c71a04ae91204cfb2e"
+          "sha256": "894cd6f47abcd65b30430b377c5051ef0547e8e74dcfb4511c7a61a506eb0ae1"
         },
         "apps/http_web_transport/lib/http/web_transport/session.ex": {
           "previous_sha256": "295d1da9978afbedd308080261d9a7a9f1fadaa504e16183299b64b3979e83e3",
@@ -1393,15 +1392,15 @@
         },
         "apps/http_web_socket/lib/http/web_socket.ex": {
           "previous_sha256": "685c7d0b6f1b4b32f1534cd2faf055bfbd24c8f4e46de1857540f763fd63a593",
-          "sha256": "5c89857768427aaec4cf1dada5b3a7ac3cf54b7e2880354140c72fae67d5c1a9"
+          "sha256": "c39527392ad28879bef3ac0a75f83b1124196d7ce094b49ab232153bff2cdaf1"
         },
         "apps/http_fetch/lib/http.ex": {
           "previous_sha256": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d",
-          "sha256": "f39bb1e218018fd6c51d8db31460113be235af61e71789ad25ca01089394da31"
+          "sha256": "6a39466e0389c97f70715f525264dd9b7329ab16e2de500a3e77442194cc1dd8"
         },
         "apps/http_fetch/lib/http/promise.ex": {
           "previous_sha256": "59989eb7acf11e11e7dc62bab51c847fe7aa12afe104d38012dee2195d9edb29",
-          "sha256": "0713d4a5e968f8d29ce37db420460316616ef73dbabaf6e89fe45251179f7d55"
+          "sha256": "cfbb978f9fa2c666373c1f229fed435e8b0f2da63512da870070f39b57137439"
         },
         "apps/http_web_socket/lib/http/web_socket/handshake.ex": {
           "previous_sha256": "99b178e112dc90c47f96e64c50ac2e2535fcc3169b9137bc19ca68744f7ce978",
@@ -1409,13 +1408,55 @@
         },
         "apps/http_event_source/lib/http/event_source/connection.ex": {
           "previous_sha256": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
-          "sha256": "08f36a713d42ef8d33dd23a5635ae4844d35ab8ad17bbe90e1c592aaf4279a6a"
+          "sha256": "65fcdb74e7e49270db6d35325228c898b0cc9f9c7595b8b03330ab89a9dc475a"
+        },
+        "apps/http_runtime/lib/http/runtime/dialer.ex": {
+          "previous_sha256": "3c2a2817df01e2155c7b5a3999b49f6cbfbc9d7ff1590060bb989ffaf78431fc",
+          "sha256": "d14ecd3bb85f3d0ba218982dccebeb93b882577aadee1c543b942dbc63afed8e"
+        },
+        "apps/http_runtime/lib/http/runtime/stream.ex": {
+          "previous_sha256": "6c295dc3c6701b85ad08b8e909d4b61777d4564fcb749a43a59a31dc11255c78",
+          "sha256": "a3f6a5d3eff02da7d5fecc0d0733aeceb6ca9d6d51cd2f25851c283d54fc7fde"
+        },
+        "apps/http_pool/lib/http/http1/pool.ex": {
+          "previous_sha256": "875d08dfde3cf50c53371219bf235d6c08906b36dfe5db4cc047160ab9eeb742",
+          "sha256": "49146291b36b89e8ef815cdece6713ed2b30ed28ac52a809f6fe2d2bccdd236d"
+        },
+        "apps/http_runtime/lib/http/protocol_client/session.ex": {
+          "previous_sha256": "53db8f26b74a84ba5f7980334bbbb21d4d1f9ef24dba03f2fc842018a03d8711",
+          "sha256": "552cc1dbd699853f86a381654f51378f650194920d15dc6b3b37cd433be880bf"
+        },
+        "apps/http_runtime/lib/http/managed_transport.ex": {
+          "previous_sha256": "d3b3eeb9fea115aaeab8cd6ec4780665164ccabee79ba437c44973852119af16",
+          "sha256": "dc8249af17489aa95286d7aae205ce57c296e36a7e079f3f3652ce7c00ceeafe"
+        },
+        "apps/http_runtime/lib/http/managed_transport/scope.ex": {
+          "previous_sha256": "c822312d48110046a5c0fede5e6768236a1e3d8e3ed077eaede961bc5f30f0e5",
+          "sha256": "c9489e5deac90de027586642b2351efacd527726ccc7cdc15ecb094f8b154e3f"
+        },
+        "apps/http_runtime/lib/http/managed_transport/policy.ex": {
+          "previous_sha256": "b283eba84c5b438eb53f35ab548682a0f83f3a7b675082f56c4a01d6767cfbd0",
+          "sha256": "bdede8df43709188010253ac01faa4f239764d0a3d6be64f9cb894d6f43af577"
+        },
+        "apps/http_pool/lib/http/http2/pool_key.ex": {
+          "previous_sha256": "9e3148277b4adc219c876f68b673a3da84953a4c956e568d096c760c097a240b",
+          "sha256": "aa4bf085980d691ea612025e4e1fedcc4ab7bde16ed491d0bf5a0885b6b6ad3c"
+        },
+        "apps/http_runtime/lib/http/runtime/pool.ex": {
+          "previous_sha256": "be2279a332664d6b5db55cac73c9a8104054e64420b47718c7e5efa1d57b9052",
+          "sha256": "fddfd221ce34112787bde34bfa5aa72448d8b6df7b6a924187336235c824ecca"
         }
       },
       "added_selected_inputs": [],
+      "removed_selected_inputs": [
+        {
+          "input": "apps/http_core/lib/http/tls_backend.ex",
+          "previous_sha256": "83f3f446e37f913312b2be044825fadeb5f02730df1608d1cbab54970f11548c"
+        }
+      ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "39954c07688f1d5efeb5655673475e046352b8500a8808f32969dca6c83a75ac",
+        "sorted_path_sha256_json": "593f3470ba2aa26228f450342d8595400c4277d1ddfb06b69fa9f5eaa41a22e5",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1423,91 +1464,91 @@
           "inventory_occurrence": 107,
           "mfa": "activate_socket/1",
           "previous_line": 2372,
-          "line": 2611
+          "line": 2606
         },
         {
           "inventory_occurrence": 108,
           "mfa": "activate_socket/1",
           "previous_line": 2377,
-          "line": 2616
+          "line": 2611
         },
         {
           "inventory_occurrence": 109,
           "mfa": "await_request_send/5",
           "previous_line": 2136,
-          "line": 2375
+          "line": 2370
         },
         {
           "inventory_occurrence": 110,
           "mfa": "await_request_send/5",
           "previous_line": 2141,
-          "line": 2380
+          "line": 2375
         },
         {
           "inventory_occurrence": 111,
           "mfa": "await_request_send/5",
           "previous_line": 2146,
-          "line": 2385
+          "line": 2380
         },
         {
           "inventory_occurrence": 112,
           "mfa": "close_http1_socket/1",
           "previous_line": 2237,
-          "line": 2476
+          "line": 2471
         },
         {
           "inventory_occurrence": 113,
           "mfa": "handle_closed/1",
           "previous_line": 1570,
-          "line": 1792
+          "line": 1786
         },
         {
           "inventory_occurrence": 114,
           "mfa": "handle_data/2",
           "previous_line": 1551,
-          "line": 1773
+          "line": 1767
         },
         {
           "inventory_occurrence": 115,
           "mfa": "owner_loop/1",
           "previous_line": 1540,
-          "line": 1762
+          "line": 1756
         },
         {
           "inventory_occurrence": 116,
           "mfa": "send_request/5",
           "previous_line": 2118,
-          "line": 2357
+          "line": 2352
         },
         {
           "inventory_occurrence": 117,
           "mfa": "send_request/5",
           "previous_line": 2123,
-          "line": 2362
+          "line": 2357
         },
         {
           "inventory_occurrence": 118,
           "mfa": "stop_http1_upload/2",
           "previous_line": 2216,
-          "line": 2455
+          "line": 2450
         },
         {
           "inventory_occurrence": 152,
           "mfa": "abort_transport/2",
           "previous_line": 1385,
-          "line": 1471
+          "line": 1468
         },
         {
           "inventory_occurrence": 153,
           "mfa": "abort_transport/2",
           "previous_line": 1386,
-          "line": 1472
+          "line": 1469
         },
         {
           "inventory_occurrence": 154,
           "mfa": "detach/1",
           "previous_line": 1365,
-          "line": 1451
+          "line": 1448
         },
         {
           "inventory_occurrence": 155,
@@ -1525,13 +1566,13 @@
           "inventory_occurrence": 157,
           "mfa": "rearm/1",
           "previous_line": 1252,
-          "line": 1338
+          "line": 1335
         },
         {
           "inventory_occurrence": 158,
           "mfa": "submit/2",
           "previous_line": 810,
-          "line": 891
+          "line": 888
         },
         {
           "inventory_occurrence": 159,
@@ -1596,7 +1637,7 @@
           "previous_mfa": "apply_callback/2",
           "mfa": "run_callbacks/3",
           "previous_line": 135,
-          "line": 161,
+          "line": 164,
           "previous_kind": "unresolved_apply",
           "kind": "unresolved_fun_invocation",
           "call_expression": "rewritten_same_retained_callback"
@@ -1605,55 +1646,127 @@
           "inventory_occurrence": 94,
           "mfa": "detach_transport/1",
           "previous_line": 721,
-          "line": 755
+          "line": 750
         },
         {
           "inventory_occurrence": 95,
           "mfa": "handle_info/2",
           "previous_line": 214,
-          "line": 215
+          "line": 213
         },
         {
           "inventory_occurrence": 96,
           "mfa": "handle_info/2",
           "previous_line": 227,
-          "line": 228
+          "line": 226
         },
         {
           "inventory_occurrence": 97,
           "mfa": "handle_info/2",
           "previous_line": 256,
-          "line": 257
+          "line": 255
         },
         {
           "inventory_occurrence": 98,
           "mfa": "open_http1/2",
           "previous_line": 387,
-          "line": 419
+          "line": 417
         },
         {
           "inventory_occurrence": 99,
           "mfa": "open_http1/2",
           "previous_line": 392,
-          "line": 424
+          "line": 422
         },
         {
           "inventory_occurrence": 100,
           "mfa": "open_transport/1",
           "previous_line": 401,
-          "line": 433
+          "line": 431
         },
         {
           "inventory_occurrence": 101,
           "mfa": "rearm/1",
           "previous_line": 635,
-          "line": 667
+          "line": 662
         },
         {
           "inventory_occurrence": 102,
           "mfa": "send_request/3",
           "previous_line": 433,
-          "line": 465
+          "line": 460
+        },
+        {
+          "inventory_occurrence": 119,
+          "mfa": "checkin/4",
+          "previous_line": 72,
+          "line": 71
+        },
+        {
+          "inventory_occurrence": 120,
+          "mfa": "checkin/4",
+          "previous_line": 65,
+          "line": 64
+        },
+        {
+          "inventory_occurrence": 121,
+          "mfa": "checkin/4",
+          "previous_line": 67,
+          "line": 66
+        },
+        {
+          "inventory_occurrence": 122,
+          "mfa": "checkin/4",
+          "previous_line": 69,
+          "line": 68
+        },
+        {
+          "inventory_occurrence": 123,
+          "mfa": "handle_call/3",
+          "previous_line": 185,
+          "line": 184
+        },
+        {
+          "inventory_occurrence": 124,
+          "mfa": "handle_info/2",
+          "previous_line": 384,
+          "line": 383
+        },
+        {
+          "inventory_occurrence": 125,
+          "mfa": "lease/2",
+          "previous_line": 327,
+          "line": 326
+        },
+        {
+          "inventory_occurrence": 126,
+          "mfa": "publish_checkin/4",
+          "previous_line": 443,
+          "line": 442
+        },
+        {
+          "inventory_occurrence": 127,
+          "mfa": "queued_socket_event?/1",
+          "previous_line": 392,
+          "line": 391
+        },
+        {
+          "inventory_occurrence": 128,
+          "mfa": "ready_to_lease/2",
+          "previous_line": 334,
+          "line": 333
+        },
+        {
+          "inventory_occurrence": 129,
+          "mfa": "ready_to_lease/2",
+          "previous_line": 335,
+          "line": 334
+        },
+        {
+          "inventory_occurrence": 130,
+          "mfa": "retire_entry/1",
+          "previous_line": 548,
+          "line": 547
         }
       ],
       "added_occurrences": [
@@ -1666,10 +1779,10 @@
       ],
       "origin_derivations": {
         "WT-1": "Session.init/1 is the only backend assignment (options.backend, default HTTP.WebTransport.Transport.QUIC). New sites migrate (202), handle_message (203) and acknowledge (204) call that retained module after function_exported?/3 checks. backend_or_invalid_state/2 (205) and finish_send/3 (206) invoke only the local closures built in handle_call/3 around the same retained backend; close moved to cleanup_backend/2 (ID 159) and the send-close/abort closures moved to finish_send/3 (IDs 163/164). The sole library backend now opens a real exclusive HTTP3 ConnectionOwner with a Quic.Cleanup.new/1 descriptor, literal webtransport session options and caller ssl keywords validated by SSL.QUIC.Config; its stream/datagram/migration bodies are literal ConnectionOwner and Cleanup calls covered by H3-1/H3-2/Q1. rc.13 follow-up (89107e7): occurrence 166 (state.backend.get_stats/1) is removed because :get_stats now replies from session-kept counters; the other thirteen retained-backend sites keep their expressions and twelve move by 4 to 41 lines. Transport.QUIC runs owner calls through interruptible/1, which spawns a monitored helper around a literal closure; its fun.() calls only the closures built at the three literal call sites and is not a reviewed occurrence.",
-        "HTTP-1_HTTP-4": "Alt-Svc keeps tls_backend nil only until the TCP fallback pins it through TLSBackend.resolve/1, which accepts only ExSSL. HTTP/3 options lift ex_ssl reference identity into QUIC ssl data. SocketClient transport/protocol selectors and the H3 handler are unchanged; 12 SocketClient sites move. rc.13 follow-ups (e95bb5c, cff6e9a): HTTP/1 redirect parity and the HTTP/2 retry add only literal bookkeeping; the same twelve SocketClient sites move by 66 or 68 lines with unchanged expressions and selectors.",
-        "HTTP-9": "WebSocket over HTTP/3 leaves tls_backend unresolved; Runtime.Options rejects any explicit backend for HTTP/3 and the HTTP1 selector still maps only :ex_ssl. Seven WebSocket sites move with unchanged expressions. rc.13 follow-up (c08c93f): the seven WebSocket.Connection sites move by 7 or 12 lines with unchanged expressions. The nine HTTP-3 EventSource.Connection sites (e03c828) likewise keep their retained transport selectors and move by 1 to 34 lines.",
+        "HTTP-1_HTTP-4": "Alt-Svc keeps tls_backend nil only until the TCP fallback pins it through TLSBackend.resolve/1, which accepts only ExSSL. HTTP/3 options lift ex_ssl reference identity into QUIC ssl data. SocketClient transport/protocol selectors and the H3 handler are unchanged; 12 SocketClient sites move. rc.13 follow-ups (e95bb5c, cff6e9a): HTTP/1 redirect parity and the HTTP/2 retry add only literal bookkeeping; the same twelve SocketClient sites move by 66 or 68 lines with unchanged expressions and selectors. rc.14 follow-up (c7fada8): HTTP.TLSBackend and the tls_backend option are removed; Dialer.select_transport/2 names the literal HTTP.Transport.ExSSL, so the TLS selector is a literal module rather than a single-valued resolver. The twelve SocketClient sites move by 5, 6 or 10 lines with unchanged expressions and selectors.",
+        "HTTP-9": "WebSocket over HTTP/3 leaves tls_backend unresolved; Runtime.Options rejects any explicit backend for HTTP/3 and the HTTP1 selector still maps only :ex_ssl. Seven WebSocket sites move with unchanged expressions. rc.13 follow-up (c08c93f): the seven WebSocket.Connection sites move by 7 or 12 lines with unchanged expressions. The nine HTTP-3 EventSource.Connection sites (e03c828) likewise keep their retained transport selectors and move by 1 to 34 lines. rc.14 follow-up (c7fada8, c222551): WebSocket and EventSource select_transport/1 name the literal HTTP.Transport.ExSSL; five WebSocket.Connection sites move by 3 lines and the nine EventSource.Connection sites by 2 or 5 lines, all with unchanged expressions.",
         "HTTP-2": "The nine RequestLifecycle worker producers are unchanged in number and kind.",
-        "HTTP-5": "then/3 accepts only a 1-arity success function and nil or a 1-arity error function (is_function/2 guards) and appends them to the callbacks list of the returned promise. HTTP.fetch/2 builds the only production %HTTP.Promise{} with callbacks: []; then/3 is the only writer. await/2 runs the retained callbacks in the awaiting caller process: run_callbacks/3 invokes error_fun.(reason) (207) only when is_function(error_fun, 1) and success_fun.(value) (106, previously the apply/2 in apply_callback/2) otherwise. Results are interpreted only as a Promise to settle or ordinary data; a returned function is never invoked. The callbacks are caller-supplied public-API callbacks, the same approved boundary as before."
+        "HTTP-5": "then/3 accepts only a 1-arity success function and nil or a 1-arity error function (is_function/2 guards) and appends them to the callbacks list of the returned promise. HTTP.fetch/2 builds the only production %HTTP.Promise{} with callbacks: []; then/3 is the only writer. await/2 runs the retained callbacks in the awaiting caller process: run_callbacks/3 invokes error_fun.(reason) (207) only when is_function(error_fun, 1) and success_fun.(value) (106, previously the apply/2 in apply_callback/2) otherwise. Results are interpreted only as a Promise to settle or ordinary data; a returned function is never invoked. The callbacks are caller-supplied public-API callbacks, the same approved boundary as before. rc.14 follow-up (8f35305): await/2 reports its own wait expiry as :await_timeout; both invocations move by 3 lines with unchanged expressions."
       },
       "reviewed_inventory_reconciliation": {
         "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
@@ -1682,7 +1795,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "36ecab8f21975904e1508717dd29d8866e49c07cfb649fdbd56e33d0e97dfeb3"
+        "sha256": "29070f6567ac11a5e2cf9a4bf20da284bd7cc059fe98ff09f8cac6fd747124dd"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
@@ -2292,6 +2405,403 @@
           "input": "apps/http_web_transport/lib/http/web_transport/transport/quic.ex",
           "change": "The QUIC backend runs blocking owner calls in an interruptible monitored helper process so close/2 can cancel a pending connect, reports a real option set and returns {:error, :not_measured} from get_stats/1.",
           "dispatch_review": "No dynamic dispatch added or removed in the compiled inventory: spawn_monitor/1 receives a literal anonymous function that calls the local call/1, whose fun.() runs only closures built at the three literal interruptible/1 and call/1 call sites around ConnectionOwner.activate/await_ready. The module remains absent from the reviewed occurrences."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "6a63b4159523b04de72edcc04920460eceeb0de4",
+          "input": "apps/http_fetch/lib/http.ex",
+          "change": "fetch/2 maps the internal :request_timeout reason to the public :timeout (c7a3c19), documents the Fetch error reason set (6a63b41) and no longer reports or documents tls_backend (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: a literal public_reason/1 helper and documentation; the apparent calls remain documentation examples and the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/http_fetch/lib/http/fetch_options.ex",
+          "change": "FetchOptions raises ArgumentError for unknown option keys, non-pair entries and a signal that is neither nil nor a pid (f261a03); the tls_backend option, its aliases and normalization are removed (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: literal raise clauses and a guarded normalize_signal/1; the transport projection still has no transport-module, protocol-module or state option. The file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "ee8d3e7a549913d6c0f063e6282443ca067a3e1d",
+          "input": "apps/http_fetch/lib/http/socket_client.ex",
+          "change": "SocketClient no longer pins or forwards a tls_backend (pin_tls_backend/1 and tls_backend/1 removed, c7fada8); owner registration uses a single-clause case (ee8d3e7); request deadline expiry is reported as :timeout and response streams are opened with response_body: true (c7a3c19).",
+          "dispatch_review": "No dynamic dispatch added. The twelve HTTP-4 sites keep their expressions, retained transport/protocol selectors and owning functions; the TCP/TLS selector reached through Dialer now returns the literal HTTP.Transport.ExSSL for TLS. They move by 5, 6 or 10 lines and are rebound below and in the amendment.",
+          "occurrence_rebindings": [
+            {
+              "inventory_occurrence": 107,
+              "mfa": "activate_socket/1",
+              "previous_line": 2611,
+              "line": 2606
+            },
+            {
+              "inventory_occurrence": 108,
+              "mfa": "activate_socket/1",
+              "previous_line": 2616,
+              "line": 2611
+            },
+            {
+              "inventory_occurrence": 109,
+              "mfa": "await_request_send/5",
+              "previous_line": 2375,
+              "line": 2370
+            },
+            {
+              "inventory_occurrence": 110,
+              "mfa": "await_request_send/5",
+              "previous_line": 2380,
+              "line": 2375
+            },
+            {
+              "inventory_occurrence": 111,
+              "mfa": "await_request_send/5",
+              "previous_line": 2385,
+              "line": 2380
+            },
+            {
+              "inventory_occurrence": 112,
+              "mfa": "close_http1_socket/1",
+              "previous_line": 2476,
+              "line": 2471
+            },
+            {
+              "inventory_occurrence": 113,
+              "mfa": "handle_closed/1",
+              "previous_line": 1792,
+              "line": 1786
+            },
+            {
+              "inventory_occurrence": 114,
+              "mfa": "handle_data/2",
+              "previous_line": 1773,
+              "line": 1767
+            },
+            {
+              "inventory_occurrence": 115,
+              "mfa": "owner_loop/1",
+              "previous_line": 1762,
+              "line": 1756
+            },
+            {
+              "inventory_occurrence": 116,
+              "mfa": "send_request/5",
+              "previous_line": 2357,
+              "line": 2352
+            },
+            {
+              "inventory_occurrence": 117,
+              "mfa": "send_request/5",
+              "previous_line": 2362,
+              "line": 2357
+            },
+            {
+              "inventory_occurrence": 118,
+              "mfa": "stop_http1_upload/2",
+              "previous_line": 2455,
+              "line": 2450
+            }
+          ]
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "8f353057ecfe52d0d6e81d6fb2e43ba5de4e5d50",
+          "input": "apps/http_fetch/lib/http/promise.ex",
+          "change": "await/2 reports its own wait expiry as {:error, :await_timeout} instead of {:error, :timeout} (8f35305); the @doc and @spec describe the distinction.",
+          "dispatch_review": "No dynamic dispatch added. The two HTTP-5 run_callbacks/3 invocations (106 success_fun.(value), 207 error_fun.(reason)) keep their expressions and the arity-guarded callbacks retained by then/3; documentation lines move both by 3 lines. They are rebound below; 106 also in the amendment (207 is an rc.11 addition).",
+          "occurrence_rebindings": [
+            {
+              "inventory_occurrence": 106,
+              "mfa": "run_callbacks/3",
+              "previous_line": 161,
+              "line": 164
+            },
+            {
+              "inventory_occurrence": 207,
+              "mfa": "run_callbacks/3",
+              "previous_line": 159,
+              "line": 162
+            }
+          ]
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/http_core/lib/http/tls_backend.ex",
+          "change": "HTTP.TLSBackend is deleted with the tls_backend option and the :http_core tls_backend configuration (c7fada8). Its resolve/1 accepted only :ex_ssl and its transport/1 returned only HTTP.Transport.ExSSL; the four former transport/1 calls (Dialer select_transport/2 twice, EventSource and WebSocket select_transport/1) now name the literal HTTP.Transport.ExSSL and the resolve/1 checks are dropped.",
+          "dispatch_review": "No dynamic dispatch added or moved; the module held no reviewed occurrence. The TLS selector origin of HTTP-1, HTTP-3, HTTP-4 and HTTP-9 narrows from the single-valued TLSBackend.transport(:ex_ssl) to the literal HTTP.Transport.ExSSL. The file leaves the selected inputs and the census and is recorded under removed_selected_inputs."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/http_runtime/lib/http/runtime/dialer.ex",
+          "change": "select_transport/2 returns the literal HTTP.Transport.ExSSL for TLS origins and HTTPS proxies instead of HTTP.TLSBackend.transport(tls_backend(request)); tls_backend/1 is removed (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved. The seven HTTP-1 sites (145-151) keep their lines, expressions and owning functions; the captured transport is now always one of the literal TCP, Unix or ExSSL modules."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/http_runtime/lib/http/runtime/stream.ex",
+          "change": "Runtime.Stream no longer resolves a tls_backend; managed provider admission applies to non-HTTP/3 https requests (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: one with clause is removed and a literal condition changes; the transport still comes from the Dialer selector. The file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/http_pool/lib/http/http1/pool.ex",
+          "change": "checkout/2 routes to the provider checkout whenever a request lifecycle is current, without the removed tls_backend == :ex_ssl condition (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added. The twelve HTTP-6 sites keep their expressions and the retained entry.transport/transport argument that SocketClient checks in; each moves up by 1 line. These sites were not rebound by the rc.11 amendment, so they are added to its occurrence_rebindings with their rc.11 lines as previous_line and are rebound below.",
+          "occurrence_rebindings": [
+            {
+              "inventory_occurrence": 119,
+              "mfa": "checkin/4",
+              "previous_line": 72,
+              "line": 71
+            },
+            {
+              "inventory_occurrence": 120,
+              "mfa": "checkin/4",
+              "previous_line": 65,
+              "line": 64
+            },
+            {
+              "inventory_occurrence": 121,
+              "mfa": "checkin/4",
+              "previous_line": 67,
+              "line": 66
+            },
+            {
+              "inventory_occurrence": 122,
+              "mfa": "checkin/4",
+              "previous_line": 69,
+              "line": 68
+            },
+            {
+              "inventory_occurrence": 123,
+              "mfa": "handle_call/3",
+              "previous_line": 185,
+              "line": 184
+            },
+            {
+              "inventory_occurrence": 124,
+              "mfa": "handle_info/2",
+              "previous_line": 384,
+              "line": 383
+            },
+            {
+              "inventory_occurrence": 125,
+              "mfa": "lease/2",
+              "previous_line": 327,
+              "line": 326
+            },
+            {
+              "inventory_occurrence": 126,
+              "mfa": "publish_checkin/4",
+              "previous_line": 443,
+              "line": 442
+            },
+            {
+              "inventory_occurrence": 127,
+              "mfa": "queued_socket_event?/1",
+              "previous_line": 392,
+              "line": 391
+            },
+            {
+              "inventory_occurrence": 128,
+              "mfa": "ready_to_lease/2",
+              "previous_line": 334,
+              "line": 333
+            },
+            {
+              "inventory_occurrence": 129,
+              "mfa": "ready_to_lease/2",
+              "previous_line": 335,
+              "line": 334
+            },
+            {
+              "inventory_occurrence": 130,
+              "mfa": "retire_entry/1",
+              "previous_line": 548,
+              "line": 547
+            }
+          ]
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "bcbc0e935127d7490bd76d9325f3c6c5c9d35da7",
+          "input": "apps/http_runtime/lib/http/protocol_client/session.ex",
+          "change": "ProtocolClient config/2 reports a bad origin as {:error, :invalid_url} and raises ArgumentError for unknown or invalid options through HTTP.Runtime.Options.raise_invalid!/2 (bcbc0e9).",
+          "dispatch_review": "No dynamic dispatch added or moved: literal origin/1 and options/1 helpers; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/http_runtime/lib/http/managed_transport.ex",
+          "change": "Managed transport documentation drops the legacy tls_backend: :ssl sentence (c7fada8). Documentation only.",
+          "dispatch_review": "No dynamic dispatch added or moved; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/http_runtime/lib/http/managed_transport/scope.ex",
+          "change": "The managed scope selects the :birth provider mode for every https origin, without the removed tls_backend == :ex_ssl condition (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: a literal condition change; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/http_runtime/lib/http/managed_transport/policy.ex",
+          "change": "The managed policy no longer accepts, resolves or freezes tls_backend (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: one key and one with clause are removed; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "bcbc0e935127d7490bd76d9325f3c6c5c9d35da7",
+          "input": "apps/http_event_source/lib/http/event_source/options.ex",
+          "change": "EventSource options accept only the listed init keys and raise ArgumentError for unknown or invalid ones through HTTP.Runtime.Options.client_init/3 and raise_invalid!/2 (bcbc0e9); delivery defaults to :push (c222551); tls_backend is removed (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: literal key lists, literal Options calls and guards; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c2225514a426d3a24d80c1ae508ddd989f0c98cc",
+          "input": "apps/http_event_source/lib/http/event_source/connection.ex",
+          "change": "select_transport/1 returns the literal HTTP.Transport.ExSSL for https and the tls_backend state field is removed (c7fada8); the :legacy delivery mode is renamed :push (c222551); same_origin?/2 and serialize_origin/1 use WHATWG origin serialization for IPv6 literals and default ports (914d2b6).",
+          "dispatch_review": "No dynamic dispatch added. The nine HTTP-3 sites keep their expressions, retained state/attempt transport selectors and owning functions; the former HTTP.TLSBackend.transport/1 result is now the literal HTTP.Transport.ExSSL. Six sites move by 2 lines and three by 5 lines and are rebound below and in the amendment.",
+          "occurrence_rebindings": [
+            {
+              "inventory_occurrence": 94,
+              "mfa": "detach_transport/1",
+              "previous_line": 755,
+              "line": 750
+            },
+            {
+              "inventory_occurrence": 95,
+              "mfa": "handle_info/2",
+              "previous_line": 215,
+              "line": 213
+            },
+            {
+              "inventory_occurrence": 96,
+              "mfa": "handle_info/2",
+              "previous_line": 228,
+              "line": 226
+            },
+            {
+              "inventory_occurrence": 97,
+              "mfa": "handle_info/2",
+              "previous_line": 257,
+              "line": 255
+            },
+            {
+              "inventory_occurrence": 98,
+              "mfa": "open_http1/2",
+              "previous_line": 419,
+              "line": 417
+            },
+            {
+              "inventory_occurrence": 99,
+              "mfa": "open_http1/2",
+              "previous_line": 424,
+              "line": 422
+            },
+            {
+              "inventory_occurrence": 100,
+              "mfa": "open_transport/1",
+              "previous_line": 433,
+              "line": 431
+            },
+            {
+              "inventory_occurrence": 101,
+              "mfa": "rearm/1",
+              "previous_line": 667,
+              "line": 662
+            },
+            {
+              "inventory_occurrence": 102,
+              "mfa": "send_request/3",
+              "previous_line": 465,
+              "line": 460
+            }
+          ]
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "bcbc0e935127d7490bd76d9325f3c6c5c9d35da7",
+          "input": "apps/http_web_socket/lib/http/web_socket/options.ex",
+          "change": "WebSocket options accept only the listed init keys and raise ArgumentError for unknown or invalid ones (bcbc0e9); delivery defaults to :push (c222551); tls_backend is removed (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: literal key lists and Options calls; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c2225514a426d3a24d80c1ae508ddd989f0c98cc",
+          "input": "apps/http_web_socket/lib/http/web_socket/connection.ex",
+          "change": "select_transport/1 returns the literal HTTP.Transport.ExSSL for wss (c7fada8) and the :legacy delivery mode is renamed :push (c222551).",
+          "dispatch_review": "No dynamic dispatch added. The seven HTTP-9 sites keep their expressions, retained transport selectors and owning functions; the former HTTP.TLSBackend.transport/1 result is now the literal HTTP.Transport.ExSSL. Sites 155 and 156 keep their lines; the other five move by 3 lines and are rebound below and in the amendment.",
+          "occurrence_rebindings": [
+            {
+              "inventory_occurrence": 152,
+              "mfa": "abort_transport/2",
+              "previous_line": 1471,
+              "line": 1468
+            },
+            {
+              "inventory_occurrence": 153,
+              "mfa": "abort_transport/2",
+              "previous_line": 1472,
+              "line": 1469
+            },
+            {
+              "inventory_occurrence": 154,
+              "mfa": "detach/1",
+              "previous_line": 1451,
+              "line": 1448
+            },
+            {
+              "inventory_occurrence": 157,
+              "mfa": "rearm/1",
+              "previous_line": 1338,
+              "line": 1335
+            },
+            {
+              "inventory_occurrence": 158,
+              "mfa": "submit/2",
+              "previous_line": 891,
+              "line": 888
+            }
+          ]
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "9aa450a4091313c2c6542ecd37e60b07b93d981d",
+          "input": "apps/http_web_transport/lib/http/web_transport.ex",
+          "change": "WebTransport documentation describes ArgumentError for unknown or invalid options (bcbc0e9), error reasons (9aa450a) and telemetry events (4e26caf); tls_backend is no longer documented (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved; documentation and literal calls only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "bcbc0e935127d7490bd76d9325f3c6c5c9d35da7",
+          "input": "apps/http_web_transport/lib/http/web_transport/options.ex",
+          "change": "WebTransport options accept only the listed init keys (backend among them, unchanged) and raise ArgumentError for unknown or invalid ones through HTTP.Runtime.Options.client_init/3 (bcbc0e9); the tls_backend aliases and validation are removed (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: literal key lists and Options calls. options.backend remains the only WT-1 backend producer, consumed only by Session.init/1. The file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "9aa450a4091313c2c6542ecd37e60b07b93d981d",
+          "input": "apps/http_web_socket/lib/http/web_socket.ex",
+          "change": "WebSocket documentation describes ArgumentError for unknown or invalid options (bcbc0e9), the :push delivery mode (c222551), error reasons (9aa450a) and telemetry events (4e26caf); tls_backend is no longer documented (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved; documentation and literal calls only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/http_pool/lib/http/http2/pool_key.ex",
+          "change": "The HTTP/2 TLS pool identity no longer carries a backend and the tls_backend key is no longer part of the transport projection (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: the key is data; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "bcbc0e935127d7490bd76d9325f3c6c5c9d35da7",
+          "input": "apps/http_runtime/lib/http/runtime/pool.ex",
+          "change": "Runtime.Pool.start_link/1 raises ArgumentError naming {:invalid_pool_option, key, why} for unknown keys or invalid policy values (bcbc0e9).",
+          "dispatch_review": "No dynamic dispatch added or moved: a literal case and Options.raise_invalid!/2 call; the file holds no reviewed occurrence."
         }
       ],
       "removed_occurrences": [

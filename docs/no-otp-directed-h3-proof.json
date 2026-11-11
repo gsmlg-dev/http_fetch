@@ -7,16 +7,16 @@
   "original_findings_removed": 0,
   "source_inputs_sha256": {
     "apps/elixir_quic_http3/lib/quic_http3/session.ex": "45423f557e8d4b16db2121560b01a2d51d372174eeb7f2d60d7fda643a5901cf",
-    "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679",
+    "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "5197e2316ae0a59722f1261a77b436e73eab2cfd7361b2eda1291a0f5067a9c4",
     "apps/http_core/lib/http/quic/ex_quic.ex": "0cb045e39b362131a53d5b3a1d7a19f5f5f25c7f192cf64a16b28ed488e0ffc6",
-    "apps/http_fetch/lib/http.ex": "f39bb1e218018fd6c51d8db31460113be235af61e71789ad25ca01089394da31",
-    "apps/http_fetch/lib/http/fetch_options.ex": "b7c823c68858ce179005ace404dac20851250bbd651420a2ae9519e10bfebdac",
-    "apps/http_fetch/lib/http/socket_client.ex": "9b0d75be354cd0a6a4ffa1278a5c3539a46b313555bcd3a3e8aee15b43ee7d12",
-    "apps/http_event_source/lib/http/event_source/options.ex": "d47237d3552da5744e9a7a60031f6b47daaad5539dc40c79e974159da1f127cc",
-    "apps/http_event_source/lib/http/event_source/connection.ex": "08f36a713d42ef8d33dd23a5635ae4844d35ab8ad17bbe90e1c592aaf4279a6a",
+    "apps/http_fetch/lib/http.ex": "6a39466e0389c97f70715f525264dd9b7329ab16e2de500a3e77442194cc1dd8",
+    "apps/http_fetch/lib/http/fetch_options.ex": "e514c7304112ac05ae41279478e619a6fb68e29021c36feb62d9b03dc04d86b0",
+    "apps/http_fetch/lib/http/socket_client.ex": "f4a9938c14ea801a9b9143d486e519ef4e86ba9bd01788ec87b4c08cd80355f1",
+    "apps/http_event_source/lib/http/event_source/options.ex": "930e41ceef9d626bd4e1e545e4dc48d3bc3571b79dc30a639db642d96b953f84",
+    "apps/http_event_source/lib/http/event_source/connection.ex": "65fcdb74e7e49270db6d35325228c898b0cc9f9c7595b8b03330ab89a9dc475a",
     "apps/http_runtime/lib/http/http3.ex": "7b1670325485fae44e28a787392e7f10c40788eac9b526a9eac75aeba57a5049",
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
-    "apps/http_runtime/lib/http/http3/pool_key.ex": "d9ef3e06fcbaab42181a3b27ddc72e16865e516d0b8c4e07be003558ac62e899",
+    "apps/http_runtime/lib/http/http3/pool_key.ex": "d3ae65db80e752cbd6bb4cdb4437c48c6a3ed031f4b86b76f7ce62f18d0aabd9",
     "apps/http_runtime/lib/http/http3/pool.ex": "974135c4126244c649815a5d4ab808678da3c1978540d84b940729f299baf73d",
     "apps/http_runtime/lib/http/http3/connection_owner.ex": "b2f5eeb3b75afdf1187f0fc4a19b2b8e070f6a0ec06d92841a68b8a7384428e2",
     "apps/http_runtime/lib/http/http3/resumption.ex": "ad78171f1d7f53425400a05a02a1d87f0263e4f3a17b87fa95fc8f4e1559ae29"
@@ -320,7 +320,7 @@
       "inventory_occurrence": 58,
       "module": "QuicHttp3.Transport.Quic",
       "mfa": "start_endpoint/5",
-      "line": 497,
+      "line": 496,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
       "proof": "H3-2",
@@ -330,7 +330,7 @@
       "inventory_occurrence": 59,
       "module": "QuicHttp3.Transport.Quic",
       "mfa": "stop_owned_endpoint/2",
-      "line": 505,
+      "line": 504,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
       "proof": "H3-2",
@@ -716,7 +716,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "73ca9e54943c6dd1834bbfd599e6d3526819b5ce",
+      "source_commit": "722a99a123757885630c4c8aab4ec691e99c3bb8",
       "scope": "opt-in resumption/0-RTT, extended CONNECT, datagrams, reliable reset, client migration and WebSocket/H3 completion receipt",
       "changed_source_inputs": {
         "apps/elixir_quic_http3/lib/quic_http3/session.ex": {
@@ -725,19 +725,19 @@
         },
         "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": {
           "previous_sha256": "e3eceea332cdee69f921bae15452e8b4d41fc76265b8bfff76a2dfbf5c28385a",
-          "sha256": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679"
+          "sha256": "5197e2316ae0a59722f1261a77b436e73eab2cfd7361b2eda1291a0f5067a9c4"
         },
         "apps/http_fetch/lib/http/fetch_options.ex": {
           "previous_sha256": "5e69e37daad48cda62f04c6043b43116383c885cfe809a3089ffad9a3d42d9f1",
-          "sha256": "b7c823c68858ce179005ace404dac20851250bbd651420a2ae9519e10bfebdac"
+          "sha256": "e514c7304112ac05ae41279478e619a6fb68e29021c36feb62d9b03dc04d86b0"
         },
         "apps/http_fetch/lib/http/socket_client.ex": {
           "previous_sha256": "dd7f464583e6bf9b687aebec9f8a819cdf84bb9311cfc2e8ff7c96edaf58f052",
-          "sha256": "9b0d75be354cd0a6a4ffa1278a5c3539a46b313555bcd3a3e8aee15b43ee7d12"
+          "sha256": "f4a9938c14ea801a9b9143d486e519ef4e86ba9bd01788ec87b4c08cd80355f1"
         },
         "apps/http_event_source/lib/http/event_source/options.ex": {
           "previous_sha256": "d1c36a500c8f5f86b6c5334d8e34b355451d9367487f5d1f4b37df0a31b44202",
-          "sha256": "d47237d3552da5744e9a7a60031f6b47daaad5539dc40c79e974159da1f127cc"
+          "sha256": "930e41ceef9d626bd4e1e545e4dc48d3bc3571b79dc30a639db642d96b953f84"
         },
         "apps/http_runtime/lib/http/http3/stream.ex": {
           "previous_sha256": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
@@ -745,7 +745,7 @@
         },
         "apps/http_runtime/lib/http/http3/pool_key.ex": {
           "previous_sha256": "6e078977445c6dd0f80c2fbceb86f72002692313d4bfaf37dd4f60054c67f134",
-          "sha256": "d9ef3e06fcbaab42181a3b27ddc72e16865e516d0b8c4e07be003558ac62e899"
+          "sha256": "d3ae65db80e752cbd6bb4cdb4437c48c6a3ed031f4b86b76f7ce62f18d0aabd9"
         },
         "apps/http_runtime/lib/http/http3/connection_owner.ex": {
           "previous_sha256": "b06ba317f5bc546c6a2941a5be3f263245e8cb070fdb0f54736adb6e84b35a37",
@@ -757,7 +757,7 @@
         },
         "apps/http_fetch/lib/http.ex": {
           "previous_sha256": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d",
-          "sha256": "f39bb1e218018fd6c51d8db31460113be235af61e71789ad25ca01089394da31"
+          "sha256": "6a39466e0389c97f70715f525264dd9b7329ab16e2de500a3e77442194cc1dd8"
         },
         "apps/http_runtime/lib/http/http3.ex": {
           "previous_sha256": "b691a8f1c780c3b9e920c7148f38a17d82975d2788170579073753bea61df92d",
@@ -765,7 +765,7 @@
         },
         "apps/http_event_source/lib/http/event_source/connection.ex": {
           "previous_sha256": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
-          "sha256": "08f36a713d42ef8d33dd23a5635ae4844d35ab8ad17bbe90e1c592aaf4279a6a"
+          "sha256": "65fcdb74e7e49270db6d35325228c898b0cc9f9c7595b8b03330ab89a9dc475a"
         }
       },
       "added_selected_inputs": [
@@ -773,7 +773,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "39954c07688f1d5efeb5655673475e046352b8500a8808f32969dca6c83a75ac",
+        "sorted_path_sha256_json": "593f3470ba2aa26228f450342d8595400c4277d1ddfb06b69fa9f5eaa41a22e5",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -889,13 +889,13 @@
           "inventory_occurrence": 58,
           "mfa": "start_endpoint/5",
           "previous_line": 483,
-          "line": 497
+          "line": 496
         },
         {
           "inventory_occurrence": 59,
           "mfa": "stop_owned_endpoint/2",
           "previous_line": 491,
-          "line": 505
+          "line": 504
         },
         {
           "inventory_occurrence": 60,
@@ -928,7 +928,7 @@
       ],
       "origin_derivations": {
         "H3-1": "Session.new/1 still assigns transport once (literal default QuicHttp3.Transport.Quic). New sites 189-199 (early/resumption queries, extension requirements, uni/kind stream opens, reset_stream_at, datagrams, migrate) call the retained session.transport. The only library session_options producer is the WebTransport backend, which supplies only webtransport limits. rc.13 follow-up (3a5522c): new site 208 (operation/3, operation(session, {:close, code, phrase}, opts)) calls the same retained session.transport as its siblings; the {:close, code, phrase} step is built only inside Session from literal codes and close_phrase/1. Session.new/1 still assigns transport once and the other twenty-six H3-1 sites move by 5 to 13 lines with unchanged expressions.",
-        "H3-2": "reset_stream_at/4 (200) and migrate/2 (201) call the retained connection/stream ops. HTTP.HTTP3.Resumption creates its shared endpoint with QuicTransport.client/1 from an explicit key projection without :ops, so ops defaults to literal Quic and borrowing still requires ops equality. Quic.reset_stream_at/4 and Quic.migrate/2 route to reviewed Connection operations.",
+        "H3-2": "reset_stream_at/4 (200) and migrate/2 (201) call the retained connection/stream ops. HTTP.HTTP3.Resumption creates its shared endpoint with QuicTransport.client/1 from an explicit key projection without :ops, so ops defaults to literal Quic and borrowing still requires ops equality. Quic.reset_stream_at/4 and Quic.migrate/2 route to reviewed Connection operations. rc.14 follow-up (c7fada8): the endpoint option projection drops :tls_backend; start_endpoint/5 (58) and stop_owned_endpoint/2 (59) move by 1 line with unchanged expressions.",
         "H3-4": "HTTP.HTTP3.Stream.relay_cleanup/2 now creates one library connector callback, fn _deadline -> native_scope(relay) end, only for certified (extended CONNECT with a request lifecycle) exclusive connections with no caller callback or descriptor. Its body calls only Quic.Cleanup.new/1 (Q1) and returns that opaque descriptor. Public option projections still never expose :quic_cleanup. connector_wait/5 is unchanged and moves 333->520.",
         "H3-3_H3-5": "ExQuic wrappers are unchanged; SocketClient still supplies only &handle_http3_event/2."
       },
@@ -943,7 +943,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "36ecab8f21975904e1508717dd29d8866e49c07cfb649fdbd56e33d0e97dfeb3"
+        "sha256": "29070f6567ac11a5e2cf9a4bf20da284bd7cc059fe98ff09f8cac6fd747124dd"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
@@ -1231,6 +1231,69 @@
           "input": "apps/http_fetch/lib/http.ex",
           "change": "fetch/2 documentation is corrected for HTTP/2 and HTTP/3, proxy forms, streaming uploads and the awaited error result.",
           "dispatch_review": "No dynamic dispatch added or removed; documentation only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
+          "change": "The endpoint option projection no longer carries :tls_backend and the :tls_backend_not_supported_for_quic validation clause is removed (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added. The H3-2 sites keep their expressions and the retained connection/endpoint ops; start_endpoint/5 (58) and stop_owned_endpoint/2 (59) move by 1 line and are rebound in the H3 review; the other H3-2 sites keep their lines.",
+          "occurrence_rebindings": [
+            {
+              "inventory_occurrence": 58,
+              "mfa": "start_endpoint/5",
+              "previous_line": 497,
+              "line": 496
+            },
+            {
+              "inventory_occurrence": 59,
+              "mfa": "stop_owned_endpoint/2",
+              "previous_line": 505,
+              "line": 504
+            }
+          ]
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "6a63b4159523b04de72edcc04920460eceeb0de4",
+          "input": "apps/http_fetch/lib/http.ex",
+          "change": "fetch/2 maps the internal :request_timeout reason to the public :timeout (c7a3c19), documents the Fetch error reason set (6a63b41) and no longer reports or documents tls_backend (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: a literal public_reason/1 helper and documentation; the apparent calls remain documentation examples and the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/http_fetch/lib/http/fetch_options.ex",
+          "change": "FetchOptions raises ArgumentError for unknown option keys, non-pair entries and a signal that is neither nil nor a pid (f261a03); the tls_backend option, its aliases and normalization are removed (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: literal raise clauses and a guarded normalize_signal/1; the transport projection still has no transport-module, protocol-module or state option. The file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "ee8d3e7a549913d6c0f063e6282443ca067a3e1d",
+          "input": "apps/http_fetch/lib/http/socket_client.ex",
+          "change": "SocketClient no longer pins or forwards a tls_backend (pin_tls_backend/1 and tls_backend/1 removed, c7fada8); owner registration uses a single-clause case (ee8d3e7); request deadline expiry is reported as :timeout and response streams are opened with response_body: true (c7a3c19).",
+          "dispatch_review": "No dynamic dispatch added or moved for H3: SocketClient still supplies only &handle_http3_event/2 to the HTTP/3 stream (H3-3/H3-5); the twelve HTTP-4 sites are rebound in the HTTP review."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "bcbc0e935127d7490bd76d9325f3c6c5c9d35da7",
+          "input": "apps/http_event_source/lib/http/event_source/options.ex",
+          "change": "EventSource options accept only the listed init keys and raise ArgumentError for unknown or invalid ones through HTTP.Runtime.Options.client_init/3 and raise_invalid!/2 (bcbc0e9); delivery defaults to :push (c222551); tls_backend is removed (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: literal key lists, literal Options calls and guards; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c2225514a426d3a24d80c1ae508ddd989f0c98cc",
+          "input": "apps/http_event_source/lib/http/event_source/connection.ex",
+          "change": "select_transport/1 returns the literal HTTP.Transport.ExSSL for https and the tls_backend state field is removed (c7fada8); the :legacy delivery mode is renamed :push (c222551); same_origin?/2 and serialize_origin/1 use WHATWG origin serialization for IPv6 literals and default ports (914d2b6).",
+          "dispatch_review": "No dynamic dispatch added or moved for H3: the HTTP/3 path still runs through the fixed HTTP3 stream modules and no H3 occurrence lives in this file; the nine HTTP-3 sites are rebound in the HTTP review."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "c7fada834df99a33813497878e7eed16da45f90a",
+          "input": "apps/http_runtime/lib/http/http3/pool_key.ex",
+          "change": "The HTTP/3 pool key no longer rejects a tls_backend option, which no longer exists (c7fada8).",
+          "dispatch_review": "No dynamic dispatch added or moved: one cond clause is removed; the file holds no reviewed occurrence."
         }
       ]
     }
