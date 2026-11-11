@@ -287,8 +287,9 @@ defmodule SSL do
   Opens a TLS 1.3 server listen socket.
 
   Options are validated before the port is opened. TLS options are the
-  certificate identity (`certfile`/`keyfile`, `cert`/`key`, `certs_keys`,
-  `password`), `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers`,
+  certificate identity (`certfile`/`keyfile`, `cert`/`key`, `certs_keys`
+  with several identities, each validated here and chosen per handshake by the
+  client's signature algorithms, `password`), `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers`,
   `versions: [:"tlsv1.3"]` and client authentication. OTP `:ssl`-only options
   are errors; every other option is a `:gen_tcp` listen option, including the
   bare address families `:inet`, `:inet6` and `:local`. `:binary` and

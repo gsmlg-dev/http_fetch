@@ -301,6 +301,38 @@ defmodule SSL.PKIXTest do
              verify_identity("partial_wildcard.pem", {:dns_id, "foo.example.test"})
   end
 
+  # RFC 6125 §6.4.3: a wildcard needs at least two labels after the `*`.
+  test "does not match a presented wildcard that spans a whole public suffix" do
+    for {pattern, reference, expected} <- [
+          {"*.com", "example.com", :hostname_mismatch},
+          {"*.test", "example.test", :hostname_mismatch},
+          {"*.example.com", "www.example.com", :ok}
+        ] do
+      data =
+        :public_key.pkix_test_data(%{
+          root: [key: {:namedCurve, :secp256r1}],
+          peer: [
+            key: {:namedCurve, :secp256r1},
+            extensions: [
+              {:Extension, {2, 5, 29, 17}, false, [{:dNSName, String.to_charlist(pattern)}]}
+            ]
+          ]
+        })
+
+      cert = data[:cert]
+
+      root_pem =
+        :public_key.pem_encode(
+          for root <- data[:cacerts], do: {:Certificate, root, :not_encrypted}
+        )
+
+      case expected do
+        :ok -> assert {:ok, _} = PKIX.verify([cert], root_pem, {:dns_id, reference})
+        error -> assert {:error, ^error} = PKIX.verify([cert], root_pem, {:dns_id, reference})
+      end
+    end
+  end
+
   test "rejects invalid ASCII DNS references before identity matching" do
     oversized_label = String.duplicate("a", 64) <> ".example.test"
     oversized_name = Enum.join(List.duplicate(String.duplicate("a", 63), 4), ".")

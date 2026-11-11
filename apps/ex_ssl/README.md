@@ -250,11 +250,20 @@ Scope:
   `:gen_tcp` option; `:binary` and `active: false` are enforced on the carrier.
   `active` other than `false`, `mode` other than `:binary` (including `:list`)
   and OTP `:ssl`-only options are errors. Options are validated before the port opens.
+- `certs_keys` takes several identities (for example RSA and ECDSA). Every
+  entry is loaded and validated by `listen/2`; an invalid entry fails it with
+  `{:error, {:invalid_option, :certs_keys}}` or the loader's error. Per
+  handshake the server picks, among the identities selected for the SNI name
+  (`sni_hosts`/`sni_fun` entries may carry their own `certs_keys`), the first in
+  list order that can sign one of the client's `signature_algorithms`,
+  preferring one whose chain fits `signature_algorithms_cert`. If none can sign,
+  the first entry is used and the handshake fails with `handshake_failure`.
 - SNI: `sni_hosts: [{name, identity_options}]` identities are loaded when the
   options are validated, so a bad certificate, a non-identity key or a
   duplicate name fails `listen/2` with `{:error, {:invalid_option, :sni_hosts}}`.
-  `sni_fun.(name)` runs in the connection process for each handshake and returns
-  identity options or `:undefined`. Selection order is `sni_hosts[name]`, then
+  `sni_fun.(name)` runs for each handshake in a monitored helper process that is
+  killed when the `SSL.handshake/2` deadline expires (the call then returns
+  `{:error, :timeout}`), and returns identity options or `:undefined`. Selection order is `sni_hosts[name]`, then
   `sni_fun.(name)`, then the default identity. `sni_hosts` names match
   ASCII case-insensitively (RFC 4343), so names differing only in case are
   duplicates; `sni_fun` receives the name exactly as the client sent it. An
@@ -282,11 +291,24 @@ Scope:
   `peer_authenticated: :client | false`. `verify: :verify_none` (default) sends
   no CertificateRequest; any other `verify` value is
   `{:error, {:invalid_option, :verify}}`. `SSL.QUIC` servers do not request
-  client certificates.
+  client certificates. Client chains get no revocation check (no CRL or OCSP);
+  only the client side of ex_ssl supports revocation policy, so a server that
+  needs revocation must pin a short-lived CA or check `SSL.peercert/1` itself.
 - No session tickets or resumption: the server sends no NewSessionTicket, and a
   client offering a PSK gets a full handshake. 0-RTT is not accepted: when the
   ClientHello offers `early_data`, up to 16 KiB of early-data records are
-  skipped (RFC 8446 §4.2.10) and the client must resend after the handshake.
+  skipped (RFC 8446 §4.2.10), bounded to 16 KiB and 64 records, and the client
+  must resend after the handshake.
+- Pre-authentication limits: a ClientHello is buffered up to 64 KiB (real
+  hellos are well under 4 KiB), not the 1 MiB used for later handshake
+  messages. After the handshake a partial handshake message (KeyUpdate) must
+  not be interleaved with application data or alerts (RFC 8446 §5.1); that
+  is an `unexpected_message` alert. A second `SSL.handshake/2` while one runs
+  returns `{:error, :already_started}`. The handshake deadline also bounds the
+  server flight write, whatever the carrier `send_timeout`.
+- Hostname verification (client side) rejects a presented wildcard with fewer
+  than two labels after `*` (`*.com`); there is no public-suffix list, so
+  `*.co.uk` still matches.
 - Receive backpressure: while about 1 MiB of plaintext is buffered unread, the
   server stops reading its carrier until the application drains it.
 - Server carriers default to `send_timeout: 30_000, send_timeout_close: true`
@@ -299,8 +321,8 @@ Scope:
 
 `SSL.QUIC` provides an experimental record-free TLS 1.3 client/server handshake
 API with caller-owned state and ordered traffic-secret actions. The TCP client
-shares its ClientHello/HRR and authentication core. This adds neither QUIC
-networking nor TCP server APIs. See the [interface](docs/QUIC_TLS_INTERFACE.md)
+shares its ClientHello/HRR and authentication core. This adds no QUIC
+networking (the TCP server API is described above). See the [interface](docs/QUIC_TLS_INTERFACE.md)
 and [implementation ledger](docs/QUIC_TLS_IMPLEMENTATION.md). The pinned
 [aioquic comparison](e2e/quic_tls/README.md) exercises both roles and compares
 traffic secrets without QUIC networking.
@@ -337,6 +359,16 @@ independent R1/R2 gates, so `SSL.QUIC.capabilities()` reports `resumption` and
 `zero_rtt` as true; both stay opt-in per connection. TCP options and early-data policy are unchanged. See the
 [continuation contract](../../docs/quic/tls-continuation-contract.md) and
 [validation evidence](../../docs/quic/tls-resumption-validation.md).
+
+QUIC 0-RTT replay protection is not enforced inside `ex_ssl`: it checks the
+ticket age window and offers early data only after the caller's
+`:session_commit` answer is `{:ok, :early_data}`, so single use depends on the
+caller's session store consuming the ticket atomically in that commit. The
+in-tree consumer, `elixir_quic`'s endpoint `Quic.ResumptionStore`, deletes the
+entry on a successful commit, so a replayed ticket gets `:miss` and a full
+handshake. That store is in-memory and endpoint-local: replay across
+endpoints, nodes or restarts is not detected, and a custom store must provide
+the same atomic single-use guarantee.
 
 The raw TCP socket is controlled by `SSL.Connection`, normally using internal `active: :once`. Application-visible `active` mode is implemented above TLS so handshake/record processing cannot be disabled by application socket mode.
 

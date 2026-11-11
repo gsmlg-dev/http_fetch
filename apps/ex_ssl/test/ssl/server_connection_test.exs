@@ -240,6 +240,101 @@ defmodule SSL.ServerConnectionTest do
     SSL.close(s)
   end
 
+  # Each skipped record costs a trial decryption, so the record count is bounded
+  # as well as the bytes: minimum-size records draw nothing from the byte budget.
+  test "rejected early data beyond the record-count budget is bad_record_mac", ctx do
+    ticket = otp_early_data_ticket()
+    proxy = proxy(ctx.port, :binary.copy(bogus_record(17), 200))
+
+    failing_client(proxy.port,
+      session_tickets: :manual,
+      use_ticket: [ticket],
+      early_data: "early"
+    )
+
+    assert {:error, {:tls_alert, {:bad_record_mac, _}}} = accept(ctx, [])
+  end
+
+  # A pre-authentication ClientHello is framed under a 64 KiB bound, not 1 MiB.
+  test "a ClientHello declaring more than 64 KiB is decode_error", ctx do
+    {:ok, raw} = :gen_tcp.connect({127, 0, 0, 1}, ctx.port, [:binary, active: false])
+    :ok = :gen_tcp.send(raw, <<22, 3, 1, 4::16, 1, 65_537::24>>)
+
+    assert {:error, {:tls_alert, {:decode_error, description}}} = accept(ctx, [])
+    assert to_string(description) =~ "handshake_length_exceeded"
+    :gen_tcp.close(raw)
+  end
+
+  test "a ClientHello declaring exactly 64 KiB is still buffered", ctx do
+    {:ok, raw} = :gen_tcp.connect({127, 0, 0, 1}, ctx.port, [:binary, active: false])
+    :ok = :gen_tcp.send(raw, <<22, 3, 1, 4::16, 1, 65_536::24>>)
+    {:ok, tcp} = :gen_tcp.accept(ctx.listen, 5000)
+    {:ok, s} = ServerConnection.start(tcp, config([]), self())
+    assert ServerConnection.handshake(s, 300) == {:error, :timeout}
+    :gen_tcp.close(raw)
+  end
+
+  # RFC 8446 §5.1: handshake fragments must not interleave with other record types.
+  test "application data after a partial post-handshake message is unexpected_message",
+       ctx do
+    client = client(ctx.port, [], fn _c -> :ok end)
+    {:ok, s} = accept(ctx, [])
+    {:connected, %{tcp: tcp, read: read}} = :sys.get_state(s.pid)
+    {:ok, partial, read} = SSL.Protocol.Record.encrypt(read, :handshake, <<24, 0, 0, 1>>)
+    {:ok, data, _read} = SSL.Protocol.Record.encrypt(read, :application_data, "x")
+    recv = Task.async(fn -> SSL.recv(s, 0, 2000) end)
+    Process.sleep(50)
+    send(s.pid, {:tcp, tcp, IO.iodata_to_binary([partial, data])})
+
+    assert {:error, {:tls_alert, {:unexpected_message, _}}} = Task.await(recv)
+    assert :ok = finish(client)
+  end
+
+  test "a second handshake call while one runs is already_started", ctx do
+    {:ok, raw} = :gen_tcp.connect({127, 0, 0, 1}, ctx.port, [:binary, active: false])
+    {:ok, tcp} = :gen_tcp.accept(ctx.listen, 5000)
+    {:ok, s} = ServerConnection.start(tcp, config([]), self())
+    first = Task.async(fn -> ServerConnection.handshake(s, 1000) end)
+    await_started(s)
+
+    assert ServerConnection.handshake(s, 1000) == {:error, :already_started}
+    assert Process.alive?(s.pid)
+    assert Task.await(first) == {:error, :timeout}
+    :gen_tcp.close(raw)
+  end
+
+  test "a send with a stale write token is closed, not enotsup", ctx do
+    client = client(ctx.port, [], fn _c -> :ok end)
+    {:ok, s} = accept(ctx, [])
+    {:ok, cursor, size} = SSL.IodataCursor.new("x")
+
+    assert :gen_statem.call(s.pid, {s.ref, {:send, make_ref(), cursor, size}}) ==
+             {:error, :closed}
+
+    assert :ok = SSL.send(s, "still usable")
+    assert :ok = finish(client)
+    SSL.close(s)
+  end
+
+  # The handshake deadline covers server-flight writes even with an infinite
+  # carrier send_timeout and a client that never reads.
+  test "a blocked server flight cannot hold SSL.handshake/2 past its timeout", ctx do
+    {:ok, raw} =
+      :gen_tcp.connect({127, 0, 0, 1}, ctx.port, [:binary, active: false, recbuf: 1024])
+
+    :ok = :gen_tcp.send(raw, client_hello())
+    {:ok, tcp} = :gen_tcp.accept(ctx.listen, 5000)
+    :ok = :inet.setopts(tcp, send_timeout: :infinity, sndbuf: 1024)
+    # Backlog that keeps the carrier port busy, so the next write blocks.
+    :ok = :gen_tcp.send(tcp, :binary.copy(<<0>>, 4_000_000))
+    {:ok, s} = ServerConnection.start(tcp, config([]), self())
+    handshake = Task.async(fn -> ServerConnection.handshake(s, 300) end)
+    Process.sleep(200)
+
+    assert Task.yield(handshake, 3000) == {:ok, {:error, :timeout}}
+    :gen_tcp.close(raw)
+  end
+
   defp slow_read(_s, remaining, _count, acc) when remaining <= 0,
     do: IO.iodata_to_binary(Enum.reverse(acc))
 
@@ -317,6 +412,34 @@ defmodule SSL.ServerConnectionTest do
     :ssl.close(c)
     :ssl.close(listen)
     ticket
+  end
+
+  defp await_started(s, attempts \\ 500)
+  defp await_started(_s, 0), do: flunk("server handshake did not start")
+
+  defp await_started(s, attempts) do
+    case :sys.get_state(s.pid) do
+      {:hello, %{started: true}} ->
+        :ok
+
+      _ ->
+        Process.sleep(2)
+        await_started(s, attempts - 1)
+    end
+  end
+
+  # Captures one OTP ClientHello record from a plain TCP listener.
+  defp client_hello do
+    {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(listen)
+    connect = Task.async(fn -> :ssl.connect({127, 0, 0, 1}, port, client_options([]), 5000) end)
+    {:ok, tcp} = :gen_tcp.accept(listen, 5000)
+    {:ok, <<22, 3, _minor, length::16>> = header} = :gen_tcp.recv(tcp, 5, 2000)
+    {:ok, body} = :gen_tcp.recv(tcp, length, 2000)
+    :gen_tcp.close(tcp)
+    :gen_tcp.close(listen)
+    assert {:error, _} = Task.await(connect)
+    header <> body
   end
 
   defp await_server_buffer(s, size, attempts \\ 500)

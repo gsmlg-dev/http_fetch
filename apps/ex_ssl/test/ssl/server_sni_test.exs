@@ -83,8 +83,43 @@ defmodule SSL.ServerSNITest do
     end
   end
 
+  test "a blocking sni_fun cannot hold SSL.handshake/2 past its timeout", %{a: a} do
+    test = self()
+
+    fun = fn _name ->
+      send(test, {:sni_fun, self()})
+      Process.sleep(:infinity)
+    end
+
+    listen = listen(sni_fun: fun)
+    {:ok, {_, port}} = SSL.sockname(listen)
+
+    client =
+      Task.async(fn ->
+        :ssl.connect(
+          {127, 0, 0, 1},
+          port,
+          [
+            versions: [:"tlsv1.3"],
+            cacerts: a.cacerts,
+            server_name_indication: ~c"a.test",
+            log_level: :none
+          ],
+          2000
+        )
+      end)
+
+    {:ok, accepted} = SSL.transport_accept(listen, 5000)
+    server = Task.async(fn -> SSL.handshake(accepted, 300) end)
+
+    assert Task.yield(server, 2000) == {:ok, {:error, :timeout}}
+    assert_received {:sni_fun, helper}
+    refute Process.alive?(helper)
+    assert {:error, _} = Task.await(client, 5000)
+  end
+
   test "sni_hosts identities are loaded and validated when options are built", %{a: a} do
-    assert {:ok, %{sni: {:hosts, %{~c"a.test" => %SSL.ClientIdentity{chain: [cert | _]}}}}} =
+    assert {:ok, %{sni: {:hosts, %{~c"a.test" => [%SSL.ClientIdentity{chain: [cert | _]}]}}}} =
              ServerOptions.build(sni_hosts: [{~c"a.test", [cert: a.cert, key: a.key]}])
 
     assert cert == a.cert

@@ -1,13 +1,15 @@
 defmodule SSL.ServerOptions do
   @moduledoc false
   alias SSL.{Capabilities, ClientIdentity, PKIX}
+  alias SSL.PKIX.CertificateSignaturePolicy
   alias SSL.QUIC.Config
 
   # sni_hosts identities are loaded at build time; sni_fun results per handshake.
   # sni_hosts keys are ASCII-lowercased (RFC 4343); sni_fun sees the name as sent.
+  # Each name maps to its certs_keys identities in preference order.
   @type sni ::
           nil
-          | {:hosts, %{charlist() => ClientIdentity.t()}}
+          | {:hosts, %{charlist() => [ClientIdentity.t(), ...]}}
           | {:fun, (charlist() -> keyword() | :undefined)}
   @type t :: %{
           ciphers: [non_neg_integer()],
@@ -15,6 +17,7 @@ defmodule SSL.ServerOptions do
           alpn: nil | [binary()],
           signature_algorithms: [non_neg_integer()],
           identity: term(),
+          identities: [ClientIdentity.t()],
           limits: keyword(),
           transport_parameters: nil,
           sni: sni(),
@@ -116,16 +119,17 @@ defmodule SSL.ServerOptions do
     with :ok <- check_shape(options),
          :ok <- reject_unsupported(options),
          :ok <- versions(Keyword.get(options, :versions)),
-         {:ok, identity_opts} <- identity_options(options),
-         {:ok, identity} <- load_identity(identity_opts),
+         {:ok, identities} <- identities(options),
          {:ok, sni} <- sni(options),
-         :ok <- identity_present(identity, sni),
+         :ok <- identity_present(identities, sni),
          {:ok, ciphers} <- ciphers(Keyword.get(options, :ciphers)),
          {:ok, groups} <- Config.algorithms([], :groups, :group, Config.ids(:group)),
          {:ok, signatures} <- signatures(),
          {:ok, limits} <- Config.limits([]),
          {:ok, alpn} <- alpn(Keyword.get(options, :alpn_preferred_protocols)),
          {:ok, client_auth} <- client_auth(options) do
+      identity = List.first(identities)
+
       {:ok,
        %{
          ciphers: ciphers,
@@ -133,6 +137,7 @@ defmodule SSL.ServerOptions do
          alpn: alpn,
          signature_algorithms: filter_signatures(signatures, identity),
          identity: identity,
+         identities: identities,
          limits: limits,
          transport_parameters: nil,
          sni: sni,
@@ -151,46 +156,109 @@ defmodule SSL.ServerOptions do
   Selects the identity for a ClientHello `server_name` (`nil` when absent).
 
   Order: `sni_hosts[name]`, then `sni_fun.(name)` (`:undefined` selects the
-  default), then the default identity. `sni_hosts` matching is ASCII
-  case-insensitive (RFC 4343); `sni_fun` receives the name as sent. The returned config carries the
-  selected identity and the signature schemes it can sign. `sni_fun` runs in
-  the caller; a raise, throw, exit or invalid result is an `internal_error`.
+  default), then the default identities. `sni_hosts` matching is ASCII
+  case-insensitive (RFC 4343); `sni_fun` receives the name as sent.
+
+  Among the selected `certs_keys` identities, the first that can sign one of
+  the offered `:signature_schemes` wins, preferring one whose chain also fits
+  `:certificate_signature_schemes` (RFC 8446 §4.4.2.2); with no such identity
+  the first is kept and the handshake fails with `no_shared_signature`. The
+  returned config carries the selected identity and the schemes it can sign.
+
+  `sni_fun` runs in a monitored helper process that is killed after
+  `:timeout` (default `:infinity`), which then returns `{:error, :timeout}`.
+  A raise, throw, exit or invalid result is an `internal_error`.
   """
-  @spec select_identity(t(), charlist() | nil) :: {:ok, t()} | {:error, {atom(), term()}}
-  def select_identity(config, name) do
-    case lookup(config.sni, name) do
-      {:ok, identity} ->
-        with {:ok, signatures} <- signatures() do
-          {:ok,
-           %{
-             config
-             | identity: identity,
-               signature_algorithms: filter_signatures(signatures, identity)
-           }}
-        end
-
-      :default when config.identity != nil ->
-        {:ok, config}
-
-      :default ->
-        {:error, {:unrecognized_name, :no_server_identity}}
-
-      {:error, reason} ->
-        {:error, {:internal_error, reason}}
+  @spec select_identity(t(), charlist() | nil, keyword()) ::
+          {:ok, t()} | {:error, :timeout | {atom(), term()}}
+  def select_identity(config, name, offer \\ []) do
+    case lookup(config.sni, name, Keyword.get(offer, :timeout, :infinity)) do
+      {:ok, identities} -> choose(config, identities, offer)
+      :default when config.identities != [] -> choose(config, config.identities, offer)
+      :default -> {:error, {:unrecognized_name, :no_server_identity}}
+      {:error, :timeout} -> {:error, :timeout}
+      {:error, reason} -> {:error, {:internal_error, reason}}
     end
   end
 
-  defp lookup(nil, _name), do: :default
-  defp lookup(_sni, nil), do: :default
+  defp choose(config, identities, offer) do
+    with {:ok, signatures} <- signatures() do
+      identity = preferred(identities, signatures, offer)
 
-  defp lookup({:hosts, hosts}, name) do
+      {:ok,
+       %{
+         config
+         | identity: identity,
+           signature_algorithms: filter_signatures(signatures, identity)
+       }}
+    end
+  end
+
+  defp preferred([identity], _signatures, _offer), do: identity
+
+  defp preferred(identities, signatures, offer) do
+    case Keyword.fetch(offer, :signature_schemes) do
+      {:ok, offered} when is_list(offered) ->
+        accepted = Keyword.get(offer, :certificate_signature_schemes) || offered
+
+        signable =
+          Enum.filter(identities, fn identity ->
+            Enum.any?(filter_signatures(signatures, identity), &(&1 in offered))
+          end)
+
+        Enum.find(signable, &CertificateSignaturePolicy.compatible?(&1.chain, nil, accepted)) ||
+          List.first(signable) || hd(identities)
+
+      _ ->
+        hd(identities)
+    end
+  end
+
+  defp lookup(nil, _name, _timeout), do: :default
+  defp lookup(_sni, nil, _timeout), do: :default
+
+  defp lookup({:hosts, hosts}, name, _timeout) do
     case Map.fetch(hosts, ascii_downcase(name)) do
-      {:ok, identity} -> {:ok, identity}
+      {:ok, identities} -> {:ok, identities}
       :error -> :default
     end
   end
 
-  defp lookup({:fun, fun}, name) do
+  # A blocking sni_fun must not outlive the handshake deadline: it runs in a
+  # monitored helper that is killed when `timeout` expires.
+  defp lookup({:fun, fun}, name, timeout) do
+    parent = self()
+    tag = make_ref()
+
+    {pid, monitor} =
+      spawn_monitor(fn ->
+        Process.flag(:sensitive, true)
+        send(parent, {tag, call_sni_fun(fun, name)})
+      end)
+
+    receive do
+      {^tag, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^pid, _reason} ->
+        {:error, {:sni_fun, :exit}}
+    after
+      timeout ->
+        Process.exit(pid, :kill)
+        Process.demonitor(monitor, [:flush])
+
+        receive do
+          {^tag, _result} -> :ok
+        after
+          0 -> :ok
+        end
+
+        {:error, :timeout}
+    end
+  end
+
+  defp call_sni_fun(fun, name) do
     case fun.(name) do
       :undefined -> :default
       options -> host_identity(options)
@@ -205,9 +273,8 @@ defmodule SSL.ServerOptions do
   defp host_identity(options) do
     with true <- is_list(options) and Keyword.keyword?(options),
          true <- Enum.all?(Keyword.keys(options), &(&1 in [:certs_keys | @identity_keys])),
-         {:ok, identity_opts} <- identity_options(options),
-         {:ok, %ClientIdentity{} = identity} <- load_identity(identity_opts) do
-      {:ok, identity}
+         {:ok, [_ | _] = identities} <- identities(options) do
+      {:ok, identities}
     else
       _ -> {:error, :invalid_identity}
     end
@@ -256,20 +323,35 @@ defmodule SSL.ServerOptions do
   defp versions([:"tlsv1.3"]), do: :ok
   defp versions(_), do: {:error, {:unsupported_option, :versions}}
 
-  defp identity_options(options) do
+  # Every certs_keys entry is loaded and validated, in preference order.
+  defp identities(options) do
     base = Keyword.take(options, @identity_keys)
 
     case Keyword.fetch(options, :certs_keys) do
-      {:ok, [entry | _]} when is_map(entry) ->
-        {:ok, base |> Keyword.drop(Map.keys(entry)) |> Kernel.++(Map.to_list(entry))}
+      {:ok, [_ | _] = entries} ->
+        load_entries(base, entries, [])
 
       {:ok, _} ->
         {:error, {:invalid_option, :certs_keys}}
 
       :error ->
-        {:ok, base}
+        with {:ok, identity} <- load_identity(base), do: {:ok, List.wrap(identity)}
     end
   end
+
+  defp load_entries(_base, [], acc), do: {:ok, Enum.reverse(acc)}
+
+  defp load_entries(base, [entry | rest], acc) when is_map(entry) do
+    options = base |> Keyword.drop(Map.keys(entry)) |> Kernel.++(Map.to_list(entry))
+
+    case load_identity(options) do
+      {:ok, %ClientIdentity{} = identity} -> load_entries(base, rest, [identity | acc])
+      {:ok, nil} -> {:error, {:invalid_option, :certs_keys}}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp load_entries(_base, _entries, _acc), do: {:error, {:invalid_option, :certs_keys}}
 
   defp load_identity(opts) do
     case ClientIdentity.load(opts) do
@@ -313,13 +395,13 @@ defmodule SSL.ServerOptions do
   defp load_hosts([], acc), do: {:ok, acc}
 
   defp load_hosts([{host, options} | rest], acc) do
-    with {:ok, identity} <- host_identity(options),
-         do: load_hosts(rest, [{ascii_downcase(host), identity} | acc])
+    with {:ok, identities} <- host_identity(options),
+         do: load_hosts(rest, [{ascii_downcase(host), identities} | acc])
   end
 
-  defp identity_present(nil, nil), do: {:error, :server_identity_required}
+  defp identity_present([], nil), do: {:error, :server_identity_required}
 
-  defp identity_present(nil, {:hosts, hosts}) when map_size(hosts) == 0,
+  defp identity_present([], {:hosts, hosts}) when map_size(hosts) == 0,
     do: {:error, :server_identity_required}
 
   defp identity_present(_, _), do: :ok

@@ -34,6 +34,14 @@ defmodule SSL.ServerConnection do
   # Rejected 0-RTT bytes a server skips (RFC 8446 §4.2.10); no ticket is ever
   # issued, so this bounds what a client may send under a foreign PSK.
   @max_early_data 16_384
+  # Each skipped record costs an AEAD trial decryption and minimum-size records
+  # draw nothing from the byte budget, so the record count is capped as well.
+  @max_early_records 64
+  # A pre-authentication ClientHello is buffered up to this size. Real hellos
+  # are 0.2-2 KiB (a few KiB with post-quantum key shares or ECH); 64 KiB is
+  # far above that, while the 1 MiB default would let each unauthenticated
+  # connection pin a megabyte.
+  @max_client_hello 65_536
   # AEAD tag plus the inner content type: the smallest per-record overhead.
   @record_overhead 17
   @alerts %{
@@ -84,6 +92,7 @@ defmodule SSL.ServerConnection do
       :alpn,
       :peercert,
       :handshake_from,
+      :deadline,
       :recv,
       :write_token,
       :records,
@@ -97,6 +106,7 @@ defmodule SSL.ServerConnection do
       ccs_received: false,
       ccs_sent: false,
       early_data: 0,
+      early_records: 0,
       closed: false,
       close_reason: :closed,
       write_closed: false
@@ -190,13 +200,17 @@ defmodule SSL.ServerConnection do
         %{started: false, tcp: tcp} = data
       )
       when not is_nil(tcp) do
-    data = %{data | started: true, handshake_from: from}
+    data = %{data | started: true, handshake_from: from, deadline: deadline}
     continue(:hello, data, [{{:timeout, :handshake}, Options.remaining(deadline), :expired}])
   end
 
   def handle_event({:call, from}, {_ref, {:handshake, _deadline}}, name, _data)
       when name in [:connected, :closing],
       do: reply(from, {:error, :already_connected})
+
+  def handle_event({:call, from}, {_ref, {:handshake, _deadline}}, name, %{started: true})
+      when name in @handshaking,
+      do: reply(from, {:error, :already_started})
 
   def handle_event({:call, from}, {_ref, :close}, name, data) do
     Socket.mark_terminal(data.socket, true)
@@ -419,6 +433,10 @@ defmodule SSL.ServerConnection do
     {:keep_state, data, [{:reply, from, :gen_tcp.shutdown(data.tcp, how)}]}
   end
 
+  # The reservation is gone (consumed, or the connection was reset): not an unsupported call.
+  defp connected_call(from, {:send, _token, _cursor, _size}, :connected, _data),
+    do: reply(from, {:error, :closed})
+
   defp connected_call(from, _request, :closing, _data), do: reply(from, {:error, :closed})
   defp connected_call(from, _request, _name, _data), do: reply(from, {:error, :enotsup})
 
@@ -446,7 +464,9 @@ defmodule SSL.ServerConnection do
        do: peer_alert(payload, data)
 
   defp record(:hello, <<22, 3, minor, _::16, payload::binary>>, data) when minor in 1..3 do
-    limit = [max_handshake_length: data.config.limits[:max_handshake_length]]
+    limit = [
+      max_handshake_length: min(data.config.limits[:max_handshake_length], @max_client_hello)
+    ]
 
     case HandshakeFramer.feed(data.framer, payload, limit) do
       {:ok, [], framer} ->
@@ -480,6 +500,23 @@ defmodule SSL.ServerConnection do
 
   defp record(:connected, <<23, _::binary>> = record, data) do
     case decrypt(data, record) do
+      # RFC 8446 §5.1: handshake fragments must not interleave with other record types.
+      {:ok, type, _bytes, _read} = ok when type in [:application_data, :alert] ->
+        if HandshakeFramer.buffered_size(data.framer) == 0,
+          do: connected_record(ok, data),
+          else: unexpected(:handshake_interleaved, data)
+
+      other ->
+        connected_record(other, data)
+    end
+  end
+
+  # Records after a peer close_notify are discarded.
+  defp record(:closing, _record, data), do: {:ok, :closing, data}
+  defp record(_name, _record, data), do: unexpected(:unexpected_record, data)
+
+  defp connected_record(result, data) do
+    case result do
       {:ok, :application_data, bytes, read} ->
         buffer(%{data | read: read}, bytes)
 
@@ -500,10 +537,6 @@ defmodule SSL.ServerConnection do
     end
   end
 
-  # Records after a peer close_notify are discarded.
-  defp record(:closing, _record, data), do: {:ok, :closing, data}
-  defp record(_name, _record, data), do: unexpected(:unexpected_record, data)
-
   defp client_record(name, :handshake, bytes, data, read),
     do: client_flight(name, bytes, %{data | read: read})
 
@@ -515,8 +548,15 @@ defmodule SSL.ServerConnection do
   # Rejected early data is skipped only while the client offered it, no record
   # has yet decrypted under the handshake key, and the budget allows it.
   defp skip_early_data(name, <<_type, _version::16, length::16, _::binary>>, data)
-       when data.early_data > 0 and length - @record_overhead <= data.early_data,
-       do: {:ok, name, %{data | early_data: data.early_data - max(length - @record_overhead, 0)}}
+       when data.early_data > 0 and data.early_records < @max_early_records and
+              length - @record_overhead <= data.early_data do
+    {:ok, name,
+     %{
+       data
+       | early_data: data.early_data - max(length - @record_overhead, 0),
+         early_records: data.early_records + 1
+     }}
+  end
 
   defp skip_early_data(:hello, _record, data), do: unexpected(:unexpected_record, data)
 
@@ -599,6 +639,7 @@ defmodule SSL.ServerConnection do
   defp client_hello(hello, data) do
     case select_identity(hello, data) do
       {:ok, data} -> accept_hello(hello, data)
+      {:error, :timeout} -> {:error, :timeout, data}
       {:error, {alert, reason}} -> {:error, alert(alert, reason), data}
     end
   end
@@ -610,8 +651,18 @@ defmodule SSL.ServerConnection do
   defp select_identity(hello, data) do
     case ClientOffer.from_client_hello(hello) do
       {:ok, offer} ->
+        selection = [
+          signature_schemes: offer.signature_schemes,
+          certificate_signature_schemes: offer.certificate_signature_schemes,
+          timeout: Options.remaining(data.deadline)
+        ]
+
         with {:ok, config} <-
-               ServerOptions.select_identity(data.config, ClientOffer.server_name(offer)),
+               ServerOptions.select_identity(
+                 data.config,
+                 ClientOffer.server_name(offer),
+                 selection
+               ),
              do: {:ok, %{data | config: config}}
 
       {:error, _reason} ->
@@ -861,8 +912,12 @@ defmodule SSL.ServerConnection do
 
   defp transmit(_data, []), do: :ok
 
+  # While the handshake is pending its deadline also bounds the write, even when
+  # the carrier send_timeout is :infinity and the client never reads.
   defp transmit(data, iodata) do
-    case :gen_tcp.send(data.tcp, iodata) do
+    deadline = if data.handshake_from, do: data.deadline, else: :infinity
+
+    case bounded_send(data.tcp, iodata, deadline) do
       :ok -> :ok
       {:error, reason} -> {:error, reason, data}
     end

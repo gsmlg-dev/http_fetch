@@ -832,8 +832,13 @@ defmodule SSL.PKIX do
     with {:ok, presented_labels} <- presented_dns_labels(name),
          {:ok, reference_labels} <- dns_labels(reference) do
       case {presented_labels, reference_labels} do
-        {["*" | presented_suffix], [_reference_label | reference_suffix]} ->
+        # RFC 6125 §6.4.3: a wildcard such as `*.com` spans a whole public
+        # suffix, so at least two labels must follow the `*`.
+        {["*", _, _ | _] = [_ | presented_suffix], [_reference_label | reference_suffix]} ->
           presented_suffix == reference_suffix
+
+        {["*" | _], _reference_labels} ->
+          false
 
         {presented_labels, reference_labels} ->
           presented_labels == reference_labels

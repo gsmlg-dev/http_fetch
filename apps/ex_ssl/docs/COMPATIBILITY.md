@@ -423,9 +423,11 @@ The experimental `SSL.QUIC` record-free TLS integration has its own
 [role/transport matrix](QUIC_TLS_IMPLEMENTATION.md) and
 [public interface](QUIC_TLS_INTERFACE.md). It does not broaden TCP socket support.
 
-TCP server TLS, DTLS, QUIC networking/HTTP/3, TLS 1.3 automatic mTLS resumption,
-0-RTT, post-handshake authentication, active true/active-N, packet framing,
-exporters, and full OTP API parity are out of scope. ALPN negotiation alone is
+DTLS, QUIC networking/HTTP/3 inside ex_ssl, TLS 1.3 automatic mTLS resumption,
+TCP 0-RTT and server session tickets, post-handshake authentication, active
+true/active-N, packet framing, exporters, and full OTP API parity are out of
+scope. The TCP TLS 1.3 server is supported (see the README) and `SSL.QUIC`
+offers opt-in resumption and 0-RTT through the caller's session store. ALPN negotiation alone is
 not evidence of an HTTP/2 request. See
 [HTTP_FETCH_INTEGRATION.md](HTTP_FETCH_INTEGRATION.md) for the opt-in consumer
 integration and its executed evidence and validation limitations.
