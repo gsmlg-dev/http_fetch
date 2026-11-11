@@ -24,11 +24,12 @@ defmodule HTTP.EventSource.SecureUnixSocketTest do
     listener: listener
   } do
     for version <- [:http1, :auto] do
-      assert {:error, :tls_over_unix_socket_not_supported} =
-               EventSource.new("https://localhost/events",
-                 unix_socket: path,
-                 http_version: version
-               )
+      assert_invalid(:tls_over_unix_socket_not_supported, fn ->
+        EventSource.new("https://localhost/events",
+          unix_socket: path,
+          http_version: version
+        )
+      end)
 
       assert {:error, :timeout} = :gen_tcp.accept(listener, 25)
     end
@@ -103,4 +104,7 @@ defmodule HTTP.EventSource.SecureUnixSocketTest do
       recv_head(socket, buffer <> data)
     end
   end
+
+  defp assert_invalid(reason, fun),
+    do: assert_raise(ArgumentError, "invalid HTTP.EventSource options: #{inspect(reason)}", fun)
 end

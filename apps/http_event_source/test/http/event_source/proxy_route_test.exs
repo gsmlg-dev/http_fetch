@@ -11,10 +11,14 @@ defmodule HTTP.EventSource.ProxyRouteTest do
           [proxy: "http://127.0.0.1:1"],
           %{"proxy" => "http://127.0.0.1:1"}
         ] do
-      assert {:error, :proxy_not_supported} =
-               HTTP.EventSource.new("http://127.0.0.1:#{port}/events", init)
+      assert_invalid(:proxy_not_supported, fn ->
+        HTTP.EventSource.new("http://127.0.0.1:#{port}/events", init)
+      end)
 
       assert {:error, :timeout} = :gen_tcp.accept(origin, 25)
     end
   end
+
+  defp assert_invalid(reason, fun),
+    do: assert_raise(ArgumentError, "invalid HTTP.EventSource options: #{inspect(reason)}", fun)
 end

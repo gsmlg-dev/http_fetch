@@ -89,4 +89,16 @@ defmodule HTTP.Runtime.PoolTest do
       transport_options: Keyword.merge([http_version: :http1], opts)
     }
   end
+
+  test "unknown keys and invalid policies raise ArgumentError at start" do
+    for {opts, reason} <- [
+          {[tls_backend: :ssl], {:invalid_pool_option, :tls_backend, :unknown}},
+          {[name: 1], {:invalid_pool_option, :name, :expected_atom_or_string}},
+          {[:bad], {:invalid_pool_option, :options, :expected_keyword}}
+        ] do
+      assert_raise ArgumentError,
+                   "invalid HTTP.Runtime.Pool options: #{inspect(reason)}",
+                   fn -> Pool.start_link(opts) end
+    end
+  end
 end

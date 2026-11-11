@@ -45,6 +45,44 @@ defmodule HTTP.WebSocket.Options do
     "maxFrameParts" => :max_frame_parts
   }
 
+  # Every init key the constructor consumes; any other key raises ArgumentError.
+  @keys [
+    :automatic_pong,
+    :binary_type,
+    :close_timeout,
+    :connect_address,
+    :connect_timeout,
+    :delivery,
+    :headers,
+    :http2_profile,
+    :http2_reuse,
+    :http2_scope,
+    :http3_profile,
+    :http3_reuse,
+    :http_version,
+    :idle_timeout,
+    :max_control_frames,
+    :max_frame_bytes,
+    :max_frame_parts,
+    :max_message_size,
+    :max_queue_bytes,
+    :max_queue_events,
+    :max_read_bytes,
+    :max_send_frames,
+    :max_send_queue,
+    :mode,
+    :opening_timeout,
+    :owner,
+    :proxy,
+    :ref,
+    :socket_opts,
+    :ssl,
+    :telemetry_url,
+    :timeout,
+    :unix_socket,
+    :write_timeout
+  ]
+
   defstruct uri: nil,
             url: nil,
             telemetry_url: :default,
@@ -125,8 +163,16 @@ defmodule HTTP.WebSocket.Options do
           {:ok, t()} | {:error, term()}
   def new(url, protocols \\ [], init \\ []) do
     with {:ok, uri} <- normalize_url(url),
-         {:ok, protocols} <- normalize_protocols(protocols),
-         {:ok, init} <- normalize_init(init),
+         {:ok, protocols} <- normalize_protocols(protocols) do
+      case build(uri, protocols, init) do
+        {:ok, options} -> {:ok, options}
+        {:error, reason} -> HTTP.Runtime.Options.raise_invalid!(HTTP.WebSocket, reason)
+      end
+    end
+  end
+
+  defp build(uri, protocols, init) do
+    with {:ok, init} <- normalize_init(init),
          :ok <- validate_mode(init),
          {:ok, init} <- HTTP.Runtime.Options.validate(uri, init, allow_http3: true),
          :ok <- validate_http3_limits(init),
@@ -305,27 +351,10 @@ defmodule HTTP.WebSocket.Options do
     end
   end
 
-  defp normalize_init(init) when is_map(init) do
-    init
-    |> Enum.map(fn {key, value} -> {normalize_key(key), value} end)
-    |> normalize_init()
+  defp normalize_init(init) do
+    with {:ok, init} <- HTTP.Runtime.Options.client_init(init, @string_keys, @keys),
+         do: normalize_options(init)
   end
-
-  defp normalize_init(init) when is_list(init) do
-    if Enum.all?(init, fn
-         {key, _value} -> is_atom(key) or is_binary(key)
-         _ -> false
-       end) do
-      init
-      |> Enum.map(fn {key, value} -> {normalize_key(key), value} end)
-      |> HTTP.Runtime.Options.normalize_keys()
-      |> normalize_options()
-    else
-      {:error, :invalid_options}
-    end
-  end
-
-  defp normalize_init(_init), do: {:error, :invalid_options}
 
   defp normalize_options(init) do
     with {:ok, headers} <- normalize_headers(Keyword.get(init, :headers, [])),
@@ -359,9 +388,6 @@ defmodule HTTP.WebSocket.Options do
     do: value |> URI.parse() |> normalize_telemetry_url()
 
   defp normalize_telemetry_url(_value), do: {:error, :invalid_telemetry_url}
-
-  defp normalize_key(key) when is_binary(key), do: Map.get(@string_keys, key, key)
-  defp normalize_key(key), do: key
 
   defp normalize_headers(%HTTP.Headers{headers: headers}), do: normalize_headers(headers)
 

@@ -113,8 +113,9 @@ defmodule HTTP.WebTransport.SessionBoundsTest do
   test "zero or invalid resource limits are rejected" do
     for key <- [:max_streams, :max_pending_waiters, :max_buffered_bytes, :max_buffered_items],
         value <- [0, -1, :infinity, "1"] do
-      assert {:error, {:invalid_limit, ^key}} =
-               WebTransport.new("https://example.com/wt", [{key, value}])
+      assert_invalid({:invalid_limit, key}, fn ->
+        WebTransport.new("https://example.com/wt", [{key, value}])
+      end)
     end
   end
 
@@ -206,4 +207,7 @@ defmodule HTTP.WebTransport.SessionBoundsTest do
     assert {:error, :peer_reset} = WebTransport.await_closed(transport, 1_000)
     assert :ok = WebTransport.await_draining(transport, 0)
   end
+
+  defp assert_invalid(reason, fun),
+    do: assert_raise(ArgumentError, "invalid HTTP.WebTransport options: #{inspect(reason)}", fun)
 end

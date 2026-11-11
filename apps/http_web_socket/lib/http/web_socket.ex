@@ -2,6 +2,11 @@ defmodule HTTP.WebSocket do
   @moduledoc """
   Browser-like WebSocket client API for Elixir.
 
+  `new/3` returns `{:error, reason}` for an invalid URL or subprotocol list.
+  Unknown option keys (including the removed `tls_backend`), malformed init and
+  invalid or conflicting option values raise `ArgumentError` naming the key or
+  reason, as `HTTP.fetch/2` does.
+
   Events are delivered as messages to the owner process:
 
       {HTTP.WebSocket, socket, %HTTP.WebSocket.Event.Open{}}
@@ -92,7 +97,7 @@ defmodule HTTP.WebSocket do
   reason, 1000-1014 except 1004/1005/1006, and 3000-4999. Reserved/non-wire
   codes, invalid UTF-8 and reasons over 123 bytes remain rejected.
 
-  Proxy HTTP/2, h2c and auto selection return `{:error, :proxy_requires_http1}`.
+  Proxy HTTP/2, h2c and auto selection raise `ArgumentError` (`:proxy_requires_http1`).
   Wait for successful completion of **every** `send_frame_ack/2` reference
   before initiating Close: local close discards queued application frames in
   both HTTP versions. This provides ordered local write completion over HTTP/1;
@@ -369,4 +374,5 @@ defmodule HTTP.WebSocket do
 
   defp put_ref(init, ref) when is_map(init), do: Map.put(init, :ref, ref)
   defp put_ref(init, ref) when is_list(init), do: Keyword.put(init, :ref, ref)
+  defp put_ref(init, _ref), do: init
 end

@@ -44,6 +44,34 @@ defmodule HTTP.WebTransport.Options do
     "ssl" => :ssl
   }
 
+  # Every init key the constructor consumes; any other key raises ArgumentError.
+  @keys [
+    :allow_pooling,
+    :anticipated_concurrent_incoming_bidirectional_streams,
+    :anticipated_concurrent_incoming_unidirectional_streams,
+    :backend,
+    :congestion_control,
+    :connect_timeout,
+    :datagrams_readable_type,
+    :headers,
+    :idle_timeout,
+    :max_buffered_bytes,
+    :max_buffered_items,
+    :max_datagram_size,
+    :max_incoming_datagrams,
+    :max_outgoing_datagrams,
+    :max_pending_waiters,
+    :max_streams,
+    :owner,
+    :protocols,
+    :quic,
+    :ref,
+    :require_unreliable,
+    :server_certificate_hashes,
+    :socket_opts,
+    :ssl
+  ]
+
   defstruct uri: nil,
             url: nil,
             owner: nil,
@@ -102,8 +130,16 @@ defmodule HTTP.WebTransport.Options do
 
   @spec new(String.t() | URI.t(), keyword() | map()) :: {:ok, t()} | {:error, term()}
   def new(url, init \\ []) do
-    with {:ok, uri} <- normalize_url(url),
-         {:ok, init} <- normalize_init(init) do
+    with {:ok, uri} <- normalize_url(url) do
+      case build(uri, init) do
+        {:ok, options} -> {:ok, options}
+        {:error, reason} -> HTTP.Runtime.Options.raise_invalid!(HTTP.WebTransport, reason)
+      end
+    end
+  end
+
+  defp build(uri, init) do
+    with {:ok, init} <- normalize_init(init) do
       {:ok,
        %__MODULE__{
          uri: uri,
@@ -158,13 +194,12 @@ defmodule HTTP.WebTransport.Options do
 
   defp normalize_uri(%URI{scheme: scheme}), do: {:error, {:unsupported_scheme, scheme}}
 
-  defp normalize_init(init) when is_map(init) do
-    init
-    |> Enum.map(fn {key, value} -> {normalize_key(key), value} end)
-    |> normalize_init()
+  defp normalize_init(init) do
+    with {:ok, init} <- HTTP.Runtime.Options.client_init(init, @string_keys, @keys),
+         do: normalize_values(init)
   end
 
-  defp normalize_init(init) when is_list(init) do
+  defp normalize_values(init) do
     with :ok <- validate_limits(init),
          {:ok, headers} <- normalize_headers(Keyword.get(init, :headers, [])),
          {:ok, owner} <- normalize_owner(Keyword.get(init, :owner, self())),
@@ -245,8 +280,6 @@ defmodule HTTP.WebTransport.Options do
     end
   end
 
-  defp normalize_init(_init), do: {:error, :invalid_options}
-
   defp validate_limits(init) do
     Enum.reduce_while(
       [:max_pending_waiters, :max_streams, :max_buffered_bytes, :max_buffered_items],
@@ -262,9 +295,6 @@ defmodule HTTP.WebTransport.Options do
   end
 
   defp default_backend, do: HTTP.WebTransport.Transport.QUIC
-
-  defp normalize_key(key) when is_binary(key), do: Map.get(@string_keys, key, key)
-  defp normalize_key(key), do: key
 
   defp normalize_headers(%HTTP.Headers{headers: headers}), do: normalize_headers(headers)
 

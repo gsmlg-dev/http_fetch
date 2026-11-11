@@ -133,7 +133,12 @@ defmodule HTTP3PublicGate do
     assert_error(HTTP.fetch(base <> "/reset", options) |> HTTP.Promise.await())
     HTTP.Response.text(fetch(base, "/", options))
 
-    source = HTTP.EventSource.new(base <> "/sse", Keyword.put(options, :reconnect_time, 30_000))
+    # EventSource has no request `timeout`; its HTTP/3 dial uses `connect_timeout`.
+    source =
+      HTTP.EventSource.new(
+        base <> "/sse",
+        options |> Keyword.delete(:timeout) |> Keyword.put(:reconnect_time, 30_000)
+      )
 
     try do
       receive do

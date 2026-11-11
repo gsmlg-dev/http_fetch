@@ -2,6 +2,11 @@ defmodule HTTP.EventSource do
   @moduledoc """
   Browser-like EventSource client API for Elixir.
 
+  `new/2` returns `{:error, reason}` for an invalid URL. Unknown option keys
+  (including the removed `tls_backend`), malformed init and invalid or
+  conflicting option values raise `ArgumentError` naming the key or reason, as
+  `HTTP.fetch/2` does.
+
   Events are delivered as messages to the owner process:
 
       {HTTP.EventSource, source, %HTTP.EventSource.Event.Open{}}
@@ -176,4 +181,5 @@ defmodule HTTP.EventSource do
 
   defp put_ref(init, ref) when is_map(init), do: Map.put(init, :ref, ref)
   defp put_ref(init, ref) when is_list(init), do: Keyword.put(init, :ref, ref)
+  defp put_ref(init, _ref), do: init
 end

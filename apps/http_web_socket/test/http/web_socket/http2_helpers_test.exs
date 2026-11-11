@@ -30,11 +30,12 @@ defmodule HTTP.WebSocket.HTTP2HelpersTest do
     assert options.delivery == :ack
     assert options.max_send_frames == 8
 
-    assert {:error, :incompatible_alpn} =
-             Options.new("wss://example.com", [],
-               http_version: :http2,
-               ssl: [alpn_advertised_protocols: ["http/1.1"]]
-             )
+    assert_invalid(:incompatible_alpn, fn ->
+      Options.new("wss://example.com", [],
+        http_version: :http2,
+        ssl: [alpn_advertised_protocols: ["http/1.1"]]
+      )
+    end)
   end
 
   test "snake case map aliases preserve explicit limits and deadlines" do
@@ -59,32 +60,39 @@ defmodule HTTP.WebSocket.HTTP2HelpersTest do
           :max_frame_parts
         ] do
       for value <- [0, -1, :infinity, nil, "12"] do
-        assert {:error, {:invalid_option, ^key}} =
-                 Options.new("ws://example.com", [], [{key, value}])
+        assert_invalid({:invalid_option, key}, fn ->
+          Options.new("ws://example.com", [], [{key, value}])
+        end)
       end
     end
 
     for key <- [:timeout, :connect_timeout, :opening_timeout, :idle_timeout, :close_timeout] do
-      assert {:error, {:invalid_option, ^key}} = Options.new("ws://example.com", [], [{key, -1}])
+      assert_invalid({:invalid_option, key}, fn ->
+        Options.new("ws://example.com", [], [{key, -1}])
+      end)
+
       assert {:ok, _} = Options.new("ws://example.com", [], [{key, :infinity}])
     end
 
-    assert {:error, :message_limit_exceeds_delivery_limit} =
-             Options.new("ws://example.com", [],
-               delivery: :ack,
-               max_message_size: 16,
-               max_queue_bytes: 22
-             )
+    assert_invalid(:message_limit_exceeds_delivery_limit, fn ->
+      Options.new("ws://example.com", [],
+        delivery: :ack,
+        max_message_size: 16,
+        max_queue_bytes: 22
+      )
+    end)
 
-    assert {:error, :invalid_headers} =
-             Options.new("ws://example.com", [], headers: [{"bad\r\nname", "x"}])
+    assert_invalid(:invalid_headers, fn ->
+      Options.new("ws://example.com", [], headers: [{"bad\r\nname", "x"}])
+    end)
 
-    assert {:error, :invalid_headers} =
-             Options.new("ws://example.com", [], headers: [{"x", "bad\r\nvalue"}])
+    assert_invalid(:invalid_headers, fn ->
+      Options.new("ws://example.com", [], headers: [{"x", "bad\r\nvalue"}])
+    end)
 
     assert {:error, :invalid_url} = Options.new("ws://user:password@example.com")
     assert {:error, :invalid_url} = Options.new(%URI{scheme: "ws", host: "", port: 0})
-    assert {:error, :invalid_options} = Options.new("ws://example.com", [], ["bad"])
+    assert_invalid(:invalid_options, fn -> Options.new("ws://example.com", [], ["bad"]) end)
   end
 
   test "builds extended CONNECT with normalized origin and no HTTP1 fields" do
@@ -233,4 +241,7 @@ defmodule HTTP.WebSocket.HTTP2HelpersTest do
     assert {:error, :close_reason_too_long} =
              Frame.protocol_close_payload(1002, :binary.copy("a", 124))
   end
+
+  defp assert_invalid(reason, fun),
+    do: assert_raise(ArgumentError, "invalid HTTP.WebSocket options: #{inspect(reason)}", fun)
 end

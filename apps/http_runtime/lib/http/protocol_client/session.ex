@@ -10,27 +10,45 @@ defmodule HTTP.ProtocolClient.Session do
   @max_event_bytes 1_048_576
   @max_request_bytes 1_048_576
 
-  def config(url, options) when is_binary(url) and is_list(options) do
-    uri = URI.parse(url)
-    timeout = Keyword.get(options, :timeout, 5_000)
-    protocol = Keyword.get(options, :protocol, :http2)
-
-    with true <- Keyword.keyword?(options),
-         true <- Keyword.keys(options) -- [:timeout, :protocol, :settings] == [],
-         true <- uri.scheme == "http" and is_binary(uri.host) and uri.host != "",
-         true <- uri.userinfo == nil and uri.fragment == nil,
-         true <- is_integer(timeout) and timeout > 0,
-         true <- protocol in [:http1, :http2],
-         {:ok, entries} <- settings(Keyword.get(options, :settings, [])) do
-      {:ok, %{uri: uri, timeout: timeout, protocol: protocol, settings: entries, id: make_ref()}}
-    else
-      _ -> {:error, :invalid_options}
+  # The origin is validated first and reported as `{:error, :invalid_url}`;
+  # unknown or invalid options then raise ArgumentError, as for other clients.
+  def config(url, options) do
+    with {:ok, uri} <- origin(url) do
+      case options(options) do
+        {:ok, config} -> {:ok, Map.put(config, :uri, uri)}
+        {:error, reason} -> HTTP.Runtime.Options.raise_invalid!(HTTP.ProtocolClient, reason)
+      end
     end
-  rescue
-    _ -> {:error, :invalid_options}
   end
 
-  def config(_, _), do: {:error, :invalid_options}
+  defp origin(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: "http", host: host, userinfo: nil, fragment: nil} = uri
+      when is_binary(host) and host != "" ->
+        {:ok, uri}
+
+      _ ->
+        {:error, :invalid_url}
+    end
+  end
+
+  defp origin(_url), do: {:error, :invalid_url}
+
+  defp options(options) do
+    with true <- (is_list(options) and Keyword.keyword?(options)) or {:error, :invalid_options},
+         nil <- Enum.find(Keyword.keys(options), &(&1 not in [:timeout, :protocol, :settings])),
+         timeout = Keyword.get(options, :timeout, 5_000),
+         true <- (is_integer(timeout) and timeout > 0) or {:error, {:invalid_option, :timeout}},
+         protocol = Keyword.get(options, :protocol, :http2),
+         true <- protocol in [:http1, :http2] or {:error, {:invalid_option, :protocol}},
+         {:ok, entries} <- settings(Keyword.get(options, :settings, [])) do
+      {:ok, %{timeout: timeout, protocol: protocol, settings: entries, id: make_ref()}}
+    else
+      key when is_atom(key) -> {:error, {:unknown_option, key}}
+      {:error, :invalid_settings} -> {:error, {:invalid_option, :settings}}
+      {:error, _reason} = error -> error
+    end
+  end
 
   defp settings(entries) when is_list(entries) do
     if Enum.all?(entries, fn
@@ -51,6 +69,8 @@ defmodule HTTP.ProtocolClient.Session do
     else
       {:error, :invalid_settings}
     end
+  rescue
+    _ -> {:error, :invalid_settings}
   end
 
   defp settings(_), do: {:error, :invalid_settings}

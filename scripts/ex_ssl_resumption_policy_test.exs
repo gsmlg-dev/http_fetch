@@ -102,17 +102,26 @@ defmodule CandidateResumptionPolicyTest do
   end
 
   defp rejected_client(:wss, port, options) do
-    socket =
-      WebSocket.new("wss://127.0.0.1:#{port}/policy", [],
-        ssl: options,
-        timeout: @timeout,
-        connect_timeout: @timeout
-      )
-
-    case socket do
+    case pre_io_rejection(fn ->
+           WebSocket.new("wss://127.0.0.1:#{port}/policy", [],
+             ssl: options,
+             timeout: @timeout,
+             connect_timeout: @timeout
+           )
+         end) do
       {:error, :incompatible_alpn} = error -> error
-      %WebSocket{} -> await_rejected_socket(socket)
+      %WebSocket{} = socket -> await_rejected_socket(socket)
     end
+  end
+
+  # Client constructors raise ArgumentError for options they reject before I/O.
+  defp pre_io_rejection(construct) do
+    construct.()
+  rescue
+    error in ArgumentError ->
+      if error.message =~ ":incompatible_alpn",
+        do: {:error, :incompatible_alpn},
+        else: reraise(error, __STACKTRACE__)
   end
 
   defp await_rejected_socket(socket) do
@@ -130,17 +139,16 @@ defmodule CandidateResumptionPolicyTest do
   end
 
   defp rejected_client(:sse, port, options) do
-    source =
-      EventSource.new("https://127.0.0.1:#{port}/policy",
-        ssl: options,
-        connect_timeout: @timeout,
-        reconnect_time: 60_000,
-        max_reconnect_time: 60_000
-      )
-
-    case source do
+    case pre_io_rejection(fn ->
+           EventSource.new("https://127.0.0.1:#{port}/policy",
+             ssl: options,
+             connect_timeout: @timeout,
+             reconnect_time: 60_000,
+             max_reconnect_time: 60_000
+           )
+         end) do
       {:error, :incompatible_alpn} = error -> error
-      %EventSource{} -> await_rejected_source(source)
+      %EventSource{} = source -> await_rejected_source(source)
     end
   end
 

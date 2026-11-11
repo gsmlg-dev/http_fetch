@@ -10,6 +10,8 @@ defmodule HTTP.ProtocolClient do
   `connect/2` accepts `protocol: :http1 | :http2` (default `:http2`), a finite
   `timeout` in milliseconds (default 5,000), and HTTP/2 `settings` entries using
   the standard atom names or numeric IDs. Server push is always disabled.
+  A URL other than a plain `http://` origin returns `{:error, :invalid_url}`;
+  unknown option keys and invalid option values raise `ArgumentError`.
 
   `request/5` returns a request reference. `recv/2` returns a nonempty list of:
 

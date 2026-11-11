@@ -16,18 +16,22 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
              })
 
     for version <- [:http2, :h2c, :auto] do
-      assert {:error, :proxy_requires_http1} =
-               WebSocket.new("ws://example.com", [], mode: :proxy, http_version: version)
+      assert_invalid(:proxy_requires_http1, fn ->
+        WebSocket.new("ws://example.com", [], mode: :proxy, http_version: version)
+      end)
     end
 
-    assert {:error, {:invalid_option, :mode}} =
-             WebSocket.new("ws://example.com", [], mode: :invalid)
+    assert_invalid({:invalid_option, :mode}, fn ->
+      WebSocket.new("ws://example.com", [], mode: :invalid)
+    end)
 
-    assert {:error, {:invalid_option, :automatic_pong}} =
-             WebSocket.new("ws://example.com", [], mode: :proxy, automatic_pong: :disabled)
+    assert_invalid({:invalid_option, :automatic_pong}, fn ->
+      WebSocket.new("ws://example.com", [], mode: :proxy, automatic_pong: :disabled)
+    end)
 
-    assert {:error, :automatic_pong_requires_proxy} =
-             WebSocket.new("ws://example.com", [], automatic_pong: false)
+    assert_invalid(:automatic_pong_requires_proxy, fn ->
+      WebSocket.new("ws://example.com", [], automatic_pong: false)
+    end)
   end
 
   @tag :integration
@@ -147,13 +151,14 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
   end
 
   test "proxy ACK capacity must admit a full RFC control payload" do
-    assert {:error, :message_limit_exceeds_delivery_limit} =
-             WebSocket.new("ws://example.com", [],
-               mode: :proxy,
-               delivery: :ack,
-               max_message_size: 1,
-               max_queue_bytes: 131
-             )
+    assert_invalid(:message_limit_exceeds_delivery_limit, fn ->
+      WebSocket.new("ws://example.com", [],
+        mode: :proxy,
+        delivery: :ack,
+        max_message_size: 1,
+        max_queue_bytes: 131
+      )
+    end)
   end
 
   @tag :integration
@@ -383,4 +388,7 @@ defmodule HTTP.WebSocket.ProxyFrameTest do
       other -> flunk("expected closed, got #{inspect(other)}")
     end
   end
+
+  defp assert_invalid(reason, fun),
+    do: assert_raise(ArgumentError, "invalid HTTP.WebSocket options: #{inspect(reason)}", fun)
 end

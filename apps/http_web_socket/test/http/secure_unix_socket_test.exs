@@ -24,8 +24,9 @@ defmodule HTTP.WebSocket.SecureUnixSocketTest do
     listener: listener
   } do
     for scheme <- ["wss", "https"] do
-      assert {:error, :tls_over_unix_socket_not_supported} =
-               WebSocket.new("#{scheme}://localhost/socket", [], unix_socket: path)
+      assert_invalid(:tls_over_unix_socket_not_supported, fn ->
+        WebSocket.new("#{scheme}://localhost/socket", [], unix_socket: path)
+      end)
 
       assert {:error, :timeout} = :gen_tcp.accept(listener, 25)
     end
@@ -77,4 +78,7 @@ defmodule HTTP.WebSocket.SecureUnixSocketTest do
       recv_head(socket, buffer <> data)
     end
   end
+
+  defp assert_invalid(reason, fun),
+    do: assert_raise(ArgumentError, "invalid HTTP.WebSocket options: #{inspect(reason)}", fun)
 end

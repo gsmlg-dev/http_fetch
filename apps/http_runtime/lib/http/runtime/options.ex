@@ -30,6 +30,36 @@ defmodule HTTP.Runtime.Options do
   def normalize_keys(init) when is_list(init) or is_map(init),
     do: Enum.map(init, fn {key, value} -> {Map.get(@keys, key, key), value} end)
 
+  @doc false
+  # Client constructor boundary: a flat init list or map whose atom or string
+  # keys normalize (client aliases, then shared runtime aliases) into `allowed`.
+  # Callers raise on the error with `raise_invalid!/2`.
+  def client_init(init, aliases, allowed) when is_list(init) or is_map(init) do
+    if Enum.all?(init, &match?({key, _value} when is_atom(key) or is_binary(key), &1)) do
+      init =
+        init
+        |> Enum.map(fn {key, value} -> {Map.get(aliases, key, key), value} end)
+        |> normalize_keys()
+
+      case Enum.find(init, fn {key, _value} -> key not in allowed end) do
+        nil -> {:ok, init}
+        {key, _value} -> {:error, {:unknown_option, key}}
+      end
+    else
+      {:error, :invalid_options}
+    end
+  end
+
+  def client_init(_init, _aliases, _allowed), do: {:error, :invalid_options}
+
+  @doc false
+  @spec raise_invalid!(module(), term()) :: no_return()
+  def raise_invalid!(client, {:unknown_option, key}),
+    do: raise(ArgumentError, "unknown #{inspect(client)} option: #{inspect(key)}")
+
+  def raise_invalid!(client, reason),
+    do: raise(ArgumentError, "invalid #{inspect(client)} options: #{inspect(reason)}")
+
   def validate(uri, init, opts \\ []) do
     init = normalize_keys(init)
 

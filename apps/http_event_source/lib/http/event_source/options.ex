@@ -36,6 +36,37 @@ defmodule HTTP.EventSource.Options do
     "withCredentials" => :with_credentials
   }
 
+  # Every init key the constructor consumes; any other key raises ArgumentError.
+  @keys [
+    :connect_timeout,
+    :delivery,
+    :headers,
+    :http2_profile,
+    :http2_reuse,
+    :http2_scope,
+    :http3_profile,
+    :http3_resumption,
+    :http3_reuse,
+    :http_version,
+    :idle_timeout,
+    :last_event_id,
+    :max_event_parts,
+    :max_event_size,
+    :max_line_size,
+    :max_queue_bytes,
+    :max_queue_events,
+    :max_reconnect_time,
+    :max_redirects,
+    :owner,
+    :proxy,
+    :reconnect_time,
+    :ref,
+    :socket_opts,
+    :ssl,
+    :unix_socket,
+    :with_credentials
+  ]
+
   defstruct uri: nil,
             url: nil,
             owner: nil,
@@ -85,8 +116,16 @@ defmodule HTTP.EventSource.Options do
 
   @spec new(String.t() | URI.t(), keyword() | map()) :: {:ok, t()} | {:error, term()}
   def new(url, init \\ []) do
-    with {:ok, uri} <- normalize_url(url),
-         {:ok, init} <- normalize_init(init),
+    with {:ok, uri} <- normalize_url(url) do
+      case build(uri, init) do
+        {:ok, options} -> {:ok, options}
+        {:error, reason} -> HTTP.Runtime.Options.raise_invalid!(HTTP.EventSource, reason)
+      end
+    end
+  end
+
+  defp build(uri, init) do
+    with {:ok, init} <- normalize_init(init),
          {:ok, init} <- HTTP.Runtime.Options.validate(uri, init, allow_http3: true),
          :ok <- validate_limits(init),
          :ok <- validate_delivery_capacity(init) do
@@ -154,17 +193,12 @@ defmodule HTTP.EventSource.Options do
 
   def valid_target?(_value), do: false
 
-  defp normalize_init(init) when is_map(init) do
-    init
-    |> Enum.map(fn {key, value} -> {normalize_key(key), value} end)
-    |> HTTP.Runtime.Options.normalize_keys()
-    |> normalize_init()
+  defp normalize_init(init) do
+    with {:ok, init} <- HTTP.Runtime.Options.client_init(init, @string_keys, @keys),
+         do: normalize_values(init)
   end
 
-  defp normalize_init(init) when is_list(init) do
-    init = Enum.map(init, fn {key, value} -> {normalize_key(key), value} end)
-    init = HTTP.Runtime.Options.normalize_keys(init)
-
+  defp normalize_values(init) do
     with {:ok, headers} <- normalize_headers(Keyword.get(init, :headers, [])),
          {:ok, owner} <- normalize_owner(Keyword.get(init, :owner, self())),
          {:ok, with_credentials} <-
@@ -215,11 +249,6 @@ defmodule HTTP.EventSource.Options do
        |> Keyword.put(:max_line_size, max_line_size)}
     end
   end
-
-  defp normalize_init(_init), do: {:error, :invalid_options}
-
-  defp normalize_key(key) when is_binary(key), do: Map.get(@string_keys, key, key)
-  defp normalize_key(key), do: key
 
   defp normalize_headers(%HTTP.Headers{headers: headers}), do: normalize_headers(headers)
 

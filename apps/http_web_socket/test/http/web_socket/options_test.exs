@@ -34,15 +34,17 @@ defmodule HTTP.WebSocket.OptionsTest do
                ssl: [cacerts: [@trust_anchor_der]]
              )
 
-    assert {:error, :http3_requires_https} =
-             Options.new("ws://example.test/socket", [], http_version: :http3)
+    assert_invalid(:http3_requires_https, fn ->
+      Options.new("ws://example.test/socket", [], http_version: :http3)
+    end)
 
-    assert {:error, :connect_address_not_supported_for_quic} =
-             Options.new("wss://example.test/socket", [],
-               http_version: :http3,
-               connect_address: {127, 0, 0, 1},
-               ssl: [cacerts: [@trust_anchor_der]]
-             )
+    assert_invalid(:connect_address_not_supported_for_quic, fn ->
+      Options.new("wss://example.test/socket", [],
+        http_version: :http3,
+        connect_address: {127, 0, 0, 1},
+        ssl: [cacerts: [@trust_anchor_der]]
+      )
+    end)
   end
 
   test "normalizes literal connection addresses and independent receive limits" do
@@ -58,47 +60,54 @@ defmodule HTTP.WebSocket.OptionsTest do
              options
 
     for key <- [:max_frame_bytes, :max_read_bytes], value <- [0, -1, :infinity, nil] do
-      assert {:error, {:invalid_option, ^key}} =
-               Options.new("ws://example.test/socket", [], [{key, value}])
+      assert_invalid({:invalid_option, key}, fn ->
+        Options.new("ws://example.test/socket", [], [{key, value}])
+      end)
     end
   end
 
   test "connection address validation retains the URL TLS identity and route contract" do
-    assert {:error, :invalid_connect_address} =
-             Options.new("ws://example.test/socket", [], connect_address: "127.0.0.1")
+    assert_invalid(:invalid_connect_address, fn ->
+      Options.new("ws://example.test/socket", [], connect_address: "127.0.0.1")
+    end)
 
-    assert {:error, :connect_address_unsupported_route} =
-             Options.new("ws://example.test/socket", [],
-               connect_address: {127, 0, 0, 1},
-               unix_socket: "/unused-websocket.sock"
-             )
+    assert_invalid(:connect_address_unsupported_route, fn ->
+      Options.new("ws://example.test/socket", [],
+        connect_address: {127, 0, 0, 1},
+        unix_socket: "/unused-websocket.sock"
+      )
+    end)
 
-    assert {:error, :connect_address_sni_conflict} =
-             Options.new("wss://example.test/socket", [],
-               connect_address: {127, 0, 0, 1},
-               ssl: [server_name_indication: ~c"other.test"]
-             )
+    assert_invalid(:connect_address_sni_conflict, fn ->
+      Options.new("wss://example.test/socket", [],
+        connect_address: {127, 0, 0, 1},
+        ssl: [server_name_indication: ~c"other.test"]
+      )
+    end)
 
-    assert {:error, :connect_address_identity_conflict} =
-             Options.new("wss://example.test/socket", [],
-               connect_address: {127, 0, 0, 1},
-               ssl: [ex_ssl: [reference_identity: {:dns_id, "other.test"}]]
-             )
+    assert_invalid(:connect_address_identity_conflict, fn ->
+      Options.new("wss://example.test/socket", [],
+        connect_address: {127, 0, 0, 1},
+        ssl: [ex_ssl: [reference_identity: {:dns_id, "other.test"}]]
+      )
+    end)
   end
 
   test "pin validation uses the same first keyword values captured by the connection" do
-    assert {:error, :connect_address_sni_conflict} =
-             Options.new("wss://example.test/socket", [], [
-               {:connect_address, {127, 0, 0, 1}},
-               {:ssl, [server_name_indication: ~c"other.test"]},
-               {:ssl, []}
-             ])
+    assert_invalid(:connect_address_sni_conflict, fn ->
+      Options.new("wss://example.test/socket", [], [
+        {:connect_address, {127, 0, 0, 1}},
+        {:ssl, [server_name_indication: ~c"other.test"]},
+        {:ssl, []}
+      ])
+    end)
 
-    assert {:error, :invalid_connect_address} =
-             Options.new("ws://example.test/socket", [], [
-               {:connect_address, "127.0.0.1"},
-               {:connect_address, {127, 0, 0, 1}}
-             ])
+    assert_invalid(:invalid_connect_address, fn ->
+      Options.new("ws://example.test/socket", [], [
+        {:connect_address, "127.0.0.1"},
+        {:connect_address, {127, 0, 0, 1}}
+      ])
+    end)
   end
 
   test "proxy endpoints reject independently of frame-forwarding mode" do
@@ -108,7 +117,10 @@ defmodule HTTP.WebSocket.OptionsTest do
           %{"proxy" => "http://proxy.example.test:8080"}
         ] do
       init = Map.new(init) |> Map.put(:mode, mode)
-      assert {:error, :proxy_not_supported} = Options.new("ws://example.test/socket", [], init)
+
+      assert_invalid(:proxy_not_supported, fn ->
+        Options.new("ws://example.test/socket", [], init)
+      end)
     end
 
     assert {:ok, %{mode: :proxy}} =
@@ -121,8 +133,9 @@ defmodule HTTP.WebSocket.OptionsTest do
           [unix_socket: "/unused-websocket.sock"],
           %{"unix_socket" => "/unused-websocket.sock"}
         ] do
-      assert {:error, :tls_over_unix_socket_not_supported} =
-               Options.new("#{scheme}://example.test/socket", [], init)
+      assert_invalid(:tls_over_unix_socket_not_supported, fn ->
+        Options.new("#{scheme}://example.test/socket", [], init)
+      end)
     end
 
     assert {:ok, %{unix_socket: "/unused-websocket.sock", uri: %{scheme: "ws"}}} =
@@ -147,8 +160,9 @@ defmodule HTTP.WebSocket.OptionsTest do
              Options.new("ws://example.com", [], %{"writeTimeout" => 123})
 
     for value <- [:infinity, 0, -1] do
-      assert {:error, {:invalid_option, :write_timeout}} =
-               Options.new("ws://example.com", [], write_timeout: value)
+      assert_invalid({:invalid_option, :write_timeout}, fn ->
+        Options.new("ws://example.com", [], write_timeout: value)
+      end)
     end
   end
 
@@ -210,7 +224,33 @@ defmodule HTTP.WebSocket.OptionsTest do
     assert {:ok, %{telemetry_url: ^safe, url: ^actual}} =
              Options.new(actual, [], %{"telemetry_url" => "ws://example.com"})
 
-    assert {:error, :invalid_telemetry_url} =
-             Options.new(actual, [], telemetry_url: false)
+    assert_invalid(:invalid_telemetry_url, fn -> Options.new(actual, [], telemetry_url: false) end)
   end
+
+  test "unknown keys, including the removed tls_backend, raise ArgumentError" do
+    for init <- [[tls_backend: :ssl], %{"tls_backend" => :ssl}, [{"tlsBackend", :ssl}]] do
+      key = init |> Enum.at(0) |> elem(0)
+
+      assert_raise ArgumentError, "unknown HTTP.WebSocket option: #{inspect(key)}", fn ->
+        Options.new("ws://example.com/socket", [], init)
+      end
+    end
+
+    assert_raise ArgumentError, "unknown HTTP.WebSocket option: :tls_backend", fn ->
+      HTTP.WebSocket.new("ws://example.com/socket", [], tls_backend: :ssl)
+    end
+  end
+
+  test "malformed init raises ArgumentError at the public constructor" do
+    for init <- [:bad, [:bad], [{1, :bad}]] do
+      assert_invalid(:invalid_options, fn -> Options.new("ws://example.com/socket", [], init) end)
+
+      assert_invalid(:invalid_options, fn ->
+        HTTP.WebSocket.new("ws://example.com/socket", [], init)
+      end)
+    end
+  end
+
+  defp assert_invalid(reason, fun),
+    do: assert_raise(ArgumentError, "invalid HTTP.WebSocket options: #{inspect(reason)}", fun)
 end

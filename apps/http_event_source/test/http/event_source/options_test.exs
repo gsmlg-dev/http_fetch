@@ -8,16 +8,19 @@ defmodule HTTP.EventSource.OptionsTest do
           [proxy: "http://proxy.example.test:8080"],
           %{"proxy" => "http://proxy.example.test:8080"}
         ] do
-      assert {:error, :proxy_not_supported} = Options.new("http://example.test/events", init)
+      assert_invalid(:proxy_not_supported, fn ->
+        Options.new("http://example.test/events", init)
+      end)
     end
 
     assert {:ok, _} = Options.new("http://example.test/events", proxy: nil)
 
-    assert {:error, :proxy_not_supported_for_quic} =
-             Options.new("https://example.test/events", %{
-               "httpVersion" => "h3",
-               "proxy" => "http://proxy.example.test:8080"
-             })
+    assert_invalid(:proxy_not_supported_for_quic, fn ->
+      Options.new("https://example.test/events", %{
+        "httpVersion" => "h3",
+        "proxy" => "http://proxy.example.test:8080"
+      })
+    end)
   end
 
   test "secure Unix options reject without starting a client" do
@@ -25,8 +28,9 @@ defmodule HTTP.EventSource.OptionsTest do
           [unix_socket: "/unused-events.sock"],
           %{"unixSocket" => "/unused-events.sock"}
         ] do
-      assert {:error, :tls_over_unix_socket_not_supported} =
-               Options.new("https://example.test/events", init)
+      assert_invalid(:tls_over_unix_socket_not_supported, fn ->
+        Options.new("https://example.test/events", init)
+      end)
     end
 
     assert {:ok, %{unix_socket: "/unused-events.sock", uri: %{scheme: "http"}}} =
@@ -75,8 +79,9 @@ defmodule HTTP.EventSource.OptionsTest do
     assert options.http3_resumption == true
     assert HTTP.Runtime.Options.transport_options(options)[:http3_resumption] == true
 
-    assert {:error, :invalid_http3_resumption} =
-             Options.new(url, http_version: :http3, ssl: ssl, http3_resumption: :yes)
+    assert_invalid(:invalid_http3_resumption, fn ->
+      Options.new(url, http_version: :http3, ssl: ssl, http3_resumption: :yes)
+    end)
   end
 
   @tag :integration
@@ -95,31 +100,34 @@ defmodule HTTP.EventSource.OptionsTest do
           {"https://example.test/events", [ssl: [verify: :verify_none]],
            :verify_none_not_supported}
         ] do
-      assert {:error, ^reason} = Options.new(url, [http_version: :http3] ++ init)
+      assert_invalid(reason, fn -> Options.new(url, [http_version: :http3] ++ init) end)
     end
 
     for header <- [{"Connection", "keep-alive"}, {"TE", "gzip"}, {":path", "/injected"}] do
-      assert {:error, :invalid_headers} =
-               Options.new("https://example.test/events",
-                 http_version: :http3,
-                 ssl: [cacertfile: @h3_ca],
-                 headers: [header]
-               )
+      assert_invalid(:invalid_headers, fn ->
+        Options.new("https://example.test/events",
+          http_version: :http3,
+          ssl: [cacertfile: @h3_ca],
+          headers: [header]
+        )
+      end)
     end
 
-    assert {:error, :invalid_http3_reuse} =
-             Options.new("https://example.test/events",
-               http_version: :http3,
-               ssl: [cacertfile: @h3_ca],
-               http3_reuse: :sometimes
-             )
+    assert_invalid(:invalid_http3_reuse, fn ->
+      Options.new("https://example.test/events",
+        http_version: :http3,
+        ssl: [cacertfile: @h3_ca],
+        http3_reuse: :sometimes
+      )
+    end)
 
-    assert {:error, {:invalid_profile, :browser}} =
-             Options.new("https://example.test/events",
-               http_version: :http3,
-               ssl: [cacertfile: @h3_ca],
-               http3_profile: :browser
-             )
+    assert_invalid({:invalid_profile, :browser}, fn ->
+      Options.new("https://example.test/events",
+        http_version: :http3,
+        ssl: [cacertfile: @h3_ca],
+        http3_profile: :browser
+      )
+    end)
   end
 
   test "normalizes supported URL schemes" do
@@ -181,13 +189,15 @@ defmodule HTTP.EventSource.OptionsTest do
   end
 
   test "rejects invalid init options" do
-    assert {:error, :invalid_owner} = Options.new("http://example.com/events", owner: :bad)
+    assert_invalid(:invalid_owner, fn -> Options.new("http://example.com/events", owner: :bad) end)
 
-    assert {:error, :invalid_last_event_id} =
-             Options.new("http://example.com/events", last_event_id: "bad\nid")
+    assert_invalid(:invalid_last_event_id, fn ->
+      Options.new("http://example.com/events", last_event_id: "bad\nid")
+    end)
 
-    assert {:error, :invalid_reconnect_time} =
-             Options.new("http://example.com/events", reconnect_time: -1)
+    assert_invalid(:invalid_reconnect_time, fn ->
+      Options.new("http://example.com/events", reconnect_time: -1)
+    end)
   end
 
   test "defaults keep HTTP1 and finite parser and delivery bounds" do
@@ -250,7 +260,7 @@ defmodule HTTP.EventSource.OptionsTest do
            [http_version: :http2, ssl: [alpn_advertised_protocols: ["http/1.1"]]],
            :incompatible_alpn}
         ] do
-      assert {:error, ^reason} = Options.new(url, init)
+      assert_invalid(reason, fn -> Options.new(url, init) end)
     end
   end
 
@@ -262,15 +272,16 @@ defmodule HTTP.EventSource.OptionsTest do
           {:max_queue_events, :invalid_max_queue_events}
         ],
         value <- [0, -1, :infinity, 1.5] do
-      assert {:error, ^reason} = Options.new("http://example.com/events", [{key, value}])
+      assert_invalid(reason, fn -> Options.new("http://example.com/events", [{key, value}]) end)
     end
 
-    assert {:error, :event_limit_exceeds_delivery_limit} =
-             Options.new("http://example.com/events",
-               delivery: :ack,
-               max_event_size: 32,
-               max_queue_bytes: 38
-             )
+    assert_invalid(:event_limit_exceeds_delivery_limit, fn ->
+      Options.new("http://example.com/events",
+        delivery: :ack,
+        max_event_size: 32,
+        max_queue_bytes: 38
+      )
+    end)
 
     assert {:ok, _} =
              Options.new("http://example.com/events",
@@ -283,18 +294,21 @@ defmodule HTTP.EventSource.OptionsTest do
     assert {:ok, %{max_redirects: 0}} =
              Options.new("http://example.com/events", max_redirects: 0)
 
-    assert {:error, {:invalid_option, :max_redirects}} =
-             Options.new("http://example.com/events", max_redirects: :infinity)
+    assert_invalid({:invalid_option, :max_redirects}, fn ->
+      Options.new("http://example.com/events", max_redirects: :infinity)
+    end)
   end
 
   test "cursor constructor rejects every header control byte and invalid UTF8" do
     for byte <- Enum.to_list(0..31) ++ [127] do
-      assert {:error, :invalid_last_event_id} =
-               Options.new("http://example.com/events", last_event_id: "a" <> <<byte>> <> "b")
+      assert_invalid(:invalid_last_event_id, fn ->
+        Options.new("http://example.com/events", last_event_id: "a" <> <<byte>> <> "b")
+      end)
     end
 
-    assert {:error, :invalid_last_event_id} =
-             Options.new("http://example.com/events", last_event_id: <<255>>)
+    assert_invalid(:invalid_last_event_id, fn ->
+      Options.new("http://example.com/events", last_event_id: <<255>>)
+    end)
 
     assert {:ok, %{last_event_id: "λ 7"}} =
              Options.new("http://example.com/events", last_event_id: "λ 7")
@@ -307,8 +321,36 @@ defmodule HTTP.EventSource.OptionsTest do
           [{"Connection", "keep-alive"}],
           [{"Upgrade", "h2c"}]
         ] do
-      assert {:error, :invalid_headers} =
-               Options.new("http://example.com/events", http_version: :h2c, headers: headers)
+      assert_invalid(:invalid_headers, fn ->
+        Options.new("http://example.com/events", http_version: :h2c, headers: headers)
+      end)
     end
   end
+
+  test "unknown keys, including the removed tls_backend, raise ArgumentError" do
+    for init <- [[tls_backend: :ssl], %{"tls_backend" => :ssl}, [{"tlsBackend", :ssl}]] do
+      key = init |> Enum.at(0) |> elem(0)
+
+      assert_raise ArgumentError, "unknown HTTP.EventSource option: #{inspect(key)}", fn ->
+        Options.new("http://example.com/events", init)
+      end
+    end
+
+    assert_raise ArgumentError, "unknown HTTP.EventSource option: :tls_backend", fn ->
+      HTTP.EventSource.new("http://example.com/events", tls_backend: :ssl)
+    end
+  end
+
+  test "malformed init raises ArgumentError at the public constructor" do
+    for init <- [:bad, [:bad], [{1, :bad}]] do
+      assert_invalid(:invalid_options, fn -> Options.new("http://example.com/events", init) end)
+
+      assert_invalid(:invalid_options, fn ->
+        HTTP.EventSource.new("http://example.com/events", init)
+      end)
+    end
+  end
+
+  defp assert_invalid(reason, fun),
+    do: assert_raise(ArgumentError, "invalid HTTP.EventSource options: #{inspect(reason)}", fun)
 end

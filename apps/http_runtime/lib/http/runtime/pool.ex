@@ -15,19 +15,26 @@ defmodule HTTP.Runtime.Pool do
   HTTP/1 selection enables reuse. Explicit `http1_reuse: false`, retention above
   the instance policy, managed scopes, HTTP/3 and automatic negotiation are
   rejected before dialing. HTTP/2 selection requires reusable pool identities.
+
+  `start_link/1` raises `ArgumentError` for unknown keys or invalid policy values,
+  naming the `{:invalid_pool_option, key, why}` reason.
   """
   use Supervisor
   alias HTTP.HTTP2.PoolKey
 
   def start_link(opts) do
-    with {:ok, policy} <- policy(opts) do
-      options =
-        case Keyword.get(opts, :name) do
-          nil -> []
-          name -> [name: {:via, Registry, {__MODULE__.Registry, name}}]
-        end
+    case policy(opts) do
+      {:ok, policy} ->
+        options =
+          case Keyword.get(opts, :name) do
+            nil -> []
+            name -> [name: {:via, Registry, {__MODULE__.Registry, name}}]
+          end
 
-      Supervisor.start_link(__MODULE__, policy, options)
+        Supervisor.start_link(__MODULE__, policy, options)
+
+      {:error, reason} ->
+        HTTP.Runtime.Options.raise_invalid!(__MODULE__, reason)
     end
   end
 

@@ -339,7 +339,9 @@ defmodule HTTPStreamClientsGate do
   end
 
   defp fetch(url, path, opts) do
-    case HTTP.fetch(url <> path, Keyword.put(opts, :timeout, 30_000))
+    fetch_opts = Keyword.take(opts, [:http_version, :http2_profile, :connect_timeout, :ssl])
+
+    case HTTP.fetch(url <> path, Keyword.put(fetch_opts, :timeout, 30_000))
          |> HTTP.Promise.await(35_000) do
       %HTTP.Response{status: 200} = response -> HTTP.Response.read_all(response)
       other -> raise "sibling Fetch failed: #{inspect(other)}"

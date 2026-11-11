@@ -14,10 +14,14 @@ defmodule HTTP.WebTransport do
   `close/2` takes effect while the session is still connecting: the pending
   connect is cancelled, QUIC resources are released and the session never opens.
 
+  `new/2` returns `{:error, reason}` for an invalid URL. Unknown option keys,
+  malformed init and invalid option values raise `ArgumentError` naming the key
+  or reason, as `HTTP.fetch/2` does.
+
   Option support:
 
     * `server_certificate_hashes` (non-empty), `allow_pooling: true` and a
-      non-empty `socket_opts` are rejected (`:unsupported_server_certificate_hashes`,
+      non-empty `socket_opts` raise `ArgumentError` (`:unsupported_server_certificate_hashes`,
       `:pooling_unsupported`, `:socket_opts_unsupported`).
     * `require_unreliable: true` fails the session unless the backend reports
       `"supports-unreliable"` (the QUIC backend always does).
@@ -255,4 +259,5 @@ defmodule HTTP.WebTransport do
 
   defp put_ref(init, ref) when is_map(init), do: Map.put(init, :ref, ref)
   defp put_ref(init, ref) when is_list(init), do: Keyword.put(init, :ref, ref)
+  defp put_ref(init, _ref), do: init
 end
