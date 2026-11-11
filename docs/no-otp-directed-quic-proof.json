@@ -1594,8 +1594,8 @@
         "apps/elixir_quic/lib/quic/resumption_store.ex"
       ],
       "active_production_source_census": {
-        "files": 267,
-        "sorted_path_sha256_json": "593f3470ba2aa26228f450342d8595400c4277d1ddfb06b69fa9f5eaa41a22e5",
+        "files": 268,
+        "sorted_path_sha256_json": "8604faaa58097996024b1f9c05a534918ecccd83d4c80f35cb51d9a1f889fd2a",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1789,7 +1789,7 @@
       },
       "reviewed_inventory_reconciliation": {
         "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
-        "count": 207,
+        "count": 209,
         "duplicates": 0,
         "identity": [
           "module",
@@ -1798,7 +1798,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "29070f6567ac11a5e2cf9a4bf20da284bd7cc059fe98ff09f8cac6fd747124dd"
+        "sha256": "1b877f232968e31b2efe1119d33ee98e813367f17ba13b68aeb1c005f727819e"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",

@@ -530,3 +530,39 @@ selects a transport module. `options.backend` is still the only WT-1 backend
 producer. The HTTP review still has 84 occurrences. The compiled inventory of a
 locally built isolated candidate release matches the five reviews exactly at
 207 sites.
+
+### Follow-up: rc.14 retry policy and ex_ssl server fixes (2026-11-12)
+
+The opt-in retry policy (`5eae73d`) adds `HTTP.Retry` as a selected input. It
+also changes `HTTP`, `FetchOptions` and `SocketClient`. The new module adds two
+dynamic invocations under the new proof HTTP-11:
+
+- `fun.(request, result)` in `retry?/3` (ID 209, line 133);
+- `fun.(attempt)` in `configured_delay/2` (ID 210, line 165).
+
+`HTTP.Retry.normalize/3` is the only constructor of `%HTTP.Retry{}`. It stores a
+function only when the caller's `retry:` value passes `is_function(fun, 2)` or
+the caller's `retry_delay:` value passes `is_function(fun, 1)`. Any other value
+is a built-in mode, `nil`, a non-negative integer or an `ArgumentError`.
+`FetchOptions` validates both through `normalize/3`, and `retry_policy/1`
+rebuilds the policy through it again. `HTTP.fetch/2` hands that policy to its
+task; `handle_async_request/6` and `run_attempts/3` pass it unchanged to
+`HTTP.Retry.decide/5`, which only reads it.
+
+`retry?/3` calls the function only in its arity-guarded clause and only after
+the hard rules. Those rules cover `max_retries`, no streamed or half-duplex
+body, and no `:aborted` or `:timeout`. `configured_delay/2` calls it only after
+the `nil` and integer clauses. Both results are checked data: a non-boolean
+decision or an invalid delay raises `ArgumentError`. The delay is still bounded
+by the request deadline. No library caller supplies either function. They are
+caller-supplied public-API callbacks, the same approved boundary as the HTTP-5
+Promise callbacks. `HTTP.Retry` is `@moduledoc false`, and a manually built
+policy is not supported input.
+
+`run_attempt/2` calls the literal `HTTP.SocketClient.request/3` and
+`HTTP.Adapter.execute/3`. The SocketClient attempt-owner bookkeeping moves the
+twelve HTTP-4 sites by 10 lines with unchanged expressions and selectors. They
+are rebound in the amendment and the follow-up entry. The census is now 268
+files. The HTTP review now has 86 occurrences. The compiled inventory of a
+locally built isolated candidate release matches the five reviews exactly at 209
+sites.

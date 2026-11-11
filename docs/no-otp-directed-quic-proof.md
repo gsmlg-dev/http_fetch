@@ -376,3 +376,8 @@ drops `:tls_backend` from its endpoint option projection. It holds no QUIC
 occurrence. Its H3-2 sites are rebound in the H3 review. No QUIC occurrence is
 added, removed or rebound. Producer hash, release census and every group's
 census digest are updated.
+
+### Follow-up: rc.14 retry policy and ex_ssl server fixes (2026-11-12)
+
+No QUIC input changes. Only the census digest and the reviewed inventory digest
+are updated. The total is now 209 because HTTP gains two HTTP-11 sites.

@@ -1,5 +1,34 @@
 # Directed production release audit
 
+## rc.14 proof follow-up: retry policy and ex_ssl server fixes — 2026-11-12
+
+Production changes after `c2e67f0` changed eight production files and added
+`HTTP.Retry`. They cover the opt-in Fetch retry policy (`5eae73d`) and three
+ex_ssl server fixes: the exact recv after peer close (`707d2c2`),
+`SSL.getopts/2` on listen sockets (`e27a9c8`), and the `SSL.ConnectionWriter`
+server writes (`d978d36`). Each changed reviewed input was re-reviewed at
+`b83880d` as a dated follow-up:
+
+- 195 reviewed occurrences are unchanged.
+- 12 HTTP-4 `HTTP.SocketClient` sites keep their expressions and functions and
+  move by 10 lines.
+- Two sites are new under HTTP-11:
+  - ID 209, `fun.(request, result)` in `HTTP.Retry.retry?/3`;
+  - ID 210, `fun.(attempt)` in `HTTP.Retry.configured_delay/2`.
+
+  Their only callables are the caller's `retry:` and `retry_delay:` functions.
+  `HTTP.Retry.normalize/3`, the policy's only constructor, accepts them only
+  with arity 2 and arity 1. Their results are checked data.
+- No site is removed. The `apps/hell` and `apps/http_test` changes are outside
+  the ten-package directed-proof boundary.
+
+The binding now covers 209 reviewed occurrences (IDs 1-210 without 166): TLS
+15, QUIC 37, HTTP 86, H3 64 and telemetry 7. It also covers the complete
+268-file production-source census. A locally built isolated candidate release
+inspects 383 BEAMs and reports 209 raw dispatch sites. These match the reviewed
+identities exactly. CI strict candidate and published gates must still pass
+independently.
+
 ## rc.14 proof follow-up — 2026-11-11
 
 Production changes after `v1.0.0-rc.13` (`5b1adbd`) changed 33 production files,

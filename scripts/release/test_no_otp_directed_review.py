@@ -62,8 +62,8 @@ def pto_amendment(quic):
 class DirectedReviewTests(unittest.TestCase):
     def test_review_bundle_covers_all_original_sites_and_all_production_sources(self):
         bundle = review.load(ROOT, '1.0.0-rc.0', PACKAGES)
-        self.assertEqual(len(bundle['occurrences']), 207)
-        self.assertEqual(len([name for name in bundle['sources'] if name.split('/')[0] in PACKAGES]), 267)
+        self.assertEqual(len(bundle['occurrences']), 209)
+        self.assertEqual(len([name for name in bundle['sources'] if name.split('/')[0] in PACKAGES]), 268)
         self.assertEqual(len(bundle['reviews']), 10)
         self.assertEqual(bundle['versions']['http_fetch'], '1.0.0-rc.0')
 
@@ -81,7 +81,7 @@ class DirectedReviewTests(unittest.TestCase):
             site = sites[number]
             line = (ROOT / site['source']).read_text().splitlines()[site['line'] - 1]
             self.assertIn('callback.(' if number == 178 else 'module.', line)
-        self.assertEqual(len(bundle['occurrences']), 207)
+        self.assertEqual(len(bundle['occurrences']), 209)
         rc9 = [site for group in review.GROUPS for site in rewind(proof(group), '1.0.0-rc.11')]
         self.assertEqual(identity_digest(rc9),
                          (180, 180, amendment['reviewed_inventory_reconciliation']['sha256']))
@@ -209,7 +209,7 @@ class DirectedReviewTests(unittest.TestCase):
             lambda sites: [site for site in sites if site['inventory_occurrence'] != 176],
             lambda sites: [site for site in sites if site['inventory_occurrence'] != 177],
             lambda sites: sites + [copy.deepcopy(sites[-1])],
-            lambda sites: sites + [dict(sites[-1], inventory_occurrence=209)],
+            lambda sites: sites + [dict(sites[-1], inventory_occurrence=211)],
             lambda sites: sites + [dict(sites[-1], inventory_occurrence=166)],
         ]
         for change in changes:
@@ -230,7 +230,7 @@ class DirectedReviewTests(unittest.TestCase):
                       if name.split('/')[0] in PACKAGES}
         census = hashlib.sha256(json.dumps(production, sort_keys=True).encode()).hexdigest()
         tokens = {'TLS-7': 'fun.(', 'Q2': 'adapter.', 'Q4': 'adapter.', 'H3-1': 'transport.',
-                  'H3-2': 'ops.', 'WT-1': ('backend.', 'fun.('), 'HTTP-5': 'fun.('}
+                  'H3-2': 'ops.', 'WT-1': ('backend.', 'fun.('), 'HTTP-5': 'fun.(', 'HTTP-11': 'fun.('}
         added, current = [], []
         for group in review.GROUPS:
             group_proof = proof(group)
@@ -239,7 +239,7 @@ class DirectedReviewTests(unittest.TestCase):
                 continue
             amendment = group_proof['source_review_amendments'][-1]
             self.assertEqual(amendment['release_version'], '1.0.0-rc.11')
-            self.assertEqual(amendment['active_production_source_census']['files'], 267)
+            self.assertEqual(amendment['active_production_source_census']['files'], 268)
             self.assertEqual(amendment['active_production_source_census']['sorted_path_sha256_json'], census)
             for name, change in amendment['changed_source_inputs'].items():
                 self.assertEqual(group_proof['source_inputs_sha256'][name], change['sha256'])
@@ -254,12 +254,12 @@ class DirectedReviewTests(unittest.TestCase):
                                          else (tokens[site['proof']],))))
             added += amendment['added_occurrences']
             reconciliation = amendment['reviewed_inventory_reconciliation']
-            self.assertEqual((reconciliation['count'], reconciliation['duplicates']), (207, 0))
+            self.assertEqual((reconciliation['count'], reconciliation['duplicates']), (209, 0))
             self.assertEqual(identity_digest(bundle['occurrences']),
-                             (207, 207, reconciliation['sha256']))
-        self.assertEqual(sorted(added), list(range(181, 209)))
+                             (209, 209, reconciliation['sha256']))
+        self.assertEqual(sorted(added), list(range(181, 211)))
         self.assertEqual(sorted(site['inventory_occurrence'] for site in current),
-                         [number for number in range(1, 209) if number != 166])
+                         [number for number in range(1, 211) if number != 166])
 
     def test_promise_callback_follow_up_rebinds_the_apply_sink_and_adds_the_error_callback(self):
         http = proof('http')
@@ -313,6 +313,22 @@ class DirectedReviewTests(unittest.TestCase):
             with self.subTest(occurrence=number):
                 self.assertIn('transport.', source[site['line'] - 1])
                 self.assertEqual(rewound[number]['line'], site['line'] + 1)
+
+    def test_rc14_retry_follow_up_adds_the_two_caller_retry_functions(self):
+        http = proof('http')
+        source = (ROOT / 'apps/http_fetch/lib/http/retry.ex').read_text().splitlines()
+        sites = {site['inventory_occurrence']: site for site in http['occurrences']}
+        for number, mfa, token in ((209, 'retry?/3', 'fun.(request, result)'),
+                                   (210, 'configured_delay/2', 'fun.(attempt)')):
+            with self.subTest(occurrence=number):
+                site = sites[number]
+                self.assertEqual((site['module'], site['mfa'], site['kind'], site['proof']),
+                                 ('HTTP.Retry', mfa, 'unresolved_fun_invocation', 'HTTP-11'))
+                self.assertIn(token, source[site['line'] - 1])
+        amendment = http['source_review_amendments'][-1]
+        self.assertIn('apps/http_fetch/lib/http/retry.ex', amendment['added_selected_inputs'])
+        self.assertIn('HTTP-11', amendment['origin_derivations'])
+        self.assertFalse({209, 210} & {site['inventory_occurrence'] for site in rewind(http, '1.0.0-rc.11')})
 
     def test_native_source_and_compiled_release_binding(self):
         result = subprocess.run(['elixir', str(Path(__file__).with_suffix('.exs'))],

@@ -6,7 +6,7 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/ex_ssl/lib/ssl.ex": "6bfbafe4bdf1cd569ca441a092f61d6c70e6132ca99150942873b6853957943e",
+    "apps/ex_ssl/lib/ssl.ex": "bfb9aa86bdf039de68bcc38d8acad42f2cfe5d842a49dda95123d21fa537e484",
     "apps/ex_ssl/lib/ssl/options.ex": "84500c5c63746215284ebb764284eca97657ca00380c2feaf70c18fbc4c9e58c",
     "apps/ex_ssl/lib/ssl/tcp_options.ex": "b007fe9db46cedb98867797b368d999dd0dbb773d938f11e057eb9cb88f47d75",
     "apps/ex_ssl/lib/ssl/connection.ex": "75f3c815c96badd6ff404910a6f05eb52a6abf9fbbb699bc9add2f705b05bc77",
@@ -34,7 +34,7 @@
     "apps/http_core/lib/http/transport/ex_ssl.ex": "20cda2e3507a1fa52ec8a5baf7259ceab9c407d434dda8e9601cfaadb514893f",
     "apps/ex_ssl/lib/ssl/crypto/tls12_key_schedule.ex": "0f21ece4467f13d1ac0acca8dd5c23d04b450b2b47063f403866126860552667",
     "apps/ex_ssl/lib/ssl/server_options.ex": "a9790096e733fe5e584cf8aa9ac54bf152e3902e42eac2ee01704e408669111a",
-    "apps/ex_ssl/lib/ssl/server_connection.ex": "350de01a588fb7ec9348186fbe8a3266a21fe86eb67a288325fdf7945f146a56",
+    "apps/ex_ssl/lib/ssl/server_connection.ex": "d476ab6a1b6877f8696b75bd4ac12671b3b557c519474fd020b2070fba093e52",
     "apps/ex_ssl/lib/ssl/listen_socket.ex": "bd071c6cd1742cd2966c43dd503aa7496a0353047159590f7369f4fd71661982"
   },
   "production_source_census": {
@@ -308,12 +308,12 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "8e810b476c5423ae91f5dc23d2fc9a468e82cf3a",
+      "source_commit": "b83880de276e808fe09adc54daf69e22f9281e45",
       "scope": "rc.10/rc.11 TLS 1.3 server API, SNI identity selection, mTLS client verification and QUIC resumption/early-data provider",
       "changed_source_inputs": {
         "apps/ex_ssl/lib/ssl.ex": {
           "previous_sha256": "1ed9e0d52e0f38be0422553acd66ae0b14ef7cd67372220acf500baddb8c48ee",
-          "sha256": "6bfbafe4bdf1cd569ca441a092f61d6c70e6132ca99150942873b6853957943e"
+          "sha256": "bfb9aa86bdf039de68bcc38d8acad42f2cfe5d842a49dda95123d21fa537e484"
         },
         "apps/ex_ssl/lib/ssl/connection.ex": {
           "previous_sha256": "f5cdeea8158c200996cd66e554be14f8c7f22ae7200826f1241104486890761b",
@@ -341,7 +341,7 @@
         },
         "apps/ex_ssl/lib/ssl/server_connection.ex": {
           "previous_sha256": "68cb5417b999b8a7907cf8c555465fc8a0f4e710bcc92f124a250c0b7ebe007f",
-          "sha256": "350de01a588fb7ec9348186fbe8a3266a21fe86eb67a288325fdf7945f146a56"
+          "sha256": "d476ab6a1b6877f8696b75bd4ac12671b3b557c519474fd020b2070fba093e52"
         },
         "apps/ex_ssl/lib/ssl/server_options.ex": {
           "previous_sha256": "d5ff070fa5e91c4f49638823fec1f781a6c16e062b56e0164bd0d7712622b67d",
@@ -354,8 +354,8 @@
         "apps/ex_ssl/lib/ssl/listen_socket.ex"
       ],
       "active_production_source_census": {
-        "files": 267,
-        "sorted_path_sha256_json": "593f3470ba2aa26228f450342d8595400c4277d1ddfb06b69fa9f5eaa41a22e5",
+        "files": 268,
+        "sorted_path_sha256_json": "8604faaa58097996024b1f9c05a534918ecccd83d4c80f35cb51d9a1f889fd2a",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -383,7 +383,7 @@
       },
       "reviewed_inventory_reconciliation": {
         "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
-        "count": 207,
+        "count": 209,
         "duplicates": 0,
         "identity": [
           "module",
@@ -392,7 +392,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "29070f6567ac11a5e2cf9a4bf20da284bd7cc059fe98ff09f8cac6fd747124dd"
+        "sha256": "1b877f232968e31b2efe1119d33ee98e813367f17ba13b68aeb1c005f727819e"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
@@ -461,6 +461,20 @@
           "input": "apps/ex_ssl/lib/ssl/server_connection.ex",
           "change": "The server connection bounds handshake writes by the handshake deadline, caps skipped early-data records, limits the pre-auth ClientHello to 64 KiB, rejects handshake fragments interleaved with application data and returns already_started/closed replies.",
           "dispatch_review": "No dynamic dispatch added or removed; literal calls, guards and state updates only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-12",
+          "source_commit": "d978d36f4ff86394ca0d0e2f27a30a9503f6fb93",
+          "input": "apps/ex_ssl/lib/ssl.ex",
+          "change": "SSL.getopts/2 reads carrier options of an SSL.ListenSocket through :inet.getopts/2 (e27a9c8); the send/2 and recv/3 @doc text describes the server write reservation and the exact recv after peer close (707d2c2, d978d36).",
+          "dispatch_review": "No dynamic dispatch added or moved: a guarded literal :inet.getopts/2 call and documentation; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-12",
+          "source_commit": "d978d36f4ff86394ca0d0e2f27a30a9503f6fb93",
+          "input": "apps/ex_ssl/lib/ssl/server_connection.ex",
+          "change": "An exact-length recv that buffered plaintext cannot satisfy after peer close returns :timeout and keeps the bytes until drained (707d2c2); after the handshake every carrier write is a job for an SSL.ConnectionWriter started with the literal ConnectionWriter.start/1, so receive delivery and control calls stay live during a blocked write (d978d36).",
+          "dispatch_review": "No dynamic dispatch added or moved: literal ConnectionWriter, :queue and :gen_statem calls and local closures passed to Enum.each/2; the compiled inventory reports no site in this module or in SSL.ConnectionWriter, and the file holds no reviewed occurrence."
         }
       ]
     }

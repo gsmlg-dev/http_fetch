@@ -247,3 +247,10 @@ SocketClient and EventSource inputs change as described in the HTTP review,
 which holds their moved sites. SocketClient still supplies only
 `&handle_http3_event/2`. No H3 occurrence is added or removed, and the H3 review
 still has 64 occurrences.
+
+### Follow-up: rc.14 retry policy (2026-11-12)
+
+`HTTP`, `FetchOptions` and `SocketClient` change for the opt-in retry policy
+(`5eae73d`), as described in the HTTP review, which holds their moved sites and
+the two new HTTP-11 sites. SocketClient still supplies only
+`&handle_http3_event/2`. No H3 occurrence is added, removed or rebound.

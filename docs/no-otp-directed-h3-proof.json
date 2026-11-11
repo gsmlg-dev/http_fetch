@@ -9,9 +9,9 @@
     "apps/elixir_quic_http3/lib/quic_http3/session.ex": "45423f557e8d4b16db2121560b01a2d51d372174eeb7f2d60d7fda643a5901cf",
     "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "5197e2316ae0a59722f1261a77b436e73eab2cfd7361b2eda1291a0f5067a9c4",
     "apps/http_core/lib/http/quic/ex_quic.ex": "0cb045e39b362131a53d5b3a1d7a19f5f5f25c7f192cf64a16b28ed488e0ffc6",
-    "apps/http_fetch/lib/http.ex": "6a39466e0389c97f70715f525264dd9b7329ab16e2de500a3e77442194cc1dd8",
-    "apps/http_fetch/lib/http/fetch_options.ex": "e514c7304112ac05ae41279478e619a6fb68e29021c36feb62d9b03dc04d86b0",
-    "apps/http_fetch/lib/http/socket_client.ex": "f4a9938c14ea801a9b9143d486e519ef4e86ba9bd01788ec87b4c08cd80355f1",
+    "apps/http_fetch/lib/http.ex": "3592fd3fb2016f3e725c435e2a439da69f1abed65470ebaf3006c26e01644c38",
+    "apps/http_fetch/lib/http/fetch_options.ex": "79d2822dad8e1aa3756bda8eb0c8660339851ba01596d43b29c07e03384562c9",
+    "apps/http_fetch/lib/http/socket_client.ex": "b9c8370be978e8b86721b47eca45e1a5ca21a98461e00c8520a3341215c766f3",
     "apps/http_event_source/lib/http/event_source/options.ex": "930e41ceef9d626bd4e1e545e4dc48d3bc3571b79dc30a639db642d96b953f84",
     "apps/http_event_source/lib/http/event_source/connection.ex": "65fcdb74e7e49270db6d35325228c898b0cc9f9c7595b8b03330ab89a9dc475a",
     "apps/http_runtime/lib/http/http3.ex": "7b1670325485fae44e28a787392e7f10c40788eac9b526a9eac75aeba57a5049",
@@ -716,7 +716,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "722a99a123757885630c4c8aab4ec691e99c3bb8",
+      "source_commit": "b83880de276e808fe09adc54daf69e22f9281e45",
       "scope": "opt-in resumption/0-RTT, extended CONNECT, datagrams, reliable reset, client migration and WebSocket/H3 completion receipt",
       "changed_source_inputs": {
         "apps/elixir_quic_http3/lib/quic_http3/session.ex": {
@@ -729,11 +729,11 @@
         },
         "apps/http_fetch/lib/http/fetch_options.ex": {
           "previous_sha256": "5e69e37daad48cda62f04c6043b43116383c885cfe809a3089ffad9a3d42d9f1",
-          "sha256": "e514c7304112ac05ae41279478e619a6fb68e29021c36feb62d9b03dc04d86b0"
+          "sha256": "79d2822dad8e1aa3756bda8eb0c8660339851ba01596d43b29c07e03384562c9"
         },
         "apps/http_fetch/lib/http/socket_client.ex": {
           "previous_sha256": "dd7f464583e6bf9b687aebec9f8a819cdf84bb9311cfc2e8ff7c96edaf58f052",
-          "sha256": "f4a9938c14ea801a9b9143d486e519ef4e86ba9bd01788ec87b4c08cd80355f1"
+          "sha256": "b9c8370be978e8b86721b47eca45e1a5ca21a98461e00c8520a3341215c766f3"
         },
         "apps/http_event_source/lib/http/event_source/options.ex": {
           "previous_sha256": "d1c36a500c8f5f86b6c5334d8e34b355451d9367487f5d1f4b37df0a31b44202",
@@ -757,7 +757,7 @@
         },
         "apps/http_fetch/lib/http.ex": {
           "previous_sha256": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d",
-          "sha256": "6a39466e0389c97f70715f525264dd9b7329ab16e2de500a3e77442194cc1dd8"
+          "sha256": "3592fd3fb2016f3e725c435e2a439da69f1abed65470ebaf3006c26e01644c38"
         },
         "apps/http_runtime/lib/http/http3.ex": {
           "previous_sha256": "b691a8f1c780c3b9e920c7148f38a17d82975d2788170579073753bea61df92d",
@@ -772,8 +772,8 @@
         "apps/http_runtime/lib/http/http3/resumption.ex"
       ],
       "active_production_source_census": {
-        "files": 267,
-        "sorted_path_sha256_json": "593f3470ba2aa26228f450342d8595400c4277d1ddfb06b69fa9f5eaa41a22e5",
+        "files": 268,
+        "sorted_path_sha256_json": "8604faaa58097996024b1f9c05a534918ecccd83d4c80f35cb51d9a1f889fd2a",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -934,7 +934,7 @@
       },
       "reviewed_inventory_reconciliation": {
         "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
-        "count": 207,
+        "count": 209,
         "duplicates": 0,
         "identity": [
           "module",
@@ -943,7 +943,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "29070f6567ac11a5e2cf9a4bf20da284bd7cc059fe98ff09f8cac6fd747124dd"
+        "sha256": "1b877f232968e31b2efe1119d33ee98e813367f17ba13b68aeb1c005f727819e"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
@@ -1294,6 +1294,27 @@
           "input": "apps/http_runtime/lib/http/http3/pool_key.ex",
           "change": "The HTTP/3 pool key no longer rejects a tls_backend option, which no longer exists (c7fada8).",
           "dispatch_review": "No dynamic dispatch added or moved: one cond clause is removed; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-12",
+          "source_commit": "5eae73d5896416ccb5e0510374456e49a23ccf1c",
+          "input": "apps/http_fetch/lib/http.ex",
+          "change": "fetch/2 builds the retry policy with FetchOptions.retry_policy/1 and handle_async_request/6 runs attempts through run_attempts/3 and run_attempt/2, sharing one request deadline and emitting [:http_fetch, :request, :retry] between attempts (5eae73d).",
+          "dispatch_review": "No dynamic dispatch added: run_attempt/2 calls the literal HTTP.SocketClient.request/3 and HTTP.Adapter.execute/3 (moved from handle_async_request), HTTP.Retry.decide/5 and HTTP.Telemetry.request_retry/4 are literal. The retry callbacks are invoked only inside HTTP.Retry (209, 210). The file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-12",
+          "source_commit": "5eae73d5896416ccb5e0510374456e49a23ccf1c",
+          "input": "apps/http_fetch/lib/http/fetch_options.ex",
+          "change": "FetchOptions accepts retry, max_retries and retry_delay (with string and camelCase aliases), validates them through HTTP.Retry.normalize/3, exposes retry_policy/1 and rejects retry with transport_scope (5eae73d).",
+          "dispatch_review": "No dynamic dispatch added or moved: literal alias entries, struct fields, reducer clauses and HTTP.Retry calls; the retry and retry_delay values are stored as validated data and never invoked here. The file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-12",
+          "source_commit": "5eae73d5896416ccb5e0510374456e49a23ccf1c",
+          "input": "apps/http_fetch/lib/http/socket_client.ex",
+          "change": "SocketClient records the attempt owner so the retry loop can discard a superseded attempt (take_attempt_owner/0, 5eae73d).",
+          "dispatch_review": "No dynamic dispatch added or moved for H3: SocketClient still supplies only &handle_http3_event/2 to the HTTP/3 stream (H3-3/H3-5); the twelve HTTP-4 sites are rebound in the HTTP review."
         }
       ]
     }

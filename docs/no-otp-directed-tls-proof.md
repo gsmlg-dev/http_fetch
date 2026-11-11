@@ -315,3 +315,18 @@ No TLS input changes after `v1.0.0-rc.13`. `HTTP.Transport.ExSSL` is unchanged.
 It is now named literally where `HTTP.TLSBackend.transport/1` used to return it
 (HTTP review). Only the census digest and the reviewed inventory digest are
 updated.
+
+### Follow-up: rc.14 ex_ssl server fixes (2026-11-12)
+
+`ssl.ex` and `server_connection.ex` change in three commits:
+
+- `707d2c2`: an exact recv after peer close keeps buffered plaintext.
+- `e27a9c8`: `SSL.getopts/2` reads listen-socket carrier options through
+  `:inet.getopts/2`.
+- `d978d36`: server carrier writes become jobs for an `SSL.ConnectionWriter`
+  started through the literal `ConnectionWriter.start/1`.
+
+They add only literal calls, guards and local closures for `Enum.each/2`. The
+compiled inventory reports no site in either module or in
+`SSL.ConnectionWriter`. No TLS occurrence is added, removed or rebound.
+Producer hashes and the digests are updated.

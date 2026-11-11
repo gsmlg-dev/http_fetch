@@ -5202,7 +5202,7 @@ defmodule NoOTP.ReleaseAuditTest do
     assert length(before.unresolved_dispatch) == 18
     assert length(after_result.unresolved_dispatch) == 12
     removed = before.unresolved_dispatch -- after_result.unresolved_dispatch
-    assert Enum.sort(Enum.map(removed, & &1.line)) == [576, 597, 605, 772, 868, 1056]
+    assert Enum.sort(Enum.map(removed, & &1.line)) == [586, 607, 615, 782, 878, 1066]
     assert Enum.all?(removed, &(&1.kind == "unresolved_module_dispatch"))
     assert after_result.parameter_invariant_derivation.status == "checked"
     assert length(after_result.parameter_invariant_derivation.checked_slots) == 9

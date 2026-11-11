@@ -79,3 +79,10 @@ literal list element is removed. The module still imports only
 `telemetry:execute/3` from the dependency and creates no handler. TEL-1 and
 TEL-2 and the seven dependency occurrences are unchanged. The amendment records
 the producer hash, the current census digest and the reviewed inventory digest.
+
+### Follow-up: retry event (2026-11-12)
+
+`HTTP.Telemetry` (`5eae73d`) documents `[:http_fetch, :request, :retry]` and
+emits it through `request_retry/4`, a literal `telemetry:execute/3` call. The
+module still imports only that function and creates no handler, so TEL-1 and
+TEL-2 are unchanged.
