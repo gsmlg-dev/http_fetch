@@ -18,7 +18,7 @@ defmodule HTTP.HTTP1TrailerWireTest do
 
     response = HTTP.fetch(url, http_version: :http1, redirect: :manual) |> HTTP.Promise.await()
     assert response.trailers.headers == []
-    stream = response.stream
+    stream = response.body
     send(stream, {:read_chunk, self(), :ack})
     assert_receive {:stream_chunk, ^stream, "data", ref}, 1_000
     refute_receive {:stream_trailers, ^stream, _}, 0
@@ -147,7 +147,7 @@ defmodule HTTP.HTTP1TrailerWireTest do
 
     {:ok, controller} = HTTP.AbortController.start_link()
     response = HTTP.fetch(url, signal: controller) |> HTTP.Promise.await()
-    stream = response.stream
+    stream = response.body
     send(stream, {:read_chunk, self(), :ack})
     assert_receive {:stream_chunk, ^stream, "data", _ref}, 1_000
     :ok = HTTP.AbortController.abort(controller)
@@ -177,7 +177,7 @@ defmodule HTTP.HTTP1TrailerWireTest do
         end)
 
       response = HTTP.fetch(url) |> HTTP.Promise.await()
-      stream = response.stream
+      stream = response.body
       send(stream, {:read_chunk, self(), :ack})
       send(peer, :send_trailers)
       assert_receive {:stream_error, ^stream, unquote(expected)}, 1_000

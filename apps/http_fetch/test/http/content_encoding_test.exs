@@ -241,7 +241,7 @@ defmodule HTTP.ContentEncodingTest do
         )
         |> HTTP.Promise.await()
 
-      reader = response.stream
+      reader = response.body
       monitor = Process.monitor(reader)
       send(reader, {:read_chunk, self(), :ack})
       assert_receive {:stream_chunk, ^reader, ^encoded, delivery}, 5_000

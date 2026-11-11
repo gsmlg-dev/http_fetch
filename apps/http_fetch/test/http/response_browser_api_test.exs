@@ -319,12 +319,11 @@ defmodule HTTP.ResponseBrowserAPITest do
       assert response_error.ok == false
     end
 
-    test "uses stream as body when constructing streaming responses" do
+    test "constructs streaming responses with the stream pid as body" do
       stream = self()
-      response = Response.new(status: 200, stream: stream)
+      response = Response.new(status: 200, body: stream)
 
       assert response.body == stream
-      assert response.stream == stream
     end
 
     test "accepts all Browser API fields" do
@@ -349,7 +348,6 @@ defmodule HTTP.ResponseBrowserAPITest do
       assert response.url == url
       assert response.redirected == true
       assert response.type == :basic
-      assert response.stream == nil
     end
 
     test "works with minimal parameters" do

@@ -140,8 +140,8 @@ text = HTTP.Response.text(clone)  # Read clone independently
 **Synchronous Returns**: Methods like `json()` and `text()` return values directly instead of Promises, following Elixir conventions.
 
 **Stream Handling**: Large responses expose an Elixir stream process in `response.body`
-instead of a JavaScript `ReadableStream`. The legacy `response.stream` field is kept
-as an alias for streamed responses.
+instead of a JavaScript `ReadableStream`; `body` is the only body field (the former
+`response.stream` alias was removed).
 
 ## Quick Start
 

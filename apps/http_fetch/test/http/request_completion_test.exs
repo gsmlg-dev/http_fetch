@@ -454,7 +454,7 @@ defmodule HTTP.RequestCompletionTest do
     assert %RequestCompletion{} = handle
     assert_receive :headers_sent
     response = Promise.await(promise)
-    stream = response.stream
+    stream = response.body
     stream_monitor = Process.monitor(stream)
     assert {:error, :cleanup_pending} = RequestCompletion.await(handle, 0)
     assert :ok = RequestCompletion.abort_and_await(handle, 2_000)
@@ -478,7 +478,7 @@ defmodule HTTP.RequestCompletionTest do
     handle = Promise.completion(promise)
     response = Promise.await(promise)
     owner = Agent.get(controller, & &1.request_id)
-    stream = response.stream
+    stream = response.body
     stream_monitor = Process.monitor(stream)
     send(stream, {:read_chunk, self(), :ack})
     :erlang.suspend_process(owner)

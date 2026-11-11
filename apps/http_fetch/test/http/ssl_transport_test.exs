@@ -389,7 +389,7 @@ defmodule HTTP.SSLTransportTest do
         |> HTTP.fetch(ssl: [cacertfile: @cacertfile])
         |> HTTP.Promise.await()
 
-      assert is_pid(response.stream)
+      assert is_pid(response.body)
       assert HTTP.Response.read_all(response) == "chunked"
     end
 
@@ -411,7 +411,7 @@ defmodule HTTP.SSLTransportTest do
         )
         |> HTTP.Promise.await()
 
-      assert is_pid(response.stream)
+      assert is_pid(response.body)
 
       owner = :sys.get_state(controller).request_id
       assert {:ssl_closed, %SSL.Socket{pid: socket_pid}} = await_owner_close(owner)
@@ -530,8 +530,7 @@ defmodule HTTP.SSLTransportTest do
         |> HTTP.Promise.await()
 
       assert response.status == 200
-      assert is_pid(response.stream)
-      assert response.body == response.stream
+      assert is_pid(response.body)
       assert HTTP.Response.read_all(response) == body
     end
 
@@ -551,7 +550,7 @@ defmodule HTTP.SSLTransportTest do
         |> HTTP.Promise.await()
 
       assert response.status == 200
-      assert is_pid(response.stream)
+      assert is_pid(response.body)
       assert HTTP.Response.read_all(response) == body
     end
   end

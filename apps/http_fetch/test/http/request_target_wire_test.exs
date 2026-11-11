@@ -55,7 +55,7 @@ defmodule HTTP.RequestTargetWireTest do
 
       completion = HTTP.Promise.completion(promise)
       response = HTTP.Promise.await(promise, 2_000)
-      assert %HTTP.Response{status: 200, stream: stream} = response
+      assert %HTTP.Response{status: 200, body: stream} = response
       assert is_pid(stream)
       assert_receive {:request_line, ^peer, line}, 2_000
 

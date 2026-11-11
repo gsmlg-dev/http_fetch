@@ -79,7 +79,7 @@ defmodule HTTP.HTTPSEarlyUploadTest do
           )
 
           response = HTTP.Promise.await(promise, 1_000)
-          reader = response.stream
+          reader = response.body
           send(reader, {:read_chunk, self(), :ack})
           HTTP.AbortController.abort(controller)
           assert_receive {:stream_error, ^reader, :aborted}, 1_000

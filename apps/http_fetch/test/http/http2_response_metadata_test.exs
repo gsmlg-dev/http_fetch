@@ -80,7 +80,7 @@ defmodule HTTP.HTTP2ResponseMetadataTest do
       end)
 
     response = fetch(url)
-    stream = response.stream
+    stream = response.body
     send(stream, {:read_chunk, self(), :ack})
     assert_receive {:stream_chunk, ^stream, "body", ack}, 5_000
     refute_receive {:stream_trailers, ^stream, _}, 50
@@ -197,7 +197,7 @@ defmodule HTTP.HTTP2ResponseMetadataTest do
 
       if unquote(streamed?) do
         response = fetch(url)
-        stream = response.stream
+        stream = response.body
         send(stream, {:read_chunk, self()})
         assert_receive {:stream_error, ^stream, :http2_trailers_limit}, 5_000
         refute_receive {:stream_end, ^stream}
@@ -300,7 +300,7 @@ defmodule HTTP.HTTP2ResponseMetadataTest do
     assert HTTP.Headers.get(first_info, "link") == "first"
     assert HTTP.Headers.get(second_info, "link") == "second"
     assert HTTP.Headers.get(second.trailers, "x-checksum") == "second"
-    stream = first.stream
+    stream = first.body
     send(stream, {:read_chunk, self()})
     assert_receive {:stream_trailers, ^stream, trailers}, 5_000
     assert HTTP.Headers.get(trailers, "x-checksum") == "first"
@@ -326,7 +326,7 @@ defmodule HTTP.HTTP2ResponseMetadataTest do
         end)
 
       response = fetch(url, signal: controller)
-      stream = response.stream
+      stream = response.body
       send(stream, {:read_chunk, self(), :ack})
       assert_receive {:stream_chunk, ^stream, "pending", _ack}, 5_000
       assert_receive {:delivery_sent, ^peer}, 5_000
@@ -455,7 +455,7 @@ defmodule HTTP.HTTP2ResponseMetadataTest do
       end)
 
     response = fetch(url)
-    stream = response.stream
+    stream = response.body
     send(stream, {:read_chunk, self(), :ack})
     assert_receive {:stream_chunk, ^stream, "last", ack}, 5_000
     send(stream, {:stream_chunk_ack, ack})

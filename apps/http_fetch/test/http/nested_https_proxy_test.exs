@@ -110,7 +110,7 @@ defmodule HTTP.NestedHTTPSProxyTest do
     {url, proxy, peer} = nested_peer(:stream_gate)
     promise = HTTP.fetch(url, options(proxy) ++ [stream_response: true, decode_body: false])
     assert %HTTP.Response{status: 200} = response = HTTP.Promise.await(promise, 3_000)
-    assert is_pid(response.stream)
+    assert is_pid(response.body)
     assert :ok = HTTP.RequestCompletion.abort_and_await(HTTP.Promise.completion(promise), 2_000)
     assert_receive {:proxy_closed, ^peer}, 2_000
     assert_receive {:origin_closed, {:error, :closed}}, 2_000

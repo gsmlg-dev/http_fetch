@@ -185,7 +185,7 @@ defmodule HTTP.IdentityCompletionIntegrationTest do
 
     proof =
       try do
-        assert %Response{status: 200, stream: first_stream} = Promise.await(first, 3_000)
+        assert %Response{status: 200, body: first_stream} = Promise.await(first, 3_000)
         assert is_pid(first_stream)
 
         F.with_shared_owner(Process.whereis(:http_fetch_http2_pool), peer, fn _shared ->
@@ -197,7 +197,7 @@ defmodule HTTP.IdentityCompletionIntegrationTest do
 
           sibling_receipt = Promise.completion(sibling)
 
-          assert %Response{status: 200, stream: sibling_stream} =
+          assert %Response{status: 200, body: sibling_stream} =
                    response = Promise.await(sibling, 3_000)
 
           assert is_pid(sibling_stream)

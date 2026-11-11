@@ -59,7 +59,7 @@ defmodule HTTP.HTTPSProxyWireTest do
                )
                |> HTTP.Promise.await(4_000)
 
-      assert is_pid(response.stream)
+      assert is_pid(response.body)
       assert HTTP.Response.read_all(response) == "ok"
 
       assert_receive {:proxy_request, connection, head, ""}, 2_000

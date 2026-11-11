@@ -203,7 +203,7 @@ defmodule HTTP.ProxyCompletionAcceptanceTest do
     ]
 
     first = HTTP.fetch(url, opts)
-    assert %HTTP.Response{status: 200, stream: first_stream} = Promise.await(first, 3_000)
+    assert %HTTP.Response{status: 200, body: first_stream} = Promise.await(first, 3_000)
     first_monitor = Process.monitor(first_stream)
     second = HTTP.fetch(url, opts)
     sibling = Promise.await(second, 3_000)

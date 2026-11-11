@@ -16,14 +16,13 @@ defmodule E2E.ResponseView do
   """
 
   @enforce_keys [:status, :headers, :body]
-  defstruct [:status, :headers, :body, :url, :stream]
+  defstruct [:status, :headers, :body, :url]
 
   @type t :: %__MODULE__{
           status: non_neg_integer(),
           headers: HTTP.Headers.t(),
-          body: binary() | nil,
-          url: URI.t() | nil,
-          stream: pid() | nil
+          body: binary() | pid() | nil,
+          url: URI.t() | nil
         }
 
   @doc """
@@ -38,8 +37,7 @@ defmodule E2E.ResponseView do
       status: r.status,
       headers: r.headers,
       body: r.body,
-      url: r.url,
-      stream: r.stream
+      url: r.url
     }
   end
 
@@ -47,8 +45,8 @@ defmodule E2E.ResponseView do
   @spec text(t()) :: binary()
   def text(%__MODULE__{body: body}) when is_binary(body), do: body
 
-  def text(%__MODULE__{stream: pid}) when is_pid(pid) do
-    HTTP.Response.read_all(%HTTP.Response{stream: pid})
+  def text(%__MODULE__{body: pid}) when is_pid(pid) do
+    HTTP.Response.read_all(%HTTP.Response{body: pid})
   end
 
   def text(%__MODULE__{}), do: ""

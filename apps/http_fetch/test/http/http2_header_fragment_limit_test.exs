@@ -129,7 +129,7 @@ defmodule HTTP.HTTP2HeaderFragmentLimitTest do
     first = fetch(url, http2_scope: scope)
     assert_receive :offender_ready, 2_000
     second = fetch(url, http2_scope: scope)
-    assert %HTTP.Response{stream: sibling_stream} = Promise.await(second)
+    assert %HTTP.Response{body: sibling_stream} = Promise.await(second)
     assert_receive {:shared_requests, _, _, _}, 2_000
     healthy = fetch(healthy_url)
     assert %HTTP.Response{} = healthy_response = Promise.await(healthy)

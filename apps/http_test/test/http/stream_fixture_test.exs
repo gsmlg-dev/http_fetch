@@ -27,7 +27,7 @@ defmodule HTTP.Test.StreamFixtureTest do
     response = HTTP.Promise.await(promise)
     assert_receive {:http_test_stream, stream, producer}
     assert response.body == stream
-    assert response.stream == stream
+    assert response.body == stream
     send(stream, {:read_chunk, self(), :ack})
     assert_receive {:stream_chunk, ^stream, "first", ack}, 1_000
     refute_receive {:http_test_gate, :second, _, _}, 25

@@ -158,7 +158,7 @@ defmodule HTTP.PooledRequestCompletionTest do
 
     promise = h2_fetch(url)
     response = Promise.await(promise)
-    stream = response.stream
+    stream = response.body
     monitor = Process.monitor(stream)
     send(stream, {:read_chunk, self(), :ack})
     owner = h2_owner(url)

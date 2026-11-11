@@ -57,7 +57,7 @@ defmodule HTTP.InfiniteTimeoutWireTest do
         {:send, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Encoding: gzip\r\n\r\n"}
       )
 
-      assert %HTTP.Response{status: 200, stream: stream} =
+      assert %HTTP.Response{status: 200, body: stream} =
                HTTP.Promise.await(promise, @wait)
 
       send(stream, {:read_chunk, self(), :ack})
@@ -152,7 +152,7 @@ defmodule HTTP.InfiniteTimeoutWireTest do
       owner = Agent.get(controller, & &1.request_id)
       owner_monitor = Process.monitor(owner)
       send(peer, {:send, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"})
-      assert %HTTP.Response{stream: stream} = HTTP.Promise.await(promise, @wait)
+      assert %HTTP.Response{body: stream} = HTTP.Promise.await(promise, @wait)
       stream_monitor = Process.monitor(stream)
       parent = self()
 
@@ -206,7 +206,7 @@ defmodule HTTP.InfiniteTimeoutWireTest do
       owner = Agent.get(controller, & &1.request_id)
       monitor = Process.monitor(owner)
       send(peer, {:send, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"})
-      assert %HTTP.Response{stream: stream} = HTTP.Promise.await(promise, @wait)
+      assert %HTTP.Response{body: stream} = HTTP.Promise.await(promise, @wait)
       send(stream, {:read_chunk, self(), :ack})
       HTTP.AbortController.abort(controller)
       assert_receive {:stream_error, ^stream, :aborted}, @wait

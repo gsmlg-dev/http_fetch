@@ -4,8 +4,7 @@ defmodule E2E.StreamingTest do
 
   The test server's `/stream-large` returns 6 MiB, which is above
   `HTTP.Config.streaming_threshold()`. Streaming responses have
-  the stream PID in `body`, with `stream: pid` retained as a compatibility
-  alias, and can be consumed via `HTTP.Response.read_all/1` or
+  the stream PID in `body` and can be consumed via `HTTP.Response.read_all/1` or
   `HTTP.Response.write_to/2`.
 
   These tests also assert that the streaming telemetry events fire.
@@ -60,14 +59,13 @@ defmodule E2E.StreamingTest do
     resp = E2E.Server.url("/stream-large") |> HTTP.fetch() |> HTTP.Promise.await()
     assert %HTTP.Response{} = resp
     assert resp.status == 200
-    assert is_pid(resp.stream)
-    assert resp.body == resp.stream
+    assert is_pid(resp.body)
     assert resp |> HTTP.Response.read_all() |> byte_size() == @expected_size
   end
 
   test "streamed response has a body stream pid" do
     resp = E2E.Server.url("/stream-large") |> HTTP.fetch() |> HTTP.Promise.await()
-    assert %HTTP.Response{body: stream, stream: stream} = resp
+    assert %HTTP.Response{body: stream} = resp
     assert is_pid(stream)
     assert resp.status == 200
     assert resp |> HTTP.Response.read_all() |> byte_size() == @expected_size

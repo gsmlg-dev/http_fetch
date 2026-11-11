@@ -220,7 +220,7 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
       end)
 
     response = fetch(url)
-    stream = response.stream
+    stream = response.body
 
     _reader =
       spawn(fn ->

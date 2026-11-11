@@ -178,7 +178,7 @@ defmodule HTTP.ExSSLProxyCompletionTest do
           HTTP.fetch(url("connect", "/sibling"), Keyword.put(opts, :stream_response, true))
 
         assert %Response{} = response = Promise.await(sibling, 5_000)
-        assert is_pid(response.stream)
+        assert is_pid(response.body)
         assert :ok = RequestCompletion.abort_and_await(Promise.completion(first), 2_000)
         assert {:error, :aborted} = Promise.await(first, 2_000)
         assert Response.read_all(response) == "ok"

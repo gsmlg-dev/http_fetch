@@ -28,7 +28,7 @@ defmodule HTTP.HTTP1ReadIdleWireTest do
         send_bytes(peer, bytes)
       end
 
-      assert %Response{status: 200, stream: stream} = Promise.await(promise, @wait)
+      assert %Response{status: 200, body: stream} = Promise.await(promise, @wait)
       assert System.monotonic_time(:millisecond) - started > @idle
 
       for bytes <- [<<0, 255, 128>>, <<254, 1, 0>>] do
@@ -59,7 +59,7 @@ defmodule HTTP.HTTP1ReadIdleWireTest do
       promise = fetch(url, backend, stream_response: true)
       assert_request(peer)
       send_bytes(peer, @head)
-      assert %Response{stream: stream} = Promise.await(promise, @wait)
+      assert %Response{body: stream} = Promise.await(promise, @wait)
       send(stream, {:read_chunk, self(), :ack})
       send_bytes(peer, <<0, 255, 128>>)
       assert_receive {:stream_chunk, ^stream, <<0, 255, 128>>, ack}, @wait
@@ -76,7 +76,7 @@ defmodule HTTP.HTTP1ReadIdleWireTest do
       promise = fetch(url, backend, stream_response: true)
       assert_request(peer)
       send_bytes(peer, @head)
-      assert %Response{stream: stream} = Promise.await(promise, @wait)
+      assert %Response{body: stream} = Promise.await(promise, @wait)
       send(stream, {:read_chunk, self(), :ack})
       send_bytes(peer, <<0, 255, 128>>)
       assert_receive {:stream_chunk, ^stream, <<0, 255, 128>>, first_ack}, @wait

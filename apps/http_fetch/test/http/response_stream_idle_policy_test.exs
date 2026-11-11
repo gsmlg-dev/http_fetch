@@ -80,7 +80,7 @@ defmodule HTTP.ResponseStreamIdlePolicyTest do
   test "legacy response reader timeout stops its stream" do
     {:ok, stream} = HTTP.Stream.start_link(0, [], idle_timeout: :infinity, telemetry: false)
     monitor = Process.monitor(stream)
-    response = HTTP.Response.new(stream: stream)
+    response = HTTP.Response.new(body: stream)
 
     assert_raise RuntimeError, "stream read failed: :timeout", fn ->
       HTTP.Response.read_all(response)

@@ -242,7 +242,7 @@ defmodule HTTP.Test do
 
     HTTP.Response.new(
       status: Keyword.get(opts, :status, 200),
-      stream: stream,
+      body: stream,
       headers: HTTP.Headers.new(Keyword.get(opts, :headers, []))
     )
   end
@@ -407,8 +407,7 @@ defmodule HTTP.Test do
   defp redirect_policy(error, _request), do: error
 
   defp discard_response(response, reason) do
-    stream = response.stream || if(is_pid(response.body), do: response.body)
-    if stream, do: HTTP.Stream.stop(stream, reason)
+    if is_pid(response.body), do: HTTP.Stream.stop(response.body, reason)
     {:error, reason}
   end
 

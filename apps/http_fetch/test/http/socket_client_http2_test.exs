@@ -631,8 +631,8 @@ defmodule HTTP.SocketClientHTTP2Test do
         :streamed_short ->
           response = HTTP.Promise.await(promise)
           assert response.status == 200
-          assert is_pid(response.stream)
-          stream_monitor = Process.monitor(response.stream)
+          assert is_pid(response.body)
+          stream_monitor = Process.monitor(response.body)
 
           assert_raise RuntimeError, "stream read failed: :content_length_mismatch", fn ->
             HTTP.Response.read_all(response)
@@ -1227,7 +1227,7 @@ defmodule HTTP.SocketClientHTTP2Test do
 
     response = HTTP.Promise.await(promise)
     assert response.status == 200
-    stream_monitor = monitor_test_process(response.stream)
+    stream_monitor = monitor_test_process(response.body)
     reader = Task.async(fn -> HTTP.Response.read_all(response) end)
     monitor_test_process(reader.pid)
 
@@ -1275,8 +1275,8 @@ defmodule HTTP.SocketClientHTTP2Test do
 
     response = HTTP.Promise.await(promise)
     assert response.status == 200
-    assert is_pid(response.stream)
-    stream = response.stream
+    assert is_pid(response.body)
+    stream = response.body
     stream_monitor = monitor_test_process(stream)
 
     holder = hold_cross_record_stream_chunk(stream, self())
@@ -1321,8 +1321,8 @@ defmodule HTTP.SocketClientHTTP2Test do
 
     response = HTTP.Promise.await(promise)
     assert response.status == 200
-    assert is_pid(response.stream)
-    stream = response.stream
+    assert is_pid(response.body)
+    stream = response.body
     stream_monitor = monitor_test_process(stream)
 
     holder = hold_cross_record_stream_chunk(stream, self())
@@ -1487,7 +1487,7 @@ defmodule HTTP.SocketClientHTTP2Test do
     response =
       HTTP.Promise.await(promise)
 
-    stream_monitor = Process.monitor(response.stream)
+    stream_monitor = Process.monitor(response.body)
     reader = Task.async(fn -> HTTP.Response.read_all(response) end)
     assert_receive {:server_ready_to_finish, server_pid}, 5_000
     owner = await_owner(controller)
@@ -1584,7 +1584,7 @@ defmodule HTTP.SocketClientHTTP2Test do
       )
       |> HTTP.Promise.await()
 
-    assert is_pid(response.stream)
+    assert is_pid(response.body)
     assert HTTP.Response.read_all(response) == body
   end
 

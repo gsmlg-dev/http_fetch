@@ -420,7 +420,7 @@ defmodule HTTP.RequestStreamTest do
       |> HTTP.Promise.await()
 
     assert response.status == 413
-    assert is_pid(response.stream)
+    assert is_pid(response.body)
     refute Process.alive?(upload)
     assert HTTP.Response.read_all(response) == "stop"
   end
@@ -456,7 +456,7 @@ defmodule HTTP.RequestStreamTest do
       )
       |> HTTP.Promise.await()
 
-    stream = response.stream
+    stream = response.body
     monitor = Process.monitor(stream)
     send(stream, {:read_chunk, self(), :ack})
     assert_receive {:stream_chunk, ^stream, "stop", _ack}, 1_000

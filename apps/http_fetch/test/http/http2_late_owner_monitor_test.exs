@@ -56,7 +56,7 @@ defmodule HTTP.HTTP2LateOwnerMonitorTest do
   test "queued END_STREAM survives installing the owner monitor after owner exit" do
     pool = pool(:complete)
 
-    assert %HTTP.Response{status: 200, stream: stream} = response = request(pool, "/queued")
+    assert %HTTP.Response{status: 200, body: stream} = response = request(pool, "/queued")
     assert is_pid(stream)
     assert HTTP.Response.read_all(response) == "ok"
     assert GenServer.call(pool, :reservations) == 1

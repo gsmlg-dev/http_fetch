@@ -14,11 +14,10 @@ defmodule HTTP.Response do
   - `status_text` - Status message ("OK", "Not Found", etc.)
   - `ok` - Boolean for success status (200-299)
   - `headers` - Response headers as `HTTP.Headers` struct
-  - `body` - Response body as binary, or stream PID for streaming responses
+  - `body` - Response body as binary, or the stream PID for streaming responses
   - `url` - The requested URL as `URI` struct
   - `redirected` - Whether response was redirected
   - `type` - Response type (:basic, :cors, :error, :opaque)
-  - `stream` - Stream process PID for streaming responses (nil for buffered)
 
   Network responses expose the actual `http_version` (`:http1`, `:http2`, or
   `:http3`). HTTP/2 and HTTP/3 retain ordered `{status, headers}` informational
@@ -89,8 +88,7 @@ defmodule HTTP.Response do
   **Synchronous Returns**: Methods like `json()` and `text()` return values directly
   instead of Promises, following Elixir conventions.
 
-  **Stream Handling**: Large responses expose a stream process in `body`, with
-  `stream` retained as a compatibility alias.
+  **Stream Handling**: Large responses expose a stream process in `body`.
 
   ## Struct Fields
 
@@ -115,17 +113,14 @@ defmodule HTTP.Response do
 
       %HTTP.Response{
         status: 200,
-        body: "response data",
-        stream: nil
+        body: "response data"
       }
 
-  **Streaming responses** expose the stream PID on `body`, with the same PID
-  retained on `stream` for compatibility:
+  **Streaming responses** expose the stream PID on `body`:
 
         %HTTP.Response{
           status: 200,
-          body: #PID<0.123.0>,
-          stream: #PID<0.123.0>
+          body: #PID<0.123.0>
         }
 
   ## Usage
@@ -167,7 +162,6 @@ defmodule HTTP.Response do
             url: nil,
             redirected: false,
             type: :basic,
-            stream: nil,
             http_version: nil,
             response_stream_idle_timeout: nil,
             informational: [],
@@ -193,7 +187,6 @@ defmodule HTTP.Response do
           url: URI.t() | nil,
           redirected: boolean(),
           type: response_type(),
-          stream: pid() | nil,
           http_version: :http1 | :http2 | :http3 | nil,
           response_stream_idle_timeout: pos_integer() | :infinity | nil,
           informational: [{integer(), HTTP.Headers.t()}],
@@ -245,25 +238,16 @@ defmodule HTTP.Response do
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     status = Keyword.get(opts, :status, 0)
-    stream = Keyword.get(opts, :stream, nil)
-
-    body =
-      if Keyword.has_key?(opts, :body) do
-        Keyword.get(opts, :body)
-      else
-        stream
-      end
 
     %__MODULE__{
       status: status,
       status_text: HTTP.StatusText.get(status),
       ok: status in 200..299,
       headers: Keyword.get(opts, :headers, %HTTP.Headers{}),
-      body: body,
+      body: Keyword.get(opts, :body),
       url: Keyword.get(opts, :url, nil),
       redirected: Keyword.get(opts, :redirected, false),
       type: Keyword.get(opts, :type, :basic),
-      stream: stream,
       http_version: Keyword.get(opts, :http_version),
       informational: Keyword.get(opts, :informational, []),
       trailers: Keyword.get(opts, :trailers, %HTTP.Headers{}),
@@ -287,15 +271,7 @@ defmodule HTTP.Response do
   """
   @spec text(t()) :: binary()
   def text(%__MODULE__{body: body} = response) when is_pid(body), do: read_all(response)
-  def text(%__MODULE__{body: body, stream: nil}), do: body
-
-  def text(%__MODULE__{body: body} = response) do
-    if is_pid(response_stream(response)) do
-      read_all(response)
-    else
-      body || ""
-    end
-  end
+  def text(%__MODULE__{body: body}), do: body || ""
 
   @doc """
   Reads the entire response body as binary.
@@ -323,7 +299,6 @@ defmodule HTTP.Response do
   end
 
   defp response_stream(%__MODULE__{body: body}) when is_pid(body), do: body
-  defp response_stream(%__MODULE__{stream: stream}) when is_pid(stream), do: stream
   defp response_stream(%__MODULE__{}), do: nil
 
   @doc false
@@ -338,13 +313,13 @@ defmodule HTTP.Response do
   @spec with_stream_body(t(), pid(), pos_integer() | :infinity | nil) :: t()
   def with_stream_body(%__MODULE__{} = response, stream, idle_timeout \\ nil)
       when is_pid(stream) do
-    %{response | body: stream, stream: stream, response_stream_idle_timeout: idle_timeout}
+    %{response | body: stream, response_stream_idle_timeout: idle_timeout}
   end
 
   @doc false
   @spec with_buffered_body(t(), binary()) :: t()
   def with_buffered_body(%__MODULE__{} = response, body) when is_binary(body) do
-    %{response | body: body, stream: nil}
+    %{response | body: body}
   end
 
   @doc false
@@ -514,7 +489,7 @@ defmodule HTTP.Response do
       text1 == text2  # true
 
       # Clone streaming response
-      response = HTTP.Response.new(status: 200, stream: stream_pid)
+      response = HTTP.Response.new(status: 200, body: stream_pid)
       clone = HTTP.Response.clone(response)
 
       # Both can be read independently
@@ -601,7 +576,7 @@ defmodule HTTP.Response do
     - `{:error, reason}` on failure
 
   ## Examples
-      iex> response = %HTTP.Response{body: "file content", stream: nil}
+      iex> response = %HTTP.Response{body: "file content"}
       iex> HTTP.Response.write_to(response, "/tmp/test.txt")
       :ok
   """

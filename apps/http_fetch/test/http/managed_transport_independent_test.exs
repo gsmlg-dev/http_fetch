@@ -233,7 +233,7 @@ defmodule HTTP.ManagedTransportIndependentTest do
 
     scope = open(origin)
     promise = fetch(origin, scope)
-    assert %Response{stream: stream} = Promise.await(promise)
+    assert %Response{body: stream} = Promise.await(promise)
     monitor = Process.monitor(stream)
     assert {:ok, receipt} = ManagedTransport.retire(scope, mode: :abort)
     assert :ok = ManagedTransport.await_retired(receipt, 3_000)

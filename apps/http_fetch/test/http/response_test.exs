@@ -33,12 +33,12 @@ defmodule HTTP.ResponseTest do
     end
 
     test "read_all - non-streaming response" do
-      response = %HTTP.Response{body: "test content", stream: nil}
+      response = %HTTP.Response{body: "test content"}
       assert HTTP.Response.read_all(response) == "test content"
     end
 
     test "read_all - empty body" do
-      response = %HTTP.Response{body: nil, stream: nil}
+      response = %HTTP.Response{body: nil}
       assert HTTP.Response.read_all(response) == ""
     end
 
@@ -51,7 +51,7 @@ defmodule HTTP.ResponseTest do
           HTTP.Stream.error(stream, :closed)
         end)
 
-      response = %HTTP.Response{body: nil, stream: stream}
+      response = %HTTP.Response{body: stream}
 
       assert_raise RuntimeError, ~r/stream read failed: :closed/, fn ->
         HTTP.Response.read_all(response)
@@ -61,12 +61,12 @@ defmodule HTTP.ResponseTest do
     end
 
     test "read_as_json - valid" do
-      response = %HTTP.Response{body: ~s({"key": "value"}), stream: nil}
+      response = %HTTP.Response{body: ~s({"key": "value"})}
       assert {:ok, %{"key" => "value"}} = HTTP.Response.read_as_json(response)
     end
 
     test "read_as_json - invalid" do
-      response = %HTTP.Response{body: "invalid json", stream: nil}
+      response = %HTTP.Response{body: "invalid json"}
       assert {:error, _reason} = HTTP.Response.read_as_json(response)
     end
 
@@ -128,7 +128,7 @@ defmodule HTTP.ResponseTest do
           end
         end)
 
-      response = %HTTP.Response{status: 200, body: stream, stream: stream}
+      response = %HTTP.Response{status: 200, body: stream}
       assert {:error, :eisdir} = HTTP.Response.write_to(response, dir)
       assert_receive {:stopped, :write_failed}
     end
@@ -141,8 +141,7 @@ defmodule HTTP.ResponseTest do
         status: 200,
         headers: %HTTP.Headers{},
         body: "test content",
-        url: "http://example.com",
-        stream: nil
+        url: "http://example.com"
       }
 
       assert :ok = HTTP.Response.write_to(response, temp_path)
@@ -160,8 +159,7 @@ defmodule HTTP.ResponseTest do
         status: 200,
         headers: %HTTP.Headers{},
         body: nil,
-        url: "http://example.com",
-        stream: nil
+        url: "http://example.com"
       }
 
       assert :ok = HTTP.Response.write_to(response, temp_path)
@@ -179,8 +177,7 @@ defmodule HTTP.ResponseTest do
         status: 200,
         headers: %HTTP.Headers{},
         body: ["hello", " ", "world"],
-        url: "http://example.com",
-        stream: nil
+        url: "http://example.com"
       }
 
       assert :ok = HTTP.Response.write_to(response, temp_path)
@@ -199,8 +196,7 @@ defmodule HTTP.ResponseTest do
         status: 200,
         headers: %HTTP.Headers{},
         body: "nested directory content",
-        url: "http://example.com",
-        stream: nil
+        url: "http://example.com"
       }
 
       assert :ok = HTTP.Response.write_to(response, temp_path)
@@ -222,7 +218,7 @@ defmodule HTTP.ResponseTest do
           HTTP.Stream.finish(stream)
         end)
 
-      response = %HTTP.Response{body: nil, stream: stream}
+      response = %HTTP.Response{body: stream}
 
       assert :ok = HTTP.Response.write_to(response, temp_path)
       assert File.read!(temp_path) == "hello world"
@@ -242,7 +238,7 @@ defmodule HTTP.ResponseTest do
           HTTP.Stream.error(stream, :closed)
         end)
 
-      response = %HTTP.Response{body: nil, stream: stream}
+      response = %HTTP.Response{body: stream}
 
       assert {:error, :closed} = HTTP.Response.write_to(response, temp_path)
       assert File.read!(temp_path) == "partial"
@@ -298,8 +294,7 @@ defmodule HTTP.ResponseTest do
         |> HTTP.Promise.await()
 
       assert response.status == 302
-      assert is_pid(response.stream)
-      assert response.body == response.stream
+      assert is_pid(response.body)
       assert HTTP.Response.read_all(response) == body
     end
 
@@ -451,8 +446,7 @@ defmodule HTTP.ResponseTest do
       response = url |> HTTP.fetch() |> HTTP.Promise.await()
 
       assert response.status == 200
-      assert is_pid(response.stream)
-      assert response.body == response.stream
+      assert is_pid(response.body)
       assert HTTP.Response.read_all(response) == "hello"
     end
 

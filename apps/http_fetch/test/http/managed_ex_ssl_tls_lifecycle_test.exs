@@ -360,7 +360,7 @@ defmodule HTTP.ManagedExSSLTLSLifecycleTest do
 
         try do
           promise = fetch(origin, scope, "m-death")
-          assert %Response{stream: stream} = Promise.await(promise, 5_000)
+          assert %Response{body: stream} = Promise.await(promise, 5_000)
           stream_monitor = Process.monitor(stream)
           graph = Probe.graph(scope)
           assert {:ok, receipt} = ManagedTransport.retire(scope, mode: :graceful)

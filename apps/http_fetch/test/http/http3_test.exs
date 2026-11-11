@@ -124,7 +124,7 @@ defmodule HTTP.FetchHTTP3Test do
       assert HTTP.Response.json(response) == {:ok, %{"protocol" => "h3"}}
 
       if unquote(streaming?) do
-        reader = response.stream
+        reader = response.body
         assert_receive {:stream_trailers, ^reader, trailers}, 5_000
         assert HTTP.Headers.get(trailers, "x-decoded") == "yes"
       else
@@ -160,7 +160,7 @@ defmodule HTTP.FetchHTTP3Test do
       assert HTTP.Response.read_all(response) == encoded
 
       if unquote(streaming?) do
-        reader = response.stream
+        reader = response.body
         assert_receive {:stream_trailers, ^reader, trailers}, 5_000
         assert HTTP.Headers.get(trailers, "x-stored") == "yes"
       else
@@ -191,7 +191,7 @@ defmodule HTTP.FetchHTTP3Test do
       )
 
       response = HTTP.Promise.await(promise)
-      reader = response.stream
+      reader = response.body
       monitor = Process.monitor(reader)
       send(reader, {:read_chunk, self(), :ack})
       assert_receive {:stream_chunk, ^reader, ^encoded, delivery}, 5_000

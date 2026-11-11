@@ -207,7 +207,7 @@ defmodule HTTP.ManagedTransportTest do
         end)
 
       promise = fetch(origin, scope)
-      assert %Response{stream: stream} = Promise.await(promise)
+      assert %Response{body: stream} = Promise.await(promise)
       stream_monitor = Process.monitor(stream)
       children = :sys.get_state(scope.coordinator).children |> Map.values()
       monitors = Enum.map(children, &Process.monitor/1)
@@ -473,9 +473,9 @@ defmodule HTTP.ManagedTransportTest do
     origin = url |> URI.parse() |> Map.put(:path, nil) |> URI.to_string()
     scope = open(origin, http_version: :h2c, socket_opts: [send_timeout: 1_500])
     first = fetch(origin, scope)
-    assert %Response{stream: first_stream} = Promise.await(first)
+    assert %Response{body: first_stream} = Promise.await(first)
     second = fetch(origin, scope, timeout: 100)
-    assert %Response{stream: second_stream} = Promise.await(second)
+    assert %Response{body: second_stream} = Promise.await(second)
     send(second_stream, {:read_chunk, self()})
     assert_receive {:stream_error, ^second_stream, :request_timeout}, 1_000
     assert_receive :deadline_reset, 1_000

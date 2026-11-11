@@ -54,7 +54,7 @@ defmodule HTTP.ProxyRequestCompletionTest do
     response = Promise.await(promise)
     handle = Promise.completion(promise)
     owner = Agent.get(controller, & &1.request_id)
-    stream = response.stream
+    stream = response.body
     monitor = Process.monitor(stream)
     send(stream, {:read_chunk, self(), :ack})
     :erlang.suspend_process(owner)
