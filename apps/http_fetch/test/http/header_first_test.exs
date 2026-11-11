@@ -93,7 +93,7 @@ defmodule HTTP.HeaderFirstTest do
     response = HTTP.Promise.await(promise, 1_000)
     stream = response.body
     send(stream, {:read_chunk, self(), :ack})
-    assert_receive {:stream_error, ^stream, :request_timeout}, 2_000
+    assert_receive {:stream_error, ^stream, :timeout}, 2_000
     send(peer, :check_closed)
     assert_receive {:peer_closed, ^peer}, 2_000
   end

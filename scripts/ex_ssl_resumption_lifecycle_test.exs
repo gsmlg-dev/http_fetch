@@ -40,7 +40,7 @@ defmodule CandidateResumptionLifecycleTest do
       promise = fetch(peer, f, timeout: 1_000)
       assert %{"ticket_offered" => true} = event(peer, "setup")
       assert {:error, reason} = HTTP.Promise.await(promise, 2_000)
-      assert reason in [:request_timeout, :connect_timeout]
+      assert reason in [:timeout, :connect_timeout]
       assert %{"index" => 2} = event(peer, "setup_closed")
     end)
   end

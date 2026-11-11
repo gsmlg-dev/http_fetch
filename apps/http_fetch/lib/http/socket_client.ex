@@ -353,6 +353,7 @@ defmodule HTTP.SocketClient do
 
         {:ok, stream_pid} =
           HTTP.Stream.start_link(content_length, response_encodings(state.request, headers),
+            response_body: true,
             telemetry: request_telemetry?(state.request),
             max_decoded_body_size: max_decoded_body_size(state.request)
           )
@@ -1406,6 +1407,7 @@ defmodule HTTP.SocketClient do
           HTTP.Stream.start_link(
             stream_content_length(headers),
             response_encodings(state.request, headers),
+            response_body: true,
             telemetry: request_telemetry?(state.request),
             max_decoded_body_size: max_decoded_body_size(state.request)
           )
@@ -1861,6 +1863,7 @@ defmodule HTTP.SocketClient do
     encodings = response_encodings(state.request, headers)
 
     opts = [
+      response_body: true,
       telemetry: request_telemetry?(state.request),
       max_decoded_body_size: max_decoded_body_size(state.request)
     ]

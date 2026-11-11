@@ -136,7 +136,7 @@ defmodule HTTP.HTTP1ReadIdleWireTest do
       {peer, url} = peer(backend)
       promise = fetch(url, backend, timeout: 400, read_idle_timeout: 2_000)
       assert_request(peer)
-      assert {:error, :request_timeout} = Promise.await(promise, @wait)
+      assert {:error, :timeout} = Promise.await(promise, @wait)
       finish(peer, promise, backend)
     end
 

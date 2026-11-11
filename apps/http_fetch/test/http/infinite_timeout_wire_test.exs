@@ -187,7 +187,7 @@ defmodule HTTP.InfiniteTimeoutWireTest do
         HTTP.fetch(url, options(unquote(backend), timeout: 300, connect_timeout: :infinity))
 
       assert_receive {:headers, ^peer, _, _}, @wait
-      assert {:error, :request_timeout} = HTTP.Promise.await(promise, @wait)
+      assert {:error, :timeout} = HTTP.Promise.await(promise, @wait)
       send(peer, :closed)
       assert_receive {:closed, ^peer}, @wait
     end
@@ -219,7 +219,7 @@ defmodule HTTP.InfiniteTimeoutWireTest do
   for backend <- [:ex_ssl],
       {timeout, connect_timeout, result} <- [
         {:infinity, 100, :connect_timeout},
-        {100, :infinity, :request_timeout},
+        {100, :infinity, :timeout},
         {:infinity, :infinity, :aborted}
       ] do
     test "#{backend} stalled handshake honors #{timeout} request and #{connect_timeout} connect timeout" do
@@ -262,7 +262,7 @@ defmodule HTTP.InfiniteTimeoutWireTest do
         case {unquote(timeout), unquote(result)} do
           {_, :aborted} -> [:aborted]
           {:infinity, _} -> [:timeout, :connect_timeout]
-          _ -> [:timeout, :request_timeout, :connect_timeout]
+          _ -> [:timeout, :connect_timeout]
         end
 
       assert reason in expected

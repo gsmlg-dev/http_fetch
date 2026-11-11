@@ -429,7 +429,7 @@ defmodule HTTP.ResponseTest do
           :gen_tcp.close(socket)
         end)
 
-      assert {:error, :request_timeout} =
+      assert {:error, :timeout} =
                url |> HTTP.fetch(timeout: 100) |> HTTP.Promise.await(2_000)
 
       assert_receive :request_received

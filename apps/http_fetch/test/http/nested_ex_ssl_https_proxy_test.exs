@@ -374,7 +374,7 @@ defmodule HTTP.NestedExSSLHTTPSProxyTest do
   defp stop_options(options, _stage, :abort), do: options
 
   defp deadline_reason(:connect_gate), do: :proxy_tunnel_timeout
-  defp deadline_reason(:origin_gate), do: :request_timeout
+  defp deadline_reason(:origin_gate), do: :timeout
   defp deadline_reason(_stage), do: :connect_timeout
 
   defp assert_cleanup(_stage, result, _handle), do: assert(result == :ok)

@@ -369,7 +369,6 @@ defmodule HTTP.Telemetry do
        when value in [
               :aborted,
               :timeout,
-              :request_timeout,
               :connect_timeout,
               :closed,
               :econnrefused,

@@ -140,7 +140,7 @@ defmodule HTTP.ExSSLHTTP2CompletionTest do
                   {:error, :cleanup_pending}
               )
 
-          expected = if unquote(terminal) == :abort, do: :aborted, else: :request_timeout
+          expected = if unquote(terminal) == :abort, do: :aborted, else: :timeout
           assert {:error, ^expected} = Promise.await(second, 1_500)
           assert :ok = RequestCompletion.await(Promise.completion(second), 1_500)
         after

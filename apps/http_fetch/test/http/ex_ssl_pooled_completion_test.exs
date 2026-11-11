@@ -111,7 +111,7 @@ defmodule HTTP.ExSSLPooledCompletionTest do
               assert_receive {:timeout, ^witness, :request_expired}, 1_000
           end
 
-          expected = if unquote(terminal) == :abort, do: :aborted, else: :request_timeout
+          expected = if unquote(terminal) == :abort, do: :aborted, else: :timeout
           assert {:error, ^expected} = Promise.await(second, 1_500)
           assert :ok = RequestCompletion.await(Promise.completion(second), 1_000)
         after

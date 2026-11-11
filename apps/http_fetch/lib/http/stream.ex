@@ -24,6 +24,7 @@ defmodule HTTP.Stream do
             trailers: nil,
             done?: false,
             error: nil,
+            response_body?: false,
             total_bytes: 0,
             start_time: nil
 
@@ -60,6 +61,7 @@ defmodule HTTP.Stream do
           decoders: decoders,
           telemetry: telemetry,
           writer: writer,
+          response_body?: Keyword.get(opts, :response_body, false),
           idle_timeout: Keyword.get(opts, :idle_timeout),
           ack_timeout: Keyword.get(opts, :ack_timeout)
         }
@@ -388,6 +390,18 @@ defmodule HTTP.Stream do
     |> maybe_continue()
   end
 
+  # Fetch users observe request deadline expiry as `:timeout`: they read
+  # response streams and produce upload streams. Fetch's own producers of
+  # response streams and readers of upload streams keep the internal reason.
+  defp reader_reason(%__MODULE__{response_body?: true}, reason), do: public_reason(reason)
+  defp reader_reason(%__MODULE__{}, reason), do: reason
+
+  defp producer_reason(%__MODULE__{response_body?: false}, reason), do: public_reason(reason)
+  defp producer_reason(%__MODULE__{}, reason), do: reason
+
+  defp public_reason(:request_timeout), do: :timeout
+  defp public_reason(reason), do: reason
+
   defp monitor_reader(%{reader: reader} = state, reader), do: state
 
   defp monitor_reader(state, reader) do
@@ -474,7 +488,7 @@ defmodule HTTP.Stream do
 
     cond do
       error ->
-        send(reader, {:stream_error, self(), error})
+        send(reader, {:stream_error, self(), reader_reason(state, error)})
         %{state | chunks: [], pending_ack: nil}
 
       done? ->
@@ -501,7 +515,7 @@ defmodule HTTP.Stream do
   end
 
   defp reply_pending(%__MODULE__{pending_ack: {sender, ref}} = state, {:error, reason}) do
-    send(sender, {:chunk_error, ref, reason})
+    send(sender, {:chunk_error, ref, producer_reason(state, reason)})
     %{state | pending_ack: nil}
   end
 end

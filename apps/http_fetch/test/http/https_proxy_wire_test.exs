@@ -190,7 +190,7 @@ defmodule HTTP.HTTPSProxyWireTest do
   defp assert_handshake_stop(:abort, reason), do: assert(reason == :aborted)
 
   defp assert_handshake_stop(:deadline, reason),
-    do: assert(reason in [:request_timeout, :connect_timeout, :timeout])
+    do: assert(reason in [:connect_timeout, :timeout])
 
   defp origin_with_refused_proxy do
     {:ok, origin} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])

@@ -158,7 +158,7 @@ defmodule HTTP.ResponseHeaderBudgetWireTest do
         timeout: 200
       )
 
-    assert {:error, :request_timeout} = HTTP.Promise.await(promise, 2_000)
+    assert {:error, :timeout} = HTTP.Promise.await(promise, 2_000)
     assert :ok = HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 2_000)
     assert_receive {:peer_done, ^peer_pid, {:error, :closed}}, 2_000
   end

@@ -55,7 +55,7 @@ defmodule HTTP.ResponseStreamIdleWireTest do
       stream = Response.stream_pid(response)
       monitor = Process.monitor(stream)
       assert_chunk(stream, "x")
-      assert_receive {:stream_error, ^stream, :request_timeout}, @wait
+      assert_receive {:stream_error, ^stream, :timeout}, @wait
       assert_receive {:DOWN, ^monitor, :process, ^stream, _reason}, @wait
       refute_receive {:stream_end, ^stream}, 0
       finish(peer, promise, backend)

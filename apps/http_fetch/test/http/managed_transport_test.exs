@@ -19,8 +19,8 @@ defmodule HTTP.ManagedTransportTest do
                  Promise.await(fetch(origin, scope))
       end
 
-      assert {:error, :request_timeout} = Promise.await(first)
-      assert {:error, :request_timeout} = Promise.await(second)
+      assert {:error, :timeout} = Promise.await(first)
+      assert {:error, :timeout} = Promise.await(second)
       assert :ok = RequestCompletion.await(Promise.completion(first), 1_000)
       assert :ok = RequestCompletion.await(Promise.completion(second), 1_000)
       assert {:messages, messages} = Process.info(scope.coordinator, :messages)
@@ -75,7 +75,7 @@ defmodule HTTP.ManagedTransportTest do
     source_monitor = Process.monitor(source)
     promise = fetch(origin, scope, body: source, method: :post, timeout: 40)
 
-    assert {:error, :request_timeout} = Promise.await(promise, 500)
+    assert {:error, :timeout} = Promise.await(promise, 500)
     assert {:error, :cleanup_pending} = RequestCompletion.await(Promise.completion(promise), 0)
     assert {:error, :timeout} = :gen_tcp.accept(listener, 0)
     assert {:error, {:transport_scope_capacity, :requests}} = Promise.await(fetch(origin, scope))
@@ -477,7 +477,7 @@ defmodule HTTP.ManagedTransportTest do
     second = fetch(origin, scope, timeout: 100)
     assert %Response{body: second_stream} = Promise.await(second)
     send(second_stream, {:read_chunk, self()})
-    assert_receive {:stream_error, ^second_stream, :request_timeout}, 1_000
+    assert_receive {:stream_error, ^second_stream, :timeout}, 1_000
     assert_receive :deadline_reset, 1_000
 
     owner =

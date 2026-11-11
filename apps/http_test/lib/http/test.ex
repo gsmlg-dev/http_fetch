@@ -216,7 +216,12 @@ defmodule HTTP.Test do
       do: raise(ArgumentError, "stream timeout must be finite and positive")
 
     {:ok, stream} =
-      HTTP.Stream.start_link(0, [], telemetry: false, idle_timeout: timeout, ack_timeout: timeout)
+      HTTP.Stream.start_link(0, [],
+        response_body: true,
+        telemetry: false,
+        idle_timeout: timeout,
+        ack_timeout: timeout
+      )
 
     Process.unlink(stream)
     :ok = track(context, stream, :stream)
@@ -247,7 +252,10 @@ defmodule HTTP.Test do
     )
   end
 
-  @doc "Waits at a cooperative response-header gate; abort returns an intentional client failure."
+  @doc """
+  Waits at a cooperative response-header gate. Abort returns `{:error, :aborted}`;
+  the request deadline or the gate's own `timeout` returns `{:error, :timeout}`.
+  """
   def gate(observer, tag, callback, timeout \\ 5_000) when is_function(callback, 0) do
     ref = make_ref()
     send(observer, {:http_test_gate, tag, self(), ref})
@@ -255,9 +263,9 @@ defmodule HTTP.Test do
     receive do
       {:http_test_release, ^ref} -> callback.()
       :abort -> {:error, :aborted}
-      :deadline -> {:error, :request_timeout}
+      :deadline -> {:error, :timeout}
     after
-      timeout -> {:error, :request_timeout}
+      timeout -> {:error, :timeout}
     end
   end
 

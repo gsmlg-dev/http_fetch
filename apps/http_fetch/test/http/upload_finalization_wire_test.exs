@@ -184,7 +184,7 @@ defmodule HTTP.UploadFinalizationWireTest do
   end
 
   defp interruption_reason(:abort), do: :aborted
-  defp interruption_reason(:deadline), do: :request_timeout
+  defp interruption_reason(:deadline), do: :timeout
 
   defp watch(pids), do: Enum.map(pids, &{&1, Process.monitor(&1)})
 
@@ -228,7 +228,7 @@ defmodule HTTP.UploadFinalizationWireTest do
     {:request_process_down, :killed}
   end
 
-  defp interrupt(:deadline, _, _), do: :request_timeout
+  defp interrupt(:deadline, _, _), do: :timeout
   defp interrupt(:timeout, _, _), do: :timeout
 
   defp completion_result(outcome) when outcome in [:owner_down, :reader_down], do: :unconfirmed

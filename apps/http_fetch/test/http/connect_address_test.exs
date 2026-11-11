@@ -388,7 +388,7 @@ defmodule HTTP.ConnectAddressTest do
       assert_receive {:tls_started, ^peer}, @timeout
       if unquote(stop) == :abort, do: HTTP.AbortController.abort(controller)
       assert {:error, reason} = HTTP.Promise.await(promise, @timeout)
-      assert reason in [:aborted, :request_timeout, :connect_timeout]
+      assert reason in [:aborted, :timeout, :connect_timeout]
       assert_receive {:tls_closed, ^peer}, @timeout
     end
   end

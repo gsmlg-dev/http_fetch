@@ -274,7 +274,7 @@ defmodule HTTP.PooledRequestCompletionTest do
 
         :deadline ->
           send(Agent.get(controller, & &1.request_id), :deadline)
-          assert {:error, :request_timeout} = Promise.await(promise)
+          assert {:error, :timeout} = Promise.await(promise)
           assert :ok = RequestCompletion.await(Promise.completion(promise), 1_000)
       end
 

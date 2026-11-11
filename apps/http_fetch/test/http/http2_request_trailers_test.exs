@@ -192,7 +192,7 @@ defmodule HTTP.HTTP2RequestTrailersTest do
         :abort -> assert result == {:error, :aborted}
         :reset -> assert result == {:error, {:stream_reset, :cancel}}
         :early_response -> assert %HTTP.Response{status: 200} = result
-        :timeout -> assert result == {:error, :request_timeout}
+        :timeout -> assert result == {:error, :timeout}
       end
 
       assert {:error, _reason} = Task.await(producer, 4_000)

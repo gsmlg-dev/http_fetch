@@ -307,7 +307,7 @@ defmodule HTTP do
           IO.puts "Abortable request completed successfully! Status: \#{status}"
         {:error, reason} ->
           IO.inspect reason, label: "Abortable Request Result"
-          if reason == :aborted or reason == :request_timeout do
+          if reason == :aborted or reason == :timeout do
             IO.puts "Request was likely aborted. Reason: \#{inspect(reason)}"
           end
       end
@@ -464,6 +464,9 @@ defmodule HTTP do
             elem(adapter, 1)
           )
 
+        {:error, reason} ->
+          {:error, public_reason(reason)}
+
         error ->
           error
       end
@@ -541,18 +544,29 @@ defmodule HTTP do
         response
 
       {:error, reason} ->
+        reason = public_reason(reason)
+
         if HTTP.Telemetry.enabled?(Keyword.get(request.transport_options, :telemetry, true)),
           do: HTTP.Telemetry.request_exception(request.url, reason, duration)
 
         error =
           if Keyword.get(request.transport_options, :error_mode, :raw) == :structured and
                not match?(%HTTP.RequestError{}, reason),
-             do: HTTP.RequestError.new(reason, failure_token),
+             do: reason |> HTTP.RequestError.new(failure_token) |> public_reason(),
              else: reason
 
         {:error, error}
     end
   end
+
+  # Request deadline expiry is `:request_timeout` inside the shared lifecycle
+  # and runtime; Fetch reports it as `:timeout`.
+  defp public_reason(:request_timeout), do: :timeout
+
+  defp public_reason(%HTTP.RequestError{reason: :request_timeout} = error),
+    do: %{error | reason: :timeout}
+
+  defp public_reason(reason), do: reason
 
   defp response_body_size(%Response{} = response), do: Response.body_size(response)
 

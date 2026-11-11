@@ -161,7 +161,7 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
       assert_request(peer)
       writer = await_blocked_writer(source)
       writer_monitor = Process.monitor(writer)
-      assert {:error, :request_timeout} = Promise.await(promise, @wait)
+      assert {:error, :timeout} = Promise.await(promise, @wait)
       assert_receive {:DOWN, ^writer_monitor, :process, ^writer, _}, @wait
       assert_receive {:DOWN, ^source_monitor, :process, ^source, :normal}, @wait
       finish(peer, promise, backend)

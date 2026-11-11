@@ -148,7 +148,7 @@ defmodule HTTP.HTTP1ReuseTest do
       :sys.resume(pool)
 
       case unquote(cancellation) do
-        :deadline -> assert HTTP.Promise.await(promise, 4_000) == {:error, :request_timeout}
+        :deadline -> assert HTTP.Promise.await(promise, 4_000) == {:error, :timeout}
         :abort -> assert HTTP.Promise.await(promise, 4_000) == {:error, :aborted}
         :caller_death -> Process.demonitor(promise.task.ref, [:flush])
       end

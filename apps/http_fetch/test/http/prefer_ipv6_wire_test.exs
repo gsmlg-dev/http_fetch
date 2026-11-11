@@ -47,7 +47,7 @@ defmodule HTTP.PreferIPv6WireTest do
       assert_receive {:waiting_response, peer}, @wait
 
       if unquote(interruption) == :cancel, do: HTTP.AbortController.abort(controller)
-      expected = if unquote(interruption) == :cancel, do: :aborted, else: :request_timeout
+      expected = if unquote(interruption) == :cancel, do: :aborted, else: :timeout
       assert {:error, ^expected} = Promise.await(promise, @wait)
       assert_receive {:fallback_peer_closed, ^peer}, @wait
       assert :ok = RequestCompletion.await(Promise.completion(promise), @wait)

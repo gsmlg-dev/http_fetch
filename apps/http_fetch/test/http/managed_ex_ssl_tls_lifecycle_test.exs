@@ -472,7 +472,7 @@ defmodule HTTP.ManagedExSSLTLSLifecycleTest do
 
         case unquote(failure) do
           :deadline ->
-            assert {:error, :request_timeout} = Promise.await(promise, 500)
+            assert {:error, :timeout} = Promise.await(promise, 500)
 
           :worker ->
             Process.exit(promise.task.pid, :kill)

@@ -123,7 +123,7 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
     %{streams: %{1 => %{pid: coordinator}}} = :sys.get_state(owner)
     send(coordinator, :deadline)
 
-    assert_raise HTTP.ResponseError, "response body stream failed: :request_timeout", fn ->
+    assert_raise HTTP.ResponseError, "response body stream failed: :timeout", fn ->
       HTTP.Response.read_all(response)
     end
 
@@ -155,7 +155,7 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
 
     %{streams: %{1 => %{pid: coordinator}}} = :sys.get_state(owner)
     send(coordinator, :deadline)
-    assert {:error, :request_timeout} = Task.await(task, 5_000)
+    assert {:error, :timeout} = Task.await(task, 5_000)
     send(peer, :close)
     assert_receive {:peer_complete, ^peer}, 5_000
     send(peer, :close)

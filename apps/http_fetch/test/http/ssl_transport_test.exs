@@ -491,7 +491,7 @@ defmodule HTTP.SSLTransportTest do
         )
 
       assert_receive :request_received, 2_000
-      assert {:error, :request_timeout} = HTTP.Promise.await(promise, 2_000)
+      assert {:error, :timeout} = HTTP.Promise.await(promise, 2_000)
       assert_receive {:server_recv_after_timeout, {:error, :closed}}, 2_000
     end
 

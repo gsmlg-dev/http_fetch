@@ -76,7 +76,7 @@ defmodule HTTP.ResponseStreamAckWireTest do
       {peer, promise, response} = response(backend, "x", 2, timeout: 1_000)
       stream = Response.stream_pid(response)
       _ack = hold_chunk(stream, "x")
-      assert_receive {:stream_error, ^stream, :request_timeout}, @wait
+      assert_receive {:stream_error, ^stream, :timeout}, @wait
       finish(peer, promise, backend)
     end
 

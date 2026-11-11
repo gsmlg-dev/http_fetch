@@ -45,7 +45,7 @@ defmodule HTTP.PromiseTimeoutWireTest do
     peer_pid = peer.pid
     assert_receive {:received_get, ^peer_pid}, 2_000
 
-    assert {:error, :timeout} = HTTP.Promise.await(promise, 1)
+    assert {:error, :await_timeout} = HTTP.Promise.await(promise, 1)
     assert {:error, :cleanup_pending} = HTTP.RequestCompletion.await(completion, 0)
     assert :ok = HTTP.RequestCompletion.abort_and_await(completion, 1_000)
     assert {:error, :closed} = Task.await(peer, 1_000)

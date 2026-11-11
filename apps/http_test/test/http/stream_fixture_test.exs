@@ -70,7 +70,7 @@ defmodule HTTP.Test.StreamFixtureTest do
 
     promise = fetch(:deadline, timeout: 100)
     assert_receive {:http_test_gate, :deadline, _, _}
-    assert HTTP.Promise.await(promise, 1_500) == {:error, :request_timeout}
+    assert HTTP.Promise.await(promise, 1_500) == {:error, :timeout}
     assert HTTP.RequestCompletion.await(HTTP.Promise.completion(promise), 1_500) == :ok
     assert HTTP.Test.verify!() == :ok
   end

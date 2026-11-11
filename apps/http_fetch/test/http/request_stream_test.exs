@@ -482,7 +482,7 @@ defmodule HTTP.RequestStreamTest do
     {:ok, upload} = HTTP.Stream.start_link(0)
     monitor = Process.monitor(upload)
 
-    assert {:error, :request_timeout} =
+    assert {:error, :timeout} =
              HTTP.fetch(url, method: :post, body: upload, duplex: :half, timeout: 100)
              |> HTTP.Promise.await()
 

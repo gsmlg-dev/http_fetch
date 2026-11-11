@@ -85,7 +85,7 @@ defmodule HTTP.HTTPSEarlyUploadTest do
           assert_receive {:stream_error, ^reader, :aborted}, 1_000
 
         :deadline ->
-          assert {:error, :request_timeout} = HTTP.Promise.await(promise, 2_000)
+          assert {:error, :timeout} = HTTP.Promise.await(promise, 2_000)
 
         :send_timeout ->
           # The native send timeout must settle before the request deadline.

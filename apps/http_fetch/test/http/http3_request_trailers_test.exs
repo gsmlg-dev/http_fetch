@@ -110,7 +110,7 @@ defmodule HTTP.HTTP3RequestTrailersTest do
 
       if unquote(outcome) == :abort,
         do: assert(result == {:error, :aborted}),
-        else: assert(result == {:error, :request_timeout})
+        else: assert(result == {:error, :timeout})
 
       command(peer, "snapshot", identity)
       assert event(peer, "snapshot", identity)["requests"] == 1

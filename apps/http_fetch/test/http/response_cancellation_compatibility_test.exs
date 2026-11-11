@@ -5,7 +5,7 @@ defmodule HTTP.ResponseCancellationCompatibilityTest do
   alias HTTP.{AbortController, Promise, RequestCompletion, Response}
   alias HTTP.Test.HTTP2ScriptedPeer, as: Peer
 
-  for {name, reason} <- [abort: :aborted, deadline: :request_timeout] do
+  for {name, reason} <- [abort: :aborted, deadline: :timeout] do
     test "untracked H2 #{name} retains its error after the peer observes cancellation" do
       parent = self()
 
