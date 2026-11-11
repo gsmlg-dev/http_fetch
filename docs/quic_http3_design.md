@@ -53,9 +53,8 @@ See the [Fetch contract](http3-fetch-contract.md) for public behavior and the
 and canary results. Beta capability reporting does not claim those gates have
 completed or establish full conformance or production readiness.
 
-The `tls_backend` setting selects TCP TLS only. Passing a non-`nil` backend to
-a QUIC-backed API returns `:tls_backend_not_supported_for_quic`; QUIC uses the
-separate `SSL.QUIC` interface. There is no fallback to OTP `:ssl`, the legacy
+QUIC uses the separate `SSL.QUIC` interface (the former TCP-only
+`tls_backend` setting was removed in 1.0.0-rc.14). There is no fallback to OTP `:ssl`, the legacy
 `:quic` implementation, or a native QUIC library.
 
 ## Release state

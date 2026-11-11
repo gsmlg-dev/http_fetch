@@ -1315,6 +1315,76 @@ every request phase.
 Other protocol-specific reasons may be returned; match on the rows above and
 treat any other term as a request failure.
 
+### WebSocket, EventSource and WebTransport error reasons
+
+Each client's moduledoc carries the same table. `:closed` deliberately covers both
+"already closed" and "process unreachable".
+
+#### HTTP.WebSocket
+
+| Reason | When |
+| --- | --- |
+| `:invalid_url` | `new/3`: unparsable URL, userinfo, empty or control-byte host, port outside 1..65535, or whitespace/control bytes in path or query |
+| `{:unsupported_scheme, scheme}` | `new/3`: scheme other than `ws`, `wss`, `http` or `https` |
+| `:fragment_not_allowed` | `new/3`: URL has a fragment |
+| `:invalid_protocols`, `:invalid_protocol`, `:duplicate_protocol` | `new/3`: malformed, non-token or repeated subprotocol |
+| `:closed` | Either the socket is closed (`send_ack/2`, `send_frame/2`, `send_frame_ack/2` when not OPEN, including CONNECTING) **or** its process is unreachable (exited, or no reply within 5 seconds). The two cases are deliberately not distinguished; getters return their CLOSED defaults (`ready_state/1` is `3`) in both. `send/2` returns it only when unreachable (a CLOSING/CLOSED socket accepts and discards, as in browsers). Also the `{:send_result, ref, {:error, :closed}}` of a send discarded by close |
+| `:invalid_state` | `send/2` while CONNECTING; `migrate/2` before OPEN |
+| `:send_queue_full` | a send would exceed `max_send_queue` bytes or `max_send_frames` |
+| `:unsupported_data` | `send/2` data is not a binary, `HTTP.Blob` or ArrayBuffer |
+| `:proxy_mode_required` | `send_frame/2` or `send_frame_ack/2` in browser mode |
+| `:invalid_text_data`, `:control_payload_too_large`, `:invalid_frame` | proxy frame text is not UTF-8, a control payload exceeds 125 bytes, or the frame shape/opcode is unsupported |
+| `:invalid_close_code`, `:invalid_close_reason`, `:close_reason_too_long` | `close/3` code not allowed, reason not UTF-8, or reason over 123 bytes |
+| `:invalid_binary_type` | `set_binary_type/2` with anything but `:blob` or `:array_buffer` |
+| `:invalid_array_buffer` | `array_buffer/1` with a non-binary |
+| `:invalid_timeout`, `:invalid_local_address`, `:migration_requires_http3`, `:not_exclusive_owner`, `:migration_busy`, `:validation_timeout`, `{:indeterminate_operation, ref}` | `migrate/2` refusals and outcomes (see `migrate/2`); `:timeout` when the call itself times out |
+| `:cleanup_unconfirmed` | `HTTP.ClientCompletion.await/2` cannot prove HTTP/3 tunnel cleanup |
+| `:timeout`, `:idle_timeout`, `:send_timeout` | Error event: opening deadline, `idle_timeout`, or `write_timeout` expired |
+| `:closed_while_connecting` | Error event: `close/1,3` before OPEN |
+| `:consumer_overloaded` | Error event: push delivery overloaded the owner mailbox |
+| `:frame_too_big`, `:message_too_big`, `:read_buffer_too_big` | Error event: receive limits exceeded (Close 1009) |
+| handshake reasons such as `{:unexpected_status, status}`, `:missing_accept`, `:invalid_accept` | Error event: the upgrade or extended CONNECT response was rejected |
+
+Invalid options are not error reasons: they raise `ArgumentError`.
+
+#### HTTP.EventSource
+
+| Reason | When |
+| --- | --- |
+| `:invalid_url` | `new/2`: non-string/URI URL, or whitespace/control bytes in path or query |
+| `{:unsupported_scheme, scheme}` | `new/2`: scheme other than `http` or `https` |
+| `:closed` | No call returns it: a closed source and an unreachable one (exited, or no reply within 5 seconds) are deliberately indistinguishable, and calls return their CLOSED defaults (`ready_state/1` is `2`, `close/1` and `acknowledge/2` return `:ok`). As the `[:close, :stop]` telemetry `error`, it means `close/1` was called |
+| `:eof`, `:idle_timeout`, `:timeout`, `:opening_timeout`, transport reasons | Error event before a reconnect: stream ended, `idle_timeout` or the connect deadline expired, or the transport failed |
+| `{:http_status, status}`, `:invalid_content_type` | Error event, fatal: non-200 response (204 stops reconnection) or not `text/event-stream` |
+| `:invalid_redirect`, `:insecure_redirect`, `:too_many_redirects` | Error event, fatal: redirect target unusable, HTTPS to HTTP, or more than `max_redirects` |
+| `:line_too_long`, `:event_too_large`, `:too_many_event_parts`, `:invalid_utf8`, `:invalid_last_event_id` | Error event, fatal: parser limits or invalid stream content |
+| `:consumer_overloaded` | Error event, fatal: push delivery overloaded the owner mailbox |
+| `:cleanup_capacity` | Error event, fatal: cleanup capacity stayed exhausted for three reconnects |
+
+Invalid options are not error reasons: they raise `ArgumentError`.
+
+#### HTTP.WebTransport (beta)
+
+| Reason | When |
+| --- | --- |
+| `{:unsupported_scheme, scheme}`, `:fragment_not_allowed`, `:invalid_url` | `new/2`: URL is not `https`, has a fragment, or is not a string/URI |
+| `:closed` | Either the session (or the stream/queue read) is closed **or** the session process is unreachable (exited, or no reply within 5 seconds; for `await_*`, any exit other than the wait timeout). The two cases are deliberately not distinguished; getters return their closed defaults (`state/1` is `:closed`) in both |
+| `:timeout` | a finite `await_*` or read timeout elapsed (a `0` timeout on a pending value), or `migrate/2`'s call timed out |
+| `:invalid_timeout` | `await_*`, read or `migrate/2` timeout is not `:infinity` or a non-negative (for `migrate/2`, positive) integer |
+| `:backpressure` | `max_pending_waiters`, `max_streams` or buffered-byte/item limits reached |
+| `:invalid_state` | operation not allowed in the current session or stream state (connecting, draining, closed, or write after FIN) |
+| `{:indeterminate_operation, ref}` | a stream creation, `close/2` or `migrate/2` outcome is unknown at its deadline; read `operation_status/2`, never replay |
+| `:deadline_exceeded` | a mutation reached the session after its deadline and was not applied |
+| `:cancelled` | a receive stream was cancelled locally |
+| `:invalid_close_code`, `:invalid_close_reason`, `:close_reason_too_long` | `close/2` code outside 0..0xFFFFFFFF, reason not UTF-8, or over 1024 bytes |
+| `:send_order_unsupported`, `:send_group_unsupported` | non-zero `send_order` or any `send_group` |
+| `:invalid_datagram`, `:invalid_datagram_age`, `:invalid_stream_data` | non-binary datagram, invalid max age, or invalid stream write data |
+| `:unreliable_transport_required` | `ready` rejects: `require_unreliable: true` and the backend lacks datagrams |
+| `:connect_cancelled`, `:connect_timeout` | `ready` rejects: `close/2` while connecting, or `connect_timeout` expired |
+| `:migration_unsupported`, `:migration_busy`, `:invalid_local_address`, `:peer_disabled_migration`, `:no_unused_connection_id`, `{:bind_failed, reason}`, `:validation_timeout` | `migrate/2` refusals (see `migrate/2`) |
+
+Invalid options are not error reasons: they raise `ArgumentError`.
+
 ## Development
 
 This project uses several code quality tools to maintain high standards:

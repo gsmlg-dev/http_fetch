@@ -97,13 +97,13 @@ For module-by-module details, see the table in `CLAUDE.md` and read
   `opts:`, or `client_opts:` buckets.
 - **5MB streaming threshold.** Responses >5MB, chunked responses, or responses
   with unknown `Content-Length` stream via a separate process. Streamed
-  responses have `body: nil` and `stream: pid`; consume them with
-  `HTTP.Response.write_to/2` or by receiving `:stream_chunk` / `:stream_end` /
-  `:stream_error` messages. Do not assume `body` is always populated.
-- **Dialyzer warnings in `.dialyzer_ignore.exs` are intentional.** They cover
-  the `Task.Supervisor.async_nolink/4` return shape in `HTTP.fetch/2` and the
-  `HTTP.Promise.then/3` opaque `Task` return. Do not remove entries to "clean
-  up" the output.
+  responses carry the stream PID in `body` (there is no separate `stream`
+  field); consume them with `HTTP.Response.read_all/1`, `write_to/2` or by
+  receiving `:stream_chunk` / `:stream_end` / `:stream_error` messages. Do not
+  assume `body` is always a binary.
+- **Dialyzer warnings in `.dialyzer_ignore.exs` are intentional.** The only
+  entry covers the `Quic.Streams.new/2` opaque MapSet default (an Elixir
+  compiler issue linked in the file). Do not remove it to "clean up" the output.
 - **Telemetry prefix is `[:http_fetch, ...]`.** Event names: `[:request,
   :start | :stop | :exception]`, `[:streaming, :start | :chunk | :stop]`.
   See `apps/http_fetch/lib/http/telemetry.ex` and `HTTP.Telemetry` for the full list and

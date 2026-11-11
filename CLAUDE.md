@@ -68,7 +68,7 @@ built and is not part of the umbrella.
 1. **Async by default**: All requests use Task.Supervisor with `async_nolink/4`
 2. **Streaming threshold**: Responses >5MB or with unknown Content-Length automatically stream via `HTTP.Stream`
 3. **Telemetry instrumentation**: All operations emit `:telemetry` events (`:http_fetch` prefix) for monitoring and observability
-4. **Error propagation**: Expected transport and parser failures return `{:error, reason}` tuples for consistent API behavior
+4. **Error propagation**: Expected transport and parser failures return `{:error, reason}` tuples; invalid options raise `ArgumentError` in every client. Error reason tables are in README.md "Error Handling"
 
 ## Development Commands
 
@@ -146,7 +146,8 @@ published-Hex consumer gate.
 
 ### Response Body Handling
 - `HTTP.Response.write_to/2` handles both buffered (direct binary write) and streamed responses (receive loop)
-- Streamed responses expose the stream PID in `body`; `stream: pid` remains as a compatibility alias
+- Streamed responses expose the stream PID in `body`; there is no separate `stream` field
+- `read_all/1`, `text/1`, `arrayBuffer/1`, `blob/1` and `clone/1` raise `HTTP.ResponseError` on stream failure; `json/1`, `read_as_json/1` and `write_to/2` return `{:error, reason}`
 
 ### Telemetry Events
 All events use `[:http_fetch, ...]` prefix:
@@ -168,8 +169,8 @@ All events use `[:http_fetch, ...]` prefix:
 ### Credo
 Credo performs static code analysis to enforce Elixir style guidelines and identify code smells. Configuration in `.credo.exs`.
 
-`mix credo` reports no issues; `--strict` reports only design hints (nested aliases,
-`apply/3`).
+`mix credo` reports no issues (CI runs it per app); `--strict` also reports
+refactoring, readability and design suggestions, which are not gated.
 
 ### Dialyzer
 Dialyzer performs static type analysis to catch type errors and inconsistencies. PLT (Persistent Lookup Table) stored in `apps/http_fetch/priv/plts/dialyzer.plt`.

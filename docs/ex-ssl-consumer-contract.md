@@ -11,9 +11,10 @@ versions. The original `0.16.1` package inventory is a historical snapshot;
 current candidate and publication evidence is recorded in the
 [implementation audit](http3-implementation-audit.md).
 
-Current source selects ExSSL for TCP TLS by default and rejects legacy
-`tls_backend: :ssl` explicitly. QUIC consumes public `SSL.QUIC` APIs independently
-of that backend setting. The historical phase records below retain their original
+ExSSL is the only TCP TLS engine. The former `tls_backend` option and
+`config :http_core, :tls_backend` were removed in 1.0.0-rc.14; passing
+`tls_backend` is an invalid option (`ArgumentError`). QUIC consumes public
+`SSL.QUIC` APIs. The historical phase records below retain their original
 versions and counts. Current migration checks are tracked in
 [TLS migration validation](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/tls-migration-validation.md). This inventory does not claim
 full OTP compatibility or completed independent human security review.
@@ -75,7 +76,7 @@ sole-provider migration; these earlier policy checks retain their own scope.
 | Requirement | Status | Production boundary | Executable coverage |
 | --- | --- | --- | --- |
 | Connect, ownership, send, passive recv, active-once, ALPN, close | implemented | `http_core` transport behaviour and ExSSL adapter | `apps/http_core/test/http/tls_transport_test.exs` |
-| Shared default and explicit per-call backend | implemented | `HTTP.TLSBackend`, fetch/WSS/EventSource option normalization | `apps/http_core/test/http/tls_backend_test.exs` and each client's option tests |
+| Single TLS engine; `tls_backend` rejected | implemented (rc.14 removed `HTTP.TLSBackend`) | fetch/WSS/EventSource strict option validation | each client's option tests |
 | Verified HTTP/1.1 fixed/chunked/close-delimited responses, large uploads, cancellation/deadline | implemented | `HTTP.SocketClient` | `apps/http_fetch/test/http/ssl_transport_test.exs` |
 | Verified ALPN HTTP/2, streaming/flow control, early response with pending upload | implemented | shared HTTP/2 parser and socket owner | `apps/http_core/test/http/http2_test.exs`, `apps/http_fetch/test/http/socket_client_http2_test.exs` |
 | Authenticated close during optional control writes | implemented | ex_ssl-only `:closed` classification, existing receive loop and deadline | deterministic cross-record tests in `socket_client_http2_test.exs` |
@@ -84,7 +85,7 @@ sole-provider migration; these earlier policy checks retain their own scope.
 | Passive WSS Upgrade followed by active-once frames | implemented | `HTTP.WebSocket.Connection`, shared transport recv | `apps/http_web_socket/test/http/web_socket_test.exs`, `web_socket_tls_lifecycle_test.exs` |
 | EventSource reconnect with pinned backend | implemented | `HTTP.EventSource.Connection` | `apps/http_event_source/test/http/event_source_test.exs` |
 | Wrong CA/reference hostname and profile/ALPN conflicts | implemented | adapter forwards to verified ex_ssl options | `tls_transport_test.exs` (adapter-level evidence) |
-| No automatic backend fallback | implemented | fixed adapter, explicit option/handshake errors | `tls_backend_test.exs`, policy and authentication negatives in `tls_transport_test.exs` |
+| No automatic backend fallback | implemented | fixed adapter, explicit option/handshake errors | policy and authentication negatives in `tls_transport_test.exs` |
 | `socket_opts: [send_timeout: ..., send_timeout_close: true]` | implemented | ExSSL translates these two options; socket values override matching `ssl` values | `tls_transport_test.exs` |
 | Safe TCP options, client certificates, TLS 1.2/mixed versions, ordered TLS policy | implemented in ex_ssl 0.4.0 | allowlisted adapter options and independent ex_ssl engine | full published feature gate, cold dependency smoke, and scoped transport tests |
 | Explicit TCP `verify_none` | implemented in current source | `verify_peer` stays default; handshake signature, Finished and record authentication remain required; QUIC still rejects none | `apps/ex_ssl/test/ssl/verify_none_interop_test.exs` and authentication-negative suites |

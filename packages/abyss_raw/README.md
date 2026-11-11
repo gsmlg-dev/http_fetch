@@ -1,6 +1,6 @@
 # Abyss Raw
 
-This independent OTP package owns the Rustler build and native artifact for interface-bound DHCP client UDP and raw ARP. It does not depend on Abyss or start a socket/poll thread at application startup. `AbyssDhcpSocket.Native` implements the five native operations; existing callers use the pure Elixir `Abyss.DhcpSocket.Native` facade supplied by Abyss.
+This independent OTP package owns the Rustler build and native artifact for interface-bound DHCP client UDP and raw ARP. It does not depend on Abyss or start a socket/poll thread at application startup. `AbyssDhcpSocket.Native` implements the five native operations and is the only API (Abyss no longer ships a facade).
 
 Requires Elixir 1.18 or later and Erlang/OTP 27 or later.
 

@@ -40,8 +40,7 @@ end
 The scope and receipt are opaque. A scope accepts only its normalized origin
 (scheme, hostname and port) and numeric IPv4/IPv6 destination. `:http1` supports
 HTTP or HTTPS; `:http2` requires HTTPS; `:h2c` requires cleartext HTTP. Only direct
-TCP and ExSSL are supported; legacy `tls_backend: :ssl` selections fail before
-dialing. Automatic protocol selection, HTTP/3, proxy/Unix routes, followed
+TCP and ExSSL are supported. Automatic protocol selection, HTTP/3, proxy/Unix routes, followed
 redirects, decoded or automatically buffered responses are rejected. Request
 headers, raw bodies and ordered duplicate request/response trailers retain the
 ordinary Fetch contract. No request is

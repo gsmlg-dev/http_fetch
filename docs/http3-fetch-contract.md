@@ -102,7 +102,7 @@ alternatives from `Alt-Svc` on final HTTPS responses into a bounded per-origin
 cache (1024 origins, `ma` default 86400 s, `clear` honoured). A later eligible
 request with a fresh entry uses HTTP/3 on the alternative port, keeping the
 origin authority, SNI and certificate identity. Requests with a proxy, Unix
-socket, connect address, explicit `tls_backend`, socket options, HTTP/2 profile,
+socket, connect address, socket options, HTTP/2 profile,
 transport scope or pool stay on TCP. `alt_svc: true` with any other
 `http_version` raises `ArgumentError`; `:auto` without it is unchanged.
 

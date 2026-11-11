@@ -232,7 +232,6 @@ These options use the existing HTTP transport's `ssl:` path:
 
 ```elixir
 HTTP.fetch("https://service.example/resource",
-  tls_backend: :ex_ssl,
   ssl: [
     cacertfile: "/etc/service/server-ca.pem",
     certfile: "/etc/service/client-chain.pem",
