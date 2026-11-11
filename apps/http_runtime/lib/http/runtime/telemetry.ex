@@ -6,6 +6,17 @@ defmodule HTTP.Runtime.Telemetry do
   compatibility. Emission does not require the Fetch application to be started.
   Either `config :http_runtime, telemetry: false` or
   `config :http_fetch, telemetry: false` disables both runtime event prefixes.
+
+  Measurements are counts unless named in bytes (`*_bytes`) or microseconds
+  (`*_us`); metadata values are bounded atoms. No URL, header or peer address
+  is emitted.
+
+  | Event | Measurements | Metadata |
+  | --- | --- | --- |
+  | `[:http_runtime, :stream, event]` | client gauges: `queued_bytes`, `raw_bytes`, `queued_events` (EventSource and WebSocket) plus `buffered_amount` (bytes), `pending_send_frames`, `control_frames` (WebSocket) | `client` (`:web_socket` or `:event_source`), `http_version`, `outcome` |
+  | `[:http_fetch, :http2, :connection]` | `active_streams`, `protocol_streams`, `buffered_receive_bytes`, `pending_upload_bytes`, `receive_budget_bytes`, `writer_batch_peak_bytes` | `event` (`:opened`, `:released`, `:receive_credit`, `:closed`), `lifecycle` |
+  | `[:http_fetch, :http2, :runtime]` | `:connection_close`: none; `:peer_reset` / `:peer_goaway`: `error_code`; `:flow_control_stall`: `count`, `duration_us` | `event`, `outcome` (close category, `:received`, or stall outcome) |
+  | `[:http_fetch, :http2, :pool]` (emitted by `HTTP.HTTP2.Pool`) | `reservations`, `waiters`, `connecting`, `connections`, `draining`, `queue_wait_us` | `event`, `outcome` |
   """
 
   @doc false

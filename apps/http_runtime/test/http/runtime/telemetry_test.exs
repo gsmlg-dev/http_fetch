@@ -48,4 +48,19 @@ defmodule HTTP.Runtime.TelemetryTest do
     assert_receive {:runtime_telemetry, ^caller, [:http_fetch, :http2, :runtime],
                     %{error_code: 123}, %{event: :peer_reset, outcome: :received}}
   end
+
+  test "the moduledoc documents every runtime event prefix with its measurements" do
+    {:docs_v1, _, _, _, %{"en" => doc}, _, _} = Code.fetch_docs(HTTP.Runtime.Telemetry)
+
+    for event <- [
+          "[:http_runtime, :stream, event]",
+          "[:http_fetch, :http2, :connection]",
+          "[:http_fetch, :http2, :runtime]",
+          "[:http_fetch, :http2, :pool]"
+        ] do
+      assert doc =~ "| `#{event}`"
+    end
+
+    assert doc =~ "duration_us"
+  end
 end

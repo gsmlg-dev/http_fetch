@@ -143,6 +143,24 @@ defmodule HTTP.WebSocket do
   `HTTP.Blob` for binary frames.
 
   `wss` connections use the `ex_ssl` TLS engine; `ssl` carries its options.
+
+  ## Telemetry
+
+  Durations are monotonic microseconds; `start_time` is `System.system_time(:microsecond)`;
+  byte counts are bytes. `url` is the connection URL reduced to scheme, host, port and
+  path (userinfo, authority, query and fragment removed), or the `telemetry_url`
+  replacement; `telemetry_url: nil` omits `url`, `scheme`, `host` and `port`.
+
+  | Event | Measurements | Metadata |
+  | --- | --- | --- |
+  | `[:http_web_socket, :connect, :start]` | `start_time` | `url`, `scheme`, `host`, `port` |
+  | `[:http_web_socket, :connect, :stop]` | `duration` | `url`, `scheme`, `host`, `port`, `protocol` (selected subprotocol), `http_version`, `fallback` (boolean) |
+  | `[:http_web_socket, :connect, :exception]` | `duration` | `url`, `scheme`, `host`, `port`, `error` |
+  | `[:http_web_socket, :message, :received]` | `bytes` | `url`, `opcode` (string) |
+  | `[:http_web_socket, :message, :sent]` | `bytes`, `buffered_amount` (bytes) | `url`, `opcode` (string) |
+  | `[:http_web_socket, :close, :start]` | `start_time` | `url`, `close_code` |
+  | `[:http_web_socket, :close, :stop]` | none | `url`, `close_code`, `was_clean` |
+  | `[:http_runtime, :stream, event]` (`event` is `:open`, `:queue`, `:fallback`, `:error` or `:close`) | `queued_bytes`, `raw_bytes`, `buffered_amount` (bytes); `queued_events`, `pending_send_frames`, `control_frames` (counts) | `client: :web_socket`, `http_version`, `outcome` |
   """
 
   alias HTTP.WebSocket.ArrayBuffer

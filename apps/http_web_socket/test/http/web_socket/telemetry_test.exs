@@ -134,4 +134,15 @@ defmodule HTTP.WebSocket.TelemetryTest do
   def handle_event(event, measurements, metadata, test_pid) do
     send(test_pid, {:telemetry_event, event, measurements, metadata})
   end
+
+  test "the HTTP.WebSocket moduledoc documents every event" do
+    {:docs_v1, _, _, _, %{"en" => doc}, _, _} = Code.fetch_docs(HTTP.WebSocket)
+
+    for event <- events() ++ [[:http_runtime, :stream, :event]] do
+      name = event |> Enum.map_join(", ", &inspect/1) |> String.replace(":event", "event")
+      assert doc =~ "`[#{name}]`"
+    end
+
+    assert doc =~ "## Telemetry"
+  end
 end

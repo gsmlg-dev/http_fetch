@@ -59,4 +59,28 @@ defmodule HTTP.WebTransport.TelemetryTest do
   def handle_event(event, measurements, metadata, test_pid) do
     send(test_pid, {:telemetry_event, event, measurements, metadata})
   end
+
+  test "the HTTP.WebTransport moduledoc documents every event" do
+    {:docs_v1, _, _, _, %{"en" => doc}, _, _} = Code.fetch_docs(HTTP.WebTransport)
+
+    for event <- [
+          [:http_web_transport, :connect, :start],
+          [:http_web_transport, :connect, :stop],
+          [:http_web_transport, :connect, :exception],
+          [:http_web_transport, :session, :draining],
+          [:http_web_transport, :session, :closed],
+          [:http_web_transport, :session, :exception],
+          [:http_web_transport, :datagram, :sent],
+          [:http_web_transport, :datagram, :received],
+          [:http_web_transport, :stream, :opened],
+          [:http_web_transport, :stream, :sent],
+          [:http_web_transport, :stream, :received],
+          [:http_web_transport, :stream, :closed]
+        ] do
+      name = event |> Enum.map_join(", ", &inspect/1) |> String.replace(":event", "event")
+      assert doc =~ "`[#{name}]`"
+    end
+
+    assert doc =~ "## Telemetry"
+  end
 end

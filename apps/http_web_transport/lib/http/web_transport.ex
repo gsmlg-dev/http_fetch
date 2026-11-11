@@ -42,6 +42,28 @@ defmodule HTTP.WebTransport do
   are not measured.
 
   QUIC TLS configuration is separate from TCP TLS.
+
+  ## Telemetry
+
+  Durations are monotonic microseconds; `start_time` is `System.system_time(:microsecond)`;
+  byte counts are bytes. `url` is the session URL reduced to scheme, host, port and
+  path: userinfo, authority, query and fragment are removed. `stream_id` is an opaque
+  local stream reference.
+
+  | Event | Measurements | Metadata |
+  | --- | --- | --- |
+  | `[:http_web_transport, :connect, :start]` | `start_time` | `url`, `scheme`, `host`, `port` |
+  | `[:http_web_transport, :connect, :stop]` | `duration` | `url`, `scheme`, `host`, `port`, `protocol`, `reliability` |
+  | `[:http_web_transport, :connect, :exception]` | `duration` | `url`, `scheme`, `host`, `port`, `error` |
+  | `[:http_web_transport, :session, :draining]` | none | `url` |
+  | `[:http_web_transport, :session, :closed]` | none | `url`, `close_code`, `reason` |
+  | `[:http_web_transport, :session, :exception]` | none | `url`, `error` |
+  | `[:http_web_transport, :datagram, :sent]` | `bytes`, `datagram_size` (bytes, same value), `queue_length` (outgoing datagrams queued) | `url` |
+  | `[:http_web_transport, :datagram, :received]` | `bytes`, `datagram_size` (bytes, same value), `queue_length` (incoming datagrams queued) | `url` |
+  | `[:http_web_transport, :stream, :opened]` | none | `url`, `stream_id`, `direction` |
+  | `[:http_web_transport, :stream, :sent]` | `bytes` | `url`, `stream_id` |
+  | `[:http_web_transport, :stream, :received]` | `bytes` | `url`, `stream_id` |
+  | `[:http_web_transport, :stream, :closed]` | none | `url`, `stream_id` |
   """
 
   alias HTTP.WebTransport.CloseInfo

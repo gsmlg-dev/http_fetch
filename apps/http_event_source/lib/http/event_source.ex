@@ -76,6 +76,23 @@ defmodule HTTP.EventSource do
 
   HTTP/1 and HTTP/2 `https` connections use the `ex_ssl` TLS engine; `ssl` carries
   its options.
+
+  ## Telemetry
+
+  Durations are monotonic microseconds; `start_time` is `System.system_time(:microsecond)`;
+  byte counts are bytes. `url` is the current (post-redirect) URL reduced to scheme,
+  host, port and path: userinfo, authority, query and fragment are removed.
+
+  | Event | Measurements | Metadata |
+  | --- | --- | --- |
+  | `[:http_event_source, :connect, :start]` | `start_time` | `url`, `scheme`, `host`, `port` |
+  | `[:http_event_source, :connect, :stop]` | `duration` | `url`, `scheme`, `host`, `port`, `status`, `http_version` |
+  | `[:http_event_source, :connect, :exception]` | `duration` | `url`, `scheme`, `host`, `port`, `error` |
+  | `[:http_event_source, :message, :received]` | `bytes` (event data) | `url`, `event_type`, `last_event_id` |
+  | `[:http_event_source, :reconnect, :start]` | `reconnect_time` (milliseconds), `attempt` (count) | `url`, `error` |
+  | `[:http_event_source, :reconnect, :stop]` | `attempt` (count) | `url` |
+  | `[:http_event_source, :close, :stop]` | none | `url`, `error` (`:closed` for `close/1`, `:owner_down`, or the fatal reason) |
+  | `[:http_runtime, :stream, event]` (`event` is `:open`, `:queue`, `:reconnect`, `:fallback`, `:error` or `:close`) | `queued_bytes`, `raw_bytes` (bytes); `queued_events` (count) | `client: :event_source`, `http_version`, `outcome` |
   """
 
   alias HTTP.EventSource.Connection

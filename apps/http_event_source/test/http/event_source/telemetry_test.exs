@@ -49,4 +49,24 @@ defmodule HTTP.EventSource.TelemetryTest do
   def handle_event(event, measurements, metadata, test_pid) do
     send(test_pid, {:telemetry_event, event, measurements, metadata})
   end
+
+  test "the HTTP.EventSource moduledoc documents every event" do
+    {:docs_v1, _, _, _, %{"en" => doc}, _, _} = Code.fetch_docs(HTTP.EventSource)
+
+    for event <- [
+          [:http_event_source, :connect, :start],
+          [:http_event_source, :connect, :stop],
+          [:http_event_source, :connect, :exception],
+          [:http_event_source, :message, :received],
+          [:http_event_source, :reconnect, :start],
+          [:http_event_source, :reconnect, :stop],
+          [:http_event_source, :close, :stop],
+          [:http_runtime, :stream, :event]
+        ] do
+      name = event |> Enum.map_join(", ", &inspect/1) |> String.replace(":event", "event")
+      assert doc =~ "`[#{name}]`"
+    end
+
+    assert doc =~ "## Telemetry"
+  end
 end
