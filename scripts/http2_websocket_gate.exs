@@ -23,6 +23,17 @@ defmodule HTTPWebSocketGate do
     control_frames: 16,
     raw_bytes: 1_048_576
   }
+  @sse_keys [
+    :http_version,
+    :http2_profile,
+    :http2_scope,
+    :connect_timeout,
+    :delivery,
+    :max_queue_bytes,
+    :max_queue_events,
+    :ssl
+  ]
+  @fetch_keys [:http_version, :http2_profile, :http2_scope, :connect_timeout, :timeout, :ssl]
 
   def run do
     metrics = HTTP2GateMetrics.start()
@@ -231,7 +242,7 @@ defmodule HTTPWebSocketGate do
     sources =
       for _ <- 1..2 do
         source =
-          SSE.new(url <> "/sse/hold", Keyword.merge(opts, delivery: :ack, max_event_size: 4096))
+          SSE.new(url <> "/sse/hold", sse_opts(opts))
 
         track_session(source)
 
@@ -342,7 +353,7 @@ defmodule HTTPWebSocketGate do
   defp soak_sources(url, opts) do
     for _ <- 1..2 do
       source =
-        SSE.new(url <> "/sse/hold", Keyword.merge(opts, delivery: :ack, max_event_size: 4096))
+        SSE.new(url <> "/sse/hold", sse_opts(opts))
 
       track_session(source)
 
@@ -651,10 +662,16 @@ defmodule HTTPWebSocketGate do
     end
   end
 
+  # The shared gate options carry WebSocket-only keys; EventSource and Fetch
+  # reject unknown options, so each receives only the keys it accepts.
+  defp sse_opts(opts),
+    do: opts |> Keyword.take(@sse_keys) |> Keyword.merge(delivery: :ack, max_event_size: 4096)
+
   defp fetch(url, path, opts) do
     %HTTP.Response{status: 200} =
       response =
-      HTTP.fetch(url <> path, Keyword.put(opts, :timeout, 30_000)) |> HTTP.Promise.await(35_000)
+      HTTP.fetch(url <> path, opts |> Keyword.take(@fetch_keys) |> Keyword.put(:timeout, 30_000))
+      |> HTTP.Promise.await(35_000)
 
     HTTP.Response.read_all(response)
   end
