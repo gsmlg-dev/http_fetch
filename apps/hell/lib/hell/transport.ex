@@ -222,9 +222,9 @@ defmodule Hell.Transport do
             ) :: on_sendfile()
 
   @doc """
-  Gets the given options on the socket.
+  Gets the given options on a connection socket or a listener socket.
   """
-  @callback getopts(socket(), socket_get_options()) :: on_getopts()
+  @callback getopts(socket() | listener_socket(), socket_get_options()) :: on_getopts()
 
   @doc """
   Sets the given options on the socket. Should disallow setting of options which

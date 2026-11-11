@@ -106,6 +106,22 @@ defmodule Hell.TransportOptionsTest do
     end
   end
 
+  for {transport, required_options} <- [
+        {Hell.Transports.TCP, []},
+        {Hell.Transports.SSL, [certfile: @certfile, keyfile: @keyfile]}
+      ] do
+    test "#{inspect(transport)} reads carrier options on a listener socket" do
+      options = [nodelay: false, keepalive: true, sndbuf: 32_768] ++ unquote(required_options)
+      {:ok, listener} = unquote(transport).listen(0, options)
+      on_exit(fn -> unquote(transport).close(listener) end)
+
+      assert {:ok, opts} = unquote(transport).getopts(listener, [:nodelay, :keepalive, :sndbuf])
+      assert opts[:nodelay] == false
+      assert opts[:keepalive] == true
+      assert opts[:sndbuf] >= 32_768
+    end
+  end
+
   defp transports do
     [
       {Hell.Transports.TCP, :gen_tcp, []},

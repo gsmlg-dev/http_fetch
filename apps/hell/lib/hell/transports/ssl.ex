@@ -155,7 +155,7 @@ defmodule Hell.Transports.SSL do
   defp chunk_size(length, sent, chunk), do: min(length - sent, chunk)
 
   @impl Hell.Transport
-  @spec getopts(socket(), Hell.Transport.socket_get_options()) ::
+  @spec getopts(socket() | listener_socket(), Hell.Transport.socket_get_options()) ::
           Hell.Transport.on_getopts()
   defdelegate getopts(socket, options), to: SSL
 
