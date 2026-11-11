@@ -5,6 +5,7 @@ defmodule Quic.Codec do
   import Bitwise
 
   @max_varint 0x3FFFFFFFFFFFFFFF
+  @max_stream_count 1_152_921_504_606_846_976
   @version 1
 
   @spec encode_varint(non_neg_integer()) :: {:ok, binary()} | {:error, :varint_overflow}
@@ -561,7 +562,9 @@ defmodule Quic.Codec do
   end
 
   defp decode_frames(<<type, rest::binary>>, acc, limit) when type in 0x10..0x17 do
+    # RFC 9000 sections 19.11 and 19.14: stream counts above 2^60 are encoding errors.
     with {:ok, first, rest} <- decode_varint(rest),
+         true <- type not in [0x12, 0x13, 0x16, 0x17] or first <= @max_stream_count,
          {frame, tail} <- decode_flow_frame(type, first, rest) do
       decode_frames(tail, [frame | acc], limit - 1)
     else

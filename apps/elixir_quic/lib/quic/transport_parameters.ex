@@ -232,6 +232,11 @@ defmodule Quic.TransportParameters do
       Map.get(values, :active_connection_id_limit, 2) < 2 ->
         {:error, :invalid_active_connection_id_limit}
 
+      # RFC 9000 section 18.2: stream-count limits above 2^60 are invalid.
+      Map.get(values, :initial_max_streams_bidi, 0) > 1_152_921_504_606_846_976 or
+          Map.get(values, :initial_max_streams_uni, 0) > 1_152_921_504_606_846_976 ->
+        {:error, :invalid_initial_max_streams}
+
       true ->
         :ok
     end

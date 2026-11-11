@@ -166,4 +166,19 @@ defmodule Quic.CodecTest do
     assert {:ok, ^frames, <<>>} = Quic.Codec.decode_frames(wire)
     assert {:error, :malformed_stream_frame} = Quic.Codec.decode_frames(<<0x0E, 4, 3, 4, "a">>)
   end
+
+  test "stream-count limits above 2^60 are rejected (RFC 9000 sections 19.11 and 19.14)" do
+    over = <<0xD0, 0, 0, 0, 0, 0, 0, 1>>
+    limit = <<0xD0, 0, 0, 0, 0, 0, 0, 0>>
+
+    for type <- [0x12, 0x13, 0x16, 0x17] do
+      assert {:error, _} = Quic.Codec.decode_frames(<<type, over::binary>>)
+
+      assert {:ok, [%{value: 1_152_921_504_606_846_976}], <<>>} =
+               Quic.Codec.decode_frames(<<type, limit::binary>>)
+    end
+
+    # MAX_DATA keeps the full varint range.
+    assert {:ok, [%{type: :max_data}], <<>>} = Quic.Codec.decode_frames(<<0x10, over::binary>>)
+  end
 end

@@ -96,6 +96,18 @@ defmodule Quic.TransportParametersTest do
              ])
   end
 
+  test "stream-count limits above 2^60 are invalid (RFC 9000 section 18.2)" do
+    over = <<0xD0, 0, 0, 0, 0, 0, 0, 1>>
+    limit = <<0xD0, 0, 0, 0, 0, 0, 0, 0>>
+
+    for id <- [0x08, 0x09] do
+      assert {:error, :invalid_initial_max_streams} =
+               TransportParameters.encode([%{id: id, value: over}])
+
+      assert {:ok, _} = TransportParameters.encode([%{id: id, value: limit}])
+    end
+  end
+
   test "requires the client initial source connection id" do
     assert {:error, :missing_initial_source_connection_id} =
              TransportParameters.encode([], role: :client)
