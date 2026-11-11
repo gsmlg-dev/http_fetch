@@ -31,16 +31,20 @@ ownership rules.
 
 ## Current capability boundary
 
-`QuicHttp3.capabilities/0` reports the implemented initial client profile:
-`status: :beta`, `http3: true`, `qpack: true`,
-`qpack_profile: :static_literal` and `qpack_huffman: true`. HTTP/3 control and
-request streams use static/literal QPACK, including Huffman strings, with zero
-dynamic-table capacity and zero blocked streams.
+`QuicHttp3.capabilities/0` reports the implemented beta client profile:
+`status: :beta`, `http3: true`, `qpack: true`, `qpack_huffman: true`,
+`dynamic_qpack: true`, `zero_rtt: true`, `connection_migration: true`,
+`websocket_over_http3: true` and `webtransport: false`. The QPACK decoder
+applies peer encoder instructions to a bounded dynamic table (advertised
+defaults: capacity 4,096, 16 blocked streams); the local encoder stays
+static/literal (`qpack_profile: :static_literal`), including Huffman strings.
+0-RTT is beta and limited to safe requests; migration is available only on
+exclusive sessions. WebTransport draft-17 runs on an exclusive owner but is
+not reported as supported.
 
 Fetch and EventSource select verified HTTPS HTTP/3 explicitly with
-`http_version: :http3`; protocol failures do not downgrade. Dynamic QPACK,
-0-RTT, connection migration, WebSocket over HTTP/3 and WebTransport remain
-unsupported. `Quic.capabilities/0` continues reporting `http3: false`: raw QUIC
+`http_version: :http3`; protocol failures do not downgrade. An HTTP/3
+connection error closes the QUIC connection with its RFC 9114 error code. `Quic.capabilities/0` continues reporting `http3: false`: raw QUIC
 owns transport, while the companion owns HTTP/3. Negotiated `h3` alone is not
 proof of authenticated application readiness.
 

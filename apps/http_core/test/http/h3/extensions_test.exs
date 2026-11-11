@@ -34,6 +34,19 @@ defmodule HTTP.H3.ExtensionsTest do
     assert {:error, :capsule_too_large} =
              Capsule.feed(Capsule.new(), Varint.encode!(0x2843) <> Varint.encode!(65_537))
 
+    # Unknown capsules are skipped without retention, so their size is not bounded.
+    large = Varint.encode!(31) <> Varint.encode!(70_000)
+    assert {:ok, state, []} = Capsule.feed(Capsule.new(), large <> :binary.copy("x", 40_000))
+    assert Capsule.retained_bytes(state) == 0
+
+    assert {:ok, state, [{:capsule, 0x2843, "z"}]} =
+             Capsule.feed(
+               state,
+               :binary.copy("y", 30_000) <> Varint.encode!(0x2843) <> <<1, "z">>
+             )
+
+    assert :ok = Capsule.finish(state)
+
     assert {:ok, state, []} = Capsule.feed(Capsule.new(), <<0x40>>)
     assert {:error, :truncated_capsule} = Capsule.finish(state)
   end

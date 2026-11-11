@@ -6,9 +6,12 @@ defmodule QuicHttp3 do
   implement QUIC packet handling or expose the legacy `:quic_h3` API. The
   transport-agnostic session is available through `QuicHttp3.Session`.
 
-  The initial HTTP/3 client profile is beta, with static/literal QPACK and
-  Huffman strings. Capability reporting describes this implemented subset;
-  independent acceptance and publication are recorded separately.
+  The HTTP/3 client profile is beta. The QPACK decoder supports the dynamic
+  table; the local encoder stays static/literal with Huffman strings. 0-RTT for
+  safe requests, exclusive-session migration and WebSocket over HTTP/3 are
+  beta; WebTransport is not reported as supported. `capabilities/0` describes
+  this implemented subset; independent acceptance and publication are recorded
+  separately.
   """
 
   @http3_alpn "h3"

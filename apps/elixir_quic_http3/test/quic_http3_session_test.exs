@@ -16,9 +16,18 @@ defmodule QuicHttp3.SessionTest do
     end
 
     def stop_stream(_, _, _), do: :ok
-    def reset_stream(_, _, _), do: {:ok, make_ref()}
+
+    def reset_stream(_, code, _) do
+      send(Process.get(:owner), {:reset_stream, code})
+      {:ok, make_ref()}
+    end
+
     def cleanup(_), do: :ok
-    def close(_, _, _, _), do: :ok
+
+    def close(_, code, reason, _) do
+      send(Process.get(:owner), {:close, code, reason})
+      :ok
+    end
 
     defp send_call(key, result) do
       send(Process.get(:owner), {key, result})
@@ -107,5 +116,56 @@ defmodule QuicHttp3.SessionTest do
     assert :ready in events
     assert :writable in events
     assert {:settings, []} in events
+  end
+
+  test "an HTTP/3 connection error closes the QUIC connection with its code", %{
+    session: session
+  } do
+    {:ok, session} = Session.open(session)
+    peer = {:stream, :peer_control}
+    settings = Frame.encode!(:settings, Settings.encode!([]))
+    payload = <<0>> <> settings <> Frame.encode!(:data, "x")
+    Process.put(:events, {:ok, [{:stream_open, peer, :uni}, {:readable, peer}]})
+    Process.put(:read, {:ok, [{:data, 3, payload}]})
+
+    assert {:error, session, {:http3_error, :connection, 0x105, :forbidden_control_frame}} =
+             Session.poll(session, 8)
+
+    assert_received {:close, 0x105, "forbidden_control_frame"}
+    assert session.pending == nil
+  end
+
+  test "request field values with CR, LF or NUL are refused before any write", %{
+    session: session
+  } do
+    {:ok, session} = Session.open(session)
+    _ = flush_sends()
+
+    for value <- ["a\r\nx-injected: 1", "a\nb", "a\rb", <<"a", 0, "b">>] do
+      assert {:error, ^session, :invalid_field_value} =
+               Session.request(session, [{":path", "/"}, {"x-check", value}], "", [])
+    end
+
+    refute_received {{:open, :bidi}, _}
+  end
+
+  test "a complete response ends a still-open upload with H3_NO_ERROR", %{session: session} do
+    {:ok, session} = Session.open(session)
+    {:ok, session, ref} = Session.request(session, [{":path", "/"}], :stream, [])
+    {:ok, block} = Qpack.encode_header_block([{":status", "200"}])
+    Process.put(:events, {:ok, [{:readable, {:stream, :bidi}}]})
+    Process.put(:read, {:ok, [{:data, Frame.encode!(:headers, block)}, {:fin}]})
+    assert {:ok, session, events} = Session.poll(session, 8)
+    assert {:done, ref} in events
+    assert_received {:reset_stream, 0x100}
+    assert session.requests == %{}
+  end
+
+  defp flush_sends do
+    receive do
+      {_key, _result} -> flush_sends()
+    after
+      0 -> :ok
+    end
   end
 end

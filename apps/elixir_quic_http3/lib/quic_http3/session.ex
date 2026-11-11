@@ -5,6 +5,9 @@ defmodule QuicHttp3.Session do
   Mutating failures return the advanced session. Call `resume/1` to reconcile an
   unknown operation, or retry a definitely blocked operation after credit changes.
   Unknown operations are never replayed, including after result-cache eviction.
+  A detected HTTP/3 connection error `{:http3_error, :connection, code, reason}`
+  first closes the QUIC connection with that application error code (best
+  effort under the operation deadline) and is then returned.
   Definitely credit-blocked stream writes are split into smaller ordered
   fragments under the original deadline; `max_frame` remains an upper bound.
   Native query calls and DNS retain their transport timeout bounds; the session
@@ -26,6 +29,8 @@ defmodule QuicHttp3.Session do
   confirmed. Peer WT streams and datagrams are associated through
   `QuicHttp3.WebTransportRouter`; deliveries are `{:wt, connect_ref, event}`
   poll events whose credit is released by `webtransport_acknowledge/2`.
+  Closing the session, or the CONNECT stream ending, resets and stops every
+  associated stream with WT_SESSION_GONE.
 
   Early data (beta): before the handshake completes, `request/4` with
   `early_data: remembered_settings` admits a GET, HEAD or OPTIONS request
@@ -263,6 +268,7 @@ defmodule QuicHttp3.Session do
   end
 
   @early_methods ~w(GET HEAD OPTIONS)
+  @wt_session_gone 0x170D7B68
   @max_early_requests 8
   # Settings whose remembered non-default values bind an accepted 0-RTT
   # connection: QPACK capacity, field section size, QPACK blocked streams,
@@ -571,8 +577,8 @@ defmodule QuicHttp3.Session do
   def webtransport_close(session, code, reason, opts \\ []) do
     with %{connect: ref} when ref != nil <- session.wt || {:error, :no_webtransport_session},
          {:ok, capsule} <- Draft17.close_capsule(code, reason) do
-      {:ok, router, _actions} = Router.close(session.wt.router, session.wt.router.session_id)
-      send_data(put_in(session.wt.router, router), ref, capsule, true, opts)
+      {session, gone} = close_wt(session)
+      send_data(session, ref, capsule, true, opts, gone)
     else
       %{} -> {:error, session, :no_webtransport_session}
       {:error, reason} -> {:error, session, reason}
@@ -599,15 +605,18 @@ defmodule QuicHttp3.Session do
 
   defp wt_entry(_, _), do: {:error, :no_webtransport_session}
 
-  def send_data(session, ref, bytes, fin, opts)
-      when is_binary(bytes) and byte_size(bytes) <= 16_384 and is_boolean(fin) do
+  def send_data(session, ref, bytes, fin, opts), do: send_data(session, ref, bytes, fin, opts, [])
+
+  defp send_data(session, ref, bytes, fin, opts, extra)
+       when is_binary(bytes) and byte_size(bytes) <= 16_384 and is_boolean(fin) do
     case Map.fetch(session.requests, ref) do
       {:ok, %{purpose: {:extended_connect, _}, decoder: %{status: status}}}
       when status == nil or status < 200 or status > 299 ->
         {:error, session, :tunnel_not_accepted}
 
       {:ok, %{upload: :open, stream: stream}} ->
-        begin(session, :send_data, data_steps(stream, bytes, fin, session.max_frame), opts)
+        steps = data_steps(stream, bytes, fin, session.max_frame) ++ extra
+        begin(session, :send_data, steps, opts)
 
       {:ok, _request} ->
         {:error, session, :upload_closed}
@@ -617,7 +626,8 @@ defmodule QuicHttp3.Session do
     end
   end
 
-  def send_data(session, _ref, _bytes, _fin, _opts), do: {:error, session, :invalid_upload_chunk}
+  defp send_data(session, _ref, _bytes, _fin, _opts, _extra),
+    do: {:error, session, :invalid_upload_chunk}
 
   @doc "Sends ordered request trailing HEADERS with FIN through resumable admission."
   def send_trailers(session, ref, fields, opts) do
@@ -935,7 +945,7 @@ defmodule QuicHttp3.Session do
     case consume_event(session, event) do
       {:ok, next} -> drive(put_in(next.work.steps, rest))
       {:ok, next, steps} -> drive(put_in(next.work.steps, steps ++ rest))
-      {:error, reason} -> {:error, session, reason}
+      {:error, reason} -> fail(session, reason)
     end
   end
 
@@ -1078,6 +1088,9 @@ defmodule QuicHttp3.Session do
   defp operation(session, :close, opts),
     do: session.transport.close(session.connection, 0x100, <<>>, opts)
 
+  defp operation(session, {:close, code, phrase}, opts),
+    do: session.transport.close(session.connection, code, phrase, opts)
+
   defp operation(session, {:migrate, local}, opts),
     do: session.transport.migrate(session.connection, [{:local, local} | opts])
 
@@ -1097,6 +1110,7 @@ defmodule QuicHttp3.Session do
   defp operation_kind({:stop_code, _, _}), do: :stop_stream
   defp operation_kind({:stop, _}), do: :stop_stream
   defp operation_kind(:close), do: :close
+  defp operation_kind({:close, _, _}), do: :close
   defp operation_kind(:abort), do: :abort
   defp operation_kind({:migrate, _}), do: :migrate
 
@@ -1148,10 +1162,33 @@ defmodule QuicHttp3.Session do
 
     case accepted(session, action, success) do
       {:ok, next} -> drive(next)
-      {:error, reason} -> {:error, session, reason}
-      {:error, next, reason} -> {:error, next, reason}
+      {:error, reason} -> fail(session, reason)
+      {:error, next, reason} -> fail(next, reason)
     end
   end
+
+  # RFC 9114 Section 8: a detected connection error closes the QUIC connection
+  # with its HTTP/3 error code. The close is best effort under the current
+  # operation deadline; whatever it returns, the detected error is reported.
+  defp fail(
+         %{connection: connection, work: %{} = work} = session,
+         {:http3_error, :connection, code, reason} = error
+       )
+       when connection != nil do
+    steps = [{:close, code, close_phrase(reason)}]
+    work = %{work | kind: :connection_error, steps: steps, early: false}
+    closed = elem(drive(%{session | pending: nil, qpack_out: <<>>, work: work}), 1)
+    {:error, %{closed | pending: nil, work: nil}, error}
+  end
+
+  defp fail(session, reason), do: {:error, session, reason}
+
+  defp close_phrase(reason) when is_atom(reason) do
+    phrase = Atom.to_string(reason)
+    binary_part(phrase, 0, min(byte_size(phrase), 64))
+  end
+
+  defp close_phrase(_reason), do: <<>>
 
   defp accepted(session, {:connect, _, _, _}, {:ok, connection}),
     do: {:ok, %{session | connection: connection}}
@@ -1269,20 +1306,32 @@ defmodule QuicHttp3.Session do
   defp accepted(session, {:reset_at, stream, _code, _size}, _success),
     do: wt_update(session, stream, send: :reset)
 
+  defp accepted(session, {:reset_code, stream, _code}, _success),
+    do: wt_update(session, stream, send: :reset)
+
   defp accepted(session, {:stop_code, stream, _code}, _success),
     do: wt_update(session, stream, recv: :closed)
 
+  # RFC 9297 Section 2.1: a malformed Quarter Stream ID is H3_DATAGRAM_ERROR;
+  # datagrams above the local delivery bound are dropped.
   defp accepted(session, {:datagrams, _}, {:ok, datagrams}) when is_list(datagrams) do
-    {router, deliveries} =
-      Enum.reduce(datagrams, {session.wt.router, []}, fn bytes, {router, acc} ->
+    result =
+      Enum.reduce_while(datagrams, {session.wt.router, []}, fn bytes, {router, acc} ->
         case Router.datagram(router, bytes) do
-          {:ok, router, delivered} -> {router, acc ++ delivered}
-          {:error, _} -> {router, acc}
+          {:ok, router, delivered} -> {:cont, {router, acc ++ delivered}}
+          {:error, :invalid_datagram_association} -> {:halt, :malformed}
+          {:error, _} -> {:cont, {router, acc}}
         end
       end)
 
-    session = put_in(session.wt.router, router)
-    {:ok, record_events(session, wt_events(session, deliveries))}
+    case result do
+      :malformed ->
+        protocol_error(0x33, :malformed_datagram)
+
+      {router, deliveries} ->
+        session = put_in(session.wt.router, router)
+        {:ok, record_events(session, wt_events(session, deliveries))}
+    end
   end
 
   defp accepted(_session, {:events, _}, {:ok, events}) when not is_list(events),
@@ -1437,7 +1486,7 @@ defmodule QuicHttp3.Session do
         protocol_error(0x107, :webtransport_stream_limit)
 
       true ->
-        {:error, :peer_bidirectional_stream}
+        protocol_error(0x103, :peer_bidirectional_stream)
     end
   end
 
@@ -1640,7 +1689,9 @@ defmodule QuicHttp3.Session do
 
   defp finish_response(session, ref, request, events) do
     with {:ok, next} <- retire_request(session, ref) do
-      steps = if request.upload == :open, do: [{:reset_code, request.stream, 0x10C}], else: []
+      # RFC 9114 Section 4.1: a complete response may end the request upload
+      # early; H3_NO_ERROR tells the peer this is not a cancellation.
+      steps = if request.upload == :open, do: [{:reset_code, request.stream, 0x100}], else: []
       {:ok, put_in(next.work.steps, steps ++ next.work.steps), events}
     end
   end
@@ -1754,6 +1805,10 @@ defmodule QuicHttp3.Session do
         _ -> false
       end) ->
         {:error, :invalid_fields}
+
+      # RFC 9114 Section 4.2: CR, LF or NUL in a field value is malformed.
+      Enum.any?(fields, fn {_name, value} -> String.contains?(value, ["\r", "\n", <<0>>]) end) ->
+        {:error, :invalid_field_value}
 
       true ->
         size =
@@ -2274,11 +2329,46 @@ defmodule QuicHttp3.Session do
     end)
   end
 
+  # Session termination queues the WT_SESSION_GONE resets ahead of current work.
   defp close_router(session) do
-    case Router.close(session.wt.router, session.wt.router.session_id) do
-      {:ok, router, _actions} -> put_in(session.wt.router, router)
-      {:error, _} -> session
+    {session, steps} = close_wt(session)
+    put_in(session.work.steps, steps ++ session.work.steps)
+  end
+
+  # Draft-17 Section 6: terminating the session resets the send side and aborts
+  # the receive side of every associated stream with WT_SESSION_GONE. Local
+  # streams keep their reliable prefix so the peer can still associate the reset.
+  defp close_wt(session) do
+    router = session.wt.router
+
+    case Router.close(router, router.session_id) do
+      {:ok, closed, _actions} when router.phase in [:pending, :accepted] ->
+        steps =
+          for {_key, entry} <- Enum.sort(session.wt.streams),
+              step <- session_gone(entry),
+              do: step
+
+        {put_in(session.wt.router, closed), steps}
+
+      {:ok, closed, _actions} ->
+        {put_in(session.wt.router, closed), []}
+
+      {:error, _} ->
+        {session, []}
     end
+  end
+
+  defp session_gone(entry) do
+    reset =
+      cond do
+        entry.send != :open -> []
+        entry.prefix > 0 -> [{:reset_at, entry.stream, @wt_session_gone, entry.prefix}]
+        true -> [{:reset_code, entry.stream, @wt_session_gone}]
+      end
+
+    if entry.recv == :open,
+      do: reset ++ [{:stop_code, entry.stream, @wt_session_gone}],
+      else: reset
   end
 
   defp request_for_stream(requests, stream) do

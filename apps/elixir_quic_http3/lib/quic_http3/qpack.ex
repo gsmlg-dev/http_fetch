@@ -273,6 +273,14 @@ defmodule QuicHttp3.Qpack do
     {255, 0x3FFFFEE, 26},
     {256, 0x3FFFFFFF, 30}
   ]
+  # Built once at compile time: per-symbol codes and the decoding tree.
+  @huffman_codes List.to_tuple(Enum.map(@huffman_table, fn {_, code, width} -> {code, width} end))
+  @huffman_tree Enum.reduce(@huffman_table, %{}, fn {symbol, code, width}, tree ->
+                  path =
+                    for shift <- (width - 1)..0//-1, do: Access.key(code >>> shift &&& 1, %{})
+
+                  put_in(tree, path ++ [Access.key(:symbol)], symbol)
+                end)
   # RFC 9204 Appendix A. QPACK indexes differ from the HPACK static table.
   @static_table [
     {":authority", ""},
@@ -1089,7 +1097,7 @@ defmodule QuicHttp3.Qpack do
   defp encode_huffman(value) do
     {bits, length} =
       Enum.reduce(:binary.bin_to_list(value), {0, 0}, fn symbol, {acc, size} ->
-        {_, code, width} = Enum.at(@huffman_table, symbol)
+        {code, width} = elem(@huffman_codes, symbol)
         {acc <<< width ||| code, size + width}
       end)
 
@@ -1098,7 +1106,7 @@ defmodule QuicHttp3.Qpack do
   end
 
   defp decode_huffman(data) do
-    tree = huffman_tree()
+    tree = @huffman_tree
 
     {result, _node, pending, pending_len} =
       for <<byte <- data>>, shift <- 7..0//-1, reduce: {[], tree, 0, 0} do
@@ -1127,20 +1135,5 @@ defmodule QuicHttp3.Qpack do
     end
   catch
     {:error, reason} -> {:error, reason}
-  end
-
-  defp huffman_tree do
-    Enum.reduce(@huffman_table, %{}, fn {symbol, code, width}, tree ->
-      bits = for shift <- (width - 1)..0//-1, do: code >>> shift &&& 1
-      insert_huffman_code(tree, bits, symbol)
-    end)
-  end
-
-  defp insert_huffman_code(tree, [], symbol), do: Map.put(tree, :symbol, symbol)
-
-  defp insert_huffman_code(tree, [bit | rest], symbol) do
-    Map.update(tree, bit, insert_huffman_code(%{}, rest, symbol), fn child ->
-      insert_huffman_code(child, rest, symbol)
-    end)
   end
 end

@@ -1,5 +1,8 @@
 defmodule HTTP.H3.Capsule do
-  @moduledoc "Incremental bounded RFC 9297 capsules. Unknown payloads are skipped without retention."
+  @moduledoc """
+  Incremental bounded RFC 9297 capsules. Known capsules are limited to
+  `max_capsule_bytes`; unknown payloads of any length are skipped without retention.
+  """
   alias HTTP.H3.Varint
   defstruct prefix: <<>>, frame: nil, max_capsule_bytes: 65_536, known_types: [0x2843, 0x78AE]
 
@@ -23,7 +26,8 @@ defmodule HTTP.H3.Capsule do
 
     with {:ok, type, rest} <- Varint.decode(input),
          {:ok, length, rest} <- Varint.decode(rest) do
-      if length <= state.max_capsule_bytes,
+      # Only retained (known) capsules are bounded; unknown ones are skipped.
+      if length <= state.max_capsule_bytes or type not in state.known_types,
         do: parse(%{state | prefix: <<>>, frame: {type, length, <<>>}}, rest, events),
         else: {:error, :capsule_too_large}
     else

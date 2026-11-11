@@ -366,7 +366,10 @@ defmodule QuicHttp3.WP1Test do
       {:ok, [{:stream_open, %StreamHandle{connection: native, id: 1}, :bidi}]}
     ])
 
-    assert {:error, _, :peer_bidirectional_stream} = Session.poll(session, 8)
+    assert {:error, _, {:http3_error, :connection, 0x103, :peer_bidirectional_stream}} =
+             Session.poll(session, 8)
+
+    assert_received {:call, :close, [_, 0x103, "peer_bidirectional_stream", _]}
   end
 
   test "default SNI comes from DNS host independently of reference identity", %{opts: opts} do

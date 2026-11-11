@@ -24,6 +24,12 @@ defmodule QuicHttp3.WebTransportSessionTest do
     def reset_stream(stream, code, _), do: record({:reset, stream.handle.id, code})
     def stop_stream(stream, code, _), do: record({:stop, stream.handle.id, code})
     def send_datagram(_, bytes, _), do: record({:datagram, bytes})
+
+    def close(_, code, reason, _) do
+      send(self(), {:close, code, reason})
+      :ok
+    end
+
     def read_datagrams(_, _, _), do: {:ok, Process.delete(:datagrams) || []}
     def events(_, _, _), do: {:ok, Process.delete(:events) || []}
     def info(_), do: Process.get(:info)
@@ -202,5 +208,83 @@ defmodule QuicHttp3.WebTransportSessionTest do
     {:ok, capsule} = Draft17.close_capsule(1, "bye")
     frame = Frame.encode!(:data, capsule)
     assert_received {:send, 0, ^frame, true}
+  end
+
+  @gone 0x170D7B68
+
+  test "rejected peer bidirectional streams leave no session state behind" do
+    {session, _ref} = accepted()
+    {:ok, foreign} = Draft17.prefix(:bidi, 4)
+
+    session =
+      Enum.reduce(Enum.map(0..39, &(4 * &1 + 1)), session, fn id, session ->
+        stream = %TStream{handle: %{id: id}}
+        Process.put({:items, id}, [{:data, id, foreign <> "x"}])
+        Process.put(:events, [{:stream_open, stream, :bidi}, {:readable, stream}])
+        assert {:ok, session, []} = Session.poll(session, 8)
+        assert_received {:reset, ^id, _code}
+        assert_received {:stop, ^id, _code}
+        session
+      end)
+
+    assert session.wt.streams == %{}
+    assert MapSet.size(session.retired) == 40
+  end
+
+  test "closing the session resets and stops every associated stream with WT_SESSION_GONE" do
+    {session, _ref} = accepted()
+    {:ok, session, 2} = Session.webtransport_open(session, :uni)
+    {:ok, session, 4} = Session.webtransport_open(session, :bidi)
+    {:ok, prefix} = Draft17.prefix(:bidi, 0)
+    peer = %TStream{handle: %{id: 1}}
+    Process.put({:items, 1}, [{:data, 1, prefix <> "hi"}])
+    Process.put(:events, [{:stream_open, peer, :bidi}, {:readable, peer}])
+    {:ok, session, [{:wt, _, {:stream, 1, :bidi, "hi", false, _}}]} = Session.poll(session, 8)
+    flush()
+
+    assert {:ok, session} = Session.webtransport_close(session, 0, "")
+    {:ok, uni_prefix} = Draft17.prefix(:uni, 0)
+    uni_size = byte_size(uni_prefix)
+    bidi_size = byte_size(prefix)
+    assert_received {:send, 0, _capsule, true}
+    assert_received {:reset_at, 2, @gone, ^uni_size}
+    assert_received {:reset_at, 4, @gone, ^bidi_size}
+    assert_received {:stop, 4, @gone}
+    assert_received {:reset, 1, @gone}
+    assert_received {:stop, 1, @gone}
+    assert session.wt.streams == %{}
+  end
+
+  test "the CONNECT stream ending resets and stops every associated stream" do
+    {session, _ref} = accepted()
+    {:ok, session, 4} = Session.webtransport_open(session, :bidi)
+    flush()
+    Process.put({:items, 0}, [{:fin, 0}])
+    Process.put(:events, [{:readable, %TStream{handle: %{id: 0}}}])
+    {:ok, session, _events} = Session.poll(session, 8)
+    {:ok, prefix} = Draft17.prefix(:bidi, 0)
+    size = byte_size(prefix)
+    assert_received {:reset_at, 4, @gone, ^size}
+    assert_received {:stop, 4, @gone}
+    assert session.wt.streams == %{}
+  end
+
+  test "a datagram with a malformed quarter stream ID is an H3_DATAGRAM_ERROR" do
+    {session, _ref} = accepted()
+    Process.put(:datagrams, [<<0x40>>])
+    Process.put(:events, [:datagram_readable])
+
+    assert {:error, _session, {:http3_error, :connection, 0x33, :malformed_datagram}} =
+             Session.poll(session, 8)
+
+    assert_received {:close, 0x33, "malformed_datagram"}
+  end
+
+  defp flush do
+    receive do
+      _ -> flush()
+    after
+      0 -> :ok
+    end
   end
 end

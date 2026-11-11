@@ -32,29 +32,41 @@ incrementally. Session events are:
   `{:stream_reset, ref, code, final_size}` for terminal stream failures.
 
 Connection protocol failures return
-`{:error, advanced_session, {:http3_error, :connection, code, reason}}`.
+`{:error, advanced_session, {:http3_error, :connection, code, reason}}`. Before
+returning, Session closes the QUIC connection with an application
+CONNECTION_CLOSE carrying that HTTP/3 code (RFC 9114 Section 8); the close is
+best effort under the operation deadline and the detected error is reported
+either way.
 Stream semantic failures retire only the affected request and queue RESET/STOP
 with the decoder's error code. Terminal FIN/reset removes decoder, runnable and
 continuation state exactly once. If a response finishes while its upload is
-open, Session resets the sending half and preserves the completed receive
-events. It does not STOP an already completed response.
+open, Session resets the sending half with H3_NO_ERROR and preserves the
+completed receive events. It does not STOP an already completed response.
 
 Default local budgets are 128 fields, 65,536 encoded HEADERS bytes, 65,536
 decoded field-section bytes, and 262,144 aggregate retained parser bytes.
 Decoded accounting includes `name + value + 32` per field. Configuration can
 lower the field/header budgets; aggregate retention is configurable up to
 1,048,576 bytes. Peer SETTINGS field-section limits also constrain outgoing
-requests before stream allocation. Local SETTINGS advertise QPACK capacity
-zero, blocked streams zero, and the configured nonzero field-section budget.
+requests before stream allocation. Local SETTINGS advertise the configured
+QPACK capacity and blocked streams (defaults 4,096 and 16; this WP2 profile
+originally advertised zero for both) and the configured nonzero field-section
+budget. Request field values containing CR, LF or NUL are refused before any
+stream is opened.
 Aggregate retention covers response decoders, peer stream prefixes and control
 state; it does not count caller-owned binary upload input or delivered events.
 
 Peer unidirectional records are limited to 128, retained continuations to 128,
 and generation-aware terminal stream tombstones to 1,024. Admission stops at
 the terminal-record limit. Connection rotation before raw QUIC record exhaustion
-remains the owner's responsibility. Static-QPACK encoder/decoder streams must
-be unique; encoder instructions can only set capacity zero, decoder instructions
-must be empty, and critical stream FIN/reset is a connection error. Unknown
+remains the owner's responsibility. QPACK encoder/decoder streams must be
+unique and critical stream FIN/reset is a connection error. With a nonzero
+capacity, peer encoder instructions feed the dynamic-table decoder and the
+peer decoder stream may only carry Stream Cancellation (the local encoder never
+references the dynamic table); with capacity zero, encoder instructions can
+only set capacity zero and decoder instructions must be empty. A peer-initiated
+bidirectional stream without a WebTransport session is
+H3_STREAM_CREATION_ERROR. Unknown
 unidirectional stream types are discarded incrementally and retire normally.
 Unsolicited push is rejected explicitly.
 
@@ -149,11 +161,14 @@ the corresponding scoped fixes now pass.
 
 ## Remaining acceptance boundaries
 
-This is static/literal QPACK with Huffman decoding, not dynamic-table QPACK.
-0-RTT, migration, Alt-Svc/racing, WebSocket over H3 and WebTransport remain
-unsupported. Raw `Quic` capability reporting is unchanged; HTTP/3 semantics
-belong to the companion. A connection protocol error is reported with its code;
-the caller/owner must close or abort transport resources.
+At WP2 this was static/literal QPACK with Huffman decoding. Later work added
+the dynamic-table QPACK decoder, beta 0-RTT, exclusive-session migration and
+WebSocket over HTTP/3; `QuicHttp3.capabilities/0` is the current source of
+truth, and the local encoder stays static/literal. WebTransport remains
+`webtransport: false`. Raw `Quic` capability reporting is unchanged; HTTP/3
+semantics belong to the companion. A connection protocol error is reported
+with its code after Session sends CONNECTION_CLOSE with that code; the
+caller/owner still retires or aborts transport resources.
 
 WP2 does not establish public Fetch/SSE acceptance, a second independent server,
 32-stream fairness, 10,000-request rotation, a 24-hour canary, release artifact
