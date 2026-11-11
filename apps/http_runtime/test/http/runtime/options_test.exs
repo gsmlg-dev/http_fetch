@@ -34,7 +34,7 @@ defmodule HTTP.Runtime.OptionsTest do
   test "defaults preserve HTTP1 and aliases normalize explicit transport identity" do
     assert {:ok, options} = Options.validate(URI.parse("https://example.test/"), [])
     assert options[:http_version] == :http1
-    assert options[:delivery] == :legacy
+    assert options[:delivery] == :push
     refute Keyword.has_key?(options, :tls_backend)
 
     assert {:ok, h2} =
@@ -117,6 +117,8 @@ defmodule HTTP.Runtime.OptionsTest do
 
     for {key, value, reason} <- [
           {:delivery, :pull, :invalid_delivery},
+          {:delivery, :legacy, :invalid_delivery},
+          {:delivery, "legacy", :invalid_delivery},
           {:max_queue_bytes, 0, :invalid_max_queue_bytes},
           {:max_queue_events, :infinity, :invalid_max_queue_events},
           {:http2_reuse, "yes", :invalid_http2_reuse},
@@ -126,5 +128,19 @@ defmodule HTTP.Runtime.OptionsTest do
       assert {:error, ^reason} =
                Options.validate(URI.parse("https://example.test/"), [{key, value}])
     end
+  end
+
+  test "delivery accepts push and ack by atom or string" do
+    for {value, expected} <- [push: :push, ack: :ack] do
+      assert {:ok, options} =
+               Options.validate(URI.parse("https://example.test/"), delivery: value)
+
+      assert options[:delivery] == expected
+    end
+
+    assert {:ok, options} =
+             Options.validate(URI.parse("https://example.test/"), %{"delivery" => "push"})
+
+    assert options[:delivery] == :push
   end
 end

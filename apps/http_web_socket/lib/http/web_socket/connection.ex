@@ -1072,7 +1072,7 @@ defmodule HTTP.WebSocket.Connection do
 
   defp pack_raw(queue, data, ref), do: :queue.in({data, ref}, queue)
 
-  defp parser_capacity?(%{options: %{delivery: :legacy}}), do: true
+  defp parser_capacity?(%{options: %{delivery: :push}}), do: true
 
   defp parser_capacity?(state) do
     status = Delivery.status(state.delivery)

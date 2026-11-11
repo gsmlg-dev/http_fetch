@@ -976,7 +976,7 @@ end
 ```
 
 ACK delivery charges queued and in-flight messages against `max_queue_bytes` and
-`max_queue_events` (default 64). Legacy delivery keeps its original envelope and
+`max_queue_events` (default 64). Push delivery (`delivery: :push`, the default) keeps the plain envelope and
 uses a finite internal queue with terminal slow-owner overload; it cannot bound
 unrelated messages in the owner's mailbox. Frames and assembled messages default
 to 16 MiB, with at most 16,384 fragment parts. Outbound admission allows 64 pending
@@ -1059,7 +1059,7 @@ The default parser caps a line at 64 KiB, an assembled event at 1 MiB, and its
 parts at 16,384. The acknowledged FIFO includes its in-flight message and defaults
 to 2 MiB/64 events; its byte limit must fit `max_event_size + 7`. Raw input reserves
 the advertised receive window in addition to a 1 MiB admitted-byte budget and has
-a 128-chunk limit. Legacy delivery keeps its original envelope and permanently
+a 128-chunk limit. Push delivery (`delivery: :push`, the default) keeps the plain envelope and permanently
 stops on conservative owner-mailbox overload. Invalid responses/UTF-8/oversized
 events are fatal; 204 permanently stops; ordinary EOF/reset may reconnect.
 Accepted acknowledged deliveries drain before terminal errors. The cursor advances

@@ -193,7 +193,7 @@ defmodule HTTP.EventSource.OptionsTest do
   test "defaults keep HTTP1 and finite parser and delivery bounds" do
     assert {:ok, options} = Options.new("http://example.com/events")
     assert options.http_version == :http1
-    assert options.delivery == :legacy
+    assert options.delivery == :push
     assert options.http2_profile == nil
     assert options.http2_scope == nil
     assert options.http2_reuse == true

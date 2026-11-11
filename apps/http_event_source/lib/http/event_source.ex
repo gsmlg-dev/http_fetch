@@ -45,7 +45,7 @@ defmodule HTTP.EventSource do
   error is reported. Idle timing
   pauses while an application delivery is awaiting acknowledgement.
 
-  Legacy delivery preserves the original envelope and terminates with
+  Push delivery (`delivery: :push`, the default) uses the plain envelope and terminates with
   `:consumer_overloaded` when the owner's mailbox reaches the configured count
   or a message exceeds its byte limit. It does not bound unrelated producers
   in that mailbox. Overload is fatal and does not reconnect.

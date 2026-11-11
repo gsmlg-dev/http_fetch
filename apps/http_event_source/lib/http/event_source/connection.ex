@@ -1101,7 +1101,7 @@ defmodule HTTP.EventSource.Connection do
 
   defp parser_limit(options), do: options.max_event_size
 
-  defp parser_capacity?(%{options: %{delivery: :legacy}}), do: true
+  defp parser_capacity?(%{options: %{delivery: :push}}), do: true
 
   defp parser_capacity?(state) do
     status = Delivery.status(state.delivery)

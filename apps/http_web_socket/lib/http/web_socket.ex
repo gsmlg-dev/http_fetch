@@ -22,7 +22,9 @@ defmodule HTTP.WebSocket do
   code is reported as code 1005, and `close/3` while connecting emits an Error
   event followed by an abnormal (1006) Close, as in the WHATWG API.
 
-  With `delivery: :ack`, message events include a delivery reference:
+  `delivery: :push` (the default) sends plain events and terminates the socket
+  with `:consumer_overloaded` on owner-mailbox overload. With `delivery: :ack`,
+  message events include a delivery reference:
 
       {HTTP.WebSocket, socket, %HTTP.WebSocket.Event.Message{}, ref}
 

@@ -40,7 +40,7 @@ defmodule HTTP.Runtime.Options do
          :ok <- boolean(Keyword.get(init, :http2_reuse, true), :invalid_http2_reuse),
          :ok <-
            boolean(Keyword.get(init, :http3_resumption, false), :invalid_http3_resumption),
-         {:ok, delivery} <- delivery(Keyword.get(init, :delivery, :legacy)),
+         {:ok, delivery} <- delivery(Keyword.get(init, :delivery, :push)),
          :ok <-
            positive(Keyword.get(init, :max_queue_bytes, 2_097_152), :invalid_max_queue_bytes),
          :ok <- positive(Keyword.get(init, :max_queue_events, 64), :invalid_max_queue_events),
@@ -155,8 +155,8 @@ defmodule HTTP.Runtime.Options do
   defp boolean(_value, reason), do: {:error, reason}
   defp positive(value, _reason) when is_integer(value) and value > 0, do: :ok
   defp positive(_value, reason), do: {:error, reason}
-  defp delivery(value) when value in [:legacy, :ack], do: {:ok, value}
-  defp delivery("legacy"), do: {:ok, :legacy}
+  defp delivery(value) when value in [:push, :ack], do: {:ok, value}
+  defp delivery("push"), do: {:ok, :push}
   defp delivery("ack"), do: {:ok, :ack}
   defp delivery(_), do: {:error, :invalid_delivery}
 

@@ -28,8 +28,8 @@ defmodule HTTP.Runtime.DeliveryTest do
     assert Delivery.status(state).queued_bytes == 0
   end
 
-  test "legacy delivery preserves its envelope marker and declares slow-owner overload" do
-    state = Delivery.new(delivery: :legacy, max_queue_events: 2)
+  test "push delivery preserves its envelope marker and declares slow-owner overload" do
+    state = Delivery.new(delivery: :push, max_queue_events: 2)
     assert {:ok, ^state, [{:event, nil}]} = Delivery.push(state, :event, 1, self())
     send(self(), :unrelated_one)
     send(self(), :unrelated_two)

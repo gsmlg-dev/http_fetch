@@ -2,15 +2,16 @@ defmodule HTTP.Runtime.Delivery do
   @moduledoc """
   Finite application delivery state shared by stream adapters. Acknowledged mode
   charges the single in-flight delivery and its FIFO until opaque settlement.
-  Legacy mode retains the established envelope and applies a conservative owner
-  mailbox overload policy; it cannot bound unrelated producers in that mailbox.
+  Push mode (the default) delivers the plain three-element envelope and applies a
+  conservative owner mailbox overload policy; it cannot bound unrelated producers
+  in that mailbox.
   """
 
   def new(options) do
     options = if is_struct(options), do: Map.from_struct(options), else: Map.new(options)
 
     %{
-      mode: Map.get(options, :delivery, :legacy),
+      mode: Map.get(options, :delivery, :push),
       max_bytes: Map.get(options, :max_queue_bytes, 2_097_152),
       max_events: Map.get(options, :max_queue_events, 64),
       bytes: 0,
@@ -20,7 +21,7 @@ defmodule HTTP.Runtime.Delivery do
     }
   end
 
-  def push(%{mode: :legacy} = state, event, bytes, owner) do
+  def push(%{mode: :push} = state, event, bytes, owner) do
     case Process.info(owner, :message_queue_len) do
       {:message_queue_len, count} when count < state.max_events and bytes <= state.max_bytes ->
         {:ok, state, [{event, nil}]}
