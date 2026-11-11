@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is an Elixir umbrella providing a browser-like HTTP fetch API, shared HTTP
 protocol clients, and experimental TLS/QUIC packages. TCP sockets use Erlang's
 `:gen_tcp`; TCP TLS and the imported QUIC stack use the independent `ex_ssl`
-TLS engine. Legacy OTP `:ssl` backend selections are rejected for HTTP clients.
+TLS engine, which is the only engine (there is no `tls_backend` option).
 Hell's server TLS transport also runs on `ex_ssl`. Abyss supplies UDP and explicit
 QUIC servers; the optional `packages/abyss_raw` native package is independently
 built and is not part of the umbrella.

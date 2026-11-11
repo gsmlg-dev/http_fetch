@@ -118,7 +118,6 @@ defmodule TLSMigrationBenchmark do
     baseline = snapshot()
 
     opts = [
-      tls_backend: backend,
       http_version: :http1,
       redirect: :manual,
       telemetry: false,

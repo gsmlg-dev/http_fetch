@@ -252,7 +252,7 @@ defmodule HTTP.ManagedTransportTest do
 
   test "incompatible camelCase policy and oversized body reject before any accept" do
     {origin, listener} = listener()
-    scope = open(origin, tls_backend: :ex_ssl)
+    scope = open(origin)
 
     for override <- [
           %{"httpVersion" => :auto},
@@ -279,11 +279,11 @@ defmodule HTTP.ManagedTransportTest do
     assert :ok = ManagedTransport.await_retired(receipt, 1_000)
   end
 
-  test "removed camelCase OTP backend rejects before scope admission or dialing" do
+  test "removed camelCase tls backend option rejects before scope admission or dialing" do
     {origin, listener} = listener()
-    scope = open(origin, tls_backend: :ex_ssl)
+    scope = open(origin)
 
-    assert_raise ArgumentError, "unsupported tls_backend: :ssl; expected :ex_ssl", fn ->
+    assert_raise ArgumentError, ~s(unknown fetch option: "tlsBackend"), fn ->
       HTTP.fetch(origin, %{
         "tlsBackend" => :ssl,
         transport_scope: scope,

@@ -30,8 +30,6 @@ defmodule HTTP.EventSource.Options do
     "socket_opts" => :socket_opts,
     "socketOpts" => :socket_opts,
     "ssl" => :ssl,
-    "tls_backend" => :tls_backend,
-    "tlsBackend" => :tls_backend,
     "unix_socket" => :unix_socket,
     "unixSocket" => :unix_socket,
     "with_credentials" => :with_credentials,
@@ -50,7 +48,6 @@ defmodule HTTP.EventSource.Options do
             idle_timeout: :infinity,
             ssl: [],
             socket_opts: [],
-            tls_backend: :ex_ssl,
             unix_socket: nil,
             max_line_size: @default_max_line_size,
             http_version: :http1,
@@ -81,7 +78,6 @@ defmodule HTTP.EventSource.Options do
           idle_timeout: timeout(),
           ssl: keyword(),
           socket_opts: keyword(),
-          tls_backend: HTTP.TLSBackend.t() | nil,
           unix_socket: String.t() | nil,
           max_line_size: pos_integer(),
           ref: reference()
@@ -108,7 +104,6 @@ defmodule HTTP.EventSource.Options do
          idle_timeout: Keyword.get(init, :idle_timeout, :infinity),
          ssl: Keyword.get(init, :ssl, []),
          socket_opts: Keyword.get(init, :socket_opts, []),
-         tls_backend: Keyword.fetch!(init, :tls_backend),
          unix_socket: Keyword.get(init, :unix_socket),
          max_line_size: Keyword.get(init, :max_line_size, @default_max_line_size),
          http_version: Keyword.get(init, :http_version, :http1),
@@ -198,7 +193,6 @@ defmodule HTTP.EventSource.Options do
          {:ok, ssl} <- normalize_keyword(Keyword.get(init, :ssl, []), :invalid_ssl_options),
          {:ok, socket_opts} <-
            normalize_keyword(Keyword.get(init, :socket_opts, []), :invalid_socket_options),
-         {:ok, tls_backend} <- normalize_tls_backend(init),
          {:ok, unix_socket} <- normalize_unix_socket(Keyword.get(init, :unix_socket)),
          {:ok, max_line_size} <-
            normalize_pos_integer(
@@ -217,23 +211,12 @@ defmodule HTTP.EventSource.Options do
        |> Keyword.put(:idle_timeout, idle_timeout)
        |> Keyword.put(:ssl, ssl)
        |> Keyword.put(:socket_opts, socket_opts)
-       |> Keyword.put(:tls_backend, tls_backend)
        |> Keyword.put(:unix_socket, unix_socket)
        |> Keyword.put(:max_line_size, max_line_size)}
     end
   end
 
   defp normalize_init(_init), do: {:error, :invalid_options}
-
-  defp normalize_tls_backend(init) do
-    if init[:http_version] in [:http3, "http3", "h3"] do
-      if init[:tls_backend] == nil,
-        do: {:ok, nil},
-        else: {:error, :tls_backend_not_supported_for_quic}
-    else
-      HTTP.TLSBackend.resolve(init[:tls_backend])
-    end
-  end
 
   defp normalize_key(key) when is_binary(key), do: Map.get(@string_keys, key, key)
   defp normalize_key(key), do: key

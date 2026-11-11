@@ -3,11 +3,11 @@ defmodule HTTP.HTTP1ReuseTest do
 
   alias ExSSL.TestSupport.ManagedLifecycleProbe, as: Probe
 
-  for {scheme, backend} <- [{:http, nil}, {:https, nil}, {:https, :ex_ssl}] do
+  for scheme <- [:http, :https] do
     @tag :integration
-    test "#{scheme}/#{backend} reuses one fully consumed connection" do
+    test "#{scheme} reuses one fully consumed connection" do
       {url, peer, opts} = peer(unquote(scheme))
-      opts = Keyword.merge(opts, http1_reuse: true, tls_backend: unquote(backend))
+      opts = Keyword.merge(opts, http1_reuse: true)
       assert fetch(url, opts).body == "ok"
       assert fetch(url, opts).body == "ok"
       assert_receive {:accepted, ^peer}, 2_000
@@ -16,13 +16,13 @@ defmodule HTTP.HTTP1ReuseTest do
     end
   end
 
-  for {scheme, backend} <- [{:http, nil}, {:https, nil}, {:https, :ex_ssl}] do
+  for scheme <- [:http, :https] do
     @tag :integration
-    test "#{scheme}/#{backend} reuses a connection with an infinite request deadline" do
+    test "#{scheme} reuses a connection with an infinite request deadline" do
       {url, peer, opts} = peer(unquote(scheme))
 
       opts =
-        Keyword.merge(opts, http1_reuse: true, tls_backend: unquote(backend), timeout: :infinity)
+        Keyword.merge(opts, http1_reuse: true, timeout: :infinity)
 
       assert fetch(url, opts).body == "ok"
       assert fetch(url, opts).body == "ok"
@@ -202,7 +202,6 @@ defmodule HTTP.HTTP1ReuseTest do
       Keyword.merge(opts,
         http1_reuse: true,
         redirect: :manual,
-        tls_backend: :ex_ssl,
         timeout: 6_000,
         socket_opts: [sndbuf: 1_024]
       )

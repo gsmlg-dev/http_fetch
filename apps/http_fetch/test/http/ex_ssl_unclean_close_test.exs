@@ -99,7 +99,6 @@ defmodule HTTP.ExSSLUncleanCloseTest do
           headers: %{"content-type" => "application/json"},
           body: ~s({"stream":true}),
           http_version: :http1,
-          tls_backend: :ex_ssl,
           error_mode: :structured,
           decode_body: false,
           connect_timeout: @wait,

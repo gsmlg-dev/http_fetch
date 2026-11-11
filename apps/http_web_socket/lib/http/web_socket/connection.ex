@@ -643,11 +643,8 @@ defmodule HTTP.WebSocket.Connection do
   defp select_transport(%{uri: %{scheme: "ws", host: host, port: port}}),
     do: {:ok, HTTP.Transport.TCP, host, port || 80}
 
-  defp select_transport(%{
-         uri: %{scheme: "wss", host: host, port: port},
-         options: %{tls_backend: backend}
-       }),
-       do: {:ok, HTTP.TLSBackend.transport(backend), host, port || 443}
+  defp select_transport(%{uri: %{scheme: "wss", host: host, port: port}}),
+    do: {:ok, HTTP.Transport.ExSSL, host, port || 443}
 
   defp report_handshake(state, parent, status, headers) do
     send(

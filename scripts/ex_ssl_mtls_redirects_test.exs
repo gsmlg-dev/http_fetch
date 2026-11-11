@@ -75,9 +75,10 @@ defmodule CandidateMTLSRedirectsTest do
     assert :ok = Task.await(target_peer, 5_000)
   end
 
-  test "legacy OTP selection preserves historical behavior or rejects before current I/O", %{
-    fixtures: f
-  } do
+  test "tls_backend is accepted only by the historical consumer and rejected as unknown otherwise",
+       %{
+         fixtures: f
+       } do
     {source, port} = listener(f)
     {target, target_port} = listener(f)
 
@@ -90,8 +91,8 @@ defmodule CandidateMTLSRedirectsTest do
       assert :ok = Task.await(source_peer, 5_000)
       assert :ok = Task.await(target_peer, 5_000)
     else
-      for backend <- [:ssl, "ssl"] do
-        assert_raise ArgumentError, ~r/unsupported tls_backend/, fn ->
+      for backend <- [:ssl, "ssl", :ex_ssl] do
+        assert_raise ArgumentError, ~r/unknown fetch option/, fn ->
           fetch(port, f, tls_backend: backend)
         end
       end
@@ -159,7 +160,6 @@ defmodule CandidateMTLSRedirectsTest do
       url,
       Keyword.merge(
         [
-          tls_backend: :ex_ssl,
           timeout: 5_000,
           ssl: [
             cacerts: [f.ca.der],

@@ -17,7 +17,7 @@ defmodule HTTP.EventSource do
 
   Select `http_version: :http3` for required HTTPS over QUIC, with no protocol
   downgrade. Supply CA trust and optional reference identity through `ssl:`;
-  HTTP/3 uses its QUIC TLS engine and rejects `tls_backend:`. `http3_profile`
+  HTTP/3 uses its QUIC TLS engine. `http3_profile`
   selects `:ordered` (default) or `:compact`, and `http3_reuse` controls pooling.
   `http3_resumption: true` (beta, default `false`) dials new connections through
   the runtime's bounded session-ticket authority, as for Fetch; EventSource
@@ -69,10 +69,8 @@ defmodule HTTP.EventSource do
   Custom server-sent event names are delivered through the message event's
   `type` field.
 
-  For HTTP/1 and HTTP/2 `https` connections, `tls_backend: :ex_ssl` (or the equivalent
-  string in a map) selects the TLS provider. When omitted, the shared `:http_core`
-  TLS backend setting defaults to `:ex_ssl`, is captured when the source is created
-  and is retained across reconnects. Legacy OTP `:ssl` selections are rejected.
+  HTTP/1 and HTTP/2 `https` connections use the `ex_ssl` TLS engine; `ssl` carries
+  its options.
   """
 
   alias HTTP.EventSource.Connection

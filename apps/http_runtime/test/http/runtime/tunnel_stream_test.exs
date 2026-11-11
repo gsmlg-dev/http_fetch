@@ -218,8 +218,7 @@ defmodule HTTP.Runtime.TunnelStreamTest do
         http_version: Keyword.get(opts, :http_version, :h2c),
         http2_scope: Keyword.get(opts, :scope, "stream-#{System.unique_integer([:positive])}"),
         http2_reuse: Keyword.get(opts, :reuse, true),
-        connect_timeout: Keyword.get(opts, :connect_timeout, 5_000),
-        tls_backend: :ex_ssl
+        connect_timeout: Keyword.get(opts, :connect_timeout, 5_000)
       ]
     }
 

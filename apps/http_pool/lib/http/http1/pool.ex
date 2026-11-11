@@ -22,10 +22,9 @@ defmodule HTTP.HTTP1.Pool do
   end
 
   def checkout(request, deadline) do
-    if request.transport_options[:tls_backend] == :ex_ssl and
-         is_pid(RequestLifecycle.current()),
-       do: checkout_provider(request, deadline),
-       else: checkout(request)
+    if is_pid(RequestLifecycle.current()),
+      do: checkout_provider(request, deadline),
+      else: checkout(request)
   end
 
   defp checkout_provider(request, deadline) do

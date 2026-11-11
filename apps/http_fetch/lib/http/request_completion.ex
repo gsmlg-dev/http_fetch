@@ -54,7 +54,7 @@ defmodule HTTP.RequestCompletion do
       options.unix_socket != nil ->
         %__MODULE__{unsupported: :unix_socket}
 
-      options.tls_backend == :ex_ssl and not supported_ex_ssl?(options, request) ->
+      not supported_ex_ssl?(options, request) ->
         %__MODULE__{unsupported: :tls_backend}
 
       true ->
@@ -93,8 +93,7 @@ defmodule HTTP.RequestCompletion do
 
       {:ok, %{scheme: :https}} ->
         (request.url.scheme == "http" and options.http_version == :http1) or
-          (request.url.scheme == "https" and options.tls_backend == :ex_ssl and
-             options.http_version in [:http1, :http2])
+          (request.url.scheme == "https" and options.http_version in [:http1, :http2])
 
       _ ->
         false

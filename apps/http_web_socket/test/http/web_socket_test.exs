@@ -102,29 +102,24 @@ defmodule HTTP.WebSocketTest do
     assert_receive {WebSocket, ^warm, %Close{code: 1000, was_clean: true}}, 1_000
     assert :ok = HTTP.ClientCompletion.await(WebSocket.completion(warm), 1_000)
 
-    for backend <- [nil, :ex_ssl] do
-      {:ok, _server, port} =
-        HTTPWebSocket.TestServer.start_link(
-          tls: true,
-          certfile: @certfile,
-          keyfile: @keyfile,
-          open_message: "welcome"
-        )
+    {:ok, _server, port} =
+      HTTPWebSocket.TestServer.start_link(
+        tls: true,
+        certfile: @certfile,
+        keyfile: @keyfile,
+        open_message: "welcome"
+      )
 
-      socket =
-        WebSocket.new("wss://127.0.0.1:#{port}/socket", [],
-          tls_backend: backend,
-          ssl: [cacertfile: @cacertfile]
-        )
+    socket =
+      WebSocket.new("wss://127.0.0.1:#{port}/socket", [], ssl: [cacertfile: @cacertfile])
 
-      assert_receive {WebSocket, ^socket, %Open{}}, 1_000
-      assert_receive {WebSocket, ^socket, %Message{data: "welcome"}}, 1_000
-      assert :ok = WebSocket.send(socket, "hello")
-      assert_receive {:websocket_server_received, :text, "hello"}, 1_000
-      assert_receive {WebSocket, ^socket, %Message{data: "echo:hello"}}, 1_000
-      assert :ok = WebSocket.close(socket, 1000, "done")
-      assert_receive {WebSocket, ^socket, %Close{code: 1000, was_clean: true}}, 1_000
-    end
+    assert_receive {WebSocket, ^socket, %Open{}}, 1_000
+    assert_receive {WebSocket, ^socket, %Message{data: "welcome"}}, 1_000
+    assert :ok = WebSocket.send(socket, "hello")
+    assert_receive {:websocket_server_received, :text, "hello"}, 1_000
+    assert_receive {WebSocket, ^socket, %Message{data: "echo:hello"}}, 1_000
+    assert :ok = WebSocket.close(socket, 1000, "done")
+    assert_receive {WebSocket, ^socket, %Close{code: 1000, was_clean: true}}, 1_000
   end
 
   @tag :integration

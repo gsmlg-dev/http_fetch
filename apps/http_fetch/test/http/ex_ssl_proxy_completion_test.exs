@@ -302,7 +302,6 @@ defmodule HTTP.ExSSLProxyCompletionTest do
 
   defp options(port, version, protocol, scheme) do
     [
-      tls_backend: :ex_ssl,
       redirect: :manual,
       http_version: protocol,
       proxy: {scheme, "localhost", port, [headers: [{"Proxy-Authorization", "Basic proxy"}]]},
@@ -393,7 +392,6 @@ defmodule HTTP.ExSSLProxyCompletionEligibilityTest do
   test "supported ExSSL CONNECT completion reserves a request tracker" do
     options =
       FetchOptions.new(
-        tls_backend: :ex_ssl,
         redirect: :manual,
         proxy: {:http, "localhost", 8080, []}
       )
@@ -419,7 +417,6 @@ defmodule HTTP.ExSSLProxyCompletionEligibilityTest do
   test "a failed proxy request launch retains uncertain cleanup" do
     options =
       FetchOptions.new(
-        tls_backend: :ex_ssl,
         redirect: :manual,
         proxy: {:http, "localhost", 8080, []}
       )

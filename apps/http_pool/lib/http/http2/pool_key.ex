@@ -148,12 +148,10 @@ defmodule HTTP.HTTP2.PoolKey do
   end
 
   defp tls_identity(options, origin) do
-    backend = Keyword.get(options, :tls_backend)
     ssl_options = Keyword.get(options, :ssl, [])
 
-    with {:ok, backend} <- HTTP.TLSBackend.resolve(backend),
-         {:ok, identity, reusable?} <- ssl_identity(ssl_options, origin) do
-      {:ok, %{backend: backend, options: identity}, reusable?}
+    with {:ok, identity, reusable?} <- ssl_identity(ssl_options, origin) do
+      {:ok, %{options: identity}, reusable?}
     end
   end
 
@@ -235,7 +233,7 @@ defmodule HTTP.HTTP2.PoolKey do
   defp option_identity(value, name), do: safe_identity(value, name)
 
   defp connection_options(options) do
-    Keyword.take(options, [:connect_timeout, :tls_backend, :http_version, :prefer_ipv6])
+    Keyword.take(options, [:connect_timeout, :http_version, :prefer_ipv6])
   end
 
   defp scope_identity(options) do

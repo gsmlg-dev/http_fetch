@@ -132,7 +132,6 @@ defmodule HTTP.ProxyRequestCompletionTest do
       options =
         HTTP.FetchOptions.new(
           proxy: {:https, "localhost", 3128, []},
-          tls_backend: :ex_ssl,
           http_version: version,
           redirect: :manual
         )
@@ -229,7 +228,6 @@ defmodule HTTP.ProxyRequestCompletionTest do
           http_version: :http1,
           redirect: :manual,
           decode_body: false,
-          tls_backend: :ex_ssl,
           timeout: 3_000
         ],
         opts

@@ -27,7 +27,7 @@ defmodule HTTP.WebSocket.OptionsTest do
   alias HTTP.WebSocket.Options
 
   test "HTTP3 is explicit, secure and rejects TCP transport selection" do
-    assert {:ok, %{http_version: :http3, tls_backend: nil, http3_reuse: false}} =
+    assert {:ok, %{http_version: :http3, http3_reuse: false}} =
              Options.new("wss://example.test/socket", [],
                http_version: :http3,
                http3_reuse: false,
@@ -36,9 +36,6 @@ defmodule HTTP.WebSocket.OptionsTest do
 
     assert {:error, :http3_requires_https} =
              Options.new("ws://example.test/socket", [], http_version: :http3)
-
-    assert {:error, :tls_backend_not_supported_for_quic} =
-             Options.new("wss://example.test/socket", [], http_version: :http3, tls_backend: :ssl)
 
     assert {:error, :connect_address_not_supported_for_quic} =
              Options.new("wss://example.test/socket", [],
@@ -196,38 +193,10 @@ defmodule HTTP.WebSocket.OptionsTest do
     assert options.max_send_queue == 64
   end
 
-  test "selects TLS backends from atom and string map options" do
-    assert {:ok, %{tls_backend: :ex_ssl}} = Options.new("wss://example.com/socket")
-
-    assert {:error, :invalid_tls_backend} =
-             Options.new("wss://example.com/socket", [], tls_backend: :ssl)
-
-    assert {:ok, %{tls_backend: :ex_ssl}} =
-             Options.new("wss://example.com/socket", [], %{"tlsBackend" => "ex_ssl"})
-
-    assert {:error, :invalid_tls_backend} =
-             Options.new("wss://example.com/socket", [], %{"tls_backend" => "ssl"})
-  end
-
-  test "pins the configured TLS backend when options are constructed" do
-    previous = Application.get_env(:http_core, :tls_backend)
-    on_exit(fn -> restore_tls_backend(previous) end)
-
-    Application.put_env(:http_core, :tls_backend, :ex_ssl)
+  test "ex_ssl is the only TLS engine and exposes no tls_backend option" do
     assert {:ok, options} = Options.new("wss://example.com/socket")
-    assert options.tls_backend == :ex_ssl
-
-    assert {:error, :invalid_tls_backend} =
-             Options.new("wss://example.com/socket", [], tls_backend: :ssl)
-
-    Application.put_env(:http_core, :tls_backend, :ssl)
-    assert options.tls_backend == :ex_ssl
-    assert {:error, :invalid_tls_backend} = Options.new("wss://example.com/socket")
-  end
-
-  test "rejects invalid TLS backend selections" do
-    assert {:error, :invalid_tls_backend} =
-             Options.new("wss://example.com/socket", [], tls_backend: :unknown)
+    refute Map.has_key?(options, :tls_backend)
+    refute Keyword.has_key?(HTTP.Runtime.Options.transport_options(options), :tls_backend)
   end
 
   test "validates telemetry URL omission and explicit replacement without changing transport" do
@@ -244,7 +213,4 @@ defmodule HTTP.WebSocket.OptionsTest do
     assert {:error, :invalid_telemetry_url} =
              Options.new(actual, [], telemetry_url: false)
   end
-
-  defp restore_tls_backend(nil), do: Application.delete_env(:http_core, :tls_backend)
-  defp restore_tls_backend(value), do: Application.put_env(:http_core, :tls_backend, value)
 end

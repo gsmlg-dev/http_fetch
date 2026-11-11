@@ -34,8 +34,6 @@ defmodule HTTPStreamClientsGate do
     tls_opts =
       if protocol == :http2 do
         [
-          tls_backend:
-            String.to_existing_atom(System.get_env("HTTP_STREAM_GATE_BACKEND", "ex_ssl")),
           ssl: [cacertfile: System.fetch_env!("HTTP_STREAM_GATE_CA")]
         ]
       else
@@ -294,7 +292,7 @@ defmodule HTTPStreamClientsGate do
         stream: cancelled_id,
         code: 8,
         protocol: actual_protocol(protocol),
-        backend: opts[:tls_backend]
+        backend: :ex_ssl
       })
     )
 

@@ -57,15 +57,13 @@ defmodule HTTP.ProxyWireTest do
     assert {:error, :timeout} = :gen_tcp.accept(origin, 100)
   end
 
-  for {backend, origin_host, fixture, sni} <- [
-        {nil, "localhost", "localhost", nil},
-        {:ex_ssl, "localhost", "localhost", nil},
-        {nil, "127.0.0.1", "localhost", nil},
-        {:ex_ssl, "127.0.0.1", "localhost", nil},
-        {:ex_ssl, "127.0.0.1", "pinned", ~c"pinned.invalid"}
+  for {origin_host, fixture, sni} <- [
+        {"localhost", "localhost", nil},
+        {"127.0.0.1", "localhost", nil},
+        {"127.0.0.1", "pinned", ~c"pinned.invalid"}
       ],
       protocol <- [:http1, :http2, :auto] do
-    test "HTTPS #{protocol} #{origin_host} tunnels with #{backend || :default} using #{fixture} and keeps proxy auth outside TLS" do
+    test "HTTPS #{protocol} #{origin_host} tunnels using #{fixture} and keeps proxy auth outside TLS" do
       parent = self()
       {origin, origin_port} = listener()
       {proxy, proxy_port} = listener()
@@ -118,7 +116,7 @@ defmodule HTTP.ProxyWireTest do
             {"Authorization", "Bearer origin-secret"}
           ],
           timeout: 5_000
-        ] ++ unquote(if backend, do: [tls_backend: backend], else: [])
+        ]
 
       response =
         HTTP.fetch("https://#{unquote(origin_host)}:#{origin_port}/private", options)
@@ -179,7 +177,6 @@ defmodule HTTP.ProxyWireTest do
 
       result =
         HTTP.fetch("https://#{unquote(host)}:#{origin_port}/identity",
-          tls_backend: :ex_ssl,
           ssl: [
             cacertfile: Path.join(@fixtures, "localhost-ca.pem"),
             server_name_indication: ~c"localhost",
@@ -390,7 +387,6 @@ defmodule HTTP.ProxyWireTest do
 
       response =
         HTTP.fetch("#{unquote(scheme)}://localhost:#{origin_port}/private",
-          tls_backend: :ex_ssl,
           http_version: unquote(protocol),
           ssl: [verify: :verify_none],
           proxy:
@@ -436,7 +432,6 @@ defmodule HTTP.ProxyWireTest do
         ] do
       assert {:error, _} =
                HTTP.fetch("https://localhost:#{origin_port}/private",
-                 tls_backend: :ex_ssl,
                  http_version: :http1,
                  ssl: ssl,
                  proxy: {:http, "127.0.0.1", proxy_port, []},
@@ -455,7 +450,6 @@ defmodule HTTP.ProxyWireTest do
 
     assert {:error, {:options, {:versions, :unsupported_or_invalid}}} =
              HTTP.fetch("https://localhost:#{origin_port}/private",
-               tls_backend: :ex_ssl,
                ssl: [versions: [:invalid]],
                proxy: {:https, "127.0.0.1", proxy_port, []},
                timeout: 500

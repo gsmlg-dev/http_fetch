@@ -35,7 +35,6 @@ defmodule HTTP.VerifyFunTest do
       try do
         promise =
           HTTP.fetch("https://127.0.0.1:#{peer.port}/r44",
-            tls_backend: :ex_ssl,
             http_version: :http1,
             timeout: 5_000,
             connect_timeout: 5_000,

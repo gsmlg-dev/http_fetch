@@ -471,8 +471,7 @@ defmodule QuicHttp3.Transport.Quic do
         :datagram,
         :deadline,
         :ref,
-        :consumer,
-        :tls_backend
+        :consumer
       ])
       |> Keyword.put(:profile, profile)
       |> Keyword.put(:datagram, datagram)
@@ -573,7 +572,6 @@ defmodule QuicHttp3.Transport.Quic do
   defp valid_options(options) do
     cond do
       not Keyword.keyword?(options) -> {:error, :invalid_options}
-      options[:tls_backend] != nil -> {:error, :tls_backend_not_supported_for_quic}
       Keyword.get(options, :alpn, ["h3"]) != ["h3"] -> {:error, :invalid_h3_alpn}
       true -> :ok
     end

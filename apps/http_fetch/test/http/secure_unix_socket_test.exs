@@ -19,11 +19,10 @@ defmodule HTTP.SecureUnixSocketTest do
   end
 
   test "HTTPS never connects to a plaintext Unix socket", %{path: path, listener: listener} do
-    for backend <- [nil, :ex_ssl], version <- [:http1, :auto] do
+    for version <- [:http1, :auto] do
       assert {:error, :tls_over_unix_socket_not_supported} =
                HTTP.fetch("https://localhost/private",
                  unix_socket: path,
-                 tls_backend: backend,
                  http_version: version
                )
                |> Promise.await(1_000)

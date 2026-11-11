@@ -45,7 +45,6 @@ defmodule HTTP.EncryptedClientIdentityTest do
 
       try do
         options = [
-          tls_backend: :ex_ssl,
           http_version: unquote(protocol),
           timeout: @timeout,
           connect_timeout: @timeout,
@@ -138,7 +137,6 @@ defmodule HTTP.EncryptedClientIdentityTest do
         ]
 
         options = [
-          tls_backend: :ex_ssl,
           http_version: unquote(protocol),
           ssl: ssl,
           timeout: @timeout,

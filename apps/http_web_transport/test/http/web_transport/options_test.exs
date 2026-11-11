@@ -86,18 +86,8 @@ defmodule HTTP.WebTransport.OptionsTest do
              )
   end
 
-  test "rejects explicit TLS backends because WebTransport uses QUIC TLS" do
-    for backend <- [:ssl, :ex_ssl, "ssl", "ex_ssl", false] do
-      for options <- [
-            [tls_backend: backend],
-            %{"tls_backend" => backend},
-            %{"tlsBackend" => backend}
-          ] do
-        assert {:error, :tls_backend_not_supported_for_quic} =
-                 Options.new("https://example.com/transport", options)
-      end
-    end
-
-    assert {:ok, _} = Options.new("https://example.com/transport", tls_backend: nil)
+  test "QUIC TLS is separate from TCP TLS and exposes no tls_backend option" do
+    assert {:ok, options} = Options.new("https://example.com/transport")
+    refute Map.has_key?(options, :tls_backend)
   end
 end

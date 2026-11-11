@@ -119,9 +119,6 @@ defmodule HTTP do
                 - `:signal`: An `HTTP.AbortController` PID. If provided, the request can be aborted
                              via this controller.
                 - `:http_version`: `:http1`, `:http2`, `:http3`, `:h2c`, or `:auto`.
-                - `:tls_backend`: `:ex_ssl` (default) for HTTPS requests. Legacy `:ssl` is rejected. It may also be
-                  configured globally with `config :http_core, :tls_backend, :ex_ssl`; an explicit
-                  request value takes precedence. HTTP/3 does not support this option.
                 - `:timeout`, `:connect_timeout`, `:ssl`, and `:socket_opts`: Elixir-specific transport
                   extensions used by the socket or QUIC transport.
                 - `:connect_address`: Caller-validated IPv4/IPv6 tuple, preserving the URL authority/TLS hostname. Requires manual/error redirects.
@@ -380,8 +377,7 @@ defmodule HTTP do
 
     options = %{
       options
-      | http_version: request.transport_options[:http_version],
-        tls_backend: request.transport_options[:tls_backend]
+      | http_version: request.transport_options[:http_version]
     }
 
     completion = HTTP.RequestCompletion.new(options, request)

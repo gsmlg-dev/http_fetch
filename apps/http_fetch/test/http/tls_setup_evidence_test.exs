@@ -596,7 +596,6 @@ defmodule HTTP.TLSSetupEvidenceTest do
       connect_address: {127, 0, 0, 1},
       redirect: :manual,
       error_mode: :structured,
-      tls_backend: :ex_ssl,
       telemetry: false,
       timeout: 4_000,
       ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")] ++ extra

@@ -282,7 +282,6 @@ defmodule HTTP.NestedHTTPSProxyTest do
     assert {:error, {:options, {:versions, :unsupported_or_invalid}}} =
              HTTP.fetch("https://origin.invalid/",
                proxy: {:https, "127.0.0.1", port, []},
-               tls_backend: :ex_ssl,
                ssl: [versions: [:invalid]],
                redirect: :manual,
                telemetry: false
@@ -333,7 +332,6 @@ defmodule HTTP.NestedHTTPSProxyTest do
   defp options(proxy) do
     [
       proxy: proxy,
-      tls_backend: :ex_ssl,
       ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
       redirect: :manual,
       telemetry: false,

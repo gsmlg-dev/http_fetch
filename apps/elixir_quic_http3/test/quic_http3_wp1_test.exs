@@ -322,14 +322,11 @@ defmodule QuicHttp3.WP1Test do
     refute_received {:call, :read, _}
   end
 
-  test "unsafe TLS and TCP backend options are rejected before endpoint creation", %{opts: opts} do
+  test "unsafe TLS options are rejected before endpoint creation", %{opts: opts} do
     _ = drain_calls()
 
     assert {:error, :verify_none_not_supported} =
              Adapter.connect("example.test", 443, Keyword.put(opts, :tls, verify: :verify_none))
-
-    assert {:error, :tls_backend_not_supported_for_quic} =
-             Adapter.connect("example.test", 443, Keyword.put(opts, :tls_backend, :ssl))
 
     refute_received {:call, :client, _}
   end

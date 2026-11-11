@@ -449,7 +449,7 @@ defmodule HTTP.Runtime.Dialer do
          :ok <- validate_connect_address(transport, host, request) do
       transport =
         if proxy != nil and proxy.scheme == :https,
-          do: HTTP.TLSBackend.transport(tls_backend(request)),
+          do: HTTP.Transport.ExSSL,
           else: transport
 
       {:ok, transport, host, port}
@@ -474,11 +474,11 @@ defmodule HTTP.Runtime.Dialer do
   end
 
   defp select_origin_transport(
-         %Request{url: %URI{scheme: "https", host: host} = uri} = request,
+         %Request{url: %URI{scheme: "https", host: host} = uri},
          _socket_path
        )
        when is_binary(host) do
-    {:ok, HTTP.TLSBackend.transport(tls_backend(request)), host, uri.port || 443}
+    {:ok, HTTP.Transport.ExSSL, host, uri.port || 443}
   end
 
   defp select_origin_transport(%Request{url: %URI{scheme: scheme}}, _socket_path) do
@@ -606,8 +606,6 @@ defmodule HTTP.Runtime.Dialer do
       Keyword.has_key?(request.transport_options, :http2_priority) or
       Keyword.get(request.transport_options, :http2_reuse) == false
   end
-
-  defp tls_backend(%Request{} = request), do: Keyword.get(request.transport_options, :tls_backend)
 
   defp request_timeout(request), do: Keyword.get(request.transport_options, :timeout, 30_000)
   defp connect_deadline(:infinity, _started_at), do: :infinity

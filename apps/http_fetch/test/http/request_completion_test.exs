@@ -78,7 +78,7 @@ defmodule HTTP.RequestCompletionTest do
   end
 
   test "only direct HTTPS HTTP/1 and HTTP/2 admit ExSSL completion, including reuse" do
-    options = HTTP.FetchOptions.new(redirect: :manual, tls_backend: :ex_ssl)
+    options = HTTP.FetchOptions.new(redirect: :manual)
     request = %HTTP.Request{url: URI.parse("https://localhost/")}
 
     for excluded <- [
@@ -509,7 +509,6 @@ defmodule HTTP.RequestCompletionTest do
 
     promise =
       HTTP.fetch(String.replace(url, "http:", "https:"),
-        tls_backend: :ex_ssl,
         redirect: :manual,
         ssl: [verify: :verify_none],
         timeout: 2_000
@@ -629,8 +628,6 @@ defmodule HTTP.RequestCompletionTest do
     for opts <- [
           [http_version: :http3],
           [http_version: :auto],
-          [tls_backend: :ex_ssl],
-          [tls_backend: "ex_ssl"],
           [redirect: :follow]
         ] do
       options = HTTP.FetchOptions.new(Keyword.merge([redirect: :manual], opts))
@@ -688,31 +685,4 @@ defmodule HTTP.RequestCompletionTest do
   end
 
   defp provider_deadline(timeout), do: {:abs_ms, System.monotonic_time(:millisecond) + timeout}
-end
-
-defmodule HTTP.RequestCompletionBackendTest do
-  use ExUnit.Case, async: false
-
-  test "public option normalization pins the global ExSSL backend before eligibility" do
-    previous = Application.fetch_env(:http_core, :tls_backend)
-
-    on_exit(fn ->
-      case previous do
-        {:ok, value} -> Application.put_env(:http_core, :tls_backend, value)
-        :error -> Application.delete_env(:http_core, :tls_backend)
-      end
-    end)
-
-    Application.put_env(:http_core, :tls_backend, "ex_ssl")
-    options = HTTP.FetchOptions.new(redirect: :manual)
-    assert options.tls_backend == :ex_ssl
-    handle = HTTP.RequestCompletion.new(options)
-
-    assert {:error, {:unsupported_completion, :tls_backend}} =
-             HTTP.RequestCompletion.await(handle, 0)
-
-    assert_raise ArgumentError, ~r/unsupported tls_backend/, fn ->
-      HTTP.FetchOptions.new(redirect: :manual, tls_backend: "ssl")
-    end
-  end
 end

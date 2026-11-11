@@ -37,27 +37,22 @@ defmodule HTTP.SocketClient do
       http_version(request) == :http3 and Keyword.get(request.transport_options, :proxy) != nil ->
         {:error, :proxy_not_supported_for_quic}
 
-      http_version(request) == :http3 and tls_backend(request) != nil ->
-        {:error, :tls_backend_not_supported_for_quic}
-
       http_version(request) == :http3 ->
         request_http3(request, abort_controller_pid, unix_socket_path)
 
       true ->
-        with {:ok, pinned} <- pin_tls_backend(request) do
-          case alt_svc_route(request, unix_socket_path) do
-            {:ok, route} ->
-              request_http3(http3_request(request), abort_controller_pid, nil, route)
+        case alt_svc_route(request, unix_socket_path) do
+          {:ok, route} ->
+            request_http3(http3_request(request), abort_controller_pid, nil, route)
 
-            :none ->
-              request_socket(pinned, abort_controller_pid, unix_socket_path)
-          end
+          :none ->
+            request_socket(request, abort_controller_pid, unix_socket_path)
         end
     end
   end
 
-  # Alt-Svc routing applies only to opt-in `:auto` requests whose TLS backend
-  # was left to the default, and whose QUIC route configures cleanly.
+  # Alt-Svc routing applies only to opt-in `:auto` requests that
+  # leave transport extensions at their defaults, and whose QUIC route configures cleanly.
   defp alt_svc_route(%Request{} = request, unix_socket_path) do
     with true <- alt_svc_eligible?(request, unix_socket_path),
          origin when origin != nil <- AltSvcCache.origin(request.url),
@@ -78,7 +73,6 @@ defmodule HTTP.SocketClient do
           :proxy,
           :unix_socket,
           :connect_address,
-          :tls_backend,
           :http2_profile,
           :transport_scope,
           :pool
@@ -126,9 +120,7 @@ defmodule HTTP.SocketClient do
   defp quic_ssl(ssl), do: ssl
 
   defp tcp_request(%Request{} = request) do
-    request
-    |> Map.update!(:transport_options, &Keyword.put(&1, :http_version, :auto))
-    |> pin_tls_backend()
+    Map.update!(request, :transport_options, &Keyword.put(&1, :http_version, :auto))
   end
 
   defp alt_svc_fallback?(%{alt_svc: %{}, connected?: false}, reason),
@@ -154,8 +146,9 @@ defmodule HTTP.SocketClient do
   defp run_tcp(parent, ref, request, redirects, redirected?, deadline_at) do
     tracker = Keyword.get(request.transport_options, :request_lifecycle)
 
-    with {:ok, request} <- tcp_request(request),
-         :ok <- HTTP.RequestLifecycle.register(tracker, self(), :owner, deadline_at) do
+    request = tcp_request(request)
+
+    with :ok <- HTTP.RequestLifecycle.register(tracker, self(), :owner, deadline_at) do
       owner(parent, ref, request, nil, redirects, redirected?, deadline_at)
     else
       {:error, reason} -> send_error(parent, ref, reason)
@@ -2641,18 +2634,6 @@ defmodule HTTP.SocketClient do
     Keyword.get(request.transport_options, :http_version, :http1)
   end
 
-  defp tls_backend(%Request{} = request), do: Keyword.get(request.transport_options, :tls_backend)
-
-  defp pin_tls_backend(%Request{} = request) do
-    with {:ok, backend} <- HTTP.TLSBackend.resolve(tls_backend(request)) do
-      {:ok,
-       %{
-         request
-         | transport_options: Keyword.put(request.transport_options, :tls_backend, backend)
-       }}
-    end
-  end
-
   defp request_timeout(%Request{} = request),
     do: Keyword.get(request.transport_options, :timeout, HTTP.Config.default_request_timeout())
 
@@ -2777,8 +2758,7 @@ defmodule HTTP.SocketClient do
   defp validate_client_identity_redirect(request, uri) do
     ssl_options = Keyword.get(request.transport_options, :ssl, [])
 
-    if (tls_backend(request) == :ex_ssl or http_version(request) == :http3) and
-         Enum.any?([:cert, :certfile, :key, :keyfile], &Keyword.has_key?(ssl_options, &1)) and
+    if Enum.any?([:cert, :certfile, :key, :keyfile], &Keyword.has_key?(ssl_options, &1)) and
          client_identity_origin(request.url) != client_identity_origin(uri) do
       {:error, :client_identity_cross_origin_redirect}
     else

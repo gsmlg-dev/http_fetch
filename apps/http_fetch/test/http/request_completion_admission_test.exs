@@ -3,12 +3,11 @@ defmodule HTTP.RequestCompletionAdmissionTest do
 
   alias HTTP.{FetchOptions, Request, RequestCompletion}
 
-  for version <- [:http1, :http2, :h2c], backend <- [nil, :ex_ssl, "ex_ssl"] do
-    test "plaintext #{version} completion is independent of TLS selector #{inspect(backend)}" do
+  for version <- [:http1, :http2, :h2c] do
+    test "plaintext #{version} completion is admitted" do
       options =
         FetchOptions.new(
           http_version: unquote(version),
-          tls_backend: unquote(backend),
           redirect: :manual
         )
 
@@ -27,7 +26,7 @@ defmodule HTTP.RequestCompletionAdmissionTest do
   end
 
   test "plaintext selection retains the unsupported scope boundary" do
-    options = FetchOptions.new(redirect: :manual, tls_backend: :ex_ssl)
+    options = FetchOptions.new(redirect: :manual)
     request = %Request{url: URI.parse("http://example.test/")}
     options = %{options | transport_scope: :not_integrated}
 

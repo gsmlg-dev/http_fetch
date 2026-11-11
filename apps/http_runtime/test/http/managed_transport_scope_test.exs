@@ -563,7 +563,6 @@ defmodule HTTP.ManagedTransport.ScopeTest do
                origin: "https://localhost",
                connect_address: {127, 0, 0, 1},
                http_version: :http1,
-               tls_backend: :ex_ssl,
                ssl: [cacerts: []],
                max_requests: requests,
                max_connections: connections

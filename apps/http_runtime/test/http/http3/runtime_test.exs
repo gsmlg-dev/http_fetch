@@ -100,9 +100,6 @@ defmodule HTTP.HTTP3.RuntimeTest do
 
     refute key == other_identity
 
-    assert {:error, :tls_backend_not_supported_for_quic} =
-             PoolKey.build(%{request | transport_options: [ssl: tls, tls_backend: :ssl]})
-
     assert {:error, :socket_opts_not_supported_for_quic} =
              PoolKey.build(request, socket_opts: [active: false])
 

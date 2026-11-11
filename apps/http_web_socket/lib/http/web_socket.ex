@@ -12,7 +12,7 @@ defmodule HTTP.WebSocket do
   HTTP/1 is the default. Select `http_version: :http2`, `:h2c`, or `:auto`
   explicitly. `http_version: :http3` selects an RFC 9220 tunnel for `wss`,
   with explicit QUIC CA trust in `ssl` and no fallback. TCP
-  `tls_backend`, socket options and connection-address pins are rejected for H3.
+  socket options and connection-address pins are rejected for H3.
   `http_version/1` reports the negotiated HTTP version, while
   `protocol/1` continues to report the selected WebSocket subprotocol.
 
@@ -135,10 +135,7 @@ defmodule HTTP.WebSocket do
   Plain Elixir binaries are sent as text frames. Use `array_buffer/1` or
   `HTTP.Blob` for binary frames.
 
-  For `wss` connections, `tls_backend: :ex_ssl` (or the equivalent string in a map)
-  selects the TLS provider. When omitted, the shared `:http_core` TLS backend
-  setting defaults to `:ex_ssl` and is captured when the socket is created.
-  Legacy OTP `:ssl` selections are rejected.
+  `wss` connections use the `ex_ssl` TLS engine; `ssl` carries its options.
   """
 
   alias HTTP.WebSocket.ArrayBuffer

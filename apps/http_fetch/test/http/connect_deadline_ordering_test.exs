@@ -7,15 +7,13 @@ defmodule HTTP.ConnectDeadlineOrderingTest do
   @peer_timeout 3_000
   @cacertfile Path.expand("../support/fixtures/pinned-ca.pem", __DIR__)
 
-  for backend <- [nil, :ex_ssl],
-      {control, request_timeout, expected} <- [
+  for {control, request_timeout, expected} <- [
         {:abort, 5_000, :aborted},
         {:deadline, 5_000, :request_timeout},
         {:elapsed, 500, :request_timeout},
         {:short_connect, 5_000, :timeout}
       ] do
-    test "#{backend} pinned native timeout respects #{control} ordering" do
-      backend = unquote(backend)
+    test "pinned native timeout respects #{control} ordering" do
       observer = self()
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
       on_exit(fn -> :gen_tcp.close(listener) end)
@@ -40,14 +38,12 @@ defmodule HTTP.ConnectDeadlineOrderingTest do
         transport_options: [
           connect_address: {127, 0, 0, 1},
           redirect: :manual,
-          tls_backend: backend,
           connect_timeout: 500,
           ssl: [cacertfile: @cacertfile]
         ]
       }
 
-      assert {:ok, effective_backend} = HTTP.TLSBackend.resolve(backend)
-      transport = HTTP.TLSBackend.transport(effective_backend)
+      transport = HTTP.Transport.ExSSL
 
       dial =
         Task.Supervisor.async_nolink(:http_runtime_task_supervisor, fn ->

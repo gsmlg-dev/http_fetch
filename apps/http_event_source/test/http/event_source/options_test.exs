@@ -50,7 +50,6 @@ defmodule HTTP.EventSource.OptionsTest do
     assert options.http_version == :http3
     assert options.http3_profile == :compact
     assert options.http3_reuse == false
-    assert options.tls_backend == nil
     assert options.ssl == ssl
     transport = HTTP.Runtime.Options.transport_options(options)
     assert transport[:http3_profile] == :compact
@@ -84,8 +83,6 @@ defmodule HTTP.EventSource.OptionsTest do
   test "HTTP3 rejects contradictory routes, TLS options and connection headers before networking" do
     for {url, init, reason} <- [
           {"http://example.test/events", [], :http3_requires_https},
-          {"https://example.test/events", [tls_backend: :ssl],
-           :tls_backend_not_supported_for_quic},
           {"https://example.test/events", [unix_socket: "/tmp/h3-sse.sock"],
            :unix_socket_not_supported_for_quic},
           {"https://example.test/events", [proxy: "http://proxy.test:8080"],
@@ -177,33 +174,10 @@ defmodule HTTP.EventSource.OptionsTest do
              })
   end
 
-  test "selects TLS backends from atom and string map options" do
-    assert {:ok, %{tls_backend: :ex_ssl}} = Options.new("https://example.com/events")
-
-    assert {:error, :invalid_tls_backend} =
-             Options.new("https://example.com/events", tls_backend: :ssl)
-
-    assert {:ok, %{tls_backend: :ex_ssl}} =
-             Options.new("https://example.com/events", %{"tlsBackend" => "ex_ssl"})
-
-    assert {:error, :invalid_tls_backend} =
-             Options.new("https://example.com/events", %{"tls_backend" => "ssl"})
-  end
-
-  test "pins the configured TLS backend when options are constructed" do
-    previous = Application.get_env(:http_core, :tls_backend)
-    on_exit(fn -> restore_tls_backend(previous) end)
-
-    Application.put_env(:http_core, :tls_backend, :ex_ssl)
+  test "ex_ssl is the only TLS engine and exposes no tls_backend option" do
     assert {:ok, options} = Options.new("https://example.com/events")
-    assert options.tls_backend == :ex_ssl
-
-    assert {:error, :invalid_tls_backend} =
-             Options.new("https://example.com/events", tls_backend: :ssl)
-
-    Application.put_env(:http_core, :tls_backend, :ssl)
-    assert options.tls_backend == :ex_ssl
-    assert {:error, :invalid_tls_backend} = Options.new("https://example.com/events")
+    refute Map.has_key?(options, :tls_backend)
+    refute Keyword.has_key?(HTTP.Runtime.Options.transport_options(options), :tls_backend)
   end
 
   test "rejects invalid init options" do
@@ -214,9 +188,6 @@ defmodule HTTP.EventSource.OptionsTest do
 
     assert {:error, :invalid_reconnect_time} =
              Options.new("http://example.com/events", reconnect_time: -1)
-
-    assert {:error, :invalid_tls_backend} =
-             Options.new("https://example.com/events", tls_backend: :unknown)
   end
 
   test "defaults keep HTTP1 and finite parser and delivery bounds" do
@@ -340,7 +311,4 @@ defmodule HTTP.EventSource.OptionsTest do
                Options.new("http://example.com/events", http_version: :h2c, headers: headers)
     end
   end
-
-  defp restore_tls_backend(nil), do: Application.delete_env(:http_core, :tls_backend)
-  defp restore_tls_backend(value), do: Application.put_env(:http_core, :tls_backend, value)
 end

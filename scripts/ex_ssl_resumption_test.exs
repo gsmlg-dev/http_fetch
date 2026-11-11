@@ -99,20 +99,15 @@ defmodule CandidateResumptionTest do
     end)
   end
 
-  test "SSE reconnect resumes with Last-Event-ID and its captured backend", %{fixtures: fixtures} do
-    previous = Application.get_env(:http_core, :tls_backend, :unset)
-    on_exit(fn -> restore_backend(previous) end)
-    Application.put_env(:http_core, :tls_backend, :ex_ssl)
-
+  test "SSE reconnect resumes with Last-Event-ID across reconnect", %{fixtures: fixtures} do
     with_peer(fixtures, "resumption-sse", [], fn peer ->
       sse_pair(
         peer,
         fixtures,
         [false, true],
-        fn -> Application.put_env(:http_core, :tls_backend, :invalid) end,
+        nil,
         :auto,
-        [false, true],
-        nil
+        [false, true]
       )
     end)
   end
@@ -170,7 +165,6 @@ defmodule CandidateResumptionTest do
     for {{reused, ticket_offered}, index} <- Enum.with_index(Enum.zip(expected, offered), 1) do
       socket =
         WebSocket.new("wss://127.0.0.1:#{peer.port}/socket", [],
-          tls_backend: :ex_ssl,
           ssl: tls_options(fixtures, "http/1.1", ticket_option(tickets)),
           timeout: @timeout,
           connect_timeout: @timeout
@@ -215,12 +209,10 @@ defmodule CandidateResumptionTest do
          expected,
          after_first,
          tickets,
-         offered,
-         tls_backend \\ :ex_ssl
+         offered
        ) do
     source =
       EventSource.new("https://127.0.0.1:#{peer.port}/events",
-        tls_backend: tls_backend,
         reconnect_time: 10,
         connect_timeout: @timeout,
         ssl: tls_options(fixtures, "http/1.1", ticket_option(tickets))
@@ -262,7 +254,6 @@ defmodule CandidateResumptionTest do
   defp fetch(peer, fixtures, :http1, tickets),
     do:
       HTTP.fetch("https://127.0.0.1:#{peer.port}/resumption",
-        tls_backend: :ex_ssl,
         ssl: tls_options(fixtures, "http/1.1", ticket_option(tickets)),
         timeout: @timeout,
         connect_timeout: @timeout
@@ -271,7 +262,6 @@ defmodule CandidateResumptionTest do
   defp fetch(peer, fixtures, :http2, tickets),
     do:
       HTTP.fetch("https://127.0.0.1:#{peer.port}/resumption",
-        tls_backend: :ex_ssl,
         http_version: :http2,
         http2_reuse: false,
         ssl: tls_options(fixtures, "h2", ticket_option(tickets)),
@@ -398,7 +388,4 @@ defmodule CandidateResumptionTest do
         :ok
     end
   end
-
-  defp restore_backend(:unset), do: Application.delete_env(:http_core, :tls_backend)
-  defp restore_backend(value), do: Application.put_env(:http_core, :tls_backend, value)
 end

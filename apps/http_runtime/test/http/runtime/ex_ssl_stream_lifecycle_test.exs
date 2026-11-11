@@ -443,7 +443,6 @@ defmodule HTTP.Runtime.ExSSLStreamLifecycleTest do
 
   defp options(version) do
     [
-      tls_backend: :ex_ssl,
       http_version: :http2,
       redirect: :manual,
       connect_address: {127, 0, 0, 1},

@@ -167,7 +167,6 @@ defmodule HTTP.HTTP1CancellationRaceTest do
         HTTP.fetch(url,
           http_version: :http1,
           http1_reuse: false,
-          tls_backend: :ex_ssl,
           ssl: [verify: :verify_none],
           redirect: :manual,
           decode_body: false,
@@ -328,7 +327,6 @@ defmodule HTTP.HTTP1CancellationRaceTest do
         [
           http_version: :http1,
           http1_reuse: false,
-          tls_backend: :ex_ssl,
           ssl: [verify: :verify_none],
           redirect: :manual,
           decode_body: false,

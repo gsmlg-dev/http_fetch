@@ -55,7 +55,7 @@ defmodule HTTP.HTTP1.PoolTest do
 
     request = %HTTP.Request{
       url: URI.parse("https://localhost/"),
-      transport_options: [tls_backend: :ex_ssl, http1_reuse: true, http1_pool: pool]
+      transport_options: [http1_reuse: true, http1_pool: pool]
     }
 
     :sys.suspend(pool)
@@ -83,7 +83,7 @@ defmodule HTTP.HTTP1.PoolTest do
 
     request = %HTTP.Request{
       url: URI.parse("https://localhost/"),
-      transport_options: [tls_backend: :ex_ssl, http1_reuse: true, http1_pool: pool]
+      transport_options: [http1_reuse: true, http1_pool: pool]
     }
 
     :sys.suspend(pool)

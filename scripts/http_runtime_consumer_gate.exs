@@ -338,7 +338,7 @@ defmodule HTTPRuntimeConsumerGate do
         mode: mode,
         scheme: URI.parse(url).scheme,
         protocol: opts[:http_version],
-        backend: opts[:tls_backend],
+        backend: :ex_ssl,
         verified_tls: mode == "ex_ssl"
       })
     )
@@ -355,7 +355,6 @@ defmodule HTTPRuntimeConsumerGate do
         {"ex_ssl",
          [
            http_version: :http2,
-           tls_backend: :ex_ssl,
            # The adapter supplies HTTPS hostname verification. A caller callback
            # intentionally makes the pool key non-reusable, defeating this sharing gate.
            ssl: [

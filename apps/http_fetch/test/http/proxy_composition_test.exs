@@ -4,8 +4,8 @@ defmodule HTTP.ProxyCompositionTest do
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
-  for {scheme, backend} <- [{:http, nil}, {:https, nil}, {:https, :ex_ssl}] do
-    test "#{scheme}/#{backend} reuse isolates proxy credentials and endpoints" do
+  for scheme <- [:http, :https] do
+    test "#{scheme} reuse isolates proxy credentials and endpoints" do
       scheme = unquote(scheme)
       {first_port, first_proxy} = peer(scheme)
       {second_port, second_proxy} = peer(scheme)
@@ -14,7 +14,6 @@ defmodule HTTP.ProxyCompositionTest do
       opts =
         reuse_options()
         |> Keyword.merge(
-          tls_backend: unquote(backend),
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
           headers: [{"Authorization", "Bearer origin-secret"}]
         )

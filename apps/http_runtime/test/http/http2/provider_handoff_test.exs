@@ -88,7 +88,6 @@ defmodule HTTP.HTTP2.ProviderHandoffTest do
       request = %Request{
         url: URI.parse("https://localhost:1/never"),
         transport_options: [
-          tls_backend: :ex_ssl,
           http_version: :http2,
           request_lifecycle: tracker,
           http2_pool: pool
@@ -130,7 +129,6 @@ defmodule HTTP.HTTP2.ProviderHandoffTest do
     request = %Request{
       url: URI.parse("https://localhost:1/never"),
       transport_options: [
-        tls_backend: :ex_ssl,
         http_version: :http2,
         request_lifecycle: tracker,
         http2_pool: pool

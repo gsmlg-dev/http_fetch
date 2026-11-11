@@ -5,7 +5,7 @@ defmodule HTTP.HTTP1VersionWireTest do
   alias HTTP.{Promise, RequestCompletion, RequestError, Response}
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
-  for backend <- [nil, :ex_ssl],
+  for backend <- [:ex_ssl],
       mode <- [:raw, :structured],
       version <- ["HTTP/2.0", "HTTP/0.9"] do
     test "#{backend} #{mode} rejects #{version} before response acceptance and closes without replay" do
@@ -22,7 +22,7 @@ defmodule HTTP.HTTP1VersionWireTest do
     end
   end
 
-  for backend <- [nil, :ex_ssl], version <- ["HTTP/1.0", "HTTP/1.1", "HTTP/1.9"] do
+  for backend <- [:ex_ssl], version <- ["HTTP/1.0", "HTTP/1.1", "HTTP/1.9"] do
     test "#{backend} accepts compatible #{version} responses" do
       connection = if unquote(version) == "HTTP/1.1", do: "Connection: close\r\n", else: ""
       bytes = unquote(version) <> " 200 OK\r\nContent-Length: 2\r\n" <> connection <> "\r\nok"
@@ -86,7 +86,7 @@ defmodule HTTP.HTTP1VersionWireTest do
     assert_receive {:fresh_get_completed, ^peer}, 5_000
   end
 
-  defp peer(bytes, backend) do
+  defp peer(bytes, _backend) do
     parent = self()
     transport = :ssl
 
@@ -131,7 +131,6 @@ defmodule HTTP.HTTP1VersionWireTest do
     end)
 
     options = [
-      tls_backend: backend,
       ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem"), versions: [:"tlsv1.3"]]
     ]
 

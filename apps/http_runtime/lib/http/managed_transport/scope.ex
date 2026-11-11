@@ -99,10 +99,9 @@ defmodule HTTP.ManagedTransport.Scope do
         token = make_ref()
 
         provider =
-          if state.policy.transport[:tls_backend] == :ex_ssl and
-               state.policy.origin.scheme == "https",
-             do: :birth,
-             else: nil
+          if state.policy.origin.scheme == "https",
+            do: :birth,
+            else: nil
 
         slot = %{
           tracker: tracker,

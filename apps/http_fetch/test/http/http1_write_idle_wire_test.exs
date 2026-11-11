@@ -9,7 +9,7 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
   @wait 8_000
   @chunk :binary.copy(<<0, 255, 128, 1>>, 4_096)
 
-  for backend <- [:tcp, nil, :ex_ssl] do
+  for backend <- [:tcp, :ex_ssl] do
     test "#{backend} a nonreading peer expires streamed writes and closes the source" do
       backend = unquote(backend)
       {peer, url} = peer(backend)
@@ -234,7 +234,7 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
     end
   end
 
-  defp fetch(url, backend, options) do
+  defp fetch(url, _backend, options) do
     HTTP.fetch(
       url,
       Keyword.merge(
@@ -242,7 +242,6 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
           http_version: :http1,
           redirect: :manual,
           method: :post,
-          tls_backend: if(backend == :tcp, do: nil, else: backend),
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
           socket_opts: [sndbuf: 4_096],
           decode_body: false,
@@ -464,7 +463,7 @@ defmodule HTTP.HTTP1WriteIdleWireTest do
 
   # Observe the original native owner independently of the HTTP upload worker.
   defp observe_provider(backend, {server, client}, %{completion: %{tracker: tracker}})
-       when backend in [nil, :ex_ssl] do
+       when backend in [:ex_ssl] do
     [handle] = Map.keys(:sys.get_state(tracker, 1_000).providers)
     provider = Probe.graph_handle(handle)
     on_exit(fn -> Probe.release_monitors(provider) end)

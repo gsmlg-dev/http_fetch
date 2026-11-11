@@ -133,9 +133,9 @@ defmodule HTTP.RequestErrorWireTest do
     end
   end
 
-  for {scheme, backend} <- [{"http", []}, {"https", []}, {"https", [tls_backend: :ex_ssl]}] do
+  for scheme <- ["http", "https"] do
     @tag :integration
-    test "#{scheme} #{inspect(backend)} refusal exposes pre-send evidence and caller can try a second validated pin" do
+    test "#{scheme} refusal exposes pre-send evidence and caller can try a second validated pin" do
       {refused, listener, port} = paired_listeners(10, 16)
       :ok = :gen_tcp.close(refused)
       on_exit(fn -> :gen_tcp.close(listener) end)
@@ -149,7 +149,7 @@ defmodule HTTP.RequestErrorWireTest do
           telemetry: false,
           error_mode: :structured,
           ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")]
-        ] ++ unquote(backend)
+        ]
 
       refused_promise = HTTP.fetch(url, options ++ [connect_address: @ipv6])
 

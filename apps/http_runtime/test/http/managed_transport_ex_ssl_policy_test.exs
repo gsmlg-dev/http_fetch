@@ -3,15 +3,16 @@ defmodule HTTP.ManagedTransportExSSLPolicyTest do
 
   alias HTTP.ManagedTransport.Policy
 
-  test "explicit ExSSL selectors freeze the normalized backend and immutable security identity" do
-    assert {:ok, policy} = freeze(:ex_ssl)
-    assert policy.transport[:tls_backend] == :ex_ssl
-    assert {:ok, same} = freeze("ex_ssl")
-    assert same == policy
-    assert {:error, :invalid_tls_backend} = freeze(:ssl)
-    assert {:error, :invalid_tls_backend} = freeze("ssl")
+  test "policies freeze the immutable security identity and reject the removed tls_backend option" do
+    assert {:ok, policy} = freeze()
     assert {:ok, default} = Policy.freeze(options() ++ [ssl: [cacerts: []]])
-    assert default.transport[:tls_backend] == :ex_ssl
+    assert default == policy
+    refute Keyword.has_key?(policy.transport, :tls_backend)
+
+    for backend <- [:ex_ssl, "ex_ssl", :ssl, "ssl"] do
+      assert {:error, _reason} =
+               Policy.freeze(options() ++ [tls_backend: backend, ssl: [cacerts: []]])
+    end
   end
 
   test "inline CA cert key and socket policy are copied without changing explicit settings" do
@@ -22,7 +23,7 @@ defmodule HTTP.ManagedTransportExSSLPolicyTest do
     sockets = [buffer: 32_768, sndbuf: 65_536, recbuf: 49_152, nodelay: true]
 
     assert {:ok, policy} =
-             Policy.freeze(options() ++ [tls_backend: :ex_ssl, ssl: ssl, socket_opts: sockets])
+             Policy.freeze(options() ++ [ssl: ssl, socket_opts: sockets])
 
     assert Keyword.take(policy.transport[:socket_opts], Keyword.keys(sockets)) == sockets
     assert policy.transport[:socket_opts][:send_timeout_close] == true
@@ -43,27 +44,25 @@ defmodule HTTP.ManagedTransportExSSLPolicyTest do
           [password: "secret"],
           [certs_keys: []]
         ] do
-      assert {:error, :invalid_transport_scope_tls_policy} = freeze(:ex_ssl, ssl)
+      assert {:error, :invalid_transport_scope_tls_policy} = freeze(ssl)
     end
-
-    assert {:error, :invalid_tls_backend} = freeze(:other)
   end
 
   test "origin SNI and protocol policy stay isolated and immutable" do
-    assert {:ok, h1} = freeze(:ex_ssl, alpn_advertised_protocols: ["http/1.1"])
+    assert {:ok, h1} = freeze(alpn_advertised_protocols: ["http/1.1"])
     assert h1.transport[:ssl][:server_name_indication] == ~c"localhost"
 
     assert {:error, :invalid_transport_scope_tls_policy} =
-             freeze(:ex_ssl, server_name_indication: ~c"other")
+             freeze(server_name_indication: ~c"other")
 
     assert {:error, :invalid_transport_scope_tls_policy} =
              Policy.freeze(
                options(:http2) ++
-                 [tls_backend: :ex_ssl, ssl: [cacerts: [], alpn_advertised_protocols: ["h2"]]]
+                 [ssl: [cacerts: [], alpn_advertised_protocols: ["h2"]]]
              )
 
     assert {:ok, h2} =
-             Policy.freeze(options(:http2) ++ [tls_backend: :ex_ssl, ssl: [cacerts: []]])
+             Policy.freeze(options(:http2) ++ [ssl: [cacerts: []]])
 
     refute h1.identity == h2.identity
   end
@@ -71,8 +70,8 @@ defmodule HTTP.ManagedTransportExSSLPolicyTest do
   defp options(protocol \\ :http1),
     do: [origin: "https://localhost", connect_address: {127, 0, 0, 1}, http_version: protocol]
 
-  defp freeze(backend, ssl \\ []),
-    do: Policy.freeze(options() ++ [tls_backend: backend, ssl: [cacerts: []] ++ ssl])
+  defp freeze(ssl \\ []),
+    do: Policy.freeze(options() ++ [ssl: [cacerts: []] ++ ssl])
 
   defp borrowed(value),
     do: binary_part(value <> :binary.copy(<<0>>, 1_048_576), 0, byte_size(value))

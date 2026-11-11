@@ -63,7 +63,6 @@ defmodule HTTP.FetchOptionsTest do
           "method" => "POST",
           "redirect" => "manual",
           "httpVersion" => "h2",
-          "tlsBackend" => "ex_ssl",
           "connectTimeout" => 2_000
         })
 
@@ -71,7 +70,6 @@ defmodule HTTP.FetchOptionsTest do
                method: :post,
                redirect: :manual,
                http_version: :http2,
-               tls_backend: :ex_ssl,
                connect_timeout: 2_000
              } =
                options
@@ -251,26 +249,17 @@ defmodule HTTP.FetchOptionsTest do
       end
     end
 
-    test "normalizes TLS backend selection" do
-      assert %HTTP.FetchOptions{tls_backend: :ex_ssl} = HTTP.FetchOptions.new([])
-
-      for backend <- [:ssl, "ssl"] do
-        assert_raise ArgumentError, ~r/unsupported tls_backend.*expected :ex_ssl/, fn ->
-          HTTP.FetchOptions.new(tls_backend: backend)
+    test "rejects the removed tls_backend option as unknown" do
+      for init <- [
+            [tls_backend: :ex_ssl],
+            [tls_backend: nil],
+            [tls_backend: :ssl],
+            %{"tls_backend" => "ex_ssl"},
+            %{"tlsBackend" => "ex_ssl"}
+          ] do
+        assert_raise ArgumentError, ~r/unknown fetch option/, fn ->
+          HTTP.FetchOptions.new(init)
         end
-      end
-
-      assert %HTTP.FetchOptions{tls_backend: :ex_ssl} =
-               HTTP.FetchOptions.new(%{"tlsBackend" => "ex_ssl"})
-    end
-
-    test "rejects invalid TLS backend selection" do
-      assert_raise ArgumentError, ~r/unsupported tls_backend/, fn ->
-        HTTP.FetchOptions.new(tls_backend: :invalid)
-      end
-
-      assert_raise ArgumentError, ~r/unsupported tls_backend/, fn ->
-        HTTP.FetchOptions.new(tls_backend: "SSL")
       end
     end
 
@@ -300,19 +289,6 @@ defmodule HTTP.FetchOptionsTest do
         HTTP.FetchOptions.new(http2_unknown: true)
       end
     end
-
-    test "does not resolve a nil TLS backend for HTTP/3" do
-      assert %HTTP.FetchOptions{http_version: :http3, tls_backend: nil} =
-               HTTP.FetchOptions.new(http_version: :http3)
-    end
-
-    test "preserves explicit TLS backend markers for HTTP/3" do
-      assert %HTTP.FetchOptions{tls_backend: false} =
-               HTTP.FetchOptions.new(http_version: :http3, tls_backend: false)
-
-      assert %HTTP.FetchOptions{tls_backend: :unknown} =
-               HTTP.FetchOptions.new(http_version: :http3, tls_backend: :unknown)
-    end
   end
 
   describe "to_transport_options/1" do
@@ -323,7 +299,6 @@ defmodule HTTP.FetchOptionsTest do
           connect_timeout: 2_000,
           redirect: :manual,
           http_version: :http2,
-          tls_backend: :ex_ssl,
           ssl: [verify: :verify_none],
           socket_opts: [:inet6]
         )
@@ -333,7 +308,6 @@ defmodule HTTP.FetchOptionsTest do
       assert transport_options[:connect_timeout] == 2_000
       assert transport_options[:redirect] == :manual
       assert transport_options[:http_version] == :http2
-      assert transport_options[:tls_backend] == :ex_ssl
       assert transport_options[:ssl] == [verify: :verify_none]
       assert transport_options[:socket_opts] == [:inet6]
     end
@@ -386,10 +360,9 @@ defmodule HTTP.FetchOptionsTest do
       options = HTTP.FetchOptions.new(http_version: :auto)
       assert options.alt_svc == false
       refute Keyword.has_key?(HTTP.FetchOptions.to_transport_options(options), :alt_svc)
-      assert options.tls_backend == :ex_ssl
     end
 
-    test "requires http_version :auto and defers the default TLS backend" do
+    test "requires http_version :auto" do
       for init <- [
             [http_version: :auto, alt_svc: true],
             %{"httpVersion" => "auto", "altSvc" => true},
@@ -398,11 +371,7 @@ defmodule HTTP.FetchOptionsTest do
         options = HTTP.FetchOptions.new(init)
         transport = HTTP.FetchOptions.to_transport_options(options)
         assert transport[:alt_svc] == true
-        assert options.tls_backend == nil
       end
-
-      explicit = HTTP.FetchOptions.new(http_version: :auto, alt_svc: true, tls_backend: :ex_ssl)
-      assert explicit.tls_backend == :ex_ssl
     end
 
     test "rejects other versions and non-boolean values" do

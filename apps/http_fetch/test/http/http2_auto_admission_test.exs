@@ -24,7 +24,7 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
     {:ok, pool: pool}
   end
 
-  for backend <- [nil, :ex_ssl] do
+  for backend <- [:ex_ssl] do
     @tag backend: backend, admission_cold: true
     test "cold auto HTTPS bounds actual TCP accepts for #{backend}", %{
       pool: pool,
@@ -233,7 +233,6 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
         body: upload,
         duplex: :half,
         http_version: :auto,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
       )
 
@@ -265,7 +264,7 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
     end
   end
 
-  defp request(url, backend, options \\ []) do
+  defp request(url, _backend, options \\ []) do
     %Request{
       url: URI.parse(url),
       method: "GET",
@@ -274,7 +273,6 @@ defmodule HTTP.HTTP2AutoAdmissionTest do
         Keyword.merge(
           [
             http_version: :auto,
-            tls_backend: backend,
             timeout: 10_000,
             ssl: [verify: :verify_peer, cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
           ],

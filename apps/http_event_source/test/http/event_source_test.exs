@@ -114,60 +114,25 @@ defmodule HTTP.EventSourceTest do
   end
 
   @tag :integration
-  test "delivers events over verified TLS 1.3 for each backend" do
-    for backend <- [nil, :ex_ssl] do
-      {:ok, _server, port} =
-        HTTPEventSource.TestServer.start_link(
-          tls: true,
-          certfile: @certfile,
-          keyfile: @keyfile,
-          body: "data: secure\n\n",
-          close: false
-        )
-
-      source =
-        EventSource.new("https://127.0.0.1:#{port}/events",
-          tls_backend: backend,
-          ssl: [cacertfile: @cacertfile]
-        )
-
-      assert_receive {EventSource, ^source, %Open{}}, 1_000
-      assert_receive {EventSource, ^source, %Message{data: "secure"}}, 1_000
-      assert :ok = EventSource.close(source)
-      assert_receive :event_source_server_closed, 1_000
-    end
-  end
-
-  @tag :integration
-  test "retains the configured TLS backend across reconnects" do
-    previous = Application.get_env(:http_core, :tls_backend)
-    on_exit(fn -> restore_tls_backend(previous) end)
-    Application.put_env(:http_core, :tls_backend, :ex_ssl)
-
-    {:ok, server, port} =
+  test "delivers events over verified TLS 1.3" do
+    {:ok, _server, port} =
       HTTPEventSource.TestServer.start_link(
         tls: true,
         certfile: @certfile,
         keyfile: @keyfile,
-        responses: [
-          [body: "data: first\n\n", wait_for: :close_first_response],
-          [body: "data: second\n\n", close: false]
-        ]
+        body: "data: secure\n\n",
+        close: false
       )
 
     source =
       EventSource.new("https://127.0.0.1:#{port}/events",
-        ssl: [cacertfile: @cacertfile],
-        reconnect_time: 10
+        ssl: [cacertfile: @cacertfile]
       )
 
-    assert_receive {:event_source_server_request, _first_request}, 1_000
-    assert_receive {EventSource, ^source, %Message{data: "first"}}, 1_000
-    Application.put_env(:http_core, :tls_backend, :invalid)
-    refute_receive {:event_source_server_request, _request}, 50
-    send(server, :close_first_response)
-    assert_receive {EventSource, ^source, %Message{data: "second"}}, 1_000
+    assert_receive {EventSource, ^source, %Open{}}, 1_000
+    assert_receive {EventSource, ^source, %Message{data: "secure"}}, 1_000
     assert :ok = EventSource.close(source)
+    assert_receive :event_source_server_closed, 1_000
   end
 
   test "rejects invalid constructor input synchronously" do
@@ -278,7 +243,6 @@ defmodule HTTP.EventSourceTest do
 
     source =
       EventSource.new("https://127.0.0.1:#{port}/events",
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile],
         reconnect_time: 60_000
       )
@@ -301,7 +265,4 @@ defmodule HTTP.EventSourceTest do
     assert_receive {EventSource, ^source, %Error{reason: :eof}}, 5_000
     assert :ok = EventSource.close(source)
   end
-
-  defp restore_tls_backend(nil), do: Application.delete_env(:http_core, :tls_backend)
-  defp restore_tls_backend(value), do: Application.put_env(:http_core, :tls_backend, value)
 end

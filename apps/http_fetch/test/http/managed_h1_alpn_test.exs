@@ -45,7 +45,7 @@ defmodule HTTP.ManagedH1ALPNTest do
       end
 
       body = <<0, 13, 10, 255, 42>>
-      second = fetch(origin <> "/second", scope, method: :post, body: body, tls_backend: :ex_ssl)
+      second = fetch(origin <> "/second", scope, method: :post, body: body)
       assert %Response{status: 200} = response = Promise.await(second, 5_000)
 
       assert event(peer, "request") == %{
@@ -116,7 +116,6 @@ defmodule HTTP.ManagedH1ALPNTest do
                origin: origin,
                connect_address: {127, 0, 0, 1},
                http_version: :http1,
-               tls_backend: :ex_ssl,
                max_connections: 2,
                max_requests: 32,
                max_pending: 0,

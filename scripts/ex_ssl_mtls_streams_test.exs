@@ -38,10 +38,7 @@ defmodule CandidateMtlsStreamsTest do
     %{listener: listener, port: port, task: task} = start_web_socket_peer(self(), ref, fixtures)
 
     socket =
-      WebSocket.new("wss://127.0.0.1:#{port}/socket", [],
-        tls_backend: :ex_ssl,
-        ssl: client_ssl_options(fixtures)
-      )
+      WebSocket.new("wss://127.0.0.1:#{port}/socket", [], ssl: client_ssl_options(fixtures))
 
     try do
       assert_receive {:mtls_wss, ^ref, :authenticated, client_der}, @timeout
@@ -66,18 +63,14 @@ defmodule CandidateMtlsStreamsTest do
     end
   end
 
-  test "packaged EventSource reconnects to the same mTLS endpoint with its pinned backend", %{
+  test "packaged EventSource reconnects to the same mTLS endpoint", %{
     fixtures: fixtures
   } do
     ref = make_ref()
     %{listener: listener, port: port, task: task} = start_event_source_peer(self(), ref, fixtures)
-    previous_backend = Application.get_env(:http_core, :tls_backend, :unset)
-
-    on_exit(fn -> restore_backend(previous_backend) end)
 
     source =
       EventSource.new("https://127.0.0.1:#{port}/events",
-        tls_backend: :ex_ssl,
         reconnect_time: 10,
         ssl: client_ssl_options(fixtures)
       )
@@ -94,8 +87,6 @@ defmodule CandidateMtlsStreamsTest do
 
       assert_receive {:mtls_sse, ^ref, :first_ready}, @timeout
 
-      Application.put_env(:http_core, :tls_backend, :invalid)
-      assert %{tls_backend: :ex_ssl} = :sys.get_state(source.pid)
       send(task.pid, {:close_first, ref})
       assert_receive {:mtls_sse, ^ref, :first_closed}, @timeout
       assert_receive {EventSource, ^source, %Error{reason: :eof}}, @timeout
@@ -315,7 +306,4 @@ defmodule CandidateMtlsStreamsTest do
     _ = :ssl.close(listener)
     if Process.alive?(task.pid), do: Task.shutdown(task, :brutal_kill)
   end
-
-  defp restore_backend(:unset), do: Application.delete_env(:http_core, :tls_backend)
-  defp restore_backend(value), do: Application.put_env(:http_core, :tls_backend, value)
 end

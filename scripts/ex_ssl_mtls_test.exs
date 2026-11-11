@@ -123,7 +123,6 @@ defmodule CandidateMTLSTest do
 
     HTTP.fetch("https://127.0.0.1:#{port}#{@path}",
       http_version: if(protocol == "h2", do: :http2, else: :http1),
-      tls_backend: :ex_ssl,
       ssl: ssl,
       timeout: 5_000,
       connect_timeout: 5_000

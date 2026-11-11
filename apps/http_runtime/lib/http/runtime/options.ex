@@ -44,14 +44,12 @@ defmodule HTTP.Runtime.Options do
          :ok <-
            positive(Keyword.get(init, :max_queue_bytes, 2_097_152), :invalid_max_queue_bytes),
          :ok <- positive(Keyword.get(init, :max_queue_events, 64), :invalid_max_queue_events),
-         {:ok, backend} <- backend(version, init[:tls_backend]),
          init =
            init
            |> Keyword.put(:http_version, version)
            |> Keyword.put(:http2_profile, profile)
            |> Keyword.put(:http2_reuse, Keyword.get(init, :http2_reuse, true))
-           |> Keyword.put(:delivery, delivery)
-           |> Keyword.put(:tls_backend, backend),
+           |> Keyword.put(:delivery, delivery),
          request = %Request{
            url: origin_uri(uri),
            transport_options: transport_options(Map.new(init))
@@ -74,7 +72,6 @@ defmodule HTTP.Runtime.Options do
           :http3_profile,
           :http3_reuse,
           :http3_resumption,
-          :tls_backend,
           :ssl,
           :socket_opts,
           :connect_timeout,
@@ -98,10 +95,6 @@ defmodule HTTP.Runtime.Options do
 
   defp version(value, true) when value in [:http3, "http3", "h3"], do: {:ok, :http3}
   defp version(value, _allow_http3), do: version(value)
-
-  defp backend(:http3, nil), do: {:ok, nil}
-  defp backend(:http3, _value), do: {:error, :tls_backend_not_supported_for_quic}
-  defp backend(_version, value), do: HTTP.TLSBackend.resolve(value)
 
   defp protocol_selection(request, init) do
     cond do

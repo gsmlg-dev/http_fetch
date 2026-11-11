@@ -35,7 +35,6 @@ defmodule HTTP.IdentityCompletionIntegrationTest do
           HTTP.fetch(
             F.url(peer),
             [
-              tls_backend: :ex_ssl,
               http_version: protocol,
               redirect: :manual,
               ssl: ssl,
@@ -89,7 +88,6 @@ defmodule HTTP.IdentityCompletionIntegrationTest do
       HTTP.fetch(
         F.url(peer),
         [
-          tls_backend: :ex_ssl,
           http_version: protocol,
           redirect: :manual,
           ssl: ssl,
@@ -171,7 +169,6 @@ defmodule HTTP.IdentityCompletionIntegrationTest do
 
     options =
       [
-        tls_backend: :ex_ssl,
         http_version: :http2,
         redirect: :manual,
         ssl: ssl,
@@ -286,7 +283,6 @@ defmodule HTTP.IdentityCompletionIntegrationTest do
       promise =
         HTTP.fetch(F.url(peer),
           transport_scope: scope,
-          tls_backend: :ex_ssl,
           http_version: :http1,
           redirect: :manual,
           decode_body: false,
@@ -325,7 +321,6 @@ defmodule HTTP.IdentityCompletionIntegrationTest do
       origin: origin,
       connect_address: {127, 0, 0, 1},
       http_version: :http1,
-      tls_backend: :ex_ssl,
       max_requests: 1,
       max_connections: 1,
       ssl: [

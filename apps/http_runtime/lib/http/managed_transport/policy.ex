@@ -39,7 +39,6 @@ defmodule HTTP.ManagedTransport.Policy do
     :origin,
     :connect_address,
     :http_version,
-    :tls_backend,
     :ssl,
     :socket_opts,
     :max_requests,
@@ -59,7 +58,6 @@ defmodule HTTP.ManagedTransport.Policy do
          version when version in [:http1, :http2, :h2c] <- opts[:http_version],
          true <- version != :h2c or origin.scheme == "http",
          true <- version != :http2 or origin.scheme == "https",
-         {:ok, backend} <- HTTP.TLSBackend.resolve(opts[:tls_backend]),
          true <- Keyword.get(opts, :http2_profile, :native_v1) == :native_v1,
          true <- Keyword.get(opts, :max_pending, 0) == 0,
          {:ok, requests} <- limit(opts, :max_requests, 100, 2_048),
@@ -79,7 +77,6 @@ defmodule HTTP.ManagedTransport.Policy do
         [
           http_version: version,
           connect_address: opts[:connect_address],
-          tls_backend: backend,
           ssl: ssl,
           socket_opts: sockets
         ] ++

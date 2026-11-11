@@ -101,7 +101,7 @@ defmodule HTTP.FetchOptions do
     the origin). A later eligible `https` request with a fresh entry uses HTTP/3
     on the alternative UDP port, keeping the origin authority, SNI and
     certificate identity. Requests with a proxy, Unix socket, `connect_address`,
-    explicit `tls_backend`, `socket_opts`, `http2_profile`, `transport_scope` or
+    `socket_opts`, `http2_profile`, `transport_scope` or
     explicit `pool` never use the alternative. If the QUIC connection is never
     established (`{:http3_not_established, _}` or `:opening_timeout`), the
     request runs on the normal `:auto` H2/HTTP/1.1 path within the original
@@ -113,10 +113,7 @@ defmodule HTTP.FetchOptions do
     For a proxy route this policy selects the proxy endpoint address family.
   - `response_header_limits` - Request-local HTTP/1 and CONNECT budgets; see
     `HTTP.ResponseHeaderLimits`. Also applies to informational and redirect heads.
-  - `tls_backend` - TLS implementation, `:ex_ssl`; defaults to the shared
-    `:http_core, :tls_backend` configuration, falling back to `:ex_ssl`.
-    Legacy `:ssl` selections return an explicit configuration error
-  - `ssl` - TLS options passed to the selected TLS backend
+  - `ssl` - TLS options passed to the `ex_ssl` TLS engine
   - `socket_opts` - socket options passed to the underlying transport
   - `unix_socket` - Unix Domain Socket path
   - `http1_reuse` - opt in to HTTP/1 keep-alive; requires `http_version: :http1`.
@@ -138,7 +135,7 @@ defmodule HTTP.FetchOptions do
     selection belongs to the caller.
     HTTPS proxies support HTTP/1 forwarding to HTTP origins and CONNECT tunnels
     to HTTPS origins. Proxy `ssl` settings verify the proxy independently from
-    origin `ssl` settings; `tls_backend` selects the provider for both layers.
+    origin `ssl` settings.
     Proxy scheme, endpoint, credentials and both TLS policies isolate pools.
   - `http2_profile` - versioned HTTP/2 wire profile (only used by HTTP/2)
   - `http2_reuse` - whether an HTTP/2 connection may be reused; defaults to `true`
@@ -233,8 +230,6 @@ defmodule HTTP.FetchOptions do
     "socket_opts" => :socket_opts,
     "socketOpts" => :socket_opts,
     "ssl" => :ssl,
-    "tls_backend" => :tls_backend,
-    "tlsBackend" => :tls_backend,
     "timeout" => :timeout,
     "telemetry" => :telemetry,
     "unix_socket" => :unix_socket,
@@ -259,7 +254,6 @@ defmodule HTTP.FetchOptions do
             redirect: :follow,
             http_version: :http1,
             alt_svc: false,
-            tls_backend: nil,
             timeout: nil,
             error_mode: :raw,
             connect_timeout: nil,
@@ -288,7 +282,6 @@ defmodule HTTP.FetchOptions do
 
   @type redirect :: :follow | :manual | :error
   @type http_version :: :http1 | :http2 | :http3 | :h2c | :auto
-  @type tls_backend :: term()
 
   @type t :: %__MODULE__{
           adapter: module() | {module(), term()} | nil,
@@ -308,7 +301,6 @@ defmodule HTTP.FetchOptions do
           redirect: redirect(),
           http_version: http_version(),
           alt_svc: boolean(),
-          tls_backend: tls_backend(),
           timeout: timeout() | nil,
           error_mode: :raw | :structured,
           connect_timeout: timeout() | nil,
@@ -383,7 +375,6 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:redirect, options.redirect)
     |> maybe_add(:http_version, options.http_version)
     |> maybe_add(:alt_svc, if(options.alt_svc, do: true))
-    |> maybe_add(:tls_backend, options.tls_backend)
     |> maybe_add(:http1_reuse, if(options.http1_reuse, do: true, else: nil))
     |> maybe_add(:http1_scope, options.http1_scope)
     |> maybe_add(:http1_pool_size, if(options.http1_reuse, do: options.http1_pool_size))
@@ -483,9 +474,6 @@ defmodule HTTP.FetchOptions do
 
       {:alt_svc, alt_svc}, acc ->
         %{acc | alt_svc: alt_svc}
-
-      {:tls_backend, tls_backend}, acc ->
-        %{acc | tls_backend: tls_backend}
 
       {:timeout, timeout}, acc ->
         %{acc | timeout: timeout}
@@ -631,7 +619,6 @@ defmodule HTTP.FetchOptions do
           normalize_response_stream_idle_timeout(options.response_stream_idle_timeout),
         response_stream_ack_timeout:
           normalize_response_stream_ack_timeout(options.response_stream_ack_timeout),
-        tls_backend: normalize_tls_backend(options.tls_backend, http_version, alt_svc),
         http1_reuse: normalize_http1_reuse(options.http1_reuse, http_version),
         http1_scope: normalize_http2_scope(options.http1_scope),
         http1_pool_size: normalize_http1_limit(options.http1_pool_size, 16, :http1_pool_size),
@@ -882,14 +869,6 @@ defmodule HTTP.FetchOptions do
     "unsupported http_version: #{inspect(http_version)}; expected :http1, :http2, :http3, :h2c, or :auto"
   end
 
-  defp normalize_tls_backend(nil, :http3, _alt_svc), do: nil
-  defp normalize_tls_backend(tls_backend, :http3, _alt_svc), do: tls_backend
-  # Alt-Svc defers the default backend so an explicit selection stays distinguishable.
-  defp normalize_tls_backend(nil, _http_version, true), do: nil
-
-  defp normalize_tls_backend(tls_backend, _http_version, _alt_svc),
-    do: resolve_tls_backend(tls_backend)
-
   defp normalize_alt_svc(value, _http_version) when value in [nil, false], do: false
   defp normalize_alt_svc(true, :auto), do: true
 
@@ -956,20 +935,6 @@ defmodule HTTP.FetchOptions do
 
   defp http2_option_key?(key) when is_binary(key),
     do: String.starts_with?(key, "http2_") or String.starts_with?(key, "http2")
-
-  defp resolve_tls_backend(tls_backend) do
-    case HTTP.TLSBackend.resolve(tls_backend) do
-      {:ok, backend} ->
-        backend
-
-      {:error, :invalid_tls_backend} ->
-        raise ArgumentError, tls_backend_error_message(tls_backend)
-    end
-  end
-
-  defp tls_backend_error_message(tls_backend) do
-    "unsupported tls_backend: #{inspect(tls_backend)}; expected :ex_ssl"
-  end
 
   defp maybe_add(list, _key, nil), do: list
   defp maybe_add(list, key, value), do: Keyword.put(list, key, value)

@@ -10,7 +10,7 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
-  for backend <- [nil, :ex_ssl], terminal <- [:eof, :close] do
+  for backend <- [:ex_ssl], terminal <- [:eof, :close] do
     test "delivers validated Upgrade bytes when #{backend} closes before ownership transfer with #{terminal}" do
       parent = self()
 
@@ -20,7 +20,6 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
 
       socket =
         WebSocket.new("wss://localhost:#{port}/socket", [],
-          tls_backend: unquote(backend),
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
         )
 
@@ -44,7 +43,7 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
 
         assert pid == socket.pid
 
-        if unquote(backend) in [nil, :ex_ssl] do
+        if unquote(backend) == :ex_ssl do
           tls_monitor = Process.monitor(tls_pid(tls))
           assert_receive {:DOWN, ^tls_monitor, :process, _, reason}, 5_000
           assert reason in [:normal, :noproc]
@@ -73,7 +72,6 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
 
       socket =
         WebSocket.new("wss://localhost:#{port}/socket", [],
-          tls_backend: :ex_ssl,
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
         )
 
@@ -192,7 +190,6 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
 
     socket =
       WebSocket.new("wss://127.0.0.1:#{port}/socket", [],
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
       )
 

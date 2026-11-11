@@ -32,7 +32,6 @@ defmodule HTTP.WebSocket.IdentityCompletionIntegrationTest do
           F.url(peer, "wss"),
           [],
           [
-            tls_backend: :ex_ssl,
             http_version: protocol,
             ssl: ssl,
             opening_timeout: 3_000,
@@ -90,7 +89,6 @@ defmodule HTTP.WebSocket.IdentityCompletionIntegrationTest do
         F.url(peer, "wss"),
         [],
         [
-          tls_backend: :ex_ssl,
           http_version: protocol,
           ssl: ssl,
           opening_timeout: 3_000,
@@ -172,7 +170,6 @@ defmodule HTTP.WebSocket.IdentityCompletionIntegrationTest do
 
     options =
       [
-        tls_backend: :ex_ssl,
         http_version: :http2,
         ssl: ssl,
         opening_timeout: 3_000,

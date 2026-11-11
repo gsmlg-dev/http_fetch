@@ -94,7 +94,6 @@ defmodule CandidateResumptionPolicyTest do
   defp rejected_client(family, port, options) when family in [:http1, :http2] do
     HTTP.fetch("https://127.0.0.1:#{port}/policy",
       http_version: family,
-      tls_backend: :ex_ssl,
       ssl: options,
       timeout: @timeout,
       connect_timeout: @timeout
@@ -105,7 +104,6 @@ defmodule CandidateResumptionPolicyTest do
   defp rejected_client(:wss, port, options) do
     socket =
       WebSocket.new("wss://127.0.0.1:#{port}/policy", [],
-        tls_backend: :ex_ssl,
         ssl: options,
         timeout: @timeout,
         connect_timeout: @timeout
@@ -134,7 +132,6 @@ defmodule CandidateResumptionPolicyTest do
   defp rejected_client(:sse, port, options) do
     source =
       EventSource.new("https://127.0.0.1:#{port}/policy",
-        tls_backend: :ex_ssl,
         ssl: options,
         connect_timeout: @timeout,
         reconnect_time: 60_000,
@@ -172,7 +169,6 @@ defmodule CandidateResumptionPolicyTest do
     response =
       HTTP.fetch("https://127.0.0.1:#{port}/warm",
         http_version: if(family == :http2, do: :http2, else: :http1),
-        tls_backend: :ex_ssl,
         ssl: ssl(f, family),
         timeout: @timeout
       )

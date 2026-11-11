@@ -178,7 +178,6 @@ defmodule CandidateOptionsTest do
         context.fixtures,
         fn port ->
           HTTP.fetch("https://localhost:#{port}/options",
-            tls_backend: :ex_ssl,
             ssl: tls_options(context.fixtures),
             socket_opts: [ip: {0, 0, 0, 0, 0, 0, 0, 1}],
             timeout: 5_000,
@@ -209,7 +208,6 @@ defmodule CandidateOptionsTest do
       assert_before_io(fn port ->
         assert {:error, {:options, _}} =
                  HTTP.fetch("https://127.0.0.1:#{port}/options",
-                   tls_backend: :ex_ssl,
                    socket_opts: socket_opts,
                    timeout: 2_000,
                    connect_timeout: 2_000
@@ -224,7 +222,6 @@ defmodule CandidateOptionsTest do
       assert {:error, {:options, _}} =
                HTTP.fetch("https://127.0.0.1:#{port}/options",
                  http_version: :http2,
-                 tls_backend: :ex_ssl,
                  ssl: [{:verify, :verify_peer} | :improper],
                  timeout: 2_000,
                  connect_timeout: 2_000
@@ -239,7 +236,6 @@ defmodule CandidateOptionsTest do
     HTTP.fetch(
       "https://127.0.0.1:#{port}/options",
       [
-        tls_backend: :ex_ssl,
         ssl: ssl,
         timeout: 5_000,
         connect_timeout: 5_000

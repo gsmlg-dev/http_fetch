@@ -315,7 +315,6 @@ defmodule HTTP.FetchHTTP3Test do
   @tag :integration
   test "H3 incompatible TCP routes are rejected explicitly", context do
     for {option, error} <- [
-          {{:tls_backend, :ssl}, :tls_backend_not_supported_for_quic},
           {{:proxy, "http://127.0.0.1:1"}, :proxy_not_supported_for_quic},
           {{:socket_opts, [nodelay: true]}, :socket_opts_not_supported_for_quic},
           {{:http2_profile, :native_v1}, :http2_profile_not_supported_for_quic}

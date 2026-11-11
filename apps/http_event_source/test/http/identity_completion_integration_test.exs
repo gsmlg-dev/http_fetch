@@ -31,7 +31,6 @@ defmodule HTTP.EventSource.IdentityCompletionIntegrationTest do
         EventSource.new(
           F.url(peer),
           [
-            tls_backend: :ex_ssl,
             http_version: protocol,
             ssl: ssl,
             connect_timeout: 3_000,
@@ -88,7 +87,6 @@ defmodule HTTP.EventSource.IdentityCompletionIntegrationTest do
       EventSource.new(
         F.url(peer),
         [
-          tls_backend: :ex_ssl,
           http_version: protocol,
           ssl: ssl,
           connect_timeout: 3_000,
@@ -170,7 +168,6 @@ defmodule HTTP.EventSource.IdentityCompletionIntegrationTest do
 
     options =
       [
-        tls_backend: :ex_ssl,
         http_version: :http2,
         ssl: ssl,
         connect_timeout: 3_000,

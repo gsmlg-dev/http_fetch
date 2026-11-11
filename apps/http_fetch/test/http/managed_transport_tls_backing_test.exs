@@ -51,8 +51,7 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
     retire(compact)
   end
 
-  for backend <- [:default, :ex_ssl],
-      version <- [:"tlsv1.2", :"tlsv1.3"],
+  for version <- [:"tlsv1.2", :"tlsv1.3"],
       {host, ca_file, rejection} <- [
         {"localhost", "pinned-ca.pem", :wrong_ca},
         {"wrong.invalid", "localhost-ca.pem", :wrong_identity}
@@ -66,12 +65,12 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
 
     cleanup = :ok
 
-    test "#{backend} #{version} borrowed CA keeps #{rejection} #{alert} refusal without HTTP bytes or replay" do
-      {origin, peer} = rejection_peer(unquote(host), unquote(backend), unquote(version))
+    test "#{version} borrowed CA keeps #{rejection} #{alert} refusal without HTTP bytes or replay" do
+      {origin, peer} = rejection_peer(unquote(host), unquote(version))
 
       try do
         {scope, input_bytes, backing_bytes} =
-          borrowed_scope(origin, unquote(ca_file), unquote(backend), unquote(version))
+          borrowed_scope(origin, unquote(ca_file), unquote(version))
 
         assert backing_bytes > input_bytes
         :erlang.garbage_collect(self())
@@ -93,7 +92,7 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
   end
 
   # OTP's TLS 1.2 peer lacks required EMS, so it cannot reach ExSSL certificate checks.
-  defp rejection_peer(host, backend, :"tlsv1.2") when backend in [:default, :ex_ssl] do
+  defp rejection_peer(host, :"tlsv1.2") do
     port =
       Port.open({:spawn_executable, System.find_executable("python3")}, [
         :binary,
@@ -121,7 +120,7 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
     {"https://#{host}:#{number}", {:openssl, port}}
   end
 
-  defp rejection_peer(host, _, _) do
+  defp rejection_peer(host, _version) do
     {origin, listener} = listener(host)
     {origin, {:otp, listener, peer(listener)}}
   end
@@ -178,7 +177,7 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
     assert Port.info(port) == nil
   end
 
-  defp borrowed_scope(origin, name, backend \\ :default, version \\ nil) do
+  defp borrowed_scope(origin, name, version \\ nil) do
     parent = self()
 
     {helper, monitor} =
@@ -203,7 +202,7 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
         ssl_options =
           if version, do: Keyword.put(ssl_options, :versions, [version]), else: ssl_options
 
-        scope = open(origin, ssl_options, backend)
+        scope = open(origin, ssl_options)
         {scope, byte_size(der), backing_bytes}
     after
       3_000 -> flunk("missing finite borrowed CA fixture")
@@ -227,7 +226,7 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
     ]
   end
 
-  defp open(origin, ssl, backend \\ :default) do
+  defp open(origin, ssl) do
     options = [
       origin: origin,
       connect_address: {127, 0, 0, 1},
@@ -245,9 +244,6 @@ defmodule HTTP.ManagedTransportTLSBackingTest do
       ],
       ssl: ssl
     ]
-
-    options =
-      if backend == :default, do: options, else: Keyword.put(options, :tls_backend, backend)
 
     assert {:ok, scope} = ManagedTransport.open(options)
 

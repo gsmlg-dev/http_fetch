@@ -23,7 +23,6 @@ defmodule HTTP.R47MultiClientIdentityEventSourceTest do
         F.with_peer(m, [version: version, hint: "client-a", application: "sse"], fn port ->
           source =
             EventSource.new("https://127.0.0.1:#{port}/r47",
-              tls_backend: :ex_ssl,
               http_version: :http1,
               ssl: F.options(m, ["p256-b", "rsa2048-a"], version)
             )

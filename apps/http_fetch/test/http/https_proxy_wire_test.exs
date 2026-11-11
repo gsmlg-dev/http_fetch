@@ -4,14 +4,13 @@ defmodule HTTP.HTTPSProxyWireTest do
 
   @fixtures Path.expand("../support/fixtures", __DIR__)
 
-  for backend <- [nil, :ex_ssl] do
+  for backend <- [:ex_ssl] do
     test "#{backend} TLS proxy forwards exact entities in absolute form and reuses by proxy credentials" do
       {port, peer} = proxy_peer()
       route = {:https, "localhost", port, [headers: [{"Proxy-Authorization", "Basic first"}]]}
 
       options = [
         proxy: route,
-        tls_backend: unquote(backend),
         ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
         http1_reuse: true,
         http1_scope: "https-proxy-#{System.unique_integer([:positive])}",
@@ -70,14 +69,13 @@ defmodule HTTP.HTTPSProxyWireTest do
     end
   end
 
-  for backend <- [nil, :ex_ssl] do
+  for backend <- [:ex_ssl] do
     test "#{backend} TLS proxy rejects a trusted certificate for the wrong hostname" do
       {port, _peer} = proxy_peer("pinned")
 
       assert {:error, reason} =
                HTTP.fetch("http://origin.invalid/",
                  proxy: {:https, "localhost", port, []},
-                 tls_backend: unquote(backend),
                  ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")],
                  redirect: :manual,
                  telemetry: false,
@@ -110,7 +108,6 @@ defmodule HTTP.HTTPSProxyWireTest do
     assert {:error, {:tls_alert, {:unknown_ca, _}}} =
              HTTP.fetch("https://origin.invalid/",
                proxy: {:https, "localhost", port, []},
-               tls_backend: :ex_ssl,
                ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")],
                timeout: 2_000,
                redirect: :manual
@@ -165,7 +162,7 @@ defmodule HTTP.HTTPSProxyWireTest do
     refute String.downcase(head) =~ "transfer-encoding"
   end
 
-  for backend <- [nil, :ex_ssl], stop <- [:abort, :deadline] do
+  for backend <- [:ex_ssl], stop <- [:abort, :deadline] do
     test "#{backend} TLS proxy handshake is bounded by #{stop}" do
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
       {:ok, {_, port}} = :inet.sockname(listener)
@@ -175,7 +172,6 @@ defmodule HTTP.HTTPSProxyWireTest do
       promise =
         HTTP.fetch("http://origin.invalid/",
           proxy: {:https, "localhost", port, []},
-          tls_backend: unquote(backend),
           signal: controller,
           redirect: :manual,
           timeout: if(unquote(stop) == :deadline, do: 2_000, else: 5_000)
@@ -230,11 +226,11 @@ defmodule HTTP.HTTPSProxyWireTest do
     {port, peer}
   end
 
-  defp assert_hostname_failure(backend, reason) when backend in [nil, :ex_ssl] do
+  defp assert_hostname_failure(backend, reason) when backend in [:ex_ssl] do
     assert {:tls_alert, {:certificate_unknown, _}} = reason
   end
 
-  defp hostname_alert(backend) when backend in [nil, :ex_ssl], do: :certificate_unknown
+  defp hostname_alert(backend) when backend in [:ex_ssl], do: :certificate_unknown
 
   defp accept(listener, parent) do
     case :ssl.transport_accept(listener) do

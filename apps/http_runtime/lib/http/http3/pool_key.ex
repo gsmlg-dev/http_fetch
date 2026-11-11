@@ -88,9 +88,6 @@ defmodule HTTP.HTTP3.PoolKey do
 
   defp compatible_route(options) do
     cond do
-      options[:tls_backend] != nil ->
-        {:error, :tls_backend_not_supported_for_quic}
-
       options[:unix_socket] != nil ->
         {:error, :unix_socket_not_supported_for_quic}
 

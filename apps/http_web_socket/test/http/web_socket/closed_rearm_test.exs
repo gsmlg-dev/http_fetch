@@ -128,7 +128,7 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
     assert_receive {WebSocket, ^target, %Close{code: 1006, was_clean: false}}
   end
 
-  for backend <- [nil, :ex_ssl], terminal <- [:close, :eof, :truncated, :invalid] do
+  for backend <- [:ex_ssl], terminal <- [:close, :eof, :truncated, :invalid] do
     test "#{backend} processes queued #{terminal} frames before peer EOF finalizes closure" do
       backend = unquote(backend)
       terminal = unquote(terminal)
@@ -137,7 +137,6 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
 
       socket =
         WebSocket.new("wss://127.0.0.1:#{port}/socket", [],
-          tls_backend: backend,
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
         )
 
@@ -442,7 +441,7 @@ defmodule HTTP.WebSocket.ClosedRearmTest do
 
   defp tls_pid(%SSL.Socket{pid: pid}), do: pid
 
-  defp wait_for_tls_data(backend, pid, monitor, _consumer) when backend in [nil, :ex_ssl] do
+  defp wait_for_tls_data(backend, pid, monitor, _consumer) when backend in [:ex_ssl] do
     assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 5_000
   end
 

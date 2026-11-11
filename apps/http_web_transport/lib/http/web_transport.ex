@@ -37,9 +37,7 @@ defmodule HTTP.WebTransport do
   They are not QUIC wire counters: packet, retransmission and RTT statistics
   are not measured.
 
-  QUIC TLS configuration is separate from TCP TLS. The shared
-  `:http_core, :tls_backend` configuration does not apply here; an explicit
-  non-nil `tls_backend` option returns `{:error, :tls_backend_not_supported_for_quic}`.
+  QUIC TLS configuration is separate from TCP TLS.
   """
 
   alias HTTP.WebTransport.CloseInfo

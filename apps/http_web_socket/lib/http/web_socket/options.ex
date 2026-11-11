@@ -34,8 +34,6 @@ defmodule HTTP.WebSocket.Options do
     "max_send_frames" => :max_send_frames,
     "max_control_frames" => :max_control_frames,
     "max_frame_parts" => :max_frame_parts,
-    "tls_backend" => :tls_backend,
-    "tlsBackend" => :tls_backend,
     "openingTimeout" => :opening_timeout,
     "idleTimeout" => :idle_timeout,
     "closeTimeout" => :close_timeout,
@@ -60,7 +58,6 @@ defmodule HTTP.WebSocket.Options do
             connect_timeout: @default_connect_timeout,
             ssl: [],
             socket_opts: [],
-            tls_backend: :ex_ssl,
             max_message_size: @default_max_message_size,
             max_frame_bytes: @default_max_message_size,
             max_read_bytes: nil,
@@ -99,7 +96,6 @@ defmodule HTTP.WebSocket.Options do
           connect_timeout: timeout(),
           ssl: keyword(),
           socket_opts: keyword(),
-          tls_backend: HTTP.TLSBackend.t(),
           max_message_size: pos_integer(),
           max_frame_bytes: pos_integer(),
           max_read_bytes: pos_integer() | nil,
@@ -152,7 +148,6 @@ defmodule HTTP.WebSocket.Options do
          connect_timeout: Keyword.get(init, :connect_timeout, @default_connect_timeout),
          ssl: Keyword.get(init, :ssl, []),
          socket_opts: Keyword.get(init, :socket_opts, []),
-         tls_backend: Keyword.fetch!(init, :tls_backend),
          max_message_size: Keyword.get(init, :max_message_size, @default_max_message_size),
          max_frame_bytes:
            Keyword.get(init, :max_frame_bytes, max(valid_message_limit(init), 125)),
@@ -332,12 +327,6 @@ defmodule HTTP.WebSocket.Options do
 
   defp normalize_init(_init), do: {:error, :invalid_options}
 
-  defp normalize_backend(init) do
-    if init[:http_version] in [:http3, "http3", "h3"],
-      do: {:ok, init[:tls_backend]},
-      else: HTTP.TLSBackend.resolve(init[:tls_backend])
-  end
-
   defp normalize_options(init) do
     with {:ok, headers} <- normalize_headers(Keyword.get(init, :headers, [])),
          {:ok, binary_type} <- normalize_binary_type(Keyword.get(init, :binary_type, :blob)),
@@ -345,7 +334,6 @@ defmodule HTTP.WebSocket.Options do
          {:ok, ssl} <- normalize_keyword(Keyword.get(init, :ssl, []), :invalid_ssl_options),
          {:ok, socket_opts} <-
            normalize_keyword(Keyword.get(init, :socket_opts, []), :invalid_socket_options),
-         {:ok, tls_backend} <- normalize_backend(init),
          {:ok, telemetry_url} <-
            normalize_telemetry_url(Keyword.get(init, :telemetry_url, :default)) do
       {:ok,
@@ -355,7 +343,6 @@ defmodule HTTP.WebSocket.Options do
        |> Keyword.put(:owner, owner)
        |> Keyword.put(:ssl, ssl)
        |> Keyword.put(:socket_opts, socket_opts)
-       |> Keyword.put(:tls_backend, tls_backend)
        |> Keyword.put(:connect_address, Keyword.get(init, :connect_address))
        |> Keyword.put(:telemetry_url, telemetry_url)
        |> Keyword.put_new(:max_queue_bytes, 2 * delivery_message_limit(init) + 7)}

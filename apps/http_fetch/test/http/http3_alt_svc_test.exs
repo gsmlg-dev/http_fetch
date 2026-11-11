@@ -128,10 +128,10 @@ defmodule HTTP.FetchHTTP3AltSvcTest do
 
   test "ineligible routes ignore cached alternatives", context do
     Cache.put(context.origin, ~s(h3=":#{context.udp_port}"))
-    serve_h1(context.listener, [], "explicit backend")
+    serve_h1(context.listener, [], "explicit socket options")
 
     assert %HTTP.Response{http_version: :http1} =
-             await(fetch(context, tls_backend: :ex_ssl))
+             await(fetch(context, socket_opts: [nodelay: true]))
   end
 
   defp fetch(context, opts \\ []) do

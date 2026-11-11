@@ -351,7 +351,6 @@ defmodule HTTP.NestedExSSLHTTPSProxyTest do
     promise =
       HTTP.fetch("https://origin.invalid/",
         proxy: {:https, "127.0.0.1", port, []},
-        tls_backend: :ex_ssl,
         ssl: [versions: [:invalid]],
         redirect: :manual,
         telemetry: false
@@ -388,7 +387,6 @@ defmodule HTTP.NestedExSSLHTTPSProxyTest do
   defp options(proxy) do
     [
       proxy: proxy,
-      tls_backend: :ex_ssl,
       ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
       redirect: :manual,
       telemetry: false,

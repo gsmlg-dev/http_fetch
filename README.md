@@ -351,35 +351,20 @@ replayed or returned to the reusable connection pool. If headers already
 resolved a streamed response, its reader receives `:stream_error` instead of
 successful completion. `HTTP.RequestCompletion` remains the cleanup barrier.
 
-## TLS Backend Selection
+## TLS Engine
 
-HTTPS fetch (HTTP/1.1 and HTTP/2), secure WebSocket, and HTTPS EventSource share
-one TLS default: `:ex_ssl` when no configuration is set. Explicit configuration
-is optional:
-
-```elixir
-# config/config.exs or config/runtime.exs
-config :http_core, tls_backend: :ex_ssl
-```
-
-A flat per-call option overrides the shared setting:
+HTTPS fetch (HTTP/1.1 and HTTP/2), secure WebSocket, and HTTPS EventSource use
+the `ex_ssl` TLS engine; it is the only engine. There is no engine selector:
+the former `tls_backend` option and `config :http_core, :tls_backend` setting
+were removed, and `HTTP.fetch/2` raises `ArgumentError` for `tls_backend` like
+any other unknown option. Configure TLS through `ssl`:
 
 ```elixir
-HTTP.fetch("https://example.com",
-  tls_backend: :ex_ssl,
-  ssl: [cacertfile: "/path/to/ca.pem"]
-)
+HTTP.fetch("https://example.com", ssl: [cacertfile: "/path/to/ca.pem"])
 
-HTTP.WebSocket.new("wss://example.com/socket", [], tls_backend: :ex_ssl)
-HTTP.EventSource.new("https://example.com/events", tls_backend: :ex_ssl)
+HTTP.WebSocket.new("wss://example.com/socket", [], ssl: [cacertfile: "/path/to/ca.pem"])
+HTTP.EventSource.new("https://example.com/events", ssl: [cacertfile: "/path/to/ca.pem"])
 ```
-
-`tls_backend` accepts `:ex_ssl` or `"ex_ssl"`. Legacy `:ssl` and `"ssl"`
-selections return an explicit configuration error before connecting. Maps also accept
-`"tls_backend"` and `"tlsBackend"` keys. Omitted or `nil` values inherit the shared
-configuration. The backend is captured when the request/client is created and
-retained through redirects and EventSource reconnects; runtime configuration
-changes affect new operations. Invalid selections fail explicitly.
 
 Current benchmarks use ExSSL by default. See the
 [TLS tooling guide](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/tls-migration-design.md#running-current-tls-tooling) for
@@ -476,9 +461,7 @@ The [consumer contract inventory](docs/ex-ssl-consumer-contract.md) maps the
 implemented subset and intentional restrictions to its tests.
 
 Plain HTTP, WS, and Unix sockets retain their existing transports. HTTP/3 and
-WebTransport use QUIC's separate TLS implementation and ignore the shared
-setting. An explicit non-`nil` `tls_backend` on either QUIC API returns
-`{:error, :tls_backend_not_supported_for_quic}` (through the promise for fetch).
+WebTransport use QUIC's separate TLS implementation.
 The raw QUIC transport does not select an application protocol merely from ALPN;
 `Quic.capabilities().http3` remains `false`.
 
@@ -670,7 +653,7 @@ credentials, and both TLS policies isolate pooled connections.
 
 ```elixir
 HTTP.fetch("https://origin.example/resource",
-  tls_backend: :ex_ssl, http_version: :http1, redirect: :manual,
+  http_version: :http1, redirect: :manual,
   ssl: [cacertfile: "origin-ca.pem"],
   proxy: {:https, "proxy.example", 443,
     [ssl: [cacertfile: "proxy-ca.pem"],
@@ -1247,7 +1230,7 @@ request = %HTTP.Request{
 ```
 
 **Transport Options:**
-- `transport_options`: Socket transport options such as `timeout`, `connect_timeout`, `tls_backend`, `ssl`,
+- `transport_options`: Socket transport options such as `timeout`, `connect_timeout`, `ssl`,
   `socket_opts`, and `redirect`
 
 `redirect` defaults to `:follow` with the socket transport. Pass `redirect: :manual`

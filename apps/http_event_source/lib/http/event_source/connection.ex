@@ -52,7 +52,6 @@ defmodule HTTP.EventSource.Connection do
             idle_timeout: :infinity,
             ssl: [],
             socket_opts: [],
-            tls_backend: :ex_ssl,
             unix_socket: nil,
             max_line_size: 64 * 1024,
             transport: nil,
@@ -121,7 +120,6 @@ defmodule HTTP.EventSource.Connection do
       idle_timeout: options.idle_timeout,
       ssl: options.ssl,
       socket_opts: options.socket_opts,
-      tls_backend: options.tls_backend,
       unix_socket: options.unix_socket,
       max_line_size: options.max_line_size,
       last_event_id: options.last_event_id,
@@ -452,11 +450,8 @@ defmodule HTTP.EventSource.Connection do
     {:ok, HTTP.Transport.TCP, host, port || 80}
   end
 
-  defp select_transport(%{
-         uri: %URI{scheme: "https", host: host, port: port},
-         tls_backend: backend
-       }) do
-    {:ok, HTTP.TLSBackend.transport(backend), host, port || 443}
+  defp select_transport(%{uri: %URI{scheme: "https", host: host, port: port}}) do
+    {:ok, HTTP.Transport.ExSSL, host, port || 443}
   end
 
   defp select_transport(%{uri: %URI{scheme: scheme}}), do: {:error, {:unsupported_scheme, scheme}}

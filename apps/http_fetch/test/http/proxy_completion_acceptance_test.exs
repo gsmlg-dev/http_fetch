@@ -193,7 +193,6 @@ defmodule HTTP.ProxyCompletionAcceptanceTest do
     opts = [
       proxy: {:http, "127.0.0.1", port, [headers: [{"Proxy-Authorization", "Basic tunnel"}]]},
       http_version: :http2,
-      tls_backend: :ex_ssl,
       ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
       redirect: :manual,
       stream_response: true,
@@ -318,7 +317,6 @@ defmodule HTTP.ProxyCompletionAcceptanceTest do
           {:https, "localhost", port,
            [headers: [{"Proxy-Authorization", "Basic " <> credential}]]},
         http_version: :http1,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
         http1_scope: "proxy-completion-#{port}",
         redirect: :manual,

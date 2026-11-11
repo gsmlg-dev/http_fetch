@@ -183,7 +183,6 @@ defmodule TLSMigrationPerformance do
            origin: origin,
            connect_address: {127, 0, 0, 1},
            http_version: protocol,
-           tls_backend: backend,
            max_connections: 1,
            max_requests: 1,
            max_pending: 0,

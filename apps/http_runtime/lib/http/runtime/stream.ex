@@ -95,7 +95,7 @@ defmodule HTTP.Runtime.Stream do
       is_pid(opts[:request_lifecycle]) ->
         {request, opts[:request_lifecycle]}
 
-      opts[:tls_backend] == :ex_ssl and request.url.scheme == "https" and
+      opts[:http_version] != :http3 and request.url.scheme == "https" and
         supported_lifecycle_proxy?(request) and opts[:managed_coordinator] == nil ->
         {tracker, _latch} = RequestLifecycle.start()
         {%{request | transport_options: Keyword.put(opts, :request_lifecycle, tracker)}, tracker}
@@ -123,12 +123,7 @@ defmodule HTTP.Runtime.Stream do
       | transport_options: Keyword.put(request.transport_options, :stream_purpose, purpose)
     }
 
-    with {:ok, backend} <- HTTP.TLSBackend.resolve(request.transport_options[:tls_backend]),
-         request = %{
-           request
-           | transport_options: Keyword.put(request.transport_options, :tls_backend, backend)
-         },
-         {:ok, transport, host, port} <-
+    with {:ok, transport, host, port} <-
            Dialer.select_transport(request, request.transport_options[:unix_socket]),
          {:ok, selection} <- Dialer.protocol_selection(request, transport),
          {:ok, headers, ""} <-

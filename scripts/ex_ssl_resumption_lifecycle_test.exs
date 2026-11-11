@@ -91,7 +91,7 @@ defmodule CandidateResumptionLifecycleTest do
     WebSocket.new(
       "wss://127.0.0.1:#{peer.port}/socket",
       [],
-      Keyword.merge([tls_backend: :ex_ssl, ssl: ssl(f), connect_timeout: @timeout], extra)
+      Keyword.merge([ssl: ssl(f), connect_timeout: @timeout], extra)
     )
   end
 
@@ -100,7 +100,6 @@ defmodule CandidateResumptionLifecycleTest do
       "https://127.0.0.1:#{peer.port}/events",
       Keyword.merge(
         [
-          tls_backend: :ex_ssl,
           ssl: ssl(f),
           connect_timeout: @timeout,
           reconnect_time: 60_000,
@@ -138,7 +137,7 @@ defmodule CandidateResumptionLifecycleTest do
     HTTP.fetch(
       "https://127.0.0.1:#{peer.port}/resumption",
       Keyword.merge(
-        [tls_backend: :ex_ssl, ssl: ssl(f), timeout: @timeout, connect_timeout: @timeout],
+        [ssl: ssl(f), timeout: @timeout, connect_timeout: @timeout],
         extra
       )
     )

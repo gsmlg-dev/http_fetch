@@ -38,7 +38,6 @@ defmodule CandidateAlgorithmsTest do
           response =
             HTTP.fetch("https://127.0.0.1:#{port}/algorithm",
               http_version: if(unquote(protocol) == "h2", do: :http2, else: :http1),
-              tls_backend: :ex_ssl,
               ssl: [
                 cacerts: [fixture.der],
                 server_name_indication: ~c"exssl.test",
@@ -72,7 +71,6 @@ defmodule CandidateAlgorithmsTest do
         fn port ->
           assert {:error, _} =
                    HTTP.fetch("https://127.0.0.1:#{port}/algorithm",
-                     tls_backend: :ex_ssl,
                      ssl: [
                        cacerts: [fixture.der],
                        server_name_indication: ~c"wrong.test",
@@ -84,16 +82,6 @@ defmodule CandidateAlgorithmsTest do
         :reject
       )
     end
-  end
-
-  test "default backend matches the selected current or historical consumer" do
-    expected =
-      case System.fetch_env!("EX_SSL_EXPECTED_DEFAULT_BACKEND") do
-        "ex_ssl" -> :ex_ssl
-        "ssl" -> :ssl
-      end
-
-    assert HTTP.FetchOptions.new([]).tls_backend == expected
   end
 
   defp profile(scheme, protocol) do

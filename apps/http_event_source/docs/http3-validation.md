@@ -18,8 +18,8 @@ source =
 ```
 
 HTTP/3 is an explicit HTTPS-only choice with no downgrade. Trust and optional
-reference identity use QUIC TLS `ssl:` options. An explicit `tls_backend:` is
-rejected; HTTP/1 and HTTP/2 retain their existing pinned backend behavior.
+reference identity use QUIC TLS `ssl:` options. HTTP/1 and HTTP/2 use the
+`ex_ssl` TLS engine.
 String aliases include `httpVersion: "h3"`, `http3Profile`, and `http3Reuse`.
 Profiles are `:ordered` and `:compact`. UNIX sockets, proxies, TCP socket options,
 HTTP/2 profile/scope overrides and infinite opening deadlines are rejected before

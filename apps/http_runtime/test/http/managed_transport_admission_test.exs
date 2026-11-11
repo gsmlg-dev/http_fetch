@@ -436,7 +436,6 @@ defmodule HTTP.ManagedTransportAdmissionTest do
                origin: "https://localhost",
                connect_address: {127, 0, 0, 1},
                http_version: :http1,
-               tls_backend: :ex_ssl,
                ssl: [cacerts: []],
                max_requests: 1,
                max_connections: 1

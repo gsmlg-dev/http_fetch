@@ -23,7 +23,6 @@ defmodule HTTP.R47MultiClientIdentityWebSocketTest do
         F.with_peer(m, [version: version, hint: "client-a", application: "wss"], fn port ->
           socket =
             WebSocket.new("wss://127.0.0.1:#{port}/r47", [],
-              tls_backend: :ex_ssl,
               ssl: F.options(m, ["p256-b", "rsa2048-a"], version)
             )
 

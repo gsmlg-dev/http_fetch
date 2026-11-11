@@ -69,16 +69,13 @@ defmodule HTTP.ConnectAddressTest do
     on_exit(fn -> :gen_tcp.close(listener) end)
     {:ok, {_, port}} = :inet.sockname(listener)
 
-    for backend <- [nil, :ex_ssl] do
-      assert {:error, :connect_address_sni_conflict} =
-               HTTP.fetch("https://pinned.invalid:#{port}/",
-                 connect_address: @ipv4,
-                 redirect: :manual,
-                 tls_backend: backend,
-                 ssl: [server_name_indication: ~c"wrong.invalid"]
-               )
-               |> HTTP.Promise.await(@timeout)
-    end
+    assert {:error, :connect_address_sni_conflict} =
+             HTTP.fetch("https://pinned.invalid:#{port}/",
+               connect_address: @ipv4,
+               redirect: :manual,
+               ssl: [server_name_indication: ~c"wrong.invalid"]
+             )
+             |> HTTP.Promise.await(@timeout)
 
     for identity <- [
           {:ip, {127, 0, 0, 2}},
@@ -92,7 +89,6 @@ defmodule HTTP.ConnectAddressTest do
                HTTP.fetch("https://127.0.0.1:#{port}/",
                  connect_address: @ipv4,
                  redirect: :manual,
-                 tls_backend: :ex_ssl,
                  ssl: [ex_ssl: [reference_identity: identity]]
                )
                |> HTTP.Promise.await(@timeout)
@@ -102,7 +98,6 @@ defmodule HTTP.ConnectAddressTest do
              HTTP.fetch("https://pinned.invalid:#{port}/",
                connect_address: @ipv4,
                redirect: :manual,
-               tls_backend: :ex_ssl,
                ssl: [ex_ssl: [reference_identity: {:dns_id, "wrong.invalid"}]]
              )
              |> HTTP.Promise.await(@timeout)
@@ -150,11 +145,10 @@ defmodule HTTP.ConnectAddressTest do
     end
   end
 
-  for backend <- [nil, :ex_ssl], address <- [@ipv4, @ipv6] do
+  for address <- [@ipv4, @ipv6] do
     @tag :integration
-    test "#{backend} pin #{inspect(address)} retains SNI and hostname verification" do
+    test "pin #{inspect(address)} retains SNI and hostname verification" do
       address = unquote(Macro.escape(address))
-      backend = unquote(backend)
       parent = self()
 
       {port, _} =
@@ -168,7 +162,6 @@ defmodule HTTP.ConnectAddressTest do
         HTTP.fetch("https://pinned.invalid:#{port}/verified",
           connect_address: address,
           redirect: :manual,
-          tls_backend: backend,
           ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")]
         )
         |> HTTP.Promise.await(@timeout)
@@ -180,7 +173,7 @@ defmodule HTTP.ConnectAddressTest do
     end
   end
 
-  for backend <- [nil, :ex_ssl] do
+  for backend <- [:ex_ssl] do
     @tag :integration
     test "#{backend} pin keeps default trust and rejects wrong URL certificate identity" do
       for {host, ssl} <- [
@@ -194,7 +187,6 @@ defmodule HTTP.ConnectAddressTest do
                  HTTP.fetch("https://#{host}:#{port}/",
                    connect_address: @ipv4,
                    redirect: :manual,
-                   tls_backend: unquote(backend),
                    ssl: ssl
                  )
                  |> HTTP.Promise.await(@timeout)
@@ -251,7 +243,6 @@ defmodule HTTP.ConnectAddressTest do
         HTTP.fetch("https://#{host}:#{port}/verified",
           connect_address: address,
           redirect: :manual,
-          tls_backend: :ex_ssl,
           ssl: ssl
         )
         |> HTTP.Promise.await(@timeout)
@@ -277,7 +268,6 @@ defmodule HTTP.ConnectAddressTest do
                HTTP.fetch("https://#{unquote(host)}:#{port}/",
                  connect_address: @ipv4,
                  redirect: :manual,
-                 tls_backend: :ex_ssl,
                  ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")]
                )
                |> HTTP.Promise.await(@timeout)
@@ -295,7 +285,6 @@ defmodule HTTP.ConnectAddressTest do
              HTTP.fetch("https://127.0.0.1:#{port}/",
                connect_address: @ipv4,
                redirect: :manual,
-               tls_backend: :ex_ssl,
                ssl: [cacertfile: Path.join(@fixtures, "pinned-ip-ca.pem")]
              )
              |> HTTP.Promise.await(@timeout)
@@ -370,7 +359,7 @@ defmodule HTTP.ConnectAddressTest do
     assert HTTP.Headers.get(result.headers, "location") == "http://other.invalid/path"
   end
 
-  for backend <- [nil, :ex_ssl], stop <- [:abort, :deadline] do
+  for backend <- [:ex_ssl], stop <- [:abort, :deadline] do
     @tag :integration
     test "#{backend} pinned TLS establishment cleanup on #{stop}" do
       parent = self()
@@ -391,7 +380,6 @@ defmodule HTTP.ConnectAddressTest do
         HTTP.fetch("https://pinned.invalid:#{port}/",
           connect_address: @ipv4,
           redirect: :manual,
-          tls_backend: unquote(backend),
           signal: controller,
           timeout: timeout,
           connect_timeout: @timeout
@@ -513,7 +501,6 @@ defmodule HTTP.ConnectAddressTest do
       url: URI.parse("https://pinned.invalid:#{port}/"),
       body: self(),
       transport_options: [
-        tls_backend: :ex_ssl,
         connect_address: @ipv4,
         redirect: :manual,
         ssl: [cacertfile: Path.join(@fixtures, "pinned-ca.pem")]

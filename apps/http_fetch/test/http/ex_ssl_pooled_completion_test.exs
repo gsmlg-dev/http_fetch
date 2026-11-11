@@ -378,7 +378,6 @@ defmodule HTTP.ExSSLPooledCompletionTest do
 
   defp options(version) do
     [
-      tls_backend: :ex_ssl,
       http_version: :http1,
       http1_reuse: true,
       http1_idle_timeout: 500,

@@ -3,8 +3,8 @@ defmodule HTTP.ManagedTransportCipherMapTest do
 
   alias HTTP.ManagedTransport.Policy
 
-  for backend <- [nil, :ex_ssl], protocol <- [:http1, :http2], tls <- [:"tlsv1.2", :"tlsv1.3"] do
-    test "#{backend} #{protocol} #{tls} freezes the supported OTP cipher map" do
+  for protocol <- [:http1, :http2], tls <- [:"tlsv1.2", :"tlsv1.3"] do
+    test "#{protocol} #{tls} freezes the supported OTP cipher map" do
       tls = unquote(tls)
 
       cipher = %{
@@ -15,11 +15,10 @@ defmodule HTTP.ManagedTransportCipherMapTest do
       }
 
       assert {:ok, policy} =
-               freeze([versions: [tls], ciphers: [cipher]], unquote(backend), unquote(protocol))
+               freeze([versions: [tls], ciphers: [cipher]], unquote(protocol))
 
       assert policy.transport[:ssl][:ciphers] == [cipher]
       assert policy.transport[:ssl][:versions] == [tls]
-      assert policy.transport[:tls_backend] == :ex_ssl
       assert policy.transport[:http_version] == unquote(protocol)
     end
   end
@@ -79,12 +78,11 @@ defmodule HTTP.ManagedTransportCipherMapTest do
     end
   end
 
-  defp freeze(ssl, backend \\ :ex_ssl, protocol \\ :http1) do
+  defp freeze(ssl, protocol \\ :http1) do
     Policy.freeze(
       origin: "https://localhost",
       connect_address: {127, 0, 0, 1},
       http_version: protocol,
-      tls_backend: backend,
       ssl: Keyword.put_new(ssl, :cacerts, [])
     )
   end

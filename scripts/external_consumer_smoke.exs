@@ -34,21 +34,13 @@ defmodule ExternalConsumerSmoke do
 
     assert_package_metadata!()
 
-    {:ok, :ex_ssl} = HTTP.TLSBackend.resolve()
     fetch_http1!(certfile, keyfile, cacertfile)
     fetch_h2!(certfile, keyfile, cacertfile)
     web_socket!(certfile, keyfile, cacertfile)
     event_source!(certfile, keyfile, cacertfile)
 
-    {:error, :tls_backend_not_supported_for_quic} =
-      HTTP.WebTransport.new("https://localhost:443/", tls_backend: :ex_ssl)
-
-    Application.put_env(:http_core, :tls_backend, :ex_ssl)
-
     {:ok, %{backend: HTTP.WebTransport.Transport.QUIC}} =
       HTTP.WebTransport.Options.new("https://localhost:443/")
-
-    Application.delete_env(:http_core, :tls_backend)
 
     IO.puts("external consumer smoke passed")
   end
@@ -69,7 +61,7 @@ defmodule ExternalConsumerSmoke do
 
     for {label, options} <- [
           default: [ssl: [cacertfile: cacertfile]],
-          ex_ssl: [tls_backend: :ex_ssl, ssl: [cacertfile: cacertfile]]
+          ex_ssl: [ssl: [cacertfile: cacertfile]]
         ] do
       response = HTTP.fetch("https://localhost:#{port}/", options) |> HTTP.Promise.await()
 
@@ -191,7 +183,6 @@ defmodule ExternalConsumerSmoke do
           ex_ssl: [
             http_version: :http2,
             http2_scope: :external_consumer_ex_ssl,
-            tls_backend: :ex_ssl,
             ssl: [cacertfile: cacertfile]
           ]
         ] do
@@ -228,7 +219,7 @@ defmodule ExternalConsumerSmoke do
 
     for {label, options} <- [
           default: [ssl: [cacertfile: cacertfile]],
-          ex_ssl: [tls_backend: :ex_ssl, ssl: [cacertfile: cacertfile]]
+          ex_ssl: [ssl: [cacertfile: cacertfile]]
         ] do
       socket = HTTP.WebSocket.new("wss://localhost:#{port}/", [], options)
       assert match?(%HTTP.WebSocket{}, socket), "WebSocket #{label} did not start"
@@ -259,7 +250,7 @@ defmodule ExternalConsumerSmoke do
 
     for {label, options} <- [
           default: [ssl: [cacertfile: cacertfile]],
-          ex_ssl: [tls_backend: :ex_ssl, ssl: [cacertfile: cacertfile]]
+          ex_ssl: [ssl: [cacertfile: cacertfile]]
         ] do
       source = HTTP.EventSource.new("https://localhost:#{port}/", options)
       assert match?(%HTTP.EventSource{}, source), "EventSource #{label} did not start"

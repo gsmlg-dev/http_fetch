@@ -374,7 +374,7 @@ defmodule HTTP.Runtime.StreamTest do
 
     request = %HTTP.Request{
       url: URI.parse(url),
-      transport_options: [http_version: :http1, tls_backend: :ex_ssl]
+      transport_options: [http_version: :http1]
     }
 
     {:ok, second, second_generation} = Stream.start(request, self())
@@ -562,8 +562,7 @@ defmodule HTTP.Runtime.StreamTest do
         http_version: Keyword.get(opts, :http_version, :h2c),
         http2_scope: Keyword.get(opts, :scope, "stream-#{System.unique_integer([:positive])}"),
         http2_reuse: Keyword.get(opts, :reuse, true),
-        connect_timeout: Keyword.get(opts, :connect_timeout, 5_000),
-        tls_backend: :ex_ssl
+        connect_timeout: Keyword.get(opts, :connect_timeout, 5_000)
       ]
     }
 

@@ -8,29 +8,19 @@ defmodule HTTP.SSLTransportTest do
   @keyfile Path.expand("../support/fixtures/localhost.key", __DIR__)
 
   describe "https transport" do
-    test "rejects explicit TLS backends for HTTP/3 through the promise" do
-      for tls_backend <- [false, :unknown, "ssl", "ex_ssl"] do
-        assert {:error, :tls_backend_not_supported_for_quic} =
-                 "https://127.0.0.1:1/secure"
-                 |> HTTP.fetch(http_version: :http3, tls_backend: tls_backend)
-                 |> HTTP.Promise.await()
+    test "rejects the removed tls_backend option as unknown" do
+      for tls_backend <- [false, :unknown, "ssl", "ex_ssl", :ex_ssl] do
+        assert_raise ArgumentError, ~r/unknown fetch option: :tls_backend/, fn ->
+          HTTP.fetch("https://127.0.0.1:1/secure", tls_backend: tls_backend)
+        end
       end
-    end
-
-    test "does not resolve shared TLS configuration for HTTP/3" do
-      previous = Application.get_env(:http_core, :tls_backend)
-      on_exit(fn -> restore_tls_backend(previous) end)
-      Application.put_env(:http_core, :tls_backend, :invalid)
-
-      assert %HTTP.FetchOptions{http_version: :http3, tls_backend: nil} =
-               HTTP.FetchOptions.new(http_version: :http3)
     end
 
     test "rejects unsupported ex_ssl socket options through HTTP.fetch" do
       for socket_opts <- [[nodelay: :invalid], [send_timeout_close: false]] do
         assert {:error, {:options, _reason}} =
                  "https://127.0.0.1:1/secure"
-                 |> HTTP.fetch(tls_backend: :ex_ssl, socket_opts: socket_opts)
+                 |> HTTP.fetch(socket_opts: socket_opts)
                  |> HTTP.Promise.await()
       end
     end
@@ -42,7 +32,6 @@ defmodule HTTP.SSLTransportTest do
       assert {:error, {:options, {:alpn_advertised_protocols, :profile_conflict}}} =
                "https://127.0.0.1:1/secure"
                |> HTTP.fetch(
-                 tls_backend: :ex_ssl,
                  http_version: :http2,
                  ssl: [
                    alpn_advertised_protocols: ["h2"],
@@ -108,7 +97,7 @@ defmodule HTTP.SSLTransportTest do
 
       response =
         url
-        |> HTTP.fetch(tls_backend: :ex_ssl, ssl: [cacertfile: @cacertfile])
+        |> HTTP.fetch(ssl: [cacertfile: @cacertfile])
         |> HTTP.Promise.await()
 
       assert response.status == 200
@@ -138,7 +127,6 @@ defmodule HTTP.SSLTransportTest do
         try do
           promise =
             HTTP.fetch("https://127.0.0.1:#{peer.port}/secure",
-              tls_backend: :ex_ssl,
               http_version: :http1,
               http1_reuse: false,
               redirect: :manual,
@@ -195,7 +183,6 @@ defmodule HTTP.SSLTransportTest do
       try do
         promise =
           HTTP.fetch("https://pinned.invalid:#{peer.port}/secure",
-            tls_backend: :ex_ssl,
             connect_address: {127, 0, 0, 1},
             redirect: :manual,
             headers: [{"User-Agent", "p3-completion"}],
@@ -248,7 +235,6 @@ defmodule HTTP.SSLTransportTest do
         try do
           promise =
             HTTP.fetch("https://#{unquote(host)}:#{peer.port}/secure",
-              tls_backend: :ex_ssl,
               redirect: :manual,
               connect_address: {127, 0, 0, 1},
               ssl: [
@@ -283,7 +269,6 @@ defmodule HTTP.SSLTransportTest do
 
       promise =
         HTTP.fetch("https://127.0.0.1:#{port}/secure",
-          tls_backend: :ex_ssl,
           redirect: :manual,
           ssl: [cacertfile: @cacertfile],
           socket_opts: [nodelay: :invalid]
@@ -306,7 +291,6 @@ defmodule HTTP.SSLTransportTest do
       try do
         promise =
           HTTP.fetch("https://127.0.0.1:#{port}/secure",
-            tls_backend: :ex_ssl,
             redirect: :manual,
             ssl: [cacertfile: @cacertfile, ex_ssl: [lifecycle: {handle, lease}]]
           )
@@ -333,7 +317,6 @@ defmodule HTTP.SSLTransportTest do
 
       promise =
         HTTP.fetch("https://127.0.0.1:#{port}/secure",
-          tls_backend: :ex_ssl,
           redirect: :manual,
           signal: controller,
           ssl: [cacertfile: @cacertfile]
@@ -370,7 +353,6 @@ defmodule HTTP.SSLTransportTest do
 
       promise =
         HTTP.fetch("https://127.0.0.1:#{port}/secure",
-          tls_backend: :ex_ssl,
           redirect: :manual,
           timeout: 2_000,
           ssl: [cacertfile: @cacertfile, versions: [:"tlsv1.3"]]
@@ -404,7 +386,7 @@ defmodule HTTP.SSLTransportTest do
 
       response =
         url
-        |> HTTP.fetch(tls_backend: :ex_ssl, ssl: [cacertfile: @cacertfile])
+        |> HTTP.fetch(ssl: [cacertfile: @cacertfile])
         |> HTTP.Promise.await()
 
       assert is_pid(response.stream)
@@ -425,7 +407,6 @@ defmodule HTTP.SSLTransportTest do
         url
         |> HTTP.fetch(
           signal: controller,
-          tls_backend: :ex_ssl,
           ssl: [cacertfile: @cacertfile]
         )
         |> HTTP.Promise.await()
@@ -459,7 +440,6 @@ defmodule HTTP.SSLTransportTest do
         |> HTTP.fetch(
           method: :post,
           body: body,
-          tls_backend: :ex_ssl,
           ssl: [cacertfile: @cacertfile]
         )
         |> HTTP.Promise.await()
@@ -483,7 +463,6 @@ defmodule HTTP.SSLTransportTest do
       promise =
         HTTP.fetch(url,
           signal: controller,
-          tls_backend: :ex_ssl,
           ssl: [cacertfile: @cacertfile]
         )
 
@@ -508,7 +487,6 @@ defmodule HTTP.SSLTransportTest do
       promise =
         HTTP.fetch(url,
           timeout: 500,
-          tls_backend: :ex_ssl,
           ssl: [cacertfile: @cacertfile]
         )
 
@@ -518,7 +496,7 @@ defmodule HTTP.SSLTransportTest do
     end
 
     @tag :integration
-    test "uses TLS backend transport options on direct requests" do
+    test "uses ex_ssl transport options on direct requests" do
       url =
         start_https_server!(fn socket ->
           assert {:ok, request} = recv_headers(socket, <<>>)
@@ -529,51 +507,11 @@ defmodule HTTP.SSLTransportTest do
       response =
         HTTP.SocketClient.request(%HTTP.Request{
           url: URI.parse(url),
-          transport_options: [tls_backend: "ex_ssl", ssl: [cacertfile: @cacertfile]]
+          transport_options: [ssl: [cacertfile: @cacertfile]]
         })
 
       assert response.status == 200
       assert HTTP.Response.read_all(response) == "direct"
-    end
-
-    @tag :integration
-    test "pins the configured backend through HTTPS redirects" do
-      test_pid = self()
-
-      destination =
-        start_https_server!(fn socket ->
-          assert {:ok, _request} = recv_headers(socket, <<>>)
-          send_response(socket, "redirected")
-        end)
-
-      source =
-        start_https_server!(fn socket ->
-          assert {:ok, _request} = recv_headers(socket, <<>>)
-          send(test_pid, {:redirect_request_received, self()})
-
-          receive do
-            :send_redirect ->
-              :ok =
-                :ssl.send(socket, [
-                  "HTTP/1.1 302 Found\r\n",
-                  "Location: ",
-                  destination,
-                  "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                ])
-          end
-        end)
-
-      previous = Application.get_env(:http_core, :tls_backend)
-      on_exit(fn -> restore_tls_backend(previous) end)
-      Application.put_env(:http_core, :tls_backend, :ex_ssl)
-
-      promise = HTTP.fetch(source, ssl: [cacertfile: @cacertfile])
-      assert_receive {:redirect_request_received, redirect_server}
-      Application.put_env(:http_core, :tls_backend, :invalid)
-      send(redirect_server, :send_redirect)
-
-      assert %HTTP.Response{status: 200} = response = HTTP.Promise.await(promise)
-      assert HTTP.Response.read_all(response) == "redirected"
     end
 
     @tag :integration
@@ -609,7 +547,7 @@ defmodule HTTP.SSLTransportTest do
 
       response =
         url
-        |> HTTP.fetch(tls_backend: "ex_ssl", ssl: [cacertfile: @cacertfile])
+        |> HTTP.fetch(ssl: [cacertfile: @cacertfile])
         |> HTTP.Promise.await()
 
       assert response.status == 200
@@ -776,7 +714,4 @@ defmodule HTTP.SSLTransportTest do
 
     :ssl.close(socket)
   end
-
-  defp restore_tls_backend(nil), do: Application.delete_env(:http_core, :tls_backend)
-  defp restore_tls_backend(backend), do: Application.put_env(:http_core, :tls_backend, backend)
 end

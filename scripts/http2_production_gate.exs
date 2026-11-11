@@ -4,7 +4,6 @@ url = System.fetch_env!("HTTP_FETCH_GATE_URL")
 
 backend =
   case System.get_env("HTTP_FETCH_GATE_BACKEND", "ex_ssl") do
-    "ssl" -> :ssl
     "ex_ssl" -> :ex_ssl
   end
 
@@ -18,7 +17,6 @@ ssl =
 opts = [
   http_version: if(String.starts_with?(url, "https"), do: :http2, else: :h2c),
   http2_profile: :native_v1,
-  tls_backend: backend,
   ssl: ssl,
   timeout: 60_000
 ]

@@ -35,7 +35,7 @@ defmodule HTTP.Runtime.OptionsTest do
     assert {:ok, options} = Options.validate(URI.parse("https://example.test/"), [])
     assert options[:http_version] == :http1
     assert options[:delivery] == :legacy
-    assert options[:tls_backend] == :ex_ssl
+    refute Keyword.has_key?(options, :tls_backend)
 
     assert {:ok, h2} =
              Options.validate(URI.parse("wss://example.test/"), %{
@@ -70,14 +70,13 @@ defmodule HTTP.Runtime.OptionsTest do
     end
   end
 
-  test "TLS backend stays explicit and incompatible ALPN never gets silently overwritten" do
+  test "incompatible ALPN never gets silently overwritten" do
     assert {:ok, options} =
              Options.validate(URI.parse("https://example.test/"),
-               http_version: :http2,
-               tls_backend: :ex_ssl
+               http_version: :http2
              )
 
-    assert options[:tls_backend] == :ex_ssl
+    refute Keyword.has_key?(options, :tls_backend)
 
     for {version, alpn} <- [{:http1, ["h2"]}, {:http2, ["http/1.1"]}, {:auto, ["h2"]}] do
       assert {:error, :incompatible_alpn} =

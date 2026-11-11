@@ -23,14 +23,13 @@ defmodule HTTP.WebSocket.OpeningTest do
     refute_receive {WebSocket, ^ws, %Open{}}, 0
   end
 
-  for backend <- [nil, :ex_ssl] do
+  for backend <- [:ex_ssl] do
     test "close interrupts stalled HTTP/1 TLS dialing with #{backend}" do
       parent = self()
       {url, peer} = stalled_peer(:tls, parent)
 
       ws =
         WebSocket.new(url, [],
-          tls_backend: unquote(backend),
           timeout: 30_000,
           connect_timeout: :infinity
         )
@@ -83,7 +82,6 @@ defmodule HTTP.WebSocket.OpeningTest do
       ws =
         WebSocket.new("wss://localhost:#{port}/chat", [],
           http_version: :auto,
-          tls_backend: unquote(backend),
           ssl: trusted(),
           timeout: @timeout
         )
@@ -124,7 +122,6 @@ defmodule HTTP.WebSocket.OpeningTest do
       ws =
         WebSocket.new("wss://localhost:#{port}/chat", [],
           http_version: :auto,
-          tls_backend: unquote(backend),
           ssl: trusted(),
           timeout: @timeout
         )
@@ -160,7 +157,6 @@ defmodule HTTP.WebSocket.OpeningTest do
       ws =
         WebSocket.new("wss://localhost:#{port}/chat", [],
           http_version: :auto,
-          tls_backend: unquote(backend),
           ssl: Keyword.put(trusted(), :server_name_indication, ~c"wrong.test"),
           timeout: @timeout
         )

@@ -107,11 +107,6 @@ defmodule HTTP3PublicGate do
       )
     end
 
-    assert_error(
-      HTTP.fetch(base <> "/", Keyword.put(options, :tls_backend, :ssl))
-      |> HTTP.Promise.await()
-    )
-
     for key <- ["HTTP3_EXPIRED_PORT", "HTTP3_WRONG_ALPN_PORT"] do
       target = "https://127.0.0.1:#{System.fetch_env!(key)}/"
 

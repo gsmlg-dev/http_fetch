@@ -198,7 +198,7 @@ defmodule HTTP.WebSocket.ProxyBoundaryTest do
     assert_receive {:shutdown_peer_closed, ^peer}, @timeout
   end
 
-  for backend <- [nil, :ex_ssl] do
+  for backend <- [:ex_ssl] do
     test "verified WSS slow-peer cancellation is bounded with #{backend}" do
       fixtures = Path.expand("../../support/fixtures", __DIR__)
 
@@ -232,7 +232,6 @@ defmodule HTTP.WebSocket.ProxyBoundaryTest do
 
       ws =
         WebSocket.new("wss://localhost:#{port}/proxy", [],
-          tls_backend: unquote(backend),
           write_timeout: 2_000,
           close_timeout: 100,
           ssl: [cacertfile: Path.join(fixtures, "localhost-ca.pem")],
@@ -261,7 +260,7 @@ defmodule HTTP.WebSocket.ProxyBoundaryTest do
     end
   end
 
-  for backend <- [nil, :ex_ssl] do
+  for backend <- [:ex_ssl] do
     test "WSS owner loss aborts a blocked transport with #{backend}" do
       fixtures = Path.expand("../../support/fixtures", __DIR__)
 
@@ -299,7 +298,6 @@ defmodule HTTP.WebSocket.ProxyBoundaryTest do
       ws =
         WebSocket.new("wss://localhost:#{port}/proxy", [],
           owner: owner,
-          tls_backend: unquote(backend),
           socket_opts: [sndbuf: 1_024],
           ssl: [cacertfile: Path.join(fixtures, "localhost-ca.pem")]
         )

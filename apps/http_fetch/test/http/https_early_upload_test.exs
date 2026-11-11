@@ -7,7 +7,7 @@ defmodule HTTP.HTTPSEarlyUploadTest do
   @fixtures Path.expand("../../../http_web_socket/test/support/fixtures", __DIR__)
   @timeout 5_000
 
-  for backend <- [nil, :ex_ssl],
+  for backend <- [:ex_ssl],
       version <- [:http1, :auto],
       outcome <- [:buffered, :streamed, :cancel, :deadline, :send_timeout, :owner_down],
       timeout <- [4_000, :infinity],
@@ -39,7 +39,6 @@ defmodule HTTP.HTTPSEarlyUploadTest do
           duplex: :half,
           signal: controller,
           http_version: unquote(version),
-          tls_backend: unquote(backend),
           timeout: request_timeout,
           ssl: [cacertfile: Path.join(@fixtures, "localhost-ca.pem")],
           socket_opts: socket_opts

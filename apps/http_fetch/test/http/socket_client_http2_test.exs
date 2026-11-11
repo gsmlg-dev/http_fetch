@@ -323,7 +323,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       url
       |> HTTP.fetch(
         http_version: :auto,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
       |> HTTP.Promise.await()
@@ -345,7 +344,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       |> HTTP.fetch(
         http_version: :http2,
         http2_profile: :native_v1,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
       |> HTTP.Promise.await()
@@ -391,7 +389,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       HTTP.fetch(url,
         http_version: :http2,
         signal: controller,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
 
@@ -452,7 +449,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       HTTP.fetch(url,
         http_version: :http2,
         signal: controller,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
 
@@ -520,7 +516,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       HTTP.fetch(url,
         http_version: :http2,
         signal: controller,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
 
@@ -607,7 +602,6 @@ defmodule HTTP.SocketClientHTTP2Test do
         HTTP.fetch(url,
           http_version: :http2,
           signal: controller,
-          tls_backend: :ex_ssl,
           ssl: [cacertfile: @cacertfile]
         )
 
@@ -689,7 +683,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       HTTP.fetch(url,
         http_version: :http2,
         signal: controller,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
 
@@ -758,7 +751,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       HTTP.fetch(url,
         http_version: :http2,
         signal: controller,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
 
@@ -828,7 +820,6 @@ defmodule HTTP.SocketClientHTTP2Test do
           body: body,
           http_version: :http2,
           signal: controller,
-          tls_backend: :ex_ssl,
           ssl: resumption_options(unquote(resumed))
         )
 
@@ -903,7 +894,6 @@ defmodule HTTP.SocketClientHTTP2Test do
           body: request_body,
           http_version: :http2,
           signal: controller,
-          tls_backend: :ex_ssl,
           ssl: resumption_options(unquote(resumed))
         )
 
@@ -972,7 +962,6 @@ defmodule HTTP.SocketClientHTTP2Test do
         body: request_body,
         http_version: :http2,
         signal: controller,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
 
@@ -1091,7 +1080,6 @@ defmodule HTTP.SocketClientHTTP2Test do
         body: request_body,
         http_version: :http2,
         signal: controller,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
 
@@ -1159,7 +1147,6 @@ defmodule HTTP.SocketClientHTTP2Test do
           method: :post,
           body: request_body,
           http_version: :http2,
-          tls_backend: :ex_ssl,
           ssl: [cacertfile: @cacertfile]
         )
         |> HTTP.Promise.await()
@@ -1234,7 +1221,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       HTTP.fetch(url,
         http_version: :http2,
         signal: controller,
-        tls_backend: :ex_ssl,
         socket_opts: [nodelay: true],
         ssl: [cacertfile: @cacertfile]
       )
@@ -1401,7 +1387,6 @@ defmodule HTTP.SocketClientHTTP2Test do
           body: body,
           http_version: :http2,
           signal: controller,
-          tls_backend: :ex_ssl,
           ssl: [cacertfile: @cacertfile]
         )
 
@@ -1451,7 +1436,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       url
       |> HTTP.fetch(
         http_version: :http2,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
       |> HTTP.Promise.await()
@@ -1496,7 +1480,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       HTTP.fetch(url,
         http_version: :http2,
         signal: controller,
-        tls_backend: :ex_ssl,
         socket_opts: [nodelay: true],
         ssl: [cacertfile: @cacertfile]
       )
@@ -1542,7 +1525,6 @@ defmodule HTTP.SocketClientHTTP2Test do
              url
              |> HTTP.fetch(
                http_version: :http2,
-               tls_backend: :ex_ssl,
                ssl: [cacertfile: @cacertfile]
              )
              |> HTTP.Promise.await()
@@ -1565,7 +1547,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       url
       |> HTTP.fetch(
         http_version: :auto,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
       |> HTTP.Promise.await()
@@ -1598,7 +1579,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       url
       |> HTTP.fetch(
         http_version: :http2,
-        tls_backend: :ex_ssl,
         socket_opts: [nodelay: true],
         ssl: [cacertfile: @cacertfile]
       )
@@ -1619,7 +1599,6 @@ defmodule HTTP.SocketClientHTTP2Test do
              url
              |> HTTP.fetch(
                http_version: :http2,
-               tls_backend: :ex_ssl,
                ssl: [cacertfile: @cacertfile]
              )
              |> HTTP.Promise.await()
@@ -2038,7 +2017,6 @@ defmodule HTTP.SocketClientHTTP2Test do
       HTTP.fetch(url,
         http_version: :http2,
         http2_reuse: false,
-        tls_backend: :ex_ssl,
         ssl: resumption_options(true)
       )
       |> HTTP.Promise.await()
@@ -2443,7 +2421,6 @@ defmodule HTTP.SocketClientHTTP2Test do
         http_version: :http2,
         signal: controller,
         timeout: timeout,
-        tls_backend: :ex_ssl,
         ssl: [cacertfile: @cacertfile]
       )
 

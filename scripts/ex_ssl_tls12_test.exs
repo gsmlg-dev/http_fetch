@@ -29,7 +29,6 @@ defmodule CandidateTLS12Test do
       with_peer(fixtures, mode, ["--large"], fn peer ->
         promise =
           HTTP.fetch("https://127.0.0.1:#{peer.port}/tls12",
-            tls_backend: :ex_ssl,
             http_version: unquote(protocol),
             ssl:
               client_ssl(
@@ -61,7 +60,6 @@ defmodule CandidateTLS12Test do
     with_peer(fixtures, "http1", ["--max-version", "tls13"], fn peer ->
       response =
         HTTP.fetch("https://127.0.0.1:#{peer.port}/tls12",
-          tls_backend: :ex_ssl,
           ssl: client_ssl(fixtures, [:"tlsv1.3", :"tlsv1.2"], "http/1.1"),
           timeout: @timeout,
           connect_timeout: @timeout
@@ -81,7 +79,6 @@ defmodule CandidateTLS12Test do
     with_peer(fixtures, "wss", [], fn peer ->
       socket =
         WebSocket.new("wss://127.0.0.1:#{peer.port}/socket", [],
-          tls_backend: :ex_ssl,
           ssl: client_ssl(fixtures, [:"tlsv1.2"], "http/1.1")
         )
 
@@ -108,17 +105,13 @@ defmodule CandidateTLS12Test do
     end)
   end
 
-  test "packaged SSE reconnects to same TLS 1.2 mTLS origin with backend and Last-Event-ID pinned",
+  test "packaged SSE reconnects to same TLS 1.2 mTLS origin with Last-Event-ID pinned",
        %{
          fixtures: fixtures
        } do
-    previous = Application.get_env(:http_core, :tls_backend, :unset)
-    on_exit(fn -> restore_backend(previous) end)
-
     with_peer(fixtures, "sse", [], fn peer ->
       source =
         EventSource.new("https://127.0.0.1:#{peer.port}/events",
-          tls_backend: :ex_ssl,
           reconnect_time: 10,
           ssl: client_ssl(fixtures, [:"tlsv1.2"], "http/1.1")
         )
@@ -133,8 +126,6 @@ defmodule CandidateTLS12Test do
                        @timeout
 
         assert {:ok, _} = event(peer, "first_ready")
-        Application.put_env(:http_core, :tls_backend, :invalid)
-        assert %{tls_backend: :ex_ssl} = :sys.get_state(source.pid)
         true = Port.command(peer.handle, "go\n")
 
         assert_handshake(peer, fixtures, "TLSv1.2", "http/1.1", 2)
@@ -268,7 +259,4 @@ defmodule CandidateTLS12Test do
         :ok
     end
   end
-
-  defp restore_backend(:unset), do: Application.delete_env(:http_core, :tls_backend)
-  defp restore_backend(value), do: Application.put_env(:http_core, :tls_backend, value)
 end

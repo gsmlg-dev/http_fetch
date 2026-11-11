@@ -34,7 +34,6 @@ defmodule HTTPWebSocketGate do
     tls_opts =
       if tls? do
         [
-          tls_backend: String.to_existing_atom(System.get_env("HTTP_WS_GATE_BACKEND", "ex_ssl")),
           ssl: [cacertfile: System.fetch_env!("HTTP_WS_GATE_CA")]
         ]
       else

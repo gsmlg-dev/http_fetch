@@ -39,7 +39,6 @@ defmodule HTTP.FetchExSSLSetupPhaseIntegrationTest do
 
       promise =
         HTTP.fetch("https://#{host}:#{port}/never",
-          tls_backend: :ex_ssl,
           connect_address: {127, 0, 0, 1},
           http_version: :http1,
           http1_reuse: false,
@@ -79,7 +78,6 @@ defmodule HTTP.FetchExSSLSetupPhaseIntegrationTest do
       {peer, port} = peer(wire(version), "http/1.1", "forward")
 
       options = [
-        tls_backend: :ex_ssl,
         http_version: :http1,
         http1_reuse: false,
         redirect: :manual,
@@ -117,7 +115,6 @@ defmodule HTTP.FetchExSSLSetupPhaseIntegrationTest do
 
       promise =
         HTTP.fetch("https://localhost:#{port}/success",
-          tls_backend: :ex_ssl,
           connect_address: {127, 0, 0, 1},
           http_version: :http1,
           http1_reuse: false,
@@ -148,7 +145,6 @@ defmodule HTTP.FetchExSSLSetupPhaseIntegrationTest do
     test "unsupported #{inspect(option)} never fabricates setup phase" do
       promise =
         HTTP.fetch("https://127.0.0.1:1/never",
-          tls_backend: :ex_ssl,
           http_version: :http1,
           redirect: :manual,
           error_mode: :structured,
@@ -274,7 +270,6 @@ defmodule HTTP.FetchExSSLPolicySetupPhaseIntegrationTest do
       try do
         promise =
           HTTP.fetch("https://r49.example:#{peer.port}/never",
-            tls_backend: :ex_ssl,
             connect_address: {127, 0, 0, 1},
             http_version: :http1,
             http1_reuse: false,
