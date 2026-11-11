@@ -997,6 +997,11 @@ defmodule Quic.HandshakeScheduler do
             coalesced_error(state, events, count, :missing_read_key)
         end
 
+      # Key-update violations are detected only after AEAD authentication
+      # succeeded, so they are authenticated protocol errors (RFC 9001 section 6).
+      {:error, {:key_update_error, _} = reason} when state.path_events ->
+        coalesced_error(state, events, count, {:authenticated_frame, reason})
+
       {:error, reason} ->
         coalesced_error(state, events, count, reason)
     end
@@ -2059,6 +2064,47 @@ defmodule Quic.HandshakeScheduler do
     end
   end
 
+  # RFC 9000 section 20.1 transport error codes for stream-level frame failures.
+  defp stream_error(reason, frame_type, public_reason),
+    do: {:transport_error, stream_error_code(reason), frame_type, public_reason}
+
+  defp stream_error_code(:flow_control), do: 0x03
+  defp stream_error_code(:stream_limit), do: 0x04
+
+  defp stream_error_code(reason)
+       when reason in [
+              :stream_state_error,
+              :receive_on_send_only_stream,
+              :send_on_receive_only_stream,
+              :peer_stream_id_invalid,
+              :unknown_stream
+            ],
+       do: 0x05
+
+  defp stream_error_code(:final_size_error), do: 0x06
+
+  defp stream_error_code(reason)
+       when reason in [
+              :frame_encoding_error,
+              :invalid_stream_frame,
+              :invalid_credit_frame,
+              :invalid_stop_sending
+            ],
+       do: 0x07
+
+  defp stream_error_code(:overlap_conflict), do: 0x0A
+  # Local resource bounds (buffer, ranges, receive queue, stream records).
+  defp stream_error_code(_reason), do: 0x01
+
+  defp stream_frame_type(frame) do
+    0x08 ||| if(frame.offset > 0, do: 0x04, else: 0) ||| if(frame.fin, do: 0x01, else: 0)
+  end
+
+  defp credit_frame_type(:max_data), do: 0x10
+  defp credit_frame_type(:max_stream_data), do: 0x11
+  defp credit_frame_type(:max_streams_bidi), do: 0x12
+  defp credit_frame_type(:max_streams_uni), do: 0x13
+
   defp acknowledge_inbound(state, space, frames) do
     if Enum.any?(
          frames,
@@ -2147,7 +2193,7 @@ defmodule Quic.HandshakeScheduler do
         ])
 
       {:error, reason} ->
-        {:error, {:stream, reason}}
+        {:error, stream_error(reason, stream_frame_type(frame), {:stream, reason})}
     end
   end
 
@@ -2206,16 +2252,7 @@ defmodule Quic.HandshakeScheduler do
           ])
 
         {:error, reason} ->
-          code =
-            case reason do
-              :frame_encoding_error -> 0x07
-              :flow_control -> 0x03
-              :stream_state_error -> 0x05
-              :final_size_error -> 0x06
-              _ -> 0x0A
-            end
-
-          {:error, {:transport_error, code, 0x24, reason}}
+          {:error, stream_error(reason, 0x24, reason)}
       end
     else
       {:error, {:protocol_violation, 0x0A, 0x24}}
@@ -2260,15 +2297,7 @@ defmodule Quic.HandshakeScheduler do
         ])
 
       {:error, reason} ->
-        code =
-          case reason do
-            :flow_control -> 0x03
-            :stream_state_error -> 0x05
-            :final_size_error -> 0x06
-            _ -> 0x0A
-          end
-
-        {:error, {:transport_error, code, 0x04, reason}}
+        {:error, stream_error(reason, 0x04, reason)}
     end
   end
 
@@ -2295,7 +2324,7 @@ defmodule Quic.HandshakeScheduler do
         dispatch_frames(next, level, space, number, rest, at, [frame | events])
 
       {:error, reason} ->
-        {:error, {:stream, reason}}
+        {:error, stream_error(reason, 0x05, {:stream, reason})}
     end
   end
 
@@ -2313,7 +2342,7 @@ defmodule Quic.HandshakeScheduler do
         ])
 
       {:error, reason} ->
-        {:error, {:stream, reason}}
+        {:error, stream_error(reason, credit_frame_type(type), {:stream, reason})}
     end
   end
 

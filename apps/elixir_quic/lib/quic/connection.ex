@@ -1137,10 +1137,32 @@ defmodule Quic.Connection do
       {:error, {:protocol_violation, 0x0A, frame_type} = reason, scheduler} ->
         close_transport_error(%{data | scheduler: scheduler}, from, reason, 0x0A, frame_type)
 
-      {:error, reason, _scheduler} ->
-        stop_with_replies(data, reason, [{:reply, from, {:error, reason}}])
+      {:error, reason, scheduler} ->
+        case authenticated_error_code(reason) do
+          {code, frame_type} ->
+            close_transport_error(%{data | scheduler: scheduler}, from, reason, code, frame_type)
+
+          nil ->
+            stop_with_replies(data, reason, [{:reply, from, {:error, reason}}])
+        end
     end
   end
+
+  # RFC 9000 section 20.1 codes for authenticated frame and packet failures that
+  # the scheduler reports without a transport code (section 10.2: close, not drop).
+  defp authenticated_error_code({:invalid_ack, :ack_never_issued}), do: {0x0A, 0x02}
+  defp authenticated_error_code({:invalid_ack, :ack_range_limit}), do: {0x01, 0x02}
+  defp authenticated_error_code({:invalid_ack, _}), do: {0x07, 0x02}
+  defp authenticated_error_code({:malformed_frame, _}), do: {0x07, 0}
+  defp authenticated_error_code(:trailing_frame_bytes), do: {0x07, 0}
+  defp authenticated_error_code(:unexpected_handshake_done), do: {0x0A, 0x1E}
+  defp authenticated_error_code(:unexpected_new_token), do: {0x0A, 0x07}
+  defp authenticated_error_code(:missing_peer_connection_id), do: {0x0A, 0x18}
+  defp authenticated_error_code(:connection_id_conflict), do: {0x0A, 0x18}
+  defp authenticated_error_code(:invalid_retire_prior_to), do: {0x07, 0x18}
+  defp authenticated_error_code(:connection_id_limit), do: {0x09, 0x18}
+  defp authenticated_error_code(:control_queue_limit), do: {0x01, 0}
+  defp authenticated_error_code(_reason), do: nil
 
   defp tls_failure_state(data, error) do
     reason = {:tls, error.kind, error.alert, error.reason}
