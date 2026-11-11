@@ -15,6 +15,11 @@ defmodule HTTP.SocketClient do
 
   # WHATWG Fetch: the 21st redirect is a network error.
   @max_redirects 20
+  @http2_max_attempts 3
+  # A draining owner refuses before any stream allocation or write. Capacity
+  # refusals are not retried: the pool would hand the same owner back until the
+  # deadline instead of failing fast.
+  @http2_open_refusals [:draining]
 
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
@@ -433,32 +438,7 @@ defmodule HTTP.SocketClient do
     end
   end
 
-  defp owner(parent, ref, request, unix_socket_path, redirects, redirected?, deadline_at) do
-    tracker = Keyword.get(request.transport_options, :request_lifecycle)
-    Process.put(HTTP.RequestLifecycle, tracker)
-    parent_monitor = Process.monitor(parent)
-
-    try do
-      result =
-        owner_request(
-          parent,
-          ref,
-          request,
-          unix_socket_path,
-          redirects,
-          redirected?,
-          deadline_at,
-          parent_monitor
-        )
-
-      HTTP.RequestLifecycle.complete(tracker, deadline_at)
-      result
-    after
-      Process.demonitor(parent_monitor, [:flush])
-    end
-  end
-
-  defp owner_request(
+  defp owner(
          parent,
          ref,
          request,
@@ -466,16 +446,15 @@ defmodule HTTP.SocketClient do
          redirects,
          redirected?,
          deadline_at,
-         parent_monitor
+         attempt \\ 1
        ) do
-    case remaining_timeout(deadline_at) do
-      0 ->
-        send_error(parent, ref, :request_timeout)
+    tracker = Keyword.get(request.transport_options, :request_lifecycle)
+    Process.put(HTTP.RequestLifecycle, tracker)
+    parent_monitor = Process.monitor(parent)
 
-      timeout ->
-        timer_ref = start_request_timer(timeout)
-
-        context = %{
+    try do
+      result =
+        owner_request(%{
           parent: parent,
           parent_monitor: parent_monitor,
           ref: ref,
@@ -484,8 +463,33 @@ defmodule HTTP.SocketClient do
           redirects: redirects,
           redirected?: redirected?,
           deadline_at: deadline_at,
-          timer_ref: timer_ref
-        }
+          attempt: attempt
+        })
+
+      HTTP.RequestLifecycle.complete(tracker, deadline_at)
+      result
+    after
+      Process.demonitor(parent_monitor, [:flush])
+    end
+  end
+
+  defp owner_request(context) do
+    %{
+      parent: parent,
+      parent_monitor: parent_monitor,
+      ref: ref,
+      request: request,
+      unix_socket_path: unix_socket_path,
+      deadline_at: deadline_at
+    } = context
+
+    case remaining_timeout(deadline_at) do
+      0 ->
+        send_error(parent, ref, :request_timeout)
+
+      timeout ->
+        timer_ref = start_request_timer(timeout)
+        context = Map.put(context, :timer_ref, timer_ref)
 
         with {:ok, transport, host, port} <- select_transport(request, unix_socket_path),
              {:ok, selection} <- protocol_selection(request, transport),
@@ -853,12 +857,14 @@ defmodule HTTP.SocketClient do
             body_bridge: bridge,
             pool: pool,
             reservation: reservation,
-            pool_key: key
+            pool_key: key,
+            attempt: context.attempt
           })
 
         {:error, reason} ->
+          if is_pid(pool), do: mark_refused_http2_owner(reason, pool, key, owner)
           cleanup_failed_http2_owner(owner, pool, key, reservation)
-          send_error(parent, ref, reason)
+          retry_or_fail_http2(context, reason)
       end
     else
       {:error, reason, :registered} ->
@@ -917,12 +923,14 @@ defmodule HTTP.SocketClient do
           body_bridge: bridge,
           pool: pool,
           reservation: reservation,
-          pool_key: key
+          pool_key: key,
+          attempt: context.attempt
         })
 
       {:error, reason} ->
+        mark_refused_http2_owner(reason, pool, key, owner)
         confirm_http2_cleanup(fn -> Pool.release(pool, key, reservation) end)
-        send_error(parent, ref, reason)
+        retry_or_fail_http2(context, reason)
     end
   end
 
@@ -1141,6 +1149,10 @@ defmodule HTTP.SocketClient do
         {:ok, %{id: id}} ->
           send_opened_http2_body(owner, id, body, bridge, internal_stream)
 
+        {:error, reason} when reason in @http2_open_refusals ->
+          discard_http2_bridge(bridge, internal_stream)
+          {:error, {:http2_open_refused, reason}}
+
         {:error, reason} ->
           discard_http2_bridge(bridge, internal_stream)
           {:error, reason}
@@ -1235,10 +1247,10 @@ defmodule HTTP.SocketClient do
         handle_http2_data(state, chunk, flags)
 
       {:http2, ^stream_id, {:http2, :reset, code}} ->
-        fail_http2(state, {:stream_reset, http2_error_code(code)})
+        unprocessed_or_fail_http2(state, {:stream_reset, http2_error_code(code)})
 
       {:http2, ^stream_id, {:http2, :stream_error, reason}} ->
-        fail_http2(state, reason)
+        unprocessed_or_fail_http2(state, reason)
 
       {:http2, ^stream_id, {:http2, :body_error, reason}} ->
         fail_http2(state, {:body_error, reason})
@@ -1596,6 +1608,61 @@ defmodule HTTP.SocketClient do
        do: Pool.mark_draining(pool, key, owner)
 
   defp mark_http2_draining(_state), do: :ok
+
+  # RFC 9113 §8.7: streams above a GOAWAY last-stream-id and streams reset with
+  # REFUSED_STREAM were not processed, like an open the owner refused. Such a
+  # request moves to another owner under the same deadline (at most
+  # @http2_max_attempts owners per hop), mirroring the HTTP/3 transfer rule.
+  # A streamed body is never replayed, and nothing is retried once any part of
+  # the response has been accepted.
+  defp unprocessed_or_fail_http2(state, reason) do
+    if http2_retry?(state, reason) and is_nil(state.mode) and not state.response_sent? and
+         is_nil(state.delivery) do
+      if match?({:goaway, _, _, :unprocessed}, reason), do: mark_http2_draining(state)
+      finish_http2(state, :retry)
+      retry_http2(state)
+    else
+      fail_http2(state, reason)
+    end
+  end
+
+  defp retry_or_fail_http2(context, {:http2_open_refused, refusal} = reason) do
+    if http2_retry?(context, reason),
+      do: retry_http2(context),
+      else: send_error(context.parent, context.ref, refusal)
+  end
+
+  defp retry_or_fail_http2(context, reason), do: send_error(context.parent, context.ref, reason)
+
+  defp http2_retry?(%{attempt: attempt, request: request}, reason) do
+    attempt < @http2_max_attempts and not Request.streaming_body?(request) and
+      http2_unprocessed?(reason)
+  end
+
+  defp http2_unprocessed?({:http2_open_refused, _refusal}), do: true
+  defp http2_unprocessed?({:goaway, _last, _error, :unprocessed}), do: true
+  defp http2_unprocessed?({:stream_reset, :refused_stream}), do: true
+  defp http2_unprocessed?(_reason), do: false
+
+  defp retry_http2(state) do
+    owner(
+      state.parent,
+      state.ref,
+      state.request,
+      state.unix_socket_path,
+      state.redirects,
+      state.redirected?,
+      state.deadline_at,
+      state.attempt + 1
+    )
+  end
+
+  # A draining owner must not be reserved again by the retry; the owner's own
+  # asynchronous draining notice may not have reached the pool yet.
+  defp mark_refused_http2_owner({:http2_open_refused, :draining}, pool, key, owner),
+    do: confirm_http2_cleanup(fn -> Pool.mark_draining(pool, key, owner) end)
+
+  defp mark_refused_http2_owner(_reason, _pool, _key, _owner), do: :ok
 
   defp parse_status(<<a, b, c>>)
        when a in ?0..?9 and b in ?0..?9 and c in ?0..?9 do
@@ -2170,7 +2237,7 @@ defmodule HTTP.SocketClient do
     else
       case HTTP.ContentDecoder.buffered(
              response.headers,
-             response.body || "",
+             buffered_input(response),
              max_decoded_body_size(request)
            ) do
         {:ok, body} ->
@@ -2181,6 +2248,9 @@ defmodule HTTP.SocketClient do
       end
     end
   end
+
+  defp buffered_input(%Response{body: body}) when is_binary(body), do: body
+  defp buffered_input(_response), do: ""
 
   defp max_decoded_body_size(request) do
     Keyword.get(request.transport_options, :max_decoded_body_size) ||
