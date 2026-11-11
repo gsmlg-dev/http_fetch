@@ -19,7 +19,6 @@ defmodule HTTP.WebTransport.OptionsTest do
     assert {:ok, options} =
              Options.new("https://example.com/transport",
                owner: self(),
-               allow_pooling: true,
                require_unreliable: true,
                headers: %{"x-token" => "abc"},
                congestion_control: :low_latency,
@@ -32,14 +31,13 @@ defmodule HTTP.WebTransport.OptionsTest do
                idle_timeout: 20,
                ssl: [verify: :verify_none],
                quic: [alpn: "h3"],
-               socket_opts: [active: false],
                max_incoming_datagrams: 4,
                max_outgoing_datagrams: 5,
                max_datagram_size: 6
              )
 
     assert options.owner == self()
-    assert options.allow_pooling == true
+    assert options.allow_pooling == false
     assert options.require_unreliable == true
     assert {"X-Token", "abc"} in options.headers
     assert options.congestion_control == :low_latency
@@ -52,10 +50,19 @@ defmodule HTTP.WebTransport.OptionsTest do
     assert options.idle_timeout == 20
     assert options.ssl == [verify: :verify_none]
     assert options.quic == [alpn: "h3"]
-    assert options.socket_opts == [active: false]
+    assert options.socket_opts == []
     assert options.max_incoming_datagrams == 4
     assert options.max_outgoing_datagrams == 5
     assert options.max_datagram_size == 6
+  end
+
+  test "rejects accepted-but-unimplemented options explicitly" do
+    url = "https://example.com/transport"
+    assert {:error, :pooling_unsupported} = Options.new(url, allow_pooling: true)
+    assert {:error, :socket_opts_unsupported} = Options.new(url, socket_opts: [active: false])
+
+    assert {:error, :unsupported_server_certificate_hashes} =
+             Options.new(url, server_certificate_hashes: [%{algorithm: "sha-256", value: <<0>>}])
   end
 
   test "normalizes browser-style string keys" do

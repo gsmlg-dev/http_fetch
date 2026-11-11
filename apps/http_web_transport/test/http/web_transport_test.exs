@@ -179,6 +179,83 @@ defmodule HTTP.WebTransportTest do
              WebTransport.close(transport, reason: :binary.copy("a", 1_025))
   end
 
+  test "get_stats reports session byte and datagram counters" do
+    transport = connected_transport()
+    datagrams = WebTransport.datagrams(transport)
+    writable = DatagramDuplexStream.create_writable(datagrams)
+
+    assert {:ok, %{bytes_sent: 0, bytes_received: 0}} = WebTransport.get_stats(transport)
+    assert :ok = DatagramsWritable.write(writable, <<1, 2, 3>>)
+    send(transport.pid, {:webtransport_datagram, transport.ref, "pong"})
+    assert {:ok, "pong"} = DatagramDuplexStream.read(datagrams, timeout: 1_000)
+
+    assert {:ok, stats} = WebTransport.get_stats(transport)
+    assert stats.bytes_sent == 3
+    assert stats.bytes_received == 4
+    assert stats.datagrams == %{sent: 1, received: 1, dropped: 0}
+  end
+
+  test "incoming datagram max age drops stale datagrams and counts them" do
+    transport = connected_transport()
+    datagrams = WebTransport.datagrams(transport)
+    assert :ok = DatagramDuplexStream.set_incoming_max_age(datagrams, 20)
+
+    send(transport.pid, {:webtransport_datagram, transport.ref, "stale"})
+    Process.sleep(60)
+    assert {:error, :timeout} = DatagramDuplexStream.read(datagrams, timeout: 10)
+
+    send(transport.pid, {:webtransport_datagram, transport.ref, "fresh"})
+    assert {:ok, "fresh"} = DatagramDuplexStream.read(datagrams, timeout: 1_000)
+    assert {:ok, %{datagrams: %{dropped: 1}}} = WebTransport.get_stats(transport)
+  end
+
+  test "send order and send groups are rejected instead of ignored" do
+    transport = connected_transport()
+    datagrams = WebTransport.datagrams(transport)
+
+    writable = DatagramDuplexStream.create_writable(datagrams, send_order: 5)
+    assert {:error, :send_order_unsupported} = DatagramsWritable.write(writable, "x")
+
+    assert {:error, :send_group_unsupported} =
+             WebTransport.create_unidirectional_stream(transport,
+               send_group: WebTransport.create_send_group(transport)
+             )
+
+    assert {:error, :send_order_unsupported} =
+             WebTransport.create_bidirectional_stream(transport, send_order: 1)
+  end
+
+  test "close rejects out-of-range codes and invalid UTF-8 reasons" do
+    transport = connected_transport()
+
+    assert {:error, :invalid_close_code} =
+             WebTransport.close(transport, close_code: 0x1_0000_0000)
+
+    assert {:error, :invalid_close_reason} = WebTransport.close(transport, reason: <<0xFF>>)
+    assert :ok = WebTransport.close(transport, close_code: 0xFFFFFFFF)
+  end
+
+  test "require_unreliable fails a session whose backend is reliable-only" do
+    defmodule ReliableOnlyBackend do
+      @moduledoc false
+      def connect(uri, options) do
+        with {:ok, ref, info} <- HTTP.WebTransport.FakeBackend.connect(uri, options),
+             do: {:ok, ref, %{info | reliability: "reliable-only"}}
+      end
+
+      defdelegate close(ref, info), to: HTTP.WebTransport.FakeBackend
+    end
+
+    transport =
+      WebTransport.new("https://example.com/transport",
+        backend: ReliableOnlyBackend,
+        require_unreliable: true
+      )
+
+    assert {:error, :unreliable_transport_required} = WebTransport.await_ready(transport, 1_000)
+    assert WebTransport.state(transport) == :failed
+  end
+
   defp connected_transport do
     transport = WebTransport.new("https://example.com/transport", backend: FakeBackend)
     assert %WebTransport{} = transport

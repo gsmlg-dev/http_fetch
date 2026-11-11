@@ -19,7 +19,7 @@ defmodule HTTP.WebTransport.Transport.QUIC do
   @behaviour HTTP.WebTransport.Transport
 
   alias HTTP.HTTP3.{ConnectionOwner, ConnectionSupervisor}
-  alias HTTP.WebTransport.{CloseInfo, Options, Stats}
+  alias HTTP.WebTransport.{CloseInfo, Options}
 
   @protocol "webtransport-h3"
   @default_operation_timeout 5_000
@@ -36,6 +36,7 @@ defmodule HTTP.WebTransport.Transport.QUIC do
     deadline = now() + options.connect_timeout
 
     with :ok <- validate_target(uri),
+         :ok <- check_cancelled(),
          {:ok, fields} <- connect_fields(uri, options),
          {:ok, handle, lease} <- Quic.Cleanup.new(owner: self()) do
       cleanup = %{handle: handle, lease: lease}
@@ -81,7 +82,8 @@ defmodule HTTP.WebTransport.Transport.QUIC do
             max_streams: min(options.max_streams, 128)
           ]
         ]
-      ] ++ Keyword.take(options.quic, [:profile, :idle_timeout, :datagram, :streams])
+      ] ++
+        idle_timeout(options) ++ Keyword.take(options.quic, [:profile, :datagram, :streams])
 
     case ConnectionSupervisor.start_connection(owner_opts) do
       {:ok, owner} ->
@@ -109,12 +111,23 @@ defmodule HTTP.WebTransport.Transport.QUIC do
     end
   end
 
+  # `quic: [idle_timeout: ms]` wins over the W3C-style `idle_timeout` option.
+  defp idle_timeout(%Options{quic: quic, idle_timeout: idle_timeout}) do
+    cond do
+      Keyword.has_key?(quic, :idle_timeout) -> [idle_timeout: Keyword.fetch!(quic, :idle_timeout)]
+      is_integer(idle_timeout) -> [idle_timeout: idle_timeout]
+      true -> []
+    end
+  end
+
   defp open_session(%Ref{owner: owner} = session_ref, activation, fields, deadline) do
+    subscriber = self()
+
     with :ok <- call(fn -> ConnectionOwner.activate(owner, activation) end),
          :ok <- owner_ready(session_ref, deadline),
          {:ok, ref} <-
-           call(fn ->
-             ConnectionOwner.open(owner, fields, :stream, self(), session_ref.generation,
+           interruptible(fn ->
+             ConnectionOwner.open(owner, fields, :stream, subscriber, session_ref.generation,
                purpose: :extended_connect,
                protocol: @protocol,
                timeout: remaining(deadline),
@@ -128,8 +141,11 @@ defmodule HTTP.WebTransport.Transport.QUIC do
   end
 
   defp owner_ready(session_ref, deadline) do
-    case call(fn -> ConnectionOwner.await_ready(session_ref.owner, remaining(deadline)) end) do
+    owner = session_ref.owner
+
+    case interruptible(fn -> ConnectionOwner.await_ready(owner, remaining(deadline)) end) do
       :ok -> :ok
+      {:error, :connect_cancelled} -> {:error, :connect_cancelled}
       {:error, {:owner_down, reason}} -> {:error, {:http3_not_established, reason}}
       {:error, reason} -> {:error, {:http3_not_established, reason}}
     end
@@ -158,6 +174,9 @@ defmodule HTTP.WebTransport.Transport.QUIC do
 
       {:DOWN, ^monitor, :process, ^owner, reason} ->
         {:error, {:owner_down, reason}}
+
+      :wt_cancel_connect ->
+        {:error, :connect_cancelled}
     after
       remaining(deadline) ->
         {:error, :connect_timeout}
@@ -183,8 +202,7 @@ defmodule HTTP.WebTransport.Transport.QUIC do
   @impl true
   def close(%Ref{} = session_ref, %CloseInfo{} = info) do
     if Process.alive?(session_ref.owner) do
-      code = if info.close_code in 0..0xFFFFFFFF, do: info.close_code, else: 0
-      _ = owner_call(session_ref, {:close, code, info.reason}, session_ref.timeout)
+      _ = owner_call(session_ref, {:close, info.close_code, info.reason}, session_ref.timeout)
       linger(session_ref, now() + session_ref.linger)
     end
 
@@ -195,7 +213,7 @@ defmodule HTTP.WebTransport.Transport.QUIC do
   def close(_session_ref, _info), do: :ok
 
   @impl true
-  def get_stats(_session_ref), do: {:ok, %Stats{}}
+  def get_stats(_session_ref), do: {:error, :not_measured}
 
   @impl true
   def open_bidirectional_stream(session_ref, _options), do: open(session_ref, :bidi)
@@ -382,8 +400,10 @@ defmodule HTTP.WebTransport.Transport.QUIC do
   defp validate_target(_uri), do: {:error, :invalid_webtransport_url}
 
   defp connect_fields(uri, options) do
+    host = if String.contains?(uri.host, ":"), do: "[#{uri.host}]", else: uri.host
+
     authority =
-      if uri.port in [nil, 443], do: uri.host, else: "#{uri.host}:#{uri.port}"
+      if uri.port in [nil, 443], do: host, else: "#{host}:#{uri.port}"
 
     path = (uri.path || "/") <> if(uri.query, do: "?" <> uri.query, else: "")
     path = if String.starts_with?(path, "/"), do: path, else: "/" <> path
@@ -436,6 +456,43 @@ defmodule HTTP.WebTransport.Transport.QUIC do
   end
 
   defp parse_sf_string(_value), do: nil
+
+  # Runs a blocking owner call in a helper so a `:wt_cancel_connect` message
+  # (sent by `HTTP.WebTransport.close/1` while connecting) can interrupt it.
+  defp interruptible(fun) do
+    parent = self()
+    tag = make_ref()
+    {pid, monitor} = spawn_monitor(fn -> send(parent, {tag, call(fun)}) end)
+
+    receive do
+      {^tag, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        {:error, {:owner_down, reason}}
+
+      :wt_cancel_connect ->
+        Process.exit(pid, :kill)
+        Process.demonitor(monitor, [:flush])
+
+        receive do
+          {^tag, _result} -> :ok
+        after
+          0 -> :ok
+        end
+
+        {:error, :connect_cancelled}
+    end
+  end
+
+  defp check_cancelled do
+    receive do
+      :wt_cancel_connect -> {:error, :connect_cancelled}
+    after
+      0 -> :ok
+    end
+  end
 
   defp call(fun) do
     fun.()

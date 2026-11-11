@@ -11,6 +11,32 @@ defmodule HTTP.WebTransport do
   This is beta: independent interoperability acceptance has not passed, so
   `HTTP.WebTransport.Profile.supported?/0` remains false.
 
+  `close/2` takes effect while the session is still connecting: the pending
+  connect is cancelled, QUIC resources are released and the session never opens.
+
+  Option support:
+
+    * `server_certificate_hashes` (non-empty), `allow_pooling: true` and a
+      non-empty `socket_opts` are rejected (`:unsupported_server_certificate_hashes`,
+      `:pooling_unsupported`, `:socket_opts_unsupported`).
+    * `require_unreliable: true` fails the session unless the backend reports
+      `"supports-unreliable"` (the QUIC backend always does).
+    * `idle_timeout` (milliseconds) is passed to the QUIC owner.
+    * `anticipated_concurrent_incoming_*_streams` and `congestion_control` are
+      W3C hints and are stored and reported but not applied.
+    * `datagrams_readable_type` `:default` and `:bytes` are equivalent: datagrams
+      are always delivered as binaries.
+    * Datagram `incoming_max_age`/`outgoing_max_age` drop stale datagrams (incoming
+      ones when read, outgoing ones buffered while connecting) and count them in
+      `get_stats/1`. `send_order` other than 0 and any `send_group` are rejected
+      with `:send_order_unsupported` / `:send_group_unsupported`.
+
+  `get_stats/1` reports counters kept by the session at its API boundary:
+  application payload bytes sent and received (stream data and datagrams),
+  datagram counts, and datagrams dropped (oversized, or expired by max age).
+  They are not QUIC wire counters: packet, retransmission and RTT statistics
+  are not measured.
+
   QUIC TLS configuration is separate from TCP TLS. The shared
   `:http_core, :tls_backend` configuration does not apply here; an explicit
   non-nil `tls_backend` option returns `{:error, :tls_backend_not_supported_for_quic}`.
@@ -186,6 +212,8 @@ defmodule HTTP.WebTransport do
     options = if is_map(options), do: Map.to_list(options), else: options
 
     with {:ok, close_info} <- close_info(options) do
+      # A session still connecting is blocked in its backend; this wakes it.
+      with %__MODULE__{pid: pid} when is_pid(pid) <- transport, do: send(pid, :wt_cancel_connect)
       connection_call(transport, {:close, close_info}, :ok)
     end
   end
@@ -195,10 +223,10 @@ defmodule HTTP.WebTransport do
     close_code = Keyword.get(options, :close_code, 0)
 
     cond do
-      not is_integer(close_code) or close_code < 0 ->
+      not is_integer(close_code) or close_code < 0 or close_code > 0xFFFFFFFF ->
         {:error, :invalid_close_code}
 
-      not is_binary(reason) ->
+      not is_binary(reason) or not String.valid?(reason) ->
         {:error, :invalid_close_reason}
 
       byte_size(reason) > 1_024 ->

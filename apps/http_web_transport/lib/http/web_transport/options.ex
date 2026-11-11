@@ -172,7 +172,7 @@ defmodule HTTP.WebTransport.Options do
          {:ok, headers} <- normalize_headers(Keyword.get(init, :headers, [])),
          {:ok, owner} <- normalize_owner(Keyword.get(init, :owner, self())),
          {:ok, allow_pooling} <-
-           normalize_boolean(Keyword.get(init, :allow_pooling, false), :invalid_allow_pooling),
+           normalize_allow_pooling(Keyword.get(init, :allow_pooling, false)),
          {:ok, require_unreliable} <-
            normalize_boolean(
              Keyword.get(init, :require_unreliable, false),
@@ -208,7 +208,7 @@ defmodule HTTP.WebTransport.Options do
          {:ok, ssl} <- normalize_keyword(Keyword.get(init, :ssl, []), :invalid_ssl_options),
          {:ok, quic} <- normalize_keyword(Keyword.get(init, :quic, []), :invalid_quic_options),
          {:ok, socket_opts} <-
-           normalize_keyword(Keyword.get(init, :socket_opts, []), :invalid_socket_options),
+           normalize_socket_opts(Keyword.get(init, :socket_opts, [])),
          {:ok, max_incoming_datagrams} <-
            normalize_pos_integer(
              Keyword.get(init, :max_incoming_datagrams, @default_max_datagrams),
@@ -298,6 +298,15 @@ defmodule HTTP.WebTransport.Options do
 
   defp normalize_boolean(value, _error) when is_boolean(value), do: {:ok, value}
   defp normalize_boolean(_value, error), do: {:error, error}
+
+  # Connection pooling is not implemented: every session owns its connection.
+  defp normalize_allow_pooling(true), do: {:error, :pooling_unsupported}
+  defp normalize_allow_pooling(value), do: normalize_boolean(value, :invalid_allow_pooling)
+
+  # The QUIC backend owns its UDP socket and exposes no socket options.
+  defp normalize_socket_opts([]), do: {:ok, []}
+  defp normalize_socket_opts(opts) when is_list(opts), do: {:error, :socket_opts_unsupported}
+  defp normalize_socket_opts(_opts), do: {:error, :invalid_socket_options}
 
   defp normalize_server_certificate_hashes([]), do: {:ok, []}
 

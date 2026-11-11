@@ -97,8 +97,18 @@ defmodule HTTP.WebTransport.Session do
     case state.backend.connect(state.uri, state.options) do
       {:ok, session_ref, info} ->
         duration = System.monotonic_time(:microsecond) - started_at
-        state = connect_success(state, session_ref, info, duration)
-        {:noreply, state}
+
+        if state.options.require_unreliable and
+             Map.get(info, :reliability, "supports-unreliable") != "supports-unreliable" do
+          state = %{state | session_ref: session_ref}
+          Telemetry.connect_exception(state.uri, :unreliable_transport_required, duration)
+          {:noreply, fail_session(state, :unreliable_transport_required)}
+        else
+          {:noreply, connect_success(state, session_ref, info, duration)}
+        end
+
+      {:error, :connect_cancelled} ->
+        {:noreply, close_session(state, %CloseInfo{reason: "closed while connecting"})}
 
       {:error, reason} ->
         duration = System.monotonic_time(:microsecond) - started_at
@@ -208,8 +218,14 @@ defmodule HTTP.WebTransport.Session do
   end
 
   def handle_call({:send_datagram, bytes, options}, _from, state) when is_binary(bytes) do
-    {:reply, reply, state} = send_datagram(bytes, options, state)
-    {:reply, reply, state}
+    case reject_send_priority(options) do
+      :ok ->
+        {:reply, reply, state} = send_datagram(bytes, options, state)
+        {:reply, reply, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call({:read_datagram, timeout}, _from, state)
@@ -232,19 +248,11 @@ defmodule HTTP.WebTransport.Session do
     read_queued(kind, timeout, from, state)
   end
 
-  def handle_call({:create_bidirectional_stream, options}, _from, state) do
-    case create_stream(:bidirectional, options, state) do
-      {:ok, stream, state} -> {:reply, {:ok, stream}, state}
-      {:error, reason, state} -> {:reply, {:error, reason}, state}
-    end
-  end
+  def handle_call({:create_bidirectional_stream, options}, _from, state),
+    do: create_stream_reply(:bidirectional, options, state)
 
-  def handle_call({:create_unidirectional_stream, options}, _from, state) do
-    case create_stream(:unidirectional, options, state) do
-      {:ok, stream, state} -> {:reply, {:ok, stream}, state}
-      {:error, reason, state} -> {:reply, {:error, reason}, state}
-    end
-  end
+  def handle_call({:create_unidirectional_stream, options}, _from, state),
+    do: create_stream_reply(:unidirectional, options, state)
 
   def handle_call({:send_stream, stream_ref, data, options}, _from, state) do
     with {:ok, bytes} <- normalize_iodata(data),
@@ -303,16 +311,10 @@ defmodule HTTP.WebTransport.Session do
     read_stream(stream_ref, timeout, from, state)
   end
 
-  def handle_call(:get_stats, _from, %{session_ref: nil} = state) do
-    {:reply, {:ok, state.stats}, state}
-  end
-
-  def handle_call(:get_stats, _from, state) do
-    case state.backend.get_stats(state.session_ref) do
-      {:ok, stats} -> {:reply, {:ok, stats}, state}
-      {:error, _reason} -> {:reply, {:ok, state.stats}, state}
-    end
-  end
+  # The session counts application payload bytes and datagrams at its own
+  # boundary; backend `get_stats/1` results are not merged because the QUIC
+  # transport exposes no wire-level counters.
+  def handle_call(:get_stats, _from, state), do: {:reply, {:ok, state.stats}, state}
 
   def handle_call({:close, close_info}, _from, state) do
     state = close_session(state, close_info)
@@ -327,6 +329,8 @@ defmodule HTTP.WebTransport.Session do
   end
 
   @impl true
+  def handle_info(:wt_cancel_connect, state), do: {:noreply, state}
+
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, %{owner_monitor: monitor} = state) do
     {:stop, :normal, close_session(state, %CloseInfo{reason: "owner exited"})}
   end
@@ -504,7 +508,8 @@ defmodule HTTP.WebTransport.Session do
          not buffer_fits?(state, byte_size(bytes), 1) do
       {:reply, {:error, :backpressure}, state}
     else
-      {:reply, :ok, %{state | outgoing_datagrams: state.outgoing_datagrams ++ [{bytes, options}]}}
+      {:reply, :ok,
+       %{state | outgoing_datagrams: state.outgoing_datagrams ++ [{bytes, options, now_ms()}]}}
     end
   end
 
@@ -526,6 +531,26 @@ defmodule HTTP.WebTransport.Session do
     Telemetry.datagram_received(state.uri, byte_size(bytes), length(state.datagram_queue))
     state = update_stats(state, :datagram_received, byte_size(bytes))
     deliver_queue(:datagram, bytes, state)
+  end
+
+  defp create_stream_reply(kind, options, state) do
+    with :ok <- reject_send_priority(options),
+         {:ok, stream, state} <- create_stream(kind, options, state) do
+      {:reply, {:ok, stream}, state}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+      {:error, reason, state} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Send groups and send order need a prioritising scheduler the QUIC backend
+  # does not have; only the neutral values are accepted.
+  defp reject_send_priority(options) do
+    cond do
+      Keyword.get(options, :send_order, 0) not in [0, nil] -> {:error, :send_order_unsupported}
+      Keyword.get(options, :send_group) != nil -> {:error, :send_group_unsupported}
+      true -> :ok
+    end
   end
 
   defp create_stream(_kind, _options, %{state: state} = session)
@@ -770,8 +795,15 @@ defmodule HTTP.WebTransport.Session do
   defp flush_outgoing_datagrams(%{outgoing_datagrams: []} = state), do: state
 
   defp flush_outgoing_datagrams(state) do
-    Enum.reduce(state.outgoing_datagrams, %{state | outgoing_datagrams: []}, fn {bytes, options},
-                                                                                acc ->
+    {fresh, expired} =
+      split_expired(
+        Enum.map(state.outgoing_datagrams, fn {_, _, queued} = entry -> {entry, queued} end),
+        state.outgoing_datagrams_max_age
+      )
+
+    state = count_dropped(%{state | outgoing_datagrams: []}, length(expired))
+
+    Enum.reduce(fresh, state, fn {{bytes, options, _queued}, _}, acc ->
       case send_datagram(bytes, options, acc) do
         {:reply, :ok, acc} -> acc
         {:reply, {:error, _reason}, acc} -> acc
@@ -892,8 +924,15 @@ defmodule HTTP.WebTransport.Session do
 
   defp take_queue_waiter(_kind, _state), do: :empty
 
-  defp pop_queue(:datagram, %{datagram_queue: [value | rest]} = state),
-    do: {:ok, value, %{state | datagram_queue: rest}}
+  defp pop_queue(:datagram, %{datagram_queue: queue} = state) do
+    {fresh, expired} = split_expired(queue, state.incoming_datagrams_max_age)
+    state = count_dropped(%{state | datagram_queue: fresh}, length(expired))
+
+    case fresh do
+      [{value, _arrived} | rest] -> {:ok, value, %{state | datagram_queue: rest}}
+      [] -> :empty
+    end
+  end
 
   defp pop_queue(:incoming_bidirectional, %{incoming_bidi_queue: [value | rest]} = state),
     do: {:ok, value, %{state | incoming_bidi_queue: rest}}
@@ -904,7 +943,7 @@ defmodule HTTP.WebTransport.Session do
   defp pop_queue(_kind, _state), do: :empty
 
   defp push_queue(:datagram, value, state) do
-    queue = bounded_push(state.datagram_queue, value, state.max_incoming_datagrams)
+    queue = bounded_push(state.datagram_queue, {value, now_ms()}, state.max_incoming_datagrams)
     candidate = %{state | datagram_queue: queue}
     if buffer_fits?(candidate, 0, 0), do: candidate, else: state
   end
@@ -1161,11 +1200,13 @@ defmodule HTTP.WebTransport.Session do
         {b + Enum.reduce(stream.queue, 0, &(event_bytes(&1) + &2)), n + length(stream.queue)}
       end)
 
-    bytes = bytes + Enum.reduce(state.datagram_queue, 0, &(byte_size(&1) + &2))
+    bytes =
+      bytes +
+        Enum.reduce(state.datagram_queue, 0, fn {data, _}, total -> byte_size(data) + total end)
 
     bytes =
       bytes +
-        Enum.reduce(state.outgoing_datagrams, 0, fn {data, _}, total ->
+        Enum.reduce(state.outgoing_datagrams, 0, fn {data, _, _}, total ->
           total + byte_size(data)
         end)
 
@@ -1235,6 +1276,24 @@ defmodule HTTP.WebTransport.Session do
   end
 
   defp normalize_close_info(_close_info), do: %CloseInfo{}
+
+  defp now_ms, do: System.monotonic_time(:millisecond)
+
+  # Datagram max age (W3C `incomingMaxAge` / `outgoingMaxAge`): entries older
+  # than the configured age are dropped and counted, never delivered.
+  defp split_expired(queue, nil), do: {queue, []}
+
+  defp split_expired(queue, max_age) do
+    cutoff = now_ms() - max_age
+    Enum.split_with(queue, fn {_value, arrived} -> arrived >= cutoff end)
+  end
+
+  defp count_dropped(state, 0), do: state
+
+  defp count_dropped(state, count) do
+    datagrams = Map.update!(state.stats.datagrams, :dropped, &(&1 + count))
+    %{state | stats: %{state.stats | datagrams: datagrams}}
+  end
 
   defp bounded_push(queue, value, max) do
     queue = queue ++ [value]

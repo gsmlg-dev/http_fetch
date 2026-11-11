@@ -43,6 +43,37 @@ defmodule HTTP.WebTransport.QUICIntegrationTest do
     %{server: server, url: "https://127.0.0.1:#{port}/wt?x=1", ssl: ssl}
   end
 
+  test "close while connecting takes effect and releases the session", ctx do
+    {:ok, silent} = :gen_udp.open(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, silent_port} = :inet.port(silent)
+    on_exit(fn -> :gen_udp.close(silent) end)
+
+    transport =
+      WebTransport.new("https://127.0.0.1:#{silent_port}/wt",
+        ssl: ctx.ssl,
+        connect_timeout: 30_000
+      )
+
+    Process.sleep(200)
+    monitor = Process.monitor(transport.pid)
+    started = System.monotonic_time(:millisecond)
+    assert :ok = WebTransport.close(transport)
+    assert System.monotonic_time(:millisecond) - started < 3_000
+    assert WebTransport.state(transport) == :closed
+    assert {:error, :closed} = WebTransport.await_ready(transport, 1_000)
+    assert {:ok, _} = WebTransport.await_closed(transport, 1_000)
+    Process.demonitor(monitor, [:flush])
+  end
+
+  test "get_stats counts bytes moved over the live QUIC session", ctx do
+    {transport, peer} = open(ctx)
+    {:ok, out} = WebTransport.create_unidirectional_stream(transport)
+    assert :ok = SendStream.write(out, "12345")
+    _ = next_stream(peer.conn, :uni)
+    assert {:ok, %{bytes_sent: 5}} = WebTransport.get_stats(transport)
+    assert :ok = WebTransport.close(transport)
+  end
+
   test "bidi and uni streams carry exact bytes and FIN in both directions", ctx do
     {transport, peer} = open(ctx)
 
