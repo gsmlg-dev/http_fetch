@@ -1102,6 +1102,11 @@ promise = HTTP.fetch(url, [
 
 Set `duplex: "half"` only when `body` is an `HTTP.Stream` PID.
 
+With `redirect: :follow` (the default), every protocol follows at most 20
+redirects (the Fetch limit); the next one returns `{:error, :too_many_redirects}`.
+A 307/308 that would replay a streamed `duplex: "half"` body returns
+`{:error, :streaming_body_redirect_not_replayable}` instead of the 3xx response.
+
 Supports both string URLs and URI structs:
 
 ```elixir

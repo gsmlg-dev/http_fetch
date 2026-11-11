@@ -135,7 +135,11 @@ defmodule HTTP do
                  when awaited.
 
   The socket transport defaults `redirect` to `:follow`; pass `redirect: :manual`
-  to return redirect responses, or `redirect: :error` to fail on redirect. Request timeout handling
+  to return redirect responses, or `redirect: :error` to fail on redirect. Following stops
+  after 20 redirects (the Fetch limit): the next redirect returns
+  `{:error, :too_many_redirects}` on HTTP/1, HTTP/2 and HTTP/3, and a 307/308 that would
+  replay a streamed (`duplex: :half`) body returns
+  `{:error, :streaming_body_redirect_not_replayable}`. Request timeout handling
   gives the internal socket owner up to one additional second to report its timeout before the
   awaiting caller aborts it. For HTTP/1, HTTP/2 and HTTP/3, `timeout: :infinity`
   removes the total request deadline, including response body reads. `connect_timeout`

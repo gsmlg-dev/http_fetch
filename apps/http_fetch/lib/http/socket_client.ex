@@ -13,7 +13,8 @@ defmodule HTTP.SocketClient do
   alias HTTP.Request
   alias HTTP.Response
 
-  @max_redirects 5
+  # WHATWG Fetch: the 21st redirect is a network error.
+  @max_redirects 20
 
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
@@ -343,8 +344,7 @@ defmodule HTTP.SocketClient do
       redirect_error?(state, response) ->
         {:error, :redirect, state}
 
-      redirect_mode(state.request) == :follow and state.redirects >= @max_redirects and
-          redirect_candidate?(state.request, response.status, response.headers) ->
+      redirect_limit_reached?(state, response) ->
         {:error, :too_many_redirects, state}
 
       follow_redirect?(state, response) ->
@@ -1379,8 +1379,7 @@ defmodule HTTP.SocketClient do
         cancel_http2_stream(state)
         fail_http2(state, :redirect)
 
-      redirect_mode(state.request) == :follow and state.redirects >= @max_redirects and
-          redirect_candidate?(state.request, status, headers) ->
+      redirect_limit_reached?(state, response) ->
         cancel_http2_stream(state)
         fail_http2(state, :too_many_redirects)
 
@@ -1840,6 +1839,9 @@ defmodule HTTP.SocketClient do
       redirect_error?(state, response) ->
         fail(state, :redirect)
 
+      redirect_limit_reached?(state, response) ->
+        fail(state, :too_many_redirects)
+
       follow_redirect?(state, response) ->
         redirect(state, response)
 
@@ -2029,12 +2031,8 @@ defmodule HTTP.SocketClient do
 
         :done
 
-      {:error, :client_identity_cross_origin_redirect = reason} ->
+      {:error, reason} ->
         fail(state, reason)
-
-      {:error, _reason} ->
-        send_response(state.parent, state.ref, response, state.request)
-        finish(state)
     end
   end
 
@@ -2665,6 +2663,12 @@ defmodule HTTP.SocketClient do
 
   defp redirect_error?(state, response) do
     redirect_mode(state.request) == :error &&
+      redirect_candidate?(state.request, response.status, response.headers)
+  end
+
+  defp redirect_limit_reached?(state, response) do
+    redirect_mode(state.request) == :follow &&
+      state.redirects >= @max_redirects &&
       redirect_candidate?(state.request, response.status, response.headers)
   end
 

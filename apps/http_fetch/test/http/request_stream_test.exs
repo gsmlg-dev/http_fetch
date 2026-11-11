@@ -570,11 +570,10 @@ defmodule HTTP.RequestStreamTest do
 
     {:ok, upload} = HTTP.Stream.start_link(0)
 
-    response =
-      HTTP.fetch(url, method: :post, body: upload, duplex: :half, timeout: 1_000)
-      |> HTTP.Promise.await()
+    assert {:error, :streaming_body_redirect_not_replayable} =
+             HTTP.fetch(url, method: :post, body: upload, duplex: :half, timeout: 1_000)
+             |> HTTP.Promise.await()
 
-    assert response.status == 307
     refute Process.alive?(upload)
     assert_receive :stream_not_replayed, 1_000
   end
