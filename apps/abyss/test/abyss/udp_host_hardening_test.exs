@@ -298,6 +298,63 @@ defmodule Abyss.UDPHostHardeningTest do
     assert :ok = Abyss.stop(server, 100)
   end
 
+  test "a stuck dispatcher callback is dropped after the admission bound and reception resumes" do
+    {server, listener, _socket, port} =
+      endpoint(
+        datagram_dispatcher: {SlowDispatcher, [owner: self()]},
+        admission_start_timeout: 50
+      )
+
+    test_pid = self()
+    handler_id = {:dispatcher_timeout, make_ref()}
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        [:abyss, :datagram, :dropped],
+        fn _event, _measurements, %{server_id: ^server, reason: reason}, _ ->
+          send(test_pid, {:dropped, reason})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    {socket, _span} = Abyss.Listener.socket_info(listener)
+    send(listener, {:udp, socket, {127, 0, 0, 1}, port, [], "stuck"})
+    assert_receive {:dispatcher_entered, dispatcher, _context}
+    assert %{starting: 1} = Abyss.Listener.status(listener)
+
+    status = wait_status(listener, &match?(%{starting: 0}, &1))
+    assert status.dropped == 1
+    assert status.mode == :running
+    assert_receive {:dropped, :dispatcher_timeout}
+
+    # The listener is armed again: a later datagram reaches the dispatcher
+    # once its stuck callback returns.
+    send(listener, {:udp, socket, {127, 0, 0, 1}, port, [], "next"})
+    assert %{starting: 1} = Abyss.Listener.status(listener)
+    send(dispatcher, :finish_dispatch)
+    assert_receive {:dispatcher_entered, ^dispatcher, _context}, 1_000
+    send(dispatcher, :finish_dispatch)
+    wait_status(listener, &match?(%{starting: 0}, &1))
+    assert :ok = Abyss.stop(server, 100)
+  end
+
+  defp wait_status(listener, fun, tries \\ 200)
+  defp wait_status(_listener, _fun, 0), do: flunk("listener status not reached")
+
+  defp wait_status(listener, fun, tries) do
+    status = Abyss.Listener.status(listener)
+
+    if fun.(status) do
+      status
+    else
+      Process.sleep(5)
+      wait_status(listener, fun, tries - 1)
+    end
+  end
+
   defp wait_draining(listener, tries \\ 100)
   defp wait_draining(_listener, 0), do: flunk("drain barrier not reached")
 

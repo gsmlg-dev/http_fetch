@@ -600,10 +600,13 @@ defmodule Abyss.Listener do
         token = make_ref()
         reservation = %{token: token, packet: packet, timer: nil, slot: nil, expired: false}
 
+        # The dispatch call is bounded by admission_start_timeout so a stuck
+        # callback drops its datagram and the listener rearms.
         Abyss.ListenerStarter.dispatch(
           state.starter,
           {token, state.dispatcher, packet, Abyss.Telemetry.monotonic_time(),
-           %{ancillary: ancillary, local_info: state.local_info}}
+           %{ancillary: ancillary, local_info: state.local_info},
+           state.server_config.admission_start_timeout}
         )
 
         {:noreply,

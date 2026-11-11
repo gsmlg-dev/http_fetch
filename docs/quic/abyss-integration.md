@@ -2,7 +2,9 @@
 
 Target inspected: `gsmlg-dev/abyss@37cda66` (pushed to `gsmlg-dev/abyss/main`). The additive dispatcher seam and ex_quic adapter are implemented and covered by the cross-repository acceptance run below.
 
-## Actual starting behavior
+## Starting behavior at the inspected commit
+
+This section records `abyss@37cda66` before the dispatcher seam. The current `Abyss.Listener` instead receives with one active credit (`active: :once` or a native select), has no retry tasks, and passes ancillary data to the dispatcher and the datagram runtime.
 
 `Abyss.Listener.accept_packet` applies a size check and calls `Abyss.Connection.start`. The latter starts a handler child for that data arrival and can schedule retry tasks on capacity exhaustion. Handlers share the listener socket. Unicast receipt uses `transport.recv(socket, 0, :infinity)` from the listener process, and the ancillary-data branch currently discards that metadata. [R5]
 
@@ -12,7 +14,7 @@ Do not route every QUIC datagram through that handler lifecycle. QUIC requires d
 
 The Abyss patch adds a general `datagram_dispatcher` configuration option. Omitted means the exact existing UDP path. Opt-in mode invokes a persistent callback before handler creation, passing datagram bytes, remote address, local endpoint metadata, monotonic receipt time and endpoint generation.
 
-The listener still blocks in `recv(:infinity)`. A separate bounded writer owns egress admission and reports local send results while the listener remains blocked. Routes are monitored and removed when their connection process exits. See `gsmlg-dev/abyss@37cda66` and `docs/dispatcher.md` in that repository.
+The listener receives with one active credit (`active: :once`, or a native select) and does not call the dispatcher inline: a fixed starter process runs each dispatch call, bounded by `admission_start_timeout`, and a datagram whose callback does not return in time is dropped as `:dispatcher_timeout` so reception resumes. A separate bounded writer owns egress admission and reports local send results independently of the listener. Routes are monitored and removed when their connection process exits. See `gsmlg-dev/abyss@37cda66` and `docs/dispatcher.md` in that repository.
 
 `Quic.AbyssDispatcher` is the dependency-free callback adapter in this repository. It starts an externally owned `Quic.Endpoint`, forwards each datagram through its CID router, and uses the injected `send_fun` for egress. New connections are admitted only after minimal structural/version checks and a resource reservation. Established routes use destination CID; a provisional map covers Initial packets before the selected server CID becomes usable. Untrusted CID fields are routing hints, not authentication.
 

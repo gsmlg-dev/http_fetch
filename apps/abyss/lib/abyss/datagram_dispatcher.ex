@@ -31,8 +31,10 @@ defmodule Abyss.Dispatcher do
 
   One dispatcher is created per listener. Calls are serialized in this process,
   and connection processes are monitored so all CID routes are removed on
-  death. Egress uses a separate bounded writer because the listener may be
-  blocked in `recv(:infinity)`.
+  death. Egress uses a separate bounded writer so sends never wait on the
+  listener's receive path. The listener's call into a dispatcher is bounded by
+  `admission_start_timeout`; a callback that overruns it has its datagram
+  dropped as `:dispatcher_timeout`.
   """
 
   use GenServer

@@ -41,6 +41,14 @@ context containing the last callback `state`, `routes`, `generation`, `send`,
 `send_fun` and dispatcher PID in `local`. Available `ancillary` and `local_info`
 fields are preserved. Empty payloads are valid datagrams.
 
+The listener has at most one datagram in its dispatcher at a time. A callback
+that does not return within `admission_start_timeout` (default 1000 ms) has its
+datagram counted as dropped with reason `:dispatcher_timeout`, and the listener
+resumes reception. The request stays in the dispatcher mailbox, so the callback
+may still see that datagram once it returns; later datagrams queue behind it
+and are bounded the same way. Keep callbacks short and move blocking work to routed
+processes.
+
 Return `{:ok, state}` or `{:drop, reason, state}` to update application state.
 Callbacks can register generic routes via `{:new, keys, pid, state}` or
 `{:route, keys, pid, state}`. Replacing routes removes displaced monitors;

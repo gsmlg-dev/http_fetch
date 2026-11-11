@@ -11,18 +11,21 @@ defmodule Abyss.ListenerStarter do
 
   @impl true
   def handle_cast(
-        {:dispatch, {token, dispatcher, {ip, port, data}, received_at, metadata}},
+        {:dispatch, {token, dispatcher, {ip, port, data}, received_at, metadata, timeout}},
         owner
       ) do
     result =
-      Abyss.Dispatcher.dispatch_with_metadata(
-        dispatcher,
-        {ip, port},
-        data,
-        received_at,
-        metadata,
-        :infinity
-      )
+      case Abyss.Dispatcher.dispatch_with_metadata(
+             dispatcher,
+             {ip, port},
+             data,
+             received_at,
+             metadata,
+             timeout
+           ) do
+        {:error, {:timeout, _call}} -> {:dropped, :dispatcher_timeout}
+        other -> other
+      end
 
     send(owner, {:dispatch_result, token, result})
     {:noreply, owner}
