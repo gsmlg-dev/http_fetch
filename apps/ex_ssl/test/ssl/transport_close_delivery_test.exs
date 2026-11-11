@@ -120,6 +120,69 @@ defmodule SSL.TransportCloseDeliveryTest do
     end
   end
 
+  # Enumerated residual cases for an unclean TCP close (#158 follow-up): every
+  # complete record is delivered in order; only a truncated trailing record is
+  # lost, and the terminal is reported strictly after the delivered plaintext.
+  describe "residual unclean-close cases" do
+    test "complete records followed by a truncated record deliver the records, then fail" do
+      # An application-data header announcing 100 bytes with only 10 present.
+      trailer = <<23, 3, 3, 100::16>> <> :binary.copy(<<0>>, 10)
+      {socket, peer} = connect_and_close(:fin, Peer.client_options(), trailer: trailer)
+      await_transport_terminal(socket)
+
+      assert @body == recv_all(socket, [])
+      assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
+      stop_peer(peer)
+    end
+
+    test "a truncated record with no preceding plaintext yields an error and no data" do
+      trailer = <<23, 3, 3, 100::16>> <> :binary.copy(<<0>>, 10)
+
+      {socket, peer} =
+        connect_and_close(:fin, Peer.client_options(), chunks: [], trailer: trailer)
+
+      await_transport_terminal(socket)
+
+      assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
+      stop_peer(peer)
+    end
+
+    test "recv with a length drains exact slices after the close, then fails" do
+      {socket, peer} = connect_and_close(:fin)
+      await_transport_terminal(socket)
+
+      size = byte_size(@body)
+      half = div(size, 2)
+      assert {:ok, first} = SSL.recv(socket, half, 0)
+      assert {:ok, second} = SSL.recv(socket, size - half, 0)
+      assert first <> second == @body
+      assert {:error, :econnreset} = SSL.recv(socket, 1, 0)
+      stop_peer(peer)
+    end
+
+    test "recv with a length longer than the remainder does not lose the remainder" do
+      {socket, peer} = connect_and_close(:fin)
+      await_transport_terminal(socket)
+
+      # The unsatisfiable length reports the terminal, but keeps the remainder.
+      assert {:error, :econnreset} = SSL.recv(socket, byte_size(@body) + 1, 0)
+      assert @body == recv_all(socket, [])
+      assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
+      stop_peer(peer)
+    end
+
+    test "many complete records still queued at the close are all delivered" do
+      chunks = for index <- 1..64, do: :binary.copy(<<rem(index, 251)>>, 16_384)
+      body = IO.iodata_to_binary(chunks)
+      {socket, peer} = connect_and_close(:fin, Peer.client_options(), chunks: chunks)
+
+      # Input backpressure keeps the records queued until they are read.
+      assert body == recv_all(socket, [], 5_000)
+      assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
+      stop_peer(peer)
+    end
+  end
+
   defp held_output(pid, deadline) do
     assert System.monotonic_time(:millisecond) < deadline
 
@@ -133,8 +196,10 @@ defmodule SSL.TransportCloseDeliveryTest do
     end
   end
 
-  defp connect_and_close(mode, client_options \\ Peer.client_options()) do
+  defp connect_and_close(mode, client_options \\ Peer.client_options(), extra \\ []) do
     parent = self()
+    chunks = Keyword.get(extra, :chunks, @chunks)
+    trailer = Keyword.get(extra, :trailer)
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, packet: :raw, reuseaddr: true])
     {:ok, {_address, port}} = :inet.sockname(listener)
     %{certfile: certfile, keyfile: keyfile} = Peer.certificates()
@@ -158,7 +223,7 @@ defmodule SSL.TransportCloseDeliveryTest do
             5_000
           )
 
-        Enum.each(@chunks, &(:ok = :ssl.send(tls, &1)))
+        Enum.each(chunks, &(:ok = :ssl.send(tls, &1)))
         send(parent, {:peer_sent, self()})
 
         receive do
@@ -170,6 +235,7 @@ defmodule SSL.TransportCloseDeliveryTest do
           {:close, how} ->
             # Close the carrier underneath :ssl so no close_notify is sent.
             if how == :reset, do: :ok = :inet.setopts(tcp, linger: {true, 0})
+            if trailer, do: :ok = :gen_tcp.send(tcp, trailer)
             :ok = :gen_tcp.close(tcp)
         end
 
