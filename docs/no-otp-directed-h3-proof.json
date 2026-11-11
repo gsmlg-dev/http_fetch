@@ -6,14 +6,14 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/elixir_quic_http3/lib/quic_http3/session.ex": "e329caba406925e06286e3bea3f01f8b83a820ef4a77eca1b6ff826a775e3db3",
+    "apps/elixir_quic_http3/lib/quic_http3/session.ex": "45423f557e8d4b16db2121560b01a2d51d372174eeb7f2d60d7fda643a5901cf",
     "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679",
     "apps/http_core/lib/http/quic/ex_quic.ex": "0cb045e39b362131a53d5b3a1d7a19f5f5f25c7f192cf64a16b28ed488e0ffc6",
-    "apps/http_fetch/lib/http.ex": "f2331ea11d40cc50c5f5af83c65279d04c2d8ec540a5413b8cff35f34db46a7b",
+    "apps/http_fetch/lib/http.ex": "f39bb1e218018fd6c51d8db31460113be235af61e71789ad25ca01089394da31",
     "apps/http_fetch/lib/http/fetch_options.ex": "b7c823c68858ce179005ace404dac20851250bbd651420a2ae9519e10bfebdac",
-    "apps/http_fetch/lib/http/socket_client.ex": "9f5bc9f0777cee93d9087c8576843622a3f55a48634fb2f32ed0314230677687",
-    "apps/http_event_source/lib/http/event_source/options.ex": "6ee7ca7f5be5e113db4fb3b25e4df8f096c7e94cd1fdeb24bd8bcf88b79e85f0",
-    "apps/http_event_source/lib/http/event_source/connection.ex": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
+    "apps/http_fetch/lib/http/socket_client.ex": "9b0d75be354cd0a6a4ffa1278a5c3539a46b313555bcd3a3e8aee15b43ee7d12",
+    "apps/http_event_source/lib/http/event_source/options.ex": "d47237d3552da5744e9a7a60031f6b47daaad5539dc40c79e974159da1f127cc",
+    "apps/http_event_source/lib/http/event_source/connection.ex": "08f36a713d42ef8d33dd23a5635ae4844d35ab8ad17bbe90e1c592aaf4279a6a",
     "apps/http_runtime/lib/http/http3.ex": "7b1670325485fae44e28a787392e7f10c40788eac9b526a9eac75aeba57a5049",
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
     "apps/http_runtime/lib/http/http3/pool_key.ex": "d9ef3e06fcbaab42181a3b27ddc72e16865e516d0b8c4e07be003558ac62e899",
@@ -30,7 +30,7 @@
       "inventory_occurrence": 29,
       "module": "QuicHttp3.Session",
       "mfa": "drive/1",
-      "line": 924,
+      "line": 934,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -40,7 +40,7 @@
       "inventory_occurrence": 30,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1026,
+      "line": 1036,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -50,7 +50,7 @@
       "inventory_occurrence": 31,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1030,
+      "line": 1040,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -60,7 +60,7 @@
       "inventory_occurrence": 32,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1036,
+      "line": 1046,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -70,7 +70,7 @@
       "inventory_occurrence": 33,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1039,
+      "line": 1049,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -80,7 +80,7 @@
       "inventory_occurrence": 34,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1042,
+      "line": 1052,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -90,7 +90,7 @@
       "inventory_occurrence": 35,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1045,
+      "line": 1055,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -100,7 +100,7 @@
       "inventory_occurrence": 36,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1048,
+      "line": 1058,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -110,7 +110,7 @@
       "inventory_occurrence": 37,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1068,
+      "line": 1078,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -120,7 +120,7 @@
       "inventory_occurrence": 38,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1071,
+      "line": 1081,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -130,7 +130,7 @@
       "inventory_occurrence": 39,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1074,
+      "line": 1084,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -140,7 +140,7 @@
       "inventory_occurrence": 40,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1076,
+      "line": 1086,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -150,7 +150,7 @@
       "inventory_occurrence": 41,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1079,
+      "line": 1089,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -160,7 +160,7 @@
       "inventory_occurrence": 42,
       "module": "QuicHttp3.Session",
       "mfa": "ready/1",
-      "line": 190,
+      "line": 195,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -170,7 +170,7 @@
       "inventory_occurrence": 43,
       "module": "QuicHttp3.Session",
       "mfa": "resume/1",
-      "line": 814,
+      "line": 824,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1",
@@ -530,7 +530,7 @@
       "inventory_occurrence": 189,
       "module": "QuicHttp3.Session",
       "mfa": "early_request/5",
-      "line": 295,
+      "line": 301,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1"
@@ -539,7 +539,7 @@
       "inventory_occurrence": 190,
       "module": "QuicHttp3.Session",
       "mfa": "early_offered?/1",
-      "line": 343,
+      "line": 349,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1"
@@ -548,7 +548,7 @@
       "inventory_occurrence": 191,
       "module": "QuicHttp3.Session",
       "mfa": "resumed?/1",
-      "line": 359,
+      "line": 365,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1"
@@ -557,7 +557,7 @@
       "inventory_occurrence": 192,
       "module": "QuicHttp3.Session",
       "mfa": "early_disposition/1",
-      "line": 373,
+      "line": 379,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1"
@@ -566,7 +566,7 @@
       "inventory_occurrence": 193,
       "module": "QuicHttp3.Session",
       "mfa": "extension_requirements/2",
-      "line": 475,
+      "line": 481,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1"
@@ -575,7 +575,7 @@
       "inventory_occurrence": 194,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1033,
+      "line": 1043,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1"
@@ -584,7 +584,7 @@
       "inventory_occurrence": 195,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1051,
+      "line": 1061,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1"
@@ -593,7 +593,7 @@
       "inventory_occurrence": 196,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1058,
+      "line": 1068,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1"
@@ -602,7 +602,7 @@
       "inventory_occurrence": 197,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1062,
+      "line": 1072,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1"
@@ -611,7 +611,7 @@
       "inventory_occurrence": 198,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1065,
+      "line": 1075,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1"
@@ -620,7 +620,7 @@
       "inventory_occurrence": 199,
       "module": "QuicHttp3.Session",
       "mfa": "operation/3",
-      "line": 1082,
+      "line": 1095,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
       "proof": "H3-1"
@@ -642,6 +642,15 @@
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex",
       "proof": "H3-2"
+    },
+    {
+      "inventory_occurrence": 208,
+      "module": "QuicHttp3.Session",
+      "mfa": "operation/3",
+      "line": 1092,
+      "kind": "unresolved_module_dispatch",
+      "source": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+      "proof": "H3-1"
     }
   ],
   "checks": {
@@ -707,12 +716,12 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "0186b4e3db4637d55c578929ce4d9dc0db808e67",
+      "source_commit": "73ca9e54943c6dd1834bbfd599e6d3526819b5ce",
       "scope": "opt-in resumption/0-RTT, extended CONNECT, datagrams, reliable reset, client migration and WebSocket/H3 completion receipt",
       "changed_source_inputs": {
         "apps/elixir_quic_http3/lib/quic_http3/session.ex": {
           "previous_sha256": "c0b460040007aea68cbca830c60a15c5fb2efda12c1c345bd24c095caa63544f",
-          "sha256": "e329caba406925e06286e3bea3f01f8b83a820ef4a77eca1b6ff826a775e3db3"
+          "sha256": "45423f557e8d4b16db2121560b01a2d51d372174eeb7f2d60d7fda643a5901cf"
         },
         "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": {
           "previous_sha256": "e3eceea332cdee69f921bae15452e8b4d41fc76265b8bfff76a2dfbf5c28385a",
@@ -724,11 +733,11 @@
         },
         "apps/http_fetch/lib/http/socket_client.ex": {
           "previous_sha256": "dd7f464583e6bf9b687aebec9f8a819cdf84bb9311cfc2e8ff7c96edaf58f052",
-          "sha256": "9f5bc9f0777cee93d9087c8576843622a3f55a48634fb2f32ed0314230677687"
+          "sha256": "9b0d75be354cd0a6a4ffa1278a5c3539a46b313555bcd3a3e8aee15b43ee7d12"
         },
         "apps/http_event_source/lib/http/event_source/options.ex": {
           "previous_sha256": "d1c36a500c8f5f86b6c5334d8e34b355451d9367487f5d1f4b37df0a31b44202",
-          "sha256": "6ee7ca7f5be5e113db4fb3b25e4df8f096c7e94cd1fdeb24bd8bcf88b79e85f0"
+          "sha256": "d47237d3552da5744e9a7a60031f6b47daaad5539dc40c79e974159da1f127cc"
         },
         "apps/http_runtime/lib/http/http3/stream.ex": {
           "previous_sha256": "aabfee484a68606fe96400834d5a67643f52688b2c0236a2e05cd3fb9afcbd78",
@@ -748,11 +757,15 @@
         },
         "apps/http_fetch/lib/http.ex": {
           "previous_sha256": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d",
-          "sha256": "f2331ea11d40cc50c5f5af83c65279d04c2d8ec540a5413b8cff35f34db46a7b"
+          "sha256": "f39bb1e218018fd6c51d8db31460113be235af61e71789ad25ca01089394da31"
         },
         "apps/http_runtime/lib/http/http3.ex": {
           "previous_sha256": "b691a8f1c780c3b9e920c7148f38a17d82975d2788170579073753bea61df92d",
           "sha256": "7b1670325485fae44e28a787392e7f10c40788eac9b526a9eac75aeba57a5049"
+        },
+        "apps/http_event_source/lib/http/event_source/connection.ex": {
+          "previous_sha256": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
+          "sha256": "08f36a713d42ef8d33dd23a5635ae4844d35ab8ad17bbe90e1c592aaf4279a6a"
         }
       },
       "added_selected_inputs": [
@@ -760,7 +773,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "b41180ac991cfdf7392b27d61d62f21586a21d826f71985b31a7a18b0372c23f",
+        "sorted_path_sha256_json": "a380c36ea08eba3775aecc55903ff2441eae171e01f30bd499c3d26f663e7db0",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -768,91 +781,91 @@
           "inventory_occurrence": 29,
           "mfa": "drive/1",
           "previous_line": 454,
-          "line": 924
+          "line": 934
         },
         {
           "inventory_occurrence": 30,
           "mfa": "operation/3",
           "previous_line": 537,
-          "line": 1026
+          "line": 1036
         },
         {
           "inventory_occurrence": 31,
           "mfa": "operation/3",
           "previous_line": 541,
-          "line": 1030
+          "line": 1040
         },
         {
           "inventory_occurrence": 32,
           "mfa": "operation/3",
           "previous_line": 544,
-          "line": 1036
+          "line": 1046
         },
         {
           "inventory_occurrence": 33,
           "mfa": "operation/3",
           "previous_line": 547,
-          "line": 1039
+          "line": 1049
         },
         {
           "inventory_occurrence": 34,
           "mfa": "operation/3",
           "previous_line": 550,
-          "line": 1042
+          "line": 1052
         },
         {
           "inventory_occurrence": 35,
           "mfa": "operation/3",
           "previous_line": 553,
-          "line": 1045
+          "line": 1055
         },
         {
           "inventory_occurrence": 36,
           "mfa": "operation/3",
           "previous_line": 556,
-          "line": 1048
+          "line": 1058
         },
         {
           "inventory_occurrence": 37,
           "mfa": "operation/3",
           "previous_line": 559,
-          "line": 1068
+          "line": 1078
         },
         {
           "inventory_occurrence": 38,
           "mfa": "operation/3",
           "previous_line": 562,
-          "line": 1071
+          "line": 1081
         },
         {
           "inventory_occurrence": 39,
           "mfa": "operation/3",
           "previous_line": 565,
-          "line": 1074
+          "line": 1084
         },
         {
           "inventory_occurrence": 40,
           "mfa": "operation/3",
           "previous_line": 567,
-          "line": 1076
+          "line": 1086
         },
         {
           "inventory_occurrence": 41,
           "mfa": "operation/3",
           "previous_line": 570,
-          "line": 1079
+          "line": 1089
         },
         {
           "inventory_occurrence": 42,
           "mfa": "ready/1",
           "previous_line": 120,
-          "line": 190
+          "line": 195
         },
         {
           "inventory_occurrence": 43,
           "mfa": "resume/1",
           "previous_line": 353,
-          "line": 814
+          "line": 824
         },
         {
           "inventory_occurrence": 46,
@@ -910,10 +923,11 @@
         198,
         199,
         200,
-        201
+        201,
+        208
       ],
       "origin_derivations": {
-        "H3-1": "Session.new/1 still assigns transport once (literal default QuicHttp3.Transport.Quic). New sites 189-199 (early/resumption queries, extension requirements, uni/kind stream opens, reset_stream_at, datagrams, migrate) call the retained session.transport. The only library session_options producer is the WebTransport backend, which supplies only webtransport limits.",
+        "H3-1": "Session.new/1 still assigns transport once (literal default QuicHttp3.Transport.Quic). New sites 189-199 (early/resumption queries, extension requirements, uni/kind stream opens, reset_stream_at, datagrams, migrate) call the retained session.transport. The only library session_options producer is the WebTransport backend, which supplies only webtransport limits. rc.13 follow-up (3a5522c): new site 208 (operation/3, operation(session, {:close, code, phrase}, opts)) calls the same retained session.transport as its siblings; the {:close, code, phrase} step is built only inside Session from literal codes and close_phrase/1. Session.new/1 still assigns transport once and the other twenty-six H3-1 sites move by 5 to 13 lines with unchanged expressions.",
         "H3-2": "reset_stream_at/4 (200) and migrate/2 (201) call the retained connection/stream ops. HTTP.HTTP3.Resumption creates its shared endpoint with QuicTransport.client/1 from an explicit key projection without :ops, so ops defaults to literal Quic and borrowing still requires ops equality. Quic.reset_stream_at/4 and Quic.migrate/2 route to reviewed Connection operations.",
         "H3-4": "HTTP.HTTP3.Stream.relay_cleanup/2 now creates one library connector callback, fn _deadline -> native_scope(relay) end, only for certified (extended CONNECT with a request lifecycle) exclusive connections with no caller callback or descriptor. Its body calls only Quic.Cleanup.new/1 (Q1) and returns that opaque descriptor. Public option projections still never expose :quic_cleanup. connector_wait/5 is unchanged and moves 333->520.",
         "H3-3_H3-5": "ExQuic wrappers are unchanged; SocketClient still supplies only &handle_http3_event/2."
@@ -929,7 +943,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "3ef0649ead2c45a16a3161a9125b589ba375c0728aab5d496d21402e29d9ab9d"
+        "sha256": "36ecab8f21975904e1508717dd29d8866e49c07cfb649fdbd56e33d0e97dfeb3"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
@@ -1010,6 +1024,213 @@
           "input": "apps/http_runtime/lib/http/http3/connection_owner.ex",
           "change": "ConnectionOwner computes the default opening deadline lazily from HTTP.HTTP3.opening_timeout/1, so connect_timeout: :infinity keeps the finite 5,000 ms QUIC opening budget.",
           "dispatch_review": "No dynamic dispatch added or moved: Keyword.get_lazy/3 receives a local closure whose body is literal now/0 and HTTP.HTTP3.opening_timeout/1 calls; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "e95bb5c7d484bbbf482290d8cb2e9c6653649e61",
+          "input": "apps/http_fetch/lib/http.ex",
+          "change": "Documentation states the 20-redirect Fetch limit and the :too_many_redirects and :streaming_body_redirect_not_replayable results.",
+          "dispatch_review": "No dynamic dispatch added or removed; documentation only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "e95bb5c7d484bbbf482290d8cb2e9c6653649e61",
+          "input": "apps/http_fetch/lib/http/socket_client.ex",
+          "change": "HTTP/1 returns {:error, :too_many_redirects} past the shared limit of 20 and returns redirect errors such as :streaming_body_redirect_not_replayable instead of the 307/308 response.",
+          "dispatch_review": "No dynamic dispatch added or removed; the reviewed occurrences in this file belong to another group proof, which rebinds them; this proof holds no reviewed occurrence in the file."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "e03c82819fc1c59890e8a18dacb9635e0fb2cddb",
+          "input": "apps/http_event_source/lib/http/event_source/options.ex",
+          "change": "Options rejects URLs whose path or query holds whitespace or controls with :invalid_url.",
+          "dispatch_review": "No dynamic dispatch added or removed; literal validation only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "e03c82819fc1c59890e8a18dacb9635e0fb2cddb",
+          "input": "apps/http_event_source/lib/http/event_source/connection.ex",
+          "change": "A crashing HTTP/1 dial is reported as {:connect_worker_down, reason}, redirects to unsendable URLs fail with :invalid_redirect, and three consecutive :cleanup_capacity admissions fail the source.",
+          "dispatch_review": "No dynamic dispatch added or removed; the reviewed occurrences in this file belong to another group proof, which rebinds them; this proof holds no reviewed occurrence in the file."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "3a5522ccea056b7b6434fe0703111a74af3f8285",
+          "input": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+          "change": "The H3 session sends RFC 9114 connection error codes on detected connection errors, resets WebTransport streams on session end, rejects malformed datagrams and field values, and routes close(code, phrase) through the retained transport.",
+          "dispatch_review": "One call is added: operation(session, {:close, code, phrase}, opts) at line 1092 invokes the retained session.transport, the same H3-1 selector as its siblings; it is new occurrence 208. The other 26 H3-1 sites keep their expressions and owning functions and move by 5 to 13 lines; they are rebound below. Session.new/1 still assigns transport once and the only library session_options producer is the WebTransport backend.",
+          "occurrence_rebindings": [
+            {
+              "inventory_occurrence": 29,
+              "mfa": "drive/1",
+              "previous_line": 924,
+              "line": 934
+            },
+            {
+              "inventory_occurrence": 30,
+              "mfa": "operation/3",
+              "previous_line": 1026,
+              "line": 1036
+            },
+            {
+              "inventory_occurrence": 31,
+              "mfa": "operation/3",
+              "previous_line": 1030,
+              "line": 1040
+            },
+            {
+              "inventory_occurrence": 32,
+              "mfa": "operation/3",
+              "previous_line": 1036,
+              "line": 1046
+            },
+            {
+              "inventory_occurrence": 33,
+              "mfa": "operation/3",
+              "previous_line": 1039,
+              "line": 1049
+            },
+            {
+              "inventory_occurrence": 34,
+              "mfa": "operation/3",
+              "previous_line": 1042,
+              "line": 1052
+            },
+            {
+              "inventory_occurrence": 35,
+              "mfa": "operation/3",
+              "previous_line": 1045,
+              "line": 1055
+            },
+            {
+              "inventory_occurrence": 36,
+              "mfa": "operation/3",
+              "previous_line": 1048,
+              "line": 1058
+            },
+            {
+              "inventory_occurrence": 37,
+              "mfa": "operation/3",
+              "previous_line": 1068,
+              "line": 1078
+            },
+            {
+              "inventory_occurrence": 38,
+              "mfa": "operation/3",
+              "previous_line": 1071,
+              "line": 1081
+            },
+            {
+              "inventory_occurrence": 39,
+              "mfa": "operation/3",
+              "previous_line": 1074,
+              "line": 1084
+            },
+            {
+              "inventory_occurrence": 40,
+              "mfa": "operation/3",
+              "previous_line": 1076,
+              "line": 1086
+            },
+            {
+              "inventory_occurrence": 41,
+              "mfa": "operation/3",
+              "previous_line": 1079,
+              "line": 1089
+            },
+            {
+              "inventory_occurrence": 42,
+              "mfa": "ready/1",
+              "previous_line": 190,
+              "line": 195
+            },
+            {
+              "inventory_occurrence": 43,
+              "mfa": "resume/1",
+              "previous_line": 814,
+              "line": 824
+            },
+            {
+              "inventory_occurrence": 189,
+              "mfa": "early_request/5",
+              "previous_line": 295,
+              "line": 301
+            },
+            {
+              "inventory_occurrence": 190,
+              "mfa": "early_offered?/1",
+              "previous_line": 343,
+              "line": 349
+            },
+            {
+              "inventory_occurrence": 191,
+              "mfa": "resumed?/1",
+              "previous_line": 359,
+              "line": 365
+            },
+            {
+              "inventory_occurrence": 192,
+              "mfa": "early_disposition/1",
+              "previous_line": 373,
+              "line": 379
+            },
+            {
+              "inventory_occurrence": 193,
+              "mfa": "extension_requirements/2",
+              "previous_line": 475,
+              "line": 481
+            },
+            {
+              "inventory_occurrence": 194,
+              "mfa": "operation/3",
+              "previous_line": 1033,
+              "line": 1043
+            },
+            {
+              "inventory_occurrence": 195,
+              "mfa": "operation/3",
+              "previous_line": 1051,
+              "line": 1061
+            },
+            {
+              "inventory_occurrence": 196,
+              "mfa": "operation/3",
+              "previous_line": 1058,
+              "line": 1068
+            },
+            {
+              "inventory_occurrence": 197,
+              "mfa": "operation/3",
+              "previous_line": 1062,
+              "line": 1072
+            },
+            {
+              "inventory_occurrence": 198,
+              "mfa": "operation/3",
+              "previous_line": 1065,
+              "line": 1075
+            },
+            {
+              "inventory_occurrence": 199,
+              "mfa": "operation/3",
+              "previous_line": 1082,
+              "line": 1095
+            }
+          ]
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "cff6e9a83c51be67f0825104f078d6957bf95138",
+          "input": "apps/http_fetch/lib/http/socket_client.ex",
+          "change": "HTTP/2 requests the server provably did not process are replayed once per owner (three attempts) after GOAWAY below the stream id, REFUSED_STREAM or a draining pooled owner, never for streamed bodies or after any response part was accepted.",
+          "dispatch_review": "No dynamic dispatch added or removed; the reviewed occurrences in this file belong to another group proof, which rebinds them; this proof holds no reviewed occurrence in the file."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "73ca9e54943c6dd1834bbfd599e6d3526819b5ce",
+          "input": "apps/http_fetch/lib/http.ex",
+          "change": "fetch/2 documentation is corrected for HTTP/2 and HTTP/3, proxy forms, streaming uploads and the awaited error result.",
+          "dispatch_review": "No dynamic dispatch added or removed; documentation only; the file holds no reviewed occurrence."
         }
       ]
     }

@@ -6,7 +6,7 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/ex_ssl/lib/ssl.ex": "6f2f5f334860a9f25f94df73130bb751604c069598f80bdae822f8ee274b37f9",
+    "apps/ex_ssl/lib/ssl.ex": "6bfbafe4bdf1cd569ca441a092f61d6c70e6132ca99150942873b6853957943e",
     "apps/ex_ssl/lib/ssl/options.ex": "84500c5c63746215284ebb764284eca97657ca00380c2feaf70c18fbc4c9e58c",
     "apps/ex_ssl/lib/ssl/tcp_options.ex": "b007fe9db46cedb98867797b368d999dd0dbb773d938f11e057eb9cb88f47d75",
     "apps/ex_ssl/lib/ssl/connection.ex": "75f3c815c96badd6ff404910a6f05eb52a6abf9fbbb699bc9add2f705b05bc77",
@@ -14,7 +14,7 @@
     "apps/ex_ssl/lib/ssl/client_identity.ex": "bbda9af456f8c6a182e7d30c1b97cbd4502e6d7fca9058b45a31f30a1cbef053",
     "apps/ex_ssl/lib/ssl/client_hello/materializer.ex": "77fefe616a1f03a075be13dc5e689443c85c75878d59b4ea82833fb36b94518b",
     "apps/ex_ssl/lib/ssl/crypto/key_exchange.ex": "2c1820fe441fb2169daaa74360582d54130338406faa8cc7ddcaa0d89ab44630",
-    "apps/ex_ssl/lib/ssl/pkix/pkix.ex": "f7b1e15d25ed928567b9bf904f1a6ba6dbda298395e32a91e1371138495dd22f",
+    "apps/ex_ssl/lib/ssl/pkix/pkix.ex": "3f685f6c515543b25925f403eeffe06245658010e5d1fc389edfe57ab7898e2f",
     "apps/ex_ssl/lib/ssl/pkix/verify_fun.ex": "bd19c586e84a87d283dbaedada34c3ffd0abd0315267678c4d2b5aa6e39e7542",
     "apps/ex_ssl/lib/ssl/pkix/partial_chain.ex": "331f54b411a5912512d682d69959ab3e1731244da3c8c4954b63224be3870b9a",
     "apps/ex_ssl/lib/ssl/pkix/revocation.ex": "e3c9c47fe8ccb0f5cad95785fe216b439c4df97a922e312769872aa2fd753cd5",
@@ -33,8 +33,8 @@
     "apps/elixir_quic/lib/quic/profile.ex": "2365ab1370f40fba20ff0df0cf9d91721bee6b3eb4c25b79820cd6ab74b706e0",
     "apps/http_core/lib/http/transport/ex_ssl.ex": "20cda2e3507a1fa52ec8a5baf7259ceab9c407d434dda8e9601cfaadb514893f",
     "apps/ex_ssl/lib/ssl/crypto/tls12_key_schedule.ex": "0f21ece4467f13d1ac0acca8dd5c23d04b450b2b47063f403866126860552667",
-    "apps/ex_ssl/lib/ssl/server_options.ex": "d5ff070fa5e91c4f49638823fec1f781a6c16e062b56e0164bd0d7712622b67d",
-    "apps/ex_ssl/lib/ssl/server_connection.ex": "5500466131eb0a09e2fbee8f4bcb4f27c5bc348bcecf683e76ce4910c759da57",
+    "apps/ex_ssl/lib/ssl/server_options.ex": "a9790096e733fe5e584cf8aa9ac54bf152e3902e42eac2ee01704e408669111a",
+    "apps/ex_ssl/lib/ssl/server_connection.ex": "350de01a588fb7ec9348186fbe8a3266a21fe86eb67a288325fdf7945f146a56",
     "apps/ex_ssl/lib/ssl/listen_socket.ex": "bd071c6cd1742cd2966c43dd503aa7496a0353047159590f7369f4fd71661982"
   },
   "production_source_census": {
@@ -185,8 +185,8 @@
     {
       "inventory_occurrence": 181,
       "module": "SSL.ServerOptions",
-      "mfa": "lookup/2",
-      "line": 194,
+      "mfa": "call_sni_fun/2",
+      "line": 262,
       "kind": "unresolved_fun_invocation",
       "source": "apps/ex_ssl/lib/ssl/server_options.ex",
       "proof": "TLS-7"
@@ -308,12 +308,12 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "4ae97fc9a618844e36f9bcf59da1893846109677",
+      "source_commit": "8e810b476c5423ae91f5dc23d2fc9a468e82cf3a",
       "scope": "rc.10/rc.11 TLS 1.3 server API, SNI identity selection, mTLS client verification and QUIC resumption/early-data provider",
       "changed_source_inputs": {
         "apps/ex_ssl/lib/ssl.ex": {
           "previous_sha256": "1ed9e0d52e0f38be0422553acd66ae0b14ef7cd67372220acf500baddb8c48ee",
-          "sha256": "6f2f5f334860a9f25f94df73130bb751604c069598f80bdae822f8ee274b37f9"
+          "sha256": "6bfbafe4bdf1cd569ca441a092f61d6c70e6132ca99150942873b6853957943e"
         },
         "apps/ex_ssl/lib/ssl/connection.ex": {
           "previous_sha256": "f5cdeea8158c200996cd66e554be14f8c7f22ae7200826f1241104486890761b",
@@ -321,7 +321,7 @@
         },
         "apps/ex_ssl/lib/ssl/pkix/pkix.ex": {
           "previous_sha256": "e87da677850294e277f6246e9db21252593444fafbc23566ff459ffd046a0e95",
-          "sha256": "f7b1e15d25ed928567b9bf904f1a6ba6dbda298395e32a91e1371138495dd22f"
+          "sha256": "3f685f6c515543b25925f403eeffe06245658010e5d1fc389edfe57ab7898e2f"
         },
         "apps/ex_ssl/lib/ssl/protocol/handshake_machine.ex": {
           "previous_sha256": "ebbbbe2cac633bc228063357c752a570f13434aa32f865deba0515c0471f785f",
@@ -341,7 +341,11 @@
         },
         "apps/ex_ssl/lib/ssl/server_connection.ex": {
           "previous_sha256": "68cb5417b999b8a7907cf8c555465fc8a0f4e710bcc92f124a250c0b7ebe007f",
-          "sha256": "5500466131eb0a09e2fbee8f4bcb4f27c5bc348bcecf683e76ce4910c759da57"
+          "sha256": "350de01a588fb7ec9348186fbe8a3266a21fe86eb67a288325fdf7945f146a56"
+        },
+        "apps/ex_ssl/lib/ssl/server_options.ex": {
+          "previous_sha256": "d5ff070fa5e91c4f49638823fec1f781a6c16e062b56e0164bd0d7712622b67d",
+          "sha256": "a9790096e733fe5e584cf8aa9ac54bf152e3902e42eac2ee01704e408669111a"
         }
       },
       "added_selected_inputs": [
@@ -351,7 +355,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "b41180ac991cfdf7392b27d61d62f21586a21d826f71985b31a7a18b0372c23f",
+        "sorted_path_sha256_json": "a380c36ea08eba3775aecc55903ff2441eae171e01f30bd499c3d26f663e7db0",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -372,7 +376,7 @@
         181
       ],
       "origin_derivations": {
-        "TLS-7": "SSL.listen/2 and SSL.handshake/3 normalize through ServerOptions.build/1, whose sni/1 is the only producer of {:fun, fun}: the caller :sni_fun, validated as arity one and exclusive with :sni_hosts. ListenSocket is opaque and built only by listen/2; transport_accept/2 passes its retained options to ServerConnection.start/3. The sole lookup/2 caller, select_identity/2, runs once for the first ClientHello and replaces only identity and signature_algorithms, retaining sni. The callback result is data: identity keyword options loaded by ClientIdentity.load/1 (TLS-2 password boundary); exceptions and invalid results become internal_error. No library producer supplies sni_fun; Hell forwards caller options. The user sni_fun body is the approved server callback boundary.",
+        "TLS-7": "SSL.listen/2 and SSL.handshake/3 normalize through ServerOptions.build/1, whose sni/1 is the only producer of {:fun, fun}: the caller :sni_fun, validated as arity one and exclusive with :sni_hosts. ListenSocket is opaque and built only by listen/2; transport_accept/2 passes its retained options to ServerConnection.start/3. The sole lookup/2 caller, select_identity/2, runs once for the first ClientHello and replaces only identity and signature_algorithms, retaining sni. The callback result is data: identity keyword options loaded by ClientIdentity.load/1 (TLS-2 password boundary); exceptions and invalid results become internal_error. No library producer supplies sni_fun; Hell forwards caller options. The user sni_fun body is the approved server callback boundary. rc.13 follow-up (8e810b4): lookup/3 now runs the callback in a monitored helper bounded by the handshake deadline; the invocation (181) moves into the helper closure body call_sni_fun/2 (194->262, expression fun.(name) unchanged). Its callable is the same caller :sni_fun that sni/1 validates and stores as {:fun, fun}; sni/1 remains the only producer and no library caller supplies one.",
         "TLS-4": "PKIX.client_peer/3 (server mTLS) validates the client path against normalized trust anchors with a nil verifier and no hostname matcher. hostname_match_fun/3 is unchanged and moves 767->817.",
         "TLS-6": "HandshakeCore still selects config.certificate_policy || &PKIX.peer/6 and only extracts the alert mapping into certificate_alert/1; verify_peer/3 moves 768->789. allow_early_data is a boolean handshake input.",
         "unchanged_sites": "Server handshake, server flight, QUIC resumption/session and SSL.QUIC continuation bodies introduce no other unresolved dispatch, callback option or OTP SSL call; QUIC Config accepts only the data-valued :resumption policy."
@@ -388,7 +392,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "3ef0649ead2c45a16a3161a9125b589ba375c0728aab5d496d21402e29d9ab9d"
+        "sha256": "36ecab8f21975904e1508717dd29d8866e49c07cfb649fdbd56e33d0e97dfeb3"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
@@ -420,6 +424,43 @@
           "input": "apps/ex_ssl/lib/ssl/connection.ex",
           "change": "An in-flight duplex write is settled by the writer's own result after an unclean transport close (a local send timeout stays :timeout; dead-transport errors map to the recorded :econnreset), and buffered plaintext is delivered before a writer failure after a recorded close (#158).",
           "dispatch_review": "No dynamic dispatch added or moved; literal calls and state updates only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "8e810b476c5423ae91f5dc23d2fc9a468e82cf3a",
+          "input": "apps/ex_ssl/lib/ssl.ex",
+          "change": "The TCP server API documents and routes certs_keys with several identities, each validated and chosen per handshake from the client's signature algorithms.",
+          "dispatch_review": "No dynamic dispatch added or removed; documentation and literal option handling only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "8e810b476c5423ae91f5dc23d2fc9a468e82cf3a",
+          "input": "apps/ex_ssl/lib/ssl/pkix/pkix.ex",
+          "change": "Hostname matching rejects wildcards that span a public suffix (*.com) and requires at least two labels after the wildcard (RFC 6125 6.4.3).",
+          "dispatch_review": "No dynamic dispatch added or removed; the change adds literal clauses to hostname matching. The PKIX hostname_match_fun/3 and verify_peer/3 sites keep their line numbers and bodies; no occurrence moves."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "8e810b476c5423ae91f5dc23d2fc9a468e82cf3a",
+          "input": "apps/ex_ssl/lib/ssl/server_options.ex",
+          "change": "ServerOptions loads and validates every certs_keys entry, selects the identity per handshake from the client's signature_algorithms and SNI host, and runs sni_fun in a monitored helper process bounded by the handshake deadline; the sni_fun call moves into the helper closure body call_sni_fun/2.",
+          "dispatch_review": "TLS-7 occurrence 181 (the sni_fun invocation) moves from lookup/2 to call_sni_fun/2 and from line 194 to 262 with an unchanged fun.(name) expression. lookup/3 spawns the helper with a literal local closure around call_sni_fun/2; the callable is still only the caller-supplied :sni_fun that sni/1 validates and stores as {:fun, fun}. No dynamic dispatch is added.",
+          "occurrence_rebindings": [
+            {
+              "inventory_occurrence": 181,
+              "previous_mfa": "lookup/2",
+              "mfa": "call_sni_fun/2",
+              "previous_line": 194,
+              "line": 262
+            }
+          ]
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "8e810b476c5423ae91f5dc23d2fc9a468e82cf3a",
+          "input": "apps/ex_ssl/lib/ssl/server_connection.ex",
+          "change": "The server connection bounds handshake writes by the handshake deadline, caps skipped early-data records, limits the pre-auth ClientHello to 64 KiB, rejects handshake fragments interleaved with application data and returns already_started/closed replies.",
+          "dispatch_review": "No dynamic dispatch added or removed; literal calls, guards and state updates only; the file holds no reviewed occurrence."
         }
       ]
     }

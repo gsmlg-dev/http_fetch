@@ -294,3 +294,17 @@ Producer hashes, the release census and every group's census digest are updated.
 
 A second #158 follow-up lets the writer settle an in-flight duplex write after an
 unclean close; it adds no dynamic dispatch and rebinds no occurrence.
+
+### Follow-up: rc.13 review fixes (2026-11-11)
+
+Server certificate selection and pre-auth bounds (`8e810b4`) change `ssl.ex`,
+`pkix/pkix.ex`, `server_options.ex` and `server_connection.ex`. `ServerOptions`
+now runs `sni_fun` in a monitored helper process bounded by the handshake
+deadline, so the TLS-7 invocation (occurrence 181) moves from `lookup/2` into the
+helper closure body `call_sni_fun/2` (line 194 to 262, expression `fun.(name)`
+unchanged). Its only origin is still the caller `:sni_fun` that `sni/1`
+validates and stores as `{:fun, fun}`; no library caller supplies one. The
+rebinding records `previous_mfa` and `previous_line`. The PKIX sites (71, 73)
+keep their lines. The wildcard rule, `certs_keys` handling and pre-auth bounds
+add only literal calls and guards. Producer hashes, the release census and every
+group's census digest are updated.

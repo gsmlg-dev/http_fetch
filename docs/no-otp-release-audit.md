@@ -1,5 +1,33 @@
 # Directed production release audit
 
+## rc.13 proof follow-up — 2026-11-11
+
+Production changes after `v1.0.0-rc.12` changed thirty production files:
+server `certs_keys` selection, the QUIC 1-RTT protocol-error close, recovery and
+CID eviction, H3 connection error codes, HTTP/1 redirect parity and the HTTP/2
+retry, EventSource and WebSocket fixes, and the WebTransport connect
+cancellation and session statistics. These changes altered the source census.
+Each changed reviewed input was re-reviewed in the rc.11 amendments as a dated
+follow-up:
+
+- 122 reviewed occurrences are unchanged.
+- 83 sites keep their expressions and functions and move: 17 `Quic.Connection`,
+  26 `QuicHttp3.Session`, 12 `HTTP.SocketClient`, 9 `HTTP.EventSource.Connection`,
+  7 `HTTP.WebSocket.Connection` and 12 `HTTP.WebTransport.Session`.
+- TLS-7 occurrence 181 (`sni_fun`) moves into the helper closure body
+  `call_sni_fun/2` (line 262). Its only origin is still the caller `:sni_fun`.
+- One site is new: ID 208, H3-1 `session.transport.close/4` in `operation/3`. Its
+  only origin is the retained session transport.
+- One site is removed: ID 166, WT-1 `state.backend.get_stats/1`. The session now
+  answers `:get_stats` from its own counters. The amendment records it under
+  `removed_occurrences`.
+
+The binding now covers 207 reviewed occurrences (IDs 1-208 without 166): TLS 15,
+QUIC 37, HTTP 84, H3 64 and telemetry 7. It also covers the complete 267-file
+production-source census. A locally built isolated candidate release inspects
+382 BEAMs and reports 207 raw dispatch sites. These match the reviewed identities
+exactly. CI strict candidate and published gates must still pass independently.
+
 ## rc.12 proof follow-up — 2026-11-11
 
 Production changes after `1ee0ec6` changed twelve production files: the HTTP/1

@@ -221,3 +221,16 @@ lines 40 and 53. FetchOptions and SocketClient also gain the decoded-body bound
 none of the moved SocketClient sites; the HTTP review rebinds them. No H3
 occurrence is added or rebound. The release now has 207 sites, because HTTP
 gains one Promise callback site.
+
+### Follow-up: rc.13 review fixes (2026-11-11)
+
+`QuicHttp3.Session` (`3a5522c`) sends RFC 9114 connection error codes by closing
+the QUIC connection with the detected code. The `{:close, code, phrase}`
+operation calls `session.transport.close(session.connection, code, phrase,
+opts)`, the same retained H3-1 transport as its siblings, and is new occurrence
+208 (`operation/3`, line 1092). `Session.new/1` still assigns the transport once
+and the only library `session_options` producer is the WebTransport backend. The
+other 26 H3-1 sites keep their expressions and owning functions and move by 5 to
+13 lines; they are rebound in the amendment and the follow-up entry. The H3 review
+now has 64 occurrences. SocketClient, `HTTP` and the EventSource files change as
+described in the HTTP review, which holds the moved sites.

@@ -46,7 +46,9 @@ def load(source, version, packages):
                     'unreviewed production dependency')
             bundle['sources'].update({f'telemetry/{name}': digest
                                       for name, digest in dependency['source_inputs_sha256'].items()})
-    require(sorted(item['inventory_occurrence'] for item in occurrences) == list(range(1, 208)),
+    # Occurrence 166 (WebTransport backend.get_stats/1) was removed from the source in rc.13.
+    require(sorted(item['inventory_occurrence'] for item in occurrences) ==
+            [number for number in range(1, 209) if number != 166],
             'reviewed occurrence coverage is incomplete or duplicated')
     require(all(bundle['dependency_sources'].get(name) == digest
                 for name, digest in bundle['sources'].items() if name.startswith('telemetry/')),

@@ -31,11 +31,15 @@ def rewind(proof, version):
             continue
         bindings = {item['inventory_occurrence']: item for item in amendment['occurrence_rebindings']}
         added = amendment.get('added_occurrences', [])
-        sites = [site if site['inventory_occurrence'] not in bindings else
-                 dict(site, line=bindings[site['inventory_occurrence']]['previous_line'],
-                      mfa=bindings[site['inventory_occurrence']].get('previous_mfa', site['mfa']),
-                      kind=bindings[site['inventory_occurrence']].get('previous_kind', site['kind']))
-                 for site in sites if site['inventory_occurrence'] not in added]
+        restored = [dict({key: value for key, value in site.items() if key != 'previous_line'},
+                         line=site['previous_line'])
+                    for site in amendment.get('removed_occurrences', [])]
+        sites = restored + [
+            site if site['inventory_occurrence'] not in bindings else
+            dict(site, line=bindings[site['inventory_occurrence']]['previous_line'],
+                 mfa=bindings[site['inventory_occurrence']].get('previous_mfa', site['mfa']),
+                 kind=bindings[site['inventory_occurrence']].get('previous_kind', site['kind']))
+            for site in sites if site['inventory_occurrence'] not in added]
     return sites
 
 
@@ -205,7 +209,8 @@ class DirectedReviewTests(unittest.TestCase):
             lambda sites: [site for site in sites if site['inventory_occurrence'] != 176],
             lambda sites: [site for site in sites if site['inventory_occurrence'] != 177],
             lambda sites: sites + [copy.deepcopy(sites[-1])],
-            lambda sites: sites + [dict(sites[-1], inventory_occurrence=208)],
+            lambda sites: sites + [dict(sites[-1], inventory_occurrence=209)],
+            lambda sites: sites + [dict(sites[-1], inventory_occurrence=166)],
         ]
         for change in changes:
             def load_with_changed_quic_sites(text):
@@ -252,8 +257,9 @@ class DirectedReviewTests(unittest.TestCase):
             self.assertEqual((reconciliation['count'], reconciliation['duplicates']), (207, 0))
             self.assertEqual(identity_digest(bundle['occurrences']),
                              (207, 207, reconciliation['sha256']))
-        self.assertEqual(sorted(added), list(range(181, 208)))
-        self.assertEqual(sorted(site['inventory_occurrence'] for site in current), list(range(1, 208)))
+        self.assertEqual(sorted(added), list(range(181, 209)))
+        self.assertEqual(sorted(site['inventory_occurrence'] for site in current),
+                         [number for number in range(1, 209) if number != 166])
 
     def test_promise_callback_follow_up_rebinds_the_apply_sink_and_adds_the_error_callback(self):
         http = proof('http')
@@ -269,6 +275,28 @@ class DirectedReviewTests(unittest.TestCase):
         self.assertNotIn(207, rewound)
         self.assertEqual({key: rewound[106][key] for key in ('mfa', 'line', 'kind')},
                          dict(mfa='apply_callback/2', line=135, kind='unresolved_apply'))
+
+    def test_rc13_follow_up_rebinds_sni_fun_adds_h3_close_and_removes_backend_stats(self):
+        def source_line(site):
+            return (ROOT / site['source']).read_text().splitlines()[site['line'] - 1]
+
+        tls = {site['inventory_occurrence']: site for site in proof('tls')['occurrences']}
+        self.assertEqual((tls[181]['mfa'], tls[181]['proof']), ('call_sni_fun/2', 'TLS-7'))
+        self.assertIn('fun.(name)', source_line(tls[181]))
+        h3 = {site['inventory_occurrence']: site for site in proof('h3')['occurrences']}
+        self.assertEqual((h3[208]['mfa'], h3[208]['proof']), ('operation/3', 'H3-1'))
+        self.assertIn('session.transport.close(session.connection, code, phrase, opts)',
+                      source_line(h3[208]))
+        http = proof('http')
+        self.assertNotIn(166, {site['inventory_occurrence'] for site in http['occurrences']})
+        removed = http['source_review_amendments'][-1]['removed_occurrences']
+        self.assertEqual([(site['inventory_occurrence'], site['proof'], site['previous_line'])
+                          for site in removed], [(166, 'WT-1', 216)])
+        session = (ROOT / removed[0]['source']).read_text()
+        self.assertNotIn('backend.get_stats', session)
+        rewound = {site['inventory_occurrence']: site for site in rewind(http, '1.0.0-rc.11')}
+        self.assertEqual((rewound[166]['mfa'], rewound[166]['line']), ('handle_call/3', 216))
+        self.assertNotIn(208, {site['inventory_occurrence'] for site in rewind(proof('h3'), '1.0.0-rc.11')})
 
     def test_native_source_and_compiled_release_binding(self):
         result = subprocess.run(['elixir', str(Path(__file__).with_suffix('.exs'))],

@@ -347,3 +347,15 @@ no reviewed occurrence, so no QUIC occurrence is added or rebound. The
 producer hashes, the release census and every group's rc.11 census digest are
 updated. The release now has 207 sites, because HTTP gains one Promise callback
 site.
+
+### Follow-up: rc.13 review fixes (2026-11-11)
+
+Authenticated 1-RTT protocol errors now close with CONNECTION_CLOSE (`908b582`),
+which shifts the seventeen reviewed `Quic.Connection` adapter sites by 22 lines.
+They keep their expressions, the retained `data.adapter` and their owning
+functions, and are rebound in the amendment and the follow-up entry. The
+NewReno and recovery change (`d2e5bd5`), the oldest-first retired-CID eviction
+(`1b2a978`), the 2^60 stream-count bound (`667bbbe`) and the documentation change
+(`a634b27`) add only literal calls; the H3 session change (`3a5522c`) is reviewed
+in the H3 proof. No QUIC occurrence is added or removed. The release still has 207
+sites, with one removal in HTTP and one addition in H3.

@@ -6,28 +6,28 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/elixir_quic/lib/quic.ex": "ceabba4e42c49138d5b13cf312e6d7ea03d9b1c7ef400eafaa9aa6a9010bb23d",
+    "apps/elixir_quic/lib/quic.ex": "ccff79172d84ea58ef5f23ac1293f74f8db4cda05ca235a4677cf80a4ab86b1f",
     "apps/elixir_quic/lib/quic/cleanup.ex": "b25e373c6e11a96d9248caece562c671b6f87b8a3c6c33ee24943871e1852b99",
     "apps/elixir_quic/lib/quic/cleanup/observer.ex": "7f2ae82f7d681c51d9458f27278351c30ff5ab4aee8f49c35fae8316884e2b8e",
-    "apps/elixir_quic/lib/quic/endpoint.ex": "ed907ad9ed04d45a8e96c2167d1facb98d421a7f848e0a74c308060ce735a248",
-    "apps/elixir_quic/lib/quic/connection.ex": "b91a1e0f3fc28f3fc57ae420206b60128d012a84d37cf5b08bcf98c290d8e119",
+    "apps/elixir_quic/lib/quic/endpoint.ex": "bc0f51dce1a984395c69a1b3338a4f14c7874e43e3cd05e03cb786af786bfaf4",
+    "apps/elixir_quic/lib/quic/connection.ex": "1d0e7e82e3e09c4c93031b58e1c965e27658ef917360ab74ad4c485f718e986a",
     "apps/elixir_quic/lib/quic/io/gen_udp.ex": "98ff13031224271021aa05dfb7b3175f6325b80e4d26fb03b92dfe321937be0c",
     "apps/elixir_quic/lib/quic/io/external_writer.ex": "1fda217ed39c3cbf474d4185a0af5fc5fae94667fd2ab32dcd8fbbd3ed6b2ddb",
     "apps/elixir_quic/lib/quic/abyss_dispatcher.ex": "f54b6fd777987a53374cbc15b4b8bbfa854142170cd276d312bd143ce8fbc249",
     "apps/elixir_quic/lib/quic/tls_driver.ex": "cda177305386e45ce223fdb02549cf741ca675a6a889d8da5577ab2f90e85ab3",
-    "apps/elixir_quic/lib/quic/handshake_scheduler.ex": "d8b44220e2ce24407f7070da2176388fe1689b13785ced73e53e2582b66c7e80",
+    "apps/elixir_quic/lib/quic/handshake_scheduler.ex": "3a96dedcc1e6377284d2a9f068f0a3db498951c675e2a5348745e475e9bd7f7b",
     "apps/ex_ssl/lib/ssl/quic.ex": "a2f78d3dca05b1dbf1861c77b756dcf8bc3af3c9fc742c264d909df0024fa44f",
     "apps/ex_ssl/lib/ssl/quic/config.ex": "db708d4a3dca411cab89dbad09b7b1840a018b48cdfeecdff235eb05b81e291c",
-    "apps/elixir_quic_http3/lib/quic_http3/session.ex": "e329caba406925e06286e3bea3f01f8b83a820ef4a77eca1b6ff826a775e3db3",
+    "apps/elixir_quic_http3/lib/quic_http3/session.ex": "45423f557e8d4b16db2121560b01a2d51d372174eeb7f2d60d7fda643a5901cf",
     "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "16285b8197da39400b9f3dbd9675e0296a0914bc275aecee042545ac4ec5e679",
     "apps/http_runtime/lib/http/http3/pool.ex": "974135c4126244c649815a5d4ab808678da3c1978540d84b940729f299baf73d",
     "apps/http_runtime/lib/http/http3/connection_owner.ex": "b2f5eeb3b75afdf1187f0fc4a19b2b8e070f6a0ec06d92841a68b8a7384428e2",
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
     "apps/elixir_quic/lib/quic/local_cids.ex": "8f8c5eb14f93f6e9ca16e2a812df152638d3ef6fabcc2611d117ecf1ebf89f69",
-    "apps/elixir_quic/lib/quic/recovery.ex": "50ecf0d0ed76335a2f0414912365625212b7360204fdc9cb19a588bd648cb452",
+    "apps/elixir_quic/lib/quic/recovery.ex": "8f0638885aa95eb8acd0c0fd4aeae3d0f977ec7d9d902fe0937b9a732e16895c",
     "apps/elixir_quic/lib/quic/peer_cids.ex": "a8c304a2af5000319395417bf6be5a77844419e7fa94d1100b78833e46e8fe7d",
     "apps/elixir_quic/lib/quic/paths.ex": "4168934031f50d4d0a5f379fd17b8d08320ff3c0e12419eafd1a15e37aaf9a88",
-    "apps/elixir_quic/lib/quic/codec.ex": "ad65e30afa6e495171031676a289bdb5a6b1033e5dfd94ea7b382340d58735d5",
+    "apps/elixir_quic/lib/quic/codec.ex": "4d97bf5729c84cf61f983a4d4c526d3f939c26bd5674d356d250812678afc3ce",
     "apps/elixir_quic/lib/quic/io/endpoint.ex": "ea980cd6538fc0a51ec15d0804b6d24f1495063c74625e676d88e292febe2f87",
     "apps/elixir_quic/lib/quic/resumption_store.ex": "2d7a6d3f17c535043fe7f0925567e3117cc4cbeb82a47333ced502314d4f764f"
   },
@@ -49,7 +49,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "begin_closing/2",
-      "line": 1888,
+      "line": 1910,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -59,7 +59,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "begin_closing/2",
-      "line": 1932,
+      "line": 1954,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -69,7 +69,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "closing_timer/1",
-      "line": 1817,
+      "line": 1839,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -79,7 +79,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "draining_timer/1",
-      "line": 1822,
+      "line": 1844,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -89,7 +89,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "expired?/1",
-      "line": 2442,
+      "line": 2464,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -99,7 +99,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "eligible_send/1",
-      "line": 1709,
+      "line": 1731,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -169,7 +169,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "idle_timer/1",
-      "line": 1809,
+      "line": 1831,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -179,7 +179,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "local_send/4",
-      "line": 1999,
+      "line": 2021,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -189,7 +189,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "local_send/4",
-      "line": 2001,
+      "line": 2023,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -199,7 +199,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "local_send/4",
-      "line": 2004,
+      "line": 2026,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -209,7 +209,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "receive_authenticated/6",
-      "line": 1177,
+      "line": 1199,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -219,7 +219,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "recovery_timer/1",
-      "line": 1791,
+      "line": 1813,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -229,7 +229,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "refresh_idle/1",
-      "line": 1841,
+      "line": 1863,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -329,7 +329,7 @@
     {
       "module": "Quic.Connection",
       "mfa": "path_timer/1",
-      "line": 1802,
+      "line": 1824,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2",
@@ -376,7 +376,7 @@
       "inventory_occurrence": 186,
       "module": "Quic.Connection",
       "mfa": "early_keys_timer/1",
-      "line": 1778,
+      "line": 1800,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2"
@@ -385,7 +385,7 @@
       "inventory_occurrence": 187,
       "module": "Quic.Connection",
       "mfa": "start_local_migration/6",
-      "line": 2310,
+      "line": 2332,
       "kind": "unresolved_module_dispatch",
       "source": "apps/elixir_quic/lib/quic/connection.ex",
       "proof": "Q2"
@@ -1514,12 +1514,12 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "0186b4e3db4637d55c578929ce4d9dc0db808e67",
+      "source_commit": "a634b274c8294d10ec106ed3d2a49b269ecd5d2d",
       "scope": "client migration, opt-in resumption/0-RTT, reliable reset and TLS provider continuation",
       "changed_source_inputs": {
         "apps/elixir_quic/lib/quic.ex": {
           "previous_sha256": "a172bf5d3b431ae3f27bf98072a8d3475764c511078157e95ce344b8aae4f5cb",
-          "sha256": "ceabba4e42c49138d5b13cf312e6d7ea03d9b1c7ef400eafaa9aa6a9010bb23d"
+          "sha256": "ccff79172d84ea58ef5f23ac1293f74f8db4cda05ca235a4677cf80a4ab86b1f"
         },
         "apps/elixir_quic/lib/quic/cleanup/observer.ex": {
           "previous_sha256": "c74428b9ef5cddb0eed7c8966e7593dc3d4371a1709c169fe5cccab2363e5918",
@@ -1527,11 +1527,11 @@
         },
         "apps/elixir_quic/lib/quic/endpoint.ex": {
           "previous_sha256": "d23e1a6e3423ee0959663a0f2b4eb8b74fb828c46a6146eaaeb72d19932aac41",
-          "sha256": "ed907ad9ed04d45a8e96c2167d1facb98d421a7f848e0a74c308060ce735a248"
+          "sha256": "bc0f51dce1a984395c69a1b3338a4f14c7874e43e3cd05e03cb786af786bfaf4"
         },
         "apps/elixir_quic/lib/quic/connection.ex": {
           "previous_sha256": "183872efc651a02fac6ef7fb85b22577ae5c315e0b8b8bba5c3a8913a71e60f4",
-          "sha256": "b91a1e0f3fc28f3fc57ae420206b60128d012a84d37cf5b08bcf98c290d8e119"
+          "sha256": "1d0e7e82e3e09c4c93031b58e1c965e27658ef917360ab74ad4c485f718e986a"
         },
         "apps/elixir_quic/lib/quic/io/gen_udp.ex": {
           "previous_sha256": "1e5c46de218a0614659660815d4560d137191907430d74c4e2027eff307bc98f",
@@ -1547,7 +1547,7 @@
         },
         "apps/elixir_quic/lib/quic/handshake_scheduler.ex": {
           "previous_sha256": "379df6e36c99bfcdf2f7328e7732e39dfcd74f52e97b042db3d554f3eb8c4be8",
-          "sha256": "d8b44220e2ce24407f7070da2176388fe1689b13785ced73e53e2582b66c7e80"
+          "sha256": "3a96dedcc1e6377284d2a9f068f0a3db498951c675e2a5348745e475e9bd7f7b"
         },
         "apps/ex_ssl/lib/ssl/quic.ex": {
           "previous_sha256": "d8575ea864739830c9b52185ad09aa3af03cf8a61d8164ebce5473b4cbdfddf3",
@@ -1559,7 +1559,7 @@
         },
         "apps/elixir_quic_http3/lib/quic_http3/session.ex": {
           "previous_sha256": "c0b460040007aea68cbca830c60a15c5fb2efda12c1c345bd24c095caa63544f",
-          "sha256": "e329caba406925e06286e3bea3f01f8b83a820ef4a77eca1b6ff826a775e3db3"
+          "sha256": "45423f557e8d4b16db2121560b01a2d51d372174eeb7f2d60d7fda643a5901cf"
         },
         "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": {
           "previous_sha256": "e3eceea332cdee69f921bae15452e8b4d41fc76265b8bfff76a2dfbf5c28385a",
@@ -1575,7 +1575,7 @@
         },
         "apps/elixir_quic/lib/quic/recovery.ex": {
           "previous_sha256": "5ac71a0e2b3146aac9fac71693e851cebf6759f23cc6ae7b357b7bf4b8f0731f",
-          "sha256": "50ecf0d0ed76335a2f0414912365625212b7360204fdc9cb19a588bd648cb452"
+          "sha256": "8f0638885aa95eb8acd0c0fd4aeae3d0f977ec7d9d902fe0937b9a732e16895c"
         },
         "apps/elixir_quic/lib/quic/paths.ex": {
           "previous_sha256": "fd79d4dc2e928b2cde2c7784916be17e17ac63c0a2ead050c111fb734bd815c9",
@@ -1583,7 +1583,7 @@
         },
         "apps/elixir_quic/lib/quic/codec.ex": {
           "previous_sha256": "5c6d9e588d7121b4f2411727eb10d8928ead4e383230b85fe72ac4d1cc91426d",
-          "sha256": "ad65e30afa6e495171031676a289bdb5a6b1033e5dfd94ea7b382340d58735d5"
+          "sha256": "4d97bf5729c84cf61f983a4d4c526d3f939c26bd5674d356d250812678afc3ce"
         },
         "apps/http_runtime/lib/http/http3/pool.ex": {
           "previous_sha256": "730b52081a9f99621e5edd677167556dbeede70fd74cef7d1164e9e230118d44",
@@ -1595,7 +1595,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "b41180ac991cfdf7392b27d61d62f21586a21d826f71985b31a7a18b0372c23f",
+        "sorted_path_sha256_json": "a380c36ea08eba3775aecc55903ff2441eae171e01f30bd499c3d26f663e7db0",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1603,37 +1603,37 @@
           "inventory_occurrence": 2,
           "mfa": "begin_closing/2",
           "previous_line": 1551,
-          "line": 1888
+          "line": 1910
         },
         {
           "inventory_occurrence": 3,
           "mfa": "begin_closing/2",
           "previous_line": 1507,
-          "line": 1932
+          "line": 1954
         },
         {
           "inventory_occurrence": 4,
           "mfa": "closing_timer/1",
           "previous_line": 1437,
-          "line": 1817
+          "line": 1839
         },
         {
           "inventory_occurrence": 5,
           "mfa": "draining_timer/1",
           "previous_line": 1442,
-          "line": 1822
+          "line": 1844
         },
         {
           "inventory_occurrence": 6,
           "mfa": "expired?/1",
           "previous_line": 1898,
-          "line": 2442
+          "line": 2464
         },
         {
           "inventory_occurrence": 7,
           "mfa": "eligible_send/1",
           "previous_line": 1382,
-          "line": 1709
+          "line": 1731
         },
         {
           "inventory_occurrence": 8,
@@ -1675,14 +1675,14 @@
           "inventory_occurrence": 14,
           "mfa": "idle_timer/1",
           "previous_line": 1429,
-          "line": 1809
+          "line": 1831
         },
         {
           "inventory_occurrence": 15,
           "previous_mfa": "local_send/3",
           "mfa": "local_send/4",
           "previous_line": 1613,
-          "line": 1999,
+          "line": 2021,
           "call_expression": "rewritten_same_retained_selector"
         },
         {
@@ -1690,32 +1690,32 @@
           "previous_mfa": "local_send/3",
           "mfa": "local_send/4",
           "previous_line": 1615,
-          "line": 2001
+          "line": 2023
         },
         {
           "inventory_occurrence": 17,
           "previous_mfa": "local_send/3",
           "mfa": "local_send/4",
           "previous_line": 1618,
-          "line": 2004
+          "line": 2026
         },
         {
           "inventory_occurrence": 18,
           "mfa": "receive_authenticated/6",
           "previous_line": 951,
-          "line": 1177
+          "line": 1199
         },
         {
           "inventory_occurrence": 19,
           "mfa": "recovery_timer/1",
           "previous_line": 1411,
-          "line": 1791
+          "line": 1813
         },
         {
           "inventory_occurrence": 20,
           "mfa": "refresh_idle/1",
           "previous_line": 1461,
-          "line": 1841
+          "line": 1863
         },
         {
           "inventory_occurrence": 21,
@@ -1770,7 +1770,7 @@
           "inventory_occurrence": 177,
           "mfa": "path_timer/1",
           "previous_line": 1422,
-          "line": 1802
+          "line": 1824
         }
       ],
       "added_occurrences": [
@@ -1783,7 +1783,7 @@
         188
       ],
       "origin_derivations": {
-        "Q2": "Endpoint.open_io/2 still yields only {GenUDP, socket} or {ExternalWriter, writer}; Connection.init/1 is the only adapter assignment. Client local migration (exclusive, non-external client endpoints only) receives an additional GenUDP socket PID from the generation/ref-qualified quic_path_bound reply and stores it in path_writers; local_send/4 selects that PID as writer data while calling the retained data.adapter (ID 15 rewritten, 16/17 moved). New sites 182-187 query the retained adapter clock for early-key retirement, path binding/validation and migration start.",
+        "Q2": "Endpoint.open_io/2 still yields only {GenUDP, socket} or {ExternalWriter, writer}; Connection.init/1 is the only adapter assignment. Client local migration (exclusive, non-external client endpoints only) receives an additional GenUDP socket PID from the generation/ref-qualified quic_path_bound reply and stores it in path_writers; local_send/4 selects that PID as writer data while calling the retained data.adapter (ID 15 rewritten, 16/17 moved). New sites 182-187 query the retained adapter clock for early-key retirement, path binding/validation and migration start. The rc.13 follow-up 908b582 only adds the authenticated 1-RTT protocol-error close; the seventeen Quic.Connection adapter sites (2-7, 14-20, 177, 186, 187) keep their expressions and the retained data.adapter and move by 22 lines.",
         "Q4": "TLSDriver.continue/3 (ID 188) calls the retained state.adapter with the single outstanding SSL.QUIC.Request id; the reply comes from the endpoint-local literal Quic.ResumptionStore authority. abort/2 (ID 23) additionally clears the continuation. new/2 still defaults :adapter to SSL.QUIC and no fold updates the selector.",
         "Q1_Q3": "Cleanup leases and the external send callback keep their constructors; the observer only admits two more operation kinds and AbyssDispatcher.terminate/2 tolerates an exiting endpoint."
       },
@@ -1798,7 +1798,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "3ef0649ead2c45a16a3161a9125b589ba375c0728aab5d496d21402e29d9ab9d"
+        "sha256": "36ecab8f21975904e1508717dd29d8866e49c07cfb649fdbd56e33d0e97dfeb3"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
@@ -1865,6 +1865,153 @@
           "input": "apps/http_runtime/lib/http/http3/connection_owner.ex",
           "change": "ConnectionOwner computes the default opening deadline lazily from HTTP.HTTP3.opening_timeout/1, so connect_timeout: :infinity keeps the finite 5,000 ms QUIC opening budget.",
           "dispatch_review": "No dynamic dispatch added or moved: Keyword.get_lazy/3 receives a local closure whose body is literal now/0 and HTTP.HTTP3.opening_timeout/1 calls; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "3a5522ccea056b7b6434fe0703111a74af3f8285",
+          "input": "apps/elixir_quic_http3/lib/quic_http3/session.ex",
+          "change": "The H3 session sends RFC 9114 connection error codes on detected connection errors, resets WebTransport streams on session end, rejects malformed datagrams and field values, and routes close(code, phrase) through the retained transport.",
+          "dispatch_review": "No dynamic dispatch added or removed; the reviewed occurrences in this file belong to another group proof, which rebinds them; this proof holds no reviewed occurrence in the file."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "908b5826820268c180475739a30f6997bec47547",
+          "input": "apps/elixir_quic/lib/quic/connection.ex",
+          "change": "Authenticated 1-RTT protocol errors now close the connection with CONNECTION_CLOSE.",
+          "dispatch_review": "No dynamic dispatch added or removed: the change adds literal state transitions and calls. The seventeen reviewed Quic.Connection adapter sites keep their expressions, retained adapter and owning functions and move by 22 lines; they are rebound below.",
+          "occurrence_rebindings": [
+            {
+              "inventory_occurrence": 2,
+              "mfa": "begin_closing/2",
+              "previous_line": 1888,
+              "line": 1910
+            },
+            {
+              "inventory_occurrence": 3,
+              "mfa": "begin_closing/2",
+              "previous_line": 1932,
+              "line": 1954
+            },
+            {
+              "inventory_occurrence": 4,
+              "mfa": "closing_timer/1",
+              "previous_line": 1817,
+              "line": 1839
+            },
+            {
+              "inventory_occurrence": 5,
+              "mfa": "draining_timer/1",
+              "previous_line": 1822,
+              "line": 1844
+            },
+            {
+              "inventory_occurrence": 6,
+              "mfa": "expired?/1",
+              "previous_line": 2442,
+              "line": 2464
+            },
+            {
+              "inventory_occurrence": 7,
+              "mfa": "eligible_send/1",
+              "previous_line": 1709,
+              "line": 1731
+            },
+            {
+              "inventory_occurrence": 14,
+              "mfa": "idle_timer/1",
+              "previous_line": 1809,
+              "line": 1831
+            },
+            {
+              "inventory_occurrence": 15,
+              "mfa": "local_send/4",
+              "previous_line": 1999,
+              "line": 2021
+            },
+            {
+              "inventory_occurrence": 16,
+              "mfa": "local_send/4",
+              "previous_line": 2001,
+              "line": 2023
+            },
+            {
+              "inventory_occurrence": 17,
+              "mfa": "local_send/4",
+              "previous_line": 2004,
+              "line": 2026
+            },
+            {
+              "inventory_occurrence": 18,
+              "mfa": "receive_authenticated/6",
+              "previous_line": 1177,
+              "line": 1199
+            },
+            {
+              "inventory_occurrence": 19,
+              "mfa": "recovery_timer/1",
+              "previous_line": 1791,
+              "line": 1813
+            },
+            {
+              "inventory_occurrence": 20,
+              "mfa": "refresh_idle/1",
+              "previous_line": 1841,
+              "line": 1863
+            },
+            {
+              "inventory_occurrence": 177,
+              "mfa": "path_timer/1",
+              "previous_line": 1802,
+              "line": 1824
+            },
+            {
+              "inventory_occurrence": 186,
+              "mfa": "early_keys_timer/1",
+              "previous_line": 1778,
+              "line": 1800
+            },
+            {
+              "inventory_occurrence": 187,
+              "mfa": "start_local_migration/6",
+              "previous_line": 2310,
+              "line": 2332
+            }
+          ]
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "908b5826820268c180475739a30f6997bec47547",
+          "input": "apps/elixir_quic/lib/quic/handshake_scheduler.ex",
+          "change": "The handshake scheduler reports authenticated 1-RTT protocol errors so the connection can close with CONNECTION_CLOSE.",
+          "dispatch_review": "No dynamic dispatch added or removed; literal calls and state updates only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "d2e5bd54272645007a1eb1e10a909fbe77c52d22",
+          "input": "apps/elixir_quic/lib/quic/recovery.ex",
+          "change": "Recovery applies one NewReno reduction per recovery period and prunes lost ACK-only packets.",
+          "dispatch_review": "No dynamic dispatch added or removed; literal arithmetic, Map and Enum calls only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "1b2a978b346570bdc793cd73b3000595815fa7fc",
+          "input": "apps/elixir_quic/lib/quic/endpoint.ex",
+          "change": "Retired connection IDs carry a monotonic stamp so the oldest are evicted first once over the limit; add_retired/3 becomes public (@doc false).",
+          "dispatch_review": "No dynamic dispatch added or removed; Map, Enum and :erlang.unique_integer/1 calls with a literal anonymous function passed to Enum.sort_by/2 and Enum.reduce/3; the file's reviewed Endpoint adapter occurrences keep their lines."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "667bbbeb3c37a63e0506438e2e55882286a90db5",
+          "input": "apps/elixir_quic/lib/quic/codec.ex",
+          "change": "Stream-count limits above 2^60 are rejected as encoding errors (RFC 9000 19.11 and 19.14).",
+          "dispatch_review": "No dynamic dispatch added or removed; a literal module attribute and a guard only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "a634b274c8294d10ec106ed3d2a49b269ecd5d2d",
+          "input": "apps/elixir_quic/lib/quic.ex",
+          "change": "Module documentation points to docs/quic/consumer-contract.md.",
+          "dispatch_review": "No dynamic dispatch added or removed; documentation only; the file holds no reviewed occurrence."
         }
       ]
     }

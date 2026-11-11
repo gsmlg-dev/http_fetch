@@ -458,3 +458,28 @@ sites. The release census also covers the hardened HTTP/1 field parser
 decoded-body bound in `HTTP.ContentDecoder`, `HTTP.Config` and `HTTP.Stream`
 (`0186b4e`). None of those files is a reviewed input, and the compiled
 inventory shows that none adds a dispatch site.
+
+### Follow-up: rc.13 review fixes (2026-11-11)
+
+Occurrence 166 (WT-1, `state.backend.get_stats/1` in `handle_call/3`) is
+removed: `HTTP.WebTransport.Session` (`89107e7`) now answers `:get_stats` from
+the counters it keeps at its API boundary and never calls the backend. The
+amendment records the site under `removed_occurrences` with its `previous_line`
+so the history rewind restores it. The other thirteen WT-1 sites keep their
+expressions and the retained `state.backend` selector; twelve move by 4 to 41
+lines. The backend closes a pending connect through `interruptible/1`, which
+spawns a monitored helper around a literal closure; its `fun.()` runs only the
+closures built at three literal call sites and the compiled inventory reports no
+site in that module.
+
+The twelve HTTP-4 `HTTP.SocketClient` sites move by 66 or 68 lines (HTTP/1
+redirect parity `e95bb5c` and HTTP/2 replay `cff6e9a`), the nine HTTP-3
+`HTTP.EventSource.Connection` sites move by 1 to 34 lines (`e03c828`) and the
+seven HTTP-9 `HTTP.WebSocket.Connection` sites move by 7 or 12 lines
+(`c08c93f`). All keep their expressions, retained selectors and owning functions
+and are rebound in the amendment and the follow-up entries. The `HTTP` module
+documents the redirect limit; the WebSocket handshake brackets IPv6 Host
+literals; the WebTransport options reject pooling and socket options. These add
+only literal calls. The HTTP review now has 84 occurrences. The complete compiled
+inventory of a locally built isolated candidate release matches the five reviews
+exactly at 207 sites.
