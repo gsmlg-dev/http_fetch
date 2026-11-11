@@ -6,7 +6,8 @@
 //! Provides low-level socket operations for the YellowDog DHCP client:
 //!
 //! - **Broadcast UDP sockets** bound to a specific network interface via
-//!   `SO_BINDTODEVICE` (Linux) or `IP_BOUND_IF` (FreeBSD/macOS).
+//!   `SO_BINDTODEVICE` (Linux) or `IP_BOUND_IF` (macOS). FreeBSD builds, but
+//!   interface binding is unsupported there, so `open/2` returns an error.
 //! - **Raw ARP sockets** for Duplicate Address Detection (DAD) probes.
 //! - **Async receive** via a dedicated poll thread delivering packets to the
 //!   owning Erlang process using `enif_send()`.

@@ -4,7 +4,7 @@ defmodule Abyss.DhcpSocket.Native do
 
   Install the optional package explicitly to use this feature. Provides a
   broadcast-capable UDP socket bound to the interface (`SO_BINDTODEVICE` on
-  Linux, `IP_BOUND_IF` on FreeBSD) and raw ARP socket support for Duplicate
+  Linux, `IP_BOUND_IF` on macOS; unsupported on FreeBSD) and raw ARP socket support for Duplicate
   Address Detection (RFC 5227).
 
   ## Owner messages
@@ -29,10 +29,10 @@ defmodule Abyss.DhcpSocket.Native do
   @spec open(String.t(), pid()) :: reference() | {:error, term()}
   def open(interface, owner), do: invoke(:open, [interface, owner])
 
-  @spec send_broadcast(reference(), iodata()) :: :ok | {:error, term()}
+  @spec send_broadcast(reference(), binary()) :: :ok | {:error, term()}
   def send_broadcast(socket, packet), do: invoke(:send_broadcast, [socket, packet])
 
-  @spec send_unicast(reference(), :inet.ip4_address(), iodata()) :: :ok | {:error, term()}
+  @spec send_unicast(reference(), :inet.ip4_address(), binary()) :: :ok | {:error, term()}
   def send_unicast(socket, dest_ip, packet), do: invoke(:send_unicast, [socket, dest_ip, packet])
 
   @spec send_arp_probe(reference(), :inet.ip4_address()) :: :ok | {:error, term()}

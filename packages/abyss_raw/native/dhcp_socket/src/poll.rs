@@ -39,8 +39,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-/// Maximum receive buffer size (4 KiB covers any DHCP packet + ARP frames).
-pub const MAX_PACKET_SIZE: usize = 4096;
+/// Maximum receive buffer size: the largest possible UDP payload, so a DHCP
+/// datagram (which may exceed 4 KiB with jumbo frames) is never truncated.
+pub const MAX_PACKET_SIZE: usize = 65_535;
 
 /// Poll timeout in milliseconds. The thread checks the shutdown flag at least
 /// this often even if the wake pipe write is somehow lost.
@@ -80,7 +81,7 @@ fn run(
     owner_pid: LocalPid,
     shutdown: Arc<AtomicBool>,
 ) {
-    let mut buf = [0u8; MAX_PACKET_SIZE];
+    let mut buf = vec![0u8; MAX_PACKET_SIZE];
     let mut msg_env = OwnedEnv::new();
 
     loop {

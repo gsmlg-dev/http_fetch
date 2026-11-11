@@ -4,7 +4,7 @@ defmodule AbyssDhcpSocket.Native do
 
   Loads the `dhcp_socket` Rust crate compiled by Rustler. Provides a
   broadcast-capable UDP socket bound to the interface (`SO_BINDTODEVICE` on
-  Linux, `IP_BOUND_IF` on FreeBSD) and raw ARP socket support for Duplicate
+  Linux, `IP_BOUND_IF` on macOS; unsupported on FreeBSD) and raw ARP socket support for Duplicate
   Address Detection (RFC 5227).
 
   ## Owner messages
@@ -32,10 +32,10 @@ defmodule AbyssDhcpSocket.Native do
   @spec open(String.t(), pid()) :: reference() | {:error, term()}
   def open(_interface, _owner), do: :erlang.nif_error(:nif_not_loaded)
 
-  @spec send_broadcast(reference(), iodata()) :: :ok | {:error, term()}
+  @spec send_broadcast(reference(), binary()) :: :ok | {:error, term()}
   def send_broadcast(_socket, _packet), do: :erlang.nif_error(:nif_not_loaded)
 
-  @spec send_unicast(reference(), :inet.ip4_address(), iodata()) :: :ok | {:error, term()}
+  @spec send_unicast(reference(), :inet.ip4_address(), binary()) :: :ok | {:error, term()}
   def send_unicast(_socket, _dest_ip, _packet), do: :erlang.nif_error(:nif_not_loaded)
 
   @spec send_arp_probe(reference(), :inet.ip4_address()) :: :ok | {:error, term()}

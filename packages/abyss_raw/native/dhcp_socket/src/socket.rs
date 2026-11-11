@@ -6,7 +6,7 @@
 //!
 //! | Feature               | Linux                    | FreeBSD / macOS           |
 //! |-----------------------|--------------------------|---------------------------|
-//! | Interface binding     | `SO_BINDTODEVICE`        | `IP_BOUND_IF` (ifindex)   |
+//! | Interface binding     | `SO_BINDTODEVICE`        | macOS: `IP_BOUND_IF`; FreeBSD: unsupported (open fails) |
 //! | ARP socket            | `AF_PACKET` + `SOCK_RAW` | BPF (`/dev/bpfN`)         |
 //! | Interface MAC lookup  | `SIOCGIFHWADDR` ioctl    | `getifaddrs` + `AF_LINK`  |
 
@@ -69,8 +69,9 @@ fn bind_to_interface(fd: RawFd, interface: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Bind a socket to a specific network interface (FreeBSD/macOS: IP_BOUND_IF).
-#[cfg(any(target_os = "freebsd", target_os = "macos"))]
+/// Bind a socket to a specific network interface (macOS: IP_BOUND_IF; libc
+/// defines it only for Apple and Solarish targets, not FreeBSD).
+#[cfg(target_os = "macos")]
 fn bind_to_interface(fd: RawFd, interface: &str) -> Result<(), String> {
     let c_iface = std::ffi::CString::new(interface)
         .map_err(|_| format!("invalid interface name: {interface}"))?;
@@ -100,7 +101,7 @@ fn bind_to_interface(fd: RawFd, interface: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn bind_to_interface(_fd: RawFd, interface: &str) -> Result<(), String> {
     Err(format!(
         "interface binding not supported on this platform for {interface}"
