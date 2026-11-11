@@ -115,6 +115,11 @@ defmodule Abyss.HandlerTest do
       assert result <= base_timeout * 2
     end
 
+    test "fast callbacks never shorten the configured read_timeout" do
+      fast = [System.convert_time_unit(1, :millisecond, :native)]
+      assert Handler.calculate_adaptive_timeout(60_000, fast) == 60_000
+    end
+
     test "respects minimum and maximum timeout bounds" do
       # Base timeout in milliseconds (function returns milliseconds now)
       base_timeout = 5000

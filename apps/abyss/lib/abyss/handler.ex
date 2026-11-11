@@ -519,8 +519,10 @@ defmodule Abyss.Handler do
         # Set timeout to 3x average processing time
         timeout_ms = round(avg_time_ms * 3)
 
-        # Ensure timeout is between 50% and 200% of base timeout (all in milliseconds)
-        min_timeout_ms = div(base_timeout, 2)
+        # The configured `read_timeout` is the floor (fast callbacks must not
+        # shorten the documented idle linger); slow callbacks may stretch it
+        # up to 200% of the base (all in milliseconds)
+        min_timeout_ms = base_timeout
         max_timeout_ms = base_timeout * 2
 
         # Apply bounds and return timeout in milliseconds
