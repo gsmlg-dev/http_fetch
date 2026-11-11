@@ -271,14 +271,17 @@ The former 1.13 declaration is therefore retired explicitly. CI checks the
 Abyss consumer and native package at Elixir 1.18 / OTP 27. The independent UDP
 macOS job uses macOS 26 because GitHub retired macOS 14 on 2026-11-02.
 
-Current-engine QUIC gates pass, but worker teardown can log
-`event_poll_failed` with `:closed`/unknown references or `read_failed` with
-`:invalid_operation`. The original published-engine idle run passed without
-that log. These errors are disclosed as an unconfirmed lifecycle compatibility
-concern, not silently treated as proven pre-existing or suppressed. No local
-workaround was added. Actual data, idle negotiation, PING, listener recreation,
-Retry and isolation assertions passed; no upstream blocker has been established
-from these logs alone.
+Current-engine QUIC gates pass. The `event_poll_failed` teardown log with
+`:closed`/unknown references was traced to a race inside `Abyss.QUIC`: a queued
+poll tick reached the closed connection before the worker handled the engine's
+already-queued `{:quic_closed, ...}`, so the worker stopped abnormally and the
+handler could miss `{:closed, reason}`. The worker now delivers that queued
+close (or `{:closed, :closed}` when the connection is gone) and exits normally;
+`Abyss.QUICServiceTest` covers the race. A `read_failed` log with
+`:invalid_operation` seen in the same runs comes from the gate's handler, not
+Abyss, and remains an unconfirmed lifecycle compatibility concern. Actual data,
+idle negotiation, PING, listener recreation, Retry and isolation assertions
+passed; no upstream blocker has been established from these logs alone.
 
 ## Full-regression diagnostics
 

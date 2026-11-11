@@ -102,6 +102,9 @@ defmodule Abyss.QUICServiceTest do
         {events, rest} = Enum.split(state.events, max)
         {{:ok, events}, %{state | events: rest}}
       end)
+    catch
+      # Like the engine: a call to a terminated connection reports `:closed`.
+      :exit, _ -> {:error, :closed}
     end
 
     def close(%{id: id} = connection, code, reason, _opts) do
@@ -555,6 +558,52 @@ defmodule Abyss.QUICServiceTest do
     assert_receive {:startup_result, {:error, :quic_backend_unavailable}}
     send(pid, :finish)
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
+
+  test "connection churn at max_connections defers admission until the old worker exits" do
+    {:ok, listener} = start_listener(max_connections: 1)
+    endpoint = endpoint!()
+    first = Backend.connection(%{alpn: "test", observer: self()})
+    Backend.push(endpoint, first)
+    assert_receive {:bound, ^first, _, first_worker}, 1_000
+
+    # The engine frees its slot when the first connection terminates, before
+    # the consumer worker has run its close callback and exited. A replacement
+    # connection admitted by the engine in that window must wait, not fail the
+    # listener with a host/engine count mismatch.
+    second = Backend.connection(%{alpn: "test", observer: self()})
+    Backend.push(endpoint, second)
+    refute_receive {:bound, ^second, _, _}, 100
+    assert Process.alive?(listener)
+
+    send(first_worker, {:quic_closed, first, :peer_closed})
+    assert_receive {:event, {:closed, :peer_closed}}, 1_000
+    assert_receive {:bound, ^second, _, _}, 1_000
+    assert Process.alive?(listener)
+    assert :ok = Abyss.QUIC.stop(listener)
+  end
+
+  test "a poll that races a connection close delivers the close and exits normally" do
+    {:ok, listener} = start_listener(poll_interval: 5)
+    endpoint = endpoint!()
+    connection = Backend.connection(%{alpn: "test", observer: self()})
+    Backend.push(endpoint, connection)
+    assert_receive {:bound, ^connection, _, worker}, 1_000
+
+    Backend.push_event(connection, :block)
+    assert_receive {:event_started, ^worker}, 1_000
+
+    # While the handler is busy, a poll tick is queued ahead of the engine's
+    # terminal notification, and the connection process terminates.
+    send(worker, :poll)
+    send(worker, {:quic_closed, connection, :peer_closed})
+    Agent.stop(connection.id)
+    send(worker, :release_event)
+
+    assert_receive {:consumer_down, ^connection, ^worker, :normal}, 1_000
+    assert_receive {:event, {:closed, :peer_closed}}, 1_000
+    assert Process.alive?(listener)
+    assert :ok = Abyss.QUIC.stop(listener)
   end
 
   test "shutdown stops new ingress before waiting for consumer drain" do

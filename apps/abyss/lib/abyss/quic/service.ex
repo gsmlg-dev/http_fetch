@@ -107,6 +107,9 @@ defmodule Abyss.QUIC.Service do
     # from this shared service process on consumer death.
     if state.worker_refs[worker] == ref do
       _ = if entry = state.callbacks[worker], do: Process.cancel_timer(elem(entry, 1))
+      # A slot is reusable only once its worker is gone. Admission deferred at
+      # capacity resumes here; the engine keeps those connections queued.
+      if map_size(state.workers) >= state.max_connections, do: send(self(), :accept_next)
 
       {:noreply,
        %{
@@ -135,43 +138,45 @@ defmodule Abyss.QUIC.Service do
   @impl true
   def terminate(_reason, state), do: cleanup(state)
 
+  # The engine releases a connection's slot when the connection terminates,
+  # which is before its consumer worker has delivered `{:closed, reason}` and
+  # exited. Until that worker is gone the host still counts the slot, so a
+  # replacement admitted by the engine stays in the engine's accept queue and
+  # is taken when the worker's DOWN arrives.
+  defp accept_one(state) when map_size(state.workers) >= state.max_connections,
+    do: {:noreply, state}
+
   defp accept_one(state) do
     # A finite endpoint call and one connection per mailbox turn let watchdogs
     # and shutdown remain responsive under a stream of new connections.
     case apply(state.backend, :accept, [state.endpoint, [timeout: state.init_timeout]]) do
       {:ok, connection} ->
-        if map_size(state.workers) < state.max_connections do
-          {:ok, worker} =
-            Abyss.QUIC.Worker.start_link(
-              self(),
-              connection,
-              Map.take(state, [
-                :backend,
-                :handler,
-                :handler_opts,
-                :alpn,
-                :init_timeout,
-                :callback_timeout,
-                :shutdown_timeout,
-                :poll_interval,
-                :event_batch
-              ])
-            )
+        {:ok, worker} =
+          Abyss.QUIC.Worker.start_link(
+            self(),
+            connection,
+            Map.take(state, [
+              :backend,
+              :handler,
+              :handler_opts,
+              :alpn,
+              :init_timeout,
+              :callback_timeout,
+              :shutdown_timeout,
+              :poll_interval,
+              :event_batch
+            ])
+          )
 
-          ref = Process.monitor(worker)
-          send(self(), :accept_next)
+        ref = Process.monitor(worker)
+        send(self(), :accept_next)
 
-          {:noreply,
-           %{
-             state
-             | workers: Map.put(state.workers, ref, connection),
-               worker_refs: Map.put(state.worker_refs, worker, ref)
-           }}
-        else
-          # Engine and host use the same connection ceiling; exceeding it means
-          # ownership accounting is no longer reliable, so fail this listener.
-          {:stop, :consumer_limit, state}
-        end
+        {:noreply,
+         %{
+           state
+           | workers: Map.put(state.workers, ref, connection),
+             worker_refs: Map.put(state.worker_refs, worker, ref)
+         }}
 
       {:error, :would_block} ->
         {:noreply, state}
@@ -537,25 +542,13 @@ defmodule Abyss.QUIC.Worker do
           end
 
         other ->
-          {:stop, {:event_poll_failed, other}, state}
+          poll_failed(other, state)
       end
     end)
   end
 
   def handle_info({:quic_closed, connection, reason}, %{connection: connection} = state) do
-    watched(state, state.config.callback_timeout, fn ->
-      next =
-        if state.initialized do
-          case state.config.handler.handle_event({:closed, reason}, state.app_state) do
-            {:ok, next} -> next
-            {:stop, _, next} -> next
-          end
-        else
-          state.app_state
-        end
-
-      {:stop, :normal, %{state | app_state: next}}
-    end)
+    watched(state, state.config.callback_timeout, fn -> closed(reason, state) end)
   end
 
   def handle_info(:service_draining, state) do
@@ -583,6 +576,36 @@ defmodule Abyss.QUIC.Worker do
       if state.initialized and function_exported?(state.config.handler, :terminate, 2),
         do: state.config.handler.terminate(reason, state.app_state)
     end)
+  end
+
+  # The engine sends `{:quic_closed, ...}` from the connection's terminate
+  # before the process exits, so a poll that fails because the connection is
+  # gone finds that notification already queued. Deliver it as the ordinary
+  # close instead of treating the expected race as a worker failure.
+  defp poll_failed(result, %{connection: connection} = state) do
+    receive do
+      {:quic_closed, ^connection, reason} -> closed(reason, state)
+    after
+      0 ->
+        case result do
+          {:error, :closed} -> closed(:closed, state)
+          other -> {:stop, {:event_poll_failed, other}, state}
+        end
+    end
+  end
+
+  defp closed(reason, state) do
+    next =
+      if state.initialized do
+        case state.config.handler.handle_event({:closed, reason}, state.app_state) do
+          {:ok, next} -> next
+          {:stop, _, next} -> next
+        end
+      else
+        state.app_state
+      end
+
+    {:stop, :normal, %{state | app_state: next}}
   end
 
   defp reduce_events(events, state) do
