@@ -88,7 +88,9 @@ defmodule HTTP.Promise do
   Returns:
     - `%HTTP.Response{}` on successful completion.
     - `{:error, reason}` if the request fails or is aborted.
-    - `{:error, :timeout}` if the timeout is reached.
+    - `{:error, :await_timeout}` if this wait's own `timeout` expires first. It
+      is distinct from a request failure such as `{:error, :timeout}` (the
+      request's `timeout:` deadline expired).
     - For a promise derived with `then/3`, the final value of its callback chain.
 
   The wait timeout is independent of the request's `timeout:` option. Expiring
@@ -103,11 +105,12 @@ defmodule HTTP.Promise do
   waiting for the request leaves the chain re-awaitable; once callbacks have
   started, the request result has been consumed and the chain cannot be resumed.
   """
-  @spec await(t(), timeout :: non_neg_integer() | :infinity) :: term()
+  @spec await(t(), timeout :: non_neg_integer() | :infinity) ::
+          HTTP.Response.t() | {:error, :await_timeout | term()} | term()
   def await(%__MODULE__{} = promise, timeout \\ :infinity) do
     case settle(promise, timeout, deadline(timeout)) do
       {:settled, result} -> result
-      :timeout -> {:error, :timeout}
+      :timeout -> {:error, :await_timeout}
     end
   end
 

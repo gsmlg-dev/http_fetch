@@ -53,7 +53,7 @@ defmodule HTTP.Test.StreamFixtureTest do
 
     promise = fetch(:headers)
     assert_receive {:http_test_gate, :headers, worker, ref}
-    assert HTTP.Promise.await(promise, 0) == {:error, :timeout}
+    assert HTTP.Promise.await(promise, 0) == {:error, :await_timeout}
     assert Process.alive?(worker)
     send(worker, {:http_test_release, ref})
     assert HTTP.Promise.await(promise).body == "ready"

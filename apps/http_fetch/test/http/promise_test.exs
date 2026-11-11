@@ -34,7 +34,7 @@ defmodule HTTP.PromiseTest do
       promise = %HTTP.Promise{task: task}
 
       for timeout <- [0, 1] do
-        assert {:error, :timeout} = HTTP.Promise.await(promise, timeout)
+        assert {:error, :await_timeout} = HTTP.Promise.await(promise, timeout)
         assert Process.alive?(task.pid)
       end
 
@@ -201,7 +201,7 @@ defmodule HTTP.PromiseTest do
       root = gated(supervisor, %HTTP.Response{status: 200})
       chained = HTTP.Promise.then(root, fn response -> response.status end)
 
-      assert {:error, :timeout} = HTTP.Promise.await(chained, 0)
+      assert {:error, :await_timeout} = HTTP.Promise.await(chained, 0)
       send(root.task.pid, :finish)
       assert 200 = HTTP.Promise.await(chained, 1_000)
     end
@@ -219,7 +219,7 @@ defmodule HTTP.PromiseTest do
           flunk("timeout is not a rejection")
         end)
 
-      assert {:error, :timeout} = HTTP.Promise.await(chained, 50)
+      assert {:error, :await_timeout} = HTTP.Promise.await(chained, 50)
       assert Process.alive?(nested.task.pid)
     end
 
