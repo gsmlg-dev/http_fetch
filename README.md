@@ -20,15 +20,15 @@ The monorepo contains thirteen OTP applications and the optional native package
 workflow publishes the thirteen portable packages first, then publishes `abyss_raw`
 asynchronously after Abyss, using the same immutable source tag. Native checks
 and publication do not block the portable release. The ten production client/engine
-packages retain exact internal dependencies; their no-OTP-SSL proof excludes testing support and Hell,
-whose TLS server still uses OTP `:ssl`. See the [server migration report](docs/server-migration.md) for
+packages retain exact internal dependencies; their no-OTP-SSL proof excludes testing support.
+Hell's server TLS transport also runs on `ex_ssl`. See the [server migration report](docs/server-migration.md) for
 provenance, package boundaries, commands and verification results.
 
 | Responsibility | Packages | Runtime boundary |
 | --- | --- | --- |
 | HTTP clients and pooled connections | `http_fetch`, `http_event_source`, `http_web_socket`, `http_web_transport`, `http_core`, `http_pool`, `http_runtime`, `elixir_quic_http3` | Client-side HTTP protocol support |
 | Isolated client fixtures | [`http_test`](apps/http_test/README.md) | Explicit adapter; optional Plug bridge; outside production Fetch dependencies |
-| TCP/TLS servers | [`hell`](apps/hell/README.md) | Existing TCP and OTP `:ssl` TLS behavior |
+| TCP/TLS servers | [`hell`](apps/hell/README.md) | Existing TCP behavior; TLS transport on `ex_ssl` |
 | UDP/QUIC servers | [`abyss`](apps/abyss/README.md) | Plain UDP; QUIC consumers explicitly install and start `elixir_quic` |
 | Protocol engines | `ex_ssl`, `elixir_quic` | `SSL` TLS and `Quic` QUIC APIs |
 | Optional Linux raw networking | [`abyss_raw`](packages/abyss_raw/README.md) | Separate package under `packages/`; Rust builds only on explicit installation |
@@ -37,7 +37,8 @@ The server imports preserve public names, defaults and supervision semantics.
 Abyss supports opt-in QUIC DATAGRAM and authenticated client address changes on
 an established connection. The engine validates each new path while preserving
 streams and the shared listener. See the [migration contract](https://github.com/gsmlg-dev/http_fetch/blob/main/docs/quic/consumer-contract.md#server-peer-migration).
-HTTP/3 serving, resumption/0-RTT and an explicit client migration API remain future work.
+HTTP/3 serving remains future work. Client HTTP/3 resumption and 0-RTT
+(`http3_resumption`, `early_data`) and `migrate/2` are beta features; see the HTTP/3 Beta section.
 
 The imported TLS/QUIC source inventory
 is recorded in [migration provenance](docs/migration-provenance.md); its original
@@ -63,7 +64,7 @@ for configuration, examples, cancellation, redirects and current limits.
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
 - **Full HTTP support**: GET, POST, PUT, DELETE, PATCH, HEAD methods
 - **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, ExSSL for HTTPS, and Unix domain sockets
-- **Explicit HTTP/3 beta**: HTTPS Fetch, EventSource and WebSocket (RFC 9220) with bounded streams and static/literal QPACK
+- **Explicit HTTP/3 beta**: HTTPS Fetch, EventSource and WebSocket (RFC 9220) with bounded streams and a dynamic-table QPACK decoder (the encoder stays static/literal)
 - **Unix Domain Sockets**: HTTP over Unix sockets for Docker daemon, systemd, and other local services
 - **Form data support**: HTTP.FormData for multipart/form-data and file uploads
 - **Streaming request bodies**: Fetch-style `duplex: "half"` uploads over HTTP/1.1, HTTP/2 and explicit HTTP/3
@@ -171,7 +172,7 @@ response =
   HTTP.fetch("https://jsonplaceholder.typicode.com/posts", [
     method: "POST",
     headers: %{"Content-Type" => "application/json"},
-    body: JSON.encode\!(%{title: "Hello", body: "World"})
+    body: JSON.encode!(%{title: "Hello", body: "World"})
   ])
   |> HTTP.Promise.await()
 
@@ -554,7 +555,7 @@ Proxy mode also accepts an explicit `Transfer-Encoding: chunked` for an
 unknown-length HTTP/1 stream, including declared trailers. Conflicting framing,
 other transfer codings, and explicit chunked framing on buffered bodies are
 rejected. HTTP/2 and HTTP/3 prohibit Transfer-Encoding headers. HTTP/2 supports
-bounded request trailers; HTTP/3 rejects them explicitly.
+bounded request trailers; HTTP/3 sends them as a trailing HEADERS section.
 
 ## Request-local response budgets and address preference
 
@@ -825,7 +826,7 @@ write completes the atomic header batch before resetting the request, preserving
 HPACK state for siblings. Cancellation after transmission resets the response
 half. Existing request deadlines and transport write timeouts apply. A failed
 partial transport write retires the connection and fails its active requests.
-HTTP/3 upload trailers remain unsupported (`:request_trailers_unsupported`).
+HTTP/3 upload trailers are sent as one trailing HEADERS section with FIN; see the HTTP/3 fetch contract.
 
 HTTP/1 response trailers preserve ordered duplicate fields and are delivered as
 `{:stream_trailers, stream, headers}` after body acknowledgements and before
