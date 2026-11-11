@@ -28,57 +28,50 @@ defmodule AbyssDhcpSocket.NativeTest do
   end
 
   describe "owner messages" do
+    # Excluded by test_helper.exs when loopback port 68 cannot be bound here
+    # (needs privileges on Linux; unsupported on FreeBSD).
+    @describetag :dhcp_loopback
+
     setup do
       interface = if match?({:unix, :darwin}, :os.type()), do: "lo0", else: "lo"
-
-      case Native.open(interface, self()) do
-        socket when is_reference(socket) ->
-          on_exit(fn -> Native.close(socket) end)
-          {:ok, socket: socket}
-
-        {:error, reason} ->
-          # Port 68 / interface binding needs privileges or platform support
-          # (unsupported on FreeBSD); the NIF tests above still run.
-          {:ok, skip: reason}
-      end
+      socket = Native.open(interface, self())
+      assert is_reference(socket), "open/2 failed: #{inspect(socket)}"
+      on_exit(fn -> Native.close(socket) end)
+      {:ok, socket: socket}
     end
 
-    test "received DHCP datagrams carry the socket returned by open/2", context do
-      if socket = context[:socket] do
-        {:ok, udp} = :gen_udp.open(0, [:binary])
-        :ok = :gen_udp.send(udp, {127, 0, 0, 1}, 68, "dhcp-payload")
-        assert_receive {:dhcp_rx, ^socket, "dhcp-payload"}, 2_000
-        :gen_udp.close(udp)
-      end
+    test "received DHCP datagrams carry the socket returned by open/2", %{socket: socket} do
+      {:ok, udp} = :gen_udp.open(0, [:binary])
+      :ok = :gen_udp.send(udp, {127, 0, 0, 1}, 68, "dhcp-payload")
+      assert_receive {:dhcp_rx, ^socket, "dhcp-payload"}, 2_000
+      :gen_udp.close(udp)
     end
 
-    test "the poll thread releases the socket when its owner exits", context do
-      if socket = context[:socket] do
-        interface = if match?({:unix, :darwin}, :os.type()), do: "lo0", else: "lo"
-        Native.close(socket)
+    test "the poll thread releases the socket when its owner exits", %{socket: socket} do
+      interface = if match?({:unix, :darwin}, :os.type()), do: "lo0", else: "lo"
+      Native.close(socket)
 
-        {owner, monitor} = spawn_monitor(fn -> Process.sleep(:infinity) end)
-        reopened = Native.open(interface, owner)
-        assert is_reference(reopened)
-        Process.exit(owner, :kill)
-        assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}
+      {owner, monitor} = spawn_monitor(fn -> Process.sleep(:infinity) end)
+      reopened = Native.open(interface, owner)
+      assert is_reference(reopened)
+      Process.exit(owner, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}
 
-        # The thread notices the dead owner within one poll timeout (1 s) and
-        # frees port 68; without that the resource would leak until close/1.
-        assert eventually(
-                 fn ->
-                   case Native.open(interface, self()) do
-                     socket when is_reference(socket) -> Native.close(socket) == :ok
-                     _ -> false
-                   end
-                 end,
-                 4_000
-               )
+      # The thread notices the dead owner within one poll timeout (1 s) and
+      # frees port 68; without that the resource would leak until close/1.
+      assert eventually(
+               fn ->
+                 case Native.open(interface, self()) do
+                   socket when is_reference(socket) -> Native.close(socket) == :ok
+                   _ -> false
+                 end
+               end,
+               4_000
+             )
 
-        # The handle stays valid but inert; close/1 on it is still idempotent.
-        assert {:error, "socket closed"} = Native.send_broadcast(reopened, <<1>>)
-        assert :ok = Native.close(reopened)
-      end
+      # The handle stays valid but inert; close/1 on it is still idempotent.
+      assert {:error, "socket closed"} = Native.send_broadcast(reopened, <<1>>)
+      assert :ok = Native.close(reopened)
     end
   end
 
