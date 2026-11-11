@@ -96,6 +96,7 @@ defmodule Abyss.ServerConfig do
       raise ArgumentError, "configuration must be a keyword list"
     end
 
+    validate_keys!(opts)
     validate_handler_selection!(opts)
 
     # num_acceptors is deprecated but documented; map it to num_listeners
@@ -147,6 +148,18 @@ defmodule Abyss.ServerConfig do
     config
   end
 
+  # Every option is a struct field or a datagram option; anything else would
+  # otherwise surface as a KeyError from struct!/2.
+  defp validate_keys!(opts) do
+    known =
+      [:num_acceptors | Map.keys(%__MODULE__{})] ++ Map.keys(@datagram_defaults)
+
+    case opts |> Keyword.keys() |> Enum.reject(&(&1 in known)) do
+      [] -> :ok
+      unknown -> raise ArgumentError, "unknown Abyss option(s): #{inspect(Enum.uniq(unknown))}"
+    end
+  end
+
   defp validate_handler_selection!(opts) do
     handler = Keyword.get(opts, :datagram_handler)
     dispatcher = Keyword.get(opts, :datagram_dispatcher)
@@ -166,9 +179,26 @@ defmodule Abyss.ServerConfig do
 
   defp validate_legacy_handler!(opts) do
     case Keyword.fetch(opts, :handler_module) do
-      {:ok, module} when is_atom(module) -> :ok
+      {:ok, module} when is_atom(module) -> warn_handler_module_deprecated()
       :error -> :ok
       _ -> raise ArgumentError, "handler_module must be a module"
+    end
+  end
+
+  @handler_module_warned {__MODULE__, :handler_module_deprecation_warned}
+
+  # Elixir cannot mark an option deprecated, so warn once per VM. `Abyss.Handler`
+  # itself is `@deprecated` at compile time.
+  defp warn_handler_module_deprecated do
+    if :persistent_term.get(@handler_module_warned, false) do
+      :ok
+    else
+      :persistent_term.put(@handler_module_warned, true)
+
+      Logger.warning(
+        "Abyss option :handler_module (Abyss.Handler mode) is deprecated and will be " <>
+          "removed in 2.0; use Abyss.Endpoint with :datagram_handler instead."
+      )
     end
   end
 

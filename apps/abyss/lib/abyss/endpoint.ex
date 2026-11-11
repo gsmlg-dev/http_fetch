@@ -2,7 +2,11 @@ defmodule Abyss.Endpoint do
   @moduledoc """
   Facade over the existing Abyss UDP owner and supervision tree.
 
-  Select `datagram_handler: Module` for the new application-state API. An endpoint
+  This is the supported server API. Select `datagram_handler: Module` (see
+  `Abyss.DatagramHandler`) for the application-state API; the older
+  `handler_module:` / `Abyss.Handler` mode is deprecated and will be removed in 2.0.
+
+  Select `datagram_handler: Module` for the application-state API. An endpoint
   has one logical identity and a replaceable socket generation. Capabilities and
   receipts belong to that generation. Sends return admission references; await
   reports local completion, definite failure or an unknown outcome. Timeouts do

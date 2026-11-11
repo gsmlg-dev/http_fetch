@@ -5,8 +5,8 @@ raw_expected = System.fetch_env!("ABYSS_RAW_EXPECTED_VERSION")
 ^expected = Application.spec(:abyss, :vsn) |> to_string()
 ^raw_expected = Application.spec(:abyss_raw, :vsn) |> to_string()
 true = Code.ensure_loaded?(AbyssDhcpSocket.Native)
-{:error, "invalid interface name: " <> _} = Abyss.DhcpSocket.Native.open("bad" <> <<0>>, self())
-{:error, reason} = Abyss.DhcpSocket.Native.open("abyss-no-iface", self())
+{:error, "invalid interface name: " <> _} = AbyssDhcpSocket.Native.open("bad" <> <<0>>, self())
+{:error, reason} = AbyssDhcpSocket.Native.open("abyss-no-iface", self())
 true = is_binary(reason)
 
 for {function, arguments} <- [
@@ -16,7 +16,7 @@ for {function, arguments} <- [
       {:close, [make_ref()]}
     ] do
   try do
-    apply(Abyss.DhcpSocket.Native, function, arguments)
+    apply(AbyssDhcpSocket.Native, function, arguments)
     raise "invalid native resource unexpectedly accepted"
   rescue
     ArgumentError -> :ok

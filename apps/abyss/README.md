@@ -57,7 +57,9 @@ Choose `:per_datagram` (the default) for a fresh state per input, `:endpoint` fo
 
 A reply action uses the original endpoint socket. Send admission and local completion are distinct; neither establishes peer receipt. See [migration and backend capabilities](docs/udp-runtime/migration.md) and the [runtime contract](docs/udp-runtime/design.md).
 
-## Existing handler API
+## Existing handler API (deprecated)
+
+> The `handler_module:` / `Abyss.Handler` mode is **deprecated** and will be removed in 2.0. It keeps working: `use Abyss.Handler` emits a compile-time deprecation warning and `handler_module:` logs a one-time warning. `Abyss.Endpoint` with `datagram_handler:` is the supported API.
 
 Legacy handlers continue to receive `{ip, port, payload}` and access the shared socket through their state:
 
@@ -81,6 +83,27 @@ end
 ```
 
 Each accepted packet gets a separate invocation. `{:continue, state}` keeps that invocation alive without routing subsequent peer packets to it. Stateful protocols can use the [datagram API](docs/udp-runtime/migration.md), or retain an existing [dispatcher](docs/dispatcher.md).
+
+## Error reasons
+
+Invalid options raise `ArgumentError` from `Abyss.start_link/1`, `Abyss.child_spec/1` and `Abyss.Endpoint` (including unknown option names). Runtime calls return `{:error, reason}` with these reasons:
+
+| Reason | Where | Meaning |
+|---|---|---|
+| `:not_running` | `Endpoint.local_endpoint/1` and friends | the endpoint is stopped or its owner exited |
+| `:multiple_receive_endpoints` | `Endpoint.local_endpoint/1` | more than one receiving listener, so there is no single endpoint |
+| `:stale_generation` | `Endpoint.reply/5`, send capabilities | the capability belongs to a replaced socket generation |
+| `:draining` | datagram runtime | the endpoint is draining and refuses new input |
+| `:input_limit`, `:action_limit`, `:timer_value_limit` | datagram runtime | a configured bound was exceeded; the datagram or action was rejected |
+| `:invalid_send`, `:invalid_reply`, `:invalid_send_reference`, `:invalid_destination`, `:invalid_actions`, `:invalid_action` | `Endpoint.send/4`, `reply/5`, `await/3`, handler actions | malformed arguments or actions |
+| `:missing_reply_metadata`, `:strict_reply_unsupported` | `Endpoint.reply/5` | the datagram lacks the metadata (or the backend lacks the capability) for a strict reply |
+| `{:invalid_option, option, value}`, `{:unsupported_capability, ...}`, `{:invalid_membership, value}` | `Abyss.Client`, memberships | per-call option or capability rejection (returned, not raised) |
+| `{:response_limit, :count \| :bytes}` | `Abyss.Client` | collected responses hit a limit |
+| `{:exception, e}`, `{kind, reason}`, `{:invalid_init, v}`, `{:invalid_transition, v}` | datagram handler callbacks | the application callback raised or returned an unsupported shape |
+| `:too_many_connections` | legacy handler mode | connection supervisor at capacity after retries |
+| POSIX atoms (`:eaddrinuse`, `:eaddrnotavail`, `:enodev`, ...) | socket open/send | passed through from the OS unchanged |
+
+`:timeout` is a deadline the caller supplied; `:closed` means the local socket or owner is gone. Native-backend atoms (`:native_receive_requires_arm`, `:payload_truncated`, ...) are listed in `Abyss.Transport.UDP.Native`.
 
 ## Documentation
 

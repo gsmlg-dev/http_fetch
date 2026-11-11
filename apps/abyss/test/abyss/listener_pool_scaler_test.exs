@@ -9,14 +9,16 @@ defmodule Abyss.ListenerPoolScalerTest do
   @response_time_event [:abyss, :metrics, :response_time]
 
   defmodule ScalerTestHandler do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
 
     @impl true
     def handle_data(_data, state), do: {:close, state}
   end
 
   defmodule InFlightHandler do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
 
     @impl true
     def handle_data({ip, port, data}, state) do
@@ -31,7 +33,8 @@ defmodule Abyss.ListenerPoolScalerTest do
   end
 
   defmodule OtherHandler do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
 
     @impl true
     def handle_data(_data, state), do: {:close, state}

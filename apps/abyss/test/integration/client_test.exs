@@ -4,7 +4,8 @@ defmodule Abyss.Integration.ClientTest do
   alias Abyss.Client
 
   defmodule Echo do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
     @impl true
     def handle_data({ip, port, data}, state) do
       :ok = state.server_config.transport_module.send(state.socket, ip, port, data)

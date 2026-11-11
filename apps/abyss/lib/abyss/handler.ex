@@ -2,6 +2,15 @@ defmodule Abyss.Handler do
   @moduledoc """
   `Abyss.Handler` defines the behaviour required of the application layer of an Abyss server.
 
+  > #### Deprecated {: .warning}
+  >
+  > The `handler_module` / `Abyss.Handler` server mode (one process per
+  > datagram, "legacy broadcast mode") is deprecated and will be removed in 2.0.
+  > It keeps working. New code should use `Abyss.Endpoint` with
+  > `datagram_handler:` and the `Abyss.DatagramHandler` behaviour. `use
+  > Abyss.Handler` emits a compile-time deprecation warning and passing
+  > `handler_module:` logs a one-time runtime warning.
+
   # Example
 
   A server that echoes back all data sent to it:
@@ -124,8 +133,20 @@ defmodule Abyss.Handler do
                       handle_shutdown: 1,
                       handle_timeout: 1
 
+  @deprecated "The handler_module / Abyss.Handler server mode is deprecated and will be removed in 2.0; use Abyss.Endpoint with datagram_handler: and Abyss.DatagramHandler"
   @spec __using__(any) :: Macro.t()
   defmacro __using__(_opts) do
+    quote do
+      require Abyss.Handler
+      Abyss.Handler.__implement__([])
+    end
+  end
+
+  @doc false
+  # The implementation behind `use Abyss.Handler`, kept separate so the
+  # deprecation of `__using__/1` does not fire for Abyss's own test support.
+  @spec __implement__(any) :: Macro.t()
+  defmacro __implement__(_opts) do
     quote location: :keep do
       @behaviour Abyss.Handler
 

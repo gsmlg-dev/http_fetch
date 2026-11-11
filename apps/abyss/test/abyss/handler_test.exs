@@ -7,7 +7,8 @@ defmodule Abyss.HandlerTest do
   alias Abyss.ServerConfig
 
   defmodule TestAdaptiveHandler do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
 
     @impl true
     def handle_data({ip, port, data}, state) do
@@ -41,21 +42,24 @@ defmodule Abyss.HandlerTest do
   end
 
   defmodule OneShotTimeoutHandler do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
 
     @impl true
     def handle_data(_data, state), do: {:continue, state, 1234}
   end
 
   defmodule PersistentTimeoutHandler do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
 
     @impl true
     def handle_data(_data, state), do: {:continue, state, {:persistent, 9999}}
   end
 
   defmodule MemoryTestHandler do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
 
     @impl true
     def handle_data({_ip, _port, _data}, state) do

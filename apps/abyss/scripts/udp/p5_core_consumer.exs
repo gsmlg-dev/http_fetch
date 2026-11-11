@@ -26,17 +26,6 @@ false =
     app in [:rustler, :abyss_raw, :abyss_dhcp_socket, :elixir_quic, :ex_ssl]
   end)
 
-for {function, arguments} <- [
-      {:open, ["lo", self()]},
-      {:send_broadcast, [make_ref(), <<>>]},
-      {:send_unicast, [make_ref(), {127, 0, 0, 1}, <<>>]},
-      {:send_arp_probe, [make_ref(), {127, 0, 0, 1}]},
-      {:close, [make_ref()]}
-    ] do
-  {:error, {:missing_optional_dependency, :abyss_raw}} =
-    apply(Abyss.DhcpSocket.Native, function, arguments)
-end
-
 {:ok, endpoint} =
   Abyss.Endpoint.start_link(
     datagram_handler: P5CoreEcho,

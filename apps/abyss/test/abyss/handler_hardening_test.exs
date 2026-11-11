@@ -4,7 +4,8 @@ defmodule Abyss.HandlerHardeningTest do
   @moduletag :integration
 
   defmodule Probe do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
 
     def handle_data({_ip, _port, {owner, result}}, state) do
       state = Map.merge(state, %{owner: owner, marker: :preserved})

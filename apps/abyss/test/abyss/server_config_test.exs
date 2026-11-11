@@ -405,6 +405,16 @@ defmodule Abyss.ServerConfigTest do
       end
     end
 
+    test "raises ArgumentError for an unknown option" do
+      assert_raise ArgumentError, ~r/unknown Abyss option.*:prot/, fn ->
+        Abyss.ServerConfig.new(handler_module: Abyss.TestHandler, prot: 1)
+      end
+
+      assert_raise ArgumentError, ~r/unknown Abyss option/, fn ->
+        Abyss.start_link(handler_module: Abyss.TestHandler, bogus: 1)
+      end
+    end
+
     test "raises error when options is not a keyword list" do
       assert_raise ArgumentError, "configuration must be a keyword list", fn ->
         Abyss.ServerConfig.new([{"handler_module", Abyss.TestHandler}])

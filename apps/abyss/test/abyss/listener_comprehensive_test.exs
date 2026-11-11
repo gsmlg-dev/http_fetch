@@ -166,7 +166,8 @@ defmodule Abyss.ListenerComprehensiveTest do
 
   # Helper module for testing
   defmodule TestHandler do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
 
     @impl true
     def handle_data({_ip, _port, _data}, state) do

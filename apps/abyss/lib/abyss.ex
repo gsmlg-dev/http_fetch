@@ -83,7 +83,9 @@ defmodule Abyss do
 
   ## Required Options
 
-  - `handler_module` - Module implementing `Abyss.Handler` behaviour
+  - `handler_module` - Module implementing `Abyss.Handler` behaviour.
+    **Deprecated** (removal in 2.0; a one-time warning is logged): use
+    `datagram_handler` with `Abyss.Endpoint` instead
 
   ## Optional Options
 

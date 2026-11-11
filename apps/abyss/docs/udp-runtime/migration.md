@@ -265,9 +265,9 @@ an explicit response policy for ambiguous one-to-many use. See
 ## Optional DHCP dependency
 
 Ordinary core installation does not compile Rust or load a native artifact.
-`Abyss.DhcpSocket.Native` is a pure-Elixir facade. Without the optional package,
-its functions return
-`{:error, {:missing_optional_dependency, :abyss_raw}}`.
+The former `Abyss.DhcpSocket.Native` facade was removed. Without the optional
+package `AbyssDhcpSocket.Native` is not loaded; guard with
+`Code.ensure_loaded?(AbyssDhcpSocket.Native)`.
 
 DHCP and raw ARP users explicitly install the add-on at the shared release version:
 
@@ -282,13 +282,12 @@ archive contain everything needed to build it without the parent checkout.
 Core declares neither this dependency nor Rustler, and the add-on does not
 depend on core.
 
-The implementation module intentionally remains `AbyssDhcpSocket.Native` and
-the Rust crate remains `dhcp_socket`. This preserves the released Abyss 0.8.1
-facade as well as current `Abyss.DhcpSocket.Native` callers. There is one NIF
-loader; its OTP application and `priv/native` artifact belong to `:abyss_raw`.
-The facade resolves it at runtime, preserving native-load errors separately
-from absent-package errors and operation results. It preserves all five
-operations and owner messages; `open/2` returns the opaque resource directly.
+Call `AbyssDhcpSocket.Native` (Rust crate `dhcp_socket`) directly. There is one
+NIF loader; its OTP application and `priv/native` artifact belong to
+`:abyss_raw`. `open/2` returns the opaque resource directly, and owner messages
+carry that resource as their second element: `{:dhcp_rx, socket, binary}`,
+`{:arp_rx, socket, binary}`, `{:dhcp_socket_down, socket, reason}`,
+`{:arp_socket_down, socket, reason}`.
 The package requires Cargo/Rust and the existing platform-specific raw ARP
 and interface-bind capabilities. See the
 [package guidance](https://github.com/gsmlg-dev/http_fetch/blob/main/packages/abyss_raw/README.md)

@@ -7,7 +7,8 @@ defmodule Abyss.UDPMembershipHostTest do
   @group2 {239, 255, 72, 2}
 
   defmodule Handler do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
     def handle_data(_, state), do: {:close, state}
   end
 

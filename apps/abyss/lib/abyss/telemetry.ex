@@ -44,6 +44,16 @@ defmodule Abyss.Telemetry do
   Abyss.Telemetry.reset_metrics()
   ```
 
+  ## Units
+
+  Span events (`[:abyss, :listener | :connection, :start | :stop]`) carry
+  `monotonic_time` and, on stop, `duration` in `:native` time units (convert
+  with `System.convert_time_unit/3`). `[:abyss, :metrics, :response_time]`
+  carries `response_time` in milliseconds. Datagram events carry `bytes` as
+  payload byte counts. `accepts_per_second` and `responses_per_second` are
+  per-second rates and every other metric is a plain count. Event names and
+  measurement keys are stable; metadata never contains payload bytes.
+
   ## Telemetry Spans
 
   ### `[:abyss, :listener, *]`

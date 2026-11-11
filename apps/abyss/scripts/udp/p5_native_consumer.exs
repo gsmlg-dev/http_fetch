@@ -1,5 +1,5 @@
 defmodule P5NativeConsumer do
-  alias Abyss.DhcpSocket.Native
+  alias AbyssDhcpSocket.Native
 
   def run do
     true = Code.ensure_loaded?(AbyssDhcpSocket.Native)
@@ -17,11 +17,11 @@ defmodule P5NativeConsumer do
 
   defp loop(socket, orphan) do
     receive do
-      {:dhcp_rx, payload} ->
+      {:dhcp_rx, ^socket, payload} ->
         IO.puts("WIRE DHCP " <> Base.encode64(payload))
         loop(socket, orphan)
 
-      {:arp_rx, frame} ->
+      {:arp_rx, ^socket, frame} ->
         IO.puts("WIRE ARP " <> Base.encode64(frame))
         loop(socket, orphan)
 
@@ -87,8 +87,8 @@ defmodule P5NativeConsumer do
 
   defp no_down do
     receive do
-      {tag, reason} when tag in [:dhcp_socket_down, :arp_socket_down] ->
-        raise "unexpected shutdown message: #{inspect({tag, reason})}"
+      {tag, socket, reason} when tag in [:dhcp_socket_down, :arp_socket_down] ->
+        raise "unexpected shutdown message: #{inspect({tag, socket, reason})}"
     after
       0 -> :ok
     end

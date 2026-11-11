@@ -74,7 +74,7 @@ A configured `Abyss.DatagramDispatcher` instead keeps one protocol callback stat
 
 `Abyss.QUIC` owns a separate service host using the dispatcher writer machinery. The optional `elixir_quic` engine owns QUIC connections, CIDs, recovery and TLS integration; ordinary UDP does not load it. The UDP runtime does not parse QUIC or implement stream semantics. See the [QUIC guide](quic-service.md).
 
-The core package does not compile Rust. DHCP raw-socket functionality is supplied only by an explicitly installed `abyss_raw` package. `Abyss.DhcpSocket.Native` is a lazy facade and reports a missing optional dependency when it is absent. Installation details are in the [migration guide](udp-runtime/migration.md).
+The core package does not compile Rust. DHCP raw-socket functionality is supplied only by an explicitly installed `abyss_raw` package. The former `Abyss.DhcpSocket.Native` facade was removed; call `AbyssDhcpSocket.Native` from `abyss_raw` directly (it is simply not loaded when the package is absent). Installation details are in the [migration guide](udp-runtime/migration.md).
 
 ## Lifecycle and failure boundaries
 

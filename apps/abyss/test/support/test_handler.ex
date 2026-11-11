@@ -2,7 +2,8 @@ defmodule Abyss.TestHandler do
   @moduledoc """
   Test handler module for testing Abyss.Handler behaviour
   """
-  use Abyss.Handler
+  require Abyss.Handler
+  Abyss.Handler.__implement__([])
 
   @impl true
   def handle_data({ip, port, data}, state) do
@@ -21,7 +22,8 @@ defmodule Abyss.TestEchoHandler do
   @moduledoc """
   Test echo handler for integration testing
   """
-  use Abyss.Handler
+  require Abyss.Handler
+  Abyss.Handler.__implement__([])
 
   @impl true
   def handle_data({ip, port, data}, state) do

@@ -4,7 +4,8 @@ defmodule Abyss.UDPHostHardeningTest do
   @moduletag :integration
 
   defmodule Controlled do
-    use Abyss.Handler
+    require Abyss.Handler
+    Abyss.Handler.__implement__([])
 
     def handle_data({ip, port, data}, state) do
       send(state.server_config.handler_options[:owner], {:admitted, self(), data})
