@@ -1165,22 +1165,39 @@ defmodule HTTP.EventSource.Connection do
        else: :ok
   end
 
-  defp same_origin?(left, right),
-    do: {left.scheme, left.host, left.port} == {right.scheme, right.host, right.port}
+  @doc false
+  def same_origin?(left, right),
+    do: origin_tuple(left) == origin_tuple(right)
+
+  defp origin_tuple(%URI{scheme: scheme} = uri),
+    do: {scheme, origin_host(uri.host), uri.port || default_port(scheme)}
+
+  # WHATWG host serialization: IPv6 literals are canonicalised (compressed,
+  # lowercase) and bracketed; other hosts are lowercased.
+  defp origin_host(host) do
+    with true <- String.contains?(host, ":"),
+         {:ok, address} <- :inet.parse_ipv6strict_address(String.to_charlist(host)) do
+      "[" <> List.to_string(:inet.ntoa(address)) <> "]"
+    else
+      _ -> String.downcase(host)
+    end
+  end
+
+  defp default_port("http"), do: 80
+  defp default_port("https"), do: 443
 
   defp connect_exception(state, reason, started_at) do
     duration = System.monotonic_time(:microsecond) - started_at
     Telemetry.connect_exception(state.uri, reason, duration)
   end
 
-  defp origin(state) do
-    port =
-      case state.uri.port do
-        nil -> ""
-        port -> ":" <> Integer.to_string(port)
-      end
+  defp origin(state), do: serialize_origin(state.uri)
 
-    state.uri.scheme <> "://" <> state.uri.host <> port
+  # WHATWG ASCII serialization of an origin: the default port is omitted.
+  @doc false
+  def serialize_origin(%URI{scheme: scheme} = uri) do
+    {_, host, port} = origin_tuple(uri)
+    scheme <> "://" <> host <> if(port == default_port(scheme), do: "", else: ":#{port}")
   end
 
   defp stream_telemetry(state, event, outcome) do
