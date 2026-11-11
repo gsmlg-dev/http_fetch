@@ -7,10 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0-rc.14] - 2026-11-11
+## [1.0.0-rc.14] - 2026-11-12
 
 API freeze for 1.0.0 (see [the 1.0 release criteria](docs/release-1.0-criteria.md)).
 This release contains breaking changes; each is listed below with its replacement.
+
+### Added
+- **http_fetch:** an opt-in, request-scoped retry policy for `HTTP.fetch/2` (#160):
+  `retry: false (default) | :safe_transient | :transient | fun/2`, `max_retries:`
+  (default 3) and `retry_delay:` (milliseconds or `fun(attempt)`; default 500 ms
+  doubling, capped at 10 s). `:safe_transient` retries only attempts that received
+  no response (`:econnrefused`, `:connect_timeout`, `:closed`, `:econnreset`,
+  `:ehostunreach`, `:enetunreach`); `:transient` also retries 408/429/500/502/503/504.
+  Built-in modes retry only idempotent methods. `Retry-After` (seconds or HTTP-date)
+  is honored on 429/503. One `timeout` bounds all attempts and delays. Streamed
+  upload bodies, `:aborted` and `:timeout` are never retried, and an aborted signal
+  cancels a pending delay. A retried response's unread stream is cancelled before
+  the next attempt. Invalid values raise `ArgumentError`; `retry` with
+  `transport_scope` raises `ArgumentError`, and with retry enabled
+  `HTTP.Promise.completion/1` reports `{:unsupported_completion, :retry}`. A new
+  telemetry event `[:http_fetch, :request, :retry]` carries `attempt` and `delay`
+  measurements and privacy-scoped `scheme`/`reason` metadata; request
+  start/stop/exception stay one per `fetch/2` call. With `HTTP.Test`, each attempt
+  claims one expectation.
+- **hell:** handlers can pause and resume input (#162): `{:pause, state}` /
+  `{:pause, state, {:continue, term}}` results, plus `Hell.Handler.pause_input/1` and
+  `Hell.Handler.resume_input/1` for owner-side callbacks. Input is paused without
+  the automatic `active: :once` re-arm; data the transport had already delivered is
+  kept and delivered first, in order, on resume. Paused connections are not closed
+  by the read-idle timeout; resume restarts the persistent `read_timeout`.
+- **ex_ssl, hell:** `SSL.getopts/2` (and `Hell.Transports.SSL.getopts/2`) accepts an
+  `SSL.ListenSocket` and returns the listening TCP port's options (#159).
 
 ### Removed
 - **All packages (breaking):** the `tls_backend` option (including the
@@ -82,6 +109,20 @@ This release contains breaking changes; each is listed below with its replacemen
   `datagram_handler:`.
 
 ### Fixed
+- **ex_ssl (server):** after the peer closes, an exact-length `SSL.recv/3` larger
+  than the buffered plaintext returns `{:error, :timeout}` and keeps the bytes instead
+  of returning the terminal and hiding them. The terminal (`:closed` after
+  close_notify, `:econnreset` after a TCP close without it) is reported only once the
+  buffer is drained (#163). OTP 28 `:ssl.shutdown(socket, :write)` on TLS 1.3 sends no
+  close_notify.
+- **ex_ssl (server):** a write blocked by a peer that is not reading no longer stops
+  the connection. Received records are still decrypted and delivered, and `setopts`,
+  `getopts`, `peercert`, `recv` and `close` answer promptly. Writes run in a writer
+  process in record order (KeyUpdate-safe); `send_timeout`, `send_timeout_close` and
+  `SSL.send/3` deadlines still bound the writer. `close/1`, owner exit or a peer
+  close_notify settle an unfinished write as `{:error, :closed}`. Server carriers
+  close without waiting for unsent output to flush. `{:error, :busy}` from
+  `SSL.send/2,3` sends nothing and is retryable (documented) (#161).
 - **http_fetch:** `HTTP.Response.write_to/2` no longer leaks the response stream
   when the destination cannot be opened or written.
 - **http_event_source:** `MessageEvent.origin` uses WHATWG serialization
