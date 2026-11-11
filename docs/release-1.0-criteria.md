@@ -1,7 +1,7 @@
 # 1.0.0 release criteria
 
-Date: 2026-11-11. Baseline: 1.0.0-rc.13 (`5b1adbd`). Status: **proposal, awaiting
-maintainer rulings** on each "Proposed verdict" below.
+Date: 2026-11-11. Baseline: 1.0.0-rc.13 (`5b1adbd`). Status: **approved 2026-11-11** (verdicts below are
+the maintainer's rulings).
 
 ## What 1.0.0 promises
 
