@@ -30,6 +30,7 @@ defmodule HTTP3WebSocketGate do
       %WS{} = cancelled = WS.new("wss://127.0.0.1:#{port}/echo", [], options)
       owner = await_owner(now() + 4000)
       :ok = WS.close(cancelled)
+      %Error{reason: :closed_while_connecting} = event(cancelled)
       %Close{was_clean: false} = event(cancelled)
       :ok = receipt(cancelled)
       await_empty(owner, now() + 4000)
