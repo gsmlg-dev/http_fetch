@@ -319,8 +319,19 @@ Scope:
   after close_notify, `{:error, :econnreset}` after a TCP close without it.
   OTP `:ssl.shutdown(socket, :write)` on TLS 1.3 sends no close_notify.
 - Server carriers default to `send_timeout: 30_000, send_timeout_close: true`
-  unless the caller sets either key, because server writes are synchronous
-  carrier sends. This differs from OTP's infinite default.
+  unless the caller sets either key, so a peer that never reads cannot hold a
+  writer forever. This differs from OTP's infinite default.
+- Writes run in a separate writer process. While one waits on the carrier,
+  received records are still decrypted and delivered (within the receive
+  buffer limit) and `setopts`, `getopts`, `peercert`, `recv` and `close` answer;
+  only the writer waits, until `send_timeout` or its `SSL.send/3` deadline,
+  either of which closes the connection. A reservation made by another process
+  while a write is in flight waits for it; one made while a write is reserved
+  but not yet sent returns `{:error, :busy}`, which leaves the socket unaffected
+  and may be retried. `close/1`, owner exit or a peer close_notify during a
+  write settle it as `{:error, :closed}` and discard its unsent bytes (no
+  close_notify follows an unfinished write); a TCP close lets the writer settle
+  it first.
 - A handshake timeout, a TLS failure or a peer TCP close returns `{:error, _}`,
   and the connection process stops and closes its carrier.
 

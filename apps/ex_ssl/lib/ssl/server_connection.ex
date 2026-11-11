@@ -7,12 +7,24 @@ defmodule SSL.ServerConnection do
   #
   # The process owns the carrier and answers the same call protocol as
   # SSL.Connection, so SSL.send/recv/setopts/close work on server sockets.
-  # Writes are synchronous `:gen_tcp.send/2` calls bounded by the carrier's
-  # `send_timeout`. `:closing` serves plaintext still buffered after the peer
-  # closed; the transport is already gone. No NewSessionTicket is issued.
+  # After the handshake every carrier write is a job for an SSL.ConnectionWriter
+  # process, sent in encryption order and bounded by the carrier's
+  # `send_timeout` (and a reservation deadline), so a blocked write does not stop
+  # receive processing or control calls (#161). `:closing` serves plaintext still
+  # buffered after the peer closed. No NewSessionTicket is issued.
   @behaviour :gen_statem
 
-  alias SSL.{Capabilities, Diagnostics, IodataCursor, Options, ServerOptions, Socket, TCPOptions}
+  alias SSL.{
+    Capabilities,
+    ConnectionWriter,
+    Diagnostics,
+    IodataCursor,
+    Options,
+    ServerOptions,
+    Socket,
+    TCPOptions
+  }
+
   alias SSL.Crypto.{KeyExchange, KeySchedule, TrafficState}
 
   alias SSL.Protocol.{
@@ -97,7 +109,14 @@ defmodule SSL.ServerConnection do
       :write_token,
       :records,
       :framer,
+      :writer,
+      :writer_monitor,
       buffer: :queue.new(),
+      # Writer jobs in send order: %{token, kind, from}; kind is :application, :control
+      # or {:shutdown, how}. Waiters are reservations queued behind an application job.
+      jobs: :queue.new(),
+      waiters: :queue.new(),
+      output_aborted: false,
       size: 0,
       active: false,
       active_terminal: false,
@@ -262,7 +281,7 @@ defmodule SSL.ServerConnection do
   def handle_event(:info, {:tcp_closed, tcp}, name, %{tcp: tcp} = data)
       when name == :connected do
     Socket.mark_terminal(data.socket, false)
-    continue(:closing, close_transport(%{data | closed: true}))
+    continue(:closing, transport_closed(data))
   end
 
   def handle_event(:info, {:tcp_closed, tcp}, name, %{tcp: tcp} = data),
@@ -272,7 +291,7 @@ defmodule SSL.ServerConnection do
   # plaintext deliverable and reports the error only after it is drained (#158).
   def handle_event(:info, {:tcp_error, tcp, reason}, :connected, %{tcp: tcp} = data) do
     Socket.mark_terminal(data.socket, false)
-    continue(:closing, close_transport(%{data | closed: true, close_reason: reason}))
+    continue(:closing, transport_closed(%{data | close_reason: reason}))
   end
 
   def handle_event(:info, {:tcp_error, tcp, reason}, name, %{tcp: tcp} = data),
@@ -289,6 +308,29 @@ defmodule SSL.ServerConnection do
     {:stop, :normal, if(name == :connected, do: close_notify(data), else: data)}
   end
 
+  def handle_event(:info, {:writer_result, writer, token, result}, name, %{writer: writer} = data) do
+    case :queue.out(data.jobs) do
+      {{:value, %{token: ^token} = job}, jobs} ->
+        job_done(name, job, result, %{data | jobs: jobs})
+
+      _stale ->
+        :keep_state_and_data
+    end
+  end
+
+  def handle_event(
+        :info,
+        {:DOWN, monitor, :process, _, _},
+        name,
+        %{writer_monitor: monitor} = data
+      ),
+      do: fail(name, :closed, %{data | writer: nil, writer_monitor: nil})
+
+  # A reservation deadline bounds its application job like the carrier send_timeout.
+  def handle_event({:timeout, :write}, :expired, name, data) do
+    if writing?(data), do: job_failed(name, :timeout, data), else: :keep_state_and_data
+  end
+
   def handle_event({:timeout, :handshake}, :expired, name, data),
     do: fail(name, :timeout, data)
 
@@ -301,6 +343,7 @@ defmodule SSL.ServerConnection do
   def terminate(_reason, _name, data) do
     Socket.mark_terminal(data.socket, false)
     _ = close_transport(data)
+    if data.writer, do: Process.exit(data.writer, :kill)
     :ok
   end
 
@@ -340,10 +383,13 @@ defmodule SSL.ServerConnection do
       deadline != :infinity and Options.remaining(deadline) == 0 ->
         reply(from, {:error, :timeout})
 
+      # As before #161, a reservation made while a write is in flight waits for it.
+      writing?(data) ->
+        {:keep_state, %{data | waiters: :queue.in({from, deadline}, data.waiters)}}
+
       true ->
-        token = make_ref()
-        write_token = %{token: token, owner: elem(from, 0), deadline: deadline}
-        {:keep_state, %{data | write_token: write_token}, [{:reply, from, {:ok, token}}]}
+        {data, actions} = grant(from, deadline, data)
+        {:keep_state, data, actions}
     end
   end
 
@@ -356,9 +402,22 @@ defmodule SSL.ServerConnection do
        when elem(from, 0) == owner do
     data = %{data | write_token: nil}
 
-    case send_application(data, cursor, write.deadline) do
-      {:ok, data} -> {:keep_state, data, [{:reply, from, :ok}]}
-      {:error, reason, data} -> fail_reply(from, reason, data)
+    case protect_application(data.write, cursor, []) do
+      {:ok, records, write_state} ->
+        data = enqueue(%{data | write: write_state}, :application, from, records)
+
+        timer =
+          if write.deadline == :infinity,
+            do: [],
+            else: [{{:timeout, :write}, Options.remaining(write.deadline), :expired}]
+
+        {:keep_state, data, timer}
+
+      {:error, {:fatal_alert, alert, reason}} ->
+        fail_reply(from, alert(alert, reason), data)
+
+      {:error, reason} ->
+        fail_reply(from, reason, data)
     end
   end
 
@@ -429,8 +488,19 @@ defmodule SSL.ServerConnection do
 
   defp connected_call(from, {:shutdown, how}, :connected, data)
        when how in [:read, :write, :read_write] do
-    data = if how == :read, do: data, else: close_notify(data)
-    {:keep_state, data, [{:reply, from, :gen_tcp.shutdown(data.tcp, how)}]}
+    cond do
+      how == :read ->
+        reply(from, :gen_tcp.shutdown(data.tcp, how))
+
+      # close_notify and the TCP shutdown follow the writes already queued.
+      not :queue.is_empty(data.jobs) ->
+        bytes = if data.write_closed, do: [], else: alert_record(data, 1, 0)
+        {:keep_state, enqueue(%{data | write_closed: true}, {:shutdown, how}, from, bytes)}
+
+      true ->
+        data = close_notify(data)
+        {:keep_state, data, [{:reply, from, :gen_tcp.shutdown(data.tcp, how)}]}
+    end
   end
 
   # The reservation is gone (consumed, or the connection was reset): not an unsupported call.
@@ -620,11 +690,14 @@ defmodule SSL.ServerConnection do
       :gen_statem.reply(data.handshake_from, {:ok, data.socket})
 
       peercert = if data.core.peer, do: data.core.peer.leaf_der
+      {writer, writer_monitor} = ConnectionWriter.start(self())
 
       {:ok, :connected,
        %{
          data
          | read: read,
+           writer: writer,
+           writer_monitor: writer_monitor,
            core: nil,
            client_secret: nil,
            handshake_from: nil,
@@ -758,11 +831,11 @@ defmodule SSL.ServerConnection do
            ServerFlight.decode(message, hash: hash),
          {:ok, read} <- HandshakeMachine.update_traffic_state(data.read),
          {:ok, records, write} <-
-           HandshakeMachine.maybe_update_write(data.write, request? and not data.write_closed),
-         :ok <- transmit(data, records) do
+           HandshakeMachine.maybe_update_write(data.write, request? and not data.write_closed) do
+      # The reply KeyUpdate follows every record already protected under the old key.
+      data = if records == [], do: data, else: enqueue(data, :control, nil, records)
       {:ok, :connected, %{data | read: read, write: write}}
     else
-      {:error, _reason, _data} = error -> error
       {:error, {:fatal_alert, alert, reason}} -> {:error, alert(alert, reason), data}
       {:error, reason} -> {:error, {:alert, :decode_error, reason}, data}
       _ -> unexpected(:invalid_key_update, data)
@@ -784,7 +857,7 @@ defmodule SSL.ServerConnection do
     actions = actions ++ delivered
 
     cond do
-      data.closed and data.size == 0 ->
+      data.closed and data.size == 0 and :queue.is_empty(data.jobs) ->
         notify_pending(data, {:error, data.close_reason})
         if data.active_terminal, do: send(data.owner, active_terminal(data))
         # stop_and_reply accepts only reply actions; pending timers die with the process.
@@ -851,13 +924,109 @@ defmodule SSL.ServerConnection do
 
   ## Output
 
-  defp send_application(data, cursor, deadline) do
-    with {:ok, records, write} <- protect_application(data.write, cursor, []),
-         :ok <- bounded_send(data.tcp, records, deadline) do
-      {:ok, %{data | write: write}}
-    else
-      {:error, {:fatal_alert, alert, reason}} -> {:error, alert(alert, reason), data}
-      {:error, reason} -> {:error, reason, data}
+  # Post-handshake writes are queued to the writer in protection order, so records,
+  # KeyUpdates and close_notify reach the carrier in sequence-number order.
+  defp enqueue(data, kind, from, iodata) do
+    token = make_ref()
+    send(data.writer, {:send, token, data.tcp, iodata, false})
+    %{data | jobs: :queue.in(%{token: token, kind: kind, from: from}, data.jobs)}
+  end
+
+  defp writing?(data), do: Enum.any?(:queue.to_list(data.jobs), &(&1.kind == :application))
+
+  # After a transport terminal the writer settles its own job; the carrier closes
+  # once no job remains, and buffered plaintext stays deliverable meanwhile.
+  defp job_done(name, job, result, %{closed: true} = data) do
+    actions = settle(job, settled_result(result, data))
+    data = if :queue.is_empty(data.jobs), do: close_transport(data), else: data
+    {data, granted} = grant_waiters(data)
+    continue(name, data, actions ++ granted)
+  end
+
+  defp job_done(name, job, :ok, data) do
+    {data, granted} = grant_waiters(data)
+    continue(name, data, settle(job, job_result(job, data)) ++ granted)
+  end
+
+  defp job_done(name, job, {:error, reason}, data),
+    do: job_failed(name, reason, %{data | jobs: :queue.in_r(job, data.jobs)})
+
+  defp job_result(%{kind: {:shutdown, how}}, data), do: :gen_tcp.shutdown(data.tcp, how)
+  defp job_result(_job, _data), do: :ok
+
+  # A failed or expired job ends the connection like any transport write failure.
+  defp job_failed(name, reason, %{closed: true} = data) do
+    data = abort_output(data, {:error, reason}) |> close_transport()
+    continue(name, data)
+  end
+
+  defp job_failed(name, reason, data), do: fail(name, reason, data)
+
+  defp settle(%{from: nil}, _result), do: []
+
+  defp settle(%{kind: :application, from: from}, result),
+    do: [{:reply, from, result}, {{:timeout, :write}, :cancel}]
+
+  defp settle(%{from: from}, result), do: [{:reply, from, result}]
+
+  @dead_transport [:closed, :enotconn, :epipe, :econnreset]
+  defp settled_result({:error, reason}, data) when reason in @dead_transport,
+    do: {:error, data.close_reason}
+
+  defp settled_result(result, _data), do: result
+
+  # Replies to every queued job and reservation; the in-flight output is
+  # uncertain, so the carrier later closes with zero linger.
+  defp abort_output(data, result) do
+    Enum.each(:queue.to_list(data.jobs), fn job -> settle_reply(job, result) end)
+    Enum.each(:queue.to_list(data.waiters), fn {from, _} -> :gen_statem.reply(from, result) end)
+    aborted = data.output_aborted or not :queue.is_empty(data.jobs)
+
+    %{
+      data
+      | jobs: :queue.new(),
+        waiters: :queue.new(),
+        output_aborted: aborted,
+        write_closed: true
+    }
+  end
+
+  defp settle_reply(%{from: nil}, _result), do: :ok
+  defp settle_reply(%{from: from}, result), do: :gen_statem.reply(from, result)
+
+  defp grant(from, deadline, data) do
+    token = make_ref()
+    write_token = %{token: token, owner: elem(from, 0), deadline: deadline}
+    {%{data | write_token: write_token}, [{:reply, from, {:ok, token}}]}
+  end
+
+  # Waiters are answered in order as their reservation would have been then: the
+  # first live one gets the write, later ones see it reserved (:busy).
+  defp grant_waiters(data, actions \\ []) do
+    case :queue.out(data.waiters) do
+      {:empty, _} ->
+        {data, Enum.reverse(actions)}
+
+      {{:value, {{pid, _} = from, deadline}}, waiters} ->
+        data = %{data | waiters: waiters}
+
+        cond do
+          not Process.alive?(pid) ->
+            grant_waiters(data, actions)
+
+          data.closed or data.write_closed ->
+            grant_waiters(data, [{:reply, from, {:error, :closed}} | actions])
+
+          data.write_token != nil and Process.alive?(data.write_token.owner) ->
+            grant_waiters(data, [{:reply, from, {:error, :busy}} | actions])
+
+          deadline != :infinity and Options.remaining(deadline) == 0 ->
+            grant_waiters(data, [{:reply, from, {:error, :timeout}} | actions])
+
+          true ->
+            {data, granted} = grant(from, deadline, data)
+            grant_waiters(data, granted ++ actions)
+        end
     end
   end
 
@@ -876,7 +1045,7 @@ defmodule SSL.ServerConnection do
     end
   end
 
-  # A reservation deadline shortens the carrier send_timeout for this write only.
+  # The handshake deadline shortens the carrier send_timeout for a flight write.
   defp bounded_send(tcp, iodata, :infinity), do: :gen_tcp.send(tcp, iodata)
 
   defp bounded_send(tcp, iodata, deadline) do
@@ -913,8 +1082,6 @@ defmodule SSL.ServerConnection do
     [<<22, 3, 3, size::16>>, chunk | plaintext(rest)]
   end
 
-  defp transmit(_data, []), do: :ok
-
   # While the handshake is pending its deadline also bounds the write, even when
   # the carrier send_timeout is :infinity and the client never reads.
   defp transmit(data, iodata) do
@@ -929,6 +1096,7 @@ defmodule SSL.ServerConnection do
   defp close_notify(%{write_closed: true} = data), do: data
   defp close_notify(%{tcp: nil} = data), do: data
 
+  # Behind a queued (uncertain) write no alert is sent; the carrier is aborted.
   defp close_notify(data) do
     _ = send_alert(data, 1, 0)
     %{data | write_closed: true}
@@ -936,20 +1104,36 @@ defmodule SSL.ServerConnection do
 
   defp send_alert(%{tcp: nil}, _level, _code), do: :ok
 
-  defp send_alert(%{write: nil} = data, level, code),
-    do: :gen_tcp.send(data.tcp, <<21, 3, 3, 2::16, level, code>>)
-
   defp send_alert(data, level, code) do
-    with {:ok, record, _write} <- Record.encrypt(data.write, :alert, <<level, code>>),
-         do: :gen_tcp.send(data.tcp, record)
+    if :queue.is_empty(data.jobs),
+      do: :gen_tcp.send(data.tcp, alert_record(data, level, code)),
+      else: :ok
+  end
+
+  defp alert_record(%{write: nil}, level, code), do: <<21, 3, 3, 2::16, level, code>>
+
+  # Alerts are best effort, as before: a write state that cannot protect one sends nothing.
+  defp alert_record(data, level, code) do
+    case Record.encrypt(data.write, :alert, <<level, code>>) do
+      {:ok, record, _write} -> record
+      {:error, _reason} -> []
+    end
   end
 
   ## Termination
 
+  # As on the client, a write still queued when the peer closes settles as
+  # {:error, :closed}; buffered plaintext stays deliverable.
   defp peer_closed(data, actions) do
     Socket.mark_terminal(data.socket, true)
-    data = data |> close_notify() |> close_transport()
+    data = data |> close_notify() |> abort_output({:error, :closed}) |> close_transport()
     continue(:closing, %{data | closed: true}, actions)
+  end
+
+  # A transport terminal stops new writes; a queued job settles from the writer.
+  defp transport_closed(data) do
+    data = %{data | closed: true, write_closed: true}
+    if :queue.is_empty(data.jobs), do: close_transport(data), else: data
   end
 
   defp fail(_name, reason, data) do
@@ -981,12 +1165,26 @@ defmodule SSL.ServerConnection do
   defp notify_pending(data, result) do
     if data.handshake_from, do: :gen_statem.reply(data.handshake_from, result)
     if data.recv, do: :gen_statem.reply(data.recv.from, result)
+    Enum.each(:queue.to_list(data.jobs), &settle_reply(&1, result))
+    Enum.each(:queue.to_list(data.waiters), fn {from, _} -> :gen_statem.reply(from, result) end)
   end
 
   defp close_transport(%{tcp: nil} = data), do: data
 
+  # :gen_tcp.close/1 waits for unsent driver output, so a peer that does not read
+  # would hold this process; Port.close/1 leaves the flush to the driver. Output
+  # left uncertain by an abort is discarded with zero linger instead.
   defp close_transport(data) do
-    :gen_tcp.close(data.tcp)
+    _ =
+      if data.output_aborted or not :queue.is_empty(data.jobs),
+        do: :inet.setopts(data.tcp, linger: {true, 0})
+
+    try do
+      Port.close(data.tcp)
+    rescue
+      ArgumentError -> :ok
+    end
+
     %{data | tcp: nil, armed: false}
   end
 

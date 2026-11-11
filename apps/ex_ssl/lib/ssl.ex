@@ -138,7 +138,18 @@ defmodule SSL do
     end
   end
 
-  @doc "Writes iodata as one ordered logical write. Concurrent writes return `:busy`."
+  @doc """
+  Writes iodata as one ordered logical write. Concurrent writes return `:busy`.
+
+  `{:error, :busy}` means another caller holds the write reservation; nothing of
+  this write was sent and the socket is unaffected, so it may be retried. Callers
+  should still serialize writes in one process, because there is no notification
+  when the reservation frees. On a server socket a reservation made while another
+  write is in flight waits for that write instead of returning `:busy`. A server
+  write that waits on the carrier does not stop receive delivery or other socket
+  calls; only the writer waits, bounded by `send_timeout` and an `{:abs_ms, _}`
+  deadline, and a timeout closes the connection.
+  """
   @spec send(Socket.t(), iodata()) :: :ok | {:error, term()}
   def send(socket, data) do
     with {:ok, cursor, size} <- IodataCursor.new(data),
@@ -435,8 +446,9 @@ defmodule SSL do
     |> Kernel.++([:binary, active: false])
   end
 
-  # Server writes are synchronous carrier sends, so an infinite send timeout could wedge them.
-  # The defaults apply only when the caller set neither key.
+  # A server write waits for the carrier, so an infinite send timeout could hold the
+  # writer (not the connection, #161) forever. The defaults apply only when the caller
+  # set neither key.
   defp server_carrier(tcp) do
     if Keyword.has_key?(tcp, :send_timeout) or Keyword.has_key?(tcp, :send_timeout_close),
       do: tcp,
