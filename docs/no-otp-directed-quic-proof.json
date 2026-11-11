@@ -10,7 +10,7 @@
     "apps/elixir_quic/lib/quic/cleanup.ex": "b25e373c6e11a96d9248caece562c671b6f87b8a3c6c33ee24943871e1852b99",
     "apps/elixir_quic/lib/quic/cleanup/observer.ex": "7f2ae82f7d681c51d9458f27278351c30ff5ab4aee8f49c35fae8316884e2b8e",
     "apps/elixir_quic/lib/quic/endpoint.ex": "bc0f51dce1a984395c69a1b3338a4f14c7874e43e3cd05e03cb786af786bfaf4",
-    "apps/elixir_quic/lib/quic/connection.ex": "1d0e7e82e3e09c4c93031b58e1c965e27658ef917360ab74ad4c485f718e986a",
+    "apps/elixir_quic/lib/quic/connection.ex": "e965760f4f815fa52495243d6639b58dbea4b23d8affa0573b963aa4f9b850fc",
     "apps/elixir_quic/lib/quic/io/gen_udp.ex": "98ff13031224271021aa05dfb7b3175f6325b80e4d26fb03b92dfe321937be0c",
     "apps/elixir_quic/lib/quic/io/external_writer.ex": "1fda217ed39c3cbf474d4185a0af5fc5fae94667fd2ab32dcd8fbbd3ed6b2ddb",
     "apps/elixir_quic/lib/quic/abyss_dispatcher.ex": "f54b6fd777987a53374cbc15b4b8bbfa854142170cd276d312bd143ce8fbc249",
@@ -1514,7 +1514,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "a634b274c8294d10ec106ed3d2a49b269ecd5d2d",
+      "source_commit": "4184fca9f6b565761db9b2c5220bd20a63921417",
       "scope": "client migration, opt-in resumption/0-RTT, reliable reset and TLS provider continuation",
       "changed_source_inputs": {
         "apps/elixir_quic/lib/quic.ex": {
@@ -1531,7 +1531,7 @@
         },
         "apps/elixir_quic/lib/quic/connection.ex": {
           "previous_sha256": "183872efc651a02fac6ef7fb85b22577ae5c315e0b8b8bba5c3a8913a71e60f4",
-          "sha256": "1d0e7e82e3e09c4c93031b58e1c965e27658ef917360ab74ad4c485f718e986a"
+          "sha256": "e965760f4f815fa52495243d6639b58dbea4b23d8affa0573b963aa4f9b850fc"
         },
         "apps/elixir_quic/lib/quic/io/gen_udp.ex": {
           "previous_sha256": "1e5c46de218a0614659660815d4560d137191907430d74c4e2027eff307bc98f",
@@ -1595,7 +1595,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "a380c36ea08eba3775aecc55903ff2441eae171e01f30bd499c3d26f663e7db0",
+        "sorted_path_sha256_json": "39954c07688f1d5efeb5655673475e046352b8500a8808f32969dca6c83a75ac",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -2012,6 +2012,13 @@
           "input": "apps/elixir_quic/lib/quic.ex",
           "change": "Module documentation points to docs/quic/consumer-contract.md.",
           "dispatch_review": "No dynamic dispatch added or removed; documentation only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "4184fca9f6b565761db9b2c5220bd20a63921417",
+          "input": "apps/elixir_quic/lib/quic/connection.ex",
+          "change": "The receive_packet error paths are extracted into the private local helpers wrong_level_frame_type/1 and close_authenticated_error/4 (credo complexity); behaviour is unchanged.",
+          "dispatch_review": "No dynamic dispatch added, removed or moved: the helpers make only literal local calls and state updates, and the hunks net to zero lines (-11 at 1102, +11 at 1138). The seventeen reviewed Quic.Connection adapter sites keep their lines, expressions and owning functions; no occurrence is rebound."
         }
       ]
     }

@@ -359,3 +359,12 @@ NewReno and recovery change (`d2e5bd5`), the oldest-first retired-CID eviction
 (`a634b27`) add only literal calls; the H3 session change (`3a5522c`) is reviewed
 in the H3 proof. No QUIC occurrence is added or removed. The release still has 207
 sites, with one removal in HTTP and one addition in H3.
+
+### Follow-up: receive_packet helper extraction (2026-11-11)
+
+`Quic.Connection` (`4184fca`) extracts the `receive_packet` error paths into the
+private local helpers `wrong_level_frame_type/1` and `close_authenticated_error/4`.
+They make only literal local calls and state updates. The two hunks net to zero
+lines, so the seventeen reviewed adapter sites keep their lines and no occurrence
+is added, removed or rebound. Producer hash, release census and every group's
+census digest are updated.
