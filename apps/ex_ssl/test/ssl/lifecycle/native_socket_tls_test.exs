@@ -695,6 +695,7 @@ defmodule SSL.Lifecycle.NativeSocketTLSTest do
       assert :ok = Setup.attach(a.setup, a.nonce, deadline(1_000))
       success(a)
       assert :ok = private_io(a, :enable_duplex_reads)
+      assert_receive :control_peer_handshaken, 5_000
       assert :ok = Peer.pause_client_to_server(proxy, self())
       assert_receive {:backpressure_proxy, ^ref, :paused}, 1_000
       request = private_send_request(a, :binary.copy("x", size))
@@ -777,6 +778,9 @@ defmodule SSL.Lifecycle.NativeSocketTLSTest do
 
     {:ok, peer} =
       Peer.start(fn socket ->
+        # Handler start means the server consumed the client Finished, so a
+        # later paused proxy cannot be holding the handshake itself.
+        send(parent, :control_peer_handshaken)
         receive do: (:update -> :ok)
         assert :ok = :ssl.update_keys(socket, :read_write)
         prefix = :binary.copy("x", 16_384)
