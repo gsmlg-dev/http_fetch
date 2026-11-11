@@ -186,6 +186,33 @@ defmodule Hell.AcceptorTest do
     Enum.each([existing, fresh, late], &:gen_tcp.close/1)
   end
 
+  test "an accept :closed with a live listener does not end the acceptor" do
+    key = make_ref()
+    :persistent_term.put({FlakyTransport, :key}, key)
+    FlakyTransport.set_accept_results(key, [])
+
+    {:ok, server_pid} =
+      start_supervised(
+        {Hell, port: 0, handler_module: Echo, transport_module: FlakyTransport, num_acceptors: 1}
+      )
+
+    {:ok, {_ip, port}} = Hell.listener_info(server_pid)
+    [acceptor] = acceptor_pids(server_pid)
+    ref = Process.monitor(acceptor)
+
+    # ex_ssl reports a connection-process start failure as :closed
+    FlakyTransport.set_accept_results(key, [:closed])
+    {:ok, trigger} = :gen_tcp.connect(:localhost, port, [:binary, active: false])
+
+    refute_receive {:DOWN, ^ref, _, _, _}, 500
+    {:ok, fresh} = :gen_tcp.connect(:localhost, port, [:binary, active: false])
+    :ok = :gen_tcp.send(fresh, "HELLO")
+    assert :gen_tcp.recv(fresh, 0, 1000) == {:ok, "HELLO"}
+    assert acceptor_pids(server_pid) == [acceptor]
+
+    Enum.each([trigger, fresh], &:gen_tcp.close/1)
+  end
+
   test "an :emfile telemetry event is emitted on descriptor exhaustion" do
     on_exit(TelemetryHelpers.attach_all_events(Echo))
 

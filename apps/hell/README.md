@@ -165,6 +165,19 @@ Hell does not use named processes or other 'global' state internally
 (other than telemetry event names). It is completely supported for a single node
 to host any number of `Server` processes each listening on a different port.
 
+### TLS differences from OTP `:ssl`
+
+`Hell.Transports.SSL` runs on `ex_ssl`, whose socket API differs from OTP
+`:ssl` in ways a handler can observe:
+
+- Sockets are passive. `Hell.Socket.setopts/2` accepts `active: false` or
+  `active: :once` only; `active: true` and `active: N` are rejected.
+- `Hell.Socket.recv/3` with a length above 1 MiB returns `{:error, :emsgsize}`
+  (plain TCP sockets have no such limit); read in smaller pieces.
+- `connection_information/1` reports only `:protocol`, `:selected_cipher_suite`
+  and `:session_resumption`. The client's SNI hostname is not exposed to
+  handlers; use `sni_hosts`/`sni_fun` on the listener to select identities.
+
 ## Contributing
 
 Contributions to Hell are very much welcome! Before undertaking any substantial work, please

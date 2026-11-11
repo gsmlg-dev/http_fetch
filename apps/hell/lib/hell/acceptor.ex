@@ -162,7 +162,27 @@ defmodule Hell.Acceptor do
         )
 
       {:error, :closed} ->
-        Hell.Telemetry.stop_span(span, %{connections: count})
+        # `:closed` means the listener is gone, but ex_ssl also reports it when
+        # it cannot start the TLS connection process (e.g. `:system_limit`).
+        # Only a closed listen socket ends the acceptor; otherwise a transient
+        # acceptor exit would never be restarted and the pool would shrink
+        case server_config.transport_module.sockname(listener_socket) do
+          {:ok, _address} ->
+            Hell.Telemetry.span_event(span, :accept_error, %{error: :closed})
+            Process.sleep(@fd_exhaustion_wait)
+
+            accept(
+              listener_socket,
+              connection_sup_pid,
+              server_config,
+              handler_config,
+              span,
+              count + 1
+            )
+
+          {:error, _closed} ->
+            Hell.Telemetry.stop_span(span, %{connections: count})
+        end
 
       {:error, reason} ->
         Hell.Telemetry.stop_span(span, %{connections: count}, %{error: reason})
