@@ -1056,16 +1056,20 @@ defmodule Quic.Endpoint do
       Map.has_key?(data.retired, {:cid, cid}) or
         Map.has_key?(data.retired, {:remote, remote, cid})
 
-  defp add_retired(retired, keys, limit) do
-    retired = Enum.reduce(keys, retired, &Map.put(&2, &1, true))
+  # Retired identifiers carry a monotonic stamp so that, once over the limit, the
+  # oldest are evicted first and a just-retired CID keeps blocking replays.
+  @doc false
+  def add_retired(retired, keys, limit) do
+    retired = Enum.reduce(keys, retired, &Map.put(&2, &1, :erlang.unique_integer([:monotonic])))
+    excess = map_size(retired) - limit
 
-    if map_size(retired) <= limit do
+    if excess <= 0 do
       retired
     else
       retired
-      |> Map.keys()
-      |> Enum.take(map_size(retired) - limit)
-      |> Enum.reduce(retired, &Map.delete(&2, &1))
+      |> Enum.sort_by(fn {_key, stamp} -> stamp end)
+      |> Enum.take(excess)
+      |> Enum.reduce(retired, fn {key, _stamp}, acc -> Map.delete(acc, key) end)
     end
   end
 
