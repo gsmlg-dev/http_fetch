@@ -6,7 +6,7 @@ defmodule HTTP.WebTransport.Telemetry do
   @spec connect_start(URI.t()) :: :ok
   def connect_start(url) do
     :telemetry.execute([:http_web_transport, :connect, :start], %{start_time: now()}, %{
-      url: url,
+      url: scrub(url),
       scheme: url.scheme,
       host: url.host,
       port: url.port
@@ -16,7 +16,7 @@ defmodule HTTP.WebTransport.Telemetry do
   @spec connect_stop(URI.t(), String.t(), String.t(), non_neg_integer()) :: :ok
   def connect_stop(url, protocol, reliability, duration) do
     :telemetry.execute([:http_web_transport, :connect, :stop], %{duration: duration}, %{
-      url: url,
+      url: scrub(url),
       scheme: url.scheme,
       host: url.host,
       port: url.port,
@@ -28,7 +28,7 @@ defmodule HTTP.WebTransport.Telemetry do
   @spec connect_exception(URI.t(), term(), non_neg_integer()) :: :ok
   def connect_exception(url, error, duration) do
     :telemetry.execute([:http_web_transport, :connect, :exception], %{duration: duration}, %{
-      url: url,
+      url: scrub(url),
       scheme: url.scheme,
       host: url.host,
       port: url.port,
@@ -38,13 +38,13 @@ defmodule HTTP.WebTransport.Telemetry do
 
   @spec session_draining(URI.t()) :: :ok
   def session_draining(url) do
-    :telemetry.execute([:http_web_transport, :session, :draining], %{}, %{url: url})
+    :telemetry.execute([:http_web_transport, :session, :draining], %{}, %{url: scrub(url)})
   end
 
   @spec session_closed(URI.t(), non_neg_integer(), String.t()) :: :ok
   def session_closed(url, close_code, reason) do
     :telemetry.execute([:http_web_transport, :session, :closed], %{}, %{
-      url: url,
+      url: scrub(url),
       close_code: close_code,
       reason: reason
     })
@@ -53,7 +53,7 @@ defmodule HTTP.WebTransport.Telemetry do
   @spec session_exception(URI.t(), term()) :: :ok
   def session_exception(url, error) do
     :telemetry.execute([:http_web_transport, :session, :exception], %{}, %{
-      url: url,
+      url: scrub(url),
       error: error
     })
   end
@@ -67,7 +67,7 @@ defmodule HTTP.WebTransport.Telemetry do
         datagram_size: bytes,
         queue_length: queue_length
       },
-      %{url: url}
+      %{url: scrub(url)}
     )
   end
 
@@ -80,14 +80,14 @@ defmodule HTTP.WebTransport.Telemetry do
         datagram_size: bytes,
         queue_length: queue_length
       },
-      %{url: url}
+      %{url: scrub(url)}
     )
   end
 
   @spec stream_opened(URI.t(), term(), atom()) :: :ok
   def stream_opened(url, stream_id, direction) do
     :telemetry.execute([:http_web_transport, :stream, :opened], %{}, %{
-      url: url,
+      url: scrub(url),
       stream_id: stream_id,
       direction: direction
     })
@@ -96,7 +96,7 @@ defmodule HTTP.WebTransport.Telemetry do
   @spec stream_sent(URI.t(), term(), non_neg_integer()) :: :ok
   def stream_sent(url, stream_id, bytes) do
     :telemetry.execute([:http_web_transport, :stream, :sent], %{bytes: bytes}, %{
-      url: url,
+      url: scrub(url),
       stream_id: stream_id
     })
   end
@@ -104,7 +104,7 @@ defmodule HTTP.WebTransport.Telemetry do
   @spec stream_received(URI.t(), term(), non_neg_integer()) :: :ok
   def stream_received(url, stream_id, bytes) do
     :telemetry.execute([:http_web_transport, :stream, :received], %{bytes: bytes}, %{
-      url: url,
+      url: scrub(url),
       stream_id: stream_id
     })
   end
@@ -112,10 +112,13 @@ defmodule HTTP.WebTransport.Telemetry do
   @spec stream_closed(URI.t(), term()) :: :ok
   def stream_closed(url, stream_id) do
     :telemetry.execute([:http_web_transport, :stream, :closed], %{}, %{
-      url: url,
+      url: scrub(url),
       stream_id: stream_id
     })
   end
+
+  # Same rule as WebSocket telemetry: credentials, query and fragment never reach handlers.
+  defp scrub(%URI{} = url), do: %{url | userinfo: nil, authority: nil, query: nil, fragment: nil}
 
   defp now, do: System.system_time(:microsecond)
 end

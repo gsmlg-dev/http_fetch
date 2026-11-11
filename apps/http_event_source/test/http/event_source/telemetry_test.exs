@@ -27,7 +27,7 @@ defmodule HTTP.EventSource.TelemetryTest do
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
 
-    uri = URI.parse("http://example.com/events")
+    uri = URI.parse("http://user:secret@example.com:8080/events?token=secret#hashpart")
 
     Telemetry.connect_start(uri)
     Telemetry.connect_stop(uri, 200, 10)
@@ -38,7 +38,11 @@ defmodule HTTP.EventSource.TelemetryTest do
     Telemetry.close_stop(uri, :closed)
 
     for event <- events do
-      assert_receive {:telemetry_event, ^event, _measurements, _metadata}
+      assert_receive {:telemetry_event, ^event, _measurements, metadata}
+      assert URI.to_string(metadata.url) == "http://example.com:8080/events"
+      assert %URI{userinfo: nil, authority: nil, query: nil, fragment: nil} = metadata.url
+      refute inspect(metadata) =~ "secret"
+      refute inspect(metadata) =~ "hashpart"
     end
   end
 

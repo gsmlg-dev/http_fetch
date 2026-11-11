@@ -32,7 +32,7 @@ defmodule HTTP.WebTransport.TelemetryTest do
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
 
-    uri = URI.parse("https://example.com/transport")
+    uri = URI.parse("https://user:secret@example.com:4433/transport?token=secret#hashpart")
 
     Telemetry.connect_start(uri)
     Telemetry.connect_stop(uri, "chat.v1", "supports-unreliable", 10)
@@ -48,7 +48,11 @@ defmodule HTTP.WebTransport.TelemetryTest do
     Telemetry.stream_closed(uri, 1)
 
     for event <- events do
-      assert_receive {:telemetry_event, ^event, _measurements, _metadata}
+      assert_receive {:telemetry_event, ^event, _measurements, metadata}
+      assert URI.to_string(metadata.url) == "https://example.com:4433/transport"
+      assert %URI{userinfo: nil, authority: nil, query: nil, fragment: nil} = metadata.url
+      refute inspect(metadata) =~ "secret"
+      refute inspect(metadata) =~ "hashpart"
     end
   end
 
