@@ -185,10 +185,17 @@ defmodule HTTP.WebSocket.Handshake do
     ]
   end
 
-  defp host_header(%URI{host: host, port: nil}), do: host
+  defp host_header(%URI{host: host, port: nil}), do: bracket_host(host)
 
   defp host_header(%URI{host: host, port: port, scheme: scheme}) do
+    host = bracket_host(host)
     if default_port?(scheme, port), do: host, else: host <> ":" <> Integer.to_string(port)
+  end
+
+  defp bracket_host(host) do
+    if String.contains?(host, ":") and not String.starts_with?(host, "["),
+      do: "[" <> host <> "]",
+      else: host
   end
 
   defp default_port?("ws", 80), do: true

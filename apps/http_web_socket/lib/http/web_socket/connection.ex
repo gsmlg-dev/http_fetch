@@ -287,9 +287,16 @@ defmodule HTTP.WebSocket.Connection do
     end
   end
 
-  defp close_call(code, reason, _payload, _from, %{ready_state: @connecting} = state) do
+  defp close_call(code, _reason, _payload, _from, %{ready_state: @connecting} = state) do
     Telemetry.close_start(state.telemetry_uri, code)
-    {:stop, :normal, :ok, finish(state, code || 1006, reason, false)}
+
+    emit(state, %Error{
+      target: state.target,
+      reason: :closed_while_connecting,
+      handshake: state.handshake
+    })
+
+    {:stop, :normal, :ok, finish(state, 1006, "", false)}
   end
 
   defp close_call(_code, _reason, _payload, _from, %{ready_state: @closing} = state),
@@ -1289,7 +1296,12 @@ defmodule HTTP.WebSocket.Connection do
 
       empty? and close_complete?(state) ->
         {:stop, :normal,
-         finish(state, state.close_code, state.close_reason, not Frame.incomplete?(state.parser))}
+         finish(
+           state,
+           state.close_code || 1005,
+           state.close_reason,
+           not Frame.incomplete?(state.parser)
+         )}
 
       true ->
         rearm(state)
@@ -1538,7 +1550,13 @@ defmodule HTTP.WebSocket.Connection do
         port -> ":" <> Integer.to_string(port)
       end
 
-    state.uri.scheme <> "://" <> state.uri.host <> port
+    state.uri.scheme <> "://" <> bracket_host(state.uri.host) <> port
+  end
+
+  defp bracket_host(host) do
+    if String.contains?(host, ":") and not String.starts_with?(host, "["),
+      do: "[" <> host <> "]",
+      else: host
   end
 
   defp normalize_frame({opcode, payload}) when opcode in [:ping, :pong] and is_binary(payload) do

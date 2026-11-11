@@ -127,6 +127,31 @@ defmodule HTTP.WebSocketTest do
     end
   end
 
+  @tag :integration
+  test "reports code 1005 when the peer Close carries no status code" do
+    {:ok, _server, port} =
+      HTTPWebSocket.TestServer.start_link(upgrade_frames: <<0x88, 0>>)
+
+    socket = WebSocket.new("ws://127.0.0.1:#{port}/")
+
+    assert_receive {WebSocket, ^socket, %Open{}}, 1_000
+    assert_receive {WebSocket, ^socket, %Close{code: 1005, reason: ""}}, 2_000
+  end
+
+  @tag :integration
+  test "close while connecting fires an error event then a 1006 close" do
+    {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(listen)
+
+    socket = WebSocket.new("ws://127.0.0.1:#{port}/")
+    assert WebSocket.ready_state(socket) == WebSocket.connecting()
+    assert :ok = WebSocket.close(socket, 3000, "bye")
+
+    assert_receive {WebSocket, ^socket, %Error{}}, 1_000
+    assert_receive {WebSocket, ^socket, %Close{code: 1006, was_clean: false}}, 1_000
+    :gen_tcp.close(listen)
+  end
+
   test "rejects invalid constructor input synchronously" do
     assert {:error, :fragment_not_allowed} = WebSocket.new("ws://example.com/socket#frag")
   end

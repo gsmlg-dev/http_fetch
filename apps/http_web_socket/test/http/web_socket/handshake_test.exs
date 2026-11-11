@@ -25,6 +25,16 @@ defmodule HTTP.WebSocket.HandshakeTest do
     refute request =~ "Sec-WebSocket-Key: bad\r\n"
   end
 
+  test "brackets IPv6 literal hosts in the Host header" do
+    assert {:ok, request} =
+             Handshake.build_request(URI.parse("ws://[::1]:8080/x"), [], [], @key)
+
+    assert request =~ "Host: [::1]:8080\r\n"
+
+    assert {:ok, request} = Handshake.build_request(URI.parse("ws://[::1]/x"), [], [], @key)
+    assert request =~ "Host: [::1]\r\n"
+  end
+
   test "uses root request target when path is empty" do
     assert {:ok, request} = Handshake.build_request(URI.parse("ws://example.com"), [], [], @key)
     assert request =~ "GET / HTTP/1.1\r\n"

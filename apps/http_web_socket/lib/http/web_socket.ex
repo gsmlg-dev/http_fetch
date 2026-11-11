@@ -16,6 +16,12 @@ defmodule HTTP.WebSocket do
   `http_version/1` reports the negotiated HTTP version, while
   `protocol/1` continues to report the selected WebSocket subprotocol.
 
+  No WebSocket extension is supported: `permessage-deflate` (RFC 7692) is not
+  negotiated, `extensions/1` is always `""`, and a handshake response carrying
+  `Sec-WebSocket-Extensions` fails the upgrade. A Close frame without a status
+  code is reported as code 1005, and `close/3` while connecting emits an Error
+  event followed by an abnormal (1006) Close, as in the WHATWG API.
+
   With `delivery: :ack`, message events include a delivery reference:
 
       {HTTP.WebSocket, socket, %HTTP.WebSocket.Event.Message{}, ref}
