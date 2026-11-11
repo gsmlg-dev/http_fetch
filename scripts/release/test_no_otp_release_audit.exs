@@ -3931,7 +3931,7 @@ defmodule NoOTP.ReleaseAuditTest do
     result = v_actual_slice(context, true)
 
     assert Enum.map(result.unresolved_dispatch, &{&1.line, &1.kind}) ==
-             [{631, "unresolved_module_dispatch"}]
+             [{638, "unresolved_module_dispatch"}]
   end
 
   defp v_body do
@@ -4201,7 +4201,7 @@ defmodule NoOTP.ReleaseAuditTest do
     result = w_actual_slice(context, :original)
 
     assert Enum.map(result.unconfigured.unresolved_dispatch, &{&1.line, &1.kind}) ==
-             [{662, "unresolved_module_dispatch"}]
+             [{669, "unresolved_module_dispatch"}]
 
     assert result.configured.unresolved_dispatch == []
     assert result.configured.parameter_invariant_derivation.status == "checked"
@@ -5235,7 +5235,7 @@ defmodule NoOTP.ReleaseAuditTest do
     assert length(before.unresolved_dispatch) == 18
     assert length(after_result.unresolved_dispatch) == 12
     removed = before.unresolved_dispatch -- after_result.unresolved_dispatch
-    assert Enum.sort(Enum.map(removed, & &1.line)) == [579, 600, 608, 775, 869, 1055]
+    assert Enum.sort(Enum.map(removed, & &1.line)) == [583, 604, 612, 779, 875, 1063]
     assert Enum.all?(removed, &(&1.kind == "unresolved_module_dispatch"))
     assert after_result.parameter_invariant_derivation.status == "checked"
     assert length(after_result.parameter_invariant_derivation.checked_slots) == 9
