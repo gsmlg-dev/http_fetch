@@ -3762,19 +3762,14 @@ defmodule NoOTP.ReleaseAuditTest do
   defp u_actual_slice(context, unknown_leaf?) do
     root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
 
-    backend =
-      File.read!(Path.join(root, "apps/http_core/lib/http/tls_backend.ex"))
-      |> String.replace("HTTP.TLSBackend", "NoOTPActualTupleBackend")
-
+    # The selector now names its transports literally (HTTP.TLSBackend was
+    # removed in rc.14). The unknown-leaf variant routes the TLS clause through
+    # a remote leaf whose result the audit cannot resolve.
     backend =
       if unknown_leaf?,
-        do:
-          String.replace(
-            backend,
-            "def transport(:ex_ssl), do: HTTP.Transport.ExSSL",
-            "def transport(value), do: value"
-          ),
-        else: backend
+        do: "defmodule NoOTPActualTupleBackend do def transport(value), do: value end",
+        else:
+          "defmodule NoOTPActualTupleBackend do def transport(:ex_ssl), do: HTTP.Transport.ExSSL end"
 
     {:defmodule, _, [_module, [do: {:__block__, _, definitions}]]} =
       root
@@ -3792,13 +3787,16 @@ defmodule NoOTP.ReleaseAuditTest do
     assert length(clauses) == 3
 
     clauses =
-      Macro.prewalk(clauses, fn
-        {:__aliases__, metadata, [:HTTP, :TLSBackend]} ->
-          {:__aliases__, metadata, [:NoOTPActualTupleBackend]}
+      if unknown_leaf?,
+        do:
+          Macro.prewalk(clauses, fn
+            {:__aliases__, _metadata, [:HTTP, :Transport, :ExSSL]} ->
+              quote do: NoOTPActualTupleBackend.transport(:ex_ssl)
 
-        node ->
-          node
-      end)
+            node ->
+              node
+          end),
+        else: clauses
 
     fixture =
       quote do
@@ -3970,10 +3968,6 @@ defmodule NoOTP.ReleaseAuditTest do
   defp v_actual_slice(context, unknown_caller?) do
     root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
 
-    backend =
-      File.read!(Path.join(root, "apps/http_core/lib/http/tls_backend.ex"))
-      |> String.replace("HTTP.TLSBackend", "NoOTPActualUnionBackend")
-
     {:defmodule, _, [_module, [do: {:__block__, _, definitions}]]} =
       root
       |> Path.join("apps/http_web_socket/lib/http/web_socket/connection.ex")
@@ -3989,15 +3983,6 @@ defmodule NoOTP.ReleaseAuditTest do
       end)
 
     assert length(definitions) == 4
-
-    definitions =
-      Macro.prewalk(definitions, fn
-        {:__aliases__, metadata, [:HTTP, :TLSBackend]} ->
-          {:__aliases__, metadata, [:NoOTPActualUnionBackend]}
-
-        node ->
-          node
-      end)
 
     extra =
       if unknown_caller? do
@@ -4024,7 +4009,7 @@ defmodule NoOTP.ReleaseAuditTest do
         end
       end
 
-    entries = Code.compile_string(backend) ++ Code.compile_quoted(fixture)
+    entries = Code.compile_quoted(fixture)
 
     for {module, _} <- entries do
       :code.purge(module)
@@ -4201,7 +4186,7 @@ defmodule NoOTP.ReleaseAuditTest do
     result = w_actual_slice(context, :original)
 
     assert Enum.map(result.unconfigured.unresolved_dispatch, &{&1.line, &1.kind}) ==
-             [{669, "unresolved_module_dispatch"}]
+             [{666, "unresolved_module_dispatch"}]
 
     assert result.configured.unresolved_dispatch == []
     assert result.configured.parameter_invariant_derivation.status == "checked"
@@ -4288,10 +4273,6 @@ defmodule NoOTP.ReleaseAuditTest do
   defp w_actual_slice(context, mutation) do
     root = System.get_env("NO_OTP_AUDIT_SOURCE_ROOT") || Path.expand("../..", __DIR__)
 
-    backend =
-      File.read!(Path.join(root, "apps/http_core/lib/http/tls_backend.ex"))
-      |> String.replace("HTTP.TLSBackend", "NoOTPActualSeedBackend")
-
     {:defmodule, _, [_module, [do: {:__block__, _, definitions}]]} =
       root
       |> Path.join("apps/http_web_socket/lib/http/web_socket/connection.ex")
@@ -4308,15 +4289,6 @@ defmodule NoOTP.ReleaseAuditTest do
       end)
 
     assert length(definitions) == 6
-
-    definitions =
-      Macro.prewalk(definitions, fn
-        {:__aliases__, metadata, [:HTTP, :TLSBackend]} ->
-          {:__aliases__, metadata, [:NoOTPActualSeedBackend]}
-
-        node ->
-          node
-      end)
 
     definitions =
       if mutation == :changed_backedge do
@@ -4373,7 +4345,7 @@ defmodule NoOTP.ReleaseAuditTest do
         end
       end
 
-    entries = Code.compile_string(backend) ++ Code.compile_quoted(fixture)
+    entries = Code.compile_quoted(fixture)
 
     for {module, _} <- entries do
       :code.purge(module)
@@ -4565,7 +4537,7 @@ defmodule NoOTP.ReleaseAuditTest do
 
     assert Enum.sort(Enum.map(result.unresolved_dispatch, &{&1.line, &1.kind})) ==
              Enum.map(
-               [65, 67, 69, 72, 185, 327, 334, 335, 384, 392, 443, 548],
+               [64, 66, 68, 71, 184, 326, 333, 334, 383, 391, 442, 547],
                &{&1, "unresolved_module_dispatch"}
              )
   end
@@ -4575,7 +4547,7 @@ defmodule NoOTP.ReleaseAuditTest do
 
     assert Enum.any?(
              result.unresolved_dispatch,
-             &(&1.line == 83 and &1.kind == "literal_module_ssl")
+             &(&1.line == 82 and &1.kind == "literal_module_ssl")
            )
   end
 
@@ -4585,7 +4557,7 @@ defmodule NoOTP.ReleaseAuditTest do
 
       assert Enum.any?(
                result.unresolved_dispatch,
-               &(&1.line == 83 and &1.kind == "unresolved_module_dispatch")
+               &(&1.line == 82 and &1.kind == "unresolved_module_dispatch")
              )
     end
   end
@@ -5061,10 +5033,6 @@ defmodule NoOTP.ReleaseAuditTest do
       |> String.replace("HTTP.Headers", "NoOTPActualTaggedHeaders")
       |> String.replace("HTTP.FormData", "NoOTPActualTaggedFormData")
 
-    backend =
-      File.read!(Path.join(root, "apps/http_core/lib/http/tls_backend.ex"))
-      |> String.replace("HTTP.TLSBackend", "NoOTPActualTaggedBackend")
-
     proxy =
       File.read!(Path.join(root, "apps/http_core/lib/http/proxy.ex"))
       |> String.replace("HTTP.Proxy", "NoOTPActualTaggedProxy")
@@ -5078,7 +5046,6 @@ defmodule NoOTP.ReleaseAuditTest do
       |> String.replace("HTTP.Runtime.Dialer", "NoOTPActualTaggedDialer")
       |> String.replace("alias HTTP.Request", "alias NoOTPActualTaggedRequest, as: Request")
       |> String.replace("HTTP.Proxy", "NoOTPActualTaggedProxy")
-      |> String.replace("HTTP.TLSBackend", "NoOTPActualTaggedBackend")
 
     stream =
       File.read!(Path.join(root, "apps/http_runtime/lib/http/runtime/stream.ex"))
@@ -5120,7 +5087,7 @@ defmodule NoOTP.ReleaseAuditTest do
 
     entries =
       z_compile_sources(
-        [headers, form_data, request, backend, proxy, dialer, stream],
+        [headers, form_data, request, proxy, dialer, stream],
         context.z_source_bytes,
         [headers, form_data, request]
       )
@@ -5235,7 +5202,7 @@ defmodule NoOTP.ReleaseAuditTest do
     assert length(before.unresolved_dispatch) == 18
     assert length(after_result.unresolved_dispatch) == 12
     removed = before.unresolved_dispatch -- after_result.unresolved_dispatch
-    assert Enum.sort(Enum.map(removed, & &1.line)) == [583, 604, 612, 779, 875, 1063]
+    assert Enum.sort(Enum.map(removed, & &1.line)) == [577, 598, 606, 773, 869, 1057]
     assert Enum.all?(removed, &(&1.kind == "unresolved_module_dispatch"))
     assert after_result.parameter_invariant_derivation.status == "checked"
     assert length(after_result.parameter_invariant_derivation.checked_slots) == 9
@@ -5758,10 +5725,6 @@ defmodule NoOTP.ReleaseAuditTest do
       |> String.replace("HTTP.Response", "NoOTPActualTaggedResponse")
       |> String.replace("HTTP.Headers", "NoOTPActualTaggedHeaders")
 
-    backend =
-      File.read!(Path.join(root, "apps/http_core/lib/http/tls_backend.ex"))
-      |> String.replace("HTTP.TLSBackend", "NoOTPActualTaggedBackend")
-
     proxy =
       File.read!(Path.join(root, "apps/http_core/lib/http/proxy.ex"))
       |> String.replace("HTTP.Proxy", "NoOTPActualTaggedProxy")
@@ -5775,7 +5738,6 @@ defmodule NoOTP.ReleaseAuditTest do
       |> String.replace("HTTP.Runtime.Dialer", "NoOTPActualTaggedDialer")
       |> String.replace("alias HTTP.Request", "alias NoOTPActualTaggedRequest, as: Request")
       |> String.replace("HTTP.Proxy", "NoOTPActualTaggedProxy")
-      |> String.replace("HTTP.TLSBackend", "NoOTPActualTaggedBackend")
 
     proxy =
       if mutation == :unknown_route,
@@ -5797,7 +5759,7 @@ defmodule NoOTP.ReleaseAuditTest do
           ),
         else: dialer
 
-    [headers, form_data, request, response, backend, proxy, dialer]
+    [headers, form_data, request, response, proxy, dialer]
   end
 
   test "F01 partial map seeds and recursive field identity never discharge ordinary findings",
