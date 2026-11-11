@@ -82,7 +82,7 @@ defmodule TLSMigrationBenchmark do
             alpn: "http/1.1",
             session_tickets: "disabled at peer",
             order: ["ex_ssl"],
-            selected_transport: inspect(HTTP.TLSBackend.transport(:ex_ssl)),
+            selected_transport: inspect(HTTP.Transport.ExSSL),
             concurrency: 1,
             idle_timeout_ms: 10_000
           }),

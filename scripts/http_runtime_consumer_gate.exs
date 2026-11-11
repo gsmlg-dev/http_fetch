@@ -338,7 +338,7 @@ defmodule HTTPRuntimeConsumerGate do
         mode: mode,
         scheme: URI.parse(url).scheme,
         protocol: opts[:http_version],
-        backend: :ex_ssl,
+        backend: if(mode == "ex_ssl", do: :ex_ssl),
         verified_tls: mode == "ex_ssl"
       })
     )

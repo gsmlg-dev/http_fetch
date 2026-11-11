@@ -514,8 +514,14 @@ backend = case config["backend"] do
   "ssl" -> :ssl
   _ -> raise "unknown performance backend"
 end
-{:ok, ^backend} = HTTP.TLSBackend.resolve(backend)
-transport = HTTP.TLSBackend.transport(backend)
+# The candidate has one TLS engine; only the historical OTP reference source
+# still carries the removed HTTP.TLSBackend selector.
+transport = case backend do
+  :ex_ssl -> HTTP.Transport.ExSSL
+  :ssl ->
+    {:ok, :ssl} = HTTP.TLSBackend.resolve(:ssl)
+    HTTP.TLSBackend.transport(:ssl)
+end
 Code.ensure_loaded!(transport)
 {^transport, beam, _} = :code.get_object_code(transport)
 sha = fn bytes -> :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower) end

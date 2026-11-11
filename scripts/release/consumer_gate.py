@@ -18,12 +18,10 @@ from stage import PACKAGES, ROOT
 
 MIGRATION_GROUPS = {
     "defaults": (
-        "apps/http_core/test/http/tls_backend_test.exs",
         "apps/http_runtime/test/http/runtime/options_test.exs",
         "apps/http_runtime/test/http/managed_transport_ex_ssl_policy_test.exs",
         "apps/http_fetch/test/http/fetch_options_test.exs",
         "apps/http_fetch/test/http/http2_pool_key_test.exs",
-        "apps/http_fetch/test/http/http2_pool_key_configuration_test.exs",
         "apps/http_fetch/test/http/request_completion_admission_test.exs",
         "apps/http_event_source/test/http/event_source/options_test.exs",
         "apps/http_web_socket/test/http/web_socket/options_test.exs",

@@ -110,10 +110,12 @@ class HTTPRuntimeTrafficEvidenceTests(unittest.TestCase):
                                  str(ROOT / 'apps/http_fetch/test/support/fixtures/localhost-ca.pem'))
                 self.assertIn(str(ROOT / 'apps/http_fetch/test/support/fixtures/localhost.pem'), command)
         driver = (ROOT / 'scripts/http_runtime_consumer_gate.exs').read_text()
-        for required in ('tls_backend: :ex_ssl', 'verify: :verify_peer',
+        for required in ('verify: :verify_peer',
                          'server_name_indication: ~c"localhost"',
                          '"https://", "wss://"'):
             self.assertIn(required, driver)
+        # ex_ssl is the only TLS engine; the removed option would raise ArgumentError.
+        self.assertNotIn('tls_backend', driver)
         self.assertNotIn('customize_hostname_check:', driver)
         self.assertNotIn(':verify_none', driver)
 
