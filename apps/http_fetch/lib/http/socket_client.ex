@@ -148,9 +148,8 @@ defmodule HTTP.SocketClient do
 
     request = tcp_request(request)
 
-    with :ok <- HTTP.RequestLifecycle.register(tracker, self(), :owner, deadline_at) do
-      owner(parent, ref, request, nil, redirects, redirected?, deadline_at)
-    else
+    case HTTP.RequestLifecycle.register(tracker, self(), :owner, deadline_at) do
+      :ok -> owner(parent, ref, request, nil, redirects, redirected?, deadline_at)
       {:error, reason} -> send_error(parent, ref, reason)
     end
   end
