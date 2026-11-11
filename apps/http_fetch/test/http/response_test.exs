@@ -43,21 +43,48 @@ defmodule HTTP.ResponseTest do
     end
 
     test "read_all raises on streaming errors instead of returning a partial body" do
-      {:ok, stream} = HTTP.Stream.start_link(0)
+      response = failing_stream_response(:closed)
 
-      producer =
-        Task.async(fn ->
-          :ok = HTTP.Stream.chunk(stream, "partial", 1_000)
-          HTTP.Stream.error(stream, :closed)
-        end)
+      error =
+        assert_raise HTTP.ResponseError, fn ->
+          HTTP.Response.read_all(response)
+        end
 
-      response = %HTTP.Response{body: stream}
+      assert error.reason == :closed
+      assert Exception.message(error) == "response body stream failed: :closed"
+    end
 
-      assert_raise RuntimeError, ~r/stream read failed: :closed/, fn ->
-        HTTP.Response.read_all(response)
+    for reader <- [:text, :arrayBuffer, :array_buffer, :blob, :clone] do
+      test "#{reader} raises HTTP.ResponseError on a stream failure" do
+        response = failing_stream_response({:econnreset, :peer})
+
+        error =
+          assert_raise HTTP.ResponseError, fn ->
+            apply(HTTP.Response, unquote(reader), [response])
+          end
+
+        assert error.reason == {:econnreset, :peer}
+      end
+    end
+
+    for reader <- [:json, :read_as_json] do
+      test "#{reader} returns the stream failure as an error tuple" do
+        response = failing_stream_response(:closed)
+        assert {:error, :closed} = apply(HTTP.Response, unquote(reader), [response])
       end
 
-      Task.await(producer)
+      test "#{reader} parses a streamed JSON body" do
+        {:ok, stream} = HTTP.Stream.start_link(0)
+
+        Task.start(fn ->
+          :ok = HTTP.Stream.chunk(stream, ~s({"a":), 1_000)
+          :ok = HTTP.Stream.chunk(stream, "1}", 1_000)
+          HTTP.Stream.finish(stream)
+        end)
+
+        assert {:ok, %{"a" => 1}} =
+                 apply(HTTP.Response, unquote(reader), [%HTTP.Response{body: stream}])
+      end
     end
 
     test "read_as_json - valid" do
@@ -661,6 +688,17 @@ defmodule HTTP.ResponseTest do
       refute Map.has_key?(headers, "cookie")
       assert headers["x-keep"] == "yes"
     end
+  end
+
+  defp failing_stream_response(reason) do
+    {:ok, stream} = HTTP.Stream.start_link(0)
+
+    Task.start(fn ->
+      :ok = HTTP.Stream.chunk(stream, "partial", 1_000)
+      HTTP.Stream.error(stream, reason)
+    end)
+
+    %HTTP.Response{body: stream}
   end
 
   defp start_local_http_server!(body, headers \\ [{"Content-Type", "text/plain"}]) do

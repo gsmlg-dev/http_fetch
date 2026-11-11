@@ -82,7 +82,7 @@ defmodule HTTP.ResponseStreamIdlePolicyTest do
     monitor = Process.monitor(stream)
     response = HTTP.Response.new(body: stream)
 
-    assert_raise RuntimeError, "stream read failed: :timeout", fn ->
+    assert_raise HTTP.ResponseError, "response body stream failed: :timeout", fn ->
       HTTP.Response.read_all(response)
     end
 
@@ -105,8 +105,8 @@ defmodule HTTP.ResponseStreamIdlePolicyTest do
 
       case unquote(reader) do
         :read_all ->
-          assert_raise RuntimeError,
-                       "stream read failed: {:stream_down, :fixture_stream_failure}",
+          assert_raise HTTP.ResponseError,
+                       "response body stream failed: {:stream_down, :fixture_stream_failure}",
                        fn ->
                          HTTP.Response.read_all(response)
                        end

@@ -67,8 +67,8 @@ defmodule HTTP.Response do
   Malformed or truncated supported encodings fail buffered fetches with
   `{:error, {:invalid_content_encoding, coding}}`. Streams deliver
   `{:stream_error, stream_pid, {:invalid_content_encoding, coding}}`;
-  `write_to/2` returns that error, while read methods raise the usual stream-read
-  `RuntimeError`. A failed file write may leave partial decoded bytes. Raw
+  `write_to/2`, `json/1` and `read_as_json/1` return that error, while the other
+  read methods raise `HTTP.ResponseError`. A failed file write may leave partial decoded bytes. Raw
   (non-zlib-wrapped) deflate is rejected as malformed.
 
   ## Response Methods
@@ -263,6 +263,8 @@ defmodule HTTP.Response do
   **Note**: A buffered body can be read repeatedly. A streamed body is consumed
   once; use `clone/1` to read it more than once.
 
+  Raises `HTTP.ResponseError` if a streamed body fails before it completes.
+
   ## Examples
 
       iex> response = HTTP.Response.new(status: 200, body: "Hello")
@@ -279,6 +281,10 @@ defmodule HTTP.Response do
   For streaming responses, this will consume the entire stream into memory.
   For non-streaming responses, returns the existing body.
 
+  Raises `HTTP.ResponseError` (with the stream failure as `reason`) if a
+  streamed body fails or times out before it completes; no partial body is
+  returned.
+
   ## Examples
       iex> response = HTTP.Response.new(status: 200, body: "Hello World")
       iex> HTTP.Response.read_all(response)
@@ -286,15 +292,16 @@ defmodule HTTP.Response do
   """
   @spec read_all(t()) :: binary()
   def read_all(%__MODULE__{} = response) do
-    case response_stream(response) do
-      stream when is_pid(stream) ->
-        case read_stream(stream, response.response_stream_idle_timeout) do
-          {:ok, body} -> body
-          {:error, reason} -> raise RuntimeError, "stream read failed: #{inspect(reason)}"
-        end
+    case read_body(response) do
+      {:ok, body} -> body
+      {:error, reason} -> raise HTTP.ResponseError, reason: reason
+    end
+  end
 
-      nil ->
-        response.body || ""
+  defp read_body(%__MODULE__{} = response) do
+    case response_stream(response) do
+      stream when is_pid(stream) -> read_stream(stream, response.response_stream_idle_timeout)
+      nil -> {:ok, response.body || ""}
     end
   end
 
@@ -390,7 +397,8 @@ defmodule HTTP.Response do
 
   Returns:
     - `{:ok, map | list}` if the body is valid JSON.
-    - `{:error, reason}` if the body cannot be parsed as JSON.
+    - `{:error, reason}` if a streamed body fails before it completes (`reason`
+      is the stream failure) or the body cannot be parsed as JSON.
 
   ## Examples
       iex> response = HTTP.Response.new(status: 200, body: ~s({"key": "value"}))
@@ -399,12 +407,7 @@ defmodule HTTP.Response do
   """
   @spec read_as_json(t()) :: {:ok, map() | list()} | {:error, term()}
   def read_as_json(%__MODULE__{} = response) do
-    body = read_all(response)
-
-    case JSON.decode(body) do
-      {:ok, decoded} -> {:ok, decoded}
-      {:error, error} -> {:error, error}
-    end
+    with {:ok, body} <- read_body(response), do: JSON.decode(body)
   end
 
   @doc """
@@ -412,19 +415,15 @@ defmodule HTTP.Response do
 
   Returns:
     - `{:ok, map | list}` if the body is valid JSON.
-    - `{:error, reason}` if the body cannot be parsed as JSON.
+    - `{:error, reason}` if a streamed body fails before it completes (`reason`
+      is the stream failure) or the body cannot be parsed as JSON.
 
   A streamed body is read to completion into memory first, as with `text/1`.
   This function is not deprecated; it is the same as `read_as_json/1`.
   """
   @spec json(t()) :: {:ok, map() | list()} | {:error, term()}
   def json(%__MODULE__{} = response) do
-    body = read_all(response)
-
-    case JSON.decode(body) do
-      {:ok, decoded} -> {:ok, decoded}
-      {:error, error} -> {:error, error}
-    end
+    with {:ok, body} <- read_body(response), do: JSON.decode(body)
   end
 
   @doc """
@@ -470,8 +469,8 @@ defmodule HTTP.Response do
   For buffered responses, this creates a shallow copy with the body duplicated and
   unchanged.
 
-  For streaming responses, this creates a "tee" that splits the stream into two
-  independent streams that can be consumed separately.
+  For streaming responses, this reads the stream into a buffered copy and
+  raises `HTTP.ResponseError` if the stream fails.
 
   ## Examples
 
@@ -492,8 +491,9 @@ defmodule HTTP.Response do
       response = HTTP.Response.new(status: 200, body: stream_pid)
       clone = HTTP.Response.clone(response)
 
-      # Both can be read independently
-      data1 = HTTP.Response.read_all(response)
+      # The clone is buffered and can be read repeatedly; the original
+      # stream has been consumed
+      data1 = HTTP.Response.read_all(clone)
       data2 = HTTP.Response.read_all(clone)
   """
   @spec clone(t()) :: t()
@@ -510,7 +510,7 @@ defmodule HTTP.Response do
   Reads the response body as raw binary data (equivalent to JavaScript's ArrayBuffer).
 
   Returns the body as an Elixir binary. For streaming responses, this reads
-  the entire stream into memory.
+  the entire stream into memory and raises `HTTP.ResponseError` if it fails.
 
   ## Examples
 
@@ -535,7 +535,8 @@ defmodule HTTP.Response do
   Reads the response body as a Blob (binary data with metadata).
 
   Returns an `HTTP.Blob` struct containing the body data, MIME type extracted
-  from the Content-Type header, and size in bytes.
+  from the Content-Type header, and size in bytes. Raises `HTTP.ResponseError`
+  if a streamed body fails.
 
   ## Examples
 

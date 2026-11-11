@@ -634,9 +634,11 @@ defmodule HTTP.SocketClientHTTP2Test do
           assert is_pid(response.body)
           stream_monitor = Process.monitor(response.body)
 
-          assert_raise RuntimeError, "stream read failed: :content_length_mismatch", fn ->
-            HTTP.Response.read_all(response)
-          end
+          assert_raise HTTP.ResponseError,
+                       "response body stream failed: :content_length_mismatch",
+                       fn ->
+                         HTTP.Response.read_all(response)
+                       end
 
           assert_receive {:DOWN, ^stream_monitor, :process, _stream, :normal}, 5_000
 

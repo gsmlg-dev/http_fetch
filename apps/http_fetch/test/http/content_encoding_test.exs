@@ -178,7 +178,7 @@ defmodule HTTP.ContentEncodingTest do
       encoded = malformed(unquote(encoding), unquote(malformed))
       response = fetch(:http1, encoded, [{"content-encoding", unquote(encoding)}], true)
 
-      assert_raise RuntimeError, ~r/invalid_content_encoding/, fn ->
+      assert_raise HTTP.ResponseError, ~r/invalid_content_encoding/, fn ->
         HTTP.Response.text(response)
       end
     end
@@ -197,7 +197,7 @@ defmodule HTTP.ContentEncodingTest do
 
       response = bomb_fetch(unquote(protocol), bomb, unquote(encoding), true)
 
-      assert_raise RuntimeError, ~r/decoded_body_too_large/, fn ->
+      assert_raise HTTP.ResponseError, ~r/decoded_body_too_large/, fn ->
         HTTP.Response.read_all(response)
       end
     end

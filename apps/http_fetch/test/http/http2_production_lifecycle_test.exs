@@ -50,9 +50,11 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
     assert response.status == 200
     send(peer, :reset_after_response)
 
-    assert_raise RuntimeError, ~r/stream read failed: \{:stream_reset, :refused_stream\}/, fn ->
-      HTTP.Response.read_all(response)
-    end
+    assert_raise HTTP.ResponseError,
+                 ~r/response body stream failed: \{:stream_reset, :refused_stream\}/,
+                 fn ->
+                   HTTP.Response.read_all(response)
+                 end
 
     assert_receive {:peer_complete, ^peer}
     send(peer, :close)
@@ -69,7 +71,10 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
     assert response.status == 200
     assert_receive {:peer_complete, ^peer}
     send(peer, :close)
-    assert_raise RuntimeError, ~r/stream read failed:/, fn -> HTTP.Response.read_all(response) end
+
+    assert_raise HTTP.ResponseError, ~r/response body stream failed:/, fn ->
+      HTTP.Response.read_all(response)
+    end
   end
 
   test "abort fails an already returned response stream" do
@@ -85,7 +90,7 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
     assert response.status == 200
     assert :ok = HTTP.AbortController.abort(controller)
 
-    assert_raise RuntimeError, "stream read failed: :aborted", fn ->
+    assert_raise HTTP.ResponseError, "response body stream failed: :aborted", fn ->
       HTTP.Response.read_all(response)
     end
 
@@ -118,7 +123,7 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
     %{streams: %{1 => %{pid: coordinator}}} = :sys.get_state(owner)
     send(coordinator, :deadline)
 
-    assert_raise RuntimeError, "stream read failed: :request_timeout", fn ->
+    assert_raise HTTP.ResponseError, "response body stream failed: :request_timeout", fn ->
       HTTP.Response.read_all(response)
     end
 
@@ -193,7 +198,11 @@ defmodule HTTP.HTTP2ProductionLifecycleTest do
 
     assert is_pid(owner)
     Process.exit(owner, :kill)
-    assert_raise RuntimeError, ~r/stream read failed:/, fn -> HTTP.Response.read_all(response) end
+
+    assert_raise HTTP.ResponseError, ~r/response body stream failed:/, fn ->
+      HTTP.Response.read_all(response)
+    end
+
     assert_receive {:peer_complete, ^peer}
     send(peer, :close)
   end

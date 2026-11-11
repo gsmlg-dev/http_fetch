@@ -78,7 +78,7 @@ defmodule HTTP.ExSSLUncleanCloseTest do
     peer = serve_once(ctx.listener, :read_to_close)
     response = fetch!(ctx.url, stream_response: false)
     assert_receive {:peer_closed, pid} when pid == peer.pid, @wait
-    assert_raise RuntimeError, ~r/econnreset/, fn -> Response.read_all(response) end
+    assert_raise HTTP.ResponseError, ~r/econnreset/, fn -> Response.read_all(response) end
     await_peer(peer)
   end
 
