@@ -29,7 +29,9 @@ with `{:quic_accept, endpoint}` when their ready accept queue becomes nonempty.
 most `:max_connections` connections (default 128).
 
 A connection handle is `%Quic.Runtime.ConnectionHandle{id: pid, generation: ref}`;
-a stream handle is `%Quic.Runtime.StreamHandle{connection: handle, id: integer}`.
+a stream handle is `%Quic.Runtime.StreamHandle{connection: handle, id: integer, epoch: integer}`;
+the epoch is advanced by the endpoint when the stream space is invalidated (for example
+when resumption rejects early data) so a stale handle cannot address a new stream.
 Treat both as opaque capabilities. Generations prevent stale handles from
 addressing a different connection. Stream IDs follow QUIC's initiator/direction
 bits, including client uni 2/6/10 and server uni 3/7/11. Streams are data owned by
@@ -176,7 +178,8 @@ DATAGRAM bytes do not consume stream flow-control credit.
 
 DATAGRAM frames elicit ACKs and use QUIC congestion control, but are not
 retransmitted after loss or by PTO probes. Applications must tolerate loss and
-reordering. This implementation uses 1-RTT only; 0-RTT remains unsupported.
+reordering. DATAGRAMs are sent in 1-RTT packets and, when early data is accepted
+for a resumed connection, also in 0-RTT packets.
 `Quic.capabilities().datagram` describes library support, while per-connection
 metadata describes negotiation. `http3` remains `false`.
 
@@ -317,3 +320,36 @@ Endpoint and connection operation/pull options, including `Quic.attach/3`, accep
 by that original deadline. Existing duration options keep their prior semantics.
 The cleanup receipt proves local resource retirement, never peer delivery or
 application protocol success.
+
+## Protocol errors and closing
+
+An authenticated 1-RTT packet that violates the protocol closes the connection with a
+CONNECTION_CLOSE frame (type 0x1c) carrying the RFC 9000 section 20.1 code, and the
+connection enters closing, then draining (section 10.2). Examples: FLOW_CONTROL_ERROR
+(0x03) for data beyond MAX_DATA or MAX_STREAM_DATA, STREAM_LIMIT_ERROR (0x04) for a
+stream beyond MAX_STREAMS, STREAM_STATE_ERROR (0x05), FINAL_SIZE_ERROR (0x06),
+FRAME_ENCODING_ERROR (0x07) for malformed frames, CONNECTION_ID_LIMIT_ERROR (0x09),
+PROTOCOL_VIOLATION (0x0a) for an ACK of an unsent packet, and KEY_UPDATE_ERROR (0x0e)
+for an invalid peer key update. The owner receives `{:quic_closing, conn, generation,
+{:transport, code, frame_type}}`. Packets that fail authentication are still dropped
+silently. STREAM data that arrives after a local `stop_stream` (STOP_SENDING) is
+checked against flow control and the final size, then discarded; its connection credit
+is released immediately.
+
+## Not implemented
+
+The following QUIC features are absent. Each row states the observable consequence.
+
+| Feature | RFC | Consequence |
+|---|---|---|
+| Stateless reset (send, recognize) | RFC 9000 section 10.3 | The token is parsed and stored only. A peer that lost state is never told to reset, and a received reset is not recognized, so the connection waits for idle timeout instead of closing at once. |
+| Version Negotiation (send, handle) | RFC 9000 section 6 | The server silently drops non-v1 Initials. A client ignores a Version Negotiation packet, so an attempt against a v1-incapable server ends at the handshake timeout. |
+| ECN | RFC 9000 section 13.4 | No ECN marking, validation or reaction. ECN counts in received ACK frames are parsed and ignored. |
+| Path MTU discovery | RFC 9000 section 14.3 | Packets are at most 1350 bytes (1200 on new paths), limited further only by the peer's `max_udp_payload_size`. Larger paths are not exploited. |
+| Persistent congestion | RFC 9002 section 7.6 | After prolonged loss the window is not collapsed to the minimum. NewReno recovery otherwise follows section 7.3. |
+| Pacing | RFC 9002 section 7.7 | Bursts up to the congestion window are sent back to back. |
+| Local key update initiation | RFC 9001 section 6 | There is no API to start a key update. Peer-initiated updates are accepted and validated. |
+| AEAD confidentiality and integrity limits | RFC 9001 section 6.6 | Protected packets and authentication failures are not counted against the key limits, so a key is never retired because a use or forgery limit was reached. |
+| Server NEW_TOKEN issuance | RFC 9000 section 8.1.3 | A server never issues address-validation tokens for later connections. A client accepts and stores a received NEW_TOKEN. |
+| Delayed ACKs and ACK Delay reporting | RFC 9000 section 13.2 | Every ack-eliciting packet is acknowledged at once with ACK Delay 0. |
+| Repeated CONNECTION_CLOSE while closing | RFC 9000 section 10.2.1 | CONNECTION_CLOSE is sent once. If it is lost, the peer waits for its idle timeout. Incoming packets in closing are ignored. |

@@ -2,7 +2,7 @@ defmodule Quic do
   @moduledoc """
   Certificate-based QUIC v1 reliable streams with bounded pull consumption.
 
-  See `docs/consumer-contract.md` for ownership, generation handles, deadlines,
+  See `docs/quic/consumer-contract.md` for ownership, generation handles, deadlines,
   admission outcomes and limitations. ALPN is metadata; application protocols
   are provided by consumers.
 

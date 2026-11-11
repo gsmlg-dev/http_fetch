@@ -59,7 +59,7 @@ Profiles accept application ALPN, for example
 Negotiating `h3` does not implement HTTP/3 or QPACK. Consumers own those protocols.
 `Quic.capabilities().http3` remains `false`; the separate
 [`elixir_quic_http3` companion](../elixir_quic_http3/README.md) implements the
-HTTP/3 beta client profile with static/literal QPACK. Its application support
+HTTP/3 beta client profile with a dynamic-table QPACK decoder (the encoder stays static/literal). Its application support
 does not expand raw QUIC's protocol ownership.
 
 RFC 9221 DATAGRAM support is opt-in per endpoint with
