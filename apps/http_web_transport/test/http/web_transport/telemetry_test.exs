@@ -60,7 +60,7 @@ defmodule HTTP.WebTransport.TelemetryTest do
     send(test_pid, {:telemetry_event, event, measurements, metadata})
   end
 
-  test "the HTTP.WebTransport moduledoc documents every event" do
+  test "the HTTP.WebTransport moduledoc documents every event and the error reasons" do
     {:docs_v1, _, _, _, %{"en" => doc}, _, _} = Code.fetch_docs(HTTP.WebTransport)
 
     for event <- [
@@ -82,5 +82,7 @@ defmodule HTTP.WebTransport.TelemetryTest do
     end
 
     assert doc =~ "## Telemetry"
+    assert doc =~ "## Error reasons"
+    assert doc =~ "| `:closed` |"
   end
 end

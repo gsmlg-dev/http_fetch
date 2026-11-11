@@ -161,6 +161,33 @@ defmodule HTTP.WebSocket do
   | `[:http_web_socket, :close, :start]` | `start_time` | `url`, `close_code` |
   | `[:http_web_socket, :close, :stop]` | none | `url`, `close_code`, `was_clean` |
   | `[:http_runtime, :stream, event]` (`event` is `:open`, `:queue`, `:fallback`, `:error` or `:close`) | `queued_bytes`, `raw_bytes`, `buffered_amount` (bytes); `queued_events`, `pending_send_frames`, `control_frames` (counts) | `client: :web_socket`, `http_version`, `outcome` |
+
+  ## Error reasons
+
+  | Reason | When |
+  | --- | --- |
+  | `:invalid_url` | `new/3`: unparsable URL, userinfo, empty or control-byte host, port outside 1..65535, or whitespace/control bytes in path or query |
+  | `{:unsupported_scheme, scheme}` | `new/3`: scheme other than `ws`, `wss`, `http` or `https` |
+  | `:fragment_not_allowed` | `new/3`: URL has a fragment |
+  | `:invalid_protocols`, `:invalid_protocol`, `:duplicate_protocol` | `new/3`: malformed, non-token or repeated subprotocol |
+  | `:closed` | Either the socket is closed (`send_ack/2`, `send_frame/2`, `send_frame_ack/2` when not OPEN, including CONNECTING) **or** its process is unreachable (exited, or no reply within 5 seconds). The two cases are deliberately not distinguished; getters return their CLOSED defaults (`ready_state/1` is `3`) in both. `send/2` returns it only when unreachable (a CLOSING/CLOSED socket accepts and discards, as in browsers). Also the `{:send_result, ref, {:error, :closed}}` of a send discarded by close |
+  | `:invalid_state` | `send/2` while CONNECTING; `migrate/2` before OPEN |
+  | `:send_queue_full` | a send would exceed `max_send_queue` bytes or `max_send_frames` |
+  | `:unsupported_data` | `send/2` data is not a binary, `HTTP.Blob` or ArrayBuffer |
+  | `:proxy_mode_required` | `send_frame/2` or `send_frame_ack/2` in browser mode |
+  | `:invalid_text_data`, `:control_payload_too_large`, `:invalid_frame` | proxy frame text is not UTF-8, a control payload exceeds 125 bytes, or the frame shape/opcode is unsupported |
+  | `:invalid_close_code`, `:invalid_close_reason`, `:close_reason_too_long` | `close/3` code not allowed, reason not UTF-8, or reason over 123 bytes |
+  | `:invalid_binary_type` | `set_binary_type/2` with anything but `:blob` or `:array_buffer` |
+  | `:invalid_array_buffer` | `array_buffer/1` with a non-binary |
+  | `:invalid_timeout`, `:invalid_local_address`, `:migration_requires_http3`, `:not_exclusive_owner`, `:migration_busy`, `:validation_timeout`, `{:indeterminate_operation, ref}` | `migrate/2` refusals and outcomes (see `migrate/2`); `:timeout` when the call itself times out |
+  | `:cleanup_unconfirmed` | `HTTP.ClientCompletion.await/2` cannot prove HTTP/3 tunnel cleanup |
+  | `:timeout`, `:idle_timeout`, `:send_timeout` | Error event: opening deadline, `idle_timeout`, or `write_timeout` expired |
+  | `:closed_while_connecting` | Error event: `close/1,3` before OPEN |
+  | `:consumer_overloaded` | Error event: push delivery overloaded the owner mailbox |
+  | `:frame_too_big`, `:message_too_big`, `:read_buffer_too_big` | Error event: receive limits exceeded (Close 1009) |
+  | handshake reasons such as `{:unexpected_status, status}`, `:missing_accept`, `:invalid_accept` | Error event: the upgrade or extended CONNECT response was rejected |
+
+  Invalid options are not error reasons: they raise `ArgumentError`.
   """
 
   alias HTTP.WebSocket.ArrayBuffer

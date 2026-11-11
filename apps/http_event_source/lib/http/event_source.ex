@@ -93,6 +93,22 @@ defmodule HTTP.EventSource do
   | `[:http_event_source, :reconnect, :stop]` | `attempt` (count) | `url` |
   | `[:http_event_source, :close, :stop]` | none | `url`, `error` (`:closed` for `close/1`, `:owner_down`, or the fatal reason) |
   | `[:http_runtime, :stream, event]` (`event` is `:open`, `:queue`, `:reconnect`, `:fallback`, `:error` or `:close`) | `queued_bytes`, `raw_bytes` (bytes); `queued_events` (count) | `client: :event_source`, `http_version`, `outcome` |
+
+  ## Error reasons
+
+  | Reason | When |
+  | --- | --- |
+  | `:invalid_url` | `new/2`: non-string/URI URL, or whitespace/control bytes in path or query |
+  | `{:unsupported_scheme, scheme}` | `new/2`: scheme other than `http` or `https` |
+  | `:closed` | No call returns it: a closed source and an unreachable one (exited, or no reply within 5 seconds) are deliberately indistinguishable, and calls return their CLOSED defaults (`ready_state/1` is `2`, `close/1` and `acknowledge/2` return `:ok`). As the `[:close, :stop]` telemetry `error`, it means `close/1` was called |
+  | `:eof`, `:idle_timeout`, `:timeout`, `:opening_timeout`, transport reasons | Error event before a reconnect: stream ended, `idle_timeout` or the connect deadline expired, or the transport failed |
+  | `{:http_status, status}`, `:invalid_content_type` | Error event, fatal: non-200 response (204 stops reconnection) or not `text/event-stream` |
+  | `:invalid_redirect`, `:insecure_redirect`, `:too_many_redirects` | Error event, fatal: redirect target unusable, HTTPS to HTTP, or more than `max_redirects` |
+  | `:line_too_long`, `:event_too_large`, `:too_many_event_parts`, `:invalid_utf8`, `:invalid_last_event_id` | Error event, fatal: parser limits or invalid stream content |
+  | `:consumer_overloaded` | Error event, fatal: push delivery overloaded the owner mailbox |
+  | `:cleanup_capacity` | Error event, fatal: cleanup capacity stayed exhausted for three reconnects |
+
+  Invalid options are not error reasons: they raise `ArgumentError`.
   """
 
   alias HTTP.EventSource.Connection

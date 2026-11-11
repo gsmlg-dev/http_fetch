@@ -64,6 +64,28 @@ defmodule HTTP.WebTransport do
   | `[:http_web_transport, :stream, :sent]` | `bytes` | `url`, `stream_id` |
   | `[:http_web_transport, :stream, :received]` | `bytes` | `url`, `stream_id` |
   | `[:http_web_transport, :stream, :closed]` | none | `url`, `stream_id` |
+
+  ## Error reasons
+
+  | Reason | When |
+  | --- | --- |
+  | `{:unsupported_scheme, scheme}`, `:fragment_not_allowed`, `:invalid_url` | `new/2`: URL is not `https`, has a fragment, or is not a string/URI |
+  | `:closed` | Either the session (or the stream/queue read) is closed **or** the session process is unreachable (exited, or no reply within 5 seconds; for `await_*`, any exit other than the wait timeout). The two cases are deliberately not distinguished; getters return their closed defaults (`state/1` is `:closed`) in both |
+  | `:timeout` | a finite `await_*` or read timeout elapsed (a `0` timeout on a pending value), or `migrate/2`'s call timed out |
+  | `:invalid_timeout` | `await_*`, read or `migrate/2` timeout is not `:infinity` or a non-negative (for `migrate/2`, positive) integer |
+  | `:backpressure` | `max_pending_waiters`, `max_streams` or buffered-byte/item limits reached |
+  | `:invalid_state` | operation not allowed in the current session or stream state (connecting, draining, closed, or write after FIN) |
+  | `{:indeterminate_operation, ref}` | a stream creation, `close/2` or `migrate/2` outcome is unknown at its deadline; read `operation_status/2`, never replay |
+  | `:deadline_exceeded` | a mutation reached the session after its deadline and was not applied |
+  | `:cancelled` | a receive stream was cancelled locally |
+  | `:invalid_close_code`, `:invalid_close_reason`, `:close_reason_too_long` | `close/2` code outside 0..0xFFFFFFFF, reason not UTF-8, or over 1024 bytes |
+  | `:send_order_unsupported`, `:send_group_unsupported` | non-zero `send_order` or any `send_group` |
+  | `:invalid_datagram`, `:invalid_datagram_age`, `:invalid_stream_data` | non-binary datagram, invalid max age, or invalid stream write data |
+  | `:unreliable_transport_required` | `ready` rejects: `require_unreliable: true` and the backend lacks datagrams |
+  | `:connect_cancelled`, `:connect_timeout` | `ready` rejects: `close/2` while connecting, or `connect_timeout` expired |
+  | `:migration_unsupported`, `:migration_busy`, `:invalid_local_address`, `:peer_disabled_migration`, `:no_unused_connection_id`, `{:bind_failed, reason}`, `:validation_timeout` | `migrate/2` refusals (see `migrate/2`) |
+
+  Invalid options are not error reasons: they raise `ArgumentError`.
   """
 
   alias HTTP.WebTransport.CloseInfo

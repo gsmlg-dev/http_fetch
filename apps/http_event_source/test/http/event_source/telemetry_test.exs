@@ -50,7 +50,7 @@ defmodule HTTP.EventSource.TelemetryTest do
     send(test_pid, {:telemetry_event, event, measurements, metadata})
   end
 
-  test "the HTTP.EventSource moduledoc documents every event" do
+  test "the HTTP.EventSource moduledoc documents every event and the error reasons" do
     {:docs_v1, _, _, _, %{"en" => doc}, _, _} = Code.fetch_docs(HTTP.EventSource)
 
     for event <- [
@@ -68,5 +68,7 @@ defmodule HTTP.EventSource.TelemetryTest do
     end
 
     assert doc =~ "## Telemetry"
+    assert doc =~ "## Error reasons"
+    assert doc =~ "| `:closed` |"
   end
 end
