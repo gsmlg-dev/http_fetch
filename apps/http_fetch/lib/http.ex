@@ -68,9 +68,54 @@ defmodule HTTP do
   - Content-Length > 5MB
   - Content-Length header is missing/unknown
 
-  Streaming responses expose the stream PID in `body`; `stream` is retained as a
-  compatibility alias.
+  Streaming responses expose the stream PID in `body`.
   Use `HTTP.Response.read_all/1` or `HTTP.Response.write_to/2` to consume streams.
+
+  ## Error reasons
+
+  HTTP error statuses are ordinary responses. Invalid options raise
+  `ArgumentError` before a request starts. Other failures are reason terms:
+  `{:error, reason}` from `HTTP.Promise.await/2`, `{:stream_error, stream_pid,
+  reason}` to a direct stream reader, `{:error, reason}` from
+  `HTTP.Response.json/1`, `read_as_json/1` and `write_to/2`, or the `reason` of an
+  `HTTP.ResponseError` raised by the other `HTTP.Response` body readers. With
+  `error_mode: :structured`, pre-response reasons are wrapped in
+  `%HTTP.RequestError{reason: reason}`.
+
+  Phases: *connect* (DNS, TCP, TLS or QUIC setup), *request* (sending the request
+  and waiting for the response head), *body* (streamed response or upload
+  delivery) and *await* (the caller's own wait). Reasons marked "any" can occur in
+  every request phase.
+
+  | Reason | When | Phase |
+  | --- | --- | --- |
+  | `:timeout` | The request `timeout:` deadline expired. Also an expired socket send timeout, response stream idle/acknowledgement limit or reader wait. | any |
+  | `:await_timeout` | `HTTP.Promise.await/2`'s own wait expired. The request continues and the promise can be awaited again. | await |
+  | `:connect_timeout` | `connect_timeout:` expired before the connection (including TLS/QUIC) was established. | connect |
+  | `:read_idle_timeout`, `:write_idle_timeout` | An HTTP/1 `read_idle_timeout` / `write_idle_timeout` expired. | request, body |
+  | `:aborted` | The request's `HTTP.AbortController` was aborted. | any |
+  | `:econnrefused`, `:nxdomain`, `:ehostunreach`, `:enetunreach`, `:econnreset`, ... | Socket/DNS errors from `:gen_tcp` and `:inet`. | connect, request, body |
+  | `{:tls_alert, {alert, detail}}` | TLS handshake or certificate verification failed. | connect |
+  | `{:options, detail}` | The `ssl` options were rejected by the TLS engine. | connect |
+  | `:closed` | The peer closed the connection before a complete response. | request, body |
+  | `:redirect` | A redirect was received with `redirect: :error`. | request |
+  | `:too_many_redirects` | More than 20 redirects were followed. | request |
+  | `:streaming_body_redirect_not_replayable` | A 307/308 would replay a streamed (`duplex: :half`) body. | request |
+  | `:invalid_http_response`, `:invalid_status_line`, `:invalid_response_headers`, `:invalid_content_length`, `:conflicting_response_framing`, `{:unsupported_transfer_encoding, coding}` | A malformed HTTP/1 response head or framing. | request |
+  | `:content_length_mismatch` | The body length differs from its `Content-Length` (response or upload). | body |
+  | `{:invalid_content_encoding, coding}`, `:decoded_body_too_large` | A `gzip`/`deflate` body is malformed or decodes past the limit. | body |
+  | `:http2_informational_limit`, `:http2_trailers_limit` | HTTP/2 informational or trailer retention budgets were exceeded. | request, body |
+  | `{:stream_reset, code}`, `:protocol_error`, `:flow_control_error`, ... | HTTP/2 stream reset or protocol violation. | request, body |
+  | `{:http3_error, scope, code, reason}` | HTTP/3 stream or connection error. | request, body |
+  | `{:connection_owner_down, reason}` | The shared HTTP/2 or HTTP/3 connection owner exited. | request, body |
+  | `{:proxy_connect_status, status}`, `:proxy_tunnel_timeout`, `:invalid_proxy_response` | An explicit proxy refused or failed the CONNECT tunnel. | connect |
+  | `:unknown_pool`, `:stale_pool`, `{:invalid_pool_option, key, why}` | A `pool:` selection is unknown, restarted, or incompatible with the request. | request |
+  | `{:invalid_adapter, why}` | An `adapter:` is missing callbacks or returned an invalid result. | request |
+  | `{:stream_down, reason}` | A response or upload stream process exited. | body |
+  | `{:source_failure, kind, reason}` or the raised exception | An `HTTP.Stream.from_enumerable/2` upload source raised or threw. | body |
+
+  Other protocol-specific reasons may be returned; match on the rows above and
+  treat any other term as a request failure.
 
   ## Telemetry Events
 

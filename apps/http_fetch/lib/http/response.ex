@@ -100,7 +100,6 @@ defmodule HTTP.Response do
   - `url` - The requested URL as `URI` struct
   - `redirected` - Whether response was redirected
   - `type` - Response type (:basic, :cors, :error, :opaque)
-  - `stream` - Stream process PID for streaming responses (nil for buffered)
 
   ## Streaming vs Buffered Responses
 
@@ -205,9 +204,8 @@ defmodule HTTP.Response do
     - `opts` - Keyword list with fields:
       - `:status` - HTTP status code (default: 0)
       - `:headers` - HTTP.Headers struct (default: empty headers)
-      - `:body` - Response body binary or stream PID (default: stream PID or nil)
+      - `:body` - Response body binary or stream PID (default: nil)
       - `:url` - Request URL (default: nil)
-      - `:stream` - Stream PID for streaming responses (default: nil)
       - `:redirected` - Whether response was redirected (default: false)
       - `:type` - Response type (default: :basic)
 
