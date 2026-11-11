@@ -384,8 +384,19 @@ defmodule SSL do
 
   def handshake(_, _, _), do: {:error, :badarg}
 
-  @doc "Reads carrier socket options of a server connection. `:active` is the TLS delivery mode."
-  @spec getopts(Socket.t(), [atom()]) :: {:ok, keyword()} | {:error, term()}
+  @doc """
+  Reads carrier socket options of a server connection or listen socket.
+
+  For a connection, `:active` is the TLS delivery mode. For an `SSL.ListenSocket`,
+  the options are those of the listening TCP port, as `:inet.getopts/2` reports them.
+  """
+  @spec getopts(Socket.t() | ListenSocket.t(), [atom()]) :: {:ok, keyword()} | {:error, term()}
+  def getopts(%ListenSocket{} = listen, keys) when is_list(keys) do
+    if Enum.all?(keys, &is_atom/1),
+      do: :inet.getopts(ListenSocket.carrier(listen), keys),
+      else: {:error, :badarg}
+  end
+
   def getopts(socket, keys) when is_list(keys) do
     if Enum.all?(keys, &is_atom/1), do: call(socket, {:getopts, keys}), else: {:error, :badarg}
   end

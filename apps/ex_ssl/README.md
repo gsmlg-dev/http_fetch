@@ -230,8 +230,9 @@ upgrade `SSL.handshake(tcp, options, timeout)` (returning `{:ok, socket, []}`)
 provide an OTP-shaped TCP TLS server. Accepted sockets use the ordinary
 `SSL.send/recv/setopts/controlling_process/close` calls, plus server-socket
 `SSL.getopts/2`, `SSL.getstat/1,2` and `SSL.shutdown/2`. Client sockets return
-`{:error, :enotsup}` for those server-only calls. `close/1`, `sockname/1` and
-`controlling_process/2` also accept an `SSL.ListenSocket`.
+`{:error, :enotsup}` for those server-only calls. `close/1`, `sockname/1`,
+`getopts/2` and `controlling_process/2` also accept an `SSL.ListenSocket`;
+`getopts/2` then reads the listening TCP port's options.
 
 ```elixir
 {:ok, listen} = SSL.listen(4443, certfile: "cert.pem", keyfile: "key.pem")

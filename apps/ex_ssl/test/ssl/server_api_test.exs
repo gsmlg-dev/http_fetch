@@ -134,6 +134,20 @@ defmodule SSL.ServerAPITest do
     assert Task.await(client) == :closed
   end
 
+  # #159: listener tuning is observable through the public API.
+  test "getopts reads the listen socket's carrier options" do
+    {listen, _port} = listen(nodelay: false, keepalive: true, sndbuf: 32_768)
+
+    assert {:ok, opts} = SSL.getopts(listen, [:nodelay, :keepalive, :sndbuf])
+    assert opts[:nodelay] == false
+    assert opts[:keepalive] == true
+    assert opts[:sndbuf] >= 32_768
+    assert SSL.getopts(listen, [:active]) == {:ok, [active: false]}
+    assert SSL.getopts(listen, ["nodelay"]) == {:error, :badarg}
+    assert :ok = SSL.close(listen)
+    assert {:error, _} = SSL.getopts(listen, [:nodelay])
+  end
+
   test "listen socket supports controlling_process" do
     {listen, _port} = listen([])
     test = self()
