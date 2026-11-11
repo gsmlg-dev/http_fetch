@@ -245,4 +245,50 @@ defmodule HTTP.Test.AdapterTest do
     HTTP.Test.expect(:exit_verify, fn _ -> HTTP.Test.status(200) end)
     assert fetch(:exit_verify) |> HTTP.Promise.await() |> Map.fetch!(:status) == 200
   end
+
+  test "each retried Fetch attempt claims one ordered expectation" do
+    parent = self()
+
+    HTTP.Test.expect(:retried, 2, fn request ->
+      send(parent, {:attempt, request.method})
+      HTTP.Test.status(503)
+    end)
+
+    HTTP.Test.expect(:retried, fn _ -> HTTP.Test.text("recovered") end)
+
+    response =
+      fetch(:retried, retry: :transient, retry_delay: 0) |> HTTP.Promise.await(5_000)
+
+    assert %HTTP.Response{status: 200, body: "recovered"} = response
+    assert_received {:attempt, :get}
+    assert_received {:attempt, :get}
+    assert HTTP.Test.verify!() == :ok
+  end
+
+  test "a retry beyond the registered expectations is an unexpected call" do
+    HTTP.Test.expect(:short, fn _ -> HTTP.Test.transport_error(:econnrefused) end)
+
+    assert fetch(:short, retry: :transient, retry_delay: 0) |> HTTP.Promise.await(5_000) ==
+             {:error, {:http_test, :unexpected_call}}
+
+    assert_raise HTTP.Test.VerificationError, ~r/unexpected_call/, &HTTP.Test.verify!/0
+  end
+
+  test "a retried fixture stream is stopped before the next attempt" do
+    parent = self()
+
+    HTTP.Test.expect(:stream_retry, fn _ ->
+      HTTP.Test.stream(["unread"], status: 503, observer: parent)
+    end)
+
+    HTTP.Test.expect(:stream_retry, fn _ -> HTTP.Test.status(204) end)
+
+    assert %HTTP.Response{status: 204} =
+             fetch(:stream_retry, retry: :transient, retry_delay: 0)
+             |> HTTP.Promise.await(5_000)
+
+    assert_received {:http_test_stream, stream, _producer}
+    refute Process.alive?(stream)
+    assert HTTP.Test.verify!() == :ok
+  end
 end

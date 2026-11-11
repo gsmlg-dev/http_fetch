@@ -11,7 +11,8 @@ defmodule HTTP.RequestCompletion do
   Explicit ExSSL supports direct or pinned HTTPS HTTP/1 and HTTP/2, including reuse,
   and the proxy routes described above.
   Awaiting the Promise or monitoring its response stream alone does not
-  establish request cleanup.
+  establish request cleanup. Requests with an enabled `retry:` policy report
+  `{:error, {:unsupported_completion, :retry}}`.
 
   A finite timeout covers the entire wait. `:ok` confirms termination of tracked
   request resources; `{:error, :cleanup_pending}` leaves cleanup in progress.
@@ -47,6 +48,10 @@ defmodule HTTP.RequestCompletion do
 
       options.redirect == :follow ->
         %__MODULE__{unsupported: :redirect}
+
+      # A request lifecycle covers one attempt; its cancellation is sticky.
+      options.retry != false ->
+        %__MODULE__{unsupported: :retry}
 
       options.proxy != nil and not supported_proxy?(options, request) ->
         %__MODULE__{unsupported: :proxy}

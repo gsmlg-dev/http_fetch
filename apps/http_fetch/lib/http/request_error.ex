@@ -20,7 +20,8 @@ defmodule HTTP.RequestError do
   is unavailable.
 
   `pre_send?/1` identifies the only evidence suitable for caller-managed
-  validated-address failover. Fetch never retries an attempt automatically.
+  validated-address failover. Fetch retries only with an opt-in `retry:`
+  policy (see `HTTP.fetch/2`), which never changes the dialed address.
   The caller must preserve its original absolute deadline and cancellation
   signal across attempts, and validate every address before providing a pin.
   A stream stopped by a failed attempt must be replaced for another attempt.

@@ -20,7 +20,9 @@ defmodule HTTP.Test do
   fail verification even when a Promise was never awaited. Intentional
   `transport_error/1` fixtures are ordinary client failures.
 
-  This adapter performs one request attempt. Manual redirects are exposed; error
+  Each Fetch attempt claims one expectation, so a `retry:` policy on
+  `HTTP.fetch/2` is observable as consecutive claims; a retried fixture stream
+  is stopped before the next attempt. Manual redirects are exposed; error
   redirects fail with `:redirect`; follow candidates fail with
   `{:unsupported_test_policy, :redirect_follow}`. Only 301/302/303/307/308 with a
   binary Location are candidates. Default nonredirect fixtures work normally.

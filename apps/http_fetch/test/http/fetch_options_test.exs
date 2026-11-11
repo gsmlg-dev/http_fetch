@@ -472,4 +472,60 @@ defmodule HTTP.FetchOptionsTest do
       end
     end
   end
+
+  describe "retry" do
+    test "defaults to a single attempt" do
+      options = HTTP.FetchOptions.new([])
+      assert options.retry == false
+      assert HTTP.FetchOptions.retry_policy(options) == nil
+      refute Keyword.has_key?(HTTP.FetchOptions.to_transport_options(options), :retry)
+    end
+
+    test "normalizes modes, retry limits and delays from atom and string keys" do
+      fun = fn _request, _result -> true end
+      delay = fn attempt -> attempt end
+
+      for input <- [
+            [retry: :transient],
+            %{"retry" => "transient"},
+            [retry: :safe_transient, max_retries: 0, retry_delay: 25],
+            %{"retry" => "safe_transient", "maxRetries" => 5, "retryDelay" => delay},
+            %{"retry" => fun, "max_retries" => 1, "retry_delay" => 0}
+          ] do
+        options = HTTP.FetchOptions.new(input)
+        assert %HTTP.Retry{} = policy = HTTP.FetchOptions.retry_policy(options)
+        assert policy.mode == options.retry
+        assert policy.max_retries == options.max_retries
+        assert policy.delay == options.retry_delay
+      end
+
+      assert HTTP.FetchOptions.new(retry: :transient).max_retries == 3
+      assert HTTP.FetchOptions.new(retry: fun).retry == fun
+    end
+
+    test "invalid values raise ArgumentError" do
+      for opts <- [
+            [retry: true],
+            [retry: :always],
+            [retry: "sometimes"],
+            [retry: fn _ -> true end],
+            [retry: :transient, max_retries: -1],
+            [retry: :transient, max_retries: 1.5],
+            [max_retries: :infinity],
+            [retry: :transient, retry_delay: -1],
+            [retry: :transient, retry_delay: fn -> 1 end],
+            [retry_delay: "fast"]
+          ] do
+        assert_raise ArgumentError, fn -> HTTP.FetchOptions.new(opts) end
+      end
+    end
+
+    test "retry is unsupported with a managed transport scope" do
+      assert_raise ArgumentError, ~r/retry is unsupported with transport_scope/, fn ->
+        HTTP.FetchOptions.new(retry: :transient, transport_scope: make_ref())
+      end
+
+      assert HTTP.FetchOptions.new(retry: false, transport_scope: make_ref()).retry == false
+    end
+  end
 end

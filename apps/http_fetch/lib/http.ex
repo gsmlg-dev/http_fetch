@@ -124,6 +124,7 @@ defmodule HTTP do
   - `[:http_fetch, :request, :start]` - Request initiated
   - `[:http_fetch, :request, :stop]` - Request completed
   - `[:http_fetch, :request, :exception]` - Request failed
+  - `[:http_fetch, :request, :retry]` - A `retry:` policy starts another attempt
   - `[:http_fetch, :streaming, :start]` - Streaming started
   - `[:http_fetch, :streaming, :chunk]` - Stream chunk received
   - `[:http_fetch, :streaming, :stop]` - Streaming completed
@@ -134,6 +135,8 @@ defmodule HTTP do
   alias HTTP.Promise
   alias HTTP.Request
   alias HTTP.Response
+
+  @attempt_cleanup_budget 5_000
 
   @doc """
   Performs an HTTP request, similar to `global.fetch` in web browsers.
@@ -169,6 +172,8 @@ defmodule HTTP do
                 - `:connect_address`: Caller-validated IPv4/IPv6 tuple, preserving the URL authority/TLS hostname. Requires manual/error redirects.
                 - `:unix_socket`: Path to a Unix Domain Socket file (e.g., "/var/run/docker.sock").
                                   When provided, the request is sent over the Unix socket instead of TCP/IP.
+                - `:retry`, `:max_retries`, `:retry_delay`: Opt-in request-scoped retry policy;
+                  see "Retries" below. Defaults to `retry: false` (exactly one attempt).
 
   Returns:
     - `%HTTP.Promise{}`: A Promise struct. The caller should `HTTP.Promise.await(promise_struct)` to get the final
@@ -231,6 +236,52 @@ defmodule HTTP do
   Source/finalizer exceptions fail the request even if the peer sent success.
   Cancellation or expiry may forcibly stop the source; process termination alone
   does not certify callback completion.
+
+  ## Retries
+
+  `retry:` opts in to retrying one `fetch/2` call. Invalid values raise `ArgumentError`.
+
+  - `false` (default) - exactly one attempt.
+  - `:safe_transient` - retries only attempts that received no response:
+    `:econnrefused`, `:connect_timeout`, `:closed`, `:econnreset`,
+    `:ehostunreach` and `:enetunreach`. A status the server chose to send is
+    never retried.
+  - `:transient` - the `:safe_transient` failures plus 408, 429, 500, 502, 503
+    and 504 responses.
+  - `fun(request, response_or_error)` - returns a boolean for each attempt's
+    `%HTTP.Response{}` or `{:error, reason}`, overriding classification and the
+    method rule. Any other return raises `ArgumentError` in the request worker,
+    which exits the awaiting caller.
+
+  Built-in modes retry only idempotent methods: GET, HEAD, OPTIONS, PUT, DELETE
+  and TRACE. `max_retries` is the number of additional attempts, a
+  non-negative integer defaulting to 3. `retry_delay` is milliseconds to wait
+  before each retry, either a non-negative integer or a function receiving the
+  1-based number of the attempt being retried. The default is exponential,
+  `500 * 2 ** (n - 1)` capped at 10,000 ms (500, 1000, 2000, ...). A 429 or
+  503 response with a valid `Retry-After` (delta-seconds or HTTP-date) uses
+  that delay instead.
+
+  These rules apply even to a custom function. A request whose body is a
+  streamed `HTTP.Stream` (`duplex: :half`) is never replayed. A failure of
+  `:aborted` or `:timeout` is never retried. An aborted `signal` also
+  cancels a pending retry delay, returning `{:error, :aborted}`. The returned
+  response is final; a retried response's unread streamed body is cancelled
+  and its connection closed before the next attempt. One `timeout` deadline
+  covers every attempt and delay: each later attempt receives the remaining
+  budget. When a delay would reach the deadline, Fetch returns the last
+  result instead of waiting.
+
+  Each `HTTP.Adapter` attempt calls `execute/3` again. `HTTP.Test` fixtures
+  therefore claim one expectation per attempt. Telemetry emits
+  `[:http_fetch, :request, :retry]` before each retry, while request
+  start/stop/exception stay one per call (see `HTTP.Telemetry`). With retry
+  enabled, `HTTP.Promise.completion/1` reports `{:unsupported_completion,
+  :retry}`, and `transport_scope` is rejected because a managed admission
+  covers one attempt.
+
+      HTTP.fetch(url, retry: :transient, max_retries: 2, timeout: 10_000)
+      |> HTTP.Promise.await()
 
   Example Usage:
 
@@ -394,6 +445,7 @@ defmodule HTTP do
     # Extract AbortController PID and unix_socket from FetchOptions
     abort_controller_pid = options.signal
     unix_socket_path = options.unix_socket
+    retry = HTTP.FetchOptions.retry_policy(options)
 
     # Emit telemetry event for request start
     if HTTP.Telemetry.enabled?(options.telemetry),
@@ -465,7 +517,8 @@ defmodule HTTP do
                   unix_socket_path,
                   adapter,
                   association,
-                  tracker
+                  tracker,
+                  retry
                 )
 
               {:DOWN, ^launch_monitor, :process, ^calling_pid, _reason} ->
@@ -487,7 +540,8 @@ defmodule HTTP do
          unix_socket_path,
          adapter,
          association,
-         tracker
+         tracker,
+         retry
        ) do
     admission =
       with :ok <- association,
@@ -506,7 +560,8 @@ defmodule HTTP do
             self(),
             abort_controller_pid,
             unix_socket_path,
-            elem(adapter, 1)
+            elem(adapter, 1),
+            retry
           )
 
         {:error, reason} ->
@@ -544,33 +599,28 @@ defmodule HTTP do
           pid(),
           pid() | nil,
           String.t() | nil,
-          term()
+          term(),
+          HTTP.Retry.t() | nil
         ) :: Response.t() | {:error, term()}
   def handle_async_request(
         request,
         _calling_pid,
         abort_controller_pid,
         unix_socket_path \\ nil,
-        adapter_context \\ nil
+        adapter_context \\ nil,
+        retry \\ nil
       ) do
     start_time = System.monotonic_time(:microsecond)
 
-    failure_token =
-      if Keyword.get(request.transport_options, :error_mode, :raw) == :structured do
-        if Keyword.get(request.transport_options, :redirect, :follow) in [:manual, :error],
-          do: make_ref()
-      end
-
-    request = %{
-      request
-      | transport_options:
-          Keyword.put(request.transport_options, :connect_failure_token, failure_token)
+    attempts = %{
+      signal: abort_controller_pid,
+      unix_socket: unix_socket_path,
+      adapter: adapter_context,
+      retry: retry,
+      deadline: retry_deadline(request, retry)
     }
 
-    result =
-      if adapter_context == nil,
-        do: HTTP.SocketClient.request(request, abort_controller_pid, unix_socket_path),
-        else: HTTP.Adapter.execute(request, adapter_context, abort_controller_pid)
+    {result, failure_token} = run_attempts(request, attempts, 1)
 
     duration = System.monotonic_time(:microsecond) - start_time
 
@@ -601,6 +651,131 @@ defmodule HTTP do
              else: reason
 
         {:error, error}
+    end
+  end
+
+  # One retry loop per fetch: every attempt shares the request deadline, and
+  # telemetry start/stop/exception stay one per fetch.
+  defp run_attempts(request, attempts, attempt) do
+    {result, failure_token, owner} =
+      run_attempt(attempt_request(request, attempts, attempt), attempts)
+
+    decision =
+      if attempts.retry,
+        do:
+          HTTP.Retry.decide(
+            attempts.retry,
+            request,
+            retry_result(result),
+            attempt,
+            remaining(attempts.deadline)
+          ),
+        else: :stop
+
+    case decision do
+      {:retry, delay, reason} ->
+        discard_attempt(result, owner, attempts.deadline)
+
+        if HTTP.Telemetry.enabled?(Keyword.get(request.transport_options, :telemetry, true)),
+          do: HTTP.Telemetry.request_retry(request.url, reason, attempt, delay)
+
+        case retry_wait(attempts.signal, delay) do
+          :ok -> run_attempts(request, attempts, attempt + 1)
+          :aborted -> {{:error, :aborted}, nil}
+        end
+
+      :stop ->
+        {result, failure_token}
+    end
+  end
+
+  defp run_attempt(request, attempts) do
+    failure_token =
+      if Keyword.get(request.transport_options, :error_mode, :raw) == :structured do
+        if Keyword.get(request.transport_options, :redirect, :follow) in [:manual, :error],
+          do: make_ref()
+      end
+
+    request = %{
+      request
+      | transport_options:
+          Keyword.put(request.transport_options, :connect_failure_token, failure_token)
+    }
+
+    result =
+      if attempts.adapter == nil,
+        do: HTTP.SocketClient.request(request, attempts.signal, attempts.unix_socket),
+        else: HTTP.Adapter.execute(request, attempts.adapter, attempts.signal)
+
+    {result, failure_token, HTTP.SocketClient.take_attempt_owner()}
+  end
+
+  defp retry_deadline(_request, nil), do: :infinity
+
+  defp retry_deadline(request, _retry) do
+    case Keyword.get(request.transport_options, :timeout) ||
+           HTTP.Config.default_request_timeout() do
+      :infinity -> :infinity
+      timeout -> System.monotonic_time(:millisecond) + timeout
+    end
+  end
+
+  defp remaining(:infinity), do: :infinity
+  defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  # Later attempts receive the remaining budget of the one request deadline.
+  defp attempt_request(request, %{deadline: :infinity}, _attempt), do: request
+  defp attempt_request(request, _attempts, 1), do: request
+
+  defp attempt_request(request, attempts, _attempt) do
+    timeout = remaining(attempts.deadline)
+    %{request | transport_options: Keyword.put(request.transport_options, :timeout, timeout)}
+  end
+
+  defp retry_result(%Response{} = response), do: response
+  defp retry_result({:error, reason}), do: {:error, reason |> attempt_reason() |> public_reason()}
+
+  defp attempt_reason({kind, token, reason})
+       when kind in [:connect_failure, :tls_setup_failure] and is_reference(token),
+       do: reason
+
+  defp attempt_reason(reason), do: reason
+
+  # An unread streamed body is cancelled and its socket owner aborted, as an
+  # AbortController would, and both exit before the next attempt starts.
+  # Buffered responses and failures have already released their connection.
+  defp discard_attempt(%Response{body: stream}, owner, deadline) when is_pid(stream) do
+    monitors = [
+      Process.monitor(stream) | if(is_pid(owner), do: [Process.monitor(owner)], else: [])
+    ]
+
+    HTTP.Stream.stop(stream, :aborted)
+    if is_pid(owner), do: send(owner, :abort)
+    budget = min(remaining(deadline), @attempt_cleanup_budget)
+    await_down(monitors, System.monotonic_time(:millisecond) + budget)
+  end
+
+  defp discard_attempt(_result, _owner, _deadline), do: :ok
+
+  defp await_down([], _deadline), do: :ok
+
+  defp await_down([monitor | rest], deadline) do
+    receive do
+      {:DOWN, ^monitor, :process, _pid, _reason} -> await_down(rest, deadline)
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) ->
+        Enum.each([monitor | rest], &Process.demonitor(&1, [:flush]))
+    end
+  end
+
+  # The worker is the abort target while it waits between attempts.
+  defp retry_wait(signal, delay) do
+    if is_pid(signal), do: HTTP.AbortController.set_request_id(signal, self())
+
+    receive do
+      :abort -> :aborted
+    after
+      delay -> :ok
     end
   end
 

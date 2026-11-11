@@ -20,6 +20,13 @@ defmodule HTTP.SocketClient do
   # refusals are not retried: the pool would hand the same owner back until the
   # deadline instead of failing fast.
   @http2_open_refusals [:draining]
+  @attempt_owner {__MODULE__, :attempt_owner}
+
+  # Fetch retries wait for the previous attempt's owner to exit, so its
+  # connection is closed or handed off before the next attempt starts.
+  @doc false
+  @spec take_attempt_owner() :: pid() | nil
+  def take_attempt_owner, do: Process.delete(@attempt_owner)
 
   @spec request(Request.t(), pid() | nil, String.t() | nil) :: Response.t() | {:error, term()}
   def request(%Request{} = request, abort_controller_pid \\ nil, unix_socket_path \\ nil) do
@@ -205,6 +212,8 @@ defmodule HTTP.SocketClient do
            end
          end) do
       {:ok, owner_pid} ->
+        Process.put(@attempt_owner, owner_pid)
+
         case HTTP.RequestLifecycle.register(tracker, owner_pid, :owner, deadline_at) do
           :ok ->
             send(owner_pid, :owner_launch)
@@ -238,6 +247,7 @@ defmodule HTTP.SocketClient do
            http3_owner(parent, ref, request, 0, false, deadline_at, route)
          end) do
       {:ok, owner_pid} ->
+        Process.put(@attempt_owner, owner_pid)
         set_abort_owner(abort_controller_pid, owner_pid)
         await_owner(ref, owner_pid, timeout)
 

@@ -43,7 +43,16 @@ defmodule HTTP.FetchOptions do
   - `timeout` - request timeout in non-negative milliseconds or `:infinity`
     (HTTP/1, HTTP/2 and HTTP/3); other values raise `ArgumentError`
   - `error_mode` - `:raw` (default) or `:structured`; structured failures return
-    `HTTP.RequestError` with conservative pre-send evidence. No automatic retry.
+    `HTTP.RequestError` with conservative pre-send evidence. Retry
+    classification uses the raw reason; only the final failure is wrapped.
+  - `retry` - `false` (default, one attempt), `:transient`, `:safe_transient`
+    or a 2-arity function `(request, response_or_error) -> boolean`; string
+    values `"transient"` and `"safe_transient"` are also accepted. See "Retries"
+    in `HTTP.fetch/2`. Rejected with `transport_scope`.
+  - `max_retries` - additional attempts as a non-negative integer; defaults to 3
+  - `retry_delay` - non-negative milliseconds, or a 1-arity function of the
+    1-based number of the attempt being retried; defaults to exponential
+    500 ms doubling up to 10,000 ms. `Retry-After` on 429/503 takes precedence.
   - `read_idle_timeout` - positive milliseconds (1..4,294,967,295), or `nil`
     to disable (default). Bounds each pending HTTP/1 transport read, including
     headers; nonempty transport data resets the clock. Consumer acknowledgement
@@ -118,7 +127,8 @@ defmodule HTTP.FetchOptions do
   - `unix_socket` - Unix Domain Socket path
   - `http1_reuse` - opt in to HTTP/1 keep-alive; requires `http_version: :http1`.
     Only fully consumed, self-delimited responses are reusable. Failed or
-    cancelled requests are closed, and requests are never retried on stale peers.
+    cancelled requests are closed, and requests are never retried on stale peers
+    unless the `retry` policy classifies the failure as retryable.
   - `http1_scope` - optional atom or string separating caller routes sharing an origin.
   - `http1_pool_size` - retained idle sockets per route/policy, 1..16 (default 2).
   - `http1_idle_timeout` - idle retention in milliseconds, 1..60,000 (default 30,000).
@@ -219,6 +229,11 @@ defmodule HTTP.FetchOptions do
     "http2_priority" => :http2_priority,
     "http2Priority" => :http2_priority,
     "proxy" => :proxy,
+    "retry" => :retry,
+    "max_retries" => :max_retries,
+    "maxRetries" => :max_retries,
+    "retry_delay" => :retry_delay,
+    "retryDelay" => :retry_delay,
     "method" => :method,
     "redirect" => :redirect,
     "signal" => :signal,
@@ -278,7 +293,10 @@ defmodule HTTP.FetchOptions do
             http3_resumption: false,
             early_data: false,
             http2_scope: nil,
-            http2_priority: nil
+            http2_priority: nil,
+            retry: false,
+            max_retries: 3,
+            retry_delay: nil
 
   @type redirect :: :follow | :manual | :error
   @type http_version :: :http1 | :http2 | :http3 | :h2c | :auto
@@ -325,7 +343,10 @@ defmodule HTTP.FetchOptions do
           http3_resumption: boolean(),
           early_data: boolean(),
           http2_scope: atom() | String.t() | nil,
-          http2_priority: map() | keyword() | nil
+          http2_priority: map() | keyword() | nil,
+          retry: false | HTTP.Retry.mode(),
+          max_retries: non_neg_integer(),
+          retry_delay: non_neg_integer() | (pos_integer() -> non_neg_integer()) | nil
         }
 
   @doc """
@@ -550,6 +571,15 @@ defmodule HTTP.FetchOptions do
       {:http2_priority, priority}, acc ->
         %{acc | http2_priority: priority}
 
+      {:retry, retry}, acc ->
+        %{acc | retry: retry}
+
+      {:max_retries, max_retries}, acc ->
+        %{acc | max_retries: max_retries}
+
+      {:retry_delay, delay}, acc ->
+        %{acc | retry_delay: delay}
+
       {key, _value}, _acc when is_atom(key) or is_binary(key) ->
         if http2_option_key?(key) do
           raise ArgumentError, "unsupported HTTP/2 option: #{inspect(key)}"
@@ -592,6 +622,7 @@ defmodule HTTP.FetchOptions do
   defp normalize_options(%__MODULE__{} = options) do
     http_version = normalize_http_version(options.http_version)
     alt_svc = normalize_alt_svc(options.alt_svc, http_version)
+    retry = HTTP.Retry.normalize(options.retry, options.max_retries, options.retry_delay)
 
     %{
       options
@@ -630,7 +661,10 @@ defmodule HTTP.FetchOptions do
         http3_resumption: normalize_boolean(options.http3_resumption, :http3_resumption),
         early_data: normalize_boolean(options.early_data, :early_data),
         http2_scope: normalize_http2_scope(options.http2_scope),
-        http2_priority: normalize_http2_priority(options.http2_priority)
+        http2_priority: normalize_http2_priority(options.http2_priority),
+        retry: if(retry, do: retry.mode, else: false),
+        max_retries: HTTP.Retry.normalize_max_retries(options.max_retries),
+        retry_delay: options.retry_delay
     }
     |> validate_response_header_protocol()
     |> validate_connect_address()
@@ -638,7 +672,22 @@ defmodule HTTP.FetchOptions do
     |> validate_response_stream_idle_protocol()
     |> validate_response_stream_ack_protocol()
     |> validate_early_data()
+    |> validate_retry()
   end
+
+  @doc false
+  @spec retry_policy(t()) :: HTTP.Retry.t() | nil
+  def retry_policy(%__MODULE__{retry: false}), do: nil
+
+  def retry_policy(%__MODULE__{} = options),
+    do: HTTP.Retry.normalize(options.retry, options.max_retries, options.retry_delay)
+
+  # A managed admission covers exactly one attempt.
+  defp validate_retry(%{retry: retry, transport_scope: scope})
+       when retry != false and scope != nil,
+       do: raise(ArgumentError, "retry is unsupported with transport_scope")
+
+  defp validate_retry(options), do: options
 
   defp normalize_boolean(nil, _name), do: false
   defp normalize_boolean(value, _name) when is_boolean(value), do: value

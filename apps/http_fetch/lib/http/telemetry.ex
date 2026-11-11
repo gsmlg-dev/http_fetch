@@ -49,6 +49,20 @@ defmodule HTTP.Telemetry do
   - Measurements: `%{duration: integer}` (microseconds)
   - Metadata: `%{scheme: atom, error: atom}`
 
+  **`[:http_fetch, :request, :retry]`** - Emitted before a `retry:` policy
+  starts another attempt (see `HTTP.fetch/2`)
+
+  - Measurements: `%{attempt: pos_integer, delay: non_neg_integer}`
+    - `attempt` - 1-based number of the attempt being retried
+    - `delay` - wait before the next attempt in milliseconds
+  - Metadata: `%{scheme: atom, reason: integer | atom}` - the retried
+    response status, or the failure reason category used by `:exception`
+
+  `:start`, `:stop` and `:exception` stay one per `HTTP.fetch/2` call even when
+  attempts are retried: `:start` precedes the first attempt, and `:stop` or
+  `:exception` reports the final result with a `duration` covering every
+  attempt and delay.
+
   ### Streaming Events
 
   **`[:http_fetch, :streaming, :start]`** - Emitted when response streaming begins
@@ -232,6 +246,26 @@ defmodule HTTP.Telemetry do
   end
 
   @doc """
+  Emits a telemetry event before a `retry:` policy starts another attempt.
+  `attempt` is the 1-based number of the attempt being retried, `delay` the
+  wait in milliseconds, and `reason` its status or error reason.
+
+  ## Examples
+      iex> HTTP.Telemetry.request_retry(URI.parse("https://example.com"), 503, 1, 500)
+      :ok
+  """
+  @spec request_retry(URI.t(), integer() | term(), pos_integer(), non_neg_integer()) :: :ok
+  def request_retry(url, reason, attempt, delay) do
+    reason = if is_integer(reason), do: reason, else: safe_error(reason)
+
+    execute(
+      [:http_fetch, :request, :retry],
+      %{attempt: attempt, delay: delay},
+      %{scheme: safe_scheme(url), reason: reason}
+    )
+  end
+
+  @doc """
   Emits a telemetry event for response body reading start.
 
   ## Examples
@@ -372,6 +406,7 @@ defmodule HTTP.Telemetry do
               :connect_timeout,
               :closed,
               :econnrefused,
+              :econnreset,
               :nxdomain,
               :enetunreach,
               :ehostunreach,

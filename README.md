@@ -233,6 +233,45 @@ uploads. With an unlimited request deadline, it uses the configured default
 request timeout for writes unless a finite `socket_opts: [send_timeout: ms]`
 is supplied; an explicit infinite write timeout remains unsupported.
 
+### Request Retries
+
+`HTTP.fetch/2` performs exactly one attempt unless `retry:` is set:
+
+```elixir
+HTTP.fetch(url,
+  retry: :transient,
+  max_retries: 3,
+  retry_delay: fn attempt -> 2 ** attempt * 250 end,
+  timeout: 10_000
+)
+|> HTTP.Promise.await()
+```
+
+| Option | Values | Default |
+| --- | --- | --- |
+| `retry` | `false`, `:safe_transient`, `:transient`, or `fun(request, response_or_error) -> boolean` | `false` |
+| `max_retries` | additional attempts, non-negative integer | `3` |
+| `retry_delay` | milliseconds, or `fun(attempt) -> ms` (1-based attempt being retried) | 500 ms doubling, capped at 10,000 ms |
+
+- `:safe_transient` retries only attempts that got no response: `:econnrefused`,
+  `:connect_timeout`, `:closed`, `:econnreset`, `:ehostunreach`, `:enetunreach`.
+- `:transient` also retries 408, 429, 500, 502, 503 and 504 responses.
+- Both built-in modes retry only GET, HEAD, OPTIONS, PUT, DELETE and TRACE. A
+  function decides for itself.
+- A 429 or 503 `Retry-After` (seconds or HTTP-date) replaces the delay. If a
+  delay would reach the request deadline, the last result is returned.
+- One `timeout` covers all attempts and delays; expiry is still `:timeout`.
+- Never retried, even by a function: streamed (`duplex: "half"`) bodies,
+  `:aborted` and `:timeout`. Aborting the `signal` also cancels a pending
+  delay. A returned response is final. A retried response's unread stream is
+  cancelled and its connection closed.
+- `[:http_fetch, :request, :retry]` telemetry reports `attempt`, `delay` and
+  `reason` (status or error category); start/stop/exception stay one per call.
+- `HTTP.Test` fixtures claim one expectation per attempt.
+- With retry enabled, `HTTP.Promise.completion/1` is unsupported
+  (`{:unsupported_completion, :retry}`), and `transport_scope` raises
+  `ArgumentError`.
+
 ### Independent HTTP/1 Read and Write Idle Timeouts
 
 `read_idle_timeout` and `write_idle_timeout` accept positive integer milliseconds
