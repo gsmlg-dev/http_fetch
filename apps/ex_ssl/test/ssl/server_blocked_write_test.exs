@@ -115,10 +115,27 @@ defmodule SSL.ServerBlockedWriteTest do
     writer = blocked_writer(s)
 
     assert :ok = on_client(client, &:ssl.send(&1, "bye"))
-    assert :ok = on_client(client, &:ssl.close/1)
+    _ = on_client(client, &close_notify_keeping_tcp/1)
     assert_receive {:writer_done, ^writer, {:error, :closed}}, 2000
     assert SSL.recv(s, 3, 1000) == {:ok, "bye"}
     assert SSL.recv(s, 0, 1000) == {:error, :closed}
+    stop_client(client)
+  end
+
+  # Linux answers a close with unread input by RST and drops unsent output, so
+  # an OTP client that closes over the blocked writer's data may never deliver
+  # its close_notify. That is an unclean close (#158), reported after the drain.
+  test "a peer reset during a blocked write keeps earlier input and reports econnreset" do
+    %{server: s, client: client} = connect([])
+    writer = blocked_writer(s)
+
+    assert :ok = on_client(client, &:ssl.send(&1, "bye"))
+    await_buffer(s, 3)
+    assert :ok = on_client(client, &reset_tcp/1)
+    assert_receive {:writer_done, ^writer, {:error, reason}}, 2000
+    assert reason in [:closed, :econnreset]
+    assert SSL.recv(s, 3, 1000) == {:ok, "bye"}
+    assert SSL.recv(s, 0, 1000) == {:error, :econnreset}
     stop_client(client)
   end
 
@@ -195,6 +212,33 @@ defmodule SSL.ServerBlockedWriteTest do
     else
       Process.sleep(5)
       await_application_job(s, attempts - 1)
+    end
+  end
+
+  # ssl:close/2 with a downgrade target sends close_notify and keeps the TCP
+  # socket open, so no RST can overtake the alert.
+  defp close_notify_keeping_tcp(c), do: :ssl.close(c, {self(), 2000})
+
+  # Test-only: aborts the OTP client's TCP carrier (sslsocket element 1) with
+  # zero linger, without close_notify.
+  defp reset_tcp(c) do
+    tcp = elem(c, 1)
+    :ok = :inet.setopts(tcp, linger: {true, 0})
+    true = Port.close(tcp)
+    :ok
+  end
+
+  defp await_buffer(s, size, attempts \\ 500)
+  defp await_buffer(_s, _size, 0), do: flunk("server did not buffer the input")
+
+  defp await_buffer(s, size, attempts) do
+    case :sys.get_state(s.pid) do
+      {_name, %{size: ^size}} ->
+        :ok
+
+      _ ->
+        Process.sleep(5)
+        await_buffer(s, size, attempts - 1)
     end
   end
 
