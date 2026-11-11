@@ -86,6 +86,23 @@ defmodule HTTP.EventSource.ParserTest do
     assert parser.event_parts == 0
   end
 
+  test "dispatches an event terminated by bare CRs at a chunk boundary" do
+    assert {:ok, parser, [{:event, "message", "x", ""}]} =
+             Parser.parse(Parser.new(), "data: x\r\r")
+
+    assert parser.buffer == ""
+
+    assert {:ok, parser, []} = Parser.parse(Parser.new(), "data: a\r")
+    assert {:ok, parser, [{:event, "message", "a", ""}]} = Parser.parse(parser, "\n\r\n")
+    assert {:ok, _parser, [{:event, "message", "b", ""}]} = Parser.parse(parser, "data: b\n\n")
+  end
+
+  test "a CR at a chunk end still pairs with a LF that starts the next chunk" do
+    assert {:ok, parser, []} = Parser.parse(Parser.new(), "data: a\r")
+    assert {:ok, parser, []} = Parser.parse(parser, "\ndata: b\r")
+    assert {:ok, _parser, [{:event, "message", "a\nb", ""}]} = Parser.parse(parser, "\n\r\n")
+  end
+
   test "copies retained fragments and discards an incomplete event at EOF" do
     assert {:ok, parser, []} = Parser.parse(Parser.new(), "data: hello\n")
     assert {:ok, parser, []} = Parser.close(parser)

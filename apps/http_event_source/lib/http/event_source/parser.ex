@@ -5,6 +5,7 @@ defmodule HTTP.EventSource.Parser do
   @default_max_line_size 64 * 1024
 
   defstruct buffer: <<>>,
+            skip_lf?: false,
             bom_seen?: false,
             data_parts: [],
             event_type: "",
@@ -23,6 +24,7 @@ defmodule HTTP.EventSource.Parser do
 
   @type t :: %__MODULE__{
           buffer: binary(),
+          skip_lf?: boolean(),
           bom_seen?: boolean(),
           data_parts: [binary()],
           event_type: String.t(),
@@ -59,8 +61,10 @@ defmodule HTTP.EventSource.Parser do
 
   defp parse_some_lines(parser) do
     case read_line(parser.buffer, parser.max_line_size) do
-      {:ok, line, rest} ->
-        with {:ok, parser, events} <- process_line(%{parser | buffer: rest}, line) do
+      {:ok, line, rest, skip_lf?} ->
+        parser = %{parser | buffer: rest, skip_lf?: skip_lf?}
+
+        with {:ok, parser, events} <- process_line(parser, line) do
           if events == [] do
             parse_some_lines(parser)
           else
@@ -97,7 +101,15 @@ defmodule HTTP.EventSource.Parser do
     end
   end
 
-  defp append(%__MODULE__{buffer: buffer} = parser, data), do: %{parser | buffer: buffer <> data}
+  # A CR that ended the previous chunk already terminated its line; a LF that
+  # starts the next chunk completes that CRLF pair instead of an empty line.
+  defp append(parser, <<>>), do: parser
+
+  defp append(%__MODULE__{skip_lf?: true} = parser, <<"\n", data::binary>>),
+    do: append(%{parser | skip_lf?: false}, data)
+
+  defp append(%__MODULE__{buffer: buffer} = parser, data),
+    do: %{parser | buffer: buffer <> data, skip_lf?: false}
 
   defp strip_bom(%__MODULE__{bom_seen?: true} = parser), do: {:ok, parser}
 
@@ -120,8 +132,10 @@ defmodule HTTP.EventSource.Parser do
 
   defp parse_lines(%__MODULE__{} = parser, acc) do
     case read_line(parser.buffer, parser.max_line_size) do
-      {:ok, line, rest} ->
-        with {:ok, parser, events} <- process_line(%{parser | buffer: rest}, line) do
+      {:ok, line, rest, skip_lf?} ->
+        parser = %{parser | buffer: rest, skip_lf?: skip_lf?}
+
+        with {:ok, parser, events} <- process_line(parser, line) do
           parse_lines(parser, Enum.reverse(events, acc))
         end
 
@@ -153,7 +167,7 @@ defmodule HTTP.EventSource.Parser do
         {:error, :line_too_long}
 
       {index, :cr} when index == byte_size(buffer) - 1 ->
-        :more
+        {:ok, binary_part(buffer, 0, index), <<>>, true}
 
       {index, :cr} ->
         line = binary_part(buffer, 0, index)
@@ -164,12 +178,12 @@ defmodule HTTP.EventSource.Parser do
             _other -> binary_part(buffer, index + 1, byte_size(buffer) - index - 1)
           end
 
-        {:ok, line, rest}
+        {:ok, line, rest, false}
 
       {index, :lf} ->
         line = binary_part(buffer, 0, index)
         rest = binary_part(buffer, index + 1, byte_size(buffer) - index - 1)
-        {:ok, line, rest}
+        {:ok, line, rest, false}
     end
   end
 
