@@ -63,7 +63,7 @@ for configuration, examples, cancellation, redirects and current limits.
 - **Browser-like API**: Familiar fetch interface with promises and async/await patterns
 - **Full HTTP support**: GET, POST, PUT, DELETE, PATCH, HEAD methods
 - **Internal HTTP/1.1 transport**: Uses `:gen_tcp` for HTTP, ExSSL for HTTPS, and Unix domain sockets
-- **Explicit HTTP/3 beta**: HTTPS Fetch and EventSource with bounded streams and static/literal QPACK
+- **Explicit HTTP/3 beta**: HTTPS Fetch, EventSource and WebSocket (RFC 9220) with bounded streams and static/literal QPACK
 - **Unix Domain Sockets**: HTTP over Unix sockets for Docker daemon, systemd, and other local services
 - **Form data support**: HTTP.FormData for multipart/form-data and file uploads
 - **Streaming request bodies**: Fetch-style `duplex: "half"` uploads over HTTP/1.1, HTTP/2 and explicit HTTP/3
@@ -895,9 +895,15 @@ HTTP.WebSocket.protocol(socket)
 HTTP.WebSocket.extensions(socket)
 HTTP.WebSocket.binary_type(socket)
 HTTP.WebSocket.url(socket)
-HTTP.WebSocket.http_version(socket) # :http1, :http2, or nil while opening
+HTTP.WebSocket.http_version(socket) # :http1, :http2, :http3, or nil while opening
 HTTP.WebSocket.status(socket)
 ```
+
+`http_version: :http3` selects an RFC 9220 tunnel (beta; `wss` only, no
+fallback; `migrate/2` is available on an exclusive connection). No WebSocket
+extension is supported: `permessage-deflate` is not negotiated and a handshake
+response with `Sec-WebSocket-Extensions` fails. A Close frame without a status
+code reports code 1005.
 
 Plain Elixir binaries are sent as text frames. Use `HTTP.WebSocket.array_buffer/1`
 or `HTTP.Blob` for binary frames:
