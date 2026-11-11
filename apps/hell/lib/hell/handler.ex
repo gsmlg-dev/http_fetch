@@ -62,6 +62,43 @@ defmodule Hell.Handler do
   `c:GenServer.handle_call/3` or `c:GenServer.handle_info/2`, use `set_read_timeout/2` and retain
   its returned socket in the `{socket, state}` tuple.
 
+  # Pausing Input
+
+  A handler can stop reading from its connection, for example while downstream capacity is
+  exhausted, and resume later without losing or reordering client bytes:
+
+  * From `c:handle_connection/2` or `c:handle_data/3`, return `{:pause, state}` (or
+    `{:pause, state, {:continue, continue}}`) instead of a `:continue` result. Hell does not
+    re-arm `active: :once` and does not call `c:handle_data/3` again until input is resumed.
+  * From an owner-side GenServer callback such as `c:GenServer.handle_info/2`, call
+    `pause_input/1` and retain its returned socket in the `{socket, state}` tuple. A chunk the
+    transport had already delivered to the mailbox before the call is retained instead of being
+    passed to `c:handle_data/3`.
+  * To resume, call `resume_input/1` from an owner-side GenServer callback and retain its
+    returned socket. Retained data is delivered to `c:handle_data/3` first, in its original
+    order, before Hell reads anything new from the transport.
+
+  A paused connection is not closed by the read-idle timeout: pausing cancels the read-idle
+  timer and `resume_input/1` starts a fresh interval of the connection's persistent
+  `read_timeout`. One-shot timeouts returned before the pause are discarded.
+  `set_read_timeout/2` while paused only records the new persistent value, which applies on
+  resume. A peer close or transport error that the transport reports while input is paused and
+  no data is retained stops the connection as usual; one that follows retained data is
+  processed after that data on resume. Do not call `Hell.Socket.recv/3` or change the socket's
+  `:active` option while input is paused, since that would bypass the retained data.
+
+  For example, a credit-based handler can pause when it runs out of credit and resume when
+  credit is granted:
+
+      def handle_data(data, _socket, state) do
+        state = enqueue(state, data)
+        if state.credit > 0, do: {:continue, state}, else: {:pause, state}
+      end
+
+      def handle_info({:credit, credit}, {socket, state}) do
+        {:noreply, {Hell.Handler.resume_input(socket), %{state | credit: credit}}}
+      end
+
   It is fully supported to intermix synchronous `Hell.Socket.recv` calls with async return values from `c:handle_connection/2`
   and `c:handle_data/3` callbacks, however it is critical to note that the timeouts between the two
   are completely separate. The `read_timeout` parameter only applies to reads
@@ -203,6 +240,8 @@ defmodule Hell.Handler do
           | {:switch_transport, {module(), upgrade_opts :: [term()]}, state :: term()}
           | {:switch_transport, {module(), upgrade_opts :: [term()]}, state :: term(),
              timeout_options() | {:continue, term()}}
+          | {:pause, state :: term()}
+          | {:pause, state :: term(), {:continue, term()}}
           | {:close, state :: term()}
           | {:error, term(), state :: term()}
 
@@ -228,6 +267,11 @@ defmodule Hell.Handler do
   * Returning `{:continue, state, {:continue, continue}}` is identical to the previous case with the
   addition of a `c:GenServer.handle_continue/2` callback being made immediately after, in line with
   similar behaviour on `GenServer` callbacks.
+  * Returning `{:pause, state}` keeps the connection open without reading further client data:
+  Hell does not re-arm the socket and does not call `c:handle_data/3` until `resume_input/1` is
+  called from an owner-side GenServer callback. The read-idle timeout does not apply while
+  paused. `{:pause, state, {:continue, continue}}` additionally invokes
+  `c:GenServer.handle_continue/2` immediately after. See "Pausing Input" in the module docs.
   * Returning `{:switch_transport, {module, opts}, state}` will cause Hell to try switching the transport of the
   current socket. The `module` should be an Elixir module that implements the `Hell.Transport` behaviour.
   Hell will call `c:Hell.Transport.upgrade/2` for the given module to upgrade the transport in-place.
@@ -262,6 +306,11 @@ defmodule Hell.Handler do
   * Returning `{:continue, state, {:continue, continue}}` is identical to the previous case with the
   addition of a `c:GenServer.handle_continue/2` callback being made immediately after, in line with
   similar behaviour on `GenServer` callbacks.
+  * Returning `{:pause, state}` keeps the connection open without reading further client data:
+  Hell does not re-arm the socket and does not call `c:handle_data/3` until `resume_input/1` is
+  called from an owner-side GenServer callback. The read-idle timeout does not apply while
+  paused. `{:pause, state, {:continue, continue}}` additionally invokes
+  `c:GenServer.handle_continue/2` immediately after. See "Pausing Input" in the module docs.
   * Returning `{:error, reason, state}` will cause Hell to close the socket & call the `c:handle_error/3` callback to
   allow final cleanup to be done.
   """
@@ -362,11 +411,97 @@ defmodule Hell.Handler do
   """
   @doc since: "0.1.3"
   @spec set_read_timeout(Hell.Socket.t(), timeout()) :: Hell.Socket.t()
+  def set_read_timeout(%Hell.Socket{input_paused: true} = socket, timeout)
+      when timeout == :infinity or (is_integer(timeout) and timeout >= 0) do
+    %{socket | read_timeout: timeout}
+  end
+
   def set_read_timeout(%Hell.Socket{} = socket, timeout)
       when timeout == :infinity or (is_integer(timeout) and timeout >= 0) do
     socket = cancel_read_timer(socket)
     arm_read_timer(%{socket | read_timeout: timeout}, timeout)
   end
+
+  @doc """
+  Pauses delivery of client data to `c:handle_data/3` and returns the updated socket.
+
+  Call this function only from the process owning a handler built with `use Hell.Handler`,
+  from `c:GenServer.handle_call/3`, `c:GenServer.handle_cast/2`, `c:GenServer.handle_info/2`
+  or `c:GenServer.handle_continue/2`, and retain the returned socket in the GenServer's
+  `{socket, state}` tuple. In `c:handle_connection/2` and `c:handle_data/3`, return
+  `{:pause, state}` instead.
+
+  The socket stops reading from the transport and the read-idle timer is cancelled. Client data
+  the transport already delivered to the handler's mailbox is retained, in order, and is
+  delivered to `c:handle_data/3` after `resume_input/1`. No `c:handle_data/3` call occurs while
+  input is paused. Pausing an already paused socket returns it unchanged.
+
+  See "Pausing Input" in the module documentation.
+  """
+  @doc since: "1.0.0"
+  @spec pause_input(Hell.Socket.t()) :: Hell.Socket.t()
+  def pause_input(%Hell.Socket{input_paused: true} = socket), do: socket
+
+  def pause_input(%Hell.Socket{} = socket) do
+    _ = Hell.Socket.setopts(socket, active: false)
+    %{cancel_read_timer(socket) | input_paused: true}
+  end
+
+  @doc """
+  Resumes delivery of client data after a pause and returns the updated socket.
+
+  Call this function only from the process owning a handler built with `use Hell.Handler`,
+  from `c:GenServer.handle_call/3`, `c:GenServer.handle_cast/2`, `c:GenServer.handle_info/2`
+  or `c:GenServer.handle_continue/2`, and retain the returned socket in the GenServer's
+  `{socket, state}` tuple.
+
+  Data retained while paused is delivered to `c:handle_data/3` first, in its original order,
+  after the current callback returns; Hell reads from the transport again once that data has
+  been handled. The read-idle timer restarts with the connection's persistent `read_timeout`.
+  Resuming a socket that is not paused returns it unchanged.
+  """
+  @doc since: "1.0.0"
+  @spec resume_input(Hell.Socket.t()) :: Hell.Socket.t()
+  def resume_input(%Hell.Socket{input_paused: false} = socket), do: socket
+
+  def resume_input(%Hell.Socket{paused_input: retained} = socket) do
+    socket = %{socket | input_paused: false, paused_input: []}
+
+    # Without retained input the socket is re-armed directly. Otherwise retained transport
+    # messages are re-queued to this process in order; the socket stays passive until the
+    # continuation of their `handle_data/3` call re-arms it, so nothing new can overtake them
+    _ =
+      case retained do
+        [] -> Hell.Socket.setopts(socket, active: :once)
+        _ -> Enum.each(retained, &send(self(), &1))
+      end
+
+    arm_read_timer(socket, socket.read_timeout)
+  end
+
+  @doc false
+  # Data is always retained. A terminal event is retained only behind retained data, so that
+  # it is processed after that data on resume; otherwise nothing is lost by stopping now
+  @spec handle_paused_input(tuple(), {Hell.Socket.t(), term()}) ::
+          {:noreply, {Hell.Socket.t(), term()}} | {:stop, term(), {Hell.Socket.t(), term()}}
+  def handle_paused_input({msg, _raw_socket, _data} = message, {socket, state})
+      when msg in [:tcp, :ssl] do
+    {:noreply, {retain(socket, message), state}}
+  end
+
+  def handle_paused_input(message, {%Hell.Socket{paused_input: [_ | _]} = socket, state}) do
+    {:noreply, {retain(socket, message), state}}
+  end
+
+  def handle_paused_input({_closed, _raw_socket}, {socket, state}) do
+    {:stop, {:shutdown, :peer_closed}, {socket, state}}
+  end
+
+  def handle_paused_input({_error, _raw_socket, reason}, {socket, state}) do
+    {:stop, reason, {socket, state}}
+  end
+
+  defp retain(socket, message), do: %{socket | paused_input: socket.paused_input ++ [message]}
 
   @spec __using__(any) :: Macro.t()
   defmacro __using__(_opts) do
@@ -453,6 +588,23 @@ defmodule Hell.Handler do
             {nil, state}
           ) do
         Hell.Handler.handle_ready(raw_socket, handler_config, acceptor_span, start_time, state)
+      end
+
+      # While input is paused, transport events are retained for `Hell.Handler.resume_input/1`
+      def handle_info(
+            {msg, raw_socket, _data_or_reason} = message,
+            {%Hell.Socket{socket: raw_socket, input_paused: true} = socket, state}
+          )
+          when msg in [:tcp, :ssl, :tcp_error, :ssl_error] do
+        Hell.Handler.handle_paused_input(message, {socket, state})
+      end
+
+      def handle_info(
+            {msg, raw_socket} = message,
+            {%Hell.Socket{socket: raw_socket, input_paused: true} = socket, state}
+          )
+          when msg in [:tcp_closed, :ssl_closed] do
+        Hell.Handler.handle_paused_input(message, {socket, state})
       end
 
       def handle_info(
@@ -725,6 +877,12 @@ defmodule Hell.Handler do
         _ = Hell.Socket.setopts(socket, active: :once)
         socket = arm_read_timer(socket, timeout)
         {:noreply, {socket, state}}
+
+      {:pause, state} ->
+        {:noreply, {pause_input(socket), state}}
+
+      {:pause, state, {:continue, continue}} ->
+        {:noreply, {pause_input(socket), state}, {:continue, continue}}
 
       {:switch_transport, {module, upgrade_opts}, state} ->
         handle_switch_continuation(socket, module, upgrade_opts, state, socket.read_timeout)

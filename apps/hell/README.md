@@ -81,6 +81,14 @@ end
 {:ok, pid} = Hell.start_link(port: 1234, handler_module: Echo)
 ```
 
+A handler that must stop reading under backpressure returns `{:pause, state}` from
+`handle_connection/2` or `handle_data/3`, or calls `Hell.Handler.pause_input/1` from an
+owner-side GenServer callback such as `handle_info/2`. No `handle_data/3` call occurs while
+paused, and data the transport had already delivered is retained. Calling
+`Hell.Handler.resume_input/1` later delivers the retained data first, then resumes reading, so
+every byte arrives exactly once and in order. A paused connection is not closed by the
+read-idle timeout; resuming restarts the persistent `read_timeout`.
+
 For more information, please consult the [`Hell.Handler`](lib/hell/handler.ex) documentation.
 
 ### Starting a Hell Server

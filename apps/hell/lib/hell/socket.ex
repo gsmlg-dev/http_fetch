@@ -12,7 +12,14 @@ defmodule Hell.Socket do
     :silent_terminate_on_error,
     :span
   ]
-  defstruct @enforce_keys ++ [:read_timer, :read_deadline, :timer_deadline]
+  defstruct @enforce_keys ++
+              [
+                :read_timer,
+                :read_deadline,
+                :timer_deadline,
+                input_paused: false,
+                paused_input: []
+              ]
 
   @typedoc "A reference to a socket along with metadata describing how to use it"
   @type t :: %__MODULE__{
@@ -23,6 +30,8 @@ defmodule Hell.Socket do
           read_timer: reference() | nil,
           read_deadline: integer() | nil,
           timer_deadline: integer() | nil,
+          input_paused: boolean(),
+          paused_input: [tuple()],
           silent_terminate_on_error: boolean(),
           span: Hell.Telemetry.t()
         }
