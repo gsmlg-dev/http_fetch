@@ -259,7 +259,14 @@ defmodule SSL do
   def sockname(%ListenSocket{} = listen), do: :inet.sockname(ListenSocket.carrier(listen))
   def sockname(socket), do: call(socket, :sockname)
 
-  @doc "Receives available bytes for length 0, or exactly length bytes. Timeout retains buffered data."
+  @doc """
+  Receives available bytes for length 0, or exactly length bytes. Timeout retains buffered data.
+
+  On a server socket whose peer has closed, an exact-length read that the
+  remaining buffered plaintext cannot satisfy returns `{:error, :timeout}` at
+  once and keeps the bytes; the close (`:closed` after close_notify, otherwise
+  `:econnreset`) is reported only after the buffer is drained.
+  """
   @spec recv(Socket.t(), non_neg_integer(), timeout()) :: {:ok, binary()} | {:error, term()}
   def recv(socket, length, timeout \\ :infinity)
 

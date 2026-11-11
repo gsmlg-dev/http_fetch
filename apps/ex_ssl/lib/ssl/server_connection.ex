@@ -815,10 +815,13 @@ defmodule SSL.ServerConnection do
     {%{data | recv: nil}, [{:reply, from, {:ok, bytes}}, {{:timeout, :recv}, :cancel}]}
   end
 
-  defp deliver(%{recv: %{from: from}, closed: true} = data),
-    do:
-      {%{data | recv: nil},
-       [{:reply, from, {:error, data.close_reason}}, {{:timeout, :recv}, :cancel}]}
+  # After the peer closed no more plaintext can arrive. An exact-length read the
+  # buffer cannot satisfy times out at once and keeps the bytes; the terminal is
+  # reported only once the buffer is drained (#158, #163).
+  defp deliver(%{recv: %{from: from}, closed: true} = data) do
+    result = if data.size > 0, do: {:error, :timeout}, else: {:error, data.close_reason}
+    {%{data | recv: nil}, [{:reply, from, result}, {{:timeout, :recv}, :cancel}]}
+  end
 
   defp deliver(%{recv: nil, active: :once, size: size} = data) when size > 0 do
     {bytes, data} = take(data, size)

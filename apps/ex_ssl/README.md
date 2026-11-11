@@ -311,6 +311,12 @@ Scope:
   `*.co.uk` still matches.
 - Receive backpressure: while about 1 MiB of plaintext is buffered unread, the
   server stops reading its carrier until the application drains it.
+- After the peer closes, buffered plaintext stays readable. An exact-length
+  `SSL.recv/3` that the remaining bytes cannot satisfy returns
+  `{:error, :timeout}` at once and keeps them; the terminal is reported only
+  once the buffer is drained: `{:error, :closed}` (or `{:ssl_closed, socket}`)
+  after close_notify, `{:error, :econnreset}` after a TCP close without it.
+  OTP `:ssl.shutdown(socket, :write)` on TLS 1.3 sends no close_notify.
 - Server carriers default to `send_timeout: 30_000, send_timeout_close: true`
   unless the caller sets either key, because server writes are synchronous
   carrier sends. This differs from OTP's infinite default.
