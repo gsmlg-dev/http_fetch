@@ -49,9 +49,9 @@ defmodule CandidateResumptionTest do
         assert_handshake(peer, index, reused, "h2")
         response = HTTP.Promise.await(promise, @timeout)
         assert response.status == 200
-        assert is_pid(response.stream)
+        assert is_pid(response.body)
         assert HTTP.Response.get_header(response, "content-length") == "6291456"
-        stream = response.stream
+        stream = response.body
         stream_monitor = Process.monitor(stream)
         assert HTTP.Response.read_all(response) == :binary.copy("B", 6 * 1024 * 1024)
         assert_receive {:DOWN, ^stream_monitor, :process, ^stream, :normal}, @timeout
@@ -142,10 +142,10 @@ defmodule CandidateResumptionTest do
       promise = fetch(peer, fixtures, :http2, tickets)
       assert_handshake(peer, index, reused, "h2", ticket_offered)
       response = HTTP.Promise.await(promise, @timeout)
-      assert is_pid(response.stream)
+      assert is_pid(response.body)
       assert response.status == 200
       assert HTTP.Response.get_header(response, "content-length") == "6291456"
-      stream = response.stream
+      stream = response.body
       stream_monitor = Process.monitor(stream)
       assert HTTP.Response.read_all(response) == :binary.copy("B", 6 * 1024 * 1024)
       assert_receive {:DOWN, ^stream_monitor, :process, ^stream, :normal}, @timeout

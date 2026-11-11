@@ -108,7 +108,7 @@ case mode do
         "body" = response.body
         "verified" = HTTP.Headers.get(response.trailers, "x-checksum")
       else
-        stream = response.stream
+        stream = response.body
         send(stream, {:read_chunk, self(), :ack})
 
         receive do
@@ -241,7 +241,7 @@ case mode do
     slow =
       Task.async(fn ->
         response = request.(0, slow_size)
-        true = is_pid(response.stream)
+        true = is_pid(response.body)
         send(parent, {:slow_response_ready, self()})
 
         receive do

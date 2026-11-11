@@ -61,7 +61,7 @@ for scheme <- ["http", "https"] do
 end
 HTTP.Test.expect(:stream, fn _ -> HTTP.Test.stream(["one", "two"], trailers: [{"x-end", "yes"}]) end)
 promise = HTTP.fetch("https://never-dial.invalid/stream", adapter: {HTTP.Test, :stream}, redirect: :manual)
-%HTTP.Response{body: stream, stream: stream} = response = HTTP.Promise.await(promise)
+%HTTP.Response{body: stream} = response = HTTP.Promise.await(promise)
 true = is_pid(stream)
 "onetwo" = HTTP.Response.read_all(response)
 :ok = HTTP.Test.verify!()
