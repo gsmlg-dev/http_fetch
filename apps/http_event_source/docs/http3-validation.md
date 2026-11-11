@@ -24,7 +24,8 @@ String aliases include `httpVersion: "h3"`, `http3Profile`, and `http3Reuse`.
 Profiles are `:ordered` and `:compact`. UNIX sockets, proxies, TCP socket options,
 HTTP/2 profile/scope overrides and infinite opening deadlines are rejected before
 the source starts. The shared runtime validator permits H3 only when called with
-`allow_http3: true`; WebSocket's default validation still rejects H3.
+`allow_http3: true`; WebSocket also passes `allow_http3: true` and supports
+explicit H3 (RFC 9220).
 
 The source uses `HTTP.HTTP3.Stream` for runtime ownership and read credit. Final
 headers establish `HTTP.EventSource.http_version(source) == :http3`; informational
