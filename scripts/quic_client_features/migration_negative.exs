@@ -102,6 +102,23 @@ defmodule Quic.ClientFeatures.MigrationNegative do
     Map.merge(ctx, %{stream: stream, initial: initial})
   end
 
+  # Reads pending stream events, accumulating data and recording the peer FIN.
+  def drain(ctx) do
+    {:ok, events} = Quic.read(ctx.stream, 16_384)
+
+    bytes =
+      Enum.reduce(events, Process.get({:received, ctx.case}), fn
+        {:data, _, bytes}, acc ->
+          acc <> bytes
+
+        {:fin, _}, acc ->
+          Process.put({:fin, ctx.case}, true)
+          acc
+      end)
+
+    Process.put({:received, ctx.case}, bytes)
+  end
+
   # Sends one phase, waits for the exact cumulative echo and prints it with
   # the local address the engine claims; the orchestrator requires the peer
   # to have observed exactly these bytes from exactly that source address.
@@ -114,19 +131,7 @@ defmodule Quic.ClientFeatures.MigrationNegative do
     echoed =
       wait(
         fn ->
-          {:ok, events} = Quic.read(ctx.stream, 16_384)
-
-          bytes =
-            Enum.reduce(events, Process.get({:received, ctx.case}), fn
-              {:data, _, bytes}, acc ->
-                acc <> bytes
-
-              {:fin, _}, acc ->
-                Process.put({:fin, ctx.case}, true)
-                acc
-            end)
-
-          Process.put({:received, ctx.case}, bytes)
+          bytes = drain(ctx)
           if bytes == expected, do: bytes, else: false
         end,
         now() + 5000,
@@ -134,7 +139,15 @@ defmodule Quic.ClientFeatures.MigrationNegative do
       )
 
     if fin do
-      wait(fn -> Process.get({:fin, ctx.case}, false) end, now() + 3000, "#{ctx.case} fin")
+      # The peer's FIN can arrive after the echoed bytes were read, so keep reading.
+      wait(
+        fn ->
+          _ = drain(ctx)
+          Process.get({:fin, ctx.case}, false)
+        end,
+        now() + 3000,
+        "#{ctx.case} fin"
+      )
     end
 
     local = address(info(ctx).local)
