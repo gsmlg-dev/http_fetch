@@ -291,3 +291,6 @@ a transport close or error that arrives without close_notify (still
 before reporting a `tcp_error`. Only literal calls and state updates changed: no
 dynamic dispatch is added or moved and no reviewed occurrence is rebound.
 Producer hashes, the release census and every group's census digest are updated.
+
+A second #158 follow-up lets the writer settle an in-flight duplex write after an
+unclean close; it adds no dynamic dispatch and rebinds no occurrence.

@@ -9,7 +9,7 @@
     "apps/ex_ssl/lib/ssl.ex": "6f2f5f334860a9f25f94df73130bb751604c069598f80bdae822f8ee274b37f9",
     "apps/ex_ssl/lib/ssl/options.ex": "84500c5c63746215284ebb764284eca97657ca00380c2feaf70c18fbc4c9e58c",
     "apps/ex_ssl/lib/ssl/tcp_options.ex": "b007fe9db46cedb98867797b368d999dd0dbb773d938f11e057eb9cb88f47d75",
-    "apps/ex_ssl/lib/ssl/connection.ex": "24adae6aa1f14f0aa2c44aa0690a963c2f4814be7ec22a9ae33867e1c1c06bbc",
+    "apps/ex_ssl/lib/ssl/connection.ex": "75f3c815c96badd6ff404910a6f05eb52a6abf9fbbb699bc9add2f705b05bc77",
     "apps/ex_ssl/lib/ssl/prepared_upgrade.ex": "c62b7433f5848289a58df30bde1cdf18155a0dcd8a3dff0da49546aac3a74461",
     "apps/ex_ssl/lib/ssl/client_identity.ex": "bbda9af456f8c6a182e7d30c1b97cbd4502e6d7fca9058b45a31f30a1cbef053",
     "apps/ex_ssl/lib/ssl/client_hello/materializer.ex": "77fefe616a1f03a075be13dc5e689443c85c75878d59b4ea82833fb36b94518b",
@@ -317,7 +317,7 @@
         },
         "apps/ex_ssl/lib/ssl/connection.ex": {
           "previous_sha256": "f5cdeea8158c200996cd66e554be14f8c7f22ae7200826f1241104486890761b",
-          "sha256": "24adae6aa1f14f0aa2c44aa0690a963c2f4814be7ec22a9ae33867e1c1c06bbc"
+          "sha256": "75f3c815c96badd6ff404910a6f05eb52a6abf9fbbb699bc9add2f705b05bc77"
         },
         "apps/ex_ssl/lib/ssl/pkix/pkix.ex": {
           "previous_sha256": "e87da677850294e277f6246e9db21252593444fafbc23566ff459ffd046a0e95",
@@ -351,7 +351,7 @@
       ],
       "active_production_source_census": {
         "files": 267,
-        "sorted_path_sha256_json": "637d116e64e800ba3004961766dd05244d979790cc92302ca7bb585c4cbd5e93",
+        "sorted_path_sha256_json": "b41180ac991cfdf7392b27d61d62f21586a21d826f71985b31a7a18b0372c23f",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -413,6 +413,13 @@
           "input": "apps/ex_ssl/lib/ssl/server_connection.ex",
           "change": "tcp_error while connected drains buffered plaintext before reporting the reason (#158).",
           "dispatch_review": "No dynamic dispatch added or moved; only literal local/remote calls and state updates; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-11",
+          "source_commit": "fc7ddf1172abab47fbd58d09ac82bbbddbc7f3f3",
+          "input": "apps/ex_ssl/lib/ssl/connection.ex",
+          "change": "An in-flight duplex write is settled by the writer's own result after an unclean transport close (a local send timeout stays :timeout; dead-transport errors map to the recorded :econnreset), and buffered plaintext is delivered before a writer failure after a recorded close (#158).",
+          "dispatch_review": "No dynamic dispatch added or moved; literal calls and state updates only; the file holds no reviewed occurrence."
         }
       ]
     }
