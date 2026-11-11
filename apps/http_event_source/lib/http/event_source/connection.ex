@@ -34,6 +34,7 @@ defmodule HTTP.EventSource.Connection do
             http_version: nil,
             delivery: nil,
             redirects: 0,
+            capacity_rejections: 0,
             raw_queue: :queue.new(),
             raw_bytes: 0,
             raw_refs: 0,
@@ -300,14 +301,34 @@ defmodule HTTP.EventSource.Connection do
     else
       case admit_attempt(state) do
         {:ok, state} ->
+          state = %{state | capacity_rejections: 0}
+
           if HTTP.Runtime.Options.h2?(state.options),
             do: connect_stream(state, Stream),
             else: connect_http1(state)
+
+        {:error, :cleanup_capacity} ->
+          reject_capacity(state)
 
         {:error, reason} ->
           reconnect(state, reason)
       end
     end
+  end
+
+  # Earlier attempts may still be confirming cleanup, so a short run of
+  # rejections is retried. Persistent rejection means unconfirmed attempts hold
+  # the client bound for their lifetime; the source fails instead of looping.
+  @max_capacity_rejections 3
+  @capacity_retry_floor 100
+
+  defp reject_capacity(%{capacity_rejections: count} = state)
+       when count + 1 >= @max_capacity_rejections,
+       do: fatal(state, :cleanup_capacity)
+
+  defp reject_capacity(state) do
+    state = %{state | capacity_rejections: state.capacity_rejections + 1}
+    reconnect(state, :cleanup_capacity, max(state.reconnect_time, @capacity_retry_floor))
   end
 
   defp admit_attempt(state) do
@@ -364,7 +385,7 @@ defmodule HTTP.EventSource.Connection do
     case RequestLifecycle.start_worker(state.attempt_tracker, :dial, state.opening_deadline, fn ->
            HTTP.OwnerMonitor.start(self(), parent)
 
-           result = open_http1(state, parent)
+           result = open_http1_reporting_crash(state, parent)
 
            RequestLifecycle.complete(state.attempt_tracker, state.opening_deadline)
            send(parent, {:http1_connected, generation, self(), result})
@@ -379,6 +400,17 @@ defmodule HTTP.EventSource.Connection do
       {:ok, worker} -> %{state | worker: worker, worker_monitor: Process.monitor(worker)}
       {:error, reason} -> reconnect(state, reason)
     end
+  end
+
+  # A crashed dial must still complete its attempt tracker; otherwise the
+  # unconfirmed attempt stays charged to the client cleanup capacity and the
+  # source eventually wedges in :cleanup_capacity reconnects.
+  defp open_http1_reporting_crash(state, parent) do
+    open_http1(state, parent)
+  catch
+    :error, reason -> {:error, {:connect_worker_down, {reason, __STACKTRACE__}}}
+    :exit, reason -> {:error, {:connect_worker_down, reason}}
+    :throw, value -> {:error, {:connect_worker_down, {:nocatch, value}}}
   end
 
   defp open_http1(state, parent) do
@@ -639,9 +671,11 @@ defmodule HTTP.EventSource.Connection do
     end
   end
 
-  defp reconnect(%{ready_state: @closed} = state, _reason), do: state
+  defp reconnect(state, reason, delay \\ nil)
+  defp reconnect(%{ready_state: @closed} = state, _reason, _delay), do: state
 
-  defp reconnect(state, reason) do
+  defp reconnect(state, reason, delay) do
+    delay = delay || state.reconnect_time
     stream_telemetry(state, :reconnect, :retrying)
     emit(state, %Error{target: state.target, reason: reason})
     Telemetry.reconnect_start(state.uri, reason, state.reconnect_time, state.attempt)
@@ -653,7 +687,7 @@ defmodule HTTP.EventSource.Connection do
       |> cancel_reconnect_timer()
 
     token = make_ref()
-    timer = Process.send_after(self(), {:reconnect, token}, state.reconnect_time)
+    timer = Process.send_after(self(), {:reconnect, token}, delay)
     %{state | ready_state: @connecting, reconnect_timer: {timer, token}}
   end
 
@@ -1089,7 +1123,8 @@ defmodule HTTP.EventSource.Connection do
          true <- state.redirects < state.options.max_redirects or {:error, :too_many_redirects},
          uri = URI.merge(state.uri, location),
          true <-
-           (uri.scheme in ["http", "https"] and is_binary(uri.host) and is_nil(uri.userinfo)) or
+           (uri.scheme in ["http", "https"] and is_binary(uri.host) and is_nil(uri.userinfo) and
+              Options.valid_target?(uri.path) and Options.valid_target?(uri.query)) or
              {:error, :invalid_redirect},
          true <-
            not (state.uri.scheme == "https" and uri.scheme == "http") or

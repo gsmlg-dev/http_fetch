@@ -174,6 +174,92 @@ defmodule HTTP.EventSourceTest do
     assert {:error, {:unsupported_scheme, "ftp"}} = EventSource.new("ftp://example.com/events")
   end
 
+  test "rejects URLs whose request target cannot be sent" do
+    assert {:error, :invalid_url} = EventSource.new("http://127.0.0.1:1/x y")
+    assert {:error, :invalid_url} = EventSource.new("http://127.0.0.1:1/x?a=\x01")
+    assert {:error, :invalid_url} = EventSource.new("http://127.0.0.1:1/x\x7F")
+  end
+
+  @tag :integration
+  test "fails instead of reconnecting forever once cleanup capacity stays exhausted" do
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+    {:ok, port} = :inet.port(listener)
+
+    source =
+      EventSource.new("https://127.0.0.1:#{port}/events",
+        reconnect_time: 10,
+        connect_timeout: 10_000
+      )
+
+    # Killing an opening dial leaves its attempt cleanup unconfirmed for life.
+    for _ <- 1..2 do
+      worker = wait_for_worker(source.pid)
+      Process.exit(worker, :kill)
+
+      assert_receive {EventSource, ^source, %Error{reason: {:connect_worker_down, :killed}}},
+                     2_000
+    end
+
+    assert_receive {EventSource, ^source, %Error{reason: :cleanup_capacity}}, 2_000
+    assert_receive {EventSource, ^source, %Error{reason: :cleanup_capacity}}, 2_000
+    assert_receive {EventSource, ^source, %Error{reason: :cleanup_capacity}}, 2_000
+    assert EventSource.ready_state(source) == EventSource.closed()
+    refute_receive {EventSource, ^source, %Error{}}, 300
+    :gen_tcp.close(listener)
+  end
+
+  defp wait_for_worker(pid, attempts \\ 100) do
+    case :sys.get_state(pid).worker do
+      worker when is_pid(worker) ->
+        worker
+
+      _ when attempts > 0 ->
+        Process.sleep(10)
+        wait_for_worker(pid, attempts - 1)
+    end
+  end
+
+  @tag :integration
+  test "fails permanently on a redirect to an unsendable request target" do
+    {:ok, _server, port} =
+      HTTPEventSource.TestServer.start_link(
+        status: 307,
+        content_type: nil,
+        headers: [{"location", "/x y"}],
+        body: ""
+      )
+
+    source = EventSource.new("http://127.0.0.1:#{port}/events", reconnect_time: 10)
+
+    assert_receive {EventSource, ^source, %Error{reason: :invalid_redirect}}, 1_000
+    assert EventSource.ready_state(source) == EventSource.closed()
+    refute_receive {EventSource, ^source, %Error{}}, 100
+  end
+
+  @tag :integration
+  test "crashed dial attempts release cleanup capacity across reconnects" do
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+    {:ok, port} = :inet.port(listener)
+
+    source =
+      EventSource.new("http://127.0.0.1:#{port}/events",
+        reconnect_time: 20,
+        socket_opts: [nodelay: :invalid]
+      )
+
+    reasons =
+      for _ <- 1..6 do
+        assert_receive {EventSource, ^source, %Error{reason: reason}}, 2_000
+        reason
+      end
+
+    refute :cleanup_capacity in reasons
+    assert Enum.all?(reasons, &match?({:connect_worker_down, _}, &1))
+    assert EventSource.ready_state(source) == EventSource.connecting()
+    assert :ok = EventSource.close(source)
+    :gen_tcp.close(listener)
+  end
+
   @tag :integration
   test "finalizes events when TLS closes before a delayed consumer rearms" do
     {:ok, server, port} =

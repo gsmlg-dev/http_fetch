@@ -140,14 +140,24 @@ defmodule HTTP.EventSource.Options do
   defp normalize_url(_url), do: {:error, :invalid_url}
 
   defp normalize_uri(%URI{scheme: scheme, host: host} = uri) when is_binary(host) do
-    case scheme do
-      "http" -> {:ok, uri}
-      "https" -> {:ok, uri}
-      _ -> {:error, {:unsupported_scheme, scheme}}
+    cond do
+      scheme not in ["http", "https"] -> {:error, {:unsupported_scheme, scheme}}
+      valid_target?(uri.path) and valid_target?(uri.query) -> {:ok, uri}
+      true -> {:error, :invalid_url}
     end
   end
 
   defp normalize_uri(%URI{scheme: scheme}), do: {:error, {:unsupported_scheme, scheme}}
+
+  # The request target is sent verbatim; whitespace or controls can never be
+  # serialized, so such a URL fails construction instead of every dial.
+  @doc false
+  def valid_target?(nil), do: true
+
+  def valid_target?(value) when is_binary(value),
+    do: not Enum.any?(:binary.bin_to_list(value), &(&1 <= 32 or &1 == 127))
+
+  def valid_target?(_value), do: false
 
   defp normalize_init(init) when is_map(init) do
     init

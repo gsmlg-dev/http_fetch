@@ -53,7 +53,18 @@ defmodule HTTP.EventSource do
   The reconnect cursor advances on parser dispatch, independently of application
   acknowledgement. Reconnection can replay events and does not guarantee
   exactly-once delivery. Incomplete events at EOF are discarded; an empty ID
-  removes the Last-Event-ID header on subsequent requests.
+  removes the Last-Event-ID header on subsequent requests. An `id:` value that
+  contains NUL is ignored, as in the WHATWG parser. Unlike browsers, an `id:`
+  value containing any other control character (including TAB) or DEL is fatal
+  (`:invalid_last_event_id`), because it cannot be replayed safely as the
+  `Last-Event-ID` request header.
+
+  URLs whose path or query contains whitespace, control characters or DEL are
+  rejected at construction with `{:error, :invalid_url}`; a redirect to such a
+  target fails with `:invalid_redirect` and does not reconnect. If earlier
+  attempts keep the client's cleanup capacity exhausted for three consecutive
+  reconnects, the source fails with `:cleanup_capacity` instead of retrying.
+  `with_credentials` is stored and reported only; there is no cookie jar.
 
   Custom server-sent event names are delivered through the message event's
   `type` field.
