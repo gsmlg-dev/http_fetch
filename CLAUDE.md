@@ -174,9 +174,9 @@ Credo performs static code analysis to enforce Elixir style guidelines and ident
 ### Dialyzer
 Dialyzer performs static type analysis to catch type errors and inconsistencies. PLT (Persistent Lookup Table) stored in `apps/http_fetch/priv/plts/dialyzer.plt`.
 
-Current known issues to address:
-- `HTTP.fetch/2`: Spec doesn't match success typing due to Task.Supervisor return inference
-- `HTTP.Promise.then/3`: Opaque type violations with Task struct
+Current known issues: none for `http_fetch`. The former `HTTP.fetch/2` and
+`HTTP.Promise.then/3` warnings no longer fire, and their ignore entries were removed from
+`.dialyzer_ignore.exs`.
 
 ## Requirements
 - Elixir 1.18+ (for built-in `JSON` module support)

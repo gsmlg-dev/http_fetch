@@ -1,8 +1,4 @@
 [
-  # Dialyzer loses the Task.Supervisor.async_nolink/4 return shape in HTTP.fetch/2
-  ~r/(apps\/http_fetch\/)?lib\/http\.ex:273.*invalid_contract/,
-  ~r/(apps\/http_fetch\/)?lib\/http\.ex:274.*no_return/,
-
   # Quic.Streams.new/2 retains its public MapSet default. Elixir loses the opaque
   # origin of the compiled literal: https://github.com/elixir-lang/elixir/issues/15673
   # Pin the spec line and function so source drift exposes this exception for review.

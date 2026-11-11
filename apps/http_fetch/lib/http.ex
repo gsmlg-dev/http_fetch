@@ -92,7 +92,7 @@ defmodule HTTP do
 
   @doc """
   Performs an HTTP request, similar to `global.fetch` in web browsers.
-  Uses an internal HTTP/1.1 socket transport asynchronously by default.
+  Uses an internal socket transport (HTTP/1.1 by default; HTTP/2 and HTTP/3 by option) asynchronously.
 
   Arguments:
     - `url`: The URL to fetch (string or URI struct).
@@ -100,7 +100,7 @@ defmodule HTTP do
               Supported options:
                 - `:method`: The HTTP method (e.g., "GET", "POST"). Defaults to "GET".
                              Can be a string or an atom (e.g., "GET" or :get).
-                - `:proxy`: Explicit HTTP proxy `{:http, host, port, opts}`. Options are
+                - `:proxy`: Explicit proxy `{:http, host, port, opts}` or `{:https, host, port, opts}`. Options are
                             proxy-only authorization headers and a bounded timeout.
                             HTTP/1 forwards cleartext requests; HTTPS uses CONNECT
                             before origin TLS and HTTP/1 or HTTP/2 negotiation.
@@ -112,7 +112,7 @@ defmodule HTTP do
                                    request bodies for all admitted methods, including GET,
                                    DELETE, and HEAD. HEAD response bodies remain empty.
                 - `:duplex`: Set to `:half` or `"half"` to enable Fetch-style request body streaming.
-                             HTTP/1.1 uses chunked framing; HTTP/2 uses flow-controlled DATA frames.
+                             HTTP/1.1 uses chunked framing; HTTP/2 and HTTP/3 use flow-controlled DATA frames.
                 - `:content_type`: The Content-Type header value. If not provided for methods with body,
                                    defaults to "application/octet-stream" when a body is present.
                 - `:redirect`: Redirect mode, one of `:follow`, `:manual`, or `:error`. Defaults to `:follow`.
@@ -130,9 +130,9 @@ defmodule HTTP do
 
   Returns:
     - `%HTTP.Promise{}`: A Promise struct. The caller should `HTTP.Promise.await(promise_struct)` to get the final
-                 `%HTTP.Response{}` or `{:error, reason}`. If the request cannot be initiated
-                 (e.g., invalid URL, bad arguments), the Promise will contain an error result
-                 when awaited.
+                 `%HTTP.Response{}` or `{:error, reason}`. Transport and protocol failures are delivered
+                 in the awaited result. Invalid options raise
+                 `ArgumentError` in the caller before any request starts.
 
   The socket transport defaults `redirect` to `:follow`; pass `redirect: :manual`
   to return redirect responses, or `redirect: :error` to fail on redirect. Following stops
