@@ -106,7 +106,6 @@ response.status_text   # "OK"
 response.ok            # true (for 200-299 status codes)
 response.headers       # HTTP.Headers struct
 response.body          # Response body binary, or stream PID for streamed responses
-response.body_used     # false (tracks consumption, but doesn't prevent reads in Elixir)
 response.redirected    # false (true if response was redirected)
 response.type          # :basic
 response.url           # URI struct
@@ -136,7 +135,7 @@ text = HTTP.Response.text(clone)  # Read clone independently
 
 ### Elixir-Specific Differences
 
-**Immutability**: Unlike JavaScript, Elixir responses are immutable. The `body_used` field exists for API compatibility but doesn't prevent multiple reads of the same response value. Use `clone/1` for clarity when reading multiple times.
+**Immutability**: Unlike JavaScript, Elixir responses are immutable. There is no `bodyUsed` flag: buffered bodies can be read repeatedly, while a streamed body is consumed once. Use `clone/1` to read a streamed body more than once.
 
 **Synchronous Returns**: Methods like `json()` and `text()` return values directly instead of Promises, following Elixir conventions.
 

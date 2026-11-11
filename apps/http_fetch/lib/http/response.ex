@@ -15,7 +15,6 @@ defmodule HTTP.Response do
   - `ok` - Boolean for success status (200-299)
   - `headers` - Response headers as `HTTP.Headers` struct
   - `body` - Response body as binary, or stream PID for streaming responses
-  - `body_used` - Track if body has been consumed
   - `url` - The requested URL as `URI` struct
   - `redirected` - Whether response was redirected
   - `type` - Response type (:basic, :cors, :error, :opaque)
@@ -83,9 +82,9 @@ defmodule HTTP.Response do
 
   ## Elixir-Specific Differences
 
-  **Immutability**: Unlike JavaScript, Elixir responses are immutable. The `body_used`
-  property won't automatically update across function calls. Use `clone/1` before
-  multiple reads.
+  **Immutability**: Unlike JavaScript, Elixir responses are immutable, so there is
+  no `bodyUsed` flag. Buffered bodies can be read repeatedly; a streamed body is
+  consumed once. Use `clone/1` before reading a streamed body more than once.
 
   **Synchronous Returns**: Methods like `json()` and `text()` return values directly
   instead of Promises, following Elixir conventions.
@@ -100,7 +99,6 @@ defmodule HTTP.Response do
   - `ok` - Boolean indicating success (true for 200-299)
   - `headers` - Response headers as `HTTP.Headers` struct
   - `body` - Response body as binary, or stream PID for streaming responses
-  - `body_used` - Whether body has been consumed (Browser API behavior)
   - `url` - The requested URL as `URI` struct
   - `redirected` - Whether response was redirected
   - `type` - Response type (:basic, :cors, :error, :opaque)
@@ -166,7 +164,6 @@ defmodule HTTP.Response do
             ok: false,
             headers: %HTTP.Headers{},
             body: nil,
-            body_used: false,
             url: nil,
             redirected: false,
             type: :basic,
@@ -193,7 +190,6 @@ defmodule HTTP.Response do
           ok: boolean(),
           headers: HTTP.Headers.t(),
           body: binary() | pid() | nil,
-          body_used: boolean(),
           url: URI.t() | nil,
           redirected: boolean(),
           type: response_type(),
@@ -225,7 +221,6 @@ defmodule HTTP.Response do
   The following fields are automatically computed:
     - `status_text` - Derived from status code via HTTP.StatusText
     - `ok` - Set to true if status in 200..299
-    - `body_used` - Always initialized to false
 
   ## Examples
 
@@ -238,8 +233,6 @@ defmodule HTTP.Response do
       true
       iex> response.body
       "OK"
-      iex> response.body_used
-      false
 
       iex> response = HTTP.Response.new(status: 404, headers: HTTP.Headers.new())
       iex> response.status
@@ -267,7 +260,6 @@ defmodule HTTP.Response do
       ok: status in 200..299,
       headers: Keyword.get(opts, :headers, %HTTP.Headers{}),
       body: body,
-      body_used: false,
       url: Keyword.get(opts, :url, nil),
       redirected: Keyword.get(opts, :redirected, false),
       type: Keyword.get(opts, :type, :basic),
@@ -279,18 +271,13 @@ defmodule HTTP.Response do
     }
   end
 
-  # Note: body_used tracking exists for Browser API compatibility but due to
-  # Elixir's immutability, it cannot prevent multiple reads like in JavaScript.
-  # The field is present for API compatibility and documentation purposes.
-
   @doc """
   Reads the response body as text.
 
   For streaming responses, this will read the entire stream into memory.
 
-  **Note**: Due to Elixir's immutability, the `body_used` field exists for API
-  compatibility but doesn't prevent multiple reads. Use `clone/1` for clarity
-  when reading multiple times.
+  **Note**: A buffered body can be read repeatedly. A streamed body is consumed
+  once; use `clone/1` to read it more than once.
 
   ## Examples
 
@@ -452,7 +439,8 @@ defmodule HTTP.Response do
     - `{:ok, map | list}` if the body is valid JSON.
     - `{:error, reason}` if the body cannot be parsed as JSON.
 
-  Note: This method is deprecated in favor of `read_as_json/1` for streaming responses.
+  A streamed body is read to completion into memory first, as with `text/1`.
+  This function is not deprecated; it is the same as `read_as_json/1`.
   """
   @spec json(t()) :: {:ok, map() | list()} | {:error, term()}
   def json(%__MODULE__{} = response) do
@@ -505,7 +493,7 @@ defmodule HTTP.Response do
   Creates a duplicate of the response, allowing the body to be read multiple times.
 
   For buffered responses, this creates a shallow copy with the body duplicated and
-  `body_used` reset to false.
+  unchanged.
 
   For streaming responses, this creates a "tee" that splits the stream into two
   independent streams that can be consumed separately.
@@ -535,17 +523,11 @@ defmodule HTTP.Response do
   """
   @spec clone(t()) :: t()
   def clone(%__MODULE__{} = response) do
-    cond do
-      stream_body?(response) ->
-        # This reads the stream and returns a buffered copy.
-        body = read_all(%{response | body_used: false})
-        with_buffered_body(%{response | body_used: false}, body)
-
-      not is_nil(response.body) ->
-        %{response | body_used: false}
-
-      true ->
-        %{response | body_used: false}
+    if stream_body?(response) do
+      # This reads the stream and returns a buffered copy.
+      with_buffered_body(response, read_all(response))
+    else
+      response
     end
   end
 
@@ -625,42 +607,41 @@ defmodule HTTP.Response do
   """
   @spec write_to(t(), String.t()) :: :ok | {:error, term()}
   def write_to(%__MODULE__{} = response, file_path) do
-    # Ensure the directory exists
-    file_path
-    |> Path.dirname()
-    |> File.mkdir_p!()
+    case write_body(response, file_path) do
+      {:file_error, reason} ->
+        # The file never accepted the stream; release it instead of leaking it.
+        if stream_body?(response), do: HTTP.Stream.stop(response_stream(response), :write_failed)
+        {:error, reason}
 
-    cond do
-      stream_body?(response) ->
-        write_stream_to_file(response, file_path)
-
-      is_binary(response.body) or is_list(response.body) ->
-        # Non-streaming response
-        binary_body =
-          if is_list(response.body), do: IO.iodata_to_binary(response.body), else: response.body
-
-        File.write!(file_path, binary_body)
-        :ok
-
-      true ->
-        # Empty or nil body
-        File.write!(file_path, "")
-        :ok
+      result ->
+        result
     end
-  rescue
-    error -> {:error, error}
   end
 
+  defp write_body(response, file_path) do
+    with :ok <- file_result(File.mkdir_p(Path.dirname(file_path))) do
+      if stream_body?(response) do
+        write_stream_to_file(response, file_path)
+      else
+        file_result(File.write(file_path, file_body(response)))
+      end
+    end
+  end
+
+  defp file_body(%__MODULE__{body: body}) when is_binary(body) or is_list(body), do: body
+  defp file_body(%__MODULE__{}), do: ""
+
+  defp file_result(:ok), do: :ok
+  defp file_result({:error, reason}), do: {:file_error, reason}
+
   defp write_stream_to_file(response, file_path) do
-    with stream when is_pid(stream) <- response_stream(response),
-         {:ok, result} <-
-           File.open(file_path, [:write, :binary], fn file ->
-             write_stream_chunks(stream, file, response.response_stream_idle_timeout)
-           end) do
-      result
-    else
-      {:error, reason} -> {:error, reason}
-      _ -> :ok
+    stream = response_stream(response)
+
+    case File.open(file_path, [:write, :binary], fn file ->
+           write_stream_chunks(stream, file, response.response_stream_idle_timeout)
+         end) do
+      {:ok, result} -> result
+      {:error, reason} -> {:file_error, reason}
     end
   end
 
@@ -675,16 +656,25 @@ defmodule HTTP.Response do
     end
   end
 
+  defp write_chunk(file, chunk) do
+    case :file.write(file, chunk) do
+      :ok -> :ok
+      {:error, reason} -> {:file_error, reason}
+    end
+  end
+
   defp do_write_stream_chunks(stream, file, monitor, policy) do
     receive do
       {:stream_chunk, ^stream, chunk, ack_ref} ->
-        :ok = IO.binwrite(file, chunk)
-        send(stream, {:stream_chunk_ack, ack_ref})
-        do_write_stream_chunks(stream, file, monitor, policy)
+        with :ok <- write_chunk(file, chunk) do
+          send(stream, {:stream_chunk_ack, ack_ref})
+          do_write_stream_chunks(stream, file, monitor, policy)
+        end
 
       {:stream_chunk, ^stream, chunk} ->
-        :ok = IO.binwrite(file, chunk)
-        do_write_stream_chunks(stream, file, monitor, policy)
+        with :ok <- write_chunk(file, chunk) do
+          do_write_stream_chunks(stream, file, monitor, policy)
+        end
 
       {:stream_end, ^stream} ->
         :ok

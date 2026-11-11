@@ -100,6 +100,39 @@ defmodule HTTP.ResponseTest do
   end
 
   describe "write_to/2" do
+    test "returns a file error and does not raise for a buffered body" do
+      dir = Path.join(System.tmp_dir!(), "write_to_dir_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      response = %HTTP.Response{status: 200, body: "data"}
+      assert {:error, :eisdir} = HTTP.Response.write_to(response, dir)
+
+      blocker = Path.join(dir, "file")
+      File.write!(blocker, "x")
+      assert {:error, reason} = HTTP.Response.write_to(response, Path.join(blocker, "child/f"))
+      assert reason in [:enotdir, :eexist]
+    end
+
+    test "returns a file error and stops the stream when the file cannot be opened" do
+      dir = Path.join(System.tmp_dir!(), "write_to_dir_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      test_pid = self()
+
+      stream =
+        spawn(fn ->
+          receive do
+            {:request_lifecycle_stop, reason} -> send(test_pid, {:stopped, reason})
+          end
+        end)
+
+      response = %HTTP.Response{status: 200, body: stream, stream: stream}
+      assert {:error, :eisdir} = HTTP.Response.write_to(response, dir)
+      assert_receive {:stopped, :write_failed}
+    end
+
     @tag :integration
     test "write non-streaming response to file" do
       temp_path = Path.join(System.tmp_dir!(), "http_response_test.txt")

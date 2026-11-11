@@ -52,9 +52,8 @@ defmodule HTTP.ResponseBrowserAPITest do
       assert response.status_text == ""
     end
 
-    test "body_used is false initially" do
-      response = Response.new(status: 200, body: "test")
-      assert response.body_used == false
+    test "has no body_used field" do
+      refute Map.has_key?(Response.new(status: 200, body: "test"), :body_used)
     end
 
     test "redirected is false by default" do
@@ -82,36 +81,17 @@ defmodule HTTP.ResponseBrowserAPITest do
     end
   end
 
-  describe "body_used tracking" do
-    test "body_used is checked but due to immutability, multiple reads work" do
-      # Note: In Elixir, due to immutability, body_used doesn't persist across
-      # function calls like it does in JavaScript. The check exists for
-      # documentation and API compatibility, but doesn't prevent multiple reads
-      # of the same immutable response value.
-
+  describe "repeated reads" do
+    test "buffered bodies can be read repeatedly" do
       response = Response.new(status: 200, body: "Hello")
 
-      # Multiple reads work because response is immutable
       assert Response.text(response) == "Hello"
-      # Works in Elixir
       assert Response.text(response) == "Hello"
     end
 
-    test "body_used flag can be manually checked" do
+    test "clone of a buffered response is equal" do
       response = Response.new(status: 200, body: "test")
-      assert response.body_used == false
-
-      # In a mutable language, this would be true after reading
-      # In Elixir, response is immutable so flag doesn't change
-    end
-
-    test "clone resets body_used flag" do
-      # Manually create a response with body_used: true for testing
-      base_response = Response.new(status: 200, body: "test")
-      response = %{base_response | body_used: true}
-
-      clone = Response.clone(response)
-      assert clone.body_used == false
+      assert Response.clone(response) == response
     end
 
     test "reading methods don't mutate original response" do
@@ -121,7 +101,7 @@ defmodule HTTP.ResponseBrowserAPITest do
       assert {:ok, _} = Response.json(response)
 
       # Original response unchanged (Elixir immutability)
-      assert response.body_used == false
+      assert response == Response.new(status: 200, body: ~s({"key": "value"}))
 
       # Can read with text too
       assert is_binary(Response.text(response))
@@ -143,13 +123,6 @@ defmodule HTTP.ResponseBrowserAPITest do
 
       # Both have same content
       assert text1 == text2
-    end
-
-    test "clone resets body_used to false" do
-      response = Response.new(status: 200, body: "test")
-      clone = Response.clone(response)
-
-      assert clone.body_used == false
     end
 
     test "clone preserves all response properties" do
@@ -183,7 +156,6 @@ defmodule HTTP.ResponseBrowserAPITest do
       clone = Response.clone(response)
 
       assert clone.body == nil
-      assert clone.body_used == false
     end
   end
 
@@ -347,11 +319,6 @@ defmodule HTTP.ResponseBrowserAPITest do
       assert response_error.ok == false
     end
 
-    test "initializes body_used to false" do
-      response = Response.new(status: 200, body: "test")
-      assert response.body_used == false
-    end
-
     test "uses stream as body when constructing streaming responses" do
       stream = self()
       response = Response.new(status: 200, stream: stream)
@@ -379,7 +346,6 @@ defmodule HTTP.ResponseBrowserAPITest do
       assert response.ok == false
       assert response.headers == headers
       assert response.body == "Redirect"
-      assert response.body_used == false
       assert response.url == url
       assert response.redirected == true
       assert response.type == :basic
@@ -393,7 +359,6 @@ defmodule HTTP.ResponseBrowserAPITest do
       assert response.status_text == "OK"
       assert response.ok == true
       assert response.body == nil
-      assert response.body_used == false
       assert response.redirected == false
       assert response.type == :basic
     end
