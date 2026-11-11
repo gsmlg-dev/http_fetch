@@ -37,7 +37,7 @@ defmodule E2E.WebTransportLifecycleTest do
     assert WebTransport.reliability(transport) == "supports-unreliable"
 
     datagrams = WebTransport.datagrams(transport)
-    writable = DatagramDuplexStream.create_writable(datagrams, send_order: 10)
+    writable = DatagramDuplexStream.create_writable(datagrams)
 
     assert %DatagramsWritable{} = writable
     assert :ok = DatagramsWritable.write(writable, "client-datagram")
@@ -46,14 +46,14 @@ defmodule E2E.WebTransportLifecycleTest do
     assert {:ok, "server-datagram"} = DatagramDuplexStream.read(datagrams, timeout: 1_000)
 
     assert {:ok, %BidirectionalStream{} = bidi} =
-             WebTransport.create_bidirectional_stream(transport, send_order: 11)
+             WebTransport.create_bidirectional_stream(transport)
 
     assert :ok = SendStream.write(bidi.writable, "client-stream")
     send(transport.pid, {:webtransport_stream_data, bidi.readable.ref, "server-stream"})
     assert {:ok, "server-stream"} = ReceiveStream.read(bidi.readable, timeout: 1_000)
 
     assert {:ok, %SendStream{} = uni} =
-             WebTransport.create_unidirectional_stream(transport, send_order: 12)
+             WebTransport.create_unidirectional_stream(transport)
 
     assert :ok = SendStream.write(uni, "client-uni")
 
