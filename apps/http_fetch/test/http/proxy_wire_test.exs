@@ -247,6 +247,11 @@ defmodule HTTP.ProxyWireTest do
   end
 
   test "CONNECT tunnel deadline and abort close the proxy peer without origin traffic" do
+    # The 100 ms proxy budget below covers dialing and the CONNECT exchange. Load
+    # the OS trust store first: a cold first load can exceed that budget before
+    # the client dials, which would make the result depend on test order.
+    _ = :public_key.cacerts_get()
+
     for operation <- [:timeout, :abort] do
       {origin, origin_port} = listener()
       {proxy, proxy_port} = listener()
