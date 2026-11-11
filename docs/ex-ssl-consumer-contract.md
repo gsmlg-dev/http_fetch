@@ -288,12 +288,19 @@ Boundaries:
   Other keys are `:gen_tcp` options; OTP `:ssl`-only options, `active` other
   than `false` and `mode` other than `:binary` (including `:list`) are errors.
   `listen/2` validates every option before it opens the port.
+- `certs_keys` may list several identities; `listen/2` loads and validates every
+  entry. Per handshake the first identity (in list order, within the SNI
+  selection) that can sign one of the client's `signature_algorithms` is used,
+  preferring one whose chain fits `signature_algorithms_cert`; none able to
+  sign falls back to the first entry and fails with `handshake_failure`.
 - SNI selection order is `sni_hosts[name]`, `sni_fun.(name)` (`:undefined`
   selects the default), then the default identity. `sni_hosts` identities are
   loaded by `listen/2`; invalid entries or duplicate names (compared ASCII
   case-insensitively, RFC 4343) return `{:error, {:invalid_option, :sni_hosts}}`.
   `sni_hosts` lookup is case-insensitive; `sni_fun` receives the name as sent. No identity is an
   `unrecognized_name` alert; a failing `sni_fun` is an `internal_error` alert.
+  `sni_fun` runs in a helper killed at the `SSL.handshake/2` deadline, which
+  returns `{:error, :timeout}`.
 - A TCP server sends its chain even when it does not match the client's
   `signature_algorithms_cert` (RFC 8446 §4.4.2.2); `SSL.QUIC` keeps the hard check.
 - Client-certificate authentication (mTLS): `verify: :verify_peer` with
@@ -313,9 +320,18 @@ Boundaries:
   `peer_authenticated: :client | false`. `verify: :verify_none` (default) sends
   no CertificateRequest; any other `verify` value is
   `{:error, {:invalid_option, :verify}}`. `SSL.QUIC` servers do not request
-  client certificates.
+  client certificates. Client chains get no CRL or OCSP revocation check.
 - No server session tickets, resumption or 0-RTT; offered early data is
-  skipped (up to 16 KiB) and the handshake completes in full.
+  skipped (up to 16 KiB and 64 records) and the handshake completes in full.
+- A pre-authentication ClientHello is buffered up to 64 KiB. Handshake
+  fragments interleaved with application data after the handshake are an
+  `unexpected_message` alert (RFC 8446 §5.1). A second `SSL.handshake/2` while
+  one runs returns `{:error, :already_started}`; the handshake deadline also
+  bounds server flight writes.
+- QUIC 0-RTT replay protection belongs to the caller's session store: `ex_ssl`
+  offers early data only after a `:session_commit` answer of `{:ok, :early_data}`.
+  `elixir_quic`'s endpoint store consumes the ticket on commit (endpoint-local,
+  in-memory, no cross-node or restart protection).
 - A full receive buffer (about 1 MiB) pauses carrier reads instead of failing.
 - Server carriers default to `send_timeout: 30_000, send_timeout_close: true`
   unless the caller sets either key.
