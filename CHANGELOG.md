@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.13] - 2026-11-11
+
+### Changed
+- **http_fetch:** the redirect limit is now the Fetch value of 20 for every
+  protocol (was 5). HTTP/1 now matches HTTP/2 and HTTP/3: past the limit it
+  returns `{:error, :too_many_redirects}` instead of the last 3xx response, and a
+  307/308 that would replay a streamed body returns
+  `:streaming_body_redirect_not_replayable` instead of the 3xx response.
+- **http_web_transport:** options that were accepted but silently ignored are now
+  rejected (`allow_pooling: true`, non-empty `socket_opts`, `send_order` other
+  than 0, any `send_group`); `require_unreliable` is enforced, `idle_timeout` is
+  passed to QUIC and datagram max-age is implemented. `anticipated_concurrent_*`
+  and `congestion_control` are documented hints.
+- **ex_ssl (server):** pre-authentication ClientHello buffering is capped at
+  64 KiB and skipped rejected early-data records at 64.
+- **elixir_quic:** the consumer contract now lists unimplemented QUIC features
+  (stateless reset, version negotiation, ECN, PMTUD, persistent congestion,
+  pacing, local key-update initiation, AEAD limits, server NEW_TOKEN) with their
+  observable consequences.
+
+### Fixed
+- **elixir_quic:** authenticated 1-RTT protocol errors (flow control, stream
+  limit, final size, stream state, malformed frames, invalid ACK, CID limit,
+  invalid key update) now send CONNECTION_CLOSE with the RFC 9000 error code
+  (KEY_UPDATE_ERROR is now reachable) instead of dropping the connection
+  silently; STREAM data after a local STOP_SENDING is discarded and its
+  flow-control credit released; NewReno reduces the window once per recovery
+  period (RFC 9002 §7.3.2); lost ACK-only packets no longer fill the sent history
+  and stall sending; retired connection IDs are evicted oldest-first and
+  stream-count limits above 2^60 are rejected.
+- **elixir_quic_http3:** HTTP/3 connection errors close the QUIC connection with
+  their RFC 9114 code; WebTransport session close or CONNECT-stream end resets
+  and stops associated streams with WT_SESSION_GONE, and rejected peer
+  bidirectional streams no longer leak session state; malformed datagram
+  quarter-stream IDs give H3_DATAGRAM_ERROR and peer bidirectional streams
+  without a WebTransport session give H3_STREAM_CREATION_ERROR; raw requests
+  reject CR, LF and NUL in field values; large unknown capsules are skipped; an
+  upload ended early after a complete response uses H3_NO_ERROR. QPACK Huffman
+  tables are built at compile time.
+- **http_fetch / http_runtime:** HTTP/2 requests the server provably did not
+  process (GOAWAY below the stream id, REFUSED_STREAM, a draining pooled
+  connection) are retried transparently on another connection (at most 3
+  attempts within the same deadline); streamed bodies are never replayed.
+- **http_event_source:** URLs whose path or query hold whitespace or control
+  characters are rejected (`{:error, :invalid_url}`, or `:invalid_redirect` for
+  redirects) instead of making every reconnect fail with `:cleanup_capacity`
+  forever; a crashed dial releases its cleanup capacity; an event terminated by a
+  bare CR at a chunk end is dispatched immediately.
+- **http_web_socket:** a Close frame without a status code reports 1005;
+  `close()` while connecting emits an error event, then a 1006 close; IPv6
+  literal hosts are bracketed in the HTTP/1 `Host` header.
+- **http_web_transport:** `close/1` while connecting cancels the connect and
+  releases resources; `get_stats/1` reports real session counters; close rejects
+  codes above 0xFFFFFFFF and non-UTF-8 reasons; IPv6 `:authority` is bracketed.
+- **ex_ssl (server):** every `certs_keys` entry is validated at listen and the
+  identity is selected per handshake by the client's `signature_algorithms` and
+  SNI host; an RSA+ECDSA server now serves ECDSA-only clients.
+- **abyss:** the QUIC listener no longer stops with `:consumer_limit` during
+  connection churn at `max_connections`, and handlers receive `{:closed, reason}`
+  when a poll races a closed connection (the `event_poll_failed` noise); a stuck
+  dispatcher callback can no longer stop UDP reception (calls are bounded by
+  `admission_start_timeout`); dynamic scale-down drains in-flight handlers
+  (bounded by `shutdown_timeout`) instead of killing them; the handler idle
+  timeout uses `read_timeout` as its floor (it was effectively halved).
+- **hell:** an acceptor no longer exits permanently when a TLS connection-process
+  start failure is reported as `:closed` while the listener is alive.
+- **abyss_raw:** compiles on FreeBSD (interface binding is macOS-only); DHCP
+  datagrams up to 65,535 bytes are no longer truncated; send specs say `binary()`.
+
+### Security
+- **ex_ssl (server):** the handshake deadline now bounds `sni_fun` and handshake
+  writes (including `send_timeout: :infinity`); handshake fragments interleaved
+  with application data after the handshake are rejected (RFC 8446 §5.1);
+  `*.tld` wildcard certificates no longer match (RFC 6125 §6.4.3). Server mTLS
+  has no CRL/OCSP checking, now documented.
+
 ## [1.0.0-rc.12] - 2026-11-11
 
 ### Added
