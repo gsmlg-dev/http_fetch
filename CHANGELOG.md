@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.16] - 2026-11-12
+
+### Added
+- **http_fetch:** `HTTP.fetch/2` option `http2_unprocessed_retry` (default `true`;
+  string keys `"http2_unprocessed_retry"` / `"http2UnprocessedRetry"`). It controls
+  the RFC 9113 §8.7 transparent replay of non-streamed HTTP/2 requests the server
+  did not process: above a GOAWAY last-stream-id, `REFUSED_STREAM`, or a draining
+  pooled connection. With `false`, the first
+  `{:goaway, last_stream_id, error_code, :unprocessed}`, `{:stream_reset, :refused_stream}`
+  or `:draining` is returned exactly as after the three connection attempts are
+  exhausted, including under `error_mode: :structured`. Non-boolean values raise
+  `ArgumentError`. HTTP/3 is unaffected (#167).
+- **http_fetch:** each transparent HTTP/2 replay emits `[:http_fetch, :request, :retry]`
+  with `delay: 0` and metadata `source: :http2_unprocessed` and
+  `reason: :http2_goaway | :http2_refused_stream | :http2_open_refused`. Handlers
+  that count `retry:` policy retries should filter on `source`; policy retry
+  metadata is unchanged (#167).
+
 ## [1.0.0-rc.15] - 2026-11-12
 
 ### Fixed
