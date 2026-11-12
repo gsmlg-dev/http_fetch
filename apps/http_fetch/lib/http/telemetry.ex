@@ -58,6 +58,15 @@ defmodule HTTP.Telemetry do
   - Metadata: `%{scheme: atom, reason: integer | atom}` - the retried
     response status, or the failure reason category used by `:exception`
 
+  A transparent HTTP/2 replay of an unprocessed request (see
+  `http2_unprocessed_retry` in `HTTP.FetchOptions`) emits the same event with
+  `delay: 0`, an `attempt` counting connection attempts within the current
+  fetch attempt and redirect hop, and metadata `%{scheme: atom, reason: atom,
+  source: :http2_unprocessed}`. Its `reason` is `:http2_goaway`,
+  `:http2_refused_stream` or `:http2_open_refused`. Only these replay events
+  carry `source`; `retry:` policy events keep `%{scheme, reason}`. A replay
+  happens within one policy attempt, so both kinds can appear for one call.
+
   `:start`, `:stop` and `:exception` stay one per `HTTP.fetch/2` call even when
   attempts are retried: `:start` precedes the first attempt, and `:stop` or
   `:exception` reports the final result with a `duration` covering every
@@ -264,6 +273,26 @@ defmodule HTTP.Telemetry do
       %{scheme: safe_scheme(url), reason: reason}
     )
   end
+
+  # Transparent HTTP/2 replay of an unprocessed request: same event as a
+  # `retry:` policy retry, marked with `source` and finite reason categories.
+  @doc false
+  @spec http2_unprocessed_retry(URI.t(), term(), pos_integer()) :: :ok
+  def http2_unprocessed_retry(url, reason, attempt) do
+    execute(
+      [:http_fetch, :request, :retry],
+      %{attempt: attempt, delay: 0},
+      %{
+        scheme: safe_scheme(url),
+        reason: http2_unprocessed_reason(reason),
+        source: :http2_unprocessed
+      }
+    )
+  end
+
+  defp http2_unprocessed_reason({:goaway, _last, _error, :unprocessed}), do: :http2_goaway
+  defp http2_unprocessed_reason({:stream_reset, :refused_stream}), do: :http2_refused_stream
+  defp http2_unprocessed_reason({:http2_open_refused, _refusal}), do: :http2_open_refused
 
   @doc """
   Emits a telemetry event for response body reading start.

@@ -432,6 +432,43 @@ defmodule HTTP.FetchOptionsTest do
     end
   end
 
+  describe "http2_unprocessed_retry" do
+    test "defaults to true and maps only the opt-out to transport options" do
+      default = HTTP.FetchOptions.new([])
+      assert default.http2_unprocessed_retry == true
+
+      refute Keyword.has_key?(
+               HTTP.FetchOptions.to_transport_options(default),
+               :http2_unprocessed_retry
+             )
+
+      for options <- [
+            [http2_unprocessed_retry: false],
+            %{"http2_unprocessed_retry" => false},
+            %{"http2UnprocessedRetry" => false}
+          ] do
+        options = HTTP.FetchOptions.new(options)
+        assert options.http2_unprocessed_retry == false
+        assert HTTP.FetchOptions.to_transport_options(options)[:http2_unprocessed_retry] == false
+      end
+
+      assert %{http2_unprocessed_retry: true} =
+               HTTP.FetchOptions.new(http2_unprocessed_retry: true)
+    end
+
+    test "rejects non-boolean values" do
+      for value <- ["false", 0, :no] do
+        assert_raise ArgumentError, ~r/invalid http2_unprocessed_retry/, fn ->
+          HTTP.FetchOptions.new(http2_unprocessed_retry: value)
+        end
+      end
+
+      assert_raise ArgumentError, ~r/invalid http2_unprocessed_retry/, fn ->
+        HTTP.fetch("http://example.test", http2_unprocessed_retry: "no")
+      end
+    end
+  end
+
   describe "edge cases" do
     test "handles empty options" do
       options = HTTP.FetchOptions.new([])

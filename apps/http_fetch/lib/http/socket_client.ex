@@ -1618,13 +1618,14 @@ defmodule HTTP.SocketClient do
   # request moves to another owner under the same deadline (at most
   # @http2_max_attempts owners per hop), mirroring the HTTP/3 transfer rule.
   # A streamed body is never replayed, and nothing is retried once any part of
-  # the response has been accepted.
+  # the response has been accepted. `http2_unprocessed_retry: false` returns the
+  # first unprocessed reason exactly as an exhausted attempt budget does.
   defp unprocessed_or_fail_http2(state, reason) do
     if http2_retry?(state, reason) and is_nil(state.mode) and not state.response_sent? and
          is_nil(state.delivery) do
       if match?({:goaway, _, _, :unprocessed}, reason), do: mark_http2_draining(state)
       finish_http2(state, :retry)
-      retry_http2(state)
+      retry_http2(state, reason)
     else
       fail_http2(state, reason)
     end
@@ -1632,7 +1633,7 @@ defmodule HTTP.SocketClient do
 
   defp retry_or_fail_http2(context, {:http2_open_refused, refusal} = reason) do
     if http2_retry?(context, reason),
-      do: retry_http2(context),
+      do: retry_http2(context, reason),
       else: send_error(context.parent, context.ref, refusal)
   end
 
@@ -1640,6 +1641,7 @@ defmodule HTTP.SocketClient do
 
   defp http2_retry?(%{attempt: attempt, request: request}, reason) do
     attempt < @http2_max_attempts and not Request.streaming_body?(request) and
+      Keyword.get(request.transport_options, :http2_unprocessed_retry, true) != false and
       http2_unprocessed?(reason)
   end
 
@@ -1648,7 +1650,10 @@ defmodule HTTP.SocketClient do
   defp http2_unprocessed?({:stream_reset, :refused_stream}), do: true
   defp http2_unprocessed?(_reason), do: false
 
-  defp retry_http2(state) do
+  defp retry_http2(state, reason) do
+    if request_telemetry?(state.request),
+      do: HTTP.Telemetry.http2_unprocessed_retry(state.request.url, reason, state.attempt)
+
     owner(
       state.parent,
       state.ref,

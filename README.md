@@ -267,6 +267,14 @@ HTTP.fetch(url,
   cancelled and its connection closed.
 - `[:http_fetch, :request, :retry]` telemetry reports `attempt`, `delay` and
   `reason` (status or error category); start/stop/exception stay one per call.
+- Independently of `retry:`, a non-streamed HTTP/2 request the server provably
+  did not process (above a GOAWAY last-stream-id, `REFUSED_STREAM`, or a
+  draining pooled connection; RFC 9113 §8.7) moves to another connection within
+  the same deadline, at most three connections per redirect hop. Each move emits
+  the retry event with `delay: 0` and `source: :http2_unprocessed`. Set
+  `http2_unprocessed_retry: false` to return the first such reason instead,
+  exactly as after the attempts are exhausted. HTTP/3 has its own transfer rule
+  and is unaffected.
 - `HTTP.Test` fixtures claim one expectation per attempt.
 - With retry enabled, `HTTP.Promise.completion/1` is unsupported
   (`{:unsupported_completion, :retry}`), and `transport_scope` raises
@@ -1343,6 +1351,7 @@ every request phase.
 | `{:invalid_content_encoding, coding}`, `:decoded_body_too_large` | A `gzip`/`deflate` body is malformed or decodes past the limit. | body |
 | `:http2_informational_limit`, `:http2_trailers_limit` | HTTP/2 informational or trailer retention budgets were exceeded. | request, body |
 | `{:stream_reset, code}`, `:protocol_error`, `:flow_control_error`, ... | HTTP/2 stream reset or protocol violation. | request, body |
+| `{:goaway, last_stream_id, error_code, :unprocessed}`, `{:stream_reset, :refused_stream}`, `:draining` | The server did not process the HTTP/2 request (above a GOAWAY last-stream-id, `REFUSED_STREAM`, or a draining pooled connection) and it was not replayed: `http2_unprocessed_retry: false`, a streamed body, or three connection attempts exhausted. | request |
 | `{:http3_error, scope, code, reason}` | HTTP/3 stream or connection error. | request, body |
 | `{:connection_owner_down, reason}` | The shared HTTP/2 or HTTP/3 connection owner exited. | request, body |
 | `{:proxy_connect_status, status}`, `:proxy_tunnel_timeout`, `:invalid_proxy_response` | An explicit proxy refused or failed the CONNECT tunnel. | connect |

@@ -90,6 +90,108 @@ defmodule HTTP.HTTP2UnprocessedRetryTest do
     end
   end
 
+  describe "http2_unprocessed_retry: false" do
+    test "a stream above the GOAWAY last-stream-id is returned without replay" do
+      url = start_peer(fn _n, socket, id, _end_stream? -> send_goaway(socket, id - 1) end)
+
+      # A bodyless request: a POST body can race the owner closing after GOAWAY.
+      assert {:error, {:goaway, 0, 0, :unprocessed}} =
+               fetch(url, http2_unprocessed_retry: false)
+
+      assert_receive {:request, 1, 1, _}
+      refute_receive {:request, _, _, _}, 200
+    end
+
+    test "REFUSED_STREAM is returned without replay" do
+      url =
+        start_peer(fn _n, socket, id, _end_stream? ->
+          send_reset(socket, id, @refused_stream)
+        end)
+
+      assert {:error, {:stream_reset, :refused_stream}} =
+               fetch(url, http2_unprocessed_retry: false)
+
+      assert_receive {:request, 1, _, _}
+      refute_receive {:request, _, _, _}, 200
+    end
+
+    test "structured errors match the exhausted-attempts result" do
+      url =
+        start_peer(fn _n, socket, id, _end_stream? ->
+          send_reset(socket, id, @refused_stream)
+        end)
+
+      structured = [error_mode: :structured, redirect: :manual]
+
+      assert {:error, %HTTP.RequestError{reason: {:stream_reset, :refused_stream}} = opted_out} =
+               fetch(url, [http2_unprocessed_retry: false] ++ structured)
+
+      assert_receive {:request, 1, _, _}
+      refute_receive {:request, _, _, _}, 200
+
+      assert {:error, exhausted} = fetch(url, structured)
+      assert exhausted == opted_out
+      for n <- 2..4, do: assert_receive({:request, ^n, _, _})
+      refute_receive {:request, _, _, _}, 200
+    end
+
+    test "an exclusive owner returns REFUSED_STREAM without replay" do
+      url =
+        start_peer(fn _n, socket, id, _end_stream? ->
+          send_reset(socket, id, @refused_stream)
+        end)
+
+      assert {:error, {:stream_reset, :refused_stream}} =
+               fetch(url, http2_reuse: false, http2_unprocessed_retry: false)
+
+      assert_receive {:request, 1, _, _}
+      refute_receive {:request, _, _, _}, 200
+    end
+  end
+
+  describe "replay telemetry" do
+    test "each transparent replay emits a retry event marked as an HTTP/2 replay" do
+      url =
+        start_peer(fn
+          1, socket, id, _end_stream? -> send_reset(socket, id, @refused_stream)
+          2, socket, id, _end_stream? -> send_goaway(socket, id - 1)
+          _n, socket, id, _end_stream? -> :ok = Peer.response(socket, id, "ok")
+        end)
+
+      with_retry_telemetry(fn ref ->
+        assert %HTTP.Response{status: 200} = fetch(url)
+
+        assert_received {^ref, %{attempt: 1, delay: 0}, first}
+
+        assert first == %{
+                 scheme: :http,
+                 reason: :http2_refused_stream,
+                 source: :http2_unprocessed
+               }
+
+        assert_received {^ref, %{attempt: 2, delay: 0}, second}
+        assert second == %{scheme: :http, reason: :http2_goaway, source: :http2_unprocessed}
+        refute_received {^ref, _, _}
+      end)
+    end
+
+    test "no replay event is emitted with the opt-out or telemetry disabled" do
+      url =
+        start_peer(fn
+          1, socket, id, _end_stream? -> send_reset(socket, id, @refused_stream)
+          _n, socket, id, _end_stream? -> :ok = Peer.response(socket, id, "ok")
+        end)
+
+      with_retry_telemetry(fn ref ->
+        assert {:error, {:stream_reset, :refused_stream}} =
+                 fetch(url, http2_unprocessed_retry: false)
+
+        assert %HTTP.Response{status: 200} = fetch(url, telemetry: false)
+        refute_received {^ref, _, _}
+      end)
+    end
+  end
+
   describe "pooled owner refusal before opening" do
     defmodule RefusingOwner do
       use GenServer, restart: :temporary
@@ -146,6 +248,25 @@ defmodule HTTP.HTTP2UnprocessedRetryTest do
       assert GenServer.call(pool, :events) == [{:draining, refusing}]
     end
 
+    test "the refusal is returned without moving owners when replay is disabled" do
+      refusing = start_supervised!({RefusingOwner, :refuse}, id: :refusing)
+      serving = start_supervised!({RefusingOwner, :complete}, id: :serving)
+      pool = start_supervised!({FakePool, [refusing, serving]})
+
+      assert {:error, :draining} =
+               HTTP.SocketClient.request(%HTTP.Request{
+                 url: URI.parse("http://example.test/refused"),
+                 transport_options: [
+                   http_version: :h2c,
+                   http2_pool: pool,
+                   timeout: 1_000,
+                   http2_unprocessed_retry: false
+                 ]
+               })
+
+      assert GenServer.call(pool, :events) == [{:draining, refusing}]
+    end
+
     test "the refusal is returned once the attempts are exhausted" do
       owners =
         for n <- 1..3, do: start_supervised!({RefusingOwner, :refuse}, id: {:refusing, n})
@@ -168,6 +289,29 @@ defmodule HTTP.HTTP2UnprocessedRetryTest do
       Keyword.merge([http_version: :h2c, http2_profile: :native_v1, timeout: 3_000], opts)
     )
     |> HTTP.Promise.await()
+  end
+
+  defp with_retry_telemetry(fun) do
+    ref = make_ref()
+    parent = self()
+    id = {__MODULE__, ref}
+
+    :telemetry.attach(
+      id,
+      [:http_fetch, :request, :retry],
+      # Handlers run in the emitting owner; forward only this test's fetches.
+      fn _event, measurements, metadata, _ ->
+        if parent in Process.get(:"$callers", []),
+          do: send(parent, {ref, measurements, metadata})
+      end,
+      nil
+    )
+
+    try do
+      fun.(ref)
+    after
+      :telemetry.detach(id)
+    end
   end
 
   defp send_goaway(socket, last),

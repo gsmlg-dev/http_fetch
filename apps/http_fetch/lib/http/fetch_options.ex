@@ -149,6 +149,23 @@ defmodule HTTP.FetchOptions do
     Proxy scheme, endpoint, credentials and both TLS policies isolate pools.
   - `http2_profile` - versioned HTTP/2 wire profile (only used by HTTP/2)
   - `http2_reuse` - whether an HTTP/2 connection may be reused; defaults to `true`
+  - `http2_unprocessed_retry` - whether a non-streamed HTTP/2 request the server
+    provably did not process is replayed; defaults to `true`. RFC 9113 §8.7
+    treats a stream above a GOAWAY last-stream-id, a stream reset with
+    `REFUSED_STREAM`, and an open refused by a draining pooled connection as
+    unprocessed. By default such a request moves to another connection under
+    the same deadline, at most three connections per redirect hop, and each
+    move emits `[:http_fetch, :request, :retry]` with `source:
+    :http2_unprocessed` (see `HTTP.Telemetry`). With `false` the first such
+    failure is returned exactly as when those attempts are exhausted:
+    `{:goaway, last_stream_id, error_code, :unprocessed}`, `{:stream_reset,
+    :refused_stream}` or `:draining` (wrapped by `error_mode: :structured`).
+    Applies to pooled and exclusive (`http2_reuse: false`) HTTP/2 connections,
+    `:auto`-negotiated h2, explicit `pool:` and `transport_scope` requests.
+    Streamed (`duplex: "half"`) bodies are never replayed either way. It has no
+    effect on HTTP/1.1, on HTTP/3 (whose transfer rule is separate), or with an
+    `adapter:`. It is independent of `retry:`, which may still retry the
+    returned failure under its own policy.
   - `http3_profile` - QUIC wire profile; defaults to `:ordered`
   - `http3_reuse` - whether an HTTP/3 connection may be reused; defaults to `true`
   - `http3_resumption` - beta opt-in QUIC session resumption for HTTP/3; defaults
@@ -216,6 +233,8 @@ defmodule HTTP.FetchOptions do
     "http2Profile" => :http2_profile,
     "http2_reuse" => :http2_reuse,
     "http2Reuse" => :http2_reuse,
+    "http2_unprocessed_retry" => :http2_unprocessed_retry,
+    "http2UnprocessedRetry" => :http2_unprocessed_retry,
     "http3_profile" => :http3_profile,
     "http3Profile" => :http3_profile,
     "http3_reuse" => :http3_reuse,
@@ -288,6 +307,7 @@ defmodule HTTP.FetchOptions do
             http1_idle_timeout: 30_000,
             http2_profile: nil,
             http2_reuse: true,
+            http2_unprocessed_retry: true,
             http3_profile: nil,
             http3_reuse: true,
             http3_resumption: false,
@@ -338,6 +358,7 @@ defmodule HTTP.FetchOptions do
           proxy: {:http | :https, String.t(), :inet.port_number(), keyword()} | nil,
           http2_profile: atom() | String.t() | map() | nil,
           http2_reuse: boolean(),
+          http2_unprocessed_retry: boolean(),
           http3_profile: atom() | map() | nil,
           http3_reuse: boolean(),
           http3_resumption: boolean(),
@@ -402,6 +423,10 @@ defmodule HTTP.FetchOptions do
     |> maybe_add(:http1_idle_timeout, if(options.http1_reuse, do: options.http1_idle_timeout))
     |> maybe_add(:http2_profile, options.http2_profile)
     |> maybe_add(:http2_reuse, if(options.http2_reuse, do: nil, else: false))
+    |> maybe_add(
+      :http2_unprocessed_retry,
+      if(options.http2_unprocessed_retry, do: nil, else: false)
+    )
     |> maybe_add(:http3_profile, options.http3_profile)
     |> maybe_add(:http3_reuse, if(options.http3_reuse, do: nil, else: false))
     |> maybe_add(:http3_resumption, if(options.http3_resumption, do: true))
@@ -553,6 +578,9 @@ defmodule HTTP.FetchOptions do
       {:http2_reuse, reuse}, acc ->
         %{acc | http2_reuse: reuse}
 
+      {:http2_unprocessed_retry, retry}, acc ->
+        %{acc | http2_unprocessed_retry: retry}
+
       {:http3_profile, profile}, acc ->
         %{acc | http3_profile: profile}
 
@@ -657,6 +685,8 @@ defmodule HTTP.FetchOptions do
           normalize_http1_limit(options.http1_idle_timeout, 60_000, :http1_idle_timeout),
         http2_profile: normalize_http2_profile(options.http2_profile),
         http2_reuse: normalize_http2_reuse(options.http2_reuse),
+        http2_unprocessed_retry:
+          normalize_http2_unprocessed_retry(options.http2_unprocessed_retry),
         http3_reuse: normalize_http3_reuse(options.http3_reuse),
         http3_resumption: normalize_boolean(options.http3_resumption, :http3_resumption),
         early_data: normalize_boolean(options.early_data, :early_data),
@@ -962,6 +992,16 @@ defmodule HTTP.FetchOptions do
 
   defp normalize_http2_reuse(value),
     do: raise(ArgumentError, "invalid http2_reuse: #{inspect(value)}; expected boolean")
+
+  defp normalize_http2_unprocessed_retry(nil), do: true
+  defp normalize_http2_unprocessed_retry(value) when is_boolean(value), do: value
+
+  defp normalize_http2_unprocessed_retry(value),
+    do:
+      raise(
+        ArgumentError,
+        "invalid http2_unprocessed_retry: #{inspect(value)}; expected boolean"
+      )
 
   defp normalize_http2_scope(nil), do: nil
   defp normalize_http2_scope(value) when is_atom(value) or is_binary(value), do: value
