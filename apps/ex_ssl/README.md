@@ -102,6 +102,12 @@ The custom reference accepts IPv4/IPv6 tuples or strings, or
 SNI follows `server_name_indication` and the usual direct-dial defaults.
 Trust, peer identity and handshake verification remain mandatory.
 
+Without `cacerts`, `cacertfile` or `verify: :verify_none`, a client trusts the OS
+store returned by `:public_key.cacerts_get/0`. The `:ex_ssl` application loads that
+store once when it starts, so a connection's timeout never includes the cold load.
+On a host without an OS store the application still starts, and such connections
+fail with `{:error, {:options, {:cacerts, :invalid}}}`.
+
 ## Runtime baseline
 
 The supported runtime baselines are Elixir 1.18 on Erlang/OTP 28, Elixir 1.19 on
