@@ -1500,7 +1500,7 @@ defmodule SSL.Connection do
         state
 
       state.closed ->
-        finish_recv(state, {:error, state.close_reason})
+        finish_recv(state, closed_recv_result(state))
 
       Options.remaining(receiver.deadline) == 0 ->
         finish_recv(state, {:error, :timeout})
@@ -1509,6 +1509,12 @@ defmodule SSL.Connection do
         state
     end
   end
+
+  # After the peer closed no more plaintext can arrive. An exact-length read the
+  # buffer cannot satisfy times out at once and keeps the bytes; the terminal is
+  # reported only once the buffer is drained (#158, #163, #164).
+  defp closed_recv_result(%{size: size}) when size > 0, do: {:error, :timeout}
+  defp closed_recv_result(state), do: {:error, state.close_reason}
 
   defp deliver_active(%{recv: nil, active: :once, size: size} = state) when size > 0 do
     {bytes, buffer} = take(state.buffer, size, [])

@@ -273,7 +273,7 @@ defmodule SSL do
   @doc """
   Receives available bytes for length 0, or exactly length bytes. Timeout retains buffered data.
 
-  On a server socket whose peer has closed, an exact-length read that the
+  On a socket whose peer has closed, an exact-length read that the
   remaining buffered plaintext cannot satisfy returns `{:error, :timeout}` at
   once and keeps the bytes; the close (`:closed` after close_notify, otherwise
   `:econnreset`) is reported only after the buffer is drained.

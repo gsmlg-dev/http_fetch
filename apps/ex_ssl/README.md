@@ -312,8 +312,9 @@ Scope:
   `*.co.uk` still matches.
 - Receive backpressure: while about 1 MiB of plaintext is buffered unread, the
   server stops reading its carrier until the application drains it.
-- After the peer closes, buffered plaintext stays readable. An exact-length
-  `SSL.recv/3` that the remaining bytes cannot satisfy returns
+- After the peer closes (server and client sockets), buffered plaintext stays
+  readable. An exact-length `SSL.recv/3` that the remaining bytes cannot
+  satisfy returns
   `{:error, :timeout}` at once and keeps them; the terminal is reported only
   once the buffer is drained: `{:error, :closed}` (or `{:ssl_closed, socket}`)
   after close_notify, `{:error, :econnreset}` after a TCP close without it.
