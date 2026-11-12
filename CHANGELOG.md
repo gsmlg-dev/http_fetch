@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plaintext was still buffered, so OTP-style readers truncated their input. It now
   returns `{:error, :timeout}` at once and keeps the bytes; the terminal is reported
   only once the buffer is drained, matching the server connection fixed in rc.14
-  (#164).
+  (#164). Only direct exact-length `SSL.recv/3` callers see the change; Fetch,
+  WebSocket, EventSource and the runtime read with length 0.
 - **ex_ssl:** the OS trust store (`:public_key.cacerts_get/0`) is loaded once when
   the `:ex_ssl` application starts. The first HTTPS request in a VM no longer spends
   part of its `timeout` (or a proxy CONNECT `timeout`) on the cold load, which could

@@ -164,8 +164,9 @@ defmodule SSL.TransportCloseDeliveryTest do
       {socket, peer} = connect_and_close(:fin)
       await_transport_terminal(socket)
 
-      # The unsatisfiable length reports the terminal, but keeps the remainder.
-      assert {:error, :econnreset} = SSL.recv(socket, byte_size(@body) + 1, 0)
+      # The unsatisfiable length times out at once and keeps the remainder; the
+      # terminal is reported only once the buffer is drained (#164).
+      assert {:error, :timeout} = SSL.recv(socket, byte_size(@body) + 1, 0)
       assert @body == recv_all(socket, [])
       assert {:error, :econnreset} = SSL.recv(socket, 0, 0)
       stop_peer(peer)
