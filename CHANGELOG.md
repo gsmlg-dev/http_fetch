@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.15] - 2026-11-12
+
+### Fixed
+- **ex_ssl:** after the peer closed, a client exact-length `SSL.recv/3` larger than
+  the buffered plaintext returned the terminal (`:closed`/`:econnreset`) while
+  plaintext was still buffered, so OTP-style readers truncated their input. It now
+  returns `{:error, :timeout}` at once and keeps the bytes; the terminal is reported
+  only once the buffer is drained, matching the server connection fixed in rc.14
+  (#164).
+- **ex_ssl:** the OS trust store (`:public_key.cacerts_get/0`) is loaded once when
+  the `:ex_ssl` application starts. The first HTTPS request in a VM no longer spends
+  part of its `timeout` (or a proxy CONNECT `timeout`) on the cold load, which could
+  make a short-deadline request fail before it dialed. Hosts without an OS store
+  still boot; their default-trust connections keep failing with
+  `{:error, {:options, {:cacerts, :invalid}}}`. Explicit `cacerts`, `cacertfile`
+  and `verify: :verify_none` never consult the OS store (#165).
+
+### Internal
+- The plain-UDP server consumer gate and the Abyss QUIC interop script no longer use
+  the deprecated Abyss `handler_module:` mode (#166).
+
 ## [1.0.0-rc.14] - 2026-11-12
 
 API freeze for 1.0.0 (see [the 1.0 release criteria](docs/release-1.0-criteria.md)).
