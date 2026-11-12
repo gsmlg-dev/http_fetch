@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.17] - 2026-11-12
+
+### Added
+- **ex_ssl:** `active_chunk_size` option (positive integer, default `:infinity`)
+  for `SSL.listen/2` and `SSL.setopts/2`. Each active-once `{:ssl, socket, bytes}`
+  message carries at most that many plaintext bytes; the rest stays buffered and
+  is delivered in order by later arms. `recv/3` is unchanged. Client sockets
+  accept it through `SSL.setopts/2`, and `Hell.Transports.SSL` passes it through,
+  bounding each `handle_data/3` call (#169).
+
+### Security
+- **hell:** listener telemetry metadata (`[:hell, :listener, :start | :stop]`),
+  listener state and `inspect/2` of `Hell.ServerConfig` (and so supervisor and
+  crash reports) redact secret TLS transport options: `password`, `key`,
+  `sni_fun`, the `key`/`password` of each `certs_keys` entry and the options of
+  each `sni_hosts` entry become `:redacted`. `Hell.ServerConfig.redact_transport_options/1`
+  exposes the same redaction (#168).
+
 ## [1.0.0-rc.16] - 2026-11-12
 
 ### Added
