@@ -1,6 +1,6 @@
 defmodule HttpPool.MixProject do
   use Mix.Project
-  @version "1.0.0-rc.14"
+  @version "1.0.0-rc.15"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
 
   def project do
@@ -33,7 +33,7 @@ defmodule HttpPool.MixProject do
 
   defp deps do
     [
-      {:http_core, "== 1.0.0-rc.14", in_umbrella: true, hex: :http_core},
+      {:http_core, "== 1.0.0-rc.15", in_umbrella: true, hex: :http_core},
       {:telemetry, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
