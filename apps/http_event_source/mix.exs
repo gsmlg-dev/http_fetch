@@ -1,7 +1,7 @@
 defmodule HttpEventSource.MixProject do
   use Mix.Project
 
-  @version "1.0.0-rc.16"
+  @version "1.0.0-rc.17"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
 
   def project do
@@ -49,8 +49,8 @@ defmodule HttpEventSource.MixProject do
 
   defp deps do
     [
-      {:http_core, "== 1.0.0-rc.16", in_umbrella: true, hex: :http_core},
-      {:http_runtime, "== 1.0.0-rc.16", in_umbrella: true, hex: :http_runtime},
+      {:http_core, "== 1.0.0-rc.17", in_umbrella: true, hex: :http_core},
+      {:http_runtime, "== 1.0.0-rc.17", in_umbrella: true, hex: :http_runtime},
       {:telemetry, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]

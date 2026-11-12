@@ -4,7 +4,7 @@ defmodule Hell.MixProject do
   def project do
     [
       app: :hell,
-      version: "1.0.0-rc.16",
+      version: "1.0.0-rc.17",
       build_path: "../../_build",
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
@@ -47,7 +47,7 @@ defmodule Hell.MixProject do
 
   defp deps() do
     [
-      {:ex_ssl, "== 1.0.0-rc.16", in_umbrella: true, hex: :ex_ssl},
+      {:ex_ssl, "== 1.0.0-rc.17", in_umbrella: true, hex: :ex_ssl},
       {:telemetry, "~> 0.4 or ~> 1.0"},
       {:machete, ">= 0.0.0", only: [:dev, :test]},
       {:ex_doc, "~> 0.25", only: [:dev, :test], runtime: false},
