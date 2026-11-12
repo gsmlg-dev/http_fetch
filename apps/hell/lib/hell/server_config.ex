@@ -78,6 +78,48 @@ defmodule Hell.ServerConfig do
     end
   end
 
+  @secret_keys [:password, :key, :sni_fun]
+
+  @doc """
+  Returns `transport_options` with secret-bearing TLS options redacted
+
+  `password`, `key` and `sni_fun` values, the `key` and `password` of every
+  `certs_keys` entry and the options of every `sni_hosts` entry are replaced by
+  `:redacted`. Listener telemetry metadata and `inspect/2` of a server
+  configuration use this form so that private key material never reaches
+  telemetry handlers or crash reports.
+  """
+  @spec redact_transport_options(Hell.transport_options()) :: Hell.transport_options()
+  def redact_transport_options(options) when is_list(options),
+    do: Enum.map(options, &redact_option/1)
+
+  def redact_transport_options(options), do: options
+
+  defp redact_option({key, _value}) when key in @secret_keys, do: {key, :redacted}
+
+  defp redact_option({:certs_keys, entries}) when is_list(entries),
+    do: {:certs_keys, Enum.map(entries, &redact_certs_key/1)}
+
+  defp redact_option({:sni_hosts, hosts}) when is_list(hosts),
+    do: {:sni_hosts, Enum.map(hosts, &redact_sni_host/1)}
+
+  defp redact_option({key, _value}) when key in [:certs_keys, :sni_hosts], do: {key, :redacted}
+  defp redact_option(option), do: option
+
+  defp redact_certs_key(entry) when is_map(entry) do
+    Enum.reduce([:key, :password], entry, fn key, entry ->
+      if Map.has_key?(entry, key), do: Map.put(entry, key, :redacted), else: entry
+    end)
+  end
+
+  defp redact_certs_key(_entry), do: :redacted
+
+  defp redact_sni_host({host, options}) when is_list(options),
+    do: {host, redact_transport_options(options)}
+
+  defp redact_sni_host({host, _options}), do: {host, :redacted}
+  defp redact_sni_host(_entry), do: :redacted
+
   defp validate_reuseport_options!(config) do
     num_listen_sockets = config.num_listen_sockets
     transport_options = config.transport_options
@@ -88,5 +130,17 @@ defmodule Hell.ServerConfig do
       raise ArgumentError,
             "reuseport: true or reuseport_lb: true must be set in transport_options when using num_listen_sockets > 1"
     end
+  end
+end
+
+defimpl Inspect, for: Hell.ServerConfig do
+  # Supervisor and crash reports inspect start arguments; keep TLS secrets out of them
+  def inspect(config, opts) do
+    redacted = %{
+      config
+      | transport_options: Hell.ServerConfig.redact_transport_options(config.transport_options)
+    }
+
+    Inspect.Any.inspect(redacted, opts)
   end
 end

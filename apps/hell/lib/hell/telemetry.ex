@@ -23,7 +23,8 @@ defmodule Hell.Telemetry do
       * `local_address`: The IP address that the listener is bound to
       * `local_port`: The port that the listener is bound to
       * `transport_module`: The transport module in use
-      * `transport_options`: Options passed to the transport module at startup
+      * `transport_options`: Options passed to the transport module at startup, with
+        secret TLS options redacted (see `Hell.ServerConfig.redact_transport_options/1`)
 
 
   This span is ended by the following event:
@@ -43,7 +44,8 @@ defmodule Hell.Telemetry do
       * `local_address`: The IP address that the listener is bound to
       * `local_port`: The port that the listener is bound to
       * `transport_module`: The transport module in use
-      * `transport_options`: Options passed to the transport module at startup
+      * `transport_options`: Options passed to the transport module at startup, with
+        secret TLS options redacted (see `Hell.ServerConfig.redact_transport_options/1`)
 
   ## `[:hell, :acceptor, *]`
 

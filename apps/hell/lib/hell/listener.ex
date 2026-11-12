@@ -35,7 +35,8 @@ defmodule Hell.Listener do
           local_address: elem(local_info, 0),
           local_port: elem(local_info, 1),
           transport_module: server_config.transport_module,
-          transport_options: server_config.transport_options
+          transport_options:
+            Hell.ServerConfig.redact_transport_options(server_config.transport_options)
         }
 
         listener_span = Hell.Telemetry.start_span(:listener, %{}, span_metadata)
