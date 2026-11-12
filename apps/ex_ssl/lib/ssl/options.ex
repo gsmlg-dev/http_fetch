@@ -203,9 +203,10 @@ defmodule SSL.Options do
 
   defp validate_setopts(options) do
     Enum.reduce_while(options, :ok, fn {key, value}, :ok ->
-      if key in [:active, :send_timeout, :send_timeout_close] and valid_option?(key, value),
-        do: {:cont, :ok},
-        else: {:halt, option_error({key, :unsupported_or_invalid})}
+      if key in [:active, :active_chunk_size, :send_timeout, :send_timeout_close] and
+           valid_option?(key, value),
+         do: {:cont, :ok},
+         else: {:halt, option_error({key, :unsupported_or_invalid})}
     end)
   end
 
@@ -218,6 +219,10 @@ defmodule SSL.Options do
   defp valid_option?(:middlebox_comp_mode, value), do: is_boolean(value)
   defp valid_option?(:mode, value), do: value == :binary
   defp valid_option?(:active, value), do: value in [false, :once]
+
+  defp valid_option?(:active_chunk_size, value),
+    do: value == :infinity or (is_integer(value) and value > 0)
+
   defp valid_option?(:packet, value), do: value in [:raw, 0]
   defp valid_option?(:depth, value), do: is_integer(value) and value >= 0
 

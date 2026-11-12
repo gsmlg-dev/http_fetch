@@ -120,6 +120,8 @@ defmodule SSL.ServerConnection do
       size: 0,
       active: false,
       active_terminal: false,
+      # Upper bound on plaintext bytes per active-once message (#169).
+      active_chunk_size: :infinity,
       armed: false,
       started: false,
       ccs_received: false,
@@ -195,6 +197,7 @@ defmodule SSL.ServerConnection do
        owner: owner,
        owner_monitor: Process.monitor(owner),
        config: config,
+       active_chunk_size: Map.get(config, :active_chunk_size, :infinity),
        records: RecordFramer.new(),
        framer: HandshakeFramer.new()
      }}
@@ -439,6 +442,11 @@ defmodule SSL.ServerConnection do
             {:ok, false} -> %{data | active: false, active_terminal: false}
             :error -> data
           end
+
+        data = %{
+          data
+          | active_chunk_size: Keyword.get(options, :active_chunk_size, data.active_chunk_size)
+        }
 
         continue(name, data, [{:reply, from, :ok}])
     end
@@ -896,13 +904,17 @@ defmodule SSL.ServerConnection do
     {%{data | recv: nil}, [{:reply, from, result}, {{:timeout, :recv}, :cancel}]}
   end
 
+  # Bytes beyond `active_chunk_size` stay buffered, in order, for the next arm.
   defp deliver(%{recv: nil, active: :once, size: size} = data) when size > 0 do
-    {bytes, data} = take(data, size)
+    {bytes, data} = take(data, chunk_length(size, data.active_chunk_size))
     send(data.owner, {:ssl, data.socket, bytes})
     {%{data | active: false}, []}
   end
 
   defp deliver(data), do: {data, []}
+
+  defp chunk_length(size, :infinity), do: size
+  defp chunk_length(size, limit), do: min(size, limit)
 
   defp take(data, length) do
     {bytes, buffer} = take(data.buffer, length, [])

@@ -308,11 +308,16 @@ defmodule SSL do
   certificate identity (`certfile`/`keyfile`, `cert`/`key`, `certs_keys`
   with several identities, each validated here and chosen per handshake by the
   client's signature algorithms, `password`), `sni_hosts`, `sni_fun`, `alpn_preferred_protocols`, `ciphers`,
-  `versions: [:"tlsv1.3"]` and client authentication. OTP `:ssl`-only options
+  `versions: [:"tlsv1.3"]`, `active_chunk_size` and client authentication. OTP `:ssl`-only options
   are errors; every other option is a `:gen_tcp` listen option, including the
   bare address families `:inet`, `:inet6` and `:local`. `:binary` and
   `active: false` are enforced; `active` other than `false` and `mode` other
   than `:binary` (including `:list`) return `{:error, {:unsupported_option, key}}`.
+
+  `active_chunk_size` (a positive integer, default `:infinity`) bounds the
+  plaintext bytes in each active-once `{:ssl, socket, bytes}` message; bytes
+  beyond it stay buffered and are delivered in order by later arms. `recv/3`
+  is not bounded by it. `setopts/2` can change it on server and client sockets.
 
   `sni_hosts: [{name, identity_options}]` identities are loaded here, so a bad
   certificate fails `listen/2`. `sni_hosts` names match ASCII case-insensitively

@@ -18,6 +18,11 @@ defmodule Hell.Transports.SSL do
     and `depth`: client certificate authentication (mTLS). The validated client
     leaf is available through `Hell.Socket.peercert/1`. The default is
     `verify: :verify_none`
+  * `active_chunk_size`: a positive integer bounding the plaintext bytes in
+    each active-once delivery (and so each `c:Hell.Handler.handle_data/3`
+    call); remaining bytes follow in order on later deliveries. The default
+    `:infinity` delivers everything buffered. It can also be changed with
+    `Hell.Socket.setopts/2`
 
   Other OTP `:ssl` options (such as `verify_fun`, `honor_cipher_order` or TLS 1.2
   `versions`) are rejected with `{:error, {:unsupported_option, key}}`. Every

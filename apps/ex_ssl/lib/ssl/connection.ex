@@ -77,7 +77,9 @@ defmodule SSL.Connection do
       write_abandoned?: false,
       duplex_reads?: false,
       active_terminal: false,
-      terminal_notified: false
+      terminal_notified: false,
+      # Upper bound on plaintext bytes per active-once message (#169).
+      active_chunk_size: :infinity
     ]
   end
 
@@ -1516,8 +1518,12 @@ defmodule SSL.Connection do
   defp closed_recv_result(%{size: size}) when size > 0, do: {:error, :timeout}
   defp closed_recv_result(state), do: {:error, state.close_reason}
 
+  # Bytes beyond `active_chunk_size` stay buffered, in order, for the next arm.
   defp deliver_active(%{recv: nil, active: :once, size: size} = state) when size > 0 do
-    {bytes, buffer} = take(state.buffer, size, [])
+    length =
+      if state.active_chunk_size == :infinity, do: size, else: min(size, state.active_chunk_size)
+
+    {bytes, buffer} = take(state.buffer, length, [])
     send(state.owner, {:ssl, state.socket, bytes})
 
     %{
@@ -1525,7 +1531,7 @@ defmodule SSL.Connection do
       | active: false,
         active_terminal: true,
         buffer: buffer,
-        size: 0
+        size: size - length
     }
   end
 
@@ -1767,6 +1773,11 @@ defmodule SSL.Connection do
   defp notify_active_terminal(state, _reason), do: state
 
   defp apply_active_option(state, options) do
+    state = %{
+      state
+      | active_chunk_size: Keyword.get(options, :active_chunk_size, state.active_chunk_size)
+    }
+
     case Keyword.fetch(options, :active) do
       {:ok, :once} -> %{state | active: :once, active_terminal: true}
       {:ok, false} -> %{state | active: false, active_terminal: false}

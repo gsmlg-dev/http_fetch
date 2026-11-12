@@ -50,6 +50,55 @@ defmodule Hell.TransportOptionsTest do
     end
   end
 
+  defmodule SlowCapture do
+    use Hell.Handler
+
+    @impl Hell.Handler
+    def handle_data(data, _socket, test_pid) do
+      send(test_pid, {:chunk, data})
+      Process.sleep(20)
+      {:continue, test_pid}
+    end
+  end
+
+  test "SSL active_chunk_size bounds the data delivered to a slow handler" do
+    {:ok, server} =
+      start_supervised(
+        {Hell,
+         port: 0,
+         num_acceptors: 1,
+         transport_module: Hell.Transports.SSL,
+         transport_options: [certfile: @certfile, keyfile: @keyfile, active_chunk_size: 16_384],
+         handler_module: SlowCapture,
+         handler_options: self()}
+      )
+
+    {:ok, {_address, port}} = Hell.listener_info(server)
+
+    {:ok, client} =
+      :ssl.connect(
+        ~c"localhost",
+        port,
+        [:binary, active: false, verify: :verify_peer, cacertfile: @cacertfile],
+        5_000
+      )
+
+    on_exit(fn -> :ssl.close(client) end)
+    payload = :crypto.strong_rand_bytes(200_000)
+    for <<part::binary-size(1_000) <- payload>>, do: :ok = :ssl.send(client, part)
+
+    chunks = collect_chunks(byte_size(payload), [])
+    assert Enum.all?(chunks, &(byte_size(&1) <= 16_384))
+    assert IO.iodata_to_binary(chunks) == payload
+  end
+
+  defp collect_chunks(remaining, acc) when remaining <= 0, do: Enum.reverse(acc)
+
+  defp collect_chunks(remaining, acc) do
+    assert_receive {:chunk, data}, 5_000
+    collect_chunks(remaining - byte_size(data), [data | acc])
+  end
+
   test "TCP preserves distinct raw socket options" do
     {level, keepalive, broadcast} =
       case :os.type() do

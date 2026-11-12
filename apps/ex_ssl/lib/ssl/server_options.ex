@@ -22,6 +22,7 @@ defmodule SSL.ServerOptions do
           transport_parameters: nil,
           sni: sni(),
           client_auth: nil | %{trust: term(), require: boolean(), depth: pos_integer()},
+          active_chunk_size: pos_integer() | :infinity,
           tcp: keyword()
         }
 
@@ -38,7 +39,8 @@ defmodule SSL.ServerOptions do
                 :cacerts,
                 :cacertfile,
                 :fail_if_no_peer_cert,
-                :depth
+                :depth,
+                :active_chunk_size
               ]
   # OTP :ssl-only options. Every other unknown key is a carrier (:gen_tcp) option.
   @unsupported [
@@ -127,7 +129,8 @@ defmodule SSL.ServerOptions do
          {:ok, signatures} <- signatures(),
          {:ok, limits} <- Config.limits([]),
          {:ok, alpn} <- alpn(Keyword.get(options, :alpn_preferred_protocols)),
-         {:ok, client_auth} <- client_auth(options) do
+         {:ok, client_auth} <- client_auth(options),
+         {:ok, chunk} <- active_chunk_size(Keyword.get(options, :active_chunk_size, :infinity)) do
       identity = List.first(identities)
 
       {:ok,
@@ -142,6 +145,7 @@ defmodule SSL.ServerOptions do
          transport_parameters: nil,
          sni: sni,
          client_auth: client_auth,
+         active_chunk_size: chunk,
          tcp: carrier_options(carrier)
        }}
     end
@@ -435,6 +439,10 @@ defmodule SSL.ServerOptions do
 
   defp filter_signatures(signatures, identity),
     do: Enum.filter(signatures, &(&1 in identity.signature_schemes))
+
+  defp active_chunk_size(:infinity), do: {:ok, :infinity}
+  defp active_chunk_size(size) when is_integer(size) and size > 0, do: {:ok, size}
+  defp active_chunk_size(_), do: {:error, {:invalid_option, :active_chunk_size}}
 
   defp client_auth(options) do
     case Keyword.get(options, :verify, :verify_none) do
