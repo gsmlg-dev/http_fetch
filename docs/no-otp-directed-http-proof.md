@@ -571,3 +571,22 @@ sites.
 
 No HTTP input changes. Only the census digest is updated; the ex_ssl changes
 add, remove or move no reviewed occurrence, and the total stays 209.
+
+### Follow-up: rc.16 HTTP/2 unprocessed-retry option (2026-11-12)
+
+The `http2_unprocessed_retry` option (`a14c711`, #167) changes `HTTP`,
+`FetchOptions` and `SocketClient`. `FetchOptions` adds literal alias entries, a
+struct field, a reducer clause and the literal private
+`normalize_http2_unprocessed_retry/1`, and forwards `false` as a transport
+option. The value is boolean data and is never invoked. The `HTTP` change is
+moduledoc only.
+
+In `SocketClient`, `http2_retry?/2` reads the option through a literal
+`Keyword.get/3`. `retry_http2/2` takes the unprocessed reason and emits the
+replay event through the existing literal local `request_telemetry?/1` and the
+literal `HTTP.Telemetry.http2_unprocessed_retry/3`. No dynamic dispatch is
+added. Code after line 1651 moves by 5 lines, so the twelve HTTP-4 sites move
+by 5 with unchanged expressions, selectors and owning functions. They are
+rebound in the amendment and the follow-up entry. A release-audit BEAM scan of
+the rc.15 and current sources reports identical sites after that shift. The
+HTTP review still has 86 occurrences, and the total stays 209.

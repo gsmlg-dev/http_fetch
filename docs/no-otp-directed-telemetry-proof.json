@@ -6,7 +6,7 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/http_fetch/lib/http/telemetry.ex": "bb0870b7561c59b9ad616703f7686c55fcb8ed56bfa040b917cf3f3de6acb862"
+    "apps/http_fetch/lib/http/telemetry.ex": "e2dacd85f8db476e4c65f03791268116030b16dd443a27d8c3f895ce7ef80b42"
   },
   "production_source_census": {
     "files": 244,
@@ -116,18 +116,18 @@
     {
       "date": "2026-11-11",
       "baseline_commit": "5b1adbdb85ed33d88e903ddb2fcce2b7c5a9dae5",
-      "source_commit": "b83880de276e808fe09adc54daf69e22f9281e45",
+      "source_commit": "a14c7118ae233a1230cabdb24c11e8af5c50c427",
       "scope": "rc.14 Fetch timeout reason contract",
       "changed_source_inputs": {
         "apps/http_fetch/lib/http/telemetry.ex": {
           "previous_sha256": "0e18333a2ffb0250ef0db846445a68eeedbf326e8cb0276f4609360348c293c1",
-          "sha256": "bb0870b7561c59b9ad616703f7686c55fcb8ed56bfa040b917cf3f3de6acb862"
+          "sha256": "e2dacd85f8db476e4c65f03791268116030b16dd443a27d8c3f895ce7ef80b42"
         }
       },
       "added_selected_inputs": [],
       "active_production_source_census": {
         "files": 268,
-        "sorted_path_sha256_json": "3ab7b9e9b6b6e803332a4475d2629c5256f033764042a8ff8f85e2e7a9839b6a",
+        "sorted_path_sha256_json": "c543c3e494ade9c6471f1160344e046ba0473fa74ace4ec82a609dd914f90156",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [],
@@ -142,7 +142,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "1b877f232968e31b2efe1119d33ee98e813367f17ba13b68aeb1c005f727819e"
+        "sha256": "dbb53c9e2931cc002117353db471155efbb2cd1b521c3b42f996e2136ffdd496"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
@@ -160,6 +160,14 @@
           "input": "apps/http_fetch/lib/http/telemetry.ex",
           "change": "HTTP.Telemetry documents and emits [:http_fetch, :request, :retry] through the new request_retry/4 (5eae73d).",
           "dispatch_review": "No dynamic dispatch added or moved: request_retry/4 calls the literal telemetry:execute/3; HTTP.Telemetry still imports only telemetry:execute/3 and creates no handler, so TEL-1/TEL-2 are unchanged."
+        },
+        {
+          "date": "2026-11-12",
+          "release_version": "1.0.0-rc.16",
+          "source_commit": "a14c7118ae233a1230cabdb24c11e8af5c50c427",
+          "input": "apps/http_fetch/lib/http/telemetry.ex",
+          "change": "HTTP.Telemetry documents the transparent HTTP/2 replay event and emits [:http_fetch, :request, :retry] with source: :http2_unprocessed through the new http2_unprocessed_retry/3 (#167, a14c711).",
+          "dispatch_review": "No dynamic dispatch added or moved: http2_unprocessed_retry/3 calls the private execute/3, a literal telemetry:execute/3 call, and the literal private http2_unprocessed_reason/1, whose three clauses return literal atoms; HTTP.Telemetry still imports only telemetry:execute/3 and creates no handler, so TEL-1/TEL-2 are unchanged."
         }
       ]
     }

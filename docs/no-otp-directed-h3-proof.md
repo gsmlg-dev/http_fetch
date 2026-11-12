@@ -259,3 +259,10 @@ the two new HTTP-11 sites. SocketClient still supplies only
 
 No H3 input changes. Only the census digest is updated; the ex_ssl changes
 add, remove or move no reviewed occurrence, and the total stays 209.
+
+### Follow-up: rc.16 HTTP/2 unprocessed-retry option (2026-11-12)
+
+`HTTP`, `FetchOptions` and `SocketClient` change for the
+`http2_unprocessed_retry` option (`a14c711`), as described in the HTTP review,
+which holds their moved sites. SocketClient still supplies only
+`&handle_http3_event/2`. No H3 occurrence is added, removed or rebound.

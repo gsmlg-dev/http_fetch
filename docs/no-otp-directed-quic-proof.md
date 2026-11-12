@@ -386,3 +386,9 @@ are updated. The total is now 209 because HTTP gains two HTTP-11 sites.
 
 No QUIC input changes. Only the census digest is updated; the ex_ssl changes
 add, remove or move no reviewed occurrence, and the total stays 209.
+
+### Follow-up: rc.16 HTTP/2 unprocessed-retry option (2026-11-12)
+
+No QUIC input changes. Only the census digest and the reviewed inventory digest
+are updated: twelve HTTP-4 SocketClient sites move by 5 lines, and the total
+stays 209.

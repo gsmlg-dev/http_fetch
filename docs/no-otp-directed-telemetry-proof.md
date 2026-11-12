@@ -91,3 +91,13 @@ TEL-2 are unchanged.
 
 No telemetry input changes. Only the census digest is updated; the ex_ssl changes
 add, remove or move no reviewed occurrence, and the total stays 209.
+
+### Follow-up: rc.16 HTTP/2 unprocessed-retry event (2026-11-12)
+
+`HTTP.Telemetry` (`a14c711`, #167) documents the transparent HTTP/2 replay
+event and emits `[:http_fetch, :request, :retry]` with
+`source: :http2_unprocessed` through the new `http2_unprocessed_retry/3`. It
+calls the private `execute/3`, a literal `telemetry:execute/3` call, and the
+literal private `http2_unprocessed_reason/1`, whose three clauses return
+literal atoms. The module still imports only that function and creates no
+handler, so TEL-1 and TEL-2 are unchanged.

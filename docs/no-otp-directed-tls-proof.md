@@ -350,3 +350,9 @@ A release-audit BEAM scan of the rc.14 and current sources reports identical
 sites, none in `SSL.Connection` or `SSL.Application`. No TLS occurrence is
 added, removed or rebound. Producer hashes and the census digest are updated;
 the reviewed inventory digest is unchanged at 209 sites.
+
+### Follow-up: rc.16 HTTP/2 unprocessed-retry option (2026-11-12)
+
+No TLS input changes. Only the census digest and the reviewed inventory digest
+are updated: twelve HTTP-4 SocketClient sites move by 5 lines, and the total
+stays 209.

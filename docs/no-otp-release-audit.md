@@ -1,5 +1,26 @@
 # Directed production release audit
 
+## rc.16 proof follow-up: HTTP/2 unprocessed-retry option — 2026-11-12
+
+Production changes after `d29fe9d` changed four http_fetch files for the
+`http2_unprocessed_retry` option (`a14c711`, #167): `HTTP.SocketClient`,
+`HTTP.FetchOptions`, `HTTP.Telemetry` and the `HTTP` moduledoc. The HTTP, H3 and
+telemetry inputs were re-reviewed at `a14c711` as a dated follow-up:
+
+- `SocketClient` adds a literal `Keyword.get/3` guard and a literal
+  `HTTP.Telemetry.http2_unprocessed_retry/3` call. Later code moves by 5 lines,
+  so the twelve HTTP-4 sites (IDs 107-118) are rebound with unchanged
+  expressions, selectors and owning functions.
+- `FetchOptions` adds only literal option plumbing and boolean validation.
+- `HTTP.Telemetry.http2_unprocessed_retry/3` emits through the literal
+  `telemetry:execute/3`.
+- No site is added or removed.
+
+The binding still covers 209 reviewed occurrences (IDs 1-210 without 166) and
+the 268-file production-source census. A release-audit BEAM scan of the rc.15
+and current sources reports identical dispatch sites after the 5-line shift.
+CI strict candidate and published gates must still pass independently.
+
 ## rc.15 proof follow-up: ex_ssl client recv and trust-store load — 2026-11-12
 
 Production changes after `5d84269` changed three ex_ssl files: the client exact
