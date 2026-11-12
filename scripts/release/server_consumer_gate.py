@@ -168,17 +168,14 @@ UDP_GATE = '''ExUnit.start()
 defmodule PlainUdpCandidateTest do
   use ExUnit.Case
   defmodule Echo do
-    use Abyss.Handler
-    def handle_data({ip, port, payload}, state) do
-      :ok = Abyss.Transport.UDP.send(state.socket, ip, port, payload)
-      {:close, state}
-    end
+    @behaviour Abyss.DatagramHandler
+    def init(_options, _context), do: {:ok, nil}
+    def handle_datagram(%Abyss.Datagram{payload: payload}, state), do: {:ok, state, [{:reply, payload}]}
   end
   test "plain UDP candidate exchanges actual datagrams without optional engines" do
-    server = start_supervised!({Abyss, [port: 0, num_listeners: 1, handler_module: Echo,
+    server = start_supervised!({Abyss.Endpoint, [port: 0, datagram_handler: Echo,
       transport_options: [ip: {127, 0, 0, 1}]]})
-    [listener] = server |> Abyss.Server.listener_pool_pid() |> Abyss.ListenerPool.listener_pids()
-    {_, port} = Abyss.Listener.listener_info(listener)
+    {:ok, {{127, 0, 0, 1}, port}} = Abyss.Endpoint.local_endpoint(server)
     {:ok, peer} = :gen_udp.open(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     try do
       for payload <- ["candidate-udp", "", :binary.copy(<<42>>, 1024)] do

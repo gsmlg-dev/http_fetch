@@ -7,13 +7,6 @@ for path <- Path.wildcard(Path.join(abyss_root, "_build/dev/lib/*/ebin")),
 Code.ensure_loaded!(Quic.AbyssDispatcher)
 {:ok, _} = Application.ensure_all_started(:telemetry)
 
-defmodule Quic.AbyssM5Handler do
-  use Abyss.Handler
-
-  @impl true
-  def handle_data(_data, state), do: {:continue, state}
-end
-
 fixture = Path.join(ex_quic_root, "apps/elixir_quic/test/fixtures/tls")
 
 der = fn name ->
@@ -36,7 +29,6 @@ client_tls = [
 
 {:ok, server} =
   Abyss.start_link(
-    handler_module: Quic.AbyssM5Handler,
     port: 0,
     num_listeners: 1,
     transport_options: [ip: {127, 0, 0, 1}],
