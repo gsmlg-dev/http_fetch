@@ -330,3 +330,23 @@ They add only literal calls, guards and local closures for `Enum.each/2`. The
 compiled inventory reports no site in either module or in
 `SSL.ConnectionWriter`. No TLS occurrence is added, removed or rebound.
 Producer hashes and the digests are updated.
+
+### Follow-up: rc.15 ex_ssl client recv and trust-store fixes (2026-11-12)
+
+`connection.ex` and `ssl.ex` change in `1967e6e` (#164). After the peer closes,
+a client exact-length recv that buffered plaintext cannot satisfy returns
+`:timeout` and keeps the bytes. The closed branch calls the new private
+`closed_recv_result/1`, a literal local call whose two guarded clauses return
+literal error tuples. Code after line 1512 moves by 6 lines, but
+`SSL.Connection` holds no reviewed occurrence, so nothing is rebound. The
+`ssl.ex` change is `recv/3` documentation only.
+
+`SSL.Application` (`cc5514f`, #165) is not a selected TLS input and is bound by
+the census. Its `start/2` now calls the literal `:public_key.cacerts_get/0`
+before the supervisor starts, inside a local rescue. No dynamic dispatch is
+added.
+
+A release-audit BEAM scan of the rc.14 and current sources reports identical
+sites, none in `SSL.Connection` or `SSL.Application`. No TLS occurrence is
+added, removed or rebound. Producer hashes and the census digest are updated;
+the reviewed inventory digest is unchanged at 209 sites.

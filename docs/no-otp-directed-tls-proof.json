@@ -6,10 +6,10 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/ex_ssl/lib/ssl.ex": "bfb9aa86bdf039de68bcc38d8acad42f2cfe5d842a49dda95123d21fa537e484",
+    "apps/ex_ssl/lib/ssl.ex": "69d70c2e2853097be2cd15a44fc3c2511eee1b83542fae5fd238f3c6d659b9b5",
     "apps/ex_ssl/lib/ssl/options.ex": "84500c5c63746215284ebb764284eca97657ca00380c2feaf70c18fbc4c9e58c",
     "apps/ex_ssl/lib/ssl/tcp_options.ex": "b007fe9db46cedb98867797b368d999dd0dbb773d938f11e057eb9cb88f47d75",
-    "apps/ex_ssl/lib/ssl/connection.ex": "75f3c815c96badd6ff404910a6f05eb52a6abf9fbbb699bc9add2f705b05bc77",
+    "apps/ex_ssl/lib/ssl/connection.ex": "5c70ed5d03fff25c73c39b679cce72c30a7a1fa5a87054504bf82a40f7bb079f",
     "apps/ex_ssl/lib/ssl/prepared_upgrade.ex": "c62b7433f5848289a58df30bde1cdf18155a0dcd8a3dff0da49546aac3a74461",
     "apps/ex_ssl/lib/ssl/client_identity.ex": "bbda9af456f8c6a182e7d30c1b97cbd4502e6d7fca9058b45a31f30a1cbef053",
     "apps/ex_ssl/lib/ssl/client_hello/materializer.ex": "77fefe616a1f03a075be13dc5e689443c85c75878d59b4ea82833fb36b94518b",
@@ -308,16 +308,16 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "b83880de276e808fe09adc54daf69e22f9281e45",
+      "source_commit": "cc5514f19ed8f5277038fb21dc9319c9d50cfe78",
       "scope": "rc.10/rc.11 TLS 1.3 server API, SNI identity selection, mTLS client verification and QUIC resumption/early-data provider",
       "changed_source_inputs": {
         "apps/ex_ssl/lib/ssl.ex": {
           "previous_sha256": "1ed9e0d52e0f38be0422553acd66ae0b14ef7cd67372220acf500baddb8c48ee",
-          "sha256": "bfb9aa86bdf039de68bcc38d8acad42f2cfe5d842a49dda95123d21fa537e484"
+          "sha256": "69d70c2e2853097be2cd15a44fc3c2511eee1b83542fae5fd238f3c6d659b9b5"
         },
         "apps/ex_ssl/lib/ssl/connection.ex": {
           "previous_sha256": "f5cdeea8158c200996cd66e554be14f8c7f22ae7200826f1241104486890761b",
-          "sha256": "75f3c815c96badd6ff404910a6f05eb52a6abf9fbbb699bc9add2f705b05bc77"
+          "sha256": "5c70ed5d03fff25c73c39b679cce72c30a7a1fa5a87054504bf82a40f7bb079f"
         },
         "apps/ex_ssl/lib/ssl/pkix/pkix.ex": {
           "previous_sha256": "e87da677850294e277f6246e9db21252593444fafbc23566ff459ffd046a0e95",
@@ -355,7 +355,7 @@
       ],
       "active_production_source_census": {
         "files": 268,
-        "sorted_path_sha256_json": "8604faaa58097996024b1f9c05a534918ecccd83d4c80f35cb51d9a1f889fd2a",
+        "sorted_path_sha256_json": "3ab7b9e9b6b6e803332a4475d2629c5256f033764042a8ff8f85e2e7a9839b6a",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -475,6 +475,22 @@
           "input": "apps/ex_ssl/lib/ssl/server_connection.ex",
           "change": "An exact-length recv that buffered plaintext cannot satisfy after peer close returns :timeout and keeps the bytes until drained (707d2c2); after the handshake every carrier write is a job for an SSL.ConnectionWriter started with the literal ConnectionWriter.start/1, so receive delivery and control calls stay live during a blocked write (d978d36).",
           "dispatch_review": "No dynamic dispatch added or moved: literal ConnectionWriter, :queue and :gen_statem calls and local closures passed to Enum.each/2; the compiled inventory reports no site in this module or in SSL.ConnectionWriter, and the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-12",
+          "release_version": "1.0.0-rc.15",
+          "source_commit": "1967e6ec69554974f84be4a637a38e8d83fe9516",
+          "input": "apps/ex_ssl/lib/ssl.ex",
+          "change": "The recv/3 @doc text describes the exact recv after peer close for every socket, not only a server socket (1967e6e).",
+          "dispatch_review": "No dynamic dispatch added or moved: documentation only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-12",
+          "release_version": "1.0.0-rc.15",
+          "source_commit": "1967e6ec69554974f84be4a637a38e8d83fe9516",
+          "input": "apps/ex_ssl/lib/ssl/connection.ex",
+          "change": "After the peer closes, a client exact-length recv that buffered plaintext cannot satisfy returns :timeout and keeps the bytes until drained; the closed branch of the receive check calls the new private closed_recv_result/1 (#164, 1967e6e).",
+          "dispatch_review": "No dynamic dispatch added or moved: closed_recv_result/1 is a literal local call whose two guarded clauses return literal error tuples. Code after line 1512 moves by 6 lines, but SSL.Connection holds no reviewed occurrence, so nothing is rebound; a release-audit BEAM scan of the rc.14 and current sources reports identical sites and none in this module."
         }
       ]
     }

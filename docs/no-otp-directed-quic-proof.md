@@ -381,3 +381,8 @@ census digest are updated.
 
 No QUIC input changes. Only the census digest and the reviewed inventory digest
 are updated. The total is now 209 because HTTP gains two HTTP-11 sites.
+
+### Follow-up: rc.15 ex_ssl client recv and trust-store fixes (2026-11-12)
+
+No QUIC input changes. Only the census digest is updated; the ex_ssl changes
+add, remove or move no reviewed occurrence, and the total stays 209.

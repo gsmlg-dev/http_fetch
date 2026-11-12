@@ -254,3 +254,8 @@ still has 64 occurrences.
 (`5eae73d`), as described in the HTTP review, which holds their moved sites and
 the two new HTTP-11 sites. SocketClient still supplies only
 `&handle_http3_event/2`. No H3 occurrence is added, removed or rebound.
+
+### Follow-up: rc.15 ex_ssl client recv and trust-store fixes (2026-11-12)
+
+No H3 input changes. Only the census digest is updated; the ex_ssl changes
+add, remove or move no reviewed occurrence, and the total stays 209.

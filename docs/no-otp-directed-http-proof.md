@@ -566,3 +566,8 @@ are rebound in the amendment and the follow-up entry. The census is now 268
 files. The HTTP review now has 86 occurrences. The compiled inventory of a
 locally built isolated candidate release matches the five reviews exactly at 209
 sites.
+
+### Follow-up: rc.15 ex_ssl client recv and trust-store fixes (2026-11-12)
+
+No HTTP input changes. Only the census digest is updated; the ex_ssl changes
+add, remove or move no reviewed occurrence, and the total stays 209.
