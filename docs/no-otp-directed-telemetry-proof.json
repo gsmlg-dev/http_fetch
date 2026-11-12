@@ -127,7 +127,7 @@
       "added_selected_inputs": [],
       "active_production_source_census": {
         "files": 268,
-        "sorted_path_sha256_json": "c543c3e494ade9c6471f1160344e046ba0473fa74ace4ec82a609dd914f90156",
+        "sorted_path_sha256_json": "60d33e2fff97204f6077f9434f278621cf8bba402e6bce76a781e0b772f15023",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [],
@@ -142,7 +142,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "dbb53c9e2931cc002117353db471155efbb2cd1b521c3b42f996e2136ffdd496"
+        "sha256": "c3a0442cb0ec85ee546035d1eccd0dcfc85c81d0316a39905e1c606a7578c41a"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",

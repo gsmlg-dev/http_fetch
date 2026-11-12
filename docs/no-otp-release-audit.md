@@ -1,5 +1,28 @@
 # Directed production release audit
 
+## rc.17 proof follow-up: ex_ssl bounded active-once delivery — 2026-11-12
+
+Production changes after `178c6b2` changed five ex_ssl files for the
+`active_chunk_size` option (`055f9fb`, #169): `SSL.ServerOptions`,
+`SSL.Options`, `SSL.ServerConnection`, `SSL.Connection` and the `SSL.listen/2`
+documentation. The TLS inputs were re-reviewed at `055f9fb` as a dated
+follow-up:
+
+- `ServerOptions` adds the private `active_chunk_size/1` validation and stores
+  the value in the server config. Later code moves by 4 lines, so TLS-7
+  occurrence 181 (`fun.(name)` in `call_sni_fun/2`) is rebound from line 262 to
+  266 with an unchanged expression and owning function.
+- `Options`, `ServerConnection` and `Connection` add only literal option
+  validation, `min/2`, `Map.get/3` and `Keyword.get/3` calls and state fields.
+- No site is added or removed.
+
+`32d7337` (#168) changes only Hell, which is outside the production-source
+census.
+
+The binding still covers 209 reviewed occurrences (IDs 1-210 without 166) and
+the 268-file production-source census. CI strict candidate and published gates
+must still pass independently.
+
 ## rc.16 proof follow-up: HTTP/2 unprocessed-retry option — 2026-11-12
 
 Production changes after `d29fe9d` changed four http_fetch files for the

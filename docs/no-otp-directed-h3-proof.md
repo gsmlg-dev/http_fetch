@@ -266,3 +266,9 @@ add, remove or move no reviewed occurrence, and the total stays 209.
 `http2_unprocessed_retry` option (`a14c711`), as described in the HTTP review,
 which holds their moved sites. SocketClient still supplies only
 `&handle_http3_event/2`. No H3 occurrence is added, removed or rebound.
+
+### Follow-up: rc.17 ex_ssl bounded active-once delivery (2026-11-12)
+
+No H3 input changes. Only the census digest and the reviewed inventory digest
+are updated: TLS-7 occurrence 181 moves from line 262 to 266, and the total
+stays 209.

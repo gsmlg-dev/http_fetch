@@ -356,3 +356,19 @@ the reviewed inventory digest is unchanged at 209 sites.
 No TLS input changes. Only the census digest and the reviewed inventory digest
 are updated: twelve HTTP-4 SocketClient sites move by 5 lines, and the total
 stays 209.
+
+### Follow-up: rc.17 ex_ssl bounded active-once delivery (2026-11-12)
+
+`055f9fb` (#169) adds the `active_chunk_size` option. `server_options.ex`
+validates it in the private `active_chunk_size/1` (three literal guarded
+clauses), stores it in the server config and keeps it out of the carrier
+options. `options.ex` accepts it in `setopts/2` through a literal
+`valid_option?/2` clause. `server_connection.ex` and `connection.ex` bound each
+active-once message with literal `min/2`, `Map.get/3` and `Keyword.get/3`
+calls; the remaining bytes stay buffered in order. The `ssl.ex` change is
+`listen/2` documentation only.
+
+TLS-7 occurrence 181 (`fun.(name)` in `call_sni_fun/2`) moves from line 262 to
+266 with an unchanged expression and owning function, and is rebound. No
+dynamic dispatch is added or removed. Producer hashes, the census digest and
+the reviewed inventory digest are updated; the total stays 209.

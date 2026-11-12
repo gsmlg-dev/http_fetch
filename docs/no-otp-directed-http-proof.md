@@ -590,3 +590,9 @@ by 5 with unchanged expressions, selectors and owning functions. They are
 rebound in the amendment and the follow-up entry. A release-audit BEAM scan of
 the rc.15 and current sources reports identical sites after that shift. The
 HTTP review still has 86 occurrences, and the total stays 209.
+
+### Follow-up: rc.17 ex_ssl bounded active-once delivery (2026-11-12)
+
+No HTTP input changes. Only the census digest and the reviewed inventory digest
+are updated: TLS-7 occurrence 181 moves from line 262 to 266, and the total
+stays 209.

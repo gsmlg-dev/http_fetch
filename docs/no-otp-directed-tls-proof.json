@@ -6,10 +6,10 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/ex_ssl/lib/ssl.ex": "69d70c2e2853097be2cd15a44fc3c2511eee1b83542fae5fd238f3c6d659b9b5",
-    "apps/ex_ssl/lib/ssl/options.ex": "84500c5c63746215284ebb764284eca97657ca00380c2feaf70c18fbc4c9e58c",
+    "apps/ex_ssl/lib/ssl.ex": "cc43204ffec669d225e59a33e83adaa624ad937b931b916f9d4aa730a50277eb",
+    "apps/ex_ssl/lib/ssl/options.ex": "0e1683ff2e5b276ed6eb27bdc6d1f2278e40048748705f007e563953d2cdd0ec",
     "apps/ex_ssl/lib/ssl/tcp_options.ex": "b007fe9db46cedb98867797b368d999dd0dbb773d938f11e057eb9cb88f47d75",
-    "apps/ex_ssl/lib/ssl/connection.ex": "5c70ed5d03fff25c73c39b679cce72c30a7a1fa5a87054504bf82a40f7bb079f",
+    "apps/ex_ssl/lib/ssl/connection.ex": "12d5795628278f029da56c41bf6f7bb6f8819cf088997d38224f461f0cea1a39",
     "apps/ex_ssl/lib/ssl/prepared_upgrade.ex": "c62b7433f5848289a58df30bde1cdf18155a0dcd8a3dff0da49546aac3a74461",
     "apps/ex_ssl/lib/ssl/client_identity.ex": "bbda9af456f8c6a182e7d30c1b97cbd4502e6d7fca9058b45a31f30a1cbef053",
     "apps/ex_ssl/lib/ssl/client_hello/materializer.ex": "77fefe616a1f03a075be13dc5e689443c85c75878d59b4ea82833fb36b94518b",
@@ -33,8 +33,8 @@
     "apps/elixir_quic/lib/quic/profile.ex": "2365ab1370f40fba20ff0df0cf9d91721bee6b3eb4c25b79820cd6ab74b706e0",
     "apps/http_core/lib/http/transport/ex_ssl.ex": "20cda2e3507a1fa52ec8a5baf7259ceab9c407d434dda8e9601cfaadb514893f",
     "apps/ex_ssl/lib/ssl/crypto/tls12_key_schedule.ex": "0f21ece4467f13d1ac0acca8dd5c23d04b450b2b47063f403866126860552667",
-    "apps/ex_ssl/lib/ssl/server_options.ex": "a9790096e733fe5e584cf8aa9ac54bf152e3902e42eac2ee01704e408669111a",
-    "apps/ex_ssl/lib/ssl/server_connection.ex": "d476ab6a1b6877f8696b75bd4ac12671b3b557c519474fd020b2070fba093e52",
+    "apps/ex_ssl/lib/ssl/server_options.ex": "7e47437445221b0419b3422f0f04c7f9dcf7ff5d33779cd7f2fa30c5547a0d3d",
+    "apps/ex_ssl/lib/ssl/server_connection.ex": "3ef9bac358e81244ba42e36b93069acd6273a994849e78438030e8648a2d0702",
     "apps/ex_ssl/lib/ssl/listen_socket.ex": "bd071c6cd1742cd2966c43dd503aa7496a0353047159590f7369f4fd71661982"
   },
   "production_source_census": {
@@ -186,7 +186,7 @@
       "inventory_occurrence": 181,
       "module": "SSL.ServerOptions",
       "mfa": "call_sni_fun/2",
-      "line": 262,
+      "line": 266,
       "kind": "unresolved_fun_invocation",
       "source": "apps/ex_ssl/lib/ssl/server_options.ex",
       "proof": "TLS-7"
@@ -308,16 +308,16 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "cc5514f19ed8f5277038fb21dc9319c9d50cfe78",
+      "source_commit": "055f9fb7ed59c8949a80ce4eba1b936c17a43632",
       "scope": "rc.10/rc.11 TLS 1.3 server API, SNI identity selection, mTLS client verification and QUIC resumption/early-data provider",
       "changed_source_inputs": {
         "apps/ex_ssl/lib/ssl.ex": {
           "previous_sha256": "1ed9e0d52e0f38be0422553acd66ae0b14ef7cd67372220acf500baddb8c48ee",
-          "sha256": "69d70c2e2853097be2cd15a44fc3c2511eee1b83542fae5fd238f3c6d659b9b5"
+          "sha256": "cc43204ffec669d225e59a33e83adaa624ad937b931b916f9d4aa730a50277eb"
         },
         "apps/ex_ssl/lib/ssl/connection.ex": {
           "previous_sha256": "f5cdeea8158c200996cd66e554be14f8c7f22ae7200826f1241104486890761b",
-          "sha256": "5c70ed5d03fff25c73c39b679cce72c30a7a1fa5a87054504bf82a40f7bb079f"
+          "sha256": "12d5795628278f029da56c41bf6f7bb6f8819cf088997d38224f461f0cea1a39"
         },
         "apps/ex_ssl/lib/ssl/pkix/pkix.ex": {
           "previous_sha256": "e87da677850294e277f6246e9db21252593444fafbc23566ff459ffd046a0e95",
@@ -341,11 +341,15 @@
         },
         "apps/ex_ssl/lib/ssl/server_connection.ex": {
           "previous_sha256": "68cb5417b999b8a7907cf8c555465fc8a0f4e710bcc92f124a250c0b7ebe007f",
-          "sha256": "d476ab6a1b6877f8696b75bd4ac12671b3b557c519474fd020b2070fba093e52"
+          "sha256": "3ef9bac358e81244ba42e36b93069acd6273a994849e78438030e8648a2d0702"
         },
         "apps/ex_ssl/lib/ssl/server_options.ex": {
           "previous_sha256": "d5ff070fa5e91c4f49638823fec1f781a6c16e062b56e0164bd0d7712622b67d",
-          "sha256": "a9790096e733fe5e584cf8aa9ac54bf152e3902e42eac2ee01704e408669111a"
+          "sha256": "7e47437445221b0419b3422f0f04c7f9dcf7ff5d33779cd7f2fa30c5547a0d3d"
+        },
+        "apps/ex_ssl/lib/ssl/options.ex": {
+          "previous_sha256": "84500c5c63746215284ebb764284eca97657ca00380c2feaf70c18fbc4c9e58c",
+          "sha256": "0e1683ff2e5b276ed6eb27bdc6d1f2278e40048748705f007e563953d2cdd0ec"
         }
       },
       "added_selected_inputs": [
@@ -355,7 +359,7 @@
       ],
       "active_production_source_census": {
         "files": 268,
-        "sorted_path_sha256_json": "c543c3e494ade9c6471f1160344e046ba0473fa74ace4ec82a609dd914f90156",
+        "sorted_path_sha256_json": "60d33e2fff97204f6077f9434f278621cf8bba402e6bce76a781e0b772f15023",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -376,7 +380,7 @@
         181
       ],
       "origin_derivations": {
-        "TLS-7": "SSL.listen/2 and SSL.handshake/3 normalize through ServerOptions.build/1, whose sni/1 is the only producer of {:fun, fun}: the caller :sni_fun, validated as arity one and exclusive with :sni_hosts. ListenSocket is opaque and built only by listen/2; transport_accept/2 passes its retained options to ServerConnection.start/3. The sole lookup/2 caller, select_identity/2, runs once for the first ClientHello and replaces only identity and signature_algorithms, retaining sni. The callback result is data: identity keyword options loaded by ClientIdentity.load/1 (TLS-2 password boundary); exceptions and invalid results become internal_error. No library producer supplies sni_fun; Hell forwards caller options. The user sni_fun body is the approved server callback boundary. rc.13 follow-up (8e810b4): lookup/3 now runs the callback in a monitored helper bounded by the handshake deadline; the invocation (181) moves into the helper closure body call_sni_fun/2 (194->262, expression fun.(name) unchanged). Its callable is the same caller :sni_fun that sni/1 validates and stores as {:fun, fun}; sni/1 remains the only producer and no library caller supplies one.",
+        "TLS-7": "SSL.listen/2 and SSL.handshake/3 normalize through ServerOptions.build/1, whose sni/1 is the only producer of {:fun, fun}: the caller :sni_fun, validated as arity one and exclusive with :sni_hosts. ListenSocket is opaque and built only by listen/2; transport_accept/2 passes its retained options to ServerConnection.start/3. The sole lookup/2 caller, select_identity/2, runs once for the first ClientHello and replaces only identity and signature_algorithms, retaining sni. The callback result is data: identity keyword options loaded by ClientIdentity.load/1 (TLS-2 password boundary); exceptions and invalid results become internal_error. No library producer supplies sni_fun; Hell forwards caller options. The user sni_fun body is the approved server callback boundary. rc.13 follow-up (8e810b4): lookup/3 now runs the callback in a monitored helper bounded by the handshake deadline; the invocation (181) moves into the helper closure body call_sni_fun/2 (194->262, expression fun.(name) unchanged). Its callable is the same caller :sni_fun that sni/1 validates and stores as {:fun, fun}; sni/1 remains the only producer and no library caller supplies one. rc.17 follow-up (055f9fb): the invocation (181) moves 262->266 in call_sni_fun/2 with fun.(name) unchanged; build/1 only adds the literal active_chunk_size/1 validation.",
         "TLS-4": "PKIX.client_peer/3 (server mTLS) validates the client path against normalized trust anchors with a nil verifier and no hostname matcher. hostname_match_fun/3 is unchanged and moves 767->817.",
         "TLS-6": "HandshakeCore still selects config.certificate_policy || &PKIX.peer/6 and only extracts the alert mapping into certificate_alert/1; verify_peer/3 moves 768->789. allow_early_data is a boolean handshake input.",
         "unchanged_sites": "Server handshake, server flight, QUIC resumption/session and SSL.QUIC continuation bodies introduce no other unresolved dispatch, callback option or OTP SSL call; QUIC Config accepts only the data-valued :resumption policy."
@@ -392,7 +396,7 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "dbb53c9e2931cc002117353db471155efbb2cd1b521c3b42f996e2136ffdd496"
+        "sha256": "c3a0442cb0ec85ee546035d1eccd0dcfc85c81d0316a39905e1c606a7578c41a"
       },
       "historical_artifact_covers_amended_source": false,
       "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
@@ -491,6 +495,54 @@
           "input": "apps/ex_ssl/lib/ssl/connection.ex",
           "change": "After the peer closes, a client exact-length recv that buffered plaintext cannot satisfy returns :timeout and keeps the bytes until drained; the closed branch of the receive check calls the new private closed_recv_result/1 (#164, 1967e6e).",
           "dispatch_review": "No dynamic dispatch added or moved: closed_recv_result/1 is a literal local call whose two guarded clauses return literal error tuples. Code after line 1512 moves by 6 lines, but SSL.Connection holds no reviewed occurrence, so nothing is rebound; a release-audit BEAM scan of the rc.14 and current sources reports identical sites and none in this module."
+        },
+        {
+          "date": "2026-11-12",
+          "release_version": "1.0.0-rc.17",
+          "source_commit": "055f9fb7ed59c8949a80ce4eba1b936c17a43632",
+          "input": "apps/ex_ssl/lib/ssl.ex",
+          "change": "The listen/2 @doc text lists the active_chunk_size server option and describes how it bounds active-once delivery (#169).",
+          "dispatch_review": "No dynamic dispatch added or moved: documentation only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-12",
+          "release_version": "1.0.0-rc.17",
+          "source_commit": "055f9fb7ed59c8949a80ce4eba1b936c17a43632",
+          "input": "apps/ex_ssl/lib/ssl/options.ex",
+          "change": "normalize_setopts/1 accepts active_chunk_size (:infinity or a positive integer) through a new literal valid_option?/2 clause (#169).",
+          "dispatch_review": "No dynamic dispatch added or moved: a literal membership test and a guarded literal clause; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-12",
+          "release_version": "1.0.0-rc.17",
+          "source_commit": "055f9fb7ed59c8949a80ce4eba1b936c17a43632",
+          "input": "apps/ex_ssl/lib/ssl/connection.ex",
+          "change": "Client deliver_active/1 sends at most active_chunk_size bytes per active-once message and keeps the rest buffered in order; apply_active_option/2 stores the setopts value (#169).",
+          "dispatch_review": "No dynamic dispatch added or moved: literal min/2, Keyword.get/3 and local take/3 calls and a state field; SSL.Connection holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-12",
+          "release_version": "1.0.0-rc.17",
+          "source_commit": "055f9fb7ed59c8949a80ce4eba1b936c17a43632",
+          "input": "apps/ex_ssl/lib/ssl/server_connection.ex",
+          "change": "Server deliver/1 sends at most active_chunk_size bytes per active-once message through the new private chunk_length/2; the bound comes from the listen config and setopts/2 (#169).",
+          "dispatch_review": "No dynamic dispatch added or moved: literal Map.get/3, Keyword.get/3 and min/2 calls and a two-clause local chunk_length/2; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-12",
+          "release_version": "1.0.0-rc.17",
+          "source_commit": "055f9fb7ed59c8949a80ce4eba1b936c17a43632",
+          "input": "apps/ex_ssl/lib/ssl/server_options.ex",
+          "change": "build/1 validates the new active_chunk_size option through the private active_chunk_size/1 and stores it in the server config; the key joins the TLS-owned keys so it is never passed to the carrier (#169).",
+          "dispatch_review": "TLS-7 occurrence 181 (the sni_fun invocation) moves from line 262 to 266 with an unchanged fun.(name) expression and owning function call_sni_fun/2; the four lines come from the config type, the key list and the build/1 with-clause. active_chunk_size/1 has three literal guarded clauses. No dynamic dispatch is added.",
+          "occurrence_rebindings": [
+            {
+              "inventory_occurrence": 181,
+              "mfa": "call_sni_fun/2",
+              "previous_line": 262,
+              "line": 266
+            }
+          ]
         }
       ]
     }

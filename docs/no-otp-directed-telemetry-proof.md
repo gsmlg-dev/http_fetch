@@ -101,3 +101,9 @@ calls the private `execute/3`, a literal `telemetry:execute/3` call, and the
 literal private `http2_unprocessed_reason/1`, whose three clauses return
 literal atoms. The module still imports only that function and creates no
 handler, so TEL-1 and TEL-2 are unchanged.
+
+### Follow-up: rc.17 ex_ssl bounded active-once delivery (2026-11-12)
+
+No telemetry input changes. Only the census digest and the reviewed inventory digest
+are updated: TLS-7 occurrence 181 moves from line 262 to 266, and the total
+stays 209.
