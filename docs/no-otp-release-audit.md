@@ -1,5 +1,24 @@
 # Directed production release audit
 
+## rc.15 proof follow-up: ex_ssl client recv and trust-store load — 2026-11-12
+
+Production changes after `5d84269` changed three ex_ssl files: the client exact
+recv after peer close (`1967e6e`, `SSL.Connection` and the `SSL.recv/3` docs) and
+the OS trust-store load at application start (`cc5514f`, `SSL.Application`).
+The TLS inputs were re-reviewed at `cc5514f` as a dated follow-up:
+
+- `SSL.Connection` gains the literal private `closed_recv_result/1`; later code
+  moves by 6 lines. `SSL.Connection`, `SSL` and `SSL.Application` hold no
+  reviewed occurrence.
+- `SSL.Application.start/2` calls the literal `:public_key.cacerts_get/0`; it is
+  bound by the census.
+- No site is added, removed or rebound.
+
+The binding still covers 209 reviewed occurrences (IDs 1-210 without 166) and
+the 268-file production-source census. A release-audit BEAM scan of the rc.14
+and current sources reports identical dispatch sites. CI strict candidate and
+published gates must still pass independently.
+
 ## rc.14 proof follow-up: retry policy and ex_ssl server fixes — 2026-11-12
 
 Production changes after `c2e67f0` changed eight production files and added
