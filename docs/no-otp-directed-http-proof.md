@@ -596,3 +596,16 @@ HTTP review still has 86 occurrences, and the total stays 209.
 No HTTP input changes. Only the census digest and the reviewed inventory digest
 are updated: TLS-7 occurrence 181 moves from line 262 to 266, and the total
 stays 209.
+
+### Follow-up: rc.18 proxy-mode User-Agent (2026-11-13)
+
+`956025c` (#171) stops adding the default `User-Agent` under
+`request_mode: :proxy`. `HTTP` gains the literal private `request_headers/1`,
+`HTTP.ManagedTransport.Policy` the literal private `default_user_agent/2`, and
+`HTTP.FetchOptions` changes only documentation; these producer inputs are
+rebound with follow-up entries. `HTTP.HTTP1`, `HTTP.HTTP2` and the
+`HTTP.Request` moduledoc change in the census only. None of these files holds a
+reviewed occurrence, and a release-audit BEAM scan of the current build reports
+no dispatch site in any of the six modules. No site is added, removed or moved;
+the HTTP review still has 86 occurrences, the total stays 209 and the reviewed
+inventory digest is unchanged.

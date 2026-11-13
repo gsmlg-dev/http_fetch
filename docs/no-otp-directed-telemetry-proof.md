@@ -107,3 +107,10 @@ handler, so TEL-1 and TEL-2 are unchanged.
 No telemetry input changes. Only the census digest and the reviewed inventory digest
 are updated: TLS-7 occurrence 181 moves from line 262 to 266, and the total
 stays 209.
+
+### Follow-up: rc.18 proxy-mode User-Agent (2026-11-13)
+
+No telemetry input changes. Only the census digest is updated: `956025c` (#171)
+changes `HTTP`, `HTTP.FetchOptions`, `HTTP.ManagedTransport.Policy`,
+`HTTP.HTTP1`, `HTTP.HTTP2` and `HTTP.Request` without adding, removing or
+moving a reviewed occurrence, and the total stays 209.

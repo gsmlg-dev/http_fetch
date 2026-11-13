@@ -372,3 +372,10 @@ TLS-7 occurrence 181 (`fun.(name)` in `call_sni_fun/2`) moves from line 262 to
 266 with an unchanged expression and owning function, and is rebound. No
 dynamic dispatch is added or removed. Producer hashes, the census digest and
 the reviewed inventory digest are updated; the total stays 209.
+
+### Follow-up: rc.18 proxy-mode User-Agent (2026-11-13)
+
+No TLS input changes. Only the census digest is updated: `956025c` (#171)
+changes `HTTP`, `HTTP.FetchOptions`, `HTTP.ManagedTransport.Policy`,
+`HTTP.HTTP1`, `HTTP.HTTP2` and `HTTP.Request` without adding, removing or
+moving a reviewed occurrence, and the total stays 209.

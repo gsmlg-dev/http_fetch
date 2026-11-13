@@ -6,8 +6,8 @@
   "status": "SOURCE_REVIEWED_COMPILED_DISCHARGE_PENDING",
   "original_findings_removed": 0,
   "source_inputs_sha256": {
-    "apps/http_fetch/lib/http.ex": "4f0347009d0d0cf01b323beca45850681bf860c0c2f39c630c6e1111a776de81",
-    "apps/http_fetch/lib/http/fetch_options.ex": "e6954954a08cd9c351bf36b25f0094c1661525843030788dc6860d8b7abc168d",
+    "apps/http_fetch/lib/http.ex": "3a07f82957131897787e7e5e620e618442a547d696a5fc9de5f4b21943040693",
+    "apps/http_fetch/lib/http/fetch_options.ex": "95b8756d6374566c31635e56c6649123b20f78a01d26f6f109dd5cb0f7d0c1ac",
     "apps/http_fetch/lib/http/socket_client.ex": "1c3ed574ecc4b1586700e9d3f30f25020ff3075c446bcff5eccc37b484b5d318",
     "apps/http_fetch/lib/http/promise.ex": "cfbb978f9fa2c666373c1f229fed435e8b0f2da63512da870070f39b57137439",
     "apps/http_fetch/lib/http/http1/idle_timeout.ex": "af2b917e837503e3f84c9e1e5c3a7cb9a2e1c34efc9a61ff19e82547f0f7180d",
@@ -27,7 +27,7 @@
     "apps/http_runtime/lib/http/protocol_client/session.ex": "552cc1dbd699853f86a381654f51378f650194920d15dc6b3b37cd433be880bf",
     "apps/http_runtime/lib/http/managed_transport.ex": "dc8249af17489aa95286d7aae205ce57c296e36a7e079f3f3652ce7c00ceeafe",
     "apps/http_runtime/lib/http/managed_transport/scope.ex": "c9489e5deac90de027586642b2351efacd527726ccc7cdc15ecb094f8b154e3f",
-    "apps/http_runtime/lib/http/managed_transport/policy.ex": "bdede8df43709188010253ac01faa4f239764d0a3d6be64f9cb894d6f43af577",
+    "apps/http_runtime/lib/http/managed_transport/policy.ex": "468eb65f6a6f5bae56465496d35c966fb5bd3221921550182821cad253855774",
     "apps/http_runtime/lib/http/http3/connection_owner.ex": "b2f5eeb3b75afdf1187f0fc4a19b2b8e070f6a0ec06d92841a68b8a7384428e2",
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
     "apps/http_event_source/lib/http/event_source/options.ex": "930e41ceef9d626bd4e1e545e4dc48d3bc3571b79dc30a639db642d96b953f84",
@@ -1358,12 +1358,12 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "a14c7118ae233a1230cabdb24c11e8af5c50c427",
+      "source_commit": "956025c3719328f243f964bc3353bb13e74a5b6f",
       "scope": "Alt-Svc discovery, HTTP/3 resumption options, WebSocket/H3 completion receipt and live draft-17 WebTransport backend",
       "changed_source_inputs": {
         "apps/http_fetch/lib/http/fetch_options.ex": {
           "previous_sha256": "5e69e37daad48cda62f04c6043b43116383c885cfe809a3089ffad9a3d42d9f1",
-          "sha256": "e6954954a08cd9c351bf36b25f0094c1661525843030788dc6860d8b7abc168d"
+          "sha256": "95b8756d6374566c31635e56c6649123b20f78a01d26f6f109dd5cb0f7d0c1ac"
         },
         "apps/http_fetch/lib/http/socket_client.ex": {
           "previous_sha256": "dd7f464583e6bf9b687aebec9f8a819cdf84bb9311cfc2e8ff7c96edaf58f052",
@@ -1415,7 +1415,7 @@
         },
         "apps/http_fetch/lib/http.ex": {
           "previous_sha256": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d",
-          "sha256": "4f0347009d0d0cf01b323beca45850681bf860c0c2f39c630c6e1111a776de81"
+          "sha256": "3a07f82957131897787e7e5e620e618442a547d696a5fc9de5f4b21943040693"
         },
         "apps/http_fetch/lib/http/promise.ex": {
           "previous_sha256": "59989eb7acf11e11e7dc62bab51c847fe7aa12afe104d38012dee2195d9edb29",
@@ -1455,7 +1455,7 @@
         },
         "apps/http_runtime/lib/http/managed_transport/policy.ex": {
           "previous_sha256": "b283eba84c5b438eb53f35ab548682a0f83f3a7b675082f56c4a01d6767cfbd0",
-          "sha256": "bdede8df43709188010253ac01faa4f239764d0a3d6be64f9cb894d6f43af577"
+          "sha256": "468eb65f6a6f5bae56465496d35c966fb5bd3221921550182821cad253855774"
         },
         "apps/http_pool/lib/http/http2/pool_key.ex": {
           "previous_sha256": "9e3148277b4adc219c876f68b673a3da84953a4c956e568d096c760c097a240b",
@@ -1477,7 +1477,7 @@
       ],
       "active_production_source_census": {
         "files": 268,
-        "sorted_path_sha256_json": "60d33e2fff97204f6077f9434f278621cf8bba402e6bce76a781e0b772f15023",
+        "sorted_path_sha256_json": "dfe1bc2c84d04280ae5f4d28f025e94e2f2b3c52a22c71ed3a2ac722e0afc53d",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -3030,6 +3030,30 @@
               "line": 2465
             }
           ]
+        },
+        {
+          "date": "2026-11-13",
+          "release_version": "1.0.0-rc.18",
+          "source_commit": "956025c3719328f243f964bc3353bb13e74a5b6f",
+          "input": "apps/http_fetch/lib/http.ex",
+          "change": "HTTP.fetch/2 builds request headers through the new private request_headers/1, which adds no default User-Agent under request_mode: :proxy; the fetch/2 doc states it (#171, 956025c).",
+          "dispatch_review": "No dynamic dispatch added or moved: two clauses of the literal private request_headers/1 with literal HTTP.FetchOptions.get_headers/1, HTTP.Headers.set_default/3 and HTTP.Headers.user_agent/1 calls. A BEAM scan of the current build reports no dispatch site in HTTP; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-13",
+          "release_version": "1.0.0-rc.18",
+          "source_commit": "956025c3719328f243f964bc3353bb13e74a5b6f",
+          "input": "apps/http_fetch/lib/http/fetch_options.ex",
+          "change": "The request_mode option documentation states that proxy mode adds no default User-Agent (#171, 956025c).",
+          "dispatch_review": "No dynamic dispatch added or moved: documentation only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-13",
+          "release_version": "1.0.0-rc.18",
+          "source_commit": "956025c3719328f243f964bc3353bb13e74a5b6f",
+          "input": "apps/http_runtime/lib/http/managed_transport/policy.ex",
+          "change": "Managed HTTP/1 field accounting skips the default User-Agent under request_mode: :proxy, mirroring HTTP.HTTP1, through the literal private default_user_agent/2 (#171, 956025c).",
+          "dispatch_review": "No dynamic dispatch added or moved: two clauses of a literal private function with literal HTTP.Headers.set_default/3 and HTTP.Headers.user_agent/0 calls. A BEAM scan of the current build reports no dispatch site in HTTP.ManagedTransport.Policy; the file holds no reviewed occurrence."
         }
       ],
       "removed_occurrences": [

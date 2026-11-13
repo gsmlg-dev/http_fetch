@@ -9,8 +9,8 @@
     "apps/elixir_quic_http3/lib/quic_http3/session.ex": "45423f557e8d4b16db2121560b01a2d51d372174eeb7f2d60d7fda643a5901cf",
     "apps/elixir_quic_http3/lib/quic_http3/transport/quic.ex": "5197e2316ae0a59722f1261a77b436e73eab2cfd7361b2eda1291a0f5067a9c4",
     "apps/http_core/lib/http/quic/ex_quic.ex": "0cb045e39b362131a53d5b3a1d7a19f5f5f25c7f192cf64a16b28ed488e0ffc6",
-    "apps/http_fetch/lib/http.ex": "4f0347009d0d0cf01b323beca45850681bf860c0c2f39c630c6e1111a776de81",
-    "apps/http_fetch/lib/http/fetch_options.ex": "e6954954a08cd9c351bf36b25f0094c1661525843030788dc6860d8b7abc168d",
+    "apps/http_fetch/lib/http.ex": "3a07f82957131897787e7e5e620e618442a547d696a5fc9de5f4b21943040693",
+    "apps/http_fetch/lib/http/fetch_options.ex": "95b8756d6374566c31635e56c6649123b20f78a01d26f6f109dd5cb0f7d0c1ac",
     "apps/http_fetch/lib/http/socket_client.ex": "1c3ed574ecc4b1586700e9d3f30f25020ff3075c446bcff5eccc37b484b5d318",
     "apps/http_event_source/lib/http/event_source/options.ex": "930e41ceef9d626bd4e1e545e4dc48d3bc3571b79dc30a639db642d96b953f84",
     "apps/http_event_source/lib/http/event_source/connection.ex": "65fcdb74e7e49270db6d35325228c898b0cc9f9c7595b8b03330ab89a9dc475a",
@@ -716,7 +716,7 @@
       "date": "2026-11-10",
       "release_version": "1.0.0-rc.11",
       "baseline_commit": "1a1f81dcd06feaf810617eb2917b4e368b7d70ca",
-      "source_commit": "a14c7118ae233a1230cabdb24c11e8af5c50c427",
+      "source_commit": "956025c3719328f243f964bc3353bb13e74a5b6f",
       "scope": "opt-in resumption/0-RTT, extended CONNECT, datagrams, reliable reset, client migration and WebSocket/H3 completion receipt",
       "changed_source_inputs": {
         "apps/elixir_quic_http3/lib/quic_http3/session.ex": {
@@ -729,7 +729,7 @@
         },
         "apps/http_fetch/lib/http/fetch_options.ex": {
           "previous_sha256": "5e69e37daad48cda62f04c6043b43116383c885cfe809a3089ffad9a3d42d9f1",
-          "sha256": "e6954954a08cd9c351bf36b25f0094c1661525843030788dc6860d8b7abc168d"
+          "sha256": "95b8756d6374566c31635e56c6649123b20f78a01d26f6f109dd5cb0f7d0c1ac"
         },
         "apps/http_fetch/lib/http/socket_client.ex": {
           "previous_sha256": "dd7f464583e6bf9b687aebec9f8a819cdf84bb9311cfc2e8ff7c96edaf58f052",
@@ -757,7 +757,7 @@
         },
         "apps/http_fetch/lib/http.ex": {
           "previous_sha256": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d",
-          "sha256": "4f0347009d0d0cf01b323beca45850681bf860c0c2f39c630c6e1111a776de81"
+          "sha256": "3a07f82957131897787e7e5e620e618442a547d696a5fc9de5f4b21943040693"
         },
         "apps/http_runtime/lib/http/http3.ex": {
           "previous_sha256": "b691a8f1c780c3b9e920c7148f38a17d82975d2788170579073753bea61df92d",
@@ -773,7 +773,7 @@
       ],
       "active_production_source_census": {
         "files": 268,
-        "sorted_path_sha256_json": "60d33e2fff97204f6077f9434f278621cf8bba402e6bce76a781e0b772f15023",
+        "sorted_path_sha256_json": "dfe1bc2c84d04280ae5f4d28f025e94e2f2b3c52a22c71ed3a2ac722e0afc53d",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1339,6 +1339,22 @@
           "input": "apps/http_fetch/lib/http/socket_client.ex",
           "change": "With http2_unprocessed_retry: false, http2_retry?/2 refuses the transparent HTTP/2 replay so the first unprocessed reason is returned; retry_http2/2 takes the reason and emits the replay event through HTTP.Telemetry.http2_unprocessed_retry/3 (#167, a14c711).",
           "dispatch_review": "No dynamic dispatch added or moved for H3: SocketClient still supplies only &handle_http3_event/2 to the HTTP/3 stream (H3-3/H3-5); the twelve HTTP-4 sites are rebound in the HTTP review."
+        },
+        {
+          "date": "2026-11-13",
+          "release_version": "1.0.0-rc.18",
+          "source_commit": "956025c3719328f243f964bc3353bb13e74a5b6f",
+          "input": "apps/http_fetch/lib/http.ex",
+          "change": "HTTP.fetch/2 builds request headers through the new private request_headers/1, which adds no default User-Agent under request_mode: :proxy; the fetch/2 doc states it (#171, 956025c).",
+          "dispatch_review": "No dynamic dispatch added or moved for H3: the User-Agent default is a literal header choice; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-13",
+          "release_version": "1.0.0-rc.18",
+          "source_commit": "956025c3719328f243f964bc3353bb13e74a5b6f",
+          "input": "apps/http_fetch/lib/http/fetch_options.ex",
+          "change": "The request_mode option documentation states that proxy mode adds no default User-Agent (#171, 956025c).",
+          "dispatch_review": "No dynamic dispatch added or moved: documentation only; the file holds no reviewed occurrence."
         }
       ]
     }

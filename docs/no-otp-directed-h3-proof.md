@@ -272,3 +272,10 @@ which holds their moved sites. SocketClient still supplies only
 No H3 input changes. Only the census digest and the reviewed inventory digest
 are updated: TLS-7 occurrence 181 moves from line 262 to 266, and the total
 stays 209.
+
+### Follow-up: rc.18 proxy-mode User-Agent (2026-11-13)
+
+`HTTP` and `FetchOptions` change for the proxy-mode `User-Agent` default
+(`956025c`, #171), as described in the HTTP review. HTTP/3 request fields come
+from `HTTP.HTTP2.request_headers/3`, which changes only in a literal header
+choice. No H3 occurrence is added, removed or rebound.

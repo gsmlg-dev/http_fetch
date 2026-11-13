@@ -1,5 +1,24 @@
 # Directed production release audit
 
+## rc.18 proof follow-up: proxy-mode User-Agent — 2026-11-13
+
+Production changes after `c3b0788` changed six census files for #171
+(`956025c`): `HTTP`, `HTTP.FetchOptions`, `HTTP.ManagedTransport.Policy`,
+`HTTP.HTTP1`, `HTTP.HTTP2` and the `HTTP.Request` moduledoc. Under
+`request_mode: :proxy` the default `User-Agent` is no longer added:
+
+- `HTTP` adds the literal private `request_headers/1`;
+  `HTTP.ManagedTransport.Policy` adds the literal private
+  `default_user_agent/2`; `HTTP.HTTP1` and `HTTP.HTTP2` select the default by
+  matching the literal request mode. All calls are literal remote or local
+  calls.
+- A release-audit BEAM scan of the current build reports no dispatch site in
+  the six modules, and none held a reviewed occurrence. No site is added,
+  removed or moved; the total stays 209 and the inventory digest is unchanged.
+
+`3c3b3bb` (#170) changes only Abyss, which is outside the production-source
+census.
+
 ## rc.17 proof follow-up: ex_ssl bounded active-once delivery — 2026-11-12
 
 Production changes after `178c6b2` changed five ex_ssl files for the
