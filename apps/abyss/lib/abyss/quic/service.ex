@@ -594,7 +594,7 @@ defmodule Abyss.QUIC.Worker do
         {:ok, events} ->
           case reduce_events(events, state) do
             {:ok, next} ->
-              rearm.()
+              _ = rearm.()
               {:noreply, %{state | app_state: next}}
 
             {:stop, reason, next} ->
