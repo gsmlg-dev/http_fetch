@@ -6,7 +6,9 @@ defmodule Abyss.QUIC.Handler do
   generation handles and stream/DATAGRAM events; Abyss does not interpret ALPN or
   application payloads. `init/3` runs after attachment and receives negotiated
   metadata. `handle_event/2` receives public engine events and a `:tick` after
-  each batch; the next poll starts after the configured interval. A matching
+  each batch; the next poll starts after the configured interval. Other
+  processes can request an extra turn without waiting for the interval with
+  `Abyss.QUIC.wake/1`, passing the worker pid (`self()` inside callbacks). A matching
   engine close notification delivers `{:closed, reason}` once if processed
   before worker termination. Crashes and forced shutdown can prevent delivery.
   Each poll delivers at most `event_batch` engine notifications. Reads remain

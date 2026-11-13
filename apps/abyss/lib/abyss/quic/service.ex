@@ -525,26 +525,16 @@ defmodule Abyss.QUIC.Worker do
   end
 
   def handle_info(:poll, %{initialized: true} = state) do
-    watched(state, state.config.callback_timeout, fn ->
-      case apply(state.config.backend, :events, [
-             state.connection,
-             state.config.event_batch,
-             [timeout: state.config.callback_timeout]
-           ]) do
-        {:ok, events} ->
-          case reduce_events(events, state) do
-            {:ok, next} ->
-              Process.send_after(self(), :poll, state.config.poll_interval)
-              {:noreply, %{state | app_state: next}}
-
-            {:stop, reason, next} ->
-              {:stop, reason, %{state | app_state: next}}
-          end
-
-        other ->
-          poll_failed(other, state)
-      end
+    poll_turn(state, fn ->
+      Process.send_after(self(), :poll, state.config.poll_interval)
     end)
+  end
+
+  # A wake runs one extra turn now and leaves the single poll timer chain alone.
+  # Wakes already queued are absorbed by this turn, so a burst costs one turn.
+  def handle_info(:abyss_quic_wake, %{initialized: true} = state) do
+    drain_wakes()
+    poll_turn(state, fn -> :ok end)
   end
 
   def handle_info({:quic_closed, connection, reason}, %{connection: connection} = state) do
@@ -591,6 +581,37 @@ defmodule Abyss.QUIC.Worker do
           {:error, :closed} -> closed(:closed, state)
           other -> {:stop, {:event_poll_failed, other}, state}
         end
+    end
+  end
+
+  defp poll_turn(state, rearm) do
+    watched(state, state.config.callback_timeout, fn ->
+      case apply(state.config.backend, :events, [
+             state.connection,
+             state.config.event_batch,
+             [timeout: state.config.callback_timeout]
+           ]) do
+        {:ok, events} ->
+          case reduce_events(events, state) do
+            {:ok, next} ->
+              rearm.()
+              {:noreply, %{state | app_state: next}}
+
+            {:stop, reason, next} ->
+              {:stop, reason, %{state | app_state: next}}
+          end
+
+        other ->
+          poll_failed(other, state)
+      end
+    end)
+  end
+
+  defp drain_wakes do
+    receive do
+      :abyss_quic_wake -> drain_wakes()
+    after
+      0 -> :ok
     end
   end
 

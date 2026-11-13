@@ -49,6 +49,26 @@ defmodule Abyss.QUIC do
           {:ok, {:inet.ip_address(), :inet.port_number()}} | {:error, term()}
   def local(listener), do: GenServer.call(listener, :local)
 
+  @doc """
+  Asks a connection worker to run one event turn now instead of at its next poll.
+
+  `worker` is the process that runs the handler callbacks: `self()` inside
+  `c:Abyss.QUIC.Handler.init/3` or `c:Abyss.QUIC.Handler.handle_event/2`. Other
+  processes, such as request workers that queued work for the handler, call this
+  after queuing so the handler can act without waiting up to `poll_interval`.
+
+  The turn polls engine events and calls `handle_event/2` with them followed by
+  `:tick`, exactly like a timed poll. It leaves the poll timer unchanged, so one
+  timer stays outstanding however often wakes arrive. Wakes queued before a turn
+  starts are coalesced into that turn. Waking a worker that has not finished
+  `init/3`, or one that has exited, does nothing. Always returns `:ok`.
+  """
+  @spec wake(pid()) :: :ok
+  def wake(worker) when is_pid(worker) do
+    send(worker, :abyss_quic_wake)
+    :ok
+  end
+
   # The remaining calls deliberately use the engine's public API. No endpoint
   # private state or structs are expanded here, keeping `:elixir_quic` optional.
   def ready(connection), do: backend_for_handle(connection, :ready, [connection])

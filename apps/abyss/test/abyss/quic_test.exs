@@ -35,6 +35,25 @@ defmodule Abyss.QUICServiceTest do
     end
   end
 
+  defmodule TickHandler do
+    @behaviour Abyss.QUIC.Handler
+
+    def init(connection, metadata, owner) do
+      send(owner, {:bound, connection, metadata, self()})
+      {:ok, owner}
+    end
+
+    def handle_event(:block, owner) do
+      send(owner, {:event_started, self()})
+
+      receive do
+        :release_event -> {:ok, owner}
+      end
+    end
+
+    def handle_event(event, owner), do: send(owner, {:event, event}) && {:ok, owner}
+  end
+
   defmodule Backend.Endpoint do
     def receive_datagram(_endpoint, _remote, _bytes, _at), do: :ok
   end
@@ -604,6 +623,92 @@ defmodule Abyss.QUICServiceTest do
     assert_receive {:event, {:closed, :peer_closed}}, 1_000
     assert Process.alive?(listener)
     assert :ok = Abyss.QUIC.stop(listener)
+  end
+
+  describe "wake/1 (issue #170)" do
+    defp bound_tick_worker(opts) do
+      {:ok, listener} = start_listener([handler: {TickHandler, self()}] ++ opts)
+      endpoint = endpoint!()
+      connection = Backend.connection()
+      Backend.push(endpoint, connection)
+      assert_receive {:bound, ^connection, _, worker}, 1_000
+      # The first poll follows attachment immediately.
+      assert_receive {:event, :tick}, 1_000
+      {listener, connection, worker}
+    end
+
+    test "runs one event turn without waiting for the poll interval" do
+      {listener, connection, worker} = bound_tick_worker(poll_interval: 60_000)
+      Backend.push_event(connection, :work)
+      refute_receive {:event, _}, 50
+
+      assert :ok = Abyss.QUIC.wake(worker)
+      assert_receive {:event, :work}, 1_000
+      assert_receive {:event, :tick}, 1_000
+      assert :ok = Abyss.QUIC.stop(listener)
+    end
+
+    test "a burst of wakes is coalesced into one turn" do
+      {listener, connection, worker} = bound_tick_worker(poll_interval: 60_000)
+      Backend.push_event(connection, :block)
+      Abyss.QUIC.wake(worker)
+      assert_receive {:event_started, ^worker}, 1_000
+
+      for _ <- 1..50, do: Abyss.QUIC.wake(worker)
+      send(worker, :release_event)
+
+      # The blocked turn ends with its tick; the queued burst runs one more turn.
+      assert_receive {:event, :tick}, 1_000
+      assert_receive {:event, :tick}, 1_000
+      refute_receive {:event, :tick}, 100
+      assert :ok = Abyss.QUIC.stop(listener)
+    end
+
+    test "frequent wakes keep a single poll timer chain" do
+      {listener, _connection, worker} = bound_tick_worker(poll_interval: 40)
+
+      for _ <- 1..20 do
+        Abyss.QUIC.wake(worker)
+        Process.sleep(5)
+      end
+
+      flush_ticks()
+      # With one 40 ms chain, 400 ms yields about 10 timed ticks; any extra
+      # chain started by a wake would at least double that.
+      Process.sleep(400)
+      ticks = flush_ticks()
+      assert ticks in 5..14
+      assert :ok = Abyss.QUIC.stop(listener)
+    end
+
+    test "waking an uninitialized or exited worker is a no-op" do
+      {:ok, listener} = start_listener(poll_interval: 60_000)
+      endpoint = endpoint!()
+      connection = Backend.connection(%{alpn: "test", init: :slow})
+      Backend.push(endpoint, connection)
+      assert_receive {:init_started, ^connection, worker}, 1_000
+
+      assert :ok = Abyss.QUIC.wake(worker)
+      send(worker, {:release_init, connection})
+      assert_receive {:bound, ^connection, _, ^worker}, 1_000
+      assert Process.alive?(worker)
+
+      monitor = Process.monitor(worker)
+      Agent.stop(connection.id)
+      send(worker, :poll)
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+      assert :ok = Abyss.QUIC.wake(worker)
+      assert Process.alive?(listener)
+      assert :ok = Abyss.QUIC.stop(listener)
+    end
+
+    defp flush_ticks(count \\ 0) do
+      receive do
+        {:event, :tick} -> flush_ticks(count + 1)
+      after
+        0 -> count
+      end
+    end
   end
 
   test "shutdown stops new ingress before waiting for consumer drain" do
