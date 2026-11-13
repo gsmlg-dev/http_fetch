@@ -1,7 +1,7 @@
 defmodule HttpRuntime.MixProject do
   use Mix.Project
 
-  @version "1.0.0-rc.17"
+  @version "1.0.0-rc.18"
   @source_url "https://github.com/gsmlg-dev/http_fetch"
 
   def project do
@@ -38,9 +38,9 @@ defmodule HttpRuntime.MixProject do
 
   defp deps do
     [
-      {:http_core, "== 1.0.0-rc.17", in_umbrella: true, hex: :http_core},
-      {:http_pool, "== 1.0.0-rc.17", in_umbrella: true, hex: :http_pool},
-      {:elixir_quic_http3, "== 1.0.0-rc.17", in_umbrella: true, hex: :elixir_quic_http3},
+      {:http_core, "== 1.0.0-rc.18", in_umbrella: true, hex: :http_core},
+      {:http_pool, "== 1.0.0-rc.18", in_umbrella: true, hex: :http_pool},
+      {:elixir_quic_http3, "== 1.0.0-rc.18", in_umbrella: true, hex: :elixir_quic_http3},
       {:telemetry, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
