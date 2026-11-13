@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.18] - 2026-11-13
+
+### Added
+- **abyss:** `Abyss.QUIC.wake/1` asks a QUIC connection worker (`self()` inside
+  `Abyss.QUIC.Handler` callbacks) to run one event turn now instead of at its next
+  poll. The turn delivers pending engine events and `:tick` to `handle_event/2`
+  like a timed poll, and leaves the single poll timer unchanged; wakes queued
+  before a turn are coalesced into it, and waking an uninitialized or exited
+  worker does nothing (#170).
+
+### Changed
+- **http_fetch / http_core:** with `request_mode: :proxy`, `HTTP.fetch/2` and the
+  HTTP/1.1, HTTP/2 and HTTP/3 request builders no longer add the default
+  `User-Agent`, so a relayed request carries only the caller's fields and does not
+  disclose the proxy's platform and runtime versions. A caller-supplied
+  `User-Agent` is sent unchanged, and `request_mode: :fetch` keeps the default
+  (#171).
+
 ## [1.0.0-rc.17] - 2026-11-12
 
 ### Added
