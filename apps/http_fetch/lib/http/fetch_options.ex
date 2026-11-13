@@ -38,7 +38,8 @@ defmodule HTTP.FetchOptions do
     statuses remain buffered empty responses. The request timeout still bounds
     the entire response; callers can observe headers before applying a body deadline.
   - `request_mode` - `:fetch` (default) or `:proxy`; proxy mode retains request
-    entities for all admitted methods, including GET, DELETE, and HEAD
+    entities for all admitted methods, including GET, DELETE, and HEAD, and
+    adds no default `User-Agent` (a caller-supplied one is sent unchanged)
   - `content_type` - convenience Content-Type value for request bodies
   - `timeout` - request timeout in non-negative milliseconds or `:infinity`
     (HTTP/1, HTTP/2 and HTTP/3); other values raise `ArgumentError`

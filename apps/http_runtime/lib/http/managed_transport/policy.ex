@@ -266,7 +266,7 @@ defmodule HTTP.ManagedTransport.Policy do
     if options[:http_version] == :http1 do
       headers =
         request.headers
-        |> HTTP.Headers.set_default("User-Agent", HTTP.Headers.user_agent())
+        |> default_user_agent(request.request_mode)
         |> HTTP.Headers.set_default("Host", HTTP.Request.authority(request.url))
         |> HTTP.Headers.set("Connection", "keep-alive")
 
@@ -277,6 +277,12 @@ defmodule HTTP.ManagedTransport.Policy do
       {headers, 0}
     end
   end
+
+  # Mirrors HTTP.HTTP1: proxy mode adds no User-Agent.
+  defp default_user_agent(headers, :proxy), do: headers
+
+  defp default_user_agent(headers, _mode),
+    do: HTTP.Headers.set_default(headers, "User-Agent", HTTP.Headers.user_agent())
 
   defp fields_bytes(fields),
     do:

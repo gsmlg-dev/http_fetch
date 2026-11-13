@@ -161,6 +161,8 @@ defmodule HTTP do
                 - `:request_mode`: `:fetch` (default) or `:proxy`. Proxy mode preserves
                                    request bodies for all admitted methods, including GET,
                                    DELETE, and HEAD. HEAD response bodies remain empty.
+                                   Proxy mode adds no default `User-Agent`; a caller-supplied
+                                   one is sent unchanged.
                 - `:duplex`: Set to `:half` or `"half"` to enable Fetch-style request body streaming.
                              HTTP/1.1 uses chunked framing; HTTP/2 and HTTP/3 use flow-controlled DATA frames.
                 - `:content_type`: The Content-Type header value. If not provided for methods with body,
@@ -434,10 +436,7 @@ defmodule HTTP do
       url: uri,
       method: HTTP.FetchOptions.get_method(options),
       request_mode: options.request_mode,
-      headers:
-        options
-        |> HTTP.FetchOptions.get_headers()
-        |> HTTP.Headers.set_default("User-Agent", HTTP.Headers.user_agent(:http_fetch)),
+      headers: request_headers(options),
       body: HTTP.FetchOptions.get_body(options),
       duplex: HTTP.FetchOptions.get_duplex(options),
       content_type: HTTP.FetchOptions.get_content_type(options),
@@ -534,6 +533,16 @@ defmodule HTTP do
     HTTP.RequestLifecycle.register(tracker, task.pid, :task)
     send(task.pid, :request_launch)
     %Promise{task: task, completion: completion}
+  end
+
+  # Proxy mode relays the caller's fields as given and adds no User-Agent.
+  defp request_headers(%HTTP.FetchOptions{request_mode: :proxy} = options),
+    do: HTTP.FetchOptions.get_headers(options)
+
+  defp request_headers(options) do
+    options
+    |> HTTP.FetchOptions.get_headers()
+    |> HTTP.Headers.set_default("User-Agent", HTTP.Headers.user_agent(:http_fetch))
   end
 
   defp run_prepared_request(

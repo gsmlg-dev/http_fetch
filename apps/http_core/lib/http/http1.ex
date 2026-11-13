@@ -555,7 +555,7 @@ defmodule HTTP.HTTP1 do
   defp request_headers(%Request{} = request) do
     %{request | headers: HTTP.Proxy.request_headers(request)}
     |> validate_request_framing!()
-    |> ensure_user_agent()
+    |> ensure_user_agent(request.request_mode)
     |> Headers.set_default("Host", Request.authority(request.url))
     |> Headers.set(
       "Connection",
@@ -606,9 +606,11 @@ defmodule HTTP.HTTP1 do
     end
   end
 
-  defp ensure_user_agent(headers) do
-    Headers.set_default(headers, "User-Agent", Headers.user_agent())
-  end
+  # Proxy mode relays the caller's fields as given and adds no User-Agent.
+  defp ensure_user_agent(headers, :proxy), do: headers
+
+  defp ensure_user_agent(headers, _mode),
+    do: Headers.set_default(headers, "User-Agent", Headers.user_agent())
 
   defp header_line(name, value) do
     name = valid_header_name!(to_string(name))

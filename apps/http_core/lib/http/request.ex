@@ -58,7 +58,8 @@ defmodule HTTP.Request do
 
   The library automatically adds a `User-Agent` header if not provided,
   containing information about the runtime environment (OS, architecture,
-  OTP version, Elixir version, and library version).
+  OTP version, Elixir version, and library version). `request_mode: :proxy`
+  adds none, so a relayed request carries only the caller's fields.
   """
 
   alias HTTP.Headers

@@ -35,6 +35,23 @@ defmodule HTTP.HTTP1Test do
     end
   end
 
+  test "proxy mode adds no default User-Agent and keeps a caller-supplied one" do
+    wire = fn mode, fields ->
+      %HTTP.Request{
+        request_mode: mode,
+        url: URI.parse("http://example.test/"),
+        headers: HTTP.Headers.new(fields)
+      }
+      |> HTTP.Request.to_iodata()
+      |> IO.iodata_to_binary()
+      |> String.downcase()
+    end
+
+    refute wire.(:proxy, []) =~ "user-agent:"
+    assert wire.(:proxy, [{"User-Agent", "Client/1"}]) =~ "user-agent: client/1\r\n"
+    assert wire.(:fetch, []) =~ "user-agent: mozilla/5.0"
+  end
+
   describe "serialize_request/1" do
     test "serializes path, query, host, connection, content headers, and body" do
       request = %HTTP.Request{

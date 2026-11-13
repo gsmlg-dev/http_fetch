@@ -73,6 +73,24 @@ defmodule HTTP.HTTP2Test do
       refute Enum.any?(headers, &match?({"connection", _}, &1))
     end
 
+    test "proxy mode adds no default User-Agent and keeps a caller-supplied one" do
+      fields = fn mode, headers ->
+        request = %HTTP.Request{
+          request_mode: mode,
+          url: URI.parse("https://example.com/"),
+          headers: HTTP.Headers.new(headers)
+        }
+
+        {:ok, fields, _body} = HTTP.HTTP2.request_headers(request)
+        for {"user-agent", value} <- fields, do: value
+      end
+
+      assert fields.(:proxy, []) == []
+      assert fields.(:proxy, [{"User-Agent", "Client/1"}]) == ["Client/1"]
+      assert [default] = fields.(:fetch, [])
+      assert default =~ "Mozilla/5.0"
+    end
+
     test "serializes request bodies as DATA frames" do
       request = %HTTP.Request{
         method: :post,
