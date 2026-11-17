@@ -1595,7 +1595,7 @@
       ],
       "active_production_source_census": {
         "files": 268,
-        "sorted_path_sha256_json": "dfe1bc2c84d04280ae5f4d28f025e94e2f2b3c52a22c71ed3a2ac722e0afc53d",
+        "sorted_path_sha256_json": "0bba1837735834774a7b1c73d47ddff3ab456624c14699b8b11c971598bc5c26",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1788,7 +1788,7 @@
         "Q1_Q3": "Cleanup leases and the external send callback keep their constructors; the observer only admits two more operation kinds and AbyssDispatcher.terminate/2 tolerates an exiting endpoint."
       },
       "reviewed_inventory_reconciliation": {
-        "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
+        "status": "SOURCE_IDENTITIES_WITH_CHANGED_MODULE_BEAM_DIAGNOSTIC_STRICT_RELEASE_PENDING",
         "count": 209,
         "duplicates": 0,
         "identity": [
@@ -1798,10 +1798,10 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "c3a0442cb0ec85ee546035d1eccd0dcfc85c81d0316a39905e1c606a7578c41a"
+        "sha256": "e83ef002257762a13de56c1ae5ac0858156adae4278cf452a98ace83c6261078"
       },
       "historical_artifact_covers_amended_source": false,
-      "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
+      "compiled_acceptance": "RC19_SOURCE_REVIEW_AND_ROOT_DIAGNOSTIC_ONLY; STRICT_CANDIDATE_AND_PUBLISHED_GATES_REQUIRED",
       "follow_up_changes": [
         {
           "date": "2026-11-10",
@@ -2027,7 +2027,24 @@
           "change": "The endpoint option projection no longer carries :tls_backend and the :tls_backend_not_supported_for_quic validation clause is removed (c7fada8).",
           "dispatch_review": "No dynamic dispatch added; the file holds no QUIC occurrence. Its H3-2 ops sites 58 and 59 move by 1 line and are rebound in the H3 review."
         }
-      ]
+      ],
+      "prior_compiled_validation": {
+        "source_commit": "722a99a123757885630c4c8aab4ec691e99c3bb8",
+        "reviewed_inventory_reconciliation": {
+          "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
+          "count": 209,
+          "duplicates": 0,
+          "identity": [
+            "module",
+            "line",
+            "kind"
+          ],
+          "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
+          "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
+          "sha256": "c3a0442cb0ec85ee546035d1eccd0dcfc85c81d0316a39905e1c606a7578c41a"
+        },
+        "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED"
+      }
     }
   ]
 }

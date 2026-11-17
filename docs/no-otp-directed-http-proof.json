@@ -32,22 +32,23 @@
     "apps/http_runtime/lib/http/http3/stream.ex": "1ad955e23c054163fb5ea8cef4c18c7e7b9e11dd1c5767fd109a1991a10495fc",
     "apps/http_event_source/lib/http/event_source/options.ex": "930e41ceef9d626bd4e1e545e4dc48d3bc3571b79dc30a639db642d96b953f84",
     "apps/http_event_source/lib/http/event_source/connection.ex": "65fcdb74e7e49270db6d35325228c898b0cc9f9c7595b8b03330ab89a9dc475a",
-    "apps/http_web_socket/lib/http/web_socket/options.ex": "b9c0125a90c53b2b73a5e7b8215cd60b7ddfc6557d89be383570e21751a63f64",
-    "apps/http_web_socket/lib/http/web_socket/connection.ex": "08636225c92fb88989688a75eccae069b60de06bb9eb40f2b1a1b5d9bd0fa2ac",
+    "apps/http_web_socket/lib/http/web_socket/options.ex": "41fb5208ac2d865f9c67fde7320824bfb3d838e4dc8dd0a1afe8d47dce0d8826",
+    "apps/http_web_socket/lib/http/web_socket/connection.ex": "3196abe45fe6a77d8fc808de9edae1125db40c16a2ecb19b38618c6531de2f6f",
     "apps/http_web_transport/lib/http/web_transport.ex": "e3b73cb237394160ba80ed662c2a600d64de9a0d7aa50df8762607d985d93123",
     "apps/http_web_transport/lib/http/web_transport/options.ex": "894cd6f47abcd65b30430b377c5051ef0547e8e74dcfb4511c7a61a506eb0ae1",
     "apps/http_web_transport/lib/http/web_transport/session.ex": "0a84e2c5397d26166af600d819f48deaccfe80b2398c33387ec2cca76b090ce0",
     "apps/http_web_transport/lib/http/web_transport/transport/quic.ex": "fb336ca22999ed2f2ec78a803c52c45c1b709c3b62f29a4b34a1f99eba0db7dd",
-    "apps/http_web_socket/lib/http/web_socket/handshake.ex": "03b0b9532bf4d45ee5f06681eb50fcf08976f1d33391dd6282f4887e02b6648e",
+    "apps/http_web_socket/lib/http/web_socket/handshake.ex": "c8cb3d50ff12fa089018fa34dedb67c9a6a6fd6869c016c1c483d3d895179bc8",
     "apps/http_web_socket/lib/http/web_socket/event.ex": "63ae8265fde1872a944ac5dadfd6fb4bd02376751985e10ed0cbe8a3ef653634",
     "apps/http_web_socket/lib/http/web_socket/frame.ex": "8f813646db68b69f4531f49472d9bde48bca21877e237af54eac462fb0b4ea33",
-    "apps/http_web_socket/lib/http/web_socket.ex": "c39527392ad28879bef3ac0a75f83b1124196d7ce094b49ab232153bff2cdaf1",
+    "apps/http_web_socket/lib/http/web_socket.ex": "2e2800b2b39ff1cf8616ca1da61028f633e0a0d0698e3024cd821b75cdbfead8",
     "apps/http_pool/lib/http/pool.ex": "a5192c4a31078ec9aabdaa53a470f20fd343513de9f8522217786db27e5ccec3",
     "apps/http_pool/lib/http/pool/telemetry.ex": "bcd3d7b8c9b50eb5d7db8b21290a86885db7f275aabf81357f2b3377ac52d064",
     "apps/http_pool/lib/http/http2/pool_key.ex": "aa4bf085980d691ea612025e4e1fedcc4ab7bde16ed491d0bf5a0885b6b6ad3c",
     "apps/http_runtime/lib/http/runtime/pool.ex": "fddfd221ce34112787bde34bfa5aa72448d8b6df7b6a924187336235c824ecca",
     "apps/http_fetch/lib/http/adapter.ex": "772454274c78cee206f0ff4f7e18576be1ae56fe8302572615b9829bc274858e",
-    "apps/http_fetch/lib/http/retry.ex": "93b48d9c9e86303e33c74cc7b0c7cdb612848f64459d0e54f932c7f27b47adc0"
+    "apps/http_fetch/lib/http/retry.ex": "93b48d9c9e86303e33c74cc7b0c7cdb612848f64459d0e54f932c7f27b47adc0",
+    "apps/http_runtime/lib/http/runtime/options.ex": "7421f13cab7e82cef2462911d0141d08279432be0d0b1dd08f5d67580b2fe7f1"
   },
   "production_source_census": {
     "files": 244,
@@ -656,7 +657,7 @@
       "inventory_occurrence": 152,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "abort_transport/2",
-      "line": 1468,
+      "line": 1510,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -666,7 +667,7 @@
       "inventory_occurrence": 153,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "abort_transport/2",
-      "line": 1469,
+      "line": 1511,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -676,7 +677,7 @@
       "inventory_occurrence": 154,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "detach/1",
-      "line": 1448,
+      "line": 1490,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -706,7 +707,7 @@
       "inventory_occurrence": 157,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "rearm/1",
-      "line": 1335,
+      "line": 1377,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -716,7 +717,7 @@
       "inventory_occurrence": 158,
       "module": "HTTP.WebSocket.Connection",
       "mfa": "submit/2",
-      "line": 888,
+      "line": 930,
       "kind": "unresolved_module_dispatch",
       "source": "apps/http_web_socket/lib/http/web_socket/connection.ex",
       "proof": "HTTP-9",
@@ -1387,11 +1388,11 @@
         },
         "apps/http_web_socket/lib/http/web_socket/options.ex": {
           "previous_sha256": "7c35aed5864213f90e9d954c8e78799981c01f1ba5526ab56683f6ea2e4e8177",
-          "sha256": "b9c0125a90c53b2b73a5e7b8215cd60b7ddfc6557d89be383570e21751a63f64"
+          "sha256": "41fb5208ac2d865f9c67fde7320824bfb3d838e4dc8dd0a1afe8d47dce0d8826"
         },
         "apps/http_web_socket/lib/http/web_socket/connection.ex": {
           "previous_sha256": "322737d98276d94fb450985ce8620d05afeb8e3c6d7943c9cac70077e9ebcb9f",
-          "sha256": "08636225c92fb88989688a75eccae069b60de06bb9eb40f2b1a1b5d9bd0fa2ac"
+          "sha256": "3196abe45fe6a77d8fc808de9edae1125db40c16a2ecb19b38618c6531de2f6f"
         },
         "apps/http_web_transport/lib/http/web_transport.ex": {
           "previous_sha256": "38751209dffad6dd099a61e4038874ef66d8c57303f42c565483f12904c0346d",
@@ -1411,7 +1412,7 @@
         },
         "apps/http_web_socket/lib/http/web_socket.ex": {
           "previous_sha256": "685c7d0b6f1b4b32f1534cd2faf055bfbd24c8f4e46de1857540f763fd63a593",
-          "sha256": "c39527392ad28879bef3ac0a75f83b1124196d7ce094b49ab232153bff2cdaf1"
+          "sha256": "2e2800b2b39ff1cf8616ca1da61028f633e0a0d0698e3024cd821b75cdbfead8"
         },
         "apps/http_fetch/lib/http.ex": {
           "previous_sha256": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d",
@@ -1423,7 +1424,7 @@
         },
         "apps/http_web_socket/lib/http/web_socket/handshake.ex": {
           "previous_sha256": "99b178e112dc90c47f96e64c50ac2e2535fcc3169b9137bc19ca68744f7ce978",
-          "sha256": "03b0b9532bf4d45ee5f06681eb50fcf08976f1d33391dd6282f4887e02b6648e"
+          "sha256": "c8cb3d50ff12fa089018fa34dedb67c9a6a6fd6869c016c1c483d3d895179bc8"
         },
         "apps/http_event_source/lib/http/event_source/connection.ex": {
           "previous_sha256": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
@@ -1464,10 +1465,15 @@
         "apps/http_runtime/lib/http/runtime/pool.ex": {
           "previous_sha256": "be2279a332664d6b5db55cac73c9a8104054e64420b47718c7e5efa1d57b9052",
           "sha256": "fddfd221ce34112787bde34bfa5aa72448d8b6df7b6a924187336235c824ecca"
+        },
+        "apps/http_runtime/lib/http/runtime/options.ex": {
+          "previous_sha256": "712aa6aa2aa3a9393418ebcee9d665f320da61cc2efc3e37d1d9f1a4cdff7e6d",
+          "sha256": "7421f13cab7e82cef2462911d0141d08279432be0d0b1dd08f5d67580b2fe7f1"
         }
       },
       "added_selected_inputs": [
-        "apps/http_fetch/lib/http/retry.ex"
+        "apps/http_fetch/lib/http/retry.ex",
+        "apps/http_runtime/lib/http/runtime/options.ex"
       ],
       "removed_selected_inputs": [
         {
@@ -1477,7 +1483,7 @@
       ],
       "active_production_source_census": {
         "files": 268,
-        "sorted_path_sha256_json": "dfe1bc2c84d04280ae5f4d28f025e94e2f2b3c52a22c71ed3a2ac722e0afc53d",
+        "sorted_path_sha256_json": "0bba1837735834774a7b1c73d47ddff3ab456624c14699b8b11c971598bc5c26",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -1557,19 +1563,19 @@
           "inventory_occurrence": 152,
           "mfa": "abort_transport/2",
           "previous_line": 1385,
-          "line": 1468
+          "line": 1510
         },
         {
           "inventory_occurrence": 153,
           "mfa": "abort_transport/2",
           "previous_line": 1386,
-          "line": 1469
+          "line": 1511
         },
         {
           "inventory_occurrence": 154,
           "mfa": "detach/1",
           "previous_line": 1365,
-          "line": 1448
+          "line": 1490
         },
         {
           "inventory_occurrence": 155,
@@ -1587,13 +1593,13 @@
           "inventory_occurrence": 157,
           "mfa": "rearm/1",
           "previous_line": 1252,
-          "line": 1335
+          "line": 1377
         },
         {
           "inventory_occurrence": 158,
           "mfa": "submit/2",
           "previous_line": 810,
-          "line": 888
+          "line": 930
         },
         {
           "inventory_occurrence": 159,
@@ -1803,13 +1809,13 @@
       "origin_derivations": {
         "WT-1": "Session.init/1 is the only backend assignment (options.backend, default HTTP.WebTransport.Transport.QUIC). New sites migrate (202), handle_message (203) and acknowledge (204) call that retained module after function_exported?/3 checks. backend_or_invalid_state/2 (205) and finish_send/3 (206) invoke only the local closures built in handle_call/3 around the same retained backend; close moved to cleanup_backend/2 (ID 159) and the send-close/abort closures moved to finish_send/3 (IDs 163/164). The sole library backend now opens a real exclusive HTTP3 ConnectionOwner with a Quic.Cleanup.new/1 descriptor, literal webtransport session options and caller ssl keywords validated by SSL.QUIC.Config; its stream/datagram/migration bodies are literal ConnectionOwner and Cleanup calls covered by H3-1/H3-2/Q1. rc.13 follow-up (89107e7): occurrence 166 (state.backend.get_stats/1) is removed because :get_stats now replies from session-kept counters; the other thirteen retained-backend sites keep their expressions and twelve move by 4 to 41 lines. Transport.QUIC runs owner calls through interruptible/1, which spawns a monitored helper around a literal closure; its fun.() calls only the closures built at the three literal call sites and is not a reviewed occurrence.",
         "HTTP-1_HTTP-4": "Alt-Svc keeps tls_backend nil only until the TCP fallback pins it through TLSBackend.resolve/1, which accepts only ExSSL. HTTP/3 options lift ex_ssl reference identity into QUIC ssl data. SocketClient transport/protocol selectors and the H3 handler are unchanged; 12 SocketClient sites move. rc.13 follow-ups (e95bb5c, cff6e9a): HTTP/1 redirect parity and the HTTP/2 retry add only literal bookkeeping; the same twelve SocketClient sites move by 66 or 68 lines with unchanged expressions and selectors. rc.14 follow-up (c7fada8): HTTP.TLSBackend and the tls_backend option are removed; Dialer.select_transport/2 names the literal HTTP.Transport.ExSSL, so the TLS selector is a literal module rather than a single-valued resolver. The twelve SocketClient sites move by 5, 6 or 10 lines with unchanged expressions and selectors. rc.14 follow-up (5eae73d): the retry loop adds only the literal attempt-owner bookkeeping; the twelve SocketClient sites move by 10 lines with unchanged expressions and selectors. rc.16 follow-up (a14c711): the http2_unprocessed_retry option adds only a literal Keyword.get/3 guard and a literal HTTP.Telemetry.http2_unprocessed_retry/3 call; the twelve SocketClient sites move by 5 lines with unchanged expressions and selectors.",
-        "HTTP-9": "WebSocket over HTTP/3 leaves tls_backend unresolved; Runtime.Options rejects any explicit backend for HTTP/3 and the HTTP1 selector still maps only :ex_ssl. Seven WebSocket sites move with unchanged expressions. rc.13 follow-up (c08c93f): the seven WebSocket.Connection sites move by 7 or 12 lines with unchanged expressions. The nine HTTP-3 EventSource.Connection sites (e03c828) likewise keep their retained transport selectors and move by 1 to 34 lines. rc.14 follow-up (c7fada8, c222551): WebSocket and EventSource select_transport/1 name the literal HTTP.Transport.ExSSL; five WebSocket.Connection sites move by 3 lines and the nine EventSource.Connection sites by 2 or 5 lines, all with unchanged expressions.",
+        "HTTP-9": "WebSocket over HTTP/3 leaves tls_backend unresolved; Runtime.Options rejects any explicit backend for HTTP/3 and the HTTP1 selector still maps only :ex_ssl. Seven WebSocket sites move with unchanged expressions. rc.13 follow-up (c08c93f): the seven WebSocket.Connection sites move by 7 or 12 lines with unchanged expressions. The nine HTTP-3 EventSource.Connection sites (e03c828) likewise keep their retained transport selectors and move by 1 to 34 lines. rc.14 follow-up (c7fada8, c222551): WebSocket and EventSource select_transport/1 name the literal HTTP.Transport.ExSSL; five WebSocket.Connection sites move by 3 lines and the nine EventSource.Connection sites by 2 or 5 lines, all with unchanged expressions. rc.19 follow-up (#172): explicit HTTP proxy tuples are data validated by HTTP.Proxy.normalize/1; only HTTP/1 is admitted. WebSocket selects the same literal TCP, Unix or ExSSL module and HTTP.Proxy.connect/6 connects to the proxy through TCP, using literal ExSSL for WSS CONNECT adoption. The tuple cannot introduce a module or callback. Five reviewed sites move by 42 lines with unchanged expressions and owning functions; two keep their lines. RequestLifecycle retains the dial worker, proxy TCP and ExSSL provider before effects and cancellation; no direct fallback is introduced.",
         "HTTP-2": "The nine RequestLifecycle worker producers are unchanged in number and kind.",
         "HTTP-5": "then/3 accepts only a 1-arity success function and nil or a 1-arity error function (is_function/2 guards) and appends them to the callbacks list of the returned promise. HTTP.fetch/2 builds the only production %HTTP.Promise{} with callbacks: []; then/3 is the only writer. await/2 runs the retained callbacks in the awaiting caller process: run_callbacks/3 invokes error_fun.(reason) (207) only when is_function(error_fun, 1) and success_fun.(value) (106, previously the apply/2 in apply_callback/2) otherwise. Results are interpreted only as a Promise to settle or ordinary data; a returned function is never invoked. The callbacks are caller-supplied public-API callbacks, the same approved boundary as before. rc.14 follow-up (8f35305): await/2 reports its own wait expiry as :await_timeout; both invocations move by 3 lines with unchanged expressions.",
         "HTTP-11": "HTTP.Retry.normalize/3 is the only constructor of %HTTP.Retry{} (struct literal at its sole return). normalize_mode/1 stores a function only when is_function(fun, 2) holds for the caller `retry:` value; every other value is :transient, :safe_transient, nil or an ArgumentError. normalize_delay/1 stores a function only when is_function(fun, 1) holds for the caller `retry_delay:` value; otherwise nil, a non-negative integer or an ArgumentError. FetchOptions.normalize_options/1 validates both through normalize/3 and retry_policy/1 rebuilds the policy through normalize/3 again; HTTP.fetch/2 passes that policy to the task closure, handle_async_request/6 stores it unchanged in the attempts map and run_attempts/3 passes it to HTTP.Retry.decide/5, which only reads it. retry?/3 (209) invokes fun.(request, result) only in the is_function(fun, 2) clause, after the built-in hard rules (max_retries, no streamed or half-duplex body, no :aborted or :timeout) and never for a built-in mode; configured_delay/2 (210) invokes fun.(attempt) only after the nil and integer clauses, so its argument is the normalized 1-arity function. Both results are data: a non-boolean or a non-integer/negative delay raises ArgumentError in the Promise worker, and the delay is still bounded by the request deadline. No library caller supplies either function; they are caller-supplied public-API callbacks, the same approved boundary as the HTTP-5 Promise callbacks. HTTP.Retry is @moduledoc false and HTTP.handle_async_request/6 is @doc false; the only production callers are HTTP.fetch/2 and run_attempts/3, and a manually constructed policy is not supported input."
       },
       "reviewed_inventory_reconciliation": {
-        "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
+        "status": "SOURCE_IDENTITIES_WITH_CHANGED_MODULE_BEAM_DIAGNOSTIC_STRICT_RELEASE_PENDING",
         "count": 209,
         "duplicates": 0,
         "identity": [
@@ -1819,10 +1825,10 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "c3a0442cb0ec85ee546035d1eccd0dcfc85c81d0316a39905e1c606a7578c41a"
+        "sha256": "e83ef002257762a13de56c1ae5ac0858156adae4278cf452a98ace83c6261078"
       },
       "historical_artifact_covers_amended_source": false,
-      "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
+      "compiled_acceptance": "RC19_SOURCE_REVIEW_AND_ROOT_DIAGNOSTIC_ONLY; STRICT_CANDIDATE_AND_PUBLISHED_GATES_REQUIRED",
       "follow_up_changes": [
         {
           "date": "2026-11-10",
@@ -3054,6 +3060,99 @@
           "input": "apps/http_runtime/lib/http/managed_transport/policy.ex",
           "change": "Managed HTTP/1 field accounting skips the default User-Agent under request_mode: :proxy, mirroring HTTP.HTTP1, through the literal private default_user_agent/2 (#171, 956025c).",
           "dispatch_review": "No dynamic dispatch added or moved: two clauses of a literal private function with literal HTTP.Headers.set_default/3 and HTTP.Headers.user_agent/0 calls. A BEAM scan of the current build reports no dispatch site in HTTP.ManagedTransport.Policy; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-18",
+          "release_version": "1.0.0-rc.19",
+          "baseline_commit": "d12421baee477e4ded0e1d774317810b4e829140",
+          "input": "apps/http_runtime/lib/http/runtime/options.ex",
+          "change": "Shared constructor validation opts WebSocket into explicit HTTP/1 HTTP proxy tuples and retains the proxy transport option; other clients continue rejecting proxy endpoints.",
+          "dispatch_review": "HTTP.Proxy.normalize/1 validates data. proxy_selection/1 requires :http and :http1; Dialer.select_transport/2 preserves Unix/pin conflicts and finite TCP/ExSSL/Unix selectors. H3 takes the earlier h3_route/2 branch and still rejects every non-nil proxy. No caller-supplied module or callable is introduced; the new source is selected explicitly.",
+          "source_commit": "eb3ae228293325f20287b407d29f26e32f084275"
+        },
+        {
+          "date": "2026-11-18",
+          "release_version": "1.0.0-rc.19",
+          "baseline_commit": "d12421baee477e4ded0e1d774317810b4e829140",
+          "input": "apps/http_web_socket/lib/http/web_socket/options.ex",
+          "change": "WebSocket options retain a validated explicit proxy tuple independently of frame-forwarding mode and pass allow_proxy: true to shared validation. Proxy normalization canonicalizes the first duplicate-key value before validation and transport projection, matching the value retained by the connection.",
+          "dispatch_review": "Literal option projection and struct fields only; proxy tuple contents cannot supply transport modules or callbacks. The existing RequestLifecycle, delivery and timeout options retain their producers. Canonicalization prevents a later duplicate nil proxy from bypassing Unix/origin-pin route validation.",
+          "source_commit": "eb3ae228293325f20287b407d29f26e32f084275"
+        },
+        {
+          "date": "2026-11-18",
+          "release_version": "1.0.0-rc.19",
+          "baseline_commit": "d12421baee477e4ded0e1d774317810b4e829140",
+          "input": "apps/http_web_socket/lib/http/web_socket/handshake.ex",
+          "change": "The opening handshake uses absolute-form http:// targets for proxied WS, retains target Host, adds only configured proxy authentication to WS proxy traffic, and strips Proxy-Authorization from the tunneled WSS request.",
+          "dispatch_review": "Literal header and URI transformations only; the proxy route is normalized HTTP.Proxy data and supplies no callable. Response metadata still uses the independently bounded allowlist.",
+          "source_commit": "eb3ae228293325f20287b407d29f26e32f084275"
+        },
+        {
+          "date": "2026-11-18",
+          "release_version": "1.0.0-rc.19",
+          "baseline_commit": "d12421baee477e4ded0e1d774317810b4e829140",
+          "input": "apps/http_web_socket/lib/http/web_socket/connection.ex",
+          "change": "HTTP/1 opening resolves the existing HTTP.Proxy route and connects through HTTP.Proxy.connect/6; WSS CONNECT and TLS use the retained request lifecycle. CONNECT and upgrade writes receive bounded send deadlines.",
+          "dispatch_review": "select_transport/1 still returns only literal TCP, Unix or ExSSL modules; a proxy is validated HTTP data, not a new module selector. connect_http1/6 either calls that transport directly or literal HTTP.Proxy.connect/6; for the admitted HTTP proxy, Proxy.connect retains TCP or upgrades through literal ExSSL. send_handshake/4 and recv_handshake/4 retain the same selected module. Five HTTP-9 sites move by 42 lines and two retain their lines, expressions and owning functions. Same-context synthetic-release BEAM diagnostics preserve all 235 root findings after the line shift, including the already-existing extra recv_handshake/4 site; they establish no strict isolated-release acceptance.",
+          "occurrence_rebindings": [
+            {
+              "inventory_occurrence": 152,
+              "mfa": "abort_transport/2",
+              "previous_line": 1468,
+              "line": 1510
+            },
+            {
+              "inventory_occurrence": 153,
+              "mfa": "abort_transport/2",
+              "previous_line": 1469,
+              "line": 1511
+            },
+            {
+              "inventory_occurrence": 154,
+              "mfa": "detach/1",
+              "previous_line": 1448,
+              "line": 1490
+            },
+            {
+              "inventory_occurrence": 157,
+              "mfa": "rearm/1",
+              "previous_line": 1335,
+              "line": 1377
+            },
+            {
+              "inventory_occurrence": 158,
+              "mfa": "submit/2",
+              "previous_line": 888,
+              "line": 930
+            }
+          ],
+          "compiled_diagnostic": {
+            "status": "DIAGNOSTIC_ONLY_STRICT_RELEASE_PENDING",
+            "context": "same synthetic release and root test production BEAMs; baseline four changed modules compiled from d12421b",
+            "checked_beams": 379,
+            "baseline_raw_dispatches": 235,
+            "current_raw_dispatches": 235,
+            "added_dispatches": 0,
+            "missing_dispatches": 0,
+            "changed_owning_mfas": 0,
+            "root_extra_recv_handshake_preserved": {
+              "previous_line": 666,
+              "line": 708
+            },
+            "strict_candidate": "NOT_RUN",
+            "strict_published": "NOT_RUN"
+          },
+          "source_commit": "eb3ae228293325f20287b407d29f26e32f084275"
+        },
+        {
+          "date": "2026-11-18",
+          "release_version": "1.0.0-rc.19",
+          "baseline_commit": "d12421baee477e4ded0e1d774317810b4e829140",
+          "input": "apps/http_web_socket/lib/http/web_socket.ex",
+          "change": "The public client documentation describes explicit HTTP/1 forward proxies, proxy authentication and timeout, WSS CONNECT target identity, explicit direct selection and unsupported combinations.",
+          "dispatch_review": "Documentation only; no callable or dispatch site is added.",
+          "source_commit": "eb3ae228293325f20287b407d29f26e32f084275"
         }
       ],
       "removed_occurrences": [
@@ -3068,7 +3167,24 @@
           "beam_sha256": "031ff133dfb551ee57f95819abadbd55ffc8a3c70321eb7e555ff72b74d3707e",
           "previous_line": 216
         }
-      ]
+      ],
+      "prior_compiled_validation": {
+        "source_commit": "956025c3719328f243f964bc3353bb13e74a5b6f",
+        "reviewed_inventory_reconciliation": {
+          "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
+          "count": 209,
+          "duplicates": 0,
+          "identity": [
+            "module",
+            "line",
+            "kind"
+          ],
+          "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
+          "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
+          "sha256": "c3a0442cb0ec85ee546035d1eccd0dcfc85c81d0316a39905e1c606a7578c41a"
+        },
+        "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED"
+      }
     }
   ]
 }

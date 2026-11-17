@@ -773,7 +773,7 @@
       ],
       "active_production_source_census": {
         "files": 268,
-        "sorted_path_sha256_json": "dfe1bc2c84d04280ae5f4d28f025e94e2f2b3c52a22c71ed3a2ac722e0afc53d",
+        "sorted_path_sha256_json": "0bba1837735834774a7b1c73d47ddff3ab456624c14699b8b11c971598bc5c26",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -933,7 +933,7 @@
         "H3-3_H3-5": "ExQuic wrappers are unchanged; SocketClient still supplies only &handle_http3_event/2."
       },
       "reviewed_inventory_reconciliation": {
-        "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
+        "status": "SOURCE_IDENTITIES_WITH_CHANGED_MODULE_BEAM_DIAGNOSTIC_STRICT_RELEASE_PENDING",
         "count": 209,
         "duplicates": 0,
         "identity": [
@@ -943,10 +943,10 @@
         ],
         "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
         "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
-        "sha256": "c3a0442cb0ec85ee546035d1eccd0dcfc85c81d0316a39905e1c606a7578c41a"
+        "sha256": "e83ef002257762a13de56c1ae5ac0858156adae4278cf452a98ace83c6261078"
       },
       "historical_artifact_covers_amended_source": false,
-      "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED",
+      "compiled_acceptance": "RC19_SOURCE_REVIEW_AND_ROOT_DIAGNOSTIC_ONLY; STRICT_CANDIDATE_AND_PUBLISHED_GATES_REQUIRED",
       "follow_up_changes": [
         {
           "date": "2026-11-10",
@@ -1355,8 +1355,34 @@
           "input": "apps/http_fetch/lib/http/fetch_options.ex",
           "change": "The request_mode option documentation states that proxy mode adds no default User-Agent (#171, 956025c).",
           "dispatch_review": "No dynamic dispatch added or moved: documentation only; the file holds no reviewed occurrence."
+        },
+        {
+          "date": "2026-11-18",
+          "release_version": "1.0.0-rc.19",
+          "baseline_commit": "d12421baee477e4ded0e1d774317810b4e829140",
+          "input": "apps/http_runtime/lib/http/runtime/options.ex",
+          "change": "WebSocket explicitly opts into HTTP/1 HTTP proxy validation; H3 still rejects every non-nil proxy before selection or I/O.",
+          "dispatch_review": "No H3 producer or reviewed H3 occurrence changes. Shared Runtime.Options is now selected in the HTTP proof; WebSocket HTTP-9 rebindings change the complete inventory digest. Strict isolated-release and published acceptance remain required.",
+          "source_commit": "eb3ae228293325f20287b407d29f26e32f084275"
         }
-      ]
+      ],
+      "prior_compiled_validation": {
+        "source_commit": "956025c3719328f243f964bc3353bb13e74a5b6f",
+        "reviewed_inventory_reconciliation": {
+          "status": "COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE",
+          "count": 209,
+          "duplicates": 0,
+          "identity": [
+            "module",
+            "line",
+            "kind"
+          ],
+          "module_normalization": "Remove only a leading colon from inspected Erlang atom module names.",
+          "encoding": "UTF-8 json.dumps(sorted(normalized_identity_tuples), separators=(comma, colon)), no trailing newline",
+          "sha256": "c3a0442cb0ec85ee546035d1eccd0dcfc85c81d0316a39905e1c606a7578c41a"
+        },
+        "compiled_acceptance": "LOCAL_STRICT_CANDIDATE_GATE; CI STRICT CANDIDATE AND PUBLISHED GATES REMAIN REQUIRED"
+      }
     }
   ]
 }

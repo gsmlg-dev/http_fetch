@@ -330,6 +330,46 @@ class DirectedReviewTests(unittest.TestCase):
         self.assertIn('HTTP-11', amendment['origin_derivations'])
         self.assertFalse({209, 210} & {site['inventory_occurrence'] for site in rewind(http, '1.0.0-rc.11')})
 
+    def test_rc19_websocket_proxy_renewal_retains_the_finite_transport_and_original_sites(self):
+        http = proof('http')
+        amendment = http['source_review_amendments'][-1]
+        selected = 'apps/http_runtime/lib/http/runtime/options.ex'
+        self.assertIn(selected, amendment['added_selected_inputs'])
+        self.assertEqual(http['source_inputs_sha256'][selected], review.sha256(ROOT / selected))
+        updates = [item for item in amendment['follow_up_changes']
+                   if item.get('release_version') == '1.0.0-rc.19']
+        self.assertEqual({item['input'] for item in updates}, {
+            selected, 'apps/http_web_socket/lib/http/web_socket/options.ex',
+            'apps/http_web_socket/lib/http/web_socket/connection.ex',
+            'apps/http_web_socket/lib/http/web_socket/handshake.ex',
+            'apps/http_web_socket/lib/http/web_socket.ex'})
+        connection = next(item for item in updates if item['input'].endswith('/connection.ex'))
+        sites = {site['inventory_occurrence']: site for site in http['occurrences']
+                 if site['module'] == 'HTTP.WebSocket.Connection'}
+        self.assertEqual(set(sites), set(range(152, 159)))
+        self.assertEqual({item['inventory_occurrence'] for item in connection['occurrence_rebindings']},
+                         {152, 153, 154, 157, 158})
+        source = (ROOT / connection['input']).read_text().splitlines()
+        for binding in connection['occurrence_rebindings']:
+            self.assertEqual(binding['line'] - binding['previous_line'], 42)
+            self.assertEqual(sites[binding['inventory_occurrence']]['line'], binding['line'])
+            self.assertIn('transport.', source[binding['line'] - 1])
+        diagnostic = connection['compiled_diagnostic']
+        self.assertEqual((diagnostic['baseline_raw_dispatches'], diagnostic['current_raw_dispatches']),
+                         (235, 235))
+        self.assertEqual((diagnostic['added_dispatches'], diagnostic['missing_dispatches']), (0, 0))
+        self.assertEqual(diagnostic['status'], 'DIAGNOSTIC_ONLY_STRICT_RELEASE_PENDING')
+        self.assertEqual(diagnostic['strict_candidate'], 'NOT_RUN')
+        self.assertEqual(diagnostic['strict_published'], 'NOT_RUN')
+        for group in ('tls', 'quic', 'http', 'h3'):
+            current = proof(group)['source_review_amendments'][-1]
+            self.assertEqual(current['reviewed_inventory_reconciliation']['status'],
+                             'SOURCE_IDENTITIES_WITH_CHANGED_MODULE_BEAM_DIAGNOSTIC_STRICT_RELEASE_PENDING')
+            self.assertEqual(current['prior_compiled_validation']['reviewed_inventory_reconciliation']['status'],
+                             'COMPILED_IDENTITIES_FROM_LOCAL_ISOLATED_RELEASE')
+        bundle = review.load(ROOT, '1.0.0-rc.19', PACKAGES)
+        self.assertEqual(len(bundle['occurrences']), 209)
+
     def test_native_source_and_compiled_release_binding(self):
         result = subprocess.run(['elixir', str(Path(__file__).with_suffix('.exs'))],
                                 env=dict(os.environ), stdout=subprocess.PIPE,

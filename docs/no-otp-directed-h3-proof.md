@@ -279,3 +279,15 @@ stays 209.
 (`956025c`, #171), as described in the HTTP review. HTTP/3 request fields come
 from `HTTP.HTTP2.request_headers/3`, which changes only in a literal header
 choice. No H3 occurrence is added, removed or rebound.
+
+### Follow-up: rc.19 HTTP/1 WebSocket forward proxies (2026-11-18)
+
+WebSocket opts into HTTP proxy validation only for HTTP/1. The shared
+`HTTP.Runtime.Options.h3_route/2` still rejects every non-nil proxy before H3
+pool selection or networking. The new proxy tuple contains transport data only;
+it cannot change a Session transport, connector, operation callback or backend.
+The HTTP review selects the shared options producer and reviews the seven
+retained HTTP-9 WebSocket sites, five of which move by 42 lines. No H3 source
+input or H3 occurrence changes. The current census and complete inventory digest
+are refreshed; the 379-module root-context BEAM diagnostic is separate from
+strict isolated-release and published acceptance, which remain required.

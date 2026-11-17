@@ -1,5 +1,28 @@
 # Directed production release audit
 
+## rc.19 proof follow-up: HTTP/1 WebSocket forward proxies — 2026-11-18
+
+The #172 changes after `d12421b` affect shared runtime options and four
+WebSocket production files. The HTTP proof now selects `HTTP.Runtime.Options`
+explicitly and traces proxy-aware validation, the retained finite transport
+selector, the existing TCP/ExSSL proxy route, request-owned cleanup and the
+handshake's target/authentication transformations. HTTP/2, H3, Unix and literal
+origin-pin proxy combinations remain rejected before networking. The H3 proof
+records that its proxy rejection precedes every H3 transport effect.
+
+Five existing HTTP-9 occurrences move by 42 lines; two keep their lines and
+all retain their owning functions and selector origins. No reviewed site is
+added or removed. Same-context baseline/current synthetic-release BEAM scans
+each inspect 379 production modules and retain all 235 root-context findings;
+the complete sets agree after the WebSocket line shift. Their extra
+`recv_handshake/4` site already exists at baseline, moving from 666 to 708.
+The other three changed implementation modules report no raw finding.
+
+The binding still covers 209 reviewed occurrences (IDs 1-210 without 166) and
+the 268-file production-source census. These source reviews and root-context
+diagnostics establish no new strict isolated-release or published acceptance.
+CI strict candidate and published gates remain required independently.
+
 ## rc.18 proof follow-up: proxy-mode User-Agent — 2026-11-13
 
 Production changes after `c3b0788` changed six census files for #171

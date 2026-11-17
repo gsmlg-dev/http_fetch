@@ -3929,7 +3929,7 @@ defmodule NoOTP.ReleaseAuditTest do
     result = v_actual_slice(context, true)
 
     assert Enum.map(result.unresolved_dispatch, &{&1.line, &1.kind}) ==
-             [{638, "unresolved_module_dispatch"}]
+             [{651, "unresolved_module_dispatch"}]
   end
 
   defp v_body do
@@ -3978,16 +3978,16 @@ defmodule NoOTP.ReleaseAuditTest do
       Enum.filter(definitions, fn
         {:defp, _, [{:select_transport, _, [_argument]}, _body]} -> true
         {:defp, _, [{:when, _, [{:select_transport, _, [_argument]}, _guard]}, _body]} -> true
-        {:defp, _, [{:connect_http1, _, [_, _, _, _, _]}, _body]} -> true
+        {:defp, _, [{:connect_http1, _, [_, _, _, _, _, _]}, _body]} -> true
         _ -> false
       end)
 
-    assert length(definitions) == 4
+    assert length(definitions) == 5
 
     extra =
       if unknown_caller? do
         quote do
-          def alternate(value), do: connect_http1(value, nil, 0, [], 0)
+          def alternate(value), do: connect_http1(value, nil, 0, [], 0, nil)
         end
       else
         quote do
@@ -3999,9 +3999,9 @@ defmodule NoOTP.ReleaseAuditTest do
         defmodule NoOTPActualUnionSlice do
           unquote_splicing(definitions)
 
-          def run(state) do
+          def run(state, proxy) do
             case select_transport(state) do
-              {:ok, transport, host, port} -> connect_http1(transport, host, port, [], 0)
+              {:ok, transport, host, port} -> connect_http1(transport, host, port, [], 0, proxy)
             end
           end
 
@@ -4186,7 +4186,7 @@ defmodule NoOTP.ReleaseAuditTest do
     result = w_actual_slice(context, :original)
 
     assert Enum.map(result.unconfigured.unresolved_dispatch, &{&1.line, &1.kind}) ==
-             [{666, "unresolved_module_dispatch"}]
+             [{708, "unresolved_module_dispatch"}]
 
     assert result.configured.unresolved_dispatch == []
     assert result.configured.parameter_invariant_derivation.status == "checked"

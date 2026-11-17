@@ -609,3 +609,40 @@ reviewed occurrence, and a release-audit BEAM scan of the current build reports
 no dispatch site in any of the six modules. No site is added, removed or moved;
 the HTTP review still has 86 occurrences, the total stays 209 and the reviewed
 inventory digest is unchanged.
+
+### Follow-up: rc.19 HTTP/1 WebSocket forward proxies (2026-11-18)
+
+The #172 changes retain an explicit HTTP proxy tuple in WebSocket options.
+`HTTP.Runtime.Options` is added to the selected producer inputs: WebSocket alone
+opts into proxy validation, `HTTP.Proxy.normalize/1` validates the tuple as data,
+and only `:http` proxies with `:http1` are admitted. Existing route validation
+rejects Unix sockets and literal origin pins. H3 still rejects every non-nil
+proxy in `h3_route/2` before networking. The tuple carries no callable or module.
+WebSocket canonicalizes the first duplicate `:proxy` value before validation,
+so route checks use the same value that the connection retains.
+
+`HTTP.WebSocket.Connection.select_transport/1` still selects only literal TCP,
+Unix or ExSSL. `connect_http1/6` either connects directly through that module or
+calls the existing literal `HTTP.Proxy.connect/6`. For an admitted HTTP proxy,
+that body opens TCP to the proxy; WSS additionally establishes CONNECT and
+adopts the tunnel with literal ExSSL. The URL remains the target Host and TLS
+reference identity. No failure branch dials the origin directly.
+
+The opening worker, proxy TCP socket and prepared ExSSL provider retain the
+existing request-lifecycle admission and cleanup obligations. CONNECT writes
+are bounded by the proxy/connect budgets. `send_handshake/4` bounds the upgrade
+write by the opening/write budgets and restores the ordinary write budget.
+The handshake's new route argument changes only the request target and header
+data: plain WS uses an absolute `http://` target and configured proxy auth;
+tunneled WSS removes `Proxy-Authorization`. Safe response metadata is unchanged.
+
+Five existing HTTP-9 occurrences move by 42 lines, with the same expressions,
+selectors and owning functions; the other two keep their lines. The same-context
+baseline/current synthetic-release BEAM diagnostics each inspect 379 production
+modules and report 235 raw findings. Their complete sets are equal after the
+WebSocket line shift. This includes the pre-existing root-context extra
+`recv_handshake/4` finding moving from 666 to 708; it is not a new release site.
+The runtime options, WebSocket options and handshake modules have no raw finding.
+No reviewed occurrence is added or removed: the reviewed set remains 209 across
+268 production files. These diagnostics do not establish isolated-release or
+published acceptance; the strict candidate and published gates remain required.
