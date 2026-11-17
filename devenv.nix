@@ -11,7 +11,9 @@ in
     figlet
     lolcat
     openssl
+    openssl.dev
     pkg-config
+    stdenv.cc
     watchman
   ] ++ lib.optionals stdenv.isLinux [
     inotify-tools
@@ -19,6 +21,12 @@ in
 
   languages.elixir.enable = true;
   languages.elixir.package = pkgs-stable.beam28Packages.elixir;
+
+  # Independent protocol peers and the compiled TLS identity fixture.
+  languages.python.enable = true;
+  languages.python.package = pkgs-stable.python312;
+  languages.python.venv.enable = true;
+  languages.python.venv.requirements = builtins.readFile ./scripts/requirements-http2-stream-clients.txt;
 
   scripts.hello.exec = ''
     figlet -w 120 $GREET | lolcat
