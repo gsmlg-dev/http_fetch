@@ -245,7 +245,10 @@ int main(int argc,char **argv) {
   /* Explicit process-exit barrier; never used as transport EOF evidence. */
   if(!stop_received) {
     struct pollfd control={STDIN_FILENO,POLLIN,0};
-    if(poll(&control,1,5000)>0) {char command[32];(void)fgets(command,sizeof(command),stdin);}
+    if(poll(&control,1,5000)>0) {
+      char command[32];
+      if(fgets(command,sizeof(command),stdin)==NULL&&ferror(stdin))status=14;
+    }
   }
   return status;
 }

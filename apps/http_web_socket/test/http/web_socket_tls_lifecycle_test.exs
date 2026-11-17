@@ -121,6 +121,18 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
           pending = :sys.get_state(socket.pid)
           assert pending.ready_state == WebSocket.connecting()
 
+          handler = {__MODULE__, make_ref()}
+
+          :ok =
+            :telemetry.attach(
+              handler,
+              [:http_web_socket, :close, :stop],
+              &__MODULE__.await_pending_worker_exit/4,
+              {socket.pid, worker, self()}
+            )
+
+          on_exit(fn -> :telemetry.detach(handler) end)
+
           case unquote(completion) do
             :cancel ->
               assert :ok = WebSocket.close(socket)
@@ -148,6 +160,11 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
           :cancel ->
             assert %HTTP.WebSocket.Event.Error{reason: :closed_while_connecting} =
                      next_event(socket)
+        end
+
+        if unquote(completion) != :success do
+          assert_receive {:pending_opening_worker_stopped, ^worker, result}, 5_000
+          assert result == :ok
         end
 
         assert %Close{code: 1006, was_clean: false} = next_event(socket)
@@ -225,6 +242,27 @@ defmodule HTTP.WebSocketTLSLifecycleTest do
   end
 
   def pause_after_upgrade(_event, _measurements, _metadata, _config), do: :ok
+
+  def await_pending_worker_exit(_event, _measurements, _metadata, {socket, worker, parent})
+      when self() == socket do
+    # close:stop runs after detach requested cancellation but before the socket
+    # exits. Keep that owner alive until the tracker's kill has joined, so the
+    # worker's independent OwnerMonitor cannot win with an owner-loss shutdown.
+    monitor = Process.monitor(worker)
+
+    result =
+      receive do
+        {:DOWN, ^monitor, :process, ^worker, _reason} -> :ok
+      after
+        4_000 ->
+          Process.demonitor(monitor, [:flush])
+          {:error, :worker_exit_timeout}
+      end
+
+    send(parent, {:pending_opening_worker_stopped, worker, result})
+  end
+
+  def await_pending_worker_exit(_event, _measurements, _metadata, _config), do: :ok
 
   defp next_event(socket) do
     assert_receive {WebSocket, ^socket, event}, 5_000
