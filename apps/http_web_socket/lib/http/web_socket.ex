@@ -84,6 +84,23 @@ defmodule HTTP.WebSocket do
   are always stripped. This option applies to every lifecycle/message event
   and never changes the transport URL or handshake.
 
+  Explicit outbound HTTP proxies are supported for HTTP/1 WS and WSS:
+
+      HTTP.WebSocket.new("wss://example.com/socket", [],
+        http_version: :http1,
+        proxy: {:http, "proxy.example", 3128,
+          [timeout: 5_000, headers: [{"Proxy-Authorization", "Basic ..."}]]})
+
+  Plain WS uses an absolute HTTP request target; WSS uses CONNECT followed by
+  target TLS with the URL's Host, SNI and certificate hostname verification.
+  Proxy authentication is sent only to the proxy. The tuple's positive
+  `timeout` (default 30 seconds) bounds proxy dialing and CONNECT/TLS setup,
+  within `connect_timeout` and `opening_timeout`. Failure never falls back to
+  direct dialing. HTTPS proxies, HTTP/2/3 or auto selection, Unix sockets and
+  `connect_address` pins cannot be combined with a proxy. The caller resolves
+  environment proxy settings and NO_PROXY, selecting `proxy: nil` for direct
+  connections. Outbound proxies work independently of frame-forwarding mode.
+
   ## HTTP/1 WebSocket proxy boundary
 
   For frame forwarding, select `mode: :proxy`, `http_version: :http1`,

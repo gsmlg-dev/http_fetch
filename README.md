@@ -945,6 +945,24 @@ or `HTTP.Blob` for binary frames:
 :ok = HTTP.WebSocket.close(socket, 1000, "done")
 ```
 
+For an outbound HTTP forward proxy, pass an explicit tuple:
+
+```elixir
+socket = HTTP.WebSocket.new("wss://example.com/socket", [],
+  http_version: :http1, delivery: :ack,
+  proxy: {:http, "proxy.example", 3128,
+    [timeout: 5_000, headers: [{"Proxy-Authorization", "Basic ..."}]]})
+```
+
+WS uses absolute HTTP form; WSS uses CONNECT and verifies the target's TLS
+identity. Proxy credentials stay outside the inner WSS request. Proxy setup
+obeys the tuple's positive `timeout` (30 seconds by default), within the
+connection and opening deadlines. Failure never triggers a direct dial.
+Only HTTP proxies with HTTP/1 are supported; HTTPS proxies, auto/H2/H3,
+Unix sockets and address pins are rejected. Resolve environment proxy and
+NO_PROXY policy in the caller and pass `proxy: nil` for direct access.
+Opening cancellation retains the `completion/1` cleanup receipt.
+
 For text/binary/control frame forwarding, opt into HTTP/1 proxy mode:
 
 ```elixir

@@ -29,11 +29,12 @@ defmodule HTTP.WebSocket.Handshake do
     %{status: status, headers: HTTP.Headers.new(Enum.reverse(selected)), truncated?: truncated?}
   end
 
-  @spec build_request(URI.t(), [String.t()], [{String.t(), String.t()}], String.t()) ::
+  @spec build_request(URI.t(), [String.t()], [{String.t(), String.t()}], String.t(), map() | nil) ::
           {:ok, binary()}
-  def build_request(%URI{} = uri, protocols, headers, key) when is_binary(key) do
+  def build_request(%URI{} = uri, protocols, headers, key, proxy \\ nil) when is_binary(key) do
     headers =
       headers
+      |> proxy_headers(uri, proxy)
       |> reject_required_headers()
       |> Kernel.++(required_headers(uri, key))
       |> maybe_add_protocols(protocols)
@@ -41,7 +42,7 @@ defmodule HTTP.WebSocket.Handshake do
     request =
       [
         "GET ",
-        request_target(uri),
+        request_target(uri, proxy),
         " HTTP/1.1\r\n",
         Enum.map(headers, fn {name, value} -> [name, ": ", value, "\r\n"] end),
         "\r\n"
@@ -49,6 +50,15 @@ defmodule HTTP.WebSocket.Handshake do
       |> IO.iodata_to_binary()
 
     {:ok, request}
+  end
+
+  defp proxy_headers(headers, _uri, nil), do: headers
+
+  defp proxy_headers(headers, uri, proxy) do
+    headers =
+      Enum.reject(headers, fn {name, _} -> String.downcase(name) == "proxy-authorization" end)
+
+    if uri.scheme == "ws", do: headers ++ proxy.headers, else: headers
   end
 
   @extended_prohibited ~w(host connection upgrade keep-alive proxy-connection transfer-encoding sec-websocket-key sec-websocket-accept)
@@ -168,8 +178,13 @@ defmodule HTTP.WebSocket.Handshake do
     end
   end
 
-  defp request_target(%URI{path: path, query: nil}), do: path_or_root(path)
-  defp request_target(%URI{path: path, query: query}), do: path_or_root(path) <> "?" <> query
+  defp request_target(%URI{scheme: "ws"} = uri, proxy) when not is_nil(proxy),
+    do: "http://" <> host_header(uri) <> request_target(uri, nil)
+
+  defp request_target(%URI{path: path, query: nil}, _proxy), do: path_or_root(path)
+
+  defp request_target(%URI{path: path, query: query}, _proxy),
+    do: path_or_root(path) <> "?" <> query
 
   defp path_or_root(nil), do: "/"
   defp path_or_root(""), do: "/"

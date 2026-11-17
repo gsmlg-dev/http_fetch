@@ -110,21 +110,74 @@ defmodule HTTP.WebSocket.OptionsTest do
     end)
   end
 
-  test "proxy endpoints reject independently of frame-forwarding mode" do
-    for mode <- [:browser, :proxy],
-        init <- [
-          [proxy: "http://proxy.example.test:8080"],
-          %{"proxy" => "http://proxy.example.test:8080"}
-        ] do
-      init = Map.new(init) |> Map.put(:mode, mode)
+  test "HTTP proxy endpoints work independently of frame-forwarding mode" do
+    proxy = {:http, "proxy.example.test", 8080, [timeout: 500]}
 
-      assert_invalid(:proxy_not_supported, fn ->
-        Options.new("ws://example.test/socket", [], init)
+    for mode <- [:browser, :proxy],
+        init <- [[proxy: proxy], %{"proxy" => proxy}] do
+      assert {:ok, %{proxy: ^proxy, mode: ^mode}} =
+               Options.new("ws://example.test/socket", [], Map.put(Map.new(init), :mode, mode))
+    end
+
+    for value <- [
+          "http://proxy.example.test:8080",
+          {:http, "bad\r\nhost", 80, []},
+          {:http, "proxy.test", 8080, [timeout: 0]},
+          {:http, "proxy.test", 8080, [headers: [{"X-Secret", "value"}]]}
+        ] do
+      assert_invalid(:invalid_proxy_configuration, fn ->
+        Options.new("ws://example.test/socket", [], proxy: value)
       end)
     end
 
-    assert {:ok, %{mode: :proxy}} =
+    assert {:ok, %{mode: :proxy, proxy: nil}} =
              Options.new("ws://example.test/socket", [], mode: :proxy, proxy: nil)
+  end
+
+  test "proxy routes reject incompatible transports without exposing configuration" do
+    proxy = {:http, "proxy.test", 3128, [headers: [{"Proxy-Authorization", "secret"}]]}
+
+    for version <- [:http2, :h2c, :auto] do
+      assert_invalid(:proxy_requires_http1, fn ->
+        Options.new("wss://example.test/socket", [], proxy: proxy, http_version: version)
+      end)
+    end
+
+    for {extra, reason} <- [
+          {[unix_socket: "/unused.sock"], :proxy_not_supported_for_unix_socket},
+          {[connect_address: {127, 0, 0, 1}], :connect_address_unsupported_route}
+        ] do
+      assert_invalid(reason, fn ->
+        Options.new("ws://example.test/socket", [], [proxy: proxy] ++ extra)
+      end)
+    end
+
+    assert_invalid(:unsupported_proxy_scheme, fn ->
+      Options.new("wss://example.test/socket", [], proxy: {:https, "proxy.test", 3128, []})
+    end)
+  end
+
+  test "duplicate proxy keys validate the same first value retained by the connection" do
+    proxy = {:http, "proxy.test", 3128, []}
+
+    for key <- [:proxy, "proxy"],
+        extra <- [[connect_address: {127, 0, 0, 1}], [unix_socket: "/unused.sock"]] do
+      reason =
+        if extra[:connect_address],
+          do: :connect_address_unsupported_route,
+          else: :proxy_not_supported_for_unix_socket
+
+      assert_invalid(reason, fn ->
+        Options.new("ws://example.test/socket", [], [{key, proxy}, {:proxy, nil}] ++ extra)
+      end)
+    end
+
+    assert {:ok, %{proxy: nil, connect_address: {127, 0, 0, 1}}} =
+             Options.new("ws://example.test/socket", [],
+               proxy: nil,
+               proxy: proxy,
+               connect_address: {127, 0, 0, 1}
+             )
   end
 
   test "secure Unix options reject including the HTTPS alias" do

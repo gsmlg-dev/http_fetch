@@ -108,6 +108,7 @@ defmodule HTTP.WebSocket.Options do
             http2_reuse: true,
             unix_socket: nil,
             connect_address: nil,
+            proxy: nil,
             delivery: :push,
             max_queue_bytes: 2 * @default_max_message_size + 7,
             max_queue_events: 64,
@@ -146,6 +147,7 @@ defmodule HTTP.WebSocket.Options do
           http2_reuse: boolean(),
           unix_socket: binary() | nil,
           connect_address: :inet.ip_address() | nil,
+          proxy: {:http, String.t(), :inet.port_number(), keyword()} | nil,
           delivery: :push | :ack,
           max_queue_bytes: pos_integer(),
           max_queue_events: pos_integer(),
@@ -174,7 +176,8 @@ defmodule HTTP.WebSocket.Options do
   defp build(uri, protocols, init) do
     with {:ok, init} <- normalize_init(init),
          :ok <- validate_mode(init),
-         {:ok, init} <- HTTP.Runtime.Options.validate(uri, init, allow_http3: true),
+         {:ok, init} <-
+           HTTP.Runtime.Options.validate(uri, init, allow_http3: true, allow_proxy: true),
          :ok <- validate_http3_limits(init),
          :ok <- validate_connect_address(uri, init),
          :ok <- validate_limits(init),
@@ -207,6 +210,7 @@ defmodule HTTP.WebSocket.Options do
          http2_reuse: Keyword.get(init, :http2_reuse, true),
          unix_socket: Keyword.get(init, :unix_socket),
          connect_address: Keyword.get(init, :connect_address),
+         proxy: Keyword.get(init, :proxy),
          delivery: Keyword.fetch!(init, :delivery),
          max_queue_bytes: Keyword.fetch!(init, :max_queue_bytes),
          max_queue_events: Keyword.get(init, :max_queue_events, 64),
@@ -372,6 +376,7 @@ defmodule HTTP.WebSocket.Options do
        |> Keyword.put(:owner, owner)
        |> Keyword.put(:ssl, ssl)
        |> Keyword.put(:socket_opts, socket_opts)
+       |> Keyword.put(:proxy, Keyword.get(init, :proxy))
        |> Keyword.put(:connect_address, Keyword.get(init, :connect_address))
        |> Keyword.put(:telemetry_url, telemetry_url)
        |> Keyword.put_new(:max_queue_bytes, 2 * delivery_message_limit(init) + 7)}

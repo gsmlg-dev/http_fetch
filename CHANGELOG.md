@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.19] - 2026-11-18
+
+### Added
+- **http_web_socket:** explicit HTTP forward proxies for HTTP/1 WS and WSS
+  with optional proxy authentication and a bounded setup timeout. WS uses
+  absolute HTTP form; WSS uses CONNECT with target TLS identity verification
+  and excludes proxy credentials from the inner Upgrade. Failed proxy setup
+  never falls back to direct dialing. Opening cancellation and timeout retain
+  request-owned cleanup receipts, ACK delivery and ordered local send completion
+  (#172).
+
 ## [1.0.0-rc.18] - 2026-11-13
 
 ### Added

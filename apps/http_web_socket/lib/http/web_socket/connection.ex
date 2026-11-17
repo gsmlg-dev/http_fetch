@@ -590,8 +590,20 @@ defmodule HTTP.WebSocket.Connection do
   defp http1_open(state, parent) do
     key = Base.encode64(:crypto.strong_rand_bytes(16))
 
-    with {:ok, request} <-
-           Handshake.build_request(state.uri, state.options.protocols, state.options.headers, key),
+    route_request = %HTTP.Request{
+      url: HTTP.Runtime.Options.origin_uri(state.uri),
+      transport_options: Options.transport_options(state.options)
+    }
+
+    with {:ok, proxy} <- HTTP.Proxy.route(route_request, state.options.unix_socket),
+         {:ok, request} <-
+           Handshake.build_request(
+             state.uri,
+             state.options.protocols,
+             state.options.headers,
+             key,
+             proxy
+           ),
          {:ok, transport, host, port} <- select_transport(state),
          {:ok, socket} <-
            connect_http1(
@@ -602,10 +614,11 @@ defmodule HTTP.WebSocket.Connection do
              |> Options.transport_options()
              |> Keyword.put(:ssl, http1_ssl(state))
              |> Keyword.put(:request_lifecycle, state.attempt_tracker),
-             bounded_timeout(state.options.connect_timeout, remaining(state.opening_deadline))
+             bounded_timeout(state.options.connect_timeout, remaining(state.opening_deadline)),
+             proxy
            ) do
       result =
-        with :ok <- transport.send(socket, request),
+        with :ok <- send_handshake(transport, socket, request, state),
              {:ok, status, headers, extra} <-
                recv_handshake(transport, socket, <<>>, state.opening_deadline),
              :ok <- report_handshake(state, parent, status, headers),
@@ -634,8 +647,37 @@ defmodule HTTP.WebSocket.Connection do
     end
   end
 
-  defp connect_http1(transport, host, port, opts, timeout),
+  defp connect_http1(transport, host, port, opts, timeout, nil),
     do: transport.connect(host, port, opts, timeout)
+
+  defp connect_http1(transport, host, port, opts, timeout, proxy) do
+    socket_opts =
+      opts
+      |> Keyword.get(:socket_opts, [])
+      |> Keyword.update(
+        :send_timeout,
+        min(timeout, proxy.timeout),
+        &min(&1, min(timeout, proxy.timeout))
+      )
+      |> Keyword.put(:send_timeout_close, true)
+
+    HTTP.Proxy.connect(
+      transport,
+      host,
+      port,
+      Keyword.put(opts, :socket_opts, socket_opts),
+      timeout,
+      proxy
+    )
+  end
+
+  defp send_handshake(transport, socket, request, state) do
+    timeout = bounded_timeout(state.options.write_timeout, remaining(state.opening_deadline))
+
+    with :ok <- transport.setopts(socket, send_timeout: timeout, send_timeout_close: true),
+         :ok <- transport.send(socket, request),
+         do: transport.setopts(socket, send_timeout: state.options.write_timeout)
+  end
 
   defp select_transport(%{options: %{unix_socket: path}}) when is_binary(path),
     do: {:ok, HTTP.Transport.Unix, path, 0}

@@ -84,7 +84,7 @@ defmodule HTTP.Runtime.Options do
            url: origin_uri(uri),
            transport_options: transport_options(Map.new(init))
          },
-         {:ok, selection} <- protocol_selection(request, init),
+         {:ok, selection} <- protocol_selection(request, init, opts),
          :ok <- validate_alpn(init[:ssl] || [], selection),
          :ok <- validate_headers(init[:headers] || [], selection) do
       {:ok, init}
@@ -105,6 +105,7 @@ defmodule HTTP.Runtime.Options do
           :ssl,
           :socket_opts,
           :connect_timeout,
+          :proxy,
           :unix_socket
         ],
         Map.has_key?(options, key),
@@ -126,7 +127,7 @@ defmodule HTTP.Runtime.Options do
   defp version(value, true) when value in [:http3, "http3", "h3"], do: {:ok, :http3}
   defp version(value, _allow_http3), do: version(value)
 
-  defp protocol_selection(request, init) do
+  defp protocol_selection(request, init, opts) do
     cond do
       init[:http_version] == :http3 ->
         with :ok <- h3_route(request.url, init),
@@ -134,14 +135,26 @@ defmodule HTTP.Runtime.Options do
           {:ok, %{mode: :http3, alpn_protocols: ["h3"]}}
         end
 
-      init[:proxy] != nil ->
+      init[:proxy] != nil and opts[:allow_proxy] != true ->
         {:error, :proxy_not_supported}
 
       true ->
-        with {:ok, transport, _host, _port} <-
+        with :ok <- proxy_selection(init),
+             {:ok, transport, _host, _port} <-
                Dialer.select_transport(request, init[:unix_socket]) do
           Dialer.protocol_selection(request, transport)
         end
+    end
+  end
+
+  defp proxy_selection(init) do
+    with {:ok, proxy} <- HTTP.Proxy.normalize(init[:proxy]) do
+      cond do
+        is_nil(proxy) -> :ok
+        proxy.scheme != :http -> {:error, :unsupported_proxy_scheme}
+        init[:http_version] != :http1 -> {:error, :proxy_requires_http1}
+        true -> :ok
+      end
     end
   end
 
