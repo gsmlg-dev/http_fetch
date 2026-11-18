@@ -1,7 +1,7 @@
 defmodule AbyssRaw.MixProject do
   use Mix.Project
 
-  @version "1.0.0-rc.19"
+  @version "1.0.0-rc.20"
 
   def project do
     [
