@@ -1,5 +1,19 @@
 # Directed production release audit
 
+## rc.20 source census follow-up: HTTP/1 field ownership — 2026-11-18
+
+The #173 fix after `6512b08` copies validated HTTP/1 field names and trimmed
+values before publishing them. This prevents response headers from retaining
+unrelated body bytes in the same read. The shared WebSocket field-line parser
+keeps its existing validation and field content.
+
+The two added calls name the literal `:binary.copy/1`; they introduce no dynamic
+dispatch or callable producer. The 209 reviewed occurrences and their source
+line bindings remain unchanged. The complete 268-file source census and its
+active review digests are renewed for the changed HTTP/1 parser. This source
+review does not claim new compiled or published acceptance; the dedicated
+candidate release gates must establish those independently.
+
 ## rc.19 proof follow-up: HTTP/1 WebSocket forward proxies — 2026-11-18
 
 The #172 changes after `d12421b` affect shared runtime options and four

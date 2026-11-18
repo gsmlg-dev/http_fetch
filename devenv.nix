@@ -8,6 +8,7 @@ in
 
   packages = with pkgs-stable; [
     git
+    expect
     figlet
     lolcat
     openssl

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.20] - 2026-11-18
+
+### Fixed
+- **http_core:** HTTP/1 response header names and values own their bytes instead
+  of retaining a read buffer containing response body data. Header order,
+  duplicates, contents and incremental body delivery remain unchanged across
+  separate and combined header/body reads (#173).
+
 ## [1.0.0-rc.19] - 2026-11-18
 
 ### Added

@@ -1483,7 +1483,7 @@
       ],
       "active_production_source_census": {
         "files": 268,
-        "sorted_path_sha256_json": "0bba1837735834774a7b1c73d47ddff3ab456624c14699b8b11c971598bc5c26",
+        "sorted_path_sha256_json": "d1abcb777b237340b5973bcbf634160404758587e3259203922df2e055b05215",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -3153,6 +3153,16 @@
           "change": "The public client documentation describes explicit HTTP/1 forward proxies, proxy authentication and timeout, WSS CONNECT target identity, explicit direct selection and unsupported combinations.",
           "dispatch_review": "Documentation only; no callable or dispatch site is added.",
           "source_commit": "eb3ae228293325f20287b407d29f26e32f084275"
+        },
+        {
+          "date": "2026-11-18",
+          "release_version": "1.0.0-rc.20",
+          "base_source_commit": "6512b0807b40adb869dc8c8ac2f569178f656de4",
+          "input": "apps/http_core/lib/http/http1.ex",
+          "previous_sha256": "1fc5bd692dbbd0586dd0a9b1cff058e973e4de187b9342b3b314b2fb9f2ccd09",
+          "sha256": "ccdba6b160d8aa27e6c6a057aafc36c362cae10a2625761c929bb77784b51cf6",
+          "change": "Validated HTTP/1 field names and trimmed values are copied before publication so response headers cannot retain body bytes from the input read. The shared field-line parser also retains the same validation and content for WebSocket Upgrade headers.",
+          "dispatch_review": "Only literal :binary.copy/1 calls are added. No callable origin, dynamic dispatch occurrence, reviewed line binding, transport selection or cleanup ownership changes. The 209 reviewed occurrences and the 268-file production-source census retain their identities."
         }
       ],
       "removed_occurrences": [

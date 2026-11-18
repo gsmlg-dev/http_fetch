@@ -312,7 +312,8 @@ defmodule HTTP.HTTP1 do
            true <- valid_token?(name),
            value = trim_ows(value),
            true <- safe_header_value?(value) do
-        {:cont, {:ok, [{name, value} | acc]}}
+        # Published fields can outlive the read that also contains body bytes.
+        {:cont, {:ok, [{:binary.copy(name), :binary.copy(value)} | acc]}}
       else
         _ -> {:halt, {:error, :invalid_header}}
       end
