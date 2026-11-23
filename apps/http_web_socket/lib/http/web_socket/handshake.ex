@@ -4,7 +4,11 @@ defmodule HTTP.WebSocket.Handshake do
   @guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
   @max_head_bytes 64 * 1024
   @required_headers ~w(host upgrade connection sec-websocket-key sec-websocket-version)
-  @metadata_headers ~w(retry-after x-codex-websocket-max-unfragmented-message-bytes)
+  @metadata_headers ~w(
+    retry-after
+    x-codex-websocket-max-unfragmented-message-bytes
+    x-codex-websocket-max-message-bytes
+  )
   @max_metadata_value_bytes 1024
 
   @spec response_metadata(non_neg_integer(), HTTP.Headers.t() | list()) ::

@@ -38,10 +38,10 @@
     "apps/http_web_transport/lib/http/web_transport/options.ex": "894cd6f47abcd65b30430b377c5051ef0547e8e74dcfb4511c7a61a506eb0ae1",
     "apps/http_web_transport/lib/http/web_transport/session.ex": "0a84e2c5397d26166af600d819f48deaccfe80b2398c33387ec2cca76b090ce0",
     "apps/http_web_transport/lib/http/web_transport/transport/quic.ex": "fb336ca22999ed2f2ec78a803c52c45c1b709c3b62f29a4b34a1f99eba0db7dd",
-    "apps/http_web_socket/lib/http/web_socket/handshake.ex": "c8cb3d50ff12fa089018fa34dedb67c9a6a6fd6869c016c1c483d3d895179bc8",
+    "apps/http_web_socket/lib/http/web_socket/handshake.ex": "e9065bdf2e991c8492fe0497ae1ce91d3c64296105408620c71953fedaa85321",
     "apps/http_web_socket/lib/http/web_socket/event.ex": "63ae8265fde1872a944ac5dadfd6fb4bd02376751985e10ed0cbe8a3ef653634",
     "apps/http_web_socket/lib/http/web_socket/frame.ex": "8f813646db68b69f4531f49472d9bde48bca21877e237af54eac462fb0b4ea33",
-    "apps/http_web_socket/lib/http/web_socket.ex": "2e2800b2b39ff1cf8616ca1da61028f633e0a0d0698e3024cd821b75cdbfead8",
+    "apps/http_web_socket/lib/http/web_socket.ex": "a74a795deecc257d55b40c5f651fe65c4969e93b985ac4e3ce9947f2a722240d",
     "apps/http_pool/lib/http/pool.ex": "a5192c4a31078ec9aabdaa53a470f20fd343513de9f8522217786db27e5ccec3",
     "apps/http_pool/lib/http/pool/telemetry.ex": "bcd3d7b8c9b50eb5d7db8b21290a86885db7f275aabf81357f2b3377ac52d064",
     "apps/http_pool/lib/http/http2/pool_key.ex": "aa4bf085980d691ea612025e4e1fedcc4ab7bde16ed491d0bf5a0885b6b6ad3c",
@@ -1412,7 +1412,7 @@
         },
         "apps/http_web_socket/lib/http/web_socket.ex": {
           "previous_sha256": "685c7d0b6f1b4b32f1534cd2faf055bfbd24c8f4e46de1857540f763fd63a593",
-          "sha256": "2e2800b2b39ff1cf8616ca1da61028f633e0a0d0698e3024cd821b75cdbfead8"
+          "sha256": "a74a795deecc257d55b40c5f651fe65c4969e93b985ac4e3ce9947f2a722240d"
         },
         "apps/http_fetch/lib/http.ex": {
           "previous_sha256": "865aaef209c6c34acaa942c41c906cc2e171de50e524fd2f981641681519b51d",
@@ -1424,7 +1424,7 @@
         },
         "apps/http_web_socket/lib/http/web_socket/handshake.ex": {
           "previous_sha256": "99b178e112dc90c47f96e64c50ac2e2535fcc3169b9137bc19ca68744f7ce978",
-          "sha256": "c8cb3d50ff12fa089018fa34dedb67c9a6a6fd6869c016c1c483d3d895179bc8"
+          "sha256": "e9065bdf2e991c8492fe0497ae1ce91d3c64296105408620c71953fedaa85321"
         },
         "apps/http_event_source/lib/http/event_source/connection.ex": {
           "previous_sha256": "5058a14cf4f58cdff03d13d39d48e67de1b50182d26fbf25088bdc659544244e",
@@ -1483,7 +1483,7 @@
       ],
       "active_production_source_census": {
         "files": 268,
-        "sorted_path_sha256_json": "d1abcb777b237340b5973bcbf634160404758587e3259203922df2e055b05215",
+        "sorted_path_sha256_json": "e7cc33b9b1a37e015d6593597edb26ffce3035b00f477dbb999bab735bf11af5",
         "encoding": "UTF-8 json.dumps(path_to_sha256, sort_keys=True), no trailing newline"
       },
       "occurrence_rebindings": [
@@ -3163,6 +3163,26 @@
           "sha256": "ccdba6b160d8aa27e6c6a057aafc36c362cae10a2625761c929bb77784b51cf6",
           "change": "Validated HTTP/1 field names and trimmed values are copied before publication so response headers cannot retain body bytes from the input read. The shared field-line parser also retains the same validation and content for WebSocket Upgrade headers.",
           "dispatch_review": "Only literal :binary.copy/1 calls are added. No callable origin, dynamic dispatch occurrence, reviewed line binding, transport selection or cleanup ownership changes. The 209 reviewed occurrences and the 268-file production-source census retain their identities."
+        },
+        {
+          "date": "2026-11-23",
+          "release_version": "1.0.0-rc.21",
+          "base_source_commit": "1cefb27f0304c3ee44f640cd86c617cb32e80f83",
+          "input": "apps/http_web_socket/lib/http/web_socket/handshake.ex",
+          "previous_sha256": "c8cb3d50ff12fa089018fa34dedb67c9a6a6fd6869c016c1c483d3d895179bc8",
+          "sha256": "e9065bdf2e991c8492fe0497ae1ce91d3c64296105408620c71953fedaa85321",
+          "change": "Adds the literal Responses message limit name to the existing single-occurrence metadata filter shared by HTTP/1, HTTP/2 and HTTP/3.",
+          "dispatch_review": "No callable producer, dynamic dispatch occurrence or reviewed line binding changes."
+        },
+        {
+          "date": "2026-11-23",
+          "release_version": "1.0.0-rc.21",
+          "base_source_commit": "1cefb27f0304c3ee44f640cd86c617cb32e80f83",
+          "input": "apps/http_web_socket/lib/http/web_socket.ex",
+          "previous_sha256": "2e2800b2b39ff1cf8616ca1da61028f633e0a0d0698e3024cd821b75cdbfead8",
+          "sha256": "a74a795deecc257d55b40c5f651fe65c4969e93b985ac4e3ce9947f2a722240d",
+          "change": "Documents the two separate WebSocket size headers and the revised aggregate value bound.",
+          "dispatch_review": "No callable producer, dynamic dispatch occurrence or reviewed line binding changes."
         }
       ],
       "removed_occurrences": [

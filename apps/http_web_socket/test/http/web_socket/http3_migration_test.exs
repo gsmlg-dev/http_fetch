@@ -126,9 +126,20 @@ defmodule HTTP.WebSocket.HTTP3MigrationTest do
     stream = next_bidi(conn)
     {fields, rest} = read_headers(stream)
     assert {":protocol", "websocket"} in fields
-    {:ok, block} = Qpack.encode_header_block([{":status", "200"}])
+
+    {:ok, block} =
+      Qpack.encode_header_block([
+        {":status", "200"},
+        {"x-codex-websocket-max-message-bytes", "134217728"}
+      ])
+
     send!(stream, Frame.encode!(:headers, block), false)
-    assert_receive {WebSocket, ^socket, %Open{}}, 5_000
+
+    assert_receive {WebSocket, ^socket,
+                    %Open{handshake: %{status: 200, headers: headers, truncated?: false}}},
+                   5_000
+
+    assert headers.headers == [{"x-codex-websocket-max-message-bytes", "134217728"}]
     {socket, %{conn: conn, stream: stream, buffer: rest}}
   end
 

@@ -48,12 +48,13 @@ defmodule HTTP.WebSocket do
 
   Open and Error events have `handshake: %{status: status, headers: headers,
   truncated?: boolean}` once a final response head has been parsed, or nil before
-  that point. `headers` is an `HTTP.Headers` containing only `retry-after` and
-  `x-codex-websocket-max-unfragmented-message-bytes`. Each is retained only when
-  it occurs exactly once and its value is at most 1024 bytes; otherwise it is
-  omitted and `truncated?` is true. Values are copied, so this metadata retains
-  at most 2048 value bytes and no other response headers. Failed upgrades retain
-  their original Error reason. This applies to HTTP/1, HTTP/2 and HTTP/3.
+  that point. `headers` is an `HTTP.Headers` containing only `retry-after`,
+  `x-codex-websocket-max-unfragmented-message-bytes`, and
+  `x-codex-websocket-max-message-bytes`. Each present header is retained only if
+  it occurs once (case-insensitively) and its value is at most 1024 bytes.
+  Otherwise it is omitted and `truncated?` is true. Values are copied, with at
+  most 3072 value bytes in total. Failed upgrades keep their original Error
+  reason. This applies to HTTP/1, HTTP/2 and HTTP/3.
 
   Receive limits are independent: `max_message_size` bounds each reassembled
   message (16 MiB by default); `max_frame_bytes` bounds each frame payload

@@ -1,5 +1,15 @@
 # Directed production release audit
 
+## rc.21 source census follow-up for WebSocket handshake metadata (2026-11-23)
+
+The #174 fix adds `x-codex-websocket-max-message-bytes` as a literal name in
+the shared WebSocket response metadata allowlist and documents the resulting
+3072-byte aggregate value limit. HTTP/1, HTTP/2, and HTTP/3 use the existing
+single-occurrence filter and copy each accepted value. The change adds no
+callable producer or dynamic dispatch. The 209 reviewed occurrences and source
+line bindings remain unchanged. The candidate release gates verify the compiled
+packages against the updated source census.
+
 ## rc.20 source census follow-up: HTTP/1 field ownership — 2026-11-18
 
 The #173 fix after `6512b08` copies validated HTTP/1 field names and trimmed

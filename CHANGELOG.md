@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.21] - 2026-11-23
+
+### Added
+- **http_web_socket:** Open and Error events now expose
+  `x-codex-websocket-max-message-bytes` in handshake metadata over HTTP/1,
+  HTTP/2, and HTTP/3. Duplicate or oversized values are omitted and set
+  `truncated?`. The unfragmented message limit remains a separate header (#174).
+
 ## [1.0.0-rc.20] - 2026-11-18
 
 ### Fixed

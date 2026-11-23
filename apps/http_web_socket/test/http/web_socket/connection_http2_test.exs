@@ -15,6 +15,7 @@ defmodule HTTP.WebSocket.ConnectionHTTP2Test do
           HTTP.HTTP2.HPACK.encode_headers([
             {":status", "200"},
             {"x-codex-websocket-max-unfragmented-message-bytes", "4"},
+            {"x-codex-websocket-max-message-bytes", "134217728"},
             {"set-cookie", "secret"}
           ])
           |> IO.iodata_to_binary()
@@ -34,13 +35,17 @@ defmodule HTTP.WebSocket.ConnectionHTTP2Test do
 
     assert_receive {WebSocket, ^ws, %Open{} = event}, 5_000
     assert %{handshake: %{status: 200, headers: headers, truncated?: false}} = event
-    assert headers.headers == [{"x-codex-websocket-max-unfragmented-message-bytes", "4"}]
+    assert HTTP.Headers.get(headers, "x-codex-websocket-max-unfragmented-message-bytes") == "4"
+    assert HTTP.Headers.get(headers, "x-codex-websocket-max-message-bytes") == "134217728"
+    assert length(headers.headers) == 2
     assert_receive {WebSocket, ^ws, %Error{reason: :frame_too_big}}, 5_000
     assert_receive {WebSocket, ^ws, %Close{code: 1009}}, 5_000
     assert :ok = HTTP.ClientCompletion.await(WebSocket.completion(ws), 5_000)
   end
 
   test "a rejected extended CONNECT retains selected failure metadata" do
+    message_limit = :binary.copy("1", 1024)
+
     {url, _peer} =
       peer(fn socket ->
         {id, 4} = request(socket)
@@ -49,6 +54,7 @@ defmodule HTTP.WebSocket.ConnectionHTTP2Test do
           HTTP.HTTP2.HPACK.encode_headers([
             {":status", "429"},
             {"retry-after", "10"},
+            {"x-codex-websocket-max-message-bytes", message_limit},
             {"set-cookie", "secret"}
           ])
           |> IO.iodata_to_binary()
@@ -59,7 +65,11 @@ defmodule HTTP.WebSocket.ConnectionHTTP2Test do
     ws = websocket(url)
     assert_receive {WebSocket, ^ws, %Error{reason: {:unexpected_status, 429}} = event}, 5_000
     assert %{handshake: %{status: 429, headers: headers, truncated?: false}} = event
-    assert headers.headers == [{"retry-after", "10"}]
+    assert HTTP.Headers.get(headers, "retry-after") == "10"
+    value = HTTP.Headers.get(headers, "x-codex-websocket-max-message-bytes")
+    assert value == message_limit
+    assert :binary.referenced_byte_size(value) == 1024
+    assert length(headers.headers) == 2
     assert :ok = HTTP.ClientCompletion.await(WebSocket.completion(ws), 5_000)
   end
 

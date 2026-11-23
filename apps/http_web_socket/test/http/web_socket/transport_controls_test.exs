@@ -7,6 +7,7 @@ defmodule HTTP.WebSocket.TransportControlsTest do
 
   @timeout 5_000
   @peer_limit "x-codex-websocket-max-unfragmented-message-bytes"
+  @message_limit "x-codex-websocket-max-message-bytes"
   @fixtures Path.expand("../../../../http_fetch/test/support/fixtures", __DIR__)
 
   for {family, address} <- [inet: {127, 0, 0, 1}, inet6: {0, 0, 0, 0, 0, 0, 0, 1}] do
@@ -107,7 +108,11 @@ defmodule HTTP.WebSocket.TransportControlsTest do
 
         :ok =
           :gen_tcp.send(socket, [
-            upgrade(request, [{@peer_limit, "3"}, {"set-cookie", "secret"}]),
+            upgrade(request, [
+              {@peer_limit, "3"},
+              {"X-Codex-WebSocket-Max-Message-Bytes", "134217728"},
+              {"set-cookie", "secret"}
+            ]),
             <<0x01, 3, "abc", 0x80, 3, "def">>
           ])
 
@@ -125,8 +130,9 @@ defmodule HTTP.WebSocket.TransportControlsTest do
     assert_receive {WebSocket, ^ws, %Open{} = event}, @timeout
     assert %{handshake: %{status: 101, headers: headers, truncated?: false}} = event
     assert HTTP.Headers.get(headers, @peer_limit) == "3"
+    assert HTTP.Headers.get(headers, @message_limit) == "134217728"
     assert HTTP.Headers.get(headers, "set-cookie") == nil
-    assert length(headers.headers) == 1
+    assert length(headers.headers) == 2
     assert_receive {WebSocket, ^ws, %Message{data: "abcdef"}, ref}, @timeout
     assert :ok = WebSocket.acknowledge(ws, ref)
     assert :ok = WebSocket.close(ws)
@@ -145,7 +151,7 @@ defmodule HTTP.WebSocket.TransportControlsTest do
             @peer_limit,
             ": ",
             :binary.copy("x", 1025),
-            "\r\nSet-Cookie: secret\r\n\r\n"
+            "\r\nX-Codex-WebSocket-Max-Message-Bytes: 134217728\r\nSet-Cookie: secret\r\n\r\n"
           ])
 
         assert {:error, :closed} = :gen_tcp.recv(socket, 0, @timeout)
@@ -154,7 +160,9 @@ defmodule HTTP.WebSocket.TransportControlsTest do
     ws = WebSocket.new("ws://127.0.0.1:#{port}/chat")
     assert_receive {WebSocket, ^ws, %Error{reason: {:unexpected_status, 429}} = event}, @timeout
     assert %{handshake: %{status: 429, headers: headers, truncated?: true}} = event
-    assert headers.headers == [{"retry-after", "10"}]
+    assert HTTP.Headers.get(headers, "retry-after") == "10"
+    assert HTTP.Headers.get(headers, @message_limit) == "134217728"
+    assert length(headers.headers) == 2
     assert_receive {WebSocket, ^ws, %Close{was_clean: false}}, @timeout
     assert :ok = HTTP.ClientCompletion.await(WebSocket.completion(ws), @timeout)
 
@@ -173,6 +181,29 @@ defmodule HTTP.WebSocket.TransportControlsTest do
     assert %{handshake: %{headers: %{headers: []}, truncated?: true}} = event
     assert :ok = WebSocket.close(ws)
     assert :ok = HTTP.ClientCompletion.await(WebSocket.completion(ws), @timeout)
+  end
+
+  for {kind, fields} <- [
+        duplicate: [{@message_limit, "1"}, {"X-Codex-WebSocket-Max-Message-Bytes", "2"}],
+        oversized: [{@message_limit, :binary.copy("1", 1025)}]
+      ] do
+    test "open omits the #{kind} Responses message limit and retains the unfragmented limit" do
+      {port, _peer} =
+        peer(fn socket ->
+          request = request(socket)
+          fields = [{@peer_limit, "3"} | unquote(fields)]
+          :ok = :gen_tcp.send(socket, upgrade(request, fields))
+          close_exchange(socket)
+        end)
+
+      ws = WebSocket.new("ws://127.0.0.1:#{port}/chat")
+      assert_receive {WebSocket, ^ws, %Open{} = event}, @timeout
+      assert %{handshake: %{status: 101, headers: headers, truncated?: true}} = event
+      assert headers.headers == [{@peer_limit, "3"}]
+      assert :ok = WebSocket.close(ws)
+      assert_receive {WebSocket, ^ws, %Close{was_clean: true}}, @timeout
+      assert :ok = HTTP.ClientCompletion.await(WebSocket.completion(ws), @timeout)
+    end
   end
 
   for {name, chunks, limits, reason} <- [
