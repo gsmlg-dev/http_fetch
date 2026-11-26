@@ -31,7 +31,7 @@ Add the `ex_ssl` package to your dependencies:
 ```elixir
 def deps do
   [
-    {:ex_ssl, "== 1.0.0-rc.12"}
+    {:ex_ssl, "== 1.0.0"}
   ]
 end
 ```

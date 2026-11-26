@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-27
+
+First stable release of the fourteen coordinated packages, based on
+`1.0.0-rc.21`. HTTP/1.1 and HTTP/2 clients and the documented TCP, UDP, and TLS
+APIs enter stable support. QUIC, HTTP/3, and WebTransport remain beta under the
+[1.0 release criteria](docs/release-1.0-criteria.md).
+
+See the `1.0.0-rc.14` entry for the API changes to account for when upgrading
+from a pre-1.0 release.
+
 ## [1.0.0-rc.21] - 2026-11-23
 
 ### Added

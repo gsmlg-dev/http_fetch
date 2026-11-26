@@ -223,7 +223,7 @@ Add the Hex package `hell` (released with the coordinated umbrella version) to y
 ```elixir
 def deps do
   [
-    {:hell, "== 1.0.0-rc.12"}
+    {:hell, "== 1.0.0"}
   ]
 end
 ```

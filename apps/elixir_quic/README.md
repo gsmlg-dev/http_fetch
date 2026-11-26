@@ -40,7 +40,7 @@ The canonical source repository is `gsmlg-dev/http_fetch`; the public module nam
 Depend on the coordinated release (all packages share one version):
 
 ```elixir
-{:elixir_quic, "== 1.0.0-rc.12"}
+{:elixir_quic, "== 1.0.0"}
 ```
 
 Consumers moving from the Git dependency must replace their `:ex_quic`

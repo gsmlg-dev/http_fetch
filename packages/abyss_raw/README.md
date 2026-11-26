@@ -9,13 +9,13 @@ DHCP users must explicitly install the optional Hex package when upgrading Abyss
 ```elixir
 defp deps do
   [
-    {:abyss, "== 1.0.0-rc.12"},
-    {:abyss_raw, "== 1.0.0-rc.12"}
+    {:abyss, "== 1.0.0"},
+    {:abyss_raw, "== 1.0.0"}
   ]
 end
 ```
 
-The package is also usable independently with only `{:abyss_raw, "== 1.0.0-rc.12"}` and direct calls to `AbyssDhcpSocket.Native`. It has no dependency on Abyss. The implementation module `AbyssDhcpSocket.Native`, Rust crate `dhcp_socket`, and NIF registration retain their existing names. No `abyss_dhcp_socket` Hex dependency is needed.
+The package is also usable independently with only `{:abyss_raw, "== 1.0.0"}` and direct calls to `AbyssDhcpSocket.Native`. It has no dependency on Abyss. The implementation module `AbyssDhcpSocket.Native`, Rust crate `dhcp_socket`, and NIF registration retain their existing names. No `abyss_dhcp_socket` Hex dependency is needed.
 
 Build from source with Elixir/Mix, Cargo/Rust, and a native linker. There are no precompiled NIF downloads; installing the package requires the native toolchain. The crate and Cargo.lock are preserved from Abyss. Its shared library belongs to `:abyss_raw` under `priv/native/dhcp_socket`, never the core application. The `Abyss.DhcpSocket.Native` facade was removed from Abyss; call `AbyssDhcpSocket.Native` directly.
 
